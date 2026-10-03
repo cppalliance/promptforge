@@ -1,6 +1,6 @@
 //! One agent session: the handle a client holds, the state that outlives
-//! any client connection, and the sink each run of the session reports
-//! through.
+//! any client connection, and the recorder tee each run of the session
+//! reports through.
 //!
 //! A session owns one running agent. Its transcript is every event of
 //! every run the session has made, in the order the session observed
@@ -26,6 +26,7 @@
 pub(crate) mod files;
 pub(crate) mod run;
 pub(crate) mod supervisor;
+mod tee;
 
 #[path = "session-transcript.rs"]
 mod transcript;
@@ -34,7 +35,6 @@ pub use files::OutputError;
 pub use transcript::reply_stamp;
 
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_capabilities::{CapabilityRegistry, HostServices};
@@ -42,7 +42,7 @@ use harness_runner::performers::InferenceBroker;
 use harness_runner::recorder::{RunId as RecordedRun, RunRecorder};
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{broadcast, watch};
 
 use self::files::SessionFiles;
 use self::transcript::Transcript;
@@ -262,8 +262,6 @@ pub(crate) struct SessionCore {
     pub(crate) agent: String,
     /// The program source, retained so turn-cancel can relaunch it.
     pub(crate) source: AgentSource,
-    /// The path the source is attributed to in parse failures.
-    pub(crate) prompt_path: PathBuf,
     /// The run's argument text.
     pub(crate) args: String,
     /// The filesystem, input text, and collected output of every run.
@@ -280,10 +278,6 @@ pub(crate) struct SessionCore {
     deltas: broadcast::Sender<Delta>,
     /// The session's failure reports.
     pub(crate) errors: broadcast::Sender<SessionFailure>,
-    /// The sink each run's delta callback sends raw deltas to; the supervisor
-    /// drains its receiver and stamps each delta. Held here so the
-    /// channel never closes while the session lives.
-    pub(crate) delta_source: mpsc::UnboundedSender<StreamDelta>,
     /// Every event the session has observed, stamped as the live stream
     /// stamps it, and the settled round count its deltas take.
     transcript: Transcript,
@@ -307,7 +301,6 @@ pub(crate) struct SessionSeed {
     pub(crate) id: SessionId,
     pub(crate) agent: String,
     pub(crate) source: AgentSource,
-    pub(crate) prompt_path: PathBuf,
     pub(crate) args: String,
     pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
@@ -318,19 +311,16 @@ pub(crate) struct SessionSeed {
 }
 
 impl SessionCore {
-    /// Builds one session's state; the returned receiver is the raw delta
-    /// stream the supervisor drains.
-    pub(crate) fn new(seed: SessionSeed) -> (Arc<Self>, mpsc::UnboundedReceiver<StreamDelta>) {
+    /// Builds one session's state.
+    pub(crate) fn new(seed: SessionSeed) -> Arc<Self> {
         let (wait_frames, _) = broadcast::channel(INPUT_CAPACITY);
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let (deltas, _) = broadcast::channel(DELTA_CAPACITY);
         let (errors, _) = broadcast::channel(ERROR_CAPACITY);
-        let (delta_source, raw_deltas) = mpsc::unbounded_channel();
-        let core = Arc::new(Self {
+        Arc::new(Self {
             id: seed.id,
             agent: seed.agent,
             source: seed.source,
-            prompt_path: seed.prompt_path,
             args: seed.args,
             files: seed.files,
             lifecycle: seed.lifecycle,
@@ -339,7 +329,6 @@ impl SessionCore {
             events,
             deltas,
             errors,
-            delta_source,
             transcript: Transcript::new(),
             runs: Mutex::new(Vec::new()),
             state: watch::Sender::new(SessionState::Alive),
@@ -347,8 +336,7 @@ impl SessionCore {
             broker: seed.broker,
             capabilities: seed.capabilities,
             services: seed.services,
-        });
-        (core, raw_deltas)
+        })
     }
 
     /// The runs in launch order.
@@ -397,7 +385,10 @@ impl SessionCore {
         let _ = self.errors.send(SessionFailure { kind, message });
     }
 
-    /// Stamps one raw delta with the current round and broadcasts it.
+    /// Stamps one raw delta with the current round and broadcasts it. The
+    /// session's broker calls it as each piece of a round arrives, which
+    /// is before the round's reply event is observed, so the stamp is the
+    /// id of the event that will supersede the delta.
     pub(crate) fn publish_delta(&self, delta: StreamDelta) {
         let (kind, content) = match delta {
             StreamDelta::Text(text) => (DeltaKind::Text, text),

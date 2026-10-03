@@ -12,6 +12,7 @@ use std::fmt;
 
 use harness::{BoxFuture, InferenceBroker, OnDelta};
 use promptforge::RunLimits;
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
@@ -94,6 +95,7 @@ impl InferenceBroker for GatewayBroker {
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
+        _round: Round,
         on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let client = self.client.clone();

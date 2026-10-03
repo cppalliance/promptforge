@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use harness::{BoxFuture, InferenceBroker, OnDelta};
 use harness_gateway_client::{CompletionError, CompletionErrorKind, GatewayBroker};
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
@@ -79,10 +80,11 @@ impl InferenceBroker for WorkshopBroker {
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
+        round: Round,
         on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         match self.current() {
-            Ok(broker) => broker.chat(binding, messages, tools, options, on_delta),
+            Ok(broker) => broker.chat(binding, messages, tools, options, round, on_delta),
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }

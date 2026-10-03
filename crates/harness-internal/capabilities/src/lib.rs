@@ -27,9 +27,10 @@
 //!   crate's traits and the broker it receives through [`RunServices`].
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - Nothing in this crate spawns a tokio task directly; the Harness
-//!   spawns only through the instrumented wrapper in `harness-runner`
-//!   (enforced by this crate's `clippy.toml`).
+//! - Nothing in this crate spawns a tokio task (enforced by this crate's
+//!   `clippy.toml`): the Harness polls every tool call and input wait
+//!   inside the run's own future, so a [`Tool`] or an [`InputBroker`] must
+//!   not block while polled.
 
 mod activation;
 mod capability;

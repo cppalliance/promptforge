@@ -35,7 +35,6 @@ async fn a_run_of_only_vfs_operations_completes_with_one_answer_per_effect() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .expect("answering every effect inline is not a stall");
@@ -81,7 +80,6 @@ async fn a_vfs_operation_runs_on_the_thread_that_drives_the_loop() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -157,7 +155,6 @@ async fn a_vfs_chain_keeps_stepping_while_a_tool_call_is_parked() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     );
     let (outcome, before_gate) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(
@@ -205,7 +202,6 @@ async fn a_backend_that_panics_drops_its_effect_instead_of_unwinding_the_run() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -245,7 +241,6 @@ async fn a_step_with_a_vfs_effect_records_its_inline_answer_before_the_next_effe
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();

@@ -6,13 +6,18 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Harness runner: the effect loop that drives an Engine Run on tokio, the performer traits, cancellation, supervision, and the one instrumented spawn wrapper"
+description = "PromptForge Harness runner: the per-run Harness, the effect loop that drives an Engine Run as one future, the performer traits, and run preparation"
 readme = "README.md"
-keywords = ["promptforge", "llm", "agent", "harness", "tokio"]
+keywords = ["promptforge", "llm", "agent", "harness"]
 categories = ["development-tools", "asynchronous"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+# Runtime-agnostic async: the effect loop's in-flight set
+# (`FuturesUnordered` of `Abortable` futures under `catch_unwind`), the
+# stop flag's `AtomicWaker`, and the race between a model listing and
+# the run's cancel.
+futures-util.workspace = true
 harness-capabilities.workspace = true
 # The Engine's public API: the Run this crate drives, the effects and
 # answers it correlates, and the run's VFS handle.
@@ -25,23 +30,20 @@ serde_json.workspace = true
 # matched to the exact text that produced it.
 sha2.workspace = true
 thiserror.workspace = true
-# `fs` for the prompt file read at preparation, so launching a run never
-# blocks a worker thread; `sync` and `rt` for the awaitable cancel token
-# (`cancel::CancelHandle`) and the task-local scope it installs in.
-tokio = { workspace = true, features = ["fs", "sync", "rt"] }
+# `rt` for the task-local scope `cancel` installs in; `cancel` is the one
+# module that still names tokio.
+tokio = { workspace = true, features = ["rt"] }
 tokio-util.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The preparation suite hands `prepare_run` a prompt file on disk.
+# The scripted capabilities' tools and input brokers are `async_trait`
+# traits.
 async-trait.workspace = true
-tempfile.workspace = true
-
-[features]
-# Fixtures for other Harness crates' tests (`test_support::mock_tag`);
-# nothing here reaches the Harness proper.
-test-support = []
+# The suites drive runs on tokio's test runtime, pace performers with its
+# clock, and gate them with its semaphore and channels.
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [lints]
 workspace = true

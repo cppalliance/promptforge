@@ -33,7 +33,7 @@ use std::sync::Arc;
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
@@ -96,7 +96,7 @@ use harness::{display_chain, HostSnapshot, LaunchRequest, SessionState};
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
@@ -185,7 +185,7 @@ use harness::DeltaKind;
 #         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #             Box::pin(async { Ok(ModelCatalog::empty()) })
 #         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #             let kind = CompletionErrorKind::Unavailable;
 #             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #         }
@@ -300,7 +300,7 @@ use harness::{WaitError, WaitFrame};
 #         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #             Box::pin(async { Ok(ModelCatalog::empty()) })
 #         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #             let kind = CompletionErrorKind::Unavailable;
 #             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #         }
@@ -405,7 +405,7 @@ use harness::{FailureKind, SessionFailure, SessionState};
 #         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #             Box::pin(async { Ok(ModelCatalog::empty()) })
 #         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #             let kind = CompletionErrorKind::Unavailable;
 #             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #         }
@@ -502,7 +502,7 @@ use harness::SessionId;
 #         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #             Box::pin(async { Ok(ModelCatalog::empty()) })
 #         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #             let kind = CompletionErrorKind::Unavailable;
 #             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #         }
@@ -811,6 +811,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 - `models`: lists the models the broker serves. Each run calls it once as it starts, and binds the selected model from the list, or its first model with no selection. A failed call, or a selection the list lacks, fails the run with [`FailureKind::RunFailed`]. It may wait until the broker has a model to offer: the run waits with it, and [`Session::cancel`] and [`Session::close`] still end that run.
 - `chat`: performs one model round over the messages with the tools advertised, under the round's options. An error it returns fails that round, and the agent receives it.
+- `round`: `chat`'s [`Round`](promptforge::effect::Round), the round's run-wide id and the path that dispatched it; the reply's events carry the same id.
 - `on_delta`: `chat`'s callback for the reply's live pieces, an [`OnDelta`]; it is `None` when nothing reads the pieces.
 
 ## LaunchError

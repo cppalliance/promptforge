@@ -68,11 +68,9 @@ fn greeter_registry(greetings: &Arc<Mutex<Vec<Option<String>>>>) -> CapabilityRe
     registry
 }
 
-/// Prepares `source` from a file in `dir` with `host` as the Host's
-/// services, and returns the preparation beside the greetings its
-/// activations read.
+/// Prepares `source` with `host` as the Host's services, and returns the
+/// preparation beside the greetings its activations read.
 async fn prepare_greeter(
-    dir: &Path,
     source: &str,
     host: HostServices,
 ) -> (Result<Prepared, PrepareError>, Vec<Option<String>>) {
@@ -80,17 +78,16 @@ async fn prepare_greeter(
     let recorder = recorder();
     let mut services = services(&recorder, Some(Arc::new(greeter_registry(&greetings))));
     services.services = host;
-    let prepared = prepare_run(&prompt_file(dir, source), "", services).await;
+    let prepared = prepare(source, "", services).await;
     let greetings = greetings.lock().unwrap().clone();
     (prepared, greetings)
 }
 
 #[tokio::test]
 async fn a_capability_activates_with_the_service_the_hosts_map_provides() {
-    let dir = tempfile::tempdir().unwrap();
     let mut host = HostServices::new();
     host.provide(&GREETING, Arc::from("hello")).unwrap();
-    let (prepared, greetings) = prepare_greeter(dir.path(), DECLARES_GREETER, host).await;
+    let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, host).await;
     assert!(prepared.is_ok(), "the Host's service meets the need");
     assert_eq!(
         greetings,
@@ -101,9 +98,7 @@ async fn a_capability_activates_with_the_service_the_hosts_map_provides() {
 
 #[tokio::test]
 async fn a_capability_whose_service_the_host_lacks_is_refused_naming_the_service() {
-    let dir = tempfile::tempdir().unwrap();
-    let (prepared, greetings) =
-        prepare_greeter(dir.path(), DECLARES_GREETER, HostServices::new()).await;
+    let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, HostServices::new()).await;
     let Err(PrepareError::Refused { error, .. }) = prepared else {
         panic!("a required capability without its service refuses the run");
     };
@@ -118,9 +113,8 @@ async fn a_capability_whose_service_the_host_lacks_is_refused_naming_the_service
 
 #[tokio::test]
 async fn an_optional_capability_whose_service_the_host_lacks_activates_without_it() {
-    let dir = tempfile::tempdir().unwrap();
     let (prepared, greetings) =
-        prepare_greeter(dir.path(), DECLARES_GREETER_OPTIONALLY, HostServices::new()).await;
+        prepare_greeter(DECLARES_GREETER_OPTIONALLY, HostServices::new()).await;
     assert!(
         prepared.is_ok(),
         "an optional capability's gap does not refuse the run"

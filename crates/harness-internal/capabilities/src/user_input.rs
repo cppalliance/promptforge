@@ -39,8 +39,9 @@
 //!
 //! # Answering with operator text
 //!
-//! When the Host has an operator, the Harness puts a broker in the run's
-//! services with [`RunServices::insert_input_broker`]. Each
+//! When the Host has an operator, it supplies a broker among its services
+//! with [`HostServices::provide`](crate::HostServices::provide) under
+//! [`INPUT_BROKER`], and the Harness hands those services to the run. Each
 //! `input.ask()` waits on [`InputBroker::wait`], and the script receives
 //! the operator's text byte-exact with `available` set to `true`.
 //! Operator input is trusted, so the ask tool answers with
@@ -50,7 +51,8 @@
 //! use std::sync::Arc;
 //!
 //! use harness_capabilities::{
-//!     Capability, InputBroker, InputError, RunServices, Tool, USER_INPUT_ASK_TOOL, UserInput,
+//!     Capability, HostServices, INPUT_BROKER, InputBroker, InputError, RunServices, Tool,
+//!     USER_INPUT_ASK_TOOL, UserInput,
 //! };
 //! use promptforge::cancel::CancelHandle;
 //! use promptforge::tools::OutputTrust;
@@ -67,8 +69,11 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
-//! services.insert_input_broker(Arc::new(Operator));
+//! let mut host = HostServices::new();
+//! let operator: Arc<dyn InputBroker> = Arc::new(Operator);
+//! host.provide(&INPUT_BROKER, operator)?;
+//! let services =
+//!     RunServices::with_host(promptforge::vfs::VfsRef::default(), CancelHandle::new(), host);
 //! let contribution = UserInput::new().create(&services)?;
 //! let ask = &contribution.tools[0];
 //! assert_eq!(ask.id().to_string(), USER_INPUT_ASK_TOOL);

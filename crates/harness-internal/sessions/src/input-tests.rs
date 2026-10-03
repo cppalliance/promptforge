@@ -2,21 +2,24 @@
 
 use super::*;
 
-use std::path::Path;
 use std::sync::Arc;
 
-use harness_capabilities::{CapabilityRegistry, HostServices, InputBroker, UserInput};
+use harness_capabilities::{
+    CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, UserInput,
+};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, InferenceBroker, OnDelta};
-use harness_runner::prepare::{Services, prepare_source};
+use harness_runner::prepare::{Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
-use harness_runner::spawn::spawn_tagged;
-use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::vfs::VfsRef;
+
+use crate::spawn::spawn_session;
+use crate::timer::TokioTimer;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.
@@ -185,7 +188,7 @@ fn broker_fixture() -> (
 async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
+    let call = spawn_session("input-tests", async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     assert_eq!(
         registry.unresolved(),
@@ -213,7 +216,7 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
 async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
+    let call = spawn_session("input-tests", async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     call.abort();
     let joined = call.await;
@@ -237,7 +240,7 @@ async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
 async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
+    let call = spawn_session("input-tests", async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     registry.cancel(&token);
     let error = call
@@ -267,6 +270,7 @@ impl InferenceBroker for NoChat {
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: Round,
         _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("the prompt makes no model round")
@@ -289,22 +293,24 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
     let recorder = Arc::new(MemoryRecorder::new());
+    let mut host = HostServices::new();
+    let broker: Arc<dyn InputBroker> = broker;
+    host.provide(&INPUT_BROKER, broker)
+        .expect("an empty map takes the broker");
     let services = Services {
         registry: Some(Arc::new(capabilities)),
-        services: HostServices::new(),
+        services: host,
         vfs: VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
         broker: Arc::new(NoChat),
-        on_delta: Arc::new(|_delta| {}),
-        input: Some(broker),
-        session_id: "session-1".to_owned(),
-        agent: "ask".to_owned(),
+        timer: Arc::new(TokioTimer),
+        name: "session-1".to_owned(),
         model: None,
         ui: None,
     };
-    let prepared = prepare_source(source, Path::new("ask.md"), "", services)
+    let prepared = prepare(source, "", services)
         .await
         .expect("a host with a broker satisfies the declaration");
     let run_id = prepared.run_id;
@@ -321,7 +327,6 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
             recorder.clone(),
             run_id,
             CancelHandle::new(),
-            |_event| {},
         ),
         answer,
     );

@@ -14,6 +14,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use harness::InferenceBroker;
 use harness_gateway_client::{CompletionError, CompletionErrorKind};
+use promptforge::effect::Round;
+use promptforge::event::ReplyOrigin;
+use promptforge::ids::RoundId;
 use promptforge::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
 };
@@ -115,6 +118,10 @@ async fn round(broker: &WorkshopBroker) -> Result<String, CompletionError> {
             vec![Message::user("hi")],
             Vec::new(),
             CompletionOptions::new("m"),
+            Round {
+                id: RoundId::new(0),
+                origin: ReplyOrigin::Infer,
+            },
             None,
         )
         .await?;

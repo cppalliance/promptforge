@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use harness_capabilities::{
     Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, activate,
+    HostServices, INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, activate,
 };
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::VfsRef;
@@ -109,10 +109,13 @@ fn registry_with_asker() -> (CapabilityRegistry, Arc<AtomicUsize>) {
 fn activate_asker(source: &str, with_broker: bool) -> (Activation, usize) {
     let (registry, creates) = registry_with_asker();
     let prompt = parse(source, "asker");
-    let mut services = RunServices::new(VfsRef::default(), CancelHandle::new());
+    let mut host = HostServices::new();
     if with_broker {
-        services.insert_input_broker(Arc::new(Silent));
+        let broker: Arc<dyn InputBroker> = Arc::new(Silent);
+        host.provide(&INPUT_BROKER, broker)
+            .expect("an empty map takes the broker");
     }
+    let services = RunServices::with_host(VfsRef::default(), CancelHandle::new(), host);
     let activation = activate(Some(&registry), &prompt, &services);
     (activation, creates.load(Ordering::SeqCst))
 }

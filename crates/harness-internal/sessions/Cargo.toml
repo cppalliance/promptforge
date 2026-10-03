@@ -19,9 +19,8 @@ async-trait.workspace = true
 # run, and the `InputBroker` trait and error vocabulary the session's
 # input broker implements.
 harness-capabilities.workspace = true
-# The effect loop a session drives its runs through, run preparation,
-# the recorder and inference broker seams a Host implements, and the
-# instrumented spawn wrapper.
+# The per-run Harness each run of a session is, and the recorder,
+# inference broker, and timer seams a Host implements.
 harness-runner.workspace = true
 # The Engine's public API: the run context, the run limits, the events
 # and deltas a session forwards, and the run's VFS handle.
@@ -34,14 +33,13 @@ serde_json.workspace = true
 thiserror.workspace = true
 # `sync` for the supervisor's typed event queues (`mpsc`), the wait
 # registry's `oneshot` and `broadcast` channels, and the session state
-# watch.
-tokio = { workspace = true, features = ["sync"] }
+# watch; `rt` for the supervisor task and a launch's blocking-pool
+# filesystem work; `time` for the timer every run sleeps on.
+tokio = { workspace = true, features = ["sync", "rt", "time"] }
 tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The tag fixture the input tests spawn their waiting calls under.
-harness-runner = { workspace = true, features = ["test-support"] }
 # The discovery and session suites seed an agents directory on disk.
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -1,12 +1,14 @@
-//! The runner's own performer and the inline Vfs answer under the effect
-//! loop: a tokio timer fires after its duration and is torn down by a
-//! cancel, a store operation runs through the Engine's store facade.
+//! A Host's timer and the inline Vfs answer under the effect loop: a
+//! timer effect is answered once its sleep ends and its sleep is torn down
+//! by a cancel, and a store operation runs through the Engine's store
+//! facade.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use harness_runner::effect_loop::drive_run;
-use harness_runner::performers::{BoxFuture, TokioTimer, ToolPerformer};
+use harness_runner::performers::{BoxFuture, Timer, ToolPerformer};
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
@@ -14,7 +16,24 @@ use promptforge::cancel::CancelHandle;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::{Value, json};
 
-use crate::support::{PendingTool, TIMED_MAIN, WAITS, run, run_with_child, unused};
+use crate::support::{PendingTool, RaiseOnDrop, TIMED_MAIN, WAITS, run, run_with_child, unused};
+
+/// A Host's timer: sleeps on the test runtime's clock for the effect's
+/// seconds, and raises `dropped` when a sleep is torn down unfinished.
+#[derive(Default)]
+struct SleepTimer {
+    dropped: Arc<AtomicBool>,
+}
+
+impl Timer for SleepTimer {
+    fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+        let raise = RaiseOnDrop(Arc::clone(&self.dropped));
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+            std::mem::forget(raise);
+        })
+    }
+}
 
 /// A run's opening metadata.
 fn meta() -> RunMeta {
@@ -110,7 +129,7 @@ async fn a_timer_effect_is_answered_after_its_duration() {
     let recorder = Arc::new(StampedRecorder::new());
     let run_id = recorder.begin_run(meta()).await.unwrap();
     let mut performers = unused();
-    performers.timer = Arc::new(TokioTimer);
+    performers.timer = Arc::new(SleepTimer::default());
     performers.tool = Arc::new(DelayedTool {
         delay: Duration::from_millis(400),
         text: "late",
@@ -128,7 +147,6 @@ async fn a_timer_effect_is_answered_after_its_duration() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -173,8 +191,10 @@ async fn a_timer_effect_is_answered_after_its_duration() {
 #[tokio::test]
 async fn a_pending_timer_is_torn_down_by_a_cancel() {
     let (recorder, run_id) = begun_log().await;
+    let timer = SleepTimer::default();
+    let dropped = Arc::clone(&timer.dropped);
     let mut performers = unused();
-    performers.timer = Arc::new(TokioTimer);
+    performers.timer = Arc::new(timer);
     performers.tool = Arc::new(PendingTool);
     let cancel = CancelHandle::new();
     let trigger = cancel.clone();
@@ -192,7 +212,6 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
         recorder.clone(),
         run_id,
         cancel,
-        |_event| {},
     )
     .await
     .unwrap();
@@ -200,6 +219,10 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "the cancel tore the sleep down instead of waiting it out"
+    );
+    assert!(
+        dropped.load(Ordering::SeqCst),
+        "the 30-second sleep was torn down unfinished"
     );
 
     let dropped = recorder
@@ -227,7 +250,6 @@ async fn an_inline_vfs_answer_performs_the_operation_the_effect_names() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();

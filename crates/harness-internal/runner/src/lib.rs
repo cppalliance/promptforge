@@ -1,11 +1,13 @@
-//! harness-runner - the Harness effect loop: prepares an Engine `Run`
-//! from a prompt file (drawing the inputs the Engine refuses to draw
-//! itself, putting the declared input file in place, activating
-//! capabilities, beginning the run at its recorder), steps it,
-//! performs each chat, tool-call, and timer effect on tokio through its
-//! performer and answers each Vfs effect inline in the loop,
-//! feeds the answers back, hands every event, effect, and answer to the
-//! run's recorder, and owns cancellation.
+//! harness-runner - the per-run Harness and the effect loop it drives: a
+//! [`Harness`] resolves the launch model through the Host's broker,
+//! prepares an Engine `Run` from the prompt's source (drawing the inputs
+//! the Engine refuses to draw itself, putting the declared input file in
+//! place, activating capabilities, beginning the run at its recorder),
+//! steps it, performs each chat, tool-call, and timer effect through its
+//! performer and answers each Vfs effect inline, feeds the answers back,
+//! hands every event, effect, and answer to the run's recorder, and reads
+//! the declared output file, all inside the one future [`Harness::run`]
+//! returns.
 //!
 //! ## Invariants
 //!
@@ -16,31 +18,32 @@
 //!   product and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`],
-//!   [`spawn::spawn_session`], and [`spawn::spawn_blocking_launch`] are
-//!   the only sites in the Harness that call
-//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other Harness crate's
-//!   `clippy.toml` bans the raw calls, and `cargo test -p build-xtask`
-//!   checks the bans are declared.
+//! - The Harness polls every effect inside the run's own future and starts
+//!   no task, so any executor can drive a run. Performers must not block
+//!   while polled: one that blocks stalls every other effect of the run,
+//!   and a performer with blocking or CPU-heavy work hands it to the
+//!   Host's own runtime. The crate's async needs come from `futures-util`;
+//!   `cancel` is the one module that names tokio.
 //! - The recorder is written in loop order: a step's events before the
 //!   step's effects are issued, each effect before its performer starts,
 //!   each answer before the run resumes with it. Every effect record has
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
 //! - The loop never reads an event to decide anything; control comes
-//!   from the run's own word (`Step`, `Run::decided`) and the cancel flag.
+//!   from the run's own word (`Step`, `Run::decided`), the cancel flag,
+//!   and the Host's stop.
 
 pub mod cancel;
 mod display_chain;
 pub mod effect_loop;
+pub mod environment;
 pub mod files;
+mod harness;
 pub mod performers;
 pub mod prepare;
 pub mod recorder;
-pub mod spawn;
-#[cfg(feature = "test-support")]
-pub mod test_support;
 
 pub use display_chain::display_chain;
+pub use harness::{Harness, HarnessError, RunControl, RunReport, RunRequest};
 pub use recorder::{
     MemoryRecorder, Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome,
     RunRecorder,

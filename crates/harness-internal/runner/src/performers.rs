@@ -10,20 +10,25 @@
 //! effect loop owns the correlation: it hands each result back to the run
 //! under the effect's id and writes the answer's record.
 //!
-//! Each performer returns a boxed `'static` future the loop spawns as its
-//! own task, so a performer must move what its future needs into it. A
-//! `Vfs` effect has no performer: the VFS is synchronous by design, so the
-//! loop answers it inline through the Engine's store operation.
+//! Each performer returns a boxed `'static` future that the loop polls
+//! inside the run's own future, beside every other effect in flight, so a
+//! performer must move what its future needs into it. A performer must not
+//! block while polled: one that blocks stalls every other effect of the
+//! run, and the run's stop and cancel with them. A performer with blocking
+//! or CPU-heavy work hands it to the Host's own runtime and awaits the
+//! result. A `Vfs` effect has no performer: the VFS is synchronous by
+//! design, so the loop answers it inline through the Engine's store
+//! operation.
 //!
-//! The runner supplies two performers itself - [`TokioTimer`] and
-//! [`ActivatedTools`] - because each is machinery it already holds:
-//! tokio's timer wheel and the tool table run preparation activated. The
-//! Host supplies the [`InferenceBroker`].
+//! The runner supplies one performer itself, [`ActivatedTools`], over the
+//! tool table run preparation activated. The Host supplies the
+//! [`InferenceBroker`] and the [`Timer`].
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog,
     StreamDelta, ToolSchema,
@@ -31,16 +36,13 @@ use promptforge::model::{
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::Value;
 
-#[path = "performers-builtin.rs"]
-mod builtin;
 #[path = "performers-tools.rs"]
 mod tools;
 
-pub use builtin::TokioTimer;
 pub use tools::ActivatedTools;
 
 /// A boxed, sendable, owning future: what an asynchronous performer
-/// returns and the loop spawns.
+/// returns and the loop polls.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// Receives each live piece of a streaming model round as it arrives.
@@ -49,19 +51,24 @@ pub type OnDelta = Arc<dyn Fn(StreamDelta) + Send + Sync>;
 /// The Host's inference: lists the models it serves and performs a `Chat`
 /// effect as one model round over `messages` with `tools` advertised,
 /// under `binding`'s frozen `options`.
+///
+/// The Harness polls each round inside the run's own future, so a broker
+/// must not block while polled; blocking or CPU-heavy work goes to the
+/// Host's own runtime.
 pub trait InferenceBroker: Send + Sync {
     /// Lists the models the broker serves.
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>>;
 
-    /// Runs the round. `on_delta` is present when the round's live deltas
-    /// have a consumer (a section's `chat` round) and `None` when only the
-    /// completed reply does (a nested `models.infer`).
+    /// Runs the round. `round` is the round's run-wide id and the path
+    /// that dispatched it. `on_delta` receives the round's live pieces
+    /// when it is present; the Harness passes `None`.
     fn chat(
         &self,
         binding: ModelBinding,
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
+        round: Round,
         on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>>;
 }
@@ -80,29 +87,29 @@ pub trait ToolPerformer: Send + Sync {
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// Performs a `Timer` effect: one sleep.
-pub trait TimerPerformer: Send + Sync {
+/// The Host's clock: performs a `Timer` effect as one sleep.
+///
+/// The Harness polls each sleep inside the run's own future, so a timer
+/// must not block while polled; it waits on the Host's own runtime.
+pub trait Timer: Send + Sync {
     /// Resolves once `seconds` have passed.
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;
 }
 
 /// The Harness's performers: one for each chat, tool-call, and timer
-/// effect, and the callback a streaming chat round's deltas go to. The
-/// loop answers a `Vfs` effect inline and has no performer for it.
+/// effect. The loop answers a `Vfs` effect inline and has no performer
+/// for it.
 ///
-/// Shared handles, so the loop can move a performer into the task it
-/// spawns for each effect while the bundle stays whole.
+/// Shared handles, so the loop can move a performer into the future it
+/// starts for each effect while the bundle stays whole.
 #[derive(Clone)]
 pub struct Performers {
     /// Performs `Chat` effects.
     pub broker: Arc<dyn InferenceBroker>,
-    /// Receives the live deltas of each `Chat` effect whose round has the
-    /// `Chat` origin.
-    pub on_delta: OnDelta,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
     /// Performs `Timer` effects.
-    pub timer: Arc<dyn TimerPerformer>,
+    pub timer: Arc<dyn Timer>,
 }
 
 impl std::fmt::Debug for Performers {

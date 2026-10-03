@@ -3,12 +3,11 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
-# The Harness spawns only through the instrumented wrapper in this crate's
-# `spawn` module, which tags each task with its EffectId and Provenance.
+# The Harness polls every effect inside the run's own future and starts no
+# task, so nothing in this crate calls the raw tokio spawns.
 # `cargo test -p build-xtask` checks that every Harness crate names both
-# methods. The wrapper functions in `spawn` are the only sites allowed to
-# call them, each under an explicit `#[expect(clippy::disallowed_methods)]`.
+# methods.
 disallowed-methods = [
-    { path = "tokio::spawn", reason = "spawn through harness-runner's instrumented wrapper" },
-    { path = "tokio::task::spawn_blocking", reason = "spawn through harness-runner's instrumented wrapper" },
+    { path = "tokio::spawn", reason = "the Harness starts no task; poll the work inside the run's future" },
+    { path = "tokio::task::spawn_blocking", reason = "the Harness starts no task; hand blocking work to the Host's runtime" },
 ]

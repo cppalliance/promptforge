@@ -6,7 +6,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 
 use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
-use crate::{INPUT_BROKER, InputBroker, InputError, ServiceKey};
+use crate::{HostServices, INPUT_BROKER, InputBroker, InputError, ServiceError, ServiceKey};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
@@ -128,9 +128,18 @@ impl InputBroker for Scripted {
     }
 }
 
+/// Host services holding `broker` under [`INPUT_BROKER`].
+fn host_with_broker(broker: Scripted) -> HostServices {
+    let mut host = HostServices::new();
+    let broker: Arc<dyn InputBroker> = Arc::new(broker);
+    host.provide(&INPUT_BROKER, broker)
+        .expect("an empty map takes the broker");
+    host
+}
+
 #[tokio::test]
-async fn new_services_have_no_input_broker_and_the_insert_supplies_one() {
-    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+async fn new_services_have_no_input_broker_and_the_hosts_services_supply_one() {
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     assert!(
         services.get(&INPUT_BROKER).is_none(),
         "a host that supplies no broker leaves the run without one"
@@ -140,10 +149,14 @@ async fn new_services_have_no_input_broker_and_the_insert_supplies_one() {
         "Debug lists the provided service ids: {services:?}"
     );
 
-    services.insert_input_broker(Arc::new(Scripted("typed")));
+    let services = RunServices::with_host(
+        promptforge::vfs::VfsRef::default(),
+        CancelHandle::new(),
+        host_with_broker(Scripted("typed")),
+    );
     let broker = services
         .get(&INPUT_BROKER)
-        .expect("the insert supplies the broker");
+        .expect("the host's services supply the broker");
     assert_eq!(broker.wait().await.expect("the broker answers"), "typed");
     assert!(
         format!("{services:?}").contains("promptforge/input-broker"),
@@ -153,35 +166,47 @@ async fn new_services_have_no_input_broker_and_the_insert_supplies_one() {
 
 #[test]
 fn the_input_service_is_provided_exactly_when_a_broker_is_present() {
-    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     assert!(!services.provides(&INPUT_BROKER.id()));
-    services.insert_input_broker(Arc::new(Scripted("typed")));
+    let services = RunServices::with_host(
+        promptforge::vfs::VfsRef::default(),
+        CancelHandle::new(),
+        host_with_broker(Scripted("typed")),
+    );
     assert!(services.provides(&INPUT_BROKER.id()));
 }
 
 #[tokio::test]
-async fn the_input_broker_insert_replaces_an_existing_provider() {
+async fn a_second_input_broker_is_refused_and_the_first_stays() {
     const SAME_LITERAL: ServiceKey<str> = ServiceKey::new("promptforge/input-broker");
-    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
-    services
-        .host
-        .provide(&SAME_LITERAL, Arc::from("the host's"))
-        .expect("the host's provider is accepted");
-    assert!(!services.provides(&INPUT_BROKER.id()));
-
-    services.insert_input_broker(Arc::new(Scripted("first")));
-    services.insert_input_broker(Arc::new(Scripted("second")));
+    let mut host = host_with_broker(Scripted("first"));
+    let second: Arc<dyn InputBroker> = Arc::new(Scripted("second"));
     assert!(
-        services.get(&SAME_LITERAL).is_none(),
-        "the host's provider under the same literal is replaced"
+        matches!(
+            host.provide(&INPUT_BROKER, second),
+            Err(ServiceError::DuplicateId { .. })
+        ),
+        "a second broker under the id is refused"
+    );
+    assert!(
+        matches!(
+            host.provide(&SAME_LITERAL, Arc::from("the host's")),
+            Err(ServiceError::DuplicateId { .. })
+        ),
+        "a provider of another type under the same literal is refused"
+    );
+    let services = RunServices::with_host(
+        promptforge::vfs::VfsRef::default(),
+        CancelHandle::new(),
+        host,
     );
     let broker = services
         .get(&INPUT_BROKER)
-        .expect("the inserted broker is provided");
+        .expect("the first broker is provided");
     assert_eq!(
         broker.wait().await.expect("the broker answers"),
-        "second",
-        "the latest insert wins"
+        "first",
+        "the first provider stays"
     );
 }
 

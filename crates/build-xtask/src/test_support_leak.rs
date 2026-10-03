@@ -6,8 +6,8 @@
 //!
 //! The Engine manifest guard (`engine_deps`) lets an Engine crate keep an
 //! optional forbidden dependency that only its `test-support` feature
-//! enables (`promptforge-engine`'s tokio test driver), and Harness crates
-//! keep test fixtures behind theirs (`harness-runner`'s). Both are safe
+//! enables (`promptforge-engine`'s tokio test driver), and a Harness crate
+//! may keep test fixtures behind its own. Both are safe
 //! only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
 //! `promptforge-engine = { workspace = true, features = ["test-support"] }`

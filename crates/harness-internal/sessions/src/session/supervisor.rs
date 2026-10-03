@@ -10,17 +10,15 @@
 //! Harness. The synthetic terminal frame for that interrupt is decided by
 //! [`effective_interrupt`] and rendered in one place, after the drain.
 //!
-//! The raw deltas each run's delta callback sends are drained here too,
-//! stamped with the session's current round, ahead of the run future in
-//! the select order so a round's chunks are broadcast before the event
-//! that supersedes them is applied.
+//! Each run is polled inside this task, so the run's events and live
+//! deltas reach the session from here as the run produces them.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use harness_runner::HarnessError;
 use harness_runner::recorder::RunOutcome;
-use promptforge::model::StreamDelta;
 use tokio::sync::mpsc;
 
 use crate::environment::Bindings;
@@ -32,18 +30,18 @@ use crate::transition::{
 
 use crate::runtime::SessionTable;
 
-use super::run::{RunFailure, run_once};
+use super::run::run_once;
 use super::{FailureKind, SessionCore};
 
 /// One owned run future paired with its reducer identity.
-type RunFuture = Pin<Box<dyn Future<Output = (RunId, Result<RunOutcome, RunFailure>)> + Send>>;
+type RunFuture = Pin<Box<dyn Future<Output = (RunId, Result<RunOutcome, HarnessError>)> + Send>>;
 
 /// Runtime data collected alongside one pure supervisor event.
 enum Collected {
     Supervisor(SupervisorEvent),
     Run {
         run: RunId,
-        result: Result<RunOutcome, RunFailure>,
+        result: Result<RunOutcome, HarnessError>,
     },
 }
 
@@ -61,9 +59,6 @@ pub(crate) struct Supervisor {
     table: Arc<SessionTable>,
     lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
     cancellations: mpsc::Receiver<SupervisorEvent>,
-    /// The raw delta stream; `None` once it closes, which cannot happen
-    /// while the core holds its sender.
-    raw_deltas: Option<mpsc::UnboundedReceiver<StreamDelta>>,
     active_run: Option<RunFuture>,
     /// Whether a genuine terminal outcome has been observed for the
     /// current run; the input to [`effective_interrupt`].
@@ -79,7 +74,6 @@ pub(crate) struct SupervisorParts {
     pub(crate) table: Arc<SessionTable>,
     pub(crate) lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
     pub(crate) cancellations: mpsc::Receiver<SupervisorEvent>,
-    pub(crate) raw_deltas: mpsc::UnboundedReceiver<StreamDelta>,
 }
 
 impl Supervisor {
@@ -91,7 +85,6 @@ impl Supervisor {
             table,
             lifecycle,
             cancellations,
-            raw_deltas,
         } = parts;
         Self {
             core,
@@ -99,7 +92,6 @@ impl Supervisor {
             table,
             lifecycle,
             cancellations,
-            raw_deltas: Some(raw_deltas),
             active_run: None,
             saw_terminal: false,
             interrupt: None,
@@ -126,23 +118,14 @@ impl Supervisor {
     }
 
     /// Waits for the next typed event, prioritizing synchronous lifecycle
-    /// events that causally precede a run wake, and broadcasting deltas as
-    /// they arrive without leaving the wait.
+    /// events that causally precede a run wake.
     async fn next(&mut self) -> Collected {
-        loop {
-            tokio::select! {
-                biased;
-                event = next_lifecycle_event(&mut self.lifecycle, &mut self.cancellations) => {
-                    return Collected::Supervisor(event);
-                }
-                received = recv_or_pending(&mut self.raw_deltas) => match received {
-                    Some(delta) => self.core.publish_delta(delta),
-                    None => self.raw_deltas = None,
-                },
-                (run, result) = finished(&mut self.active_run) => {
-                    return Collected::Run { run, result };
-                }
+        tokio::select! {
+            biased;
+            event = next_lifecycle_event(&mut self.lifecycle, &mut self.cancellations) => {
+                Collected::Supervisor(event)
             }
+            (run, result) = finished(&mut self.active_run) => Collected::Run { run, result },
         }
     }
 
@@ -161,7 +144,7 @@ impl Supervisor {
 
     /// Converts one run's report into its typed completion, reporting a
     /// failure to the client.
-    fn completion(&mut self, result: Result<RunOutcome, RunFailure>) -> RunCompletion {
+    fn completion(&mut self, result: Result<RunOutcome, HarnessError>) -> RunCompletion {
         let completion = match result {
             Ok(RunOutcome::Completed { .. }) => RunCompletion::Completed,
             Ok(RunOutcome::Cancelled) => RunCompletion::Interrupted,
@@ -253,16 +236,8 @@ impl Supervisor {
     }
 }
 
-/// Receives from an optional channel, pending forever when absent.
-async fn recv_or_pending<T>(receiver: &mut Option<mpsc::UnboundedReceiver<T>>) -> Option<T> {
-    match receiver {
-        Some(receiver) => receiver.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
 /// Awaits the active run, pending forever when there is none.
-async fn finished(run: &mut Option<RunFuture>) -> (RunId, Result<RunOutcome, RunFailure>) {
+async fn finished(run: &mut Option<RunFuture>) -> (RunId, Result<RunOutcome, HarnessError>) {
     match run {
         Some(run) => run.as_mut().await,
         None => std::future::pending().await,

@@ -8,6 +8,9 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use harness::{InferenceBroker, OnDelta};
+use promptforge::effect::Round;
+use promptforge::event::ReplyOrigin;
+use promptforge::ids::RoundId;
 use promptforge::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
     StreamDelta, ThinkingMode,
@@ -69,6 +72,14 @@ fn recording() -> (OnDelta, Arc<Mutex<Vec<StreamDelta>>>) {
     )
 }
 
+/// The run's first round, dispatched from `origin`.
+fn round(origin: ReplyOrigin) -> Round {
+    Round {
+        id: RoundId::new(0),
+        origin,
+    }
+}
+
 fn reply_of(result: &CompletionResult) -> &str {
     match result {
         CompletionResult::Text(text) => text,
@@ -87,6 +98,7 @@ async fn a_streamed_round_sends_its_deltas_to_the_callback_in_wire_order() {
             vec![Message::user("hi")],
             Vec::new(),
             CompletionOptions::new("m"),
+            round(ReplyOrigin::Chat),
             Some(on_delta),
         )
         .await
@@ -113,6 +125,7 @@ async fn a_round_without_a_callback_still_answers_with_the_whole_reply() {
             vec![Message::user("hi")],
             Vec::new(),
             CompletionOptions::new("m"),
+            round(ReplyOrigin::Infer),
             None,
         )
         .await

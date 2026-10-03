@@ -12,6 +12,7 @@ use harness::{
     BoxFuture, DeltaKind, Harness, HarnessConfig, HostSnapshot, InferenceBroker, LaunchRequest,
     OnDelta, SessionState,
 };
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
     ModelCatalog, ModelDescriptor, ModelId, StreamDelta, ThinkingMode, ToolSchema,
@@ -52,6 +53,7 @@ impl InferenceBroker for ScriptedBroker {
         messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: Round,
         on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let asked = messages

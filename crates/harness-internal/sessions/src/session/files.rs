@@ -3,15 +3,14 @@
 //! the completed run left at its `output:` file, which
 //! [`Session::output_text`] returns.
 //!
-//! The output is read once, as the run completes and before the session
-//! reports `Closed`, so a client that awaits `Closed` and then asks for
-//! it never races the read, and a Host that tears its filesystem down
-//! afterwards keeps the text.
+//! The output is the one each run's report carries, read as the run
+//! completes and kept before the session reports `Closed`, so a client
+//! that awaits `Closed` and then asks for it never races the read, and a
+//! Host that tears its filesystem down afterwards keeps the text.
 
 use std::sync::{Mutex, PoisonError};
 
-use harness_runner::files::read_output;
-use harness_runner::spawn::spawn_blocking_launch;
+use harness_runner::files::OutputError as ReportedOutput;
 use promptforge::vfs::{VfsError, VfsRef};
 
 use super::Session;
@@ -78,27 +77,18 @@ impl SessionFiles {
         self.input_text.clone()
     }
 
-    /// Reads the completed run's declared output file at `path` from
-    /// `vfs` on the blocking pool, tagged with `agent`, and keeps what it
-    /// finds for [`Session::output_text`].
-    pub(crate) async fn collect(&self, agent: &str, vfs: VfsRef, path: Option<String>) {
-        let output = match path {
-            None => Err(OutputError::Undeclared),
-            Some(path) => {
-                let read_path = path.clone();
-                let read = spawn_blocking_launch(agent, move || read_output(&vfs, &read_path))
-                    .await
-                    .unwrap_or_else(|join| {
-                        Err(VfsError::Backend {
-                            message: format!("the output read failed: {join}"),
-                        })
-                    });
-                match read {
-                    Ok(text) => Ok(text),
-                    Err(VfsError::NotFound { .. }) => Err(OutputError::Missing { path }),
-                    Err(source) => Err(OutputError::Vfs { path, source }),
-                }
-            }
+    /// Keeps what a run's report carries at its declared output file for
+    /// [`Session::output_text`]. A run that did not complete leaves
+    /// whatever an earlier run of the session left.
+    pub(crate) fn collect(&self, reported: Result<String, ReportedOutput>) {
+        let output = match reported {
+            Ok(text) => Ok(text),
+            Err(ReportedOutput::Undeclared) => Err(OutputError::Undeclared),
+            Err(ReportedOutput::Missing { path }) => Err(OutputError::Missing { path }),
+            Err(ReportedOutput::Vfs { path, source }) => Err(OutputError::Vfs { path, source }),
+            // `NotCompleted`, or a reason the runner adds behind its
+            // `#[non_exhaustive]` enum: no completed run's output to keep.
+            Err(_) => return,
         };
         *self.output.lock().unwrap_or_else(PoisonError::into_inner) = output;
     }

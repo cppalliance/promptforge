@@ -9,7 +9,7 @@ use promptforge::tools::{OutputTrust, ToolErrorKind, ToolId};
 use serde_json::json;
 
 use super::{FALLBACK, INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
-use crate::{Capability, InputBroker, InputError, RunServices, Tool};
+use crate::{Capability, HostServices, InputBroker, InputError, RunServices, Tool};
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
@@ -50,11 +50,18 @@ fn headless() -> RunServices {
     RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
 }
 
-/// Run services whose broker is `broker`.
+/// Run services whose broker is `broker`, supplied among the Host's
+/// services.
 fn with_broker(broker: impl InputBroker + 'static) -> RunServices {
-    let mut services = headless();
-    services.insert_input_broker(Arc::new(broker));
-    services
+    let mut host = HostServices::new();
+    let broker: Arc<dyn InputBroker> = Arc::new(broker);
+    host.provide(&INPUT_BROKER, broker)
+        .expect("an empty map takes the broker");
+    RunServices::with_host(
+        promptforge::vfs::VfsRef::default(),
+        CancelHandle::new(),
+        host,
+    )
 }
 
 /// The one tool the capability contributes under `services`.

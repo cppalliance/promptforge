@@ -1,26 +1,22 @@
-//! Checkpoint 4: a fixture prompt through `prepare_run` and `drive_run`
-//! with a scripted inference broker and an in-memory recorder. The prompt
+//! Checkpoint 4: a fixture prompt through `prepare` and `drive_run` with
+//! a scripted inference broker and an in-memory recorder. The prompt
 //! writes to the store, spawns a task, waits on it, and asks the model
 //! once, so the record stream holds two effects under the main task and a
 //! second task's events beside them. The suite asserts the whole stream:
 //! the run's outcome, one answer record per effect, the `Provenance`
-//! fields per task, the payloads the effects and answers record, and that
-//! every recorded event reached the sink.
+//! fields per task, and the payloads the effects and answers record.
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use harness_capabilities::HostServices;
 use harness_runner::effect_loop::drive_run;
-use harness_runner::performers::OnDelta;
-use harness_runner::prepare::{Prepared, Services, prepare_run};
+use harness_runner::performers::{BoxFuture, Timer};
+use harness_runner::prepare::{Prepared, Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
 use promptforge::cancel::CancelHandle;
-use promptforge::event::Event;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
 
 use crate::support::{Round, ScriptedBroker};
 
@@ -42,11 +38,13 @@ const FIXTURE: &str = "---\nname: end-to-end\ndescription: the checkpoint fixtur
     Ask the model.\n\n```lua\nreturn models.infer(prose) .. '|' .. var.child\n```\n\n\
     ## Child\n\n```lua\nreturn 'child-done'\n```\n";
 
-/// Writes the fixture as a prompt file in `dir` and returns its path.
-fn prompt_file(dir: &Path) -> PathBuf {
-    let path = dir.join("agent.md");
-    std::fs::write(&path, FIXTURE).expect("the fixture prompt is written");
-    path
+/// A timer the fixture never reaches: its one wait has no time limit.
+struct NoTimer;
+
+impl Timer for NoTimer {
+    fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
+        unreachable!("the fixture issues no Timer effect")
+    }
 }
 
 /// The Host's current model: what every declared role binds to.
@@ -240,10 +238,9 @@ fn assert_task_columns(records: &[Record], main_task: &str) {
     );
 }
 
-/// The fixture's preparation services over `recorder`, `broker`, and
-/// `on_delta`, with no capabilities, no Host services, and the bound
-/// model.
-fn services(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker, on_delta: OnDelta) -> Services {
+/// The fixture's preparation services over `recorder` and `broker`, with
+/// no capabilities, no Host services, and the bound model.
+fn services(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker) -> Services {
     Services {
         registry: None,
         services: HostServices::new(),
@@ -252,10 +249,8 @@ fn services(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker, on_delta: On
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
         broker: Arc::new(broker),
-        on_delta,
-        input: None,
-        session_id: "session-e2e".to_owned(),
-        agent: "end-to-end".to_owned(),
+        timer: Arc::new(NoTimer),
+        name: "session-e2e".to_owned(),
         model: Some(current_model()),
         ui: None,
     }
@@ -263,15 +258,10 @@ fn services(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker, on_delta: On
 
 #[tokio::test]
 async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
     let broker = ScriptedBroker::new(&[], REPLY, SERVED_MODEL);
     let rounds = broker.rounds();
-    let (deltas, mut delta_rx) = mpsc::unbounded_channel();
-    let on_delta: OnDelta = Arc::new(move |delta| {
-        let _ = deltas.send(delta);
-    });
-    let services = services(&recorder, broker, on_delta);
+    let services = services(&recorder, broker);
 
     let Prepared {
         run,
@@ -279,18 +269,15 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
         performers,
         parse_events,
         ..
-    } = prepare_run(&prompt_file(dir.path()), "", services)
+    } = prepare(FIXTURE, "", services)
         .await
         .expect("the fixture prepares");
-    let seen_by_sink: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&seen_by_sink);
     let outcome = drive_run(
         run,
         performers,
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        move |event| sink.lock().unwrap().push(event),
     )
     .await
     .expect("the drive completes");
@@ -309,7 +296,6 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     );
     let meta = recorder.meta(run_id).expect("the recorder began the run");
     assert_eq!(meta.session_id, "session-e2e");
-    assert_eq!(meta.agent, "end-to-end");
 
     // The broker saw one round, for the bound model, with no callback.
     let rounds = rounds.lock().unwrap().clone();
@@ -326,10 +312,6 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     assert!(
         !round.streamed,
         "a nested infer's round is handed no delta callback"
-    );
-    assert!(
-        delta_rx.try_recv().is_err(),
-        "a nested infer has no live consumer, so no delta reaches the callback"
     );
 
     // The whole record stream: events, effects, and answers.
@@ -350,16 +332,4 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
 
     let main_task = assert_effects_and_answers(&records, round);
     assert_task_columns(&records, &main_task);
-
-    // Every logged event reached the sink after the parse events, in order.
-    let logged: Vec<Value> = of_kind(&records, RecordKind::Event)
-        .iter()
-        .map(|record| record.payload.clone())
-        .collect();
-    let delivered: Vec<Value> = parse_events
-        .iter()
-        .chain(seen_by_sink.lock().unwrap().iter())
-        .map(|event| serde_json::to_value(event).unwrap())
-        .collect();
-    assert_eq!(logged, delivered);
 }

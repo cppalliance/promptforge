@@ -14,6 +14,7 @@ use harness::{
 };
 use harness_gateway_client::{CompletionError, CompletionErrorKind};
 use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
@@ -41,6 +42,7 @@ impl InferenceBroker for OfflineBroker {
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: Round,
         _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;

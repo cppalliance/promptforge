@@ -5,58 +5,60 @@
 //! of the step's effects is issued, so an effect's record never precedes the
 //! events its step reported. Each effect is appended as its
 //! [`EffectRecord`](promptforge::effect::EffectRecord) and then handled by
-//! kind. A chat, tool-call, or timer effect is started as a plain task
-//! through the tagged spawn wrapper; each task posts
-//! `(EffectId, EffectAnswer)` on one channel, and the loop appends the
-//! answer's record and resumes the run with it, then steps again. A Vfs
-//! effect starts no task: the VFS is synchronous by design, so the loop
-//! performs the operation on its own thread, appends the answer's record,
-//! and resumes the run at once. It resumes every Vfs effect of a step this
-//! way and then steps once, so the loop awaits an answer only when it
-//! answered nothing inline. Real-disk operations therefore block the
-//! thread that runs the loop, and Vfs operations from different chains run
-//! one at a time in issue order.
+//! kind. A chat, tool-call, or timer effect's performer future joins the
+//! effects in flight, which the loop polls inside the run's own future: the
+//! loop starts no task, so a run is one future that any executor can drive.
+//! When an effect's future lands, the loop appends the answer's record and
+//! resumes the run with it, then steps again. A Vfs effect has no future:
+//! the VFS is synchronous by design, so the loop performs the operation
+//! inline, appends the answer's record, and resumes the run at once. It
+//! resumes every Vfs effect of a step this way and then steps once, so the
+//! loop awaits an answer only when it answered nothing inline. Real-disk
+//! operations therefore block whatever polls the run, and Vfs operations
+//! from different chains run one at a time in issue order.
 //!
-//! Cancellation is the caller's synchronous flag, awaited beside the
-//! answer channel. When it fires the loop cancels the run, aborts every
-//! performer still out and joins it, so whatever the performer held is
-//! gone before the run ends, then answers each of those effects `Dropped`
-//! and steps the run to `Done`. A Vfs effect is never out at a cancel: it
-//! is answered before the loop looks at the flag again. A drop is an
+//! The loop waits on three things at once: the run's cancel flag, the stop
+//! a Host raises through [`RunControl::stop_round`](crate::RunControl::stop_round),
+//! and the next effect to land. A cancel cancels the run, aborts every
+//! effect in flight, answers each `Dropped`, and steps the run to `Done`. A
+//! stop aborts every effect in flight except the questions to the operator
+//! and answers each `Dropped`, leaving the cancel flag clear, so the run
+//! decides what a dropped call means: a `pcall` catches it, and an uncaught
+//! one ends the run cancelled. A Vfs effect is never in flight at a cancel
+//! or a stop: it is answered before the loop waits again. A drop is an
 //! answer, recorded like any other, so every effect record has exactly one
 //! answer record.
 //!
-//! A performer that panics posts nothing itself; tokio catches the panic
-//! and ends the task. Every performer task therefore holds an
-//! `Answering` guard that posts `Dropped` for its effect when the task
-//! ends without having answered, so the loop hears from every performer
-//! it started and a lost one can never leave the run waiting forever. A
-//! Vfs operation that panics is caught where it runs and answered
-//! `Dropped` the same way.
+//! A performer that panics is caught where its future is polled: its
+//! effect is answered `Dropped` and the panic is logged, so a lost
+//! performer can never leave the run waiting forever. A Vfs operation that
+//! panics is caught where it runs and answered `Dropped` the same way.
 //!
 //! The run's `Done` ends the run with its outcome at the recorder.
 
-use std::collections::HashMap;
+use std::future::{Future, poll_fn};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
 
+use harness_capabilities::USER_INPUT_ASK_TOOL;
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
-use promptforge::event::{Event, ReplyOrigin};
+use promptforge::event::Event;
 use promptforge::ids::Provenance;
-use promptforge::vfs::{Access, VfsOp};
+use promptforge::vfs::{Access, VfsOp, perform_vfs_op};
 use promptforge::{Run, RunError, RunResult, Step};
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 use crate::display_chain::display_chain;
-use crate::performers::Performers;
+use crate::harness::StopSignal;
+use crate::performers::{BoxFuture, Performers};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunOutcome, RunRecorder};
-use crate::spawn::spawn_tagged;
 
-#[path = "effect_loop-answering.rs"]
-mod answering;
+#[path = "effect_loop-flight.rs"]
+mod flight;
 
-use answering::{AnswerSender, Answering, answer_vfs};
+use flight::{Flights, Reach};
 
 /// Why the loop stopped without an outcome.
 #[derive(Debug, thiserror::Error)]
@@ -66,98 +68,91 @@ pub enum DriveError {
     /// not driven further.
     #[error(transparent)]
     Recorder(#[from] RecorderError),
-    /// The run is pending with nothing issued and nothing out: the run
-    /// reports a stall itself, so reaching this means the loop lost a
-    /// performer.
+    /// The run is pending with nothing issued and nothing in flight: the
+    /// run reports a stall itself, so reaching this means the loop lost an
+    /// effect.
     #[error("the effect loop has nothing to await for a pending run")]
     Stalled,
 }
 
-/// Drives `run` to its end on the current tokio runtime: performs its
+/// Drives `run` to its end inside the returned future: performs its
 /// effects through `performers`, hands every event, effect, and answer to
-/// `recorder` under `run_id`, hands every event to `sink` once it is
-/// recorded, and cancels the run when `cancel` fires. Ends the run at the
-/// recorder with its outcome and returns it.
+/// `recorder` under `run_id`, and cancels the run when `cancel` fires.
+/// Ends the run at the recorder with its outcome and returns it.
 ///
 /// The future is boxed internally: the step machinery is large, and the
-/// caller's own future stays small. It is `Send` when `sink` is, so the Harness
-/// can hold it in a task of its own; the driver never borrows itself
-/// shared across an await.
+/// caller's own future stays small. It is `Send`, and it needs no runtime
+/// of its own: every performer future is polled inside it.
 ///
 /// # Errors
 /// Returns [`DriveError::Recorder`] when the recorder refuses a write and
 /// [`DriveError::Stalled`] when the run pends with nothing to await. In
-/// either case every performer still out is aborted, the run is
-/// abandoned mid-flight, and the recorder is not told it ended.
+/// either case every effect still in flight is torn down with the future,
+/// the run is abandoned mid-flight, and the recorder is not told it ended.
 pub async fn drive_run(
     run: Run,
     performers: Performers,
     recorder: Arc<dyn RunRecorder>,
     run_id: RunId,
     cancel: CancelHandle,
-    sink: impl FnMut(Event) + Send,
 ) -> Result<RunOutcome, DriveError> {
-    let mut driver = Driver::new(run, performers, recorder, run_id, cancel, Box::new(sink));
-    Box::pin(driver.drive()).await
+    drive(run, performers, recorder, run_id, cancel, Arc::default()).await
 }
 
-/// One performer still out: what the loop needs to drop it.
-struct InFlight {
-    /// The provenance the effect was issued under, for its answer record.
-    provenance: Provenance,
-    /// The performer's task.
-    handle: JoinHandle<()>,
-}
-
-/// One run being driven.
-struct Driver<'a> {
+/// Drives `run` as [`drive_run`] does, and also drops the effects in
+/// flight, questions to the operator excepted, each time `stop` is raised.
+pub(crate) async fn drive(
     run: Run,
     performers: Performers,
     recorder: Arc<dyn RunRecorder>,
     run_id: RunId,
-    sink: Box<dyn FnMut(Event) + Send + 'a>,
-    /// Unbounded, because each performer sends exactly once and the
-    /// in-flight count is already bounded by the chains that produced the
-    /// effects.
-    tx: AnswerSender,
-    rx: mpsc::UnboundedReceiver<(EffectId, EffectAnswer)>,
-    /// The performers still out, keyed by effect. An answer for an id not
-    /// here is a late answer for an effect already dropped and is
-    /// discarded, so the run never sees two answers for one effect.
-    outstanding: HashMap<EffectId, InFlight>,
     cancel: CancelHandle,
+    stop: Arc<StopSignal>,
+) -> Result<RunOutcome, DriveError> {
+    let mut driver = Driver {
+        run,
+        performers,
+        recorder,
+        run_id,
+        flights: Flights::new(),
+        cancel,
+        stop,
+    };
+    Box::pin(driver.drive()).await
 }
 
-impl<'a> Driver<'a> {
-    fn new(
-        run: Run,
-        performers: Performers,
-        recorder: Arc<dyn RunRecorder>,
-        run_id: RunId,
-        cancel: CancelHandle,
-        sink: Box<dyn FnMut(Event) + Send + 'a>,
-    ) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        Self {
-            run,
-            performers,
-            recorder,
-            run_id,
-            sink,
-            tx,
-            rx,
-            outstanding: HashMap::new(),
-            cancel,
-        }
-    }
+/// One run being driven.
+struct Driver {
+    run: Run,
+    performers: Performers,
+    recorder: Arc<dyn RunRecorder>,
+    run_id: RunId,
+    /// The chat, tool-call, and timer effects in flight. Dropping the
+    /// driver drops their futures, so nothing a performer holds outlives
+    /// the drive however it ends.
+    flights: Flights,
+    cancel: CancelHandle,
+    stop: Arc<StopSignal>,
+}
 
+/// What ended the loop's wait.
+enum Woken {
+    /// The run's cancel flag fired.
+    Cancel,
+    /// The Host raised a stop.
+    Stop,
+    /// An effect's future landed with its answer.
+    Landed(EffectId, Provenance, EffectAnswer),
+}
+
+impl Driver {
     async fn drive(&mut self) -> Result<RunOutcome, DriveError> {
         loop {
             match self.run.step() {
                 Step::Done { result, events } => {
                     self.commit_events(events).await?;
                     // `Done` is returned only once every effect is
-                    // answered, so nothing is out.
+                    // answered, so nothing is in flight.
                     let outcome = outcome_of(result);
                     self.recorder.end_run(self.run_id, outcome.clone()).await?;
                     return Ok(outcome);
@@ -174,28 +169,26 @@ impl<'a> Driver<'a> {
                     self.commit_events(events).await?;
                     if decided {
                         // Every effect issued in this step is moot before
-                        // it is performed, and every performer still out
-                        // is moot too. Record each effect and answer it
+                        // it is performed, and every effect in flight is
+                        // moot too. Record each effect and answer it
                         // `Dropped` so the next step reaches `Done`.
                         for (id, provenance, effect) in effects {
                             self.commit_effect(id, &provenance, &effect).await?;
                             self.drop_effect(id, &provenance).await?;
                         }
-                        self.drop_outstanding().await?;
+                        self.drop_in_flight(Reach::All).await?;
                         continue;
                     }
                     let mut answered_inline = false;
                     for (id, provenance, effect) in effects {
                         self.commit_effect(id, &provenance, &effect).await?;
                         // A Vfs effect comes back from `perform` and is
-                        // answered here; every other kind is out as a
-                        // task. The run is not stepped between inline
-                        // answers: the whole batch is resumed, then
-                        // stepped once.
+                        // answered here; every other kind goes in flight.
+                        // The run is not stepped between inline answers:
+                        // the whole batch is resumed, then stepped once.
                         if let Some((access, op)) = self.perform(id, &provenance, effect) {
                             let answer = answer_vfs(id, &provenance, access, op);
-                            self.commit_answer(id, &provenance, &answer).await?;
-                            self.run.resume(id, answer);
+                            self.answer(id, &provenance, answer).await?;
                             answered_inline = true;
                         }
                     }
@@ -203,10 +196,10 @@ impl<'a> Driver<'a> {
                         // Stepping again, not awaiting: the answers just
                         // resumed may have made chains ready, and a step
                         // whose every effect was a Vfs effect has nothing
-                        // out to await.
+                        // in flight to await.
                         continue;
                     }
-                    if self.outstanding.is_empty() {
+                    if self.flights.is_empty() {
                         return Err(DriveError::Stalled);
                     }
                     self.await_answer().await?;
@@ -215,91 +208,63 @@ impl<'a> Driver<'a> {
         }
     }
 
-    /// Waits for the next answer, applying every answer already queued
-    /// behind it, or acts on the cancel flag as soon as it is set. Both
-    /// arms are event-driven: the channel wakes on a posted answer and the
-    /// flag's future wakes on the cancel, so a fully suspended run costs
-    /// no wakeups while it waits.
+    /// Waits for the next answer, then answers every effect already
+    /// landed behind it, or acts on a cancel or a stop as soon as one is
+    /// raised.
     async fn await_answer(&mut self) -> Result<(), RecorderError> {
-        tokio::select! {
-            biased;
-            arrival = self.rx.recv() => {
-                if let Some((id, answer)) = arrival {
-                    self.deliver(id, answer).await?;
-                }
-                while let Ok((id, answer)) = self.rx.try_recv() {
-                    self.deliver(id, answer).await?;
-                }
-            }
-            () = self.cancel.cancelled() => {
+        match self.wake().await {
+            Woken::Cancel => {
                 self.run.cancel();
-                self.drop_outstanding().await?;
+                self.drop_in_flight(Reach::All).await
             }
+            Woken::Stop => self.drop_in_flight(Reach::AllButQuestions).await,
+            Woken::Landed(id, provenance, answer) => {
+                self.answer(id, &provenance, answer).await?;
+                self.answer_landed().await
+            }
+        }
+    }
+
+    /// Waits for the cancel flag, a raised stop, or the next effect to
+    /// land, checked in that order, so a stop drops a round whose answer
+    /// arrived beside it. Every arm is event-driven: the cancel and the
+    /// stop wake the loop as they are raised and a future wakes it as it
+    /// lands, so a fully suspended run costs no wakeups while it waits.
+    async fn wake(&mut self) -> Woken {
+        let mut cancelled = self.cancel.cancelled();
+        let stop = &self.stop;
+        let flights = &mut self.flights;
+        poll_fn(|cx| {
+            if Pin::new(&mut cancelled).poll(cx).is_ready() {
+                return Poll::Ready(Woken::Cancel);
+            }
+            if stop.poll_take(cx).is_ready() {
+                return Poll::Ready(Woken::Stop);
+            }
+            flights
+                .poll_landed(cx)
+                .map(|(id, provenance, answer)| Woken::Landed(id, provenance, answer))
+        })
+        .await
+    }
+
+    /// Answers every effect that has already landed, without waiting.
+    async fn answer_landed(&mut self) -> Result<(), RecorderError> {
+        while let Some((id, provenance, answer)) = self.flights.landed_now() {
+            self.answer(id, &provenance, answer).await?;
         }
         Ok(())
     }
 
-    /// Records one performer's answer and resumes the run with it, unless
-    /// the effect was already dropped, in which case the late answer is
-    /// discarded.
-    async fn deliver(&mut self, id: EffectId, answer: EffectAnswer) -> Result<(), RecorderError> {
-        let Some(in_flight) = self.outstanding.remove(&id) else {
-            return Ok(());
-        };
-        if matches!(answer, EffectAnswer::Dropped) {
-            // A performer answers with its kind's payload, never with
-            // `Dropped`: only the task's guard posts that, and only when
-            // the task ended without answering. The loop aborts a task
-            // only after removing its effect from `outstanding`, so a
-            // guard's post that reaches here is a performer that
-            // panicked.
-            tracing::error!(
-                effect = %id,
-                task = %in_flight.provenance.task,
-                "a performer ended without answering; its effect is dropped"
-            );
+    /// Aborts the effects in flight that `reach` takes and answers each
+    /// `Dropped`, in effect order. The aborted futures are then torn down,
+    /// so whatever a dropped performer held is gone before the run steps
+    /// on; an effect `reach` spared that landed meanwhile is answered too.
+    async fn drop_in_flight(&mut self, reach: Reach) -> Result<(), RecorderError> {
+        for (id, provenance) in self.flights.abort(reach) {
+            self.drop_effect(id, &provenance).await?;
         }
-        self.commit_answer(id, &in_flight.provenance, &answer)
-            .await?;
-        self.run.resume(id, answer);
-        Ok(())
-    }
-
-    /// Aborts and joins every performer still out, in effect order, and
-    /// answers each of their effects `Dropped`. The join waits for an
-    /// aborted task to finish tearing down, so whatever the performer
-    /// held is gone before the effect is answered. Only chat, tool-call,
-    /// and timer performers are ever out: a Vfs effect is answered inline
-    /// and has none.
-    async fn drop_outstanding(&mut self) -> Result<(), RecorderError> {
-        let mut outstanding: Vec<(EffectId, InFlight)> =
-            std::mem::take(&mut self.outstanding).into_iter().collect();
-        outstanding.sort_by_key(|(id, _)| id.get());
-        for (id, in_flight) in outstanding {
-            in_flight.handle.abort();
-            match in_flight.handle.await {
-                // The performer finished before the abort took, or the
-                // abort took: both are the expected ends of a dropped
-                // performer, and whatever it posted is discarded below.
-                Ok(()) => {}
-                Err(join) if join.is_cancelled() => {}
-                // A performer that panicked before the drop reached it.
-                // Its effect is dropped either way, but the panic is the
-                // Harness's bug and is not swallowed.
-                Err(join) => tracing::error!(
-                    effect = %id,
-                    task = %in_flight.provenance.task,
-                    panic = %join,
-                    "a performer panicked before its effect was dropped"
-                ),
-            }
-            self.drop_effect(id, &in_flight.provenance).await?;
-        }
-        // Whatever the joined performers posted before the abort, or
-        // their guards posted at the abort, is stale: their effects are
-        // answered.
-        while self.rx.try_recv().is_ok() {}
-        Ok(())
+        self.answer_landed().await
     }
 
     /// Records the `Dropped` answer for one effect and resumes the run
@@ -309,27 +274,36 @@ impl<'a> Driver<'a> {
         id: EffectId,
         provenance: &Provenance,
     ) -> Result<(), RecorderError> {
-        let answer = EffectAnswer::Dropped;
+        self.answer(id, provenance, EffectAnswer::Dropped).await
+    }
+
+    /// Records one answer and resumes the run with it.
+    async fn answer(
+        &mut self,
+        id: EffectId,
+        provenance: &Provenance,
+        answer: EffectAnswer,
+    ) -> Result<(), RecorderError> {
         self.commit_answer(id, provenance, &answer).await?;
         self.run.resume(id, answer);
         Ok(())
     }
 
-    /// Starts the performer of a chat, tool-call, or timer effect, which
-    /// posts the effect's answer under `id`, and returns `None`.
+    /// Puts the performer future of a chat, tool-call, or timer effect in
+    /// flight and returns `None`. The performer is called inside its
+    /// future, so a performer that panics as it is called is caught like
+    /// one that panics as it runs. The Harness hands a round no delta
+    /// callback.
     ///
-    /// A Vfs effect starts nothing and is handed back as the access and
-    /// operation it carries, for the caller to answer inline. It never
-    /// gets an [`Answering`] guard: a guard dropped without posting sends
-    /// `Dropped`, and the inline answer is the effect's only one.
+    /// A Vfs effect goes nowhere and is handed back as the access and
+    /// operation it carries, for the caller to answer inline.
     fn perform(
         &mut self,
         id: EffectId,
         provenance: &Provenance,
         effect: Effect,
     ) -> Option<(Arc<Access>, VfsOp)> {
-        let tag = (id, provenance.clone());
-        let handle = match effect {
+        let (answer, question): (BoxFuture<EffectAnswer>, bool) = match effect {
             Effect::Chat {
                 binding,
                 messages,
@@ -337,48 +311,39 @@ impl<'a> Driver<'a> {
                 options,
                 round,
             } => {
-                let answer = Answering::new(self.tx.clone(), id);
-                let on_delta =
-                    (round.origin == ReplyOrigin::Chat).then(|| self.performers.on_delta.clone());
-                let round = self
-                    .performers
-                    .broker
-                    .chat(binding, messages, tools, options, on_delta);
-                spawn_tagged(tag, async move {
-                    answer.post(EffectAnswer::Chat(round.await));
-                })
+                let broker = Arc::clone(&self.performers.broker);
+                let round = async move {
+                    let completion = broker
+                        .chat(binding, messages, tools, options, round, None)
+                        .await;
+                    EffectAnswer::Chat(completion)
+                };
+                (Box::pin(round), false)
             }
             Effect::ToolCall {
                 tool, alias, args, ..
             } => {
-                let answer = Answering::new(self.tx.clone(), id);
-                let call = self.performers.tool.call(tool, alias, args);
-                spawn_tagged(tag, async move {
-                    answer.post(EffectAnswer::ToolCall(call.await));
-                })
+                let question = tool.to_string() == USER_INPUT_ASK_TOOL;
+                let performer = Arc::clone(&self.performers.tool);
+                let call =
+                    async move { EffectAnswer::ToolCall(performer.call(tool, alias, args).await) };
+                (Box::pin(call), question)
             }
             Effect::Vfs { access, op } => return Some((access, op)),
             Effect::Timer { seconds } => {
-                let answer = Answering::new(self.tx.clone(), id);
-                let sleep = self.performers.timer.sleep(seconds);
-                spawn_tagged(tag, async move {
-                    sleep.await;
-                    answer.post(EffectAnswer::Timer);
-                })
+                let timer = Arc::clone(&self.performers.timer);
+                let sleep = async move {
+                    timer.sleep(seconds).await;
+                    EffectAnswer::Timer
+                };
+                (Box::pin(sleep), false)
             }
         };
-        self.outstanding.insert(
-            id,
-            InFlight {
-                provenance: provenance.clone(),
-                handle,
-            },
-        );
+        self.flights.start(id, provenance.clone(), question, answer);
         None
     }
 
-    /// Appends one step's events to the recorder, then hands each to the
-    /// sink once it is recorded.
+    /// Appends one step's events to the recorder.
     async fn commit_events(&mut self, events: Vec<Event>) -> Result<(), RecorderError> {
         for event in events {
             let record = record(
@@ -388,7 +353,6 @@ impl<'a> Driver<'a> {
                 serde_json::to_value(&event).map_err(RecorderError::new)?,
             );
             self.append(record).await?;
-            (self.sink)(event);
         }
         Ok(())
     }
@@ -432,15 +396,33 @@ impl<'a> Driver<'a> {
     }
 }
 
-/// Aborts every performer still out when the driver is dropped mid-run -
-/// a recorder failure, or the Harness tearing the loop down. Dropping a bare
-/// `JoinHandle` detaches the task, which would strand a tool call waiting
-/// on the operator or a model round forever, so the drop applies the same
-/// abort the run's end does.
-impl Drop for Driver<'_> {
-    fn drop(&mut self) {
-        for in_flight in self.outstanding.values() {
-            in_flight.handle.abort();
+/// Answers one Vfs effect inline: performs `op` through the store view
+/// the effect carries and returns the answer to record and resume the run
+/// with. A panic out of the backend is caught here, logged against `id`
+/// and `provenance`, and answered `Dropped`, so it ends the run as a
+/// cancelled one and never unwinds the loop.
+///
+/// The access is this function's own parameter, so it drops when the
+/// function returns. The drop is hygiene only: claims follow
+/// happens-before within the run's scope, and the run ends that scope at
+/// `Done` however long any access is held.
+fn answer_vfs(
+    id: EffectId,
+    provenance: &Provenance,
+    access: Arc<Access>,
+    op: VfsOp,
+) -> EffectAnswer {
+    let result = catch_unwind(AssertUnwindSafe(|| perform_vfs_op(&access, op)));
+    drop(access);
+    match result {
+        Ok(outcome) => EffectAnswer::Vfs(outcome),
+        Err(_panic) => {
+            tracing::error!(
+                effect = %id,
+                task = %provenance.task,
+                "a Vfs operation panicked; its effect is dropped"
+            );
+            EffectAnswer::Dropped
         }
     }
 }

@@ -37,7 +37,6 @@ async fn a_recorder_that_refuses_its_nth_call_ends_the_drive_with_a_recorder_err
         baseline.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -53,7 +52,6 @@ async fn a_recorder_that_refuses_its_nth_call_ends_the_drive_with_a_recorder_err
             recorder.clone(),
             run_id,
             CancelHandle::new(),
-            |_event| {},
         )
         .await
         .expect_err("a refused call ends the drive");
@@ -105,7 +103,6 @@ async fn a_recorder_that_refuses_an_answer_aborts_the_performers_still_out() {
         dry.clone(),
         dry_run,
         cancel,
-        |_event| {},
     )
     .await
     .unwrap();
@@ -132,7 +129,6 @@ async fn a_recorder_that_refuses_an_answer_aborts_the_performers_still_out() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .expect_err("the refused answer ends the drive");

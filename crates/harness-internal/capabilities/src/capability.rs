@@ -19,10 +19,8 @@ use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 use promptforge::vfs::VfsRef;
 
-use crate::input::InputBroker;
 use crate::service::{HostServices, ServiceId, ServiceKey};
 use crate::tool::Tool;
-use crate::user_input::INPUT_BROKER;
 
 #[cfg(test)]
 #[path = "capability-tests.rs"]
@@ -188,35 +186,6 @@ impl RunServices {
     #[must_use]
     pub fn with_host(vfs: VfsRef, cancel: CancelHandle, host: HostServices) -> RunServices {
         RunServices { vfs, cancel, host }
-    }
-
-    /// Supplies the run's input broker under [`INPUT_BROKER`], replacing
-    /// any provider already under `promptforge/input-broker`: the
-    /// session's broker is the run's only input broker.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::sync::Arc;
-    ///
-    /// use harness_capabilities::{INPUT_BROKER, InputBroker, InputError, RunServices};
-    /// use promptforge::cancel::CancelHandle;
-    ///
-    /// struct Scripted;
-    ///
-    /// #[async_trait::async_trait]
-    /// impl InputBroker for Scripted {
-    ///     async fn wait(&self) -> Result<String, InputError> {
-    ///         Ok("hello".to_owned())
-    ///     }
-    /// }
-    ///
-    /// let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
-    /// services.insert_input_broker(Arc::new(Scripted));
-    /// assert!(services.get(&INPUT_BROKER).is_some());
-    /// ```
-    pub fn insert_input_broker(&mut self, broker: Arc<dyn InputBroker>) {
-        self.host.insert(&INPUT_BROKER, broker);
     }
 
     /// Returns the run's provider under `key`'s id, or `None` when it has

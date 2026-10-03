@@ -3,12 +3,12 @@
 //! drops every outstanding effect with one `Dropped` answer each; a
 //! performer that panics drops its effect rather than stranding the run;
 //! and a refused recorder write ends the drive with the recorder's error
-//! and aborts the performers still out. The Vfs effect the loop answers
-//! inline has its own module, `vfs`, and the `Chat` effect the inference
-//! broker answers has `broker`.
+//! and tears down the performers still out. The Vfs effect the loop
+//! answers inline has its own module, `vfs`, and the `Chat` effect the
+//! inference broker answers has `broker`.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use harness_runner::display_chain;
@@ -17,7 +17,6 @@ use harness_runner::recorder::{
     MemoryRecorder, Record, RecordKind, RunId, RunMeta, RunOutcome, RunRecorder,
 };
 use promptforge::cancel::CancelHandle;
-use promptforge::event::Event;
 use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
 use serde_json::json;
 
@@ -53,8 +52,7 @@ async fn begun_log() -> (Arc<MemoryRecorder>, RunId) {
 }
 
 /// Fires `cancel` from another thread after `delay`: the Host's cancel
-/// arriving while the loop waits, without a second tokio task in the
-/// test (the Harness spawns only through its tagged wrapper).
+/// arriving while the loop waits, from outside the run's own future.
 fn cancel_after(cancel: &CancelHandle, delay: Duration) {
     let trigger = cancel.clone();
     std::thread::spawn(move || {
@@ -101,8 +99,6 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     let (recorder, run_id) = begun_log().await;
     let mut performers = unused();
     performers.tool = Arc::new(TextTool("hi"));
-    let seen: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&seen);
     let vfs = VfsRef::builder().store("/", MemoryBackend::new()).build();
 
     let outcome = drive_run(
@@ -114,7 +110,6 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        move |event| sink.lock().unwrap().push(event),
     )
     .await
     .unwrap();
@@ -180,20 +175,7 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         json!({ "ToolCall": { "Ok": { "text": "hi", "trusted": true } } })
     );
 
-    // Every recorded event reached the sink, in order, and the run ended
-    // once with the loop's outcome.
-    let recorded_events: Vec<serde_json::Value> = records
-        .iter()
-        .filter(|record| record.kind == RecordKind::Event)
-        .map(|record| record.payload.clone())
-        .collect();
-    let delivered: Vec<serde_json::Value> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|event| serde_json::to_value(event).unwrap())
-        .collect();
-    assert_eq!(recorded_events, delivered);
+    // The run ended once, with the loop's outcome.
     assert_eq!(recorder.outcome(run_id), Some(outcome));
 }
 
@@ -205,10 +187,9 @@ fn answers(records: &[Record]) -> Vec<&Record> {
         .collect()
 }
 
-/// Waits until `flag` is raised, or fails after a bounded wait: an
-/// aborted task is torn down by the runtime after the abort, not at it.
-/// Under paused time each sleep is a yield that lets the teardown run
-/// and then advances the clock, so the wait costs no wall time.
+/// Waits until `flag` is raised, or fails after a bounded wait. Under
+/// paused time each sleep is a yield that advances the clock, so the wait
+/// costs no wall time.
 async fn await_raised(flag: &AtomicBool, what: &str) {
     for _ in 0..200 {
         if flag.load(Ordering::SeqCst) {
@@ -239,7 +220,6 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
         recorder.clone(),
         run_id,
         cancel,
-        |_event| {},
     )
     .await
     .unwrap();
@@ -297,7 +277,6 @@ async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
             recorder.clone(),
             run_id,
             CancelHandle::new(),
-            |_event| {},
         ),
     )
     .await
@@ -339,7 +318,6 @@ async fn a_refused_recorder_write_returns_the_recorder_error_and_aborts_the_park
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .expect_err("a refused write ends the drive");
@@ -391,7 +369,6 @@ async fn an_ended_run_refuses_the_first_write_before_any_performer_starts() {
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .expect_err("an ended run refuses its first write");

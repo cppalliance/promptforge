@@ -27,7 +27,7 @@ Here is the one prompt the first tour needs.
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
@@ -79,7 +79,7 @@ use harness::{LaunchOptions, LaunchRequest, SessionState};
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
@@ -174,7 +174,7 @@ use std::sync::{Arc, Mutex};
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }

@@ -12,14 +12,12 @@ use std::sync::Arc;
 use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
 use harness_runner::files::{InputFileError, read_output};
-use harness_runner::prepare::{PrepareError, Prepared, prepare_run};
+use harness_runner::prepare::{PrepareError, Prepared, prepare};
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::{MemoryBackend, Mode, ModePolicy, Origin, VfsError, VfsRef};
 
-use super::{
-    PLAIN, assert_events_are_the_recorded_ones, completed, prompt_file, recorder, services,
-};
+use super::{PLAIN, assert_events_are_the_recorded_ones, completed, recorder, services};
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its
 /// output, whose one section writes the output from the input.
@@ -30,17 +28,16 @@ const FILES: &str = "---\nname: files\ndescription: d\npromptforge: 0\n\
     store.write('report.md', 'seen: ' .. store.read('paper.md'))\nreturn 'done'\n```\n";
 
 /// Prepares `source` over `vfs` with `input_text` and returns the result.
-async fn prepare(
+async fn prepare_over(
     source: &str,
     vfs: &VfsRef,
     input_text: Option<&str>,
 ) -> (Arc<MemoryRecorder>, Result<Prepared, PrepareError>) {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = recorder();
     let mut services = services(&recorder, None);
     services.vfs = vfs.clone();
     services.input_text = input_text.map(str::to_owned);
-    let prepared = prepare_run(&prompt_file(dir.path(), source), "", services).await;
+    let prepared = prepare(source, "", services).await;
     (recorder, prepared)
 }
 
@@ -71,7 +68,7 @@ fn refused(recorder: &MemoryRecorder, error: PrepareError) -> InputFileError {
 #[tokio::test]
 async fn the_input_text_is_staged_at_the_declared_path_and_the_output_path_comes_back() {
     let vfs = VfsRef::default();
-    let (recorder, prepared) = prepare(FILES, &vfs, Some("# Paper")).await;
+    let (recorder, prepared) = prepare_over(FILES, &vfs, Some("# Paper")).await;
     let prepared = prepared.expect("a supplied declared input prepares");
     assert_eq!(prepared.output_path.as_deref(), Some("report.md"));
     let outcome = drive_run(
@@ -80,7 +77,6 @@ async fn the_input_text_is_staged_at_the_declared_path_and_the_output_path_comes
         recorder.clone(),
         prepared.run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -94,7 +90,7 @@ async fn a_store_mounted_away_from_the_root_is_staged_by_its_logical_path() {
         .mount("/", MemoryBackend::new())
         .store("/store", MemoryBackend::new())
         .build();
-    let (_recorder, prepared) = prepare(FILES, &vfs, Some("# Paper")).await;
+    let (_recorder, prepared) = prepare_over(FILES, &vfs, Some("# Paper")).await;
     prepared.expect("a supplied declared input prepares");
     let access = vfs.acquire(Origin::new("prepare files test")).unwrap();
     assert_eq!(access.read("/store/paper.md").unwrap(), b"# Paper");
@@ -111,20 +107,20 @@ async fn a_host_seeded_store_satisfies_the_declared_input() {
         .unwrap()
         .write("paper.md", b"# Seeded")
         .unwrap();
-    let (_recorder, prepared) = prepare(FILES, &vfs, None).await;
+    let (_recorder, prepared) = prepare_over(FILES, &vfs, None).await;
     prepared.expect("an input the store already holds prepares");
 }
 
 #[tokio::test]
 async fn input_text_for_a_prompt_that_declares_no_input_is_refused() {
-    let (recorder, prepared) = prepare(PLAIN, &VfsRef::default(), Some("# Paper")).await;
+    let (recorder, prepared) = prepare_over(PLAIN, &VfsRef::default(), Some("# Paper")).await;
     let source = refused(&recorder, prepared.expect_err("undeclared input refuses"));
     assert!(matches!(source, InputFileError::Undeclared), "{source:?}");
 }
 
 #[tokio::test]
 async fn a_declared_input_neither_supplied_nor_in_the_store_is_refused() {
-    let (recorder, prepared) = prepare(FILES, &VfsRef::default(), None).await;
+    let (recorder, prepared) = prepare_over(FILES, &VfsRef::default(), None).await;
     let source = refused(&recorder, prepared.expect_err("a missing input refuses"));
     let InputFileError::Missing { path } = source else {
         panic!("the refusal names the missing file: {source:?}");
@@ -138,7 +134,7 @@ async fn a_store_that_refuses_the_staging_write_refuses_the_run() {
         .store("/", MemoryBackend::new())
         .policy(ModePolicy::new(Mode::Ask))
         .build();
-    let (recorder, prepared) = prepare(FILES, &vfs, Some("# Paper")).await;
+    let (recorder, prepared) = prepare_over(FILES, &vfs, Some("# Paper")).await;
     let source = refused(&recorder, prepared.expect_err("a refused write refuses"));
     let InputFileError::Vfs { path, source } = source else {
         panic!("the refusal is the store's: {source:?}");
@@ -152,6 +148,6 @@ async fn a_store_that_refuses_the_staging_write_refuses_the_run() {
 
 #[tokio::test]
 async fn a_prompt_without_an_output_declaration_has_no_output_path() {
-    let (_recorder, prepared) = prepare(PLAIN, &VfsRef::default(), None).await;
+    let (_recorder, prepared) = prepare_over(PLAIN, &VfsRef::default(), None).await;
     assert_eq!(prepared.unwrap().output_path, None);
 }

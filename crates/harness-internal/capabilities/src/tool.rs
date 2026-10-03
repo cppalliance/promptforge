@@ -88,9 +88,13 @@ mod tests;
 ///   distinct from [`id`](Tool::id) and may be aliased when advertised.
 /// - [`parameters_schema`](Tool::parameters_schema) returns a JSON-Schema
 ///   `object` describing the accepted [`call`](Tool::call) arguments.
-/// - [`call`](Tool::call) is cancellation-aware, must not panic (a panic unwinds
-///   the run), and must classify every failure trust-correctly: any output that
-///   embeds attacker-influenceable data is [`ToolOutput::untrusted`].
+/// - [`call`](Tool::call) is cancellation-aware, must not panic (a panic answers
+///   its effect `Dropped` and is logged), and must classify every failure
+///   trust-correctly: any output that embeds attacker-influenceable data is
+///   [`ToolOutput::untrusted`].
+/// - [`call`](Tool::call) must not block while polled: the Harness polls it
+///   inside the run's own future, beside every other effect of the run, so a
+///   call with blocking or CPU-heavy work hands it to the Host's own runtime.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Returns the tool's stable live identity.

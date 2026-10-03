@@ -68,7 +68,6 @@ fn script_call(value: &str, section: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_that_made_each() {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = recorder();
     let mut registry = CapabilityRegistry::new();
     registry
@@ -76,13 +75,9 @@ async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_tha
             id: CapabilityId::parse("tests/speaker").unwrap(),
         }))
         .unwrap();
-    let prepared = prepare_run(
-        &prompt_file(dir.path(), SPEAKS),
-        "",
-        services(&recorder, Some(Arc::new(registry))),
-    )
-    .await
-    .unwrap();
+    let prepared = prepare(SPEAKS, "", services(&recorder, Some(Arc::new(registry))))
+        .await
+        .unwrap();
     let run_id = prepared.run_id;
     let outcome = drive_run(
         prepared.run,
@@ -90,7 +85,6 @@ async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_tha
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();

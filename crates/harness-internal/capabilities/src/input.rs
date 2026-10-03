@@ -1,13 +1,14 @@
 //! The input broker: the part of the Host that carries a question to a
 //! person; a capability waits on it for the operator's next message.
 //!
-//! When the Host has an operator, the Harness supplies an [`InputBroker`]
-//! in the run's [`RunServices`](crate::RunServices); for a Host without
-//! one (a batch or eval Host) it supplies none, and a capability reads
-//! that absence as "there is nobody to ask". Each run gets a broker bound
-//! to the session that launched it, so a wait reaches the right operator
-//! without naming the run or the section. A broker that is present stays
-//! present for the whole run.
+//! When the Host has an operator, it supplies an [`InputBroker`] among
+//! its services under [`INPUT_BROKER`](crate::INPUT_BROKER), and the run's
+//! [`RunServices`](crate::RunServices) carry it; a Host without one (a
+//! batch or eval Host) supplies none, and a capability reads that absence
+//! as "there is nobody to ask". A Host binds each run's broker to whoever
+//! launched the run, so a wait reaches the right operator without naming
+//! the run or the section. A broker that is present stays present for the
+//! whole run.
 
 use std::fmt;
 
@@ -36,6 +37,10 @@ use std::fmt;
 ///   no trimming, no re-encoding, no wrapping.
 /// - A wait whose future is dropped (the run was cancelled) must not
 ///   leave the operator prompting against it, and must not panic.
+/// - [`wait`](InputBroker::wait) must not block while polled: the Harness
+///   polls it inside the run's own future, beside every other effect of
+///   the run, so a broker hands any blocking work to the Host's own
+///   runtime.
 #[async_trait::async_trait]
 pub trait InputBroker: Send + Sync {
     /// Waits for the operator's next message and returns it byte-exact.

@@ -88,6 +88,7 @@ impl InferenceBroker for ScriptedBroker {
         messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         options: CompletionOptions,
+        _round: promptforge::effect::Round,
         on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         self.rounds.lock().unwrap().push(Round {
@@ -125,6 +126,7 @@ impl InferenceBroker for OfflineBroker {
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: promptforge::effect::Round,
         _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;
@@ -159,6 +161,7 @@ impl InferenceBroker for HoldingBroker {
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: promptforge::effect::Round,
         _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;

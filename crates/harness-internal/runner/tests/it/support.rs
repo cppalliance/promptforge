@@ -1,16 +1,17 @@
 //! Fixtures shared by the runner's suites: a one-section prompt, a run
 //! over it, and fake performers that answer by script.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
 use harness_runner::performers::{
-    BoxFuture, InferenceBroker, OnDelta, Performers, TimerPerformer, ToolPerformer,
+    BoxFuture, InferenceBroker, OnDelta, Performers, Timer, ToolPerformer,
 };
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
+use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
@@ -112,16 +113,11 @@ impl InferenceBroker for Unused {
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
+        _round: Round,
         _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("no test issues a Chat effect")
     }
-}
-
-/// A delta callback that keeps nothing, for a run whose rounds no test
-/// watches.
-pub(crate) fn no_deltas() -> OnDelta {
-    Arc::new(|_delta| {})
 }
 
 impl ToolPerformer for Unused {
@@ -135,7 +131,7 @@ impl ToolPerformer for Unused {
     }
 }
 
-impl TimerPerformer for Unused {
+impl Timer for Unused {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         unreachable!("no test issues a Timer effect")
     }
@@ -147,7 +143,6 @@ pub(crate) fn unused() -> Performers {
     let unused = Arc::new(Unused);
     Performers {
         broker: unused.clone(),
-        on_delta: no_deltas(),
         tool: unused.clone(),
         timer: unused,
     }
@@ -230,12 +225,14 @@ impl ToolPerformer for ClosingTool {
 /// A recorder that refuses one chosen call and keeps the rest in memory:
 /// the recorder failing under a live run. Calls count from one across
 /// `begin_run`, `append`, and `end_run` in the order they reach it, and a
-/// refused call records nothing. A test begins its run on `inner()`, which
-/// counts nothing, so the count starts at the loop's first write.
+/// refused call records nothing. A test that drives the loop alone begins
+/// its run on `inner()`, which counts nothing, so the count starts at the
+/// loop's first write.
 pub(crate) struct FailingRecorder {
     inner: MemoryRecorder,
     fail_on: usize,
     calls: AtomicUsize,
+    begun: Mutex<Vec<RunId>>,
 }
 
 impl FailingRecorder {
@@ -245,7 +242,14 @@ impl FailingRecorder {
             inner: MemoryRecorder::new(),
             fail_on: call,
             calls: AtomicUsize::new(0),
+            begun: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The runs this recorder issued through its own `begin_run`, in
+    /// order.
+    pub(crate) fn begun(&self) -> Vec<RunId> {
+        self.begun.lock().unwrap().clone()
     }
 
     /// A recorder that refuses nothing, for counting the calls of a run.
@@ -278,7 +282,9 @@ impl RunRecorder for FailingRecorder {
     fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
         Box::pin(async move {
             self.count()?;
-            self.inner.begin_run(meta).await
+            let run = self.inner.begin_run(meta).await?;
+            self.begun.lock().unwrap().push(run);
+            Ok(run)
         })
     }
 
@@ -298,7 +304,7 @@ impl RunRecorder for FailingRecorder {
 }
 
 /// Raises its flag when dropped: how a test sees a future torn down.
-struct RaiseOnDrop(Arc<AtomicBool>);
+pub(crate) struct RaiseOnDrop(pub(crate) Arc<AtomicBool>);
 
 impl Drop for RaiseOnDrop {
     fn drop(&mut self) {
@@ -308,11 +314,12 @@ impl Drop for RaiseOnDrop {
 
 /// Never fires, and raises `dropped` when its sleep is torn down: the
 /// timer a cancel or an abort must reach.
+#[derive(Default)]
 pub(crate) struct PendingTimer {
     pub(crate) dropped: Arc<AtomicBool>,
 }
 
-impl TimerPerformer for PendingTimer {
+impl Timer for PendingTimer {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         let raise = RaiseOnDrop(Arc::clone(&self.dropped));
         Box::pin(async move {

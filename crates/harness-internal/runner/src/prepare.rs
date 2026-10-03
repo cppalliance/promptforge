@@ -1,4 +1,4 @@
-//! Run preparation: everything between a prompt file on disk and a `Run`
+//! Run preparation: everything between a prompt's source text and a `Run`
 //! the effect loop can drive.
 //!
 //! Here the Harness draws the inputs the Engine refuses to draw itself:
@@ -20,22 +20,24 @@
 //! A refusal (or a prompt that fails to parse, or an input file that
 //! cannot be put in place) is a run that ended before
 //! it began: the recorder ends it as failed with the refusal as the
-//! message, so the record answers "why did this session fail" for a run
-//! the loop never saw. The error carries the events recorded so far, so
-//! the caller can show them too.
+//! message, so the record answers "why did this run fail" for a run the
+//! loop never saw. The error carries the events recorded so far, so the
+//! caller can show them too.
+//!
+//! The input staging is store work and runs inline, like every other VFS
+//! operation of the run.
 
 use std::fmt::{self, Write as _};
-use std::io;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_capabilities::{CapabilityRegistry, HostServices, InputBroker, RunServices, activate};
+use harness_capabilities::{CapabilityRegistry, HostServices, RunServices, activate};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
+use promptforge::prompt::FileDecl;
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::{VfsError, VfsRef};
+use promptforge::vfs::VfsRef;
 use promptforge::{Environment, RunContext, RunError};
 use promptforge::{ParseError, Prompt, Run};
 use sha2::{Digest as _, Sha256};
@@ -43,22 +45,20 @@ use sha2::{Digest as _, Sha256};
 use crate::display_chain::display_chain;
 use crate::effect_loop::failed_outcome;
 use crate::files::{InputFileError, stage_input};
-use crate::performers::{ActivatedTools, InferenceBroker, OnDelta, Performers, TokioTimer};
+use crate::performers::{ActivatedTools, InferenceBroker, Performers, Timer};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
-use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
 /// installed capabilities and the Host's services, the real directories,
-/// the run's cancel flag, the recorder, the inference broker, its delta
-/// callback, and the optional input broker that reach beyond the runner,
-/// and the session's identity for the run's metadata.
+/// the run's cancel flag, the recorder, the inference broker and the
+/// timer that reach beyond the runner, and the run's name.
 pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
     /// against; `None` is a Harness with no capabilities, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<CapabilityRegistry>>,
-    /// The Host's services: the run's capabilities read them, and the
-    /// input broker, when present, replaces any provider under its id.
+    /// The Host's services: the run's capabilities read them, its input
+    /// broker among them when it has one.
     pub services: HostServices,
     /// The run's whole filesystem: the real directories and the declared store,
     /// passed straight to the context's VFS and handed to the capabilities
@@ -74,17 +74,11 @@ pub struct Services {
     pub recorder: Arc<dyn RunRecorder>,
     /// Performs the run's `Chat` effects.
     pub broker: Arc<dyn InferenceBroker>,
-    /// Receives the live deltas of the run's streaming `Chat` effects.
-    pub on_delta: OnDelta,
-    /// The operator's input broker, when the Host has someone to ask:
-    /// handed to every capability activated for the run. `None` is a Host
-    /// with nobody to ask.
-    pub input: Option<Arc<dyn InputBroker>>,
-    /// The session launching the run: the run metadata's `session_id` and
-    /// the run's execution identifier.
-    pub session_id: String,
-    /// The agent the session runs: the run metadata's `agent`.
-    pub agent: String,
+    /// Performs the run's `Timer` effects.
+    pub timer: Arc<dyn Timer>,
+    /// The run's name: the run metadata's `session_id` and every event's
+    /// `execution`.
+    pub name: String,
     /// The Host's current model, when one is selected; prepare binds
     /// every declared role to it and checks each role's requirements.
     pub model: Option<ModelDescriptor>,
@@ -98,8 +92,7 @@ impl fmt::Debug for Services {
         f.debug_struct("Services")
             .field("registry", &self.registry)
             .field("services", &self.services)
-            .field("session_id", &self.session_id)
-            .field("agent", &self.agent)
+            .field("name", &self.name)
             .field("model", &self.model)
             .field("ui", &self.ui)
             .finish_non_exhaustive()
@@ -118,13 +111,11 @@ pub struct Prepared {
     pub seed: u64,
     /// The start the run was given, as handed to the recorder.
     pub started_at: Timestamp,
-    /// The performers for the run: the caller's inference broker and delta
-    /// callback beside the runner's own over the activated tools and
-    /// tokio's timer.
+    /// The performers for the run: the caller's inference broker and timer
+    /// beside the runner's own tool performer over the activated tools.
     pub performers: Performers,
     /// What parsing reported, already recorded ahead of the run's own
-    /// events; the caller hands them to its sink so the session sees them
-    /// in order.
+    /// events.
     pub parse_events: Vec<Event>,
     /// The prompt's declared `output:` path, which the caller reads with
     /// [`read_output`](crate::files::read_output) once the run completes.
@@ -135,22 +126,10 @@ pub struct Prepared {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PrepareError {
-    /// The prompt file could not be read; the run is never begun, since
-    /// there is no prompt to record. The read failure is the source.
-    #[error("the prompt at {path} could not be read")]
-    Read {
-        /// The path that was read.
-        path: PathBuf,
-        /// The read failure.
-        #[source]
-        source: io::Error,
-    },
     /// The prompt does not parse. The run is ended as failed; the parse
     /// failure is the source.
-    #[error("the prompt at {path} does not parse")]
+    #[error("the prompt does not parse")]
     Parse {
-        /// The path that was parsed.
-        path: PathBuf,
         /// The run, ended with this failure.
         run_id: RunId,
         /// What parsing reported, in the order it was recorded.
@@ -189,21 +168,41 @@ pub enum PrepareError {
         source: InputFileError,
     },
     /// The recorder refused a write; the run cannot be recorded, so it is
-    /// not prepared.
-    #[error(transparent)]
-    Recorder(#[from] RecorderError),
+    /// not prepared. `run` is the run the recorder issued, `None` when it
+    /// refused to begin one.
+    #[error("the run could not be recorded")]
+    Recorder {
+        /// The run the recorder issued before it refused.
+        run: Option<RunId>,
+        /// The recorder's refusal.
+        #[source]
+        source: RecorderError,
+    },
 }
 
-/// Prepares the prompt at `prompt_path` for one run with `args`: draws the
-/// run's seed and start and begins the run at its recorder, parses the
-/// prompt, puts its declared input file in place, activates its declared
+impl PrepareError {
+    /// The run this failure ended at the recorder, beside the outcome it
+    /// was ended with, or, for a recorder refusal, which ends nothing, the
+    /// run the recorder issued and its refusal.
+    pub(crate) fn ended(self) -> Result<(RunId, RunOutcome), (Option<RunId>, RecorderError)> {
+        match self {
+            PrepareError::Parse { run_id, source, .. } => Ok((run_id, failed("Parse", &source))),
+            PrepareError::Refused { run_id, error, .. } => Ok((run_id, failed_outcome(&error))),
+            PrepareError::Input { run_id, source, .. } => Ok((run_id, failed("Input", &source))),
+            PrepareError::Recorder { run, source } => Err((run, source)),
+        }
+    }
+}
+
+/// Prepares the prompt `source` for one run with `args`: draws the run's
+/// seed and start and begins the run at its recorder, parses the prompt,
+/// puts its declared input file in place, activates its declared
 /// capabilities against the caller's registry, prepares the context,
 /// refuses an unsatisfiable prompt, and builds the `Run` and its
 /// performers.
 ///
 /// # Errors
-/// Returns [`PrepareError::Read`] when the file cannot be read (the run is
-/// never begun), [`PrepareError::Parse`] when it does not parse,
+/// Returns [`PrepareError::Parse`] when the source does not parse,
 /// [`PrepareError::Input`] when its declared input file cannot be put in
 /// place, and [`PrepareError::Refused`] when the environment cannot
 /// satisfy it (in these three cases the run is ended as failed and the
@@ -213,44 +212,12 @@ pub enum PrepareError {
     clippy::result_large_err,
     reason = "the error is returned once per launch and carries the events recorded before the failure"
 )]
-pub async fn prepare_run(
-    prompt_path: &Path,
-    args: &str,
-    services: Services,
-) -> Result<Prepared, PrepareError> {
-    let source = tokio::fs::read_to_string(prompt_path)
-        .await
-        .map_err(|source| PrepareError::Read {
-            path: prompt_path.to_path_buf(),
-            source,
-        })?;
-    prepare_source(&source, prompt_path, args, services).await
-}
-
-/// Prepares prompt text already in hand, just as [`prepare_run`] does
-/// after its read: for a prompt that has no file of its own (an embedded
-/// built-in) or one the caller read itself. `prompt_path` is the path the
-/// source is attributed to in [`PrepareError::Parse`].
-///
-/// # Errors
-/// Returns [`PrepareError::Parse`] when the source does not parse,
-/// [`PrepareError::Input`] when its declared input file cannot be put in
-/// place, and [`PrepareError::Refused`] when the environment cannot
-/// satisfy it (in these three cases the run is ended as failed and the
-/// error carries the events recorded so far), and
-/// [`PrepareError::Recorder`] when the recorder refuses a write. Never
-/// [`PrepareError::Read`].
-#[expect(
-    clippy::result_large_err,
-    reason = "the error is returned once per launch and carries the events recorded before the failure"
-)]
 #[expect(
     clippy::too_many_lines,
     reason = "preparation is one linear ceremony whose every stage ends the same begun run on failure"
 )]
-pub async fn prepare_source(
+pub async fn prepare(
     source: &str,
-    prompt_path: &Path,
     args: &str,
     services: Services,
 ) -> Result<Prepared, PrepareError> {
@@ -262,10 +229,8 @@ pub async fn prepare_source(
         cancel,
         recorder,
         broker,
-        on_delta,
-        input,
-        session_id,
-        agent,
+        timer,
+        name,
         model,
         ui,
     } = services;
@@ -276,27 +241,35 @@ pub async fn prepare_source(
     let started_at = now_timestamp();
     let run_id = recorder
         .begin_run(RunMeta {
-            session_id: session_id.clone(),
-            agent: agent.clone(),
+            session_id: name.clone(),
+            agent: String::new(),
             prompt_hash: prompt_hash(source),
             seed,
             flags: 0,
             started_at: started_at.unix_millis(),
         })
-        .await?;
+        .await
+        .map_err(|source| PrepareError::Recorder { run: None, source })?;
+    let recorded = |source| PrepareError::Recorder {
+        run: Some(run_id),
+        source,
+    };
 
     // Parse-time events are the run's first records, whether or not the
     // parse succeeds.
-    let (prompt, parse_events) = Prompt::parse(source, &session_id);
+    let (prompt, parse_events) = Prompt::parse(source, &name);
     for event in &parse_events {
-        recorder.append(run_id, event_record(event)?).await?;
+        let record = event_record(event).map_err(recorded)?;
+        recorder.append(run_id, record).await.map_err(recorded)?;
     }
     let prompt = match prompt {
         Ok(prompt) => prompt,
         Err(source) => {
-            recorder.end_run(run_id, failed("Parse", &source)).await?;
+            recorder
+                .end_run(run_id, failed("Parse", &source))
+                .await
+                .map_err(recorded)?;
             return Err(PrepareError::Parse {
-                path: prompt_path.to_path_buf(),
                 run_id,
                 events: parse_events,
                 source,
@@ -307,8 +280,12 @@ pub async fn prepare_source(
     // The declared input is in place before anything else sees the
     // store: the capabilities activate over the same filesystem, and the
     // run's first section may read it.
-    if let Err(source) = stage_declared_input(&prompt, &vfs, input_text, &agent).await {
-        recorder.end_run(run_id, failed("Input", &source)).await?;
+    let declared = prompt.frontmatter().input().map(FileDecl::path);
+    if let Err(source) = stage_input(&vfs, declared, input_text) {
+        recorder
+            .end_run(run_id, failed("Input", &source))
+            .await
+            .map_err(recorded)?;
         return Err(PrepareError::Input {
             run_id,
             events: parse_events,
@@ -324,7 +301,7 @@ pub async fn prepare_source(
     // root task continues the sequence past them, so `(task_id, task_seq)`
     // is unique across every record of the run.
     let provenance_start = u32::try_from(parse_events.len()).unwrap_or(u32::MAX);
-    let mut ctx = RunContext::new(session_id, seed, started_at)
+    let mut ctx = RunContext::new(name, seed, started_at)
         .cancel(cancel)
         .provenance_start(provenance_start);
     if let Some(ui) = ui {
@@ -342,17 +319,16 @@ pub async fn prepare_source(
     // tool performer.
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
-    let mut run_services =
-        RunServices::with_host(ctx.vfs_handle().clone(), ctx.cancel_handle(), host);
-    if let Some(broker) = input {
-        run_services.insert_input_broker(broker);
-    }
+    let run_services = RunServices::with_host(ctx.vfs_handle().clone(), ctx.cancel_handle(), host);
     let activation = activate(registry.as_deref(), &prompt, &run_services);
     let env = env.tools(activation.catalog).preludes(activation.preludes);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);
     requirements.merge(activation.requirements);
     if let Some(error) = requirements.refusal() {
-        recorder.end_run(run_id, failed_outcome(&error)).await?;
+        recorder
+            .end_run(run_id, failed_outcome(&error))
+            .await
+            .map_err(recorded)?;
         return Err(PrepareError::Refused {
             run_id,
             events: parse_events,
@@ -363,9 +339,8 @@ pub async fn prepare_source(
     let run = Run::new(Arc::new(prompt), args, ctx);
     let performers = Performers {
         broker,
-        on_delta,
         tool: Arc::new(ActivatedTools::new(activation.tools)),
-        timer: Arc::new(TokioTimer),
+        timer,
     };
     Ok(Prepared {
         run,
@@ -375,37 +350,6 @@ pub async fn prepare_source(
         performers,
         parse_events,
         output_path,
-    })
-}
-
-/// Puts `prompt`'s declared input file in place in `vfs`'s store on the
-/// blocking pool, tagged with `agent`.
-async fn stage_declared_input(
-    prompt: &Prompt,
-    vfs: &VfsRef,
-    input_text: Option<String>,
-    agent: &str,
-) -> Result<(), InputFileError> {
-    let declared = prompt
-        .frontmatter()
-        .input()
-        .map(|decl| decl.path().to_owned());
-    if declared.is_none() && input_text.is_none() {
-        return Ok(());
-    }
-    let staging = vfs.clone();
-    let path = declared.clone();
-    spawn_blocking_launch(agent, move || {
-        stage_input(&staging, path.as_deref(), input_text)
-    })
-    .await
-    .unwrap_or_else(|join| {
-        Err(InputFileError::Vfs {
-            path: declared.unwrap_or_default(),
-            source: VfsError::Backend {
-                message: format!("the staging task failed: {join}"),
-            },
-        })
     })
 }
 

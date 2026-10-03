@@ -3,16 +3,16 @@
 //! failed; a prompt that does not parse fails the same way under the
 //! `Parse` kind, and each failure returns the events it recorded; each
 //! preparation draws a fresh seed and start, both handed to the recorder
-//! when the run begins; and the prepared tool performer resolves a
-//! `ToolCall` effect's id in the activated table. The Host's optional
-//! input broker - handed to every activated capability and behind the
-//! `promptforge/user-input` capability - sits in the `input` child
-//! module, the Host's services reaching activation sit in the
-//! `host_services` child module, a capability's prelude reaching the
-//! prepared run sits in the `prelude` child module, and the prompt's
-//! declared input and output files sit in the `files` child module.
+//! when the run begins under the run's name; and the prepared tool
+//! performer resolves a `ToolCall` effect's id in the activated table. The
+//! Host's optional input broker - one of its services, handed to every
+//! activated capability and behind the `promptforge/user-input`
+//! capability - sits in the `input` child module, the Host's services
+//! reaching activation sit in the `host_services` child module, a
+//! capability's prelude reaching the prepared run sits in the `prelude`
+//! child module, and the prompt's declared input and output files sit in
+//! the `files` child module.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harness_capabilities::{
@@ -22,14 +22,14 @@ use harness_capabilities::{
 use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{ActivatedTools, ToolPerformer};
-use harness_runner::prepare::{PrepareError, Prepared, Services, prepare_run};
+use harness_runner::prepare::{PrepareError, Prepared, Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
 use promptforge::RunErrorKind;
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
-use crate::support::{Unused, no_deltas};
+use crate::support::Unused;
 
 #[path = "prepare-files.rs"]
 mod files;
@@ -56,13 +56,6 @@ const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
 const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\npromptforge: 0\n\
     capabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
-
-/// Writes `source` as a prompt file in `dir` and returns its path.
-fn prompt_file(dir: &Path, source: &str) -> PathBuf {
-    let path = dir.join("agent.md");
-    std::fs::write(&path, source).expect("the fixture prompt is written");
-    path
-}
 
 /// An empty in-memory recorder.
 fn recorder() -> Arc<MemoryRecorder> {
@@ -103,10 +96,8 @@ fn services(recorder: &Arc<MemoryRecorder>, registry: Option<Arc<CapabilityRegis
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
         broker: Arc::new(Unused),
-        on_delta: no_deltas(),
-        input: None,
-        session_id: "session-1".to_owned(),
-        agent: "prepare-test".to_owned(),
+        timer: Arc::new(Unused),
+        name: "session-1".to_owned(),
         model: None,
         ui: None,
     }
@@ -197,15 +188,10 @@ fn completed(outcome: RunOutcome) -> String {
 
 #[tokio::test]
 async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_ended_as_failed() {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = recorder();
-    let error = prepare_run(
-        &prompt_file(dir.path(), NEEDS_WEB),
-        "",
-        services(&recorder, None),
-    )
-    .await
-    .expect_err("a missing required capability refuses the run");
+    let error = prepare(NEEDS_WEB, "", services(&recorder, None))
+        .await
+        .expect_err("a missing required capability refuses the run");
 
     let PrepareError::Refused {
         run_id,
@@ -241,15 +227,12 @@ async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_end
 
 #[tokio::test]
 async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_parse_failure() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = prompt_file(dir.path(), UNCLOSED);
     let recorder = recorder();
-    let error = prepare_run(&path, "", services(&recorder, None))
+    let error = prepare(UNCLOSED, "", services(&recorder, None))
         .await
         .expect_err("a prompt without a closed frontmatter does not parse");
 
     let PrepareError::Parse {
-        path: reported,
         run_id,
         events,
         source,
@@ -257,7 +240,6 @@ async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_pa
     else {
         panic!("the failure is a parse failure: {error}");
     };
-    assert_eq!(reported, path, "the failure names the prompt it read");
 
     assert_eq!(
         recorder.outcome(run_id),
@@ -276,15 +258,9 @@ async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_pa
 
 #[tokio::test]
 async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = prompt_file(dir.path(), PLAIN);
     let recorder = recorder();
-    let first = prepare_run(&path, "", services(&recorder, None))
-        .await
-        .unwrap();
-    let second = prepare_run(&path, "", services(&recorder, None))
-        .await
-        .unwrap();
+    let first = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
+    let second = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
 
     assert_ne!(
         first.seed, second.seed,
@@ -307,8 +283,11 @@ async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder()
             prepared.started_at.unix_millis(),
             "the recorder holds the start the run was given"
         );
-        assert_eq!(meta.session_id, "session-1");
-        assert_eq!(meta.agent, "prepare-test");
+        assert_eq!(
+            meta.session_id, "session-1",
+            "the metadata holds the run's name"
+        );
+        assert_eq!(meta.agent, "", "preparation names no agent");
         assert!(
             meta.prompt_hash.starts_with("sha256:"),
             "the prompt hash names its algorithm: {}",
@@ -329,27 +308,19 @@ async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder()
 
 #[tokio::test]
 async fn a_prepared_run_drives_to_its_end_under_its_own_performers() {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = recorder();
     let Prepared {
         run,
         run_id,
         performers,
         ..
-    } = prepare_run(
-        &prompt_file(dir.path(), PLAIN),
-        "",
-        services(&recorder, None),
-    )
-    .await
-    .unwrap();
+    } = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
     let outcome = drive_run(
         run,
         performers,
         recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -363,10 +334,9 @@ async fn a_prepared_run_drives_to_its_end_under_its_own_performers() {
 
 #[tokio::test]
 async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
-    let dir = tempfile::tempdir().unwrap();
     let recorder = recorder();
-    let prepared = prepare_run(
-        &prompt_file(dir.path(), CALLS_ECHO),
+    let prepared = prepare(
+        CALLS_ECHO,
         "",
         services(&recorder, Some(fixture_registry())),
     )
@@ -378,7 +348,6 @@ async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
         recorder.clone(),
         prepared.run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();

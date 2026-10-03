@@ -597,7 +597,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-2>
 
-### Step 2: A per-run Harness drives one prompt as a single future
+### Step 2: A per-run Harness drives one prompt as a single future [completed]
 
 - Component: Per-run Harness
 - Depends on: step 1.

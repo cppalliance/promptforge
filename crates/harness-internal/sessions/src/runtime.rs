@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use harness_capabilities::{CapabilityRegistry, HostServices};
 use harness_runner::performers::InferenceBroker;
 use harness_runner::recorder::RunRecorder;
-use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use promptforge::vfs::VfsRef;
 use tokio::sync::mpsc;
 
@@ -30,6 +29,7 @@ use crate::protocol::{LaunchRequest, SessionId};
 use crate::session::files::SessionFiles;
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
+use crate::spawn::{spawn_blocking_launch, spawn_session};
 
 /// What a client tells the Harness at construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,8 +223,7 @@ impl Harness {
         // Resolving through the discovered list is the trust boundary: a
         // client-sent name never reaches the filesystem unless it is the
         // bare stem of a real `.md` file in the configured directory. The
-        // directory walk is filesystem work and runs on the blocking pool,
-        // through the Harness's one spawn site.
+        // directory walk is filesystem work and runs on the blocking pool.
         let agents_path = self.config.agents_path.clone();
         let known = spawn_blocking_launch(&agent, move || discover_agents(&agents_path))
             .await
@@ -246,9 +245,8 @@ impl Harness {
         let (events, lifecycle_rx) = mpsc::unbounded_channel();
         let (cancellations, cancellations_rx) = mpsc::channel(CANCELLATION_CAPACITY);
         let id = SessionId::fresh();
-        let (core, raw_deltas) = SessionCore::new(SessionSeed {
+        let core = SessionCore::new(SessionSeed {
             id: id.clone(),
-            prompt_path: self.config.agents_path.join(format!("{agent}.md")),
             agent,
             source,
             args,
@@ -266,7 +264,6 @@ impl Harness {
             table: Arc::clone(&self.sessions),
             lifecycle: lifecycle_rx,
             cancellations: cancellations_rx,
-            raw_deltas,
         });
         spawn_session(id.as_str(), supervisor.run());
         Ok(Session::new(core))
