@@ -3,45 +3,46 @@
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
 //! and the axum router. Start at
 //! [`Config::load`] for configuration, `AgentSessions` for the
-//! agent-session opener behind `/agents/ws` (every session runs in the
-//! Harness, reached through `harness`), and [`router`] for the HTTP
-//! API; [`spawn`] runs the whole server in-process on its own thread for
-//! embedding binaries.
+//! agent-session launcher behind `/agents/ws` (each conversation's run
+//! is a Harness of its own, reached through `harness`), and [`router`]
+//! for the HTTP API; [`spawn`] runs the whole server in-process on its
+//! own thread for embedding binaries.
 //!
 //! The crate is the composition root of the workshop server
 //! decomposition: the feature subsystems (`workshop-user-state`,
 //! `workshop-workspace`, and the agent-sessions subsystem in `agents`,
 //! which serves the `/agents/ws` agent-session socket and the
-//! `/v1/models` catalog relay and owns that socket's wire frames in
-//! `agents::wire`, and which records every run in the run log of
+//! `/v1/models` catalog relay, owns that socket's wire frames in
+//! `agents::wire`, builds each conversation's run over `workshop-agents`,
+//! the conversation layer, and records every run in the run log of
 //! `workshop-run-log`), the `/ws` workshop socket in
 //! `workshop_socket` (the two sockets share `websocket`), the
 //! domain services (`workshop-gateway`, `workshop-status`,
 //! `workshop-menu`), and the vocabulary crates (`workshop-protocol`,
 //! `workshop-registry`, `workshop-support`) are assembled in `app`
 //! (helpers in `app::compose`), where every subsystem self-registers its
-//! routes, state handles, and push channels into the registry - the
-//! Harness among them.
+//! routes, state handles, and push channels into the registry.
 //!
 //! ## Invariants
 //!
 //! - Tier: server; may depend on: the vocabulary crates
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
-//!   `workshop-status`), the feature crates (`workshop-run-log`,
-//!   `workshop-user-state`, `workshop-workspace`), the Harness's public
-//!   crates `harness`, `harness-gateway-client`, and `harness-web`, and
-//!   the Engine's public API `promptforge`. `cargo test -p build-xtask`
-//!   enforces the product and container boundaries. Read
-//!   `crates/workshop/server/AGENTS.md` before adding an import.
+//!   `workshop-status`), the feature crates (`workshop-agents`,
+//!   `workshop-run-log`, `workshop-user-state`, `workshop-workspace`),
+//!   the Harness's public crates `harness`, `harness-gateway-client`, and
+//!   `harness-web`, and the Engine's public API `promptforge`.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries. Read `crates/workshop/server/AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - One task owns each socket: a single `select!` loop reads inbound
 //!   frames and writes every outbound frame itself - no outbox channel,
-//!   no writer task. Agent sessions are the documented carve-out: they
-//!   outlive sockets on purpose.
-//! - Status-bar reporting for a session is derived in the server from the
-//!   session's events, deltas, and error reports.
+//!   no writer task. Agent conversations are the documented carve-out:
+//!   they outlive sockets on purpose.
+//! - Status-bar reporting for a conversation is derived in the server
+//!   from the conversation's events, deltas, and failure reports.
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.

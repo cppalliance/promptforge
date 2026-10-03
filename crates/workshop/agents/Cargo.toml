@@ -1,0 +1,42 @@
+[package]
+name = "workshop-agents"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Workshop agent conversations: the conversation table, transcripts, operator input waits, agent discovery, and the recorder tee each conversation's run writes through"
+keywords = ["promptforge", "llm", "agent", "workshop", "conversation"]
+categories = ["development-tools"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+# The `InputBroker` trait the conversation's input broker implements is an
+# `async_trait` trait.
+async-trait.workspace = true
+# The Harness's public API: the per-run Harness a conversation drives, its
+# control, the recorder tee's trait, and the input broker's trait.
+harness.workspace = true
+# The Engine's public API: the events a conversation observes, the round
+# ids its deltas and transcript stamp, and the live pieces a round sends.
+promptforge.workspace = true
+# Wait tokens and conversation ids are 128 bits from the OS CSPRNG:
+# unguessable by anything that has not seen the announcing frame.
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# `sync` for the conversation's broadcasts and state watch and the wait
+# registry's `oneshot`; `time` for the timer every run sleeps on.
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
+workspace-hack.workspace = true
+
+[dev-dependencies]
+# The discovery suite seeds an agents directory on disk.
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

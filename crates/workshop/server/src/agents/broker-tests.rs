@@ -2,8 +2,9 @@
 //! key cannot build, every round and model list fails as `Unavailable`
 //! with no URL or key in the message, after a replacement binding is
 //! published the next round and the next model list reach the
-//! replacement, and a model list waits while the menu's catalog holds no
-//! chat-capable model.
+//! replacement, a model list waits while the menu's catalog holds no
+//! chat-capable model, and a run's broker streams only its section's own
+//! rounds into the conversation.
 
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -21,11 +22,12 @@ use promptforge::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
 };
 use serde_json::json;
+use workshop_agents::{Conversations, DeltaKind};
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
 use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Registration, Registry};
 
-use super::WorkshopBroker;
+use super::{RunBroker, WorkshopBroker};
 use crate::app::test_helpers::spawn_gateway;
 
 /// A registry holding gateway handles bound to `base_url` under `key`,
@@ -237,4 +239,55 @@ async fn a_model_list_waits_until_the_catalog_holds_a_chat_capable_model() {
         .expect("the list answers once a chat-capable model is published")
         .expect("the gateway lists");
     assert_eq!(models, ["first-model"], "the list is the gateway's own");
+}
+
+/// Runs one round of `origin` numbered `id` on a conversation's run
+/// broker and returns its reply text.
+async fn run_round(broker: &RunBroker, id: u64, origin: ReplyOrigin) -> String {
+    let completion = broker
+        .chat(
+            binding(),
+            vec![Message::user("hi")],
+            Vec::new(),
+            CompletionOptions::new("m"),
+            Round {
+                id: RoundId::new(id),
+                origin,
+            },
+            None,
+        )
+        .await
+        .expect("the gateway answers");
+    match completion.result() {
+        CompletionResult::Text(text) => text.clone(),
+        other => panic!("the round replies with text: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_sections_round_streams_into_its_conversation_under_the_round_id_and_an_infer_round_does_not()
+ {
+    let gateway = spawn_gateway(keyed_gateway("first-model", "first-key")).await;
+    let (registry, _binding, _guard) = registry_with_gateway(&gateway, "first-key");
+    let conversation = Conversations::new().open("chat");
+    let mut deltas = conversation.subscribe_deltas();
+    let broker = RunBroker::new(WorkshopBroker::new(registry), conversation);
+
+    assert_eq!(
+        run_round(&broker, 4, ReplyOrigin::Infer).await,
+        "from first-model"
+    );
+    assert!(
+        deltas.try_recv().is_err(),
+        "a nested infer round streams nothing"
+    );
+
+    assert_eq!(
+        run_round(&broker, 3, ReplyOrigin::Chat).await,
+        "from first-model"
+    );
+    let delta = deltas.try_recv().expect("the section's round streamed");
+    assert_eq!(delta.kind, DeltaKind::Text);
+    assert_eq!(delta.content, "from first-model");
+    assert_eq!(delta.reply, 3, "the piece carries its round's id");
 }

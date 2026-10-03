@@ -1,32 +1,35 @@
-This crate lets your program run PromptForge agents as long-running sessions that a person talks to.
+This crate lets your program run PromptForge prompts, one [`Harness`] per run.
 
-Your program hands the [`Harness`] the broker that reaches its models, launches agents by name, and relays what each running agent says and asks. That is the whole job of a Host. The Harness owns the running work, and your program owns everything around it: the models, the settings, the person at the screen, and when anything changes.
+Your program builds a Harness for each run, hands it the recorder, the broker that reaches its models, the timer, and the capabilities and services the run may use, then awaits [`Harness::run`]. That is the whole job of a Host. The Harness drives the run, and your program owns everything around it: the models, the clock, the person at the screen, and when to stop.
 
-By the end of this page you will have built `desk`, a Host that runs the built-in `chat` agent for one person. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A real `desk` passes `harness_gateway_client::GatewayBroker`, which reaches the PromptForge Gateway. The examples on this page compile against this crate alone, so their hidden lines define `Offline`, a broker that lists no model and refuses every round. The tours describe what `desk` sees with a broker that answers each model round with `You said: ` and the last message, and lists `stub-model` with a context window of at least 32768 tokens, because `chat` declares that minimum and a smaller window refuses the run.
+By the end of this page you will have built `desk`, a Host that runs prompts for one person. Each tour adds one idea: run a prompt and read its output, answer the operator by supplying an input broker, stop a round and cancel a run, and stream from your own broker. A real `desk` passes `harness_gateway_client::GatewayBroker`, which reaches the PromptForge Gateway. The examples on this page compile against this crate alone, so their hidden lines define `Offline`, a broker that lists no model and refuses every round, and `Clock`, a timer that sleeps on tokio. Where a tour needs a model, its hidden lines define a broker that lists `stub-model` and answers each round with `You said: ` and the last message.
 
 # Before you start
 
-A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and its prose holds text for a model. The [PromptForge language guide](https://cppalliance.github.io/promptforge/language/) teaches how to write one. This page uses a few words for the pieces a Host deals with:
+A PromptForge prompt is a Markdown file. Its Lua code holds the logic, and its prose holds text for a model. The [PromptForge language guide](https://cppalliance.github.io/promptforge/language/) teaches how to write one. This page uses a few words for the pieces a Host deals with:
 
-- A prompt file your program can launch by name is an *agent*.
-- One launched agent, which keeps running until it finishes or you close it, is a *session*.
-- One execution of the agent file, from its start to its end, is a *run*. A session makes its first run at launch, and a new run each time it restarts, as later tours show. Every run adds to the same history.
-- The object your program hands the Harness to answer every model call a session makes, and to list the models a run can bind, is the *broker*.
-- The person your program puts in front of a session to answer its questions is the *operator*.
-- An open question that a session has asked the operator, and is waiting on, is a *wait*.
+- One execution of a prompt, from its start to its end, is a *run*. One Harness drives one run.
+- The object your program hands the Harness to answer every model call the run makes, and to list the models the run can bind, is the *broker*. One model call is a *round*.
+- The object that takes a record of every step the run makes is the *recorder*.
+- The object the run sleeps on, for a timed wait, is the *timer*.
+- The person your program puts in front of a run to answer its questions is the *operator*.
 - One small piece of a reply, sent while the model is still writing, is a *delta*.
 
-An agent never reaches the outside world by itself. When it needs outside work done, it asks the Harness your program drives. That Harness work is a model round, a tool call (a question to the operator included), or a read or write of a file in the agent's [store](vfs). An agent that starts background tasks can also ask for a timer. Every event, reply, and question a session sends you comes from that Harness work.
+A run never reaches the outside world by itself. When it needs outside work done, it asks the Harness, and the Harness does that work through what your program handed it: a model round through the broker, a tool call through the capabilities, a question to the operator through your input broker, a sleep through the timer, and a read or write of a file in the run's [store](vfs) inline. Every record the run makes goes to the recorder.
 
-Here is the smallest agent a Host can launch, placed in `desk`'s agents folder:
+# Run a prompt
+
+You have a prompt and you want your program to run it and read its answer. Your program builds a Harness, hands it the prompt's text in a [`RunRequest`], and awaits the [`RunReport`].
+
+Running a prompt feels like awaiting an async function: you build the call, await it, and read what it returns. Unlike a plain function, every outside step the run takes goes through the pieces you handed the Harness, and nothing else.
 
 ````
-use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-use harness::record::MemoryRecorder;
-use harness::{Harness, HarnessConfig};
-use std::fs;
+use harness::capability::{CapabilityRegistry, HostServices};
+use harness::record::{MemoryRecorder, RunOutcome};
+use harness::vfs::VfsRef;
+use harness::{Harness, HostSnapshot, RunRequest};
 use std::sync::Arc;
-# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # struct Offline;
 # impl InferenceBroker for Offline {
@@ -38,883 +41,453 @@ use std::sync::Arc;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
 # }
-
-// 1. Make desk's agents folder.
-let desk = std::env::temp_dir().join("desk-before-you-start");
-let agents = desk.join("agents");
-fs::create_dir_all(&agents)?;
-
-// 2. Write `hello.md`: frontmatter, one H1 title, and one section whose Lua returns a text.
-let hello = concat!(
-    "---\n",
-    "name: hello\n",
-    "description: Says hello without a model\n",
-    "promptforge: 0\n",
-    "---\n",
-    "\n",
-    "# Hello\n",
-    "\n",
-    "## Greet\n",
-    "\n",
-    "```lua\n",
-    "return 'Hello from desk.'\n",
-    "```\n",
-);
-fs::write(agents.join("hello.md"), hello)?;
-
-// 3. Build a harness over the folder on desk's broker that offers the operator-input capability, recording runs in memory.
-let mut capabilities = CapabilityRegistry::new();
-capabilities.register(Arc::new(UserInput::new()))?;
-let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-
-// 4. The harness offers `hello` next to the built-in `chat`.
-assert_eq!(harness.discover(), ["chat", "hello"]);
-Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the Harness reads by path.
-2. Step 2 writes `hello.md`. Its frontmatter holds the three keys every agent needs: `name`, `description`, and `promptforge: 0`. Then come one H1 title and one section whose Lua returns a fixed text. The source is built with `concat!` so that rustdoc keeps its `# Hello` line. The smallest agent needs no model, no tool, and no operator.
-3. Step 3 builds a Harness over the folder with [`Harness::new`]. It takes a [`HarnessConfig`], a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory, the broker as an [`InferenceBroker`], a [`CapabilityRegistry`](capability::CapabilityRegistry) of the capabilities your agents may declare, and the [`HostServices`](capability::HostServices) those capabilities read. Here the broker is the hidden `Offline`, which `hello` never calls, because it makes no model round. `desk` registers [`UserInput`](capability::UserInput), the `promptforge/user-input` capability that the built-in `chat` declares to ask the operator, and provides no services. `chat` also requires `promptforge/web`, its fetch and search tools, which a real `desk` registers as `harness_web::Web` from the `harness-web` crate, beside the search provider and tokio runtime handle that capability reads. The examples on this page compile against this crate alone, so they leave web out, and a `desk` built from them has every `chat` run refused as it prepares. Building a Harness touches no folder and calls no broker, so only the registration can fail, and only for an id already registered. [Recording runs](record) shows how to bring your own recorder, and [Capabilities](capability) shows how to offer capabilities of your own.
-4. Step 4 asserts that [`Harness::discover`] lists `chat` and `hello`, sorted. The file stem is the name a launch asks for, and it sits next to the built-in `chat`.
-
-# Launch an agent
-
-You have an agent and a broker that reaches a model, and you want your program to run the agent and read its answer. Your program hands the Harness its broker, then launches agents by name. Each launch becomes a session that runs on its own.
-
-Launching feels like [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html): you get a handle back at once, and the work is already running. Unlike a spawned task, you watch its state and then read its output.
-
-````
-use harness::{display_chain, HostSnapshot, LaunchRequest, SessionState};
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-# use harness::record::MemoryRecorder;
-# use harness::{BoxFuture, Harness, HarnessConfig, InferenceBroker, OnDelta};
-# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
-# use std::error::Error;
-# use std::sync::Arc;
-# struct Offline;
-# impl InferenceBroker for Offline {
-#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-#         Box::pin(async { Ok(ModelCatalog::empty()) })
-#     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-#         let kind = CompletionErrorKind::Unavailable;
-#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+# struct Clock;
+# impl Timer for Clock {
+#     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
 #     }
 # }
-# let desk = std::env::temp_dir().join("desk-launch-an-agent");
-# let agents = desk.join("agents");
-# std::fs::create_dir_all(&agents)?;
-# let mut capabilities = CapabilityRegistry::new();
-# capabilities.register(Arc::new(UserInput::new()))?;
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-// 1. Add desk's `greet` agent: it answers the line in `line.txt` into `reply.txt`.
+// 1. desk's `greet` prompt: it reads the line in `name.txt` and writes its greeting to `reply.txt`.
 let greet = concat!(
-    "---\nname: greet\ndescription: Answers one line\npromptforge: 0\n",
-    "models: { writer: {} }\n",
-    "input: { path: line.txt, description: The line to answer }\n",
-    "output: { path: reply.txt, description: The answer }\n",
+    "---\nname: greet\ndescription: Greets the operator by name\npromptforge: 0\n",
+    "input: { path: name.txt, description: The operator's name }\n",
+    "output: { path: reply.txt, description: The greeting }\n",
     "---\n\n# Greet\n\n## Answer\n\n```lua\n",
-    "store.write('reply.txt', models.infer(writer, store.read('line.txt')))\n",
+    "store.write('reply.txt', 'Hello, ' .. store.read('name.txt') .. '.')\n",
     "```\n",
 );
-std::fs::write(agents.join("greet.md"), greet)?;
 
-// 2. Build one harness on desk's broker with desk's capabilities over a memory recorder, and share it behind an `Arc`.
-let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new()));
+// 2. Build one Harness for this run from desk's recorder, broker, timer, capabilities, and services.
+let recorder = Arc::new(MemoryRecorder::new());
+let harness = Harness::new(recorder.clone(), Arc::new(Offline), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new());
 
-// 3. Select the broker's model.
-harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
+// 3. Name the run, hand it the prompt's text and the operator's name, and give it a fresh store.
+let request = RunRequest {
+    name: "desk-greet-1".into(),
+    source: greet.into(),
+    args: String::new(),
+    input_text: Some("desk".into()),
+    vfs: VfsRef::default(),
+    host: HostSnapshot::default(),
+};
 
-// 4. Launch by name with the operator's line, wait for `Closed`, then read the output.
-async fn ask(harness: &Harness, line: &str) -> Result<String, Box<dyn Error>> {
-    let request = LaunchRequest { agent: "greet".into(), args: String::new(), input_text: Some(line.into()) };
-    let session = harness.launch(request).await.map_err(|refusal| display_chain(&refusal))?;
-    session.subscribe_state().wait_for(|state| *state == SessionState::Closed).await?;
-    let reply = session.output_text()?;
-    assert_eq!(reply, format!("You said: {line}"));
-    Ok(reply)
-}
+// 4. Run it to its end; the Harness is spent.
+let report = harness.run(request).await?;
 
-// 5. `greet` is launchable next to the built-in `chat`.
-assert_eq!(harness.discover(), ["chat", "greet"]);
-# Ok::<(), Box<dyn Error>>(())
+// 5. The report says how the run ended and what it left at its output file.
+assert!(matches!(report.outcome, RunOutcome::Completed { .. }));
+assert_eq!(report.output?, "Hello, desk.");
+assert!(recorder.outcome(report.run_id.ok_or("the run began")?).is_some());
+# Ok(())
+# }
 ````
 
-1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the Harness puts the `input:` file and looks for the `output:` file.
-2. Step 2 builds one [`Harness`] from a [`HarnessConfig`], a recorder, `desk`'s broker, and the capabilities and services that [Before you start](#before-you-start) built, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder, sends every model round to that broker, and resolves its declared capabilities against that registry.
-3. Step 3 selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. The model itself comes from the broker: each run asks the broker for its model list and binds the selected `stub-model` from it. With no selection, a launch binds the first model the broker lists.
-4. Step 4 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs a broker that answers with `You said: ` and the line, so the example never calls it.
-5. Step 5 asserts that `greet` is launchable next to `chat`.
+1. Step 1 writes `greet` as a string. Its frontmatter holds the three keys every prompt needs, `name`, `description`, and `promptforge: 0`, plus the files it reads and writes: `input:` names the file it reads, and `output:` the file it writes. The source is built with `concat!` so that rustdoc keeps its `# Greet` line. The source text is the Harness's one prompt input: your program reads it from wherever it keeps prompts.
+2. Step 2 builds a Harness with [`Harness::new`]. It takes the recorder as an `Arc<dyn RunRecorder>`, here a [`MemoryRecorder`](record::MemoryRecorder) that keeps the run's records in memory, the broker as an [`InferenceBroker`], the timer as a [`Timer`], a [`CapabilityRegistry`](capability::CapabilityRegistry) of the capabilities the prompt may declare, and the [`HostServices`](capability::HostServices) those capabilities read. `greet` makes no model round, so the hidden `Offline` broker is enough, and it declares no capability. Building a Harness touches nothing and calls no broker.
+3. Step 3 builds the [`RunRequest`]. `name` names the run in every record and event, `source` is the prompt's text, `args` is the run's argument text, and `input_text` is written at the prompt's declared input file before the run starts. `vfs` is the run's whole filesystem, here a fresh memory store; [Files](vfs) shows how to give a run files of your own. `host` is the [`HostSnapshot`]: the operator's selected model and granted workspace roots, both empty here.
+4. Step 4 awaits [`Harness::run`], which consumes the Harness. The future needs no runtime of its own and starts no task, so any executor can drive it. Build a new Harness for each run; the pieces you hand it are shared behind `Arc`s and clone cheaply.
+5. Step 5 reads the [`RunReport`]. `outcome` is how the run ended, `output` is what a completed run left at its declared output file, and `run_id` is the id the recorder issued. The run's model comes from the broker: as it starts, the run asks the broker for its model list and binds the selected model from it, or the first model listed when nothing is selected.
 
-The Harness keeps its broker for its whole life and asks it again for every model round. To move sessions to a different model server, change what your broker reaches: the next round of every running session goes there, with no restart and no cancelled question.
+A prompt that does not parse, an input file that cannot be put in place, and a capability the registry lacks each end the run as failed, reported in `outcome`. [`Harness::run`] returns an error only when the run cannot be driven at all: [`HarnessError::Model`] when the broker cannot list its models or lacks the selected one, [`HarnessError::Recorder`] when the recorder refuses a write, and [`HarnessError::Stalled`] when the run waits with nothing in flight.
 
-A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. A launch never calls the broker: a broker that cannot list its models, or whose list lacks the selected model, fails the run as it starts, and the session reports [`FailureKind::RunFailed`] and closes.
+You might expect one Harness to serve every run your program makes, like a client you build once. Instead, each run gets its own, and owns its own state, so runs never share anything you did not share yourself.
 
-You might expect [`Harness::new`] to check your folders and ask the broker for its models. Instead, it touches nothing, so a bad name arrives as a [`LaunchError`] from `launch`, and a broker that cannot serve arrives as a failed run. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch. A capability an agent requires and your registry lacks fails the run the same way, as it prepares.
-
-A broker may hold `models()` until it has a model to offer, as one whose model server is still starting would. The run waits with it, and the session stays `Alive`, but [`Session::cancel`] and [`Session::close`] still end that run.
-
-Each run reads the Host snapshot as it starts, once the broker has listed its models, so a new selection reaches a running session only when its run restarts, never in the middle of a reply.
-
-Hand over the broker, select a model, launch by name, wait for `Closed`, then read the output. `chat` loops on `input.ask()` forever, so it never closes by itself, and later tours close it. Next, [Stream a reply](#stream-a-reply) shows a reply while the model writes it.
-
-# Stream a reply
-
-You want the operator to watch a reply appear as the model writes it, not all at once when it finishes. While the model writes, the session sends small pieces of the reply, the deltas. When the reply is done, the session records one event holding the finished text. Every event a session has sent, in order, is its [transcript](record). The pieces and the finished event carry the same reply number.
-
-Each model round records up to three kinds of event that hold a reply number. A thinking event holds the model's finished reasoning, and replaces the reasoning pieces. The `assistant_reply` event holds the finished answer, and replaces the text pieces. A tool-call event lists the tools the reply asked to run.
-
-Deltas feel like an [`mpsc`](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html) stream of chunks. Unlike an `mpsc` channel, they are a broadcast that keeps nothing for a receiver that is not there, and a saved event replaces them when the reply is done.
-
-````
-use harness::DeltaKind;
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-# use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
-# use std::collections::HashMap;
-# use std::error::Error;
-# use std::future::{poll_fn, Future};
-# use std::pin::pin;
-# use std::sync::Arc;
-# use std::task::Poll;
-# fn desk() -> Harness {
-#     use harness::{BoxFuture, InferenceBroker, OnDelta};
-#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
-#     struct Offline;
-#     impl InferenceBroker for Offline {
-#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-#             Box::pin(async { Ok(ModelCatalog::empty()) })
-#         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-#             let kind = CompletionErrorKind::Unavailable;
-#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
-#         }
-#     }
-#     let mut capabilities = CapabilityRegistry::new();
-#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
-#     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
-#     harness
-# }
-# fn chat() -> LaunchRequest {
-#     LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None }
-# }
-# async fn say(session: &Session, text: &str) -> Result<(), Box<dyn Error>> {
-#     let mut waits = session.subscribe_waits();
-#     session.resend_waits();
-#     loop {
-#         if let WaitFrame::Required { token } = waits.recv().await? {
-#             return Ok(session.send_input(&token, text.into(), || {})?);
-#         }
-#     }
-# }
-# enum Next<D, E> {
-#     Delta(D),
-#     Event(E),
-# }
-# async fn first<D, E>(delta: impl Future<Output = D>, event: impl Future<Output = E>) -> Next<D, E> {
-#     let (mut delta, mut event) = (pin!(delta), pin!(event));
-#     poll_fn(|cx| match delta.as_mut().poll(cx) {
-#         Poll::Ready(delta) => Poll::Ready(Next::Delta(delta)),
-#         Poll::Pending => event.as_mut().poll(cx).map(Next::Event),
-#     })
-#     .await
-# }
-
-async fn stream() -> Result<(), Box<dyn Error>> {
-#     let harness = desk();
-    // 1. Subscribe to deltas and events right after launch, before any reply starts.
-    let session = harness.launch(chat()).await?;
-    let mut deltas = session.subscribe_deltas();
-    let mut events = session.subscribe_events();
-#   say(&session, "Hello, desk.").await?;
-
-    // 2. Print each text piece as it arrives, grouped by its reply number.
-    let mut pieces: HashMap<u64, String> = HashMap::new();
-    let (reply, text) = loop {
-        match first(deltas.recv(), events.recv()).await {
-            Next::Delta(Ok(delta)) => match delta.kind {
-                DeltaKind::Text => {
-                    print!("{}", delta.content);
-                    pieces.entry(delta.reply).or_default().push_str(&delta.content);
-                }
-                DeltaKind::Reasoning => eprint!("{}", delta.content),
-                _ => {}
-            },
-            // 3. A receiver that fell behind lost pieces; the finished event repairs them.
-            Next::Delta(Err(_)) => {}
-            // 4. The finished reply event carries the reply number of its pieces.
-            Next::Event(event) => {
-                let event = event?;
-                if event.event["kind"] == "assistant_reply" {
-                    break (event.reply, event.event["text"].as_str().map(str::to_owned));
-                }
-            }
-        }
-    };
-
-    // 5. Swap the pieces for the finished text: they join to the same reply.
-    let shown = reply.and_then(|reply| pieces.remove(&reply));
-    assert_eq!(shown, text);
-    Ok(())
-}
-````
-
-1. Read the hidden `say(&session, "Hello, desk.")` as the operator typing `Hello, desk.`. You do not need its body to follow this tour. Step 1 builds `desk`'s Harness through the hidden `desk` function, which hands it `desk`'s broker and selects the model, as [Launch an agent](#launch-an-agent) taught. It launches `chat`, then calls [`Session::subscribe_deltas`] and [`Session::subscribe_events`] before the hidden `say` answers `chat`'s first question. `chat` starts by asking the operator a question and pauses until it gets an answer. The hidden `say` answers it the way the next tour teaches, and that answer starts the first model round. Each receiver gets only what is sent after it subscribes, and the session is already running when `launch` returns. Subscribing right after launch catches every piece of the first reply.
-2. Step 2 prints each [`DeltaKind::Text`] piece, the answer, and collects it under its `reply` number. It sends each [`DeltaKind::Reasoning`] piece, the model's reasoning, to stderr, because the operator usually sees these in different places. A wildcard arm ignores kinds added later, because [`DeltaKind`] is `#[non_exhaustive]`. The hidden `first` stands in for [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html) over the two receivers.
-3. Step 3 ignores the error a lagging delta receiver gets for the pieces it lost, and does not retry. A missed piece costs the operator a moment of streaming, never text, because the finished event holds the whole reply.
-4. Step 4 stops at the `assistant_reply` event, and takes its `reply` number and its finished `text`. Only thinking, reply, and tool-call events carry a `reply` number, so a [`SessionEvent`] whose `reply` is `None` is something other than model text. You can route events without parsing every one.
-5. Step 5 removes the pieces collected under that number and asserts that they equal the finished text. The streamed preview and the finished reply agree, so `desk` can swap one for the other. Each piece carries the number of the event that replaces it, which is how `desk` knows which pieces to swap out.
-
-What happens when you subscribe after the session has sent some events? Those events are still there: read them with [`Session::transcript`]. Deltas never enter it, so a late subscriber can rebuild every finished reply, but none of the pieces.
-
-You might expect deltas to be saved like events, so that a late subscriber can replay them. Instead, deltas are live only, and the finished event with the same `reply` number is the lasting copy.
-
-Show pieces as they arrive, and let the finished event have the last word. Next, [Answer the operator](#answer-the-operator) sends the operator's text back to the agent.
+Build a Harness, hand it a request, await the report. Next, [Answer the operator](#answer-the-operator) lets a run ask a person a question.
 
 # Answer the operator
 
-The agent asks the operator a question, and your program must show it and send back what they type. When an agent asks, the session opens a wait with a single-use token, and pauses that part of the agent until you answer.
+The prompt asks the operator a question, and your program must carry it to a person and bring back what they type. The Harness waits on an *input broker* your program supplies, and the run pauses that part of the prompt until the broker answers.
 
-A wait feels like a [`oneshot`](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html) channel whose sender you hold. Unlike a oneshot, you answer it by token through the session, and it outlives any receiver you watched it on.
-
-An agent can ask in two ways. Its own Lua can call `input.ask()`, which needs only `promptforge/user-input` in its `capabilities:` frontmatter, and [`UserInput`](capability::UserInput) in the registry your program hands [`Harness::new`]. `capabilities:` lists the tool sets the Harness provides, and `promptforge/user-input` is the set for asking the operator. `chat` declares it and calls `input.ask()` directly, so this tour takes that path.
-
-Or the model can decide to ask. Then the agent's `tools:` frontmatter maps an alias, the name the model calls, to a tool's full id, as in `ask: promptforge/user-input/ask`, and [`USER_INPUT_ASK_TOOL`] is that id. The agent still declares `promptforge/user-input` under `capabilities:`, because a tool slot whose capability is not declared refuses the run with `RequirementsUnmet`.
-
-Binding a tool is not the same as offering it: the agent's Lua offers the alias with `tools.add` for one section or `tools.always` for the whole run, and the capability alone gives the model nothing to call. Both paths call the same ask tool, and open a wait the same way. One pass from the operator's message to the agent's reply is a *turn*. Answering a wait starts the next turn.
+An input broker feels like an async function your program implements: the Harness calls it, awaits it, and hands the text to the prompt. Unlike a callback you register, it travels with the run's services, so each run reaches the operator your program bound it to.
 
 ````
-use harness::{WaitError, WaitFrame};
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-# use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session};
-# use std::error::Error;
-# use std::sync::Arc;
-# fn desk() -> Harness {
-#     use harness::{BoxFuture, InferenceBroker, OnDelta};
-#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
-#     struct Offline;
-#     impl InferenceBroker for Offline {
-#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-#             Box::pin(async { Ok(ModelCatalog::empty()) })
-#         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-#             let kind = CompletionErrorKind::Unavailable;
-#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
-#         }
-#     }
-#     let mut capabilities = CapabilityRegistry::new();
-#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
-#     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
-#     harness
-# }
-# fn chat() -> LaunchRequest {
-#     LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None }
-# }
-
-// 1. Subscribe to questions, then have the session re-announce the ones already open.
-async fn question(session: &Session) -> Result<String, Box<dyn Error>> {
-    let mut waits = session.subscribe_waits();
-    session.resend_waits();
-
-    // 2. Keep the token of the first open question, and drop prompts that were cancelled.
-    loop {
-        match waits.recv().await? {
-            WaitFrame::Required { token } => return Ok(token),
-            WaitFrame::Cancelled { token } => println!("desk drops the prompt for {token}"),
-        }
-    }
-}
-
-async fn answer() -> Result<(), Box<dyn Error>> {
-#     let harness = desk();
-    let session = harness.launch(chat()).await?;
-    let mut events = session.subscribe_events();
-
-    // 3. Answer by token with the operator's text, exactly as typed.
-    let token = question(&session).await?;
-    session.send_input(&token, "Hello, desk.".into(), || {})?;
-
-    // 4. The token is spent: desk clears its prompt, and a second answer is refused.
-    let again = session.send_input(&token, "Hello again.".into(), || {});
-    assert_eq!(again, Err(WaitError::UnknownToken));
-
-    // 5. The next reply uses the operator's text.
-    let reply = loop {
-        let event = events.recv().await?;
-        if event.event["kind"] == "assistant_reply" {
-            break event;
-        }
-    };
-    assert_eq!(reply.event["text"], "You said: Hello, desk.");
-    Ok(())
-}
-````
-
-1. Step 1 defines `question`, which calls [`Session::subscribe_waits`] and then [`Session::resend_waits`]. The receiver shows only frames sent after you subscribe. But the agent is paused on its question, so the question has to outlive any one receiver. The session keeps each open question in its own list, not in the channel, and `resend_waits` announces every one still open.
-2. Step 2 returns the token of the first [`WaitFrame::Required`]. That single-use token ties an answer to the question that asked for it. For each [`WaitFrame::Cancelled`], `question` drops the prompt, because that question ended unanswered and an answer to it would be refused.
-3. Step 3 launches `chat` from the hidden `desk`, subscribes to events, and answers `chat`'s first question by token with [`Session::send_input`]. Pass the operator's text as typed: the agent receives it byte for byte, with no trimming, so trim it yourself if the agent expects that. `send_input` calls its closure once before it hands over the text, and the closure runs even when the call goes on to fail. Pass `|| {}` unless you track turns, and do not take a call to the closure as proof that the answer was accepted.
-4. Step 4 answers the same token again, and gets [`WaitError::UnknownToken`], with the text discarded. Treat that error as a normal race: the token was already answered, cancelled, or never issued. An answered wait sends no `Cancelled`, so `desk` clears its prompt itself once `send_input` returns `Ok`.
-5. Step 5 waits for the next `assistant_reply` event and asserts that its text is `You said: Hello, desk.`, the echoing broker's reply to the answer. The operator's answer reached the agent and drove its next model turn.
-
-Here is the whole question loop, from the agent asking to the agent resuming:
-
-````text
-   agent                 session                        desk                  operator
-     │                      │                             │                       │
-     │  input.ask()         │                             │                       │
-     ├─────────────────────>│  WaitFrame::Required        │                       │
-     │  (this part pauses)  │  { token }                  │                       │
-     │                      ├────────────────────────────>│  show the question    │
-     │                      │                             ├──────────────────────>│
-     │                      │                             │                       │
-     │                      │                             │  the operator types   │
-     │                      │  send_input(&token, text)   │<──────────────────────┤
-     │                      │<────────────────────────────┤                       │
-     │  text, as typed      │                             │                       │
-     │<─────────────────────┤                             │                       │
-     │  (the agent resumes) │                             │                       │
-````
-
-You might expect a question to be lost when nobody was subscribed as it was asked, like a broadcast with no receiver. Instead, the session holds every open question until it is answered or cancelled, and `resend_waits` announces each one again.
-
-Subscribe, resend, and answer by token. Next, [Stop a turn](#stop-a-turn) ends a turn that is going nowhere.
-
-# Stop a turn
-
-The model is stuck or heading the wrong way, and the operator wants to stop this answer but keep the conversation. Stopping the turn is different from stopping the session: [`Session::cancel`] stops the turn, and [`Session::close`] stops the session. This tour's example assumes a different broker, one that never finishes the round the first answer starts, so the turn hangs until you cancel it. The example compiles but never runs, so that broker is not shown.
-
-Cancelling a turn feels like aborting a tokio task. Unlike an aborted task, the session is not gone: the agent starts again over the conversation so far.
-
-````
-use harness::{FailureKind, SessionFailure, SessionState};
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-# use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitError, WaitFrame};
-# use std::error::Error;
-# use std::sync::Arc;
-# fn desk() -> Harness {
-#     use harness::{BoxFuture, InferenceBroker, OnDelta};
-#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
-#     struct Offline;
-#     impl InferenceBroker for Offline {
-#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-#             Box::pin(async { Ok(ModelCatalog::empty()) })
-#         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-#             let kind = CompletionErrorKind::Unavailable;
-#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
-#         }
-#     }
-#     let mut capabilities = CapabilityRegistry::new();
-#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
-#     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
-#     harness
-# }
-# fn chat() -> LaunchRequest {
-#     LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None }
-# }
-# async fn question(session: &Session) -> Result<String, Box<dyn Error>> {
-#     let mut waits = session.subscribe_waits();
-#     session.resend_waits();
-#     loop {
-#         match waits.recv().await? {
-#             WaitFrame::Required { token } => return Ok(token),
-#             WaitFrame::Cancelled { token } => println!("desk drops the prompt for {token}"),
-#         }
-#     }
-# }
-
-// 1. desk keeps the session after a failed turn; a failed run has already closed it.
-fn keeps_session(failure: &SessionFailure) -> bool {
-    match failure.kind {
-        FailureKind::ModelTurnFailed | FailureKind::ToolCallFailed => true,
-        FailureKind::RunFailed | FailureKind::Interrupted => false,
-    }
-}
-
-async fn stop() -> Result<(), Box<dyn Error>> {
-#     let harness = desk();
-    // 2. Subscribe to failure reports before the first turn.
-    let session = harness.launch(chat()).await?;
-    let mut failures = session.subscribe_errors();
-
-    // 3. Answer the first question; in this tour the broker hangs on this reply.
-    let first = question(&session).await?;
-    session.send_input(&first, "Take your time.".into(), || {})?;
-
-    // 4. Cancel the turn: `chat` starts again and asks anew, with no failure report.
-    session.cancel();
-    let second = question(&session).await?;
-    assert_ne!(first, second);
-    assert_eq!(session.send_input(&first, "Too late.".into(), || {}), Err(WaitError::UnknownToken));
-    assert!(failures.try_recv().is_err());
-
-    // 5. Close the session for good, and wait until nothing is left running.
-    let mut state = session.subscribe_state();
-    session.close();
-    state.wait_for(|now| *now == SessionState::Closed).await?;
-    Ok(())
-}
-
-// 6. A failed model turn keeps the session; an interrupted run does not.
-let message = "Model turn failed in agent `Conversation`".to_string();
-let turn = SessionFailure { kind: FailureKind::ModelTurnFailed, message };
-let run = SessionFailure { kind: FailureKind::Interrupted, message: String::new() };
-assert!(keeps_session(&turn) && !keeps_session(&run));
-````
-
-1. Step 1 defines `keeps_session`, which branches on each [`SessionFailure`]'s `kind`, never its `message`, because `message` is display text for the operator and the model. [`FailureKind::ModelTurnFailed`] and [`FailureKind::ToolCallFailed`] mean the turn failed and the agent is waiting again, so `desk` keeps the session. [`FailureKind::RunFailed`] means the run ended in error, and the session closes by itself. [`FailureKind::Interrupted`] is reported only after a close you asked for has ended the run. Either way the session is already closing, so `desk` does not close it again. Launch a new session if the operator wants to go on. The match lists every kind, because [`FailureKind`] is exhaustive.
-2. Step 2 calls [`Session::subscribe_errors`] before the first turn, because a failure report sent with no receiver attached is dropped. The transcript would still show that turn, but only as a turn without a reply.
-3. Step 3 answers `chat`'s first question, which starts the model turn that hangs.
-4. Step 4 calls `cancel`, which stops only the current turn. `chat`'s run starts again over its transcript and asks a new question, and no failure is reported. The assertions check that the new token differs, that the answered first token is refused with [`WaitError::UnknownToken`], and that no failure report arrived. A question still open at the cancel would get [`WaitFrame::Cancelled`], so remove those prompts. Files the stopped run wrote are gone after the restart, because each run starts with an empty [store](vfs) unless you launch with your own filesystem.
-5. Step 5 subscribes to the state, calls `close`, and waits for [`SessionState::Closed`]. The state moves to `Closing` at once, and `Closed` means nothing of the session is left running. [`Harness::close`] with the session's id ends it the same way.
-6. Step 6 builds a `ModelTurnFailed` report and an `Interrupted` report, and asserts that `keeps_session` keeps the first and not the second. The `message` is display text for the operator. Here it names `Conversation`, the one `##` section of `chat`, which holds its question loop. `keeps_session` never reads it. The routing in step 1 works on real report values, decided by kind alone.
-
-You might expect `cancel` to end the session, the way aborting a task ends it. Instead, it stops only the current turn and starts the agent again over what it already said, so the conversation survives and the operator can go on. `close` is what ends the session.
-
-Cancel stops a turn; close stops the session. Next, [Reattach after a disconnect](#reattach-after-a-disconnect) picks a session back up after your client drops it.
-
-# Reattach after a disconnect
-
-The operator's client dropped, and when they come back you want the same conversation, not a new one. A session outlives its client, so your program keeps the session's id and looks the session up again.
-
-A session id feels like a database key. Unlike a row, what it names keeps running while you are away.
-
-````
-use harness::SessionId;
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-# use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
-# use std::error::Error;
-# use std::sync::Arc;
-# fn desk() -> Harness {
-#     use harness::{BoxFuture, InferenceBroker, OnDelta};
-#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
-#     struct Offline;
-#     impl InferenceBroker for Offline {
-#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-#             Box::pin(async { Ok(ModelCatalog::empty()) })
-#         }
-#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-#             let kind = CompletionErrorKind::Unavailable;
-#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
-#         }
-#     }
-#     let mut capabilities = CapabilityRegistry::new();
-#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
-#     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
-#     harness
-# }
-# fn chat() -> LaunchRequest {
-#     LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None }
-# }
-# async fn question(session: &Session) -> Result<String, Box<dyn Error>> {
-#     let mut waits = session.subscribe_waits();
-#     session.resend_waits();
-#     loop {
-#         match waits.recv().await? {
-#             WaitFrame::Required { token } => return Ok(token),
-#             WaitFrame::Cancelled { token } => println!("desk drops the prompt for {token}"),
-#         }
-#     }
-# }
-
-async fn reattach() -> Result<(), Box<dyn Error>> {
-#     let harness = desk();
-#     let session = harness.launch(chat()).await?;
-    // 1. The client shows one event, keeps the id as text, and disconnects.
-    let mut client = session.subscribe_events();
-#     let token = question(&session).await?;
-#     session.send_input(&token, "Hello, desk.".into(), || {})?;
-    let shown = client.recv().await?.index;
-    let saved = session.id().as_str().to_owned();
-    drop((client, session));
-
-    // 2. Look the session up by its id; `None` would mean start a new one.
-    let session = harness.session(&SessionId::new(saved)).ok_or("the session was closed")?;
-
-    // 3. Subscribe first, then replay the history from one past the last shown index.
-    let mut live = session.subscribe_events();
-    let mut indexes: Vec<u64> = Vec::new();
-    for event in session.transcript(shown + 1) {
-        indexes.push(event.index);
-    }
-
-    // 4. Re-announce the open question, answer it, and skip live events already replayed.
-    let token = question(&session).await?;
-    session.send_input(&token, "I'm back.".into(), || {})?;
-    loop {
-        let event = live.recv().await?;
-        if indexes.last().is_some_and(|last| event.index <= *last) {
-            continue;
-        }
-        indexes.push(event.index);
-        if event.event["kind"] == "assistant_reply" {
-            break;
-        }
-    }
-
-    // 5. Replayed and live events join with no gap and no repeat.
-    let expected: Vec<u64> = (shown + 1..).take(indexes.len()).collect();
-    assert_eq!(indexes, expected);
-    Ok(())
-}
-
-// 6. An id the harness never issued finds no session.
-# let harness = desk();
-assert!(harness.session(&SessionId::new("never-issued")).is_none());
-````
-
-1. Step 1 launches `chat` from the hidden `desk`, and the hidden lines answer its first question. The client keeps the `index` of one live event, saves the id from [`Session::id`] as text with [`SessionId::as_str`], and drops its receiver and its handle. Dropping the handle is a disconnect, not a close: the session keeps running, with its next question open.
-2. Step 2 rebuilds the id with [`SessionId::new`] and finds the same running session with [`Harness::session`]. A `None` would mean the session was closed, with nothing to rejoin, so `desk` would start a new one. The saved text is all a client needs to rejoin.
-3. Step 3 calls [`Session::subscribe_events`] before it reads [`Session::transcript`] from one past the last shown index. An event sent between the two reads is caught live rather than lost. The other order, history first, would leave a gap.
-4. Step 4 re-announces the question asked while the client was away through `question`, which calls `subscribe_waits` and then `resend_waits`. It answers the question, and skips live events whose `index` the replay already gave. Open questions survive a disconnect, and the skip removes repeats.
-5. Step 5 asserts that the replayed and live indexes run one by one from one past the last shown index. `index` numbers every event from zero across every run of the session, restarts included, so one saved number is all the client state `desk` needs.
-6. Step 6 asserts that `Harness::session` finds nothing for an id the Harness never issued, just as it finds nothing once a session is closed. If you need to watch a close finish, keep a [`Session`] handle, because [`Harness::close`] removes the session at once, while it is still `Closing`. A lookup right after a close already returns `None`.
-
-You might expect a disconnect to end the session, the way dropping a receiver ends a channel. Instead, the session keeps running and keeps its open questions, and only a close ends it.
-
-Keep the id, subscribe first, then replay and re-announce. Next, [The complete program](#the-complete-program) puts every tour into one Host.
-
-# The complete program
-
-Here is the whole `desk` Host, every line visible: your program owns the broker, the settings, and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
-
-````
-use harness::capability::{CapabilityRegistry, HostServices, RegistryError, UserInput};
-use harness::record::MemoryRecorder;
-use harness::{
-    display_chain, DeltaKind, Harness, HarnessConfig, HostSnapshot,
-    InferenceBroker, LaunchRequest, Session, SessionState, WaitError, WaitFrame,
-};
-use std::error::Error;
-use std::future::Future;
-use std::pin::Pin;
+use async_trait::async_trait;
+use harness::capability::{CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, InputError, UserInput};
+use harness::record::{MemoryRecorder, RunOutcome};
+use harness::vfs::VfsRef;
+use harness::{Harness, HostSnapshot, RunRequest};
 use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
+# struct Clock;
+# impl Timer for Clock {
+#     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
+#     }
+# }
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-// A task desk hands to its runtime, such as `tokio::spawn`.
-type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
+// 1. desk's input broker: here the operator always types the same text.
+struct Operator(&'static str);
 
-// 1. desk hands the harness its broker, owns every setting, its recorder, and its capabilities, and pushes the operator's selection.
-fn build_harness(broker: Arc<dyn InferenceBroker>) -> Result<Arc<Harness>, RegistryError> {
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities.register(Arc::new(UserInput::new()))?;
-    let harness = Arc::new(Harness::new(
-        HarnessConfig { agents_path: "desk/agents".into() },
-        Arc::new(MemoryRecorder::new()),
-        broker,
-        capabilities,
-        HostServices::new(),
-    ));
-    harness.set_host(HostSnapshot {
-        selected_model: Some("stub-model".into()),
-        ..HostSnapshot::default()
-    });
-    Ok(harness)
-}
-
-// 2. Print each text piece as it arrives; a receiver that falls behind only loses pieces.
-fn stream(session: &Session) -> Task {
-    let mut deltas = session.subscribe_deltas();
-    let state = session.subscribe_state();
-    Box::pin(async move {
-        loop {
-            match deltas.recv().await {
-                Ok(delta) if delta.kind == DeltaKind::Text => print!("{}", delta.content),
-                Ok(_) => {}
-                Err(_) if *state.borrow() == SessionState::Closed => break,
-                Err(_) => {}
-            }
-        }
-    })
-}
-
-// 3. Print each finished reply, which has the last word over its pieces.
-fn show_replies(session: &Session) -> Task {
-    let mut events = session.subscribe_events();
-    let state = session.subscribe_state();
-    Box::pin(async move {
-        loop {
-            match events.recv().await {
-                Ok(event) if event.event["kind"] == "assistant_reply" => {
-                    println!("\n[reply {:?}] {}", event.reply, event.event["text"]);
-                }
-                Ok(_) => {}
-                Err(_) if *state.borrow() == SessionState::Closed => break,
-                Err(_) => {}
-            }
-        }
-    })
-}
-
-// 4. A task holding its own clone of the session reports when nothing is left running.
-fn report_close(session: Session) -> Task {
-    Box::pin(async move {
-        let mut state = session.subscribe_state();
-        let closed = state.wait_for(|now| *now == SessionState::Closed).await.is_ok();
-        println!("session {} closed: {closed}", session.id());
-    })
-}
-
-// 5. Answer the open question, and ask again when a restart cancelled it first.
-async fn answer(session: &Session, text: &str) -> Result<(), Box<dyn Error>> {
-    loop {
-        let mut waits = session.subscribe_waits();
-        session.resend_waits();
-        let token = loop {
-            match waits.recv().await? {
-                WaitFrame::Required { token } => break token,
-                WaitFrame::Cancelled { token } => println!("desk drops the prompt for {token}"),
-            }
-        };
-        match session.send_input(&token, text.into(), || {}) {
-            Ok(()) => return Ok(()),
-            Err(WaitError::UnknownToken) => continue,
-        }
+#[async_trait]
+impl InputBroker for Operator {
+    async fn wait(&self) -> Result<String, InputError> {
+        Ok(self.0.to_owned())
     }
 }
 
-async fn desk(broker: Arc<dyn InferenceBroker>, spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
-    let harness = build_harness(broker)?;
+// 2. Register the capability that gives a prompt `input.ask()`, and supply the broker as a service.
+let mut capabilities = CapabilityRegistry::new();
+capabilities.register(Arc::new(UserInput::new()))?;
+let mut services = HostServices::new();
+let operator: Arc<dyn InputBroker> = Arc::new(Operator("Hello, desk."));
+services.provide(&INPUT_BROKER, operator)?;
 
-    // 6. Launch `chat` by name, and start the tasks before its first turn.
-    let request = LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None };
-    let session = harness.launch(request).await.map_err(|refusal| display_chain(&refusal))?;
-    spawn(stream(&session));
-    spawn(report_close(session.clone()));
+// 3. A prompt that asks once and returns the answer.
+let asks = concat!(
+    "---\nname: asks\ndescription: Asks the operator once\npromptforge: 0\n",
+    "capabilities:\n  - promptforge/user-input\n",
+    "---\n\n# Asks\n\n## Only\n\n```lua\n",
+    "return input.ask()\n",
+    "```\n",
+);
 
-    // 7. The operator talks, stops a slow turn, and answers the question `chat` asks next.
-    answer(&session, "Hello, desk.").await?;
-    session.cancel();
-    answer(&session, "Shorter, please.").await?;
+// 4. Run it: the answer comes back byte for byte.
+let harness = Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Offline), Arc::new(Clock), capabilities, services);
+let request = RunRequest {
+    name: "desk-asks-1".into(),
+    source: asks.into(),
+    args: String::new(),
+    input_text: None,
+    vfs: VfsRef::default(),
+    host: HostSnapshot::default(),
+};
+let report = harness.run(request).await?;
+assert_eq!(report.outcome, RunOutcome::Completed { final_text: "Hello, desk.".into() });
+# Ok(())
+# }
+````
 
-    // 8. The operator grants a workspace folder while the session runs; the next run reads it.
-    harness.set_host(HostSnapshot {
-        selected_model: Some("stub-model".into()),
-        workspace_roots: vec!["desk/workspace".into()],
-    });
+1. Step 1 implements [`InputBroker`](capability::InputBroker) for `Operator`. Its one method, `wait`, returns the operator's next message byte for byte, or an [`InputError`](capability::InputError) when nobody will answer; the prompt sees that error at its `input.ask()` call. A real `desk` shows the question in its window and resolves `wait` when the operator presses Enter.
+2. Step 2 registers [`UserInput`](capability::UserInput), the `promptforge/user-input` capability, and provides the broker under [`INPUT_BROKER`](capability::INPUT_BROKER). A Host supplies a fresh input broker for each run by cloning its base services and providing the broker on the clone; the base services leave `INPUT_BROKER` empty, because [`HostServices::provide`](capability::HostServices::provide) refuses a second provider for the same id.
+3. Step 3 writes `asks`, which declares `promptforge/user-input` under `capabilities:` and calls `input.ask()`.
+4. Step 4 runs `asks` and asserts that the operator's text is the run's final text.
 
-    // 9. A client that comes back looks the session up by id, subscribes, then replays.
-    let id = session.id().clone();
-    drop(session);
-    let session = harness.session(&id).ok_or("desk's session is gone")?;
-    let replies = show_replies(&session);
-    let history = session.transcript(0);
-    assert!(history.iter().zip(0..).all(|(event, index)| event.index == index));
-    spawn(replies);
-    answer(&session, "Still there?").await?;
+The model can ask the operator too. The prompt's `tools:` frontmatter maps an alias to [`USER_INPUT_ASK_TOOL`], as in `ask: promptforge/user-input/ask`, and its Lua offers the alias with `tools.add` or `tools.always`. Both paths wait on the same input broker.
 
-    // 10. Nothing answers for the operator: desk closes, even with a question open.
-    println!("open questions: {:?}", session.unresolved_waits());
-    let mut state = session.subscribe_state();
-    assert!(harness.close(&id));
-    assert!(harness.session(&id).is_none());
-    state.wait_for(|now| *now == SessionState::Closed).await?;
-    Ok(())
+A question to the operator is the one effect a stop leaves alone, as the next tour shows, so a person mid-answer never loses the prompt they are typing into. A cancel drops it: the Harness drops the future `wait` returned, so a broker that shows a prompt clears it when its future is dropped.
+
+You might expect the Harness to bring its own way to reach a person. Instead, it has none: a prompt that requires `promptforge/user-input` on a Host with no input broker is refused as it prepares, and an optional one reads `input.connected()` as `false`.
+
+Supply the broker, register the capability, and the run asks through you. Next, [Stop a round and cancel a run](#stop-a-round-and-cancel-a-run) cuts a run's work short.
+
+# Stop a round and cancel a run
+
+The model is stuck or heading the wrong way, and the operator wants to stop this answer but keep the run. Or the operator is done, and wants the run gone. A [`RunControl`] does both: [`RunControl::stop_round`] drops the work in flight and keeps the run going, and [`RunControl::cancel`] ends the run.
+
+A `RunControl` feels like a pair of [`AbortHandle`](https://docs.rs/futures/latest/futures/future/struct.AbortHandle.html)s for the run's future. Unlike aborting a future, the run hears about it: each dropped step is answered `Dropped`, and the prompt decides what that means.
+
+````
+use harness::capability::{CapabilityRegistry, HostServices};
+use harness::record::{MemoryRecorder, RunOutcome};
+use harness::vfs::VfsRef;
+use harness::{Harness, HostSnapshot, RunRequest};
+use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
+# use promptforge::model::{Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema};
+# struct Stuck;
+# impl InferenceBroker for Stuck {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         let model = ModelId::gateway("stub-model").map(|id| ModelDescriptor::new(id, "stub", std::num::NonZeroU32::MIN.saturating_add(131_071), ThinkingMode::Never));
+#         Box::pin(async move { Ok(ModelCatalog::new(model.into_iter()).unwrap_or_else(|_| ModelCatalog::empty())) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         Box::pin(std::future::pending())
+#     }
+# }
+# struct Clock;
+# impl Timer for Clock {
+#     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
+#     }
+# }
+# fn desk() -> Harness {
+#     Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Stuck), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new())
+# }
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+// 1. A prompt whose one model round sits under a `pcall`; the hidden broker never answers it.
+let patient = concat!(
+    "---\nname: patient\ndescription: Waits on the model\npromptforge: 0\n",
+    "models: { writer: {} }\n",
+    "---\n\n# Patient\n\n## Only\n\n```lua\n",
+    "local ok, err = pcall(models.infer, writer, 'Take your time.')\n",
+    "return ok and 'answered' or err.kind\n",
+    "```\n",
+);
+let request = || RunRequest {
+    name: "desk-patient".into(),
+    source: patient.into(),
+    args: String::new(),
+    input_text: None,
+    vfs: VfsRef::default(),
+    host: HostSnapshot::default(),
+};
+
+// 2. Take the control before the run, then stop the round: the pcall catches the dropped call.
+let harness = desk();
+let control = harness.control();
+control.stop_round();
+let report = harness.run(request()).await?;
+assert_eq!(report.outcome, RunOutcome::Completed { final_text: "cancelled".into() });
+
+// 3. Cancel a run before it begins: it ends cancelled, and the recorder never hears of it.
+let harness = desk();
+harness.control().cancel();
+let report = harness.run(request()).await?;
+assert_eq!(report.outcome, RunOutcome::Cancelled);
+assert_eq!(report.run_id, None);
+# Ok(())
+# }
+````
+
+1. Step 1 writes `patient`, whose one round runs under a `pcall`, Lua's protected call, so the prompt sees a failed call as a value instead of an error. The hidden `Stuck` broker lists `stub-model` and never answers a round, and the hidden `desk` builds a Harness over it.
+2. Step 2 takes the run's control with [`Harness::control`] before it calls `run`, which consumes the Harness, and raises a stop. A stop raised while nothing is in flight drops what is in flight when the run next waits, here the stuck round, so the example raises it before the run starts. A real `desk` keeps the control in its window and raises the stop from there while the round runs. The dropped round reaches the prompt as an error whose `kind` is `cancelled`, the `pcall` catches it, and the run goes on to its end. An uncaught one would end the run with the outcome `Cancelled`.
+3. Step 3 cancels before the run begins. The run ends `Cancelled` with no `run_id`, because the recorder never began it. A cancel while the run is going answers every effect in flight `Dropped`, a question to the operator included, and ends the run `Cancelled`.
+
+A stop drops every effect in flight except a question to the operator: model rounds, tool calls, and timers. An open question stays open, so the operator can still answer it. The run's cancel flag stays clear, and the next round starts fresh.
+
+`RunControl` is cheap to clone, every clone steers the same run, and both calls take effect from any thread. Calling `cancel` again does nothing.
+
+You might expect a stop to end the turn and start the prompt over, the way aborting a task ends it. Instead, the same run goes on, with every value its Lua held, and the prompt's own `pcall` decides whether a dropped step matters.
+
+Stop a round to keep the run; cancel to end it. Next, [Stream from your own broker](#stream-from-your-own-broker) shows a reply while the model writes it.
+
+# Stream from your own broker
+
+You want the operator to watch a reply appear as the model writes it. The Harness never streams: it hands every round to your broker and takes the finished reply. Your broker streams the pieces wherever your program shows them, and the round's id pairs the pieces with the finished reply the run records.
+
+Streaming from your broker feels like teeing a stream: the pieces go to your window as they arrive, and the whole reply goes back to the run. Unlike a tee the Harness sets up, your broker decides which rounds stream, because only your program knows which ones the operator is watching.
+
+````
+use harness::capability::{CapabilityRegistry, HostServices};
+use harness::record::{MemoryRecorder, RecordKind};
+use harness::vfs::VfsRef;
+use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest};
+use promptforge::effect::Round;
+use promptforge::event::ReplyOrigin;
+use promptforge::model::{Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, StreamDelta, ToolSchema};
+use std::sync::{Arc, Mutex};
+# use harness::Timer;
+# use promptforge::model::{CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
+# struct Echo;
+# impl InferenceBroker for Echo {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         let model = ModelId::gateway("stub-model").map(|id| ModelDescriptor::new(id, "stub", std::num::NonZeroU32::MIN.saturating_add(131_071), ThinkingMode::Never));
+#         Box::pin(async move { Ok(ModelCatalog::new(model.into_iter()).unwrap_or_else(|_| ModelCatalog::empty())) })
+#     }
+#     fn chat(&self, _: ModelBinding, messages: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Round, on_delta: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let reply = format!("You said: {}", messages.last().map(|message| message.content().to_owned()).unwrap_or_default());
+#         Box::pin(async move {
+#             if let Some(on_delta) = on_delta { on_delta(StreamDelta::Text(reply.clone())); }
+#             Completion::from_result(CompletionResult::Text(reply), "stub-model").map(Box::new)
+#         })
+#     }
+# }
+# struct Clock;
+# impl Timer for Clock {
+#     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
+#     }
+# }
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+// 1. desk's broker wraps the one that reaches its models, and collects a section's pieces by round.
+struct Streaming {
+    inner: Arc<dyn InferenceBroker>,
+    shown: Arc<Mutex<Vec<(u64, String)>>>,
 }
+
+impl InferenceBroker for Streaming {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        self.inner.models()
+    }
+
+    fn chat(&self, binding: ModelBinding, messages: Vec<Message>, tools: Vec<ToolSchema>, options: CompletionOptions, round: Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        // 2. Stream only a section's own rounds, each piece under its round's id.
+        let on_delta = (round.origin == ReplyOrigin::Chat).then(|| {
+            let shown = Arc::clone(&self.shown);
+            let id = round.id.get();
+            let show: OnDelta = Arc::new(move |piece| {
+                if let StreamDelta::Text(text) = piece {
+                    shown.lock().expect("desk's window is healthy").push((id, text));
+                }
+            });
+            show
+        });
+        self.inner.chat(binding, messages, tools, options, round, on_delta)
+    }
+}
+
+// 3. A prompt with one section round.
+let chats = concat!(
+    "---\nname: chats\ndescription: Says hello to the model\npromptforge: 0\n",
+    "models: { writer: {} }\n",
+    "---\n\n# Chats\n\n## Only\n\n```lua\n",
+    "local msgs = messages.new()\n",
+    "msgs:user('Hello, desk.')\n",
+    "models.loop(writer, msgs)\n",
+    "return msgs[#msgs].content\n",
+    "```\n",
+);
+
+// 4. Run it over the streaming broker.
+let shown = Arc::new(Mutex::new(Vec::new()));
+let broker = Streaming { inner: Arc::new(Echo), shown: Arc::clone(&shown) };
+let recorder = Arc::new(MemoryRecorder::new());
+let harness = Harness::new(recorder.clone(), Arc::new(broker), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new());
+let request = RunRequest {
+    name: "desk-chats-1".into(),
+    source: chats.into(),
+    args: String::new(),
+    input_text: None,
+    vfs: VfsRef::default(),
+    host: HostSnapshot::default(),
+};
+let report = harness.run(request).await?;
+
+// 5. The finished reply the run recorded carries the round id its pieces carried.
+let records = recorder.records(report.run_id.ok_or("the run began")?);
+let reply = records
+    .iter()
+    .filter(|record| record.kind == RecordKind::Event)
+    .find(|record| record.payload["kind"] == "assistant_reply")
+    .ok_or("the run recorded its reply")?;
+let shown = shown.lock().map_err(|_| "poisoned")?.clone();
+assert_eq!(shown, [(reply.payload["round"].as_u64().ok_or("a round id")?, "You said: Hello, desk.".to_owned())]);
+# Ok(())
+# }
 ````
 
-1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). It registers [`UserInput`](capability::UserInput) because `chat` declares `promptforge/user-input`, and a run whose agent requires a capability the registry lacks is refused. A real `desk` also registers `harness_web::Web` with its two services, because `chat` requires `promptforge/web`, as [Before you start](#before-you-start) explains. You might expect the Harness to find its model server and model in the environment or a config file. Instead, it reaches models only through the broker your program hands [`Harness::new`], and holds only the settings your program pushes. `desk` takes its broker as a parameter: a real `desk` passes `harness_gateway_client::GatewayBroker`, built from the Gateway's API root and key. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only [`Session::cancel`] restarts a session's run. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
-2. Step 2 is `stream`, from [Stream a reply](#stream-a-reply). It owns its own delta receiver and a state watch, prints `Text` pieces, and shrugs off a lag error while the session runs. It ends once the state is `Closed`.
-3. Step 3 is `show_replies`, which prints each `assistant_reply` event. That finished text replaces the pieces `stream` printed under the same reply number.
-4. Step 4 is `report_close`, which holds its own clone of the [`Session`]. `report_close` keeps a handle because [`Harness::close`] removes the session from the Harness while it is still `Closing`.
-5. Step 5 is `answer`, from [Answer the operator](#answer-the-operator). It subscribes, re-announces, and answers by token. When a restart cancelled the question under it, [`WaitError::UnknownToken`] sends it around again for the new question.
-6. Step 6 launches `chat` by name, shows any refusal through [`display_chain`], and spawns `stream` and `report_close` at once, because the session is already running when `launch` returns.
-7. Step 7 answers `chat`'s first question, cancels the slow turn as [Stop a turn](#stop-a-turn) taught, and answers the new question `chat` asks after its run starts again.
-8. Step 8 pushes a new [`HostSnapshot`] that grants a workspace folder while the session runs. Nothing restarts: the running run keeps the snapshot it started with, and the session's next run reads the new one. To move the session to a different model server instead, `desk` changes what its broker reaches: the next model round goes there, with no restart and no cancelled question.
-9. Step 9 drops the handle and looks the session up by id, as [Reattach after a disconnect](#reattach-after-a-disconnect) taught. It subscribes through `show_replies` before it reads `transcript(0)`, and asserts that the history's indexes run from zero with no gap.
-10. Step 10 lists the open tokens with [`Session::unresolved_waits`], closes the session with `Harness::close`, asserts that it is gone from the Harness at once, and waits for `Closed`. An open question keeps its agent waiting until `desk` answers it, cancels the turn, or closes the session, so `desk` decides when to give up.
+1. Step 1 defines `Streaming`, which wraps the broker that reaches `desk`'s models, here the hidden `Echo`, and passes every call through. Its `shown` list stands in for `desk`'s window.
+2. Step 2 builds an [`OnDelta`] callback for each round whose [`Round`](promptforge::effect::Round) has the origin [`ReplyOrigin::Chat`](promptforge::event::ReplyOrigin::Chat): a section's own round, the one the operator watches. A nested `models.infer` round has the origin `Infer`, and `desk` reads it whole from its answer. The callback tags each piece with `round.id`, the run-wide number of the round. The Harness itself always passes `None`.
+3. Step 3 writes `chats`, whose one section sends one round through `models.loop`.
+4. Step 4 runs `chats` over `Streaming`, recording into a memory recorder.
+5. Step 5 finds the `assistant_reply` event in the run's records and asserts that the pieces `desk` showed carry the round id that event holds. The run's thinking, reply, and tool-call events each carry their round's id as `round`, so `desk` swaps its streamed preview for the finished text by that number.
 
-The Host loop, from launch to streaming, answering, and closing:
+Call the callback inline as each piece arrives; it must not block, and a broker must not panic inside it mid-round. A missed piece costs the operator a moment of streaming, never text, because the finished reply holds it all.
 
-````text
-   desk                                      harness and session
-   ────                                      ───────────────────
-   new(broker), set_host ──────────────────> holds the broker and the settings
-   launch("chat") ─────────────────────────> a session starts running
-   stream task       <─────────────────────  Delta pieces, live only
-   answer()          <─────────────────────  WaitFrame::Required { token }
-                     ─────────────────────>  send_input(&token, text)
-   show_replies task <─────────────────────  SessionEvent, the finished reply
-   cancel() ───────────────────────────────> the turn stops, chat asks again
-   session(&id), transcript(0) ────────────> the same session, its whole history
-   close(&id) ─────────────────────────────> Closing, then Closed
-````
+You might expect the Harness to hand you a stream of pieces. Instead, your broker sees every piece first, because it is the one talking to the model, and the run sees only the finished reply.
 
-Hand over a broker, push settings, launch by name, relay what each session says and asks, and close it when you are done. [Where to go next](#where-to-go-next) lists the module pages.
+Stream where the operator watches, and let the recorded reply have the last word. [Where to go next](#where-to-go-next) lists the module pages.
 
 # Reference
 
 ## BoxFuture
 
-[`BoxFuture`] is the boxed, sendable, `'static` future every [`InferenceBroker`] method returns. Build one with `Box::pin(async move { ... })`, and move what the future needs into it, because the Harness runs it as its own task after the call returns. [Before you start](#before-you-start) shows one in the hidden `Offline` broker.
+[`BoxFuture`] is the boxed, sendable, `'static` future every [`InferenceBroker`] and [`Timer`] method returns. Build one with `Box::pin(async move { ... })`, and move what the future needs into it, because the Harness polls it inside the run's future after the call returns. [Run a prompt](#run-a-prompt) shows one in the hidden `Offline` broker.
 
-## Delta
+## CurrentModelError
 
-A [`Delta`] is one live piece of a model round's reply, sent through [`Session::subscribe_deltas`] and never stored. Use it to show a reply while the model writes it. A receiver that falls behind loses pieces, and a piece sent while no receiver is attached is dropped. Collect pieces by `reply`, and swap them for the [`SessionEvent`] with the same `reply`, which is the final version. [Stream a reply](#stream-a-reply) teaches this.
-
-- `reply`: the reply number of the event that will replace this piece.
-- `kind`: whether the piece is answer text or reasoning.
-
-## DeltaKind
-
-[`DeltaKind`] tells an answer piece from a reasoning piece in a [`Delta`], so you can show them apart. `Text` is answer content, which the round's `assistant_reply` event replaces, and `Reasoning` is the model's reasoning, which the round's thinking event replaces. It serializes in lowercase, as `"text"` and `"reasoning"`, so a client that forwards it over its own wire sees those strings. Match it with a wildcard arm for kinds added later. [Stream a reply](#stream-a-reply) teaches this.
-
-## FailureKind
-
-[`FailureKind`] classifies one failure report from [`Session::subscribe_errors`], so you can label it or decide what to do next. The first two kinds are turn failures the agent survives. After the last two the session is already closing, so do not close it again: `RunFailed` closes it by itself, and `Interrupted` comes only after a close you asked for, never after a run that already completed or failed. [Stop a turn](#stop-a-turn) teaches this.
-
-| Variant | Meaning |
-|---|---|
-| `ModelTurnFailed` | A model round failed, and the agent is waiting again. |
-| `ToolCallFailed` | A tool call failed, and the agent is waiting again. |
-| `RunFailed` | The run itself ended in error. |
-| `Interrupted` | A close you asked for ended the run before it finished on its own. |
+[`CurrentModelError`] says why a run could not bind its model as it starts, inside [`HarnessError::Model`]. `CatalogFetchFailed` holds the broker's failure to list its models, and `SelectionAbsent` names a selected model the list lacks. The Harness never binds a model it made up instead.
 
 ## Harness
 
-[`Harness`] runs every session your program launches. Build one per program on your broker, share it behind an [`Arc`](std::sync::Arc), push the Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] for an unknown name, checked first, or an unreadable agent source; a broker that cannot serve never refuses a launch, and fails the run instead. [Launch an agent](#launch-an-agent) teaches this.
+[`Harness`] drives one run for your program. Build it with [`Harness::new`] from an `Arc<dyn RunRecorder>`, an `Arc<dyn InferenceBroker>`, an `Arc<dyn Timer>`, a [`CapabilityRegistry`](capability::CapabilityRegistry), and [`HostServices`](capability::HostServices); building one touches nothing. Take its [`RunControl`] with [`Harness::control`], then await [`Harness::run`], which consumes it. [Run a prompt](#run-a-prompt) teaches this.
 
-- [`Harness::new`]: takes the config, an `Arc<dyn RunRecorder>`, an `Arc<dyn InferenceBroker>`, a [`CapabilityRegistry`](capability::CapabilityRegistry), and [`HostServices`](capability::HostServices), and touches no filesystem and calls no broker. The Harness writes every run it makes to that recorder, sends every model round to that broker, opens no file at launch, and resolves every run's declared capabilities against that registry alone, handing them those services. [Recording runs](record) teaches the recorder, and [Capabilities](capability) the registry and services.
-- [`Harness::discover`]: the `.md` file stems in `agents_path` plus the built-in `chat`, sorted.
-- `launch`: returns a session already registered and running, with [`LaunchOptions::default()`](LaunchOptions::default), so each run works in a fresh memory store.
-- [`Harness::set_host`]: each push replaces the stored value; the broker stays the one `new` took for the Harness's whole life.
-- [`Harness::close`]: removes the session at once, while it is still `Closing`, and returns whether a session was ended.
+- [`Harness::run`]: resolves the run's model through the broker, prepares the source, drives the run, and reads the declared output file of a completed run, all inside one `Send` future that starts no task.
+- A cancel before `run`, or while the broker lists its models, reports `Cancelled` with no `run_id`.
 
-## HarnessConfig
+## HarnessError
 
-[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder, broker, capability registry, and services. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
+[`HarnessError`] says why [`Harness::run`] could not drive a run to an outcome of its own. Show it through [`display_chain`], so that its cause is in the text. Match it with a wildcard arm, because it may gain variants.
 
-- `agents_path`: the folder whose `.md` files are the launchable agents; launching `name` reads `<agents_path>/<name>.md`.
+| Variant | Meaning |
+|---|---|
+| `Model` | The broker could not list its models, or lacks the selected one; the run never began. |
+| `Recorder` | The recorder refused a write; `run` is the run it issued, `None` when it refused to begin one. |
+| `Stalled` | The run waited with nothing in flight, which means the Harness lost an effect. |
 
 ## HostSnapshot
 
-[`HostSnapshot`] carries your program's selected model and workspace roots into the Harness. Push it through [`Harness::set_host`] when the operator changes either one. Each run reads it as it starts, once its broker has listed the models, so a new selection reaches a running session at its next restart, never a turn in progress, and a selection made while the broker held its list reaches the run that waited. With no selection, a run binds the first model its broker lists. The Harness starts with [`HostSnapshot::default()`](HostSnapshot::default): no selection and no roots. [Launch an agent](#launch-an-agent) teaches this.
+[`HostSnapshot`] carries your program's selected model and granted workspace roots into a run, in its [`RunRequest`]. The run reads it once, as it starts, so a new selection reaches the next run, never a run in progress. With no selection, a run binds the first model its broker lists. [Run a prompt](#run-a-prompt) teaches this.
 
-- `selected_model`: never swapped for another; a model the broker's list lacks, or a list the broker cannot fetch, fails the run with [`FailureKind::RunFailed`], closing the session; `launch` succeeds.
-
-- [`HostSnapshot::ui`]: returns `{ "selected_model", "workspace_root" }`, each `null` when absent.
+- `selected_model`: never swapped for another; a model the broker's list lacks fails the run with [`HarnessError::Model`].
 - `workspace_roots`: only the first root reaches the prompt's `ui()` global.
+- [`HostSnapshot::ui`]: returns `{ "selected_model", "workspace_root" }`, each `null` when absent.
 
 ## InferenceBroker
 
-[`InferenceBroker`] is the trait your program implements, or takes from a crate, to give the Harness its models. Pass it to [`Harness::new`] as an `Arc<dyn InferenceBroker>`; one broker serves every round of every session, so it is `Send` and `Sync`. A real `desk` passes `harness_gateway_client::GatewayBroker`, which reaches the PromptForge Gateway. Each method returns a [`BoxFuture`]. [Before you start](#before-you-start) shows an offline one.
+[`InferenceBroker`] is the trait your program implements, or takes from a crate, to give a run its models. Pass it to [`Harness::new`] as an `Arc<dyn InferenceBroker>`. The Harness polls each call inside the run's future, so a broker must not block while polled; blocking or CPU-heavy work goes to your own runtime.
 
-- `models`: lists the models the broker serves. Each run calls it once as it starts, and binds the selected model from the list, or its first model with no selection. A failed call, or a selection the list lacks, fails the run with [`FailureKind::RunFailed`]. It may wait until the broker has a model to offer: the run waits with it, and [`Session::cancel`] and [`Session::close`] still end that run.
-- `chat`: performs one model round over the messages with the tools advertised, under the round's options. An error it returns fails that round, and the agent receives it.
-- `round`: `chat`'s [`Round`](promptforge::effect::Round), the round's run-wide id and the path that dispatched it; the reply's events carry the same id.
-- `on_delta`: `chat`'s callback for the reply's live pieces, an [`OnDelta`]; it is `None` when nothing reads the pieces.
-
-## LaunchError
-
-[`LaunchError`] says why [`Harness::launch`] or [`Harness::launch_with`] refused a launch. Show it to a person through [`display_chain`], so that its cause is in the text. `UnknownAgent` also refuses any name that looks like a path, so pass a bare agent name. [Launch an agent](#launch-an-agent) teaches this.
-
-| Variant | Meaning |
-|---|---|
-| `UnknownAgent` | The name is not a discovered agent; `name` holds what you asked for. Pick a name from [`Harness::discover`]. |
-| [`SessionState`](LaunchError::SessionState) | This variant shares its name with the [`SessionState`] enum but has nothing to do with it: the agent's source file could not be read. `source` holds the filesystem failure, also reachable through [`Error::source`](std::error::Error::source). |
-
-
-## LaunchOptions
-
-[`LaunchOptions`] gives a session its environment, such as a filesystem of its own. Pass it to [`Harness::launch_with`] to stage a session's files or keep them across relaunches. Build it with `..LaunchOptions::default()`, so a field added later does not break your code. The [`vfs`] page shows how.
-
-- `vfs`: the filesystem every run of the session works in, relaunches included; when unset, each run gets a fresh memory store at `/`. Every clone of the handle shares the same files, so a clone you keep can seed them before launch and collect them after the run. While the run is live, an access through your clone conflicts with the run's on any file both touch. An op sink built into the filesystem sees only operations its policy admits, so a denied read or write never reaches it.
-
-## LaunchRequest
-
-[`LaunchRequest`] names the agent to launch and what to hand it, for [`Harness::launch`] or [`Harness::launch_with`]. When `input_text` is `None` and the session's filesystem lacks the prompt's declared input file, `launch` still returns the session, but the run fails as it prepares: [`Session::subscribe_errors`] gets a [`FailureKind::RunFailed`] report, and the session closes. Set `input_text`, or stage the file through [`LaunchOptions`]. [Launch an agent](#launch-an-agent) teaches this.
-
-- `agent`: a bare agent name as [`Harness::discover`] returns it; anything else, such as a path, is refused.
-- `args`: the run's argument text, handed to the prompt as `args`, and empty when absent from serialized input.
-- `input_text`: staged at the prompt's declared `input:` file before each run; left out of serialized output when `None`.
+- `models`: lists the models the broker serves. A run calls it once as it starts.
+- `chat`: performs one round over the messages with the tools advertised, under the round's options. An error it returns fails that round, and the prompt receives it.
+- `round`: `chat`'s [`Round`](promptforge::effect::Round), the round's run-wide id and the path that dispatched it; the round's events carry the same id.
+- `on_delta`: always `None` from the Harness; [Stream from your own broker](#stream-from-your-own-broker) shows a broker that builds its own.
 
 ## OnDelta
 
-[`OnDelta`] is the callback a broker hands each live piece of a reply to, as a [`StreamDelta`](promptforge::model::StreamDelta). The Harness passes one to [`InferenceBroker::chat`] only for a section's own chat round, and `None` for a nested `models.infer` round, so a broker sends pieces only where something reads them. Each piece reaches [`Session::subscribe_deltas`] as a [`Delta`]. Call it inline as each piece arrives; it neither blocks nor fails, even with no client subscribed, and a broker must not panic inside it mid-round. [Stream a reply](#stream-a-reply) shows where the pieces end up.
+[`OnDelta`] is the callback a broker hands each live piece of a reply to, as a [`StreamDelta`](promptforge::model::StreamDelta). [Stream from your own broker](#stream-from-your-own-broker) builds one for each section round.
 
 ## OutputError
 
-[`OutputError`] says why [`Session::output_text`] has no text for you. Wait for `Closed` through [`Session::subscribe_state`] before you read, because a new session's output starts as `Unfinished`, and reading too early looks like a failed run. A missing output never fails the run, so check the output apart from the run's outcome. [Launch an agent](#launch-an-agent) teaches this.
+[`OutputError`] says why a [`RunReport`]'s `output` holds no text. A missing output never fails the run, so check it apart from the outcome.
 
 | Variant | Meaning |
 |---|---|
-| `Unfinished` | No run has completed: it is still running, or it failed, was cancelled, or was closed first. |
-| `Undeclared` | The prompt declares no `output:` file; add one. |
+| `NotCompleted` | The run did not complete, so its output file was not read. |
+| `Undeclared` | The prompt declares no `output:` file. |
 | `Missing` | The run completed without writing its declared output file; `path` holds that path. |
-| `Vfs` | The store refused the read of the output file at `path`; `source` holds the store's failure, also reachable through [`Error::source`](std::error::Error::source). |
+| `Vfs` | The store refused the read of the output file at `path`; `source` holds the store's failure. |
 
-## Session
+## RunControl
 
-A [`Session`] is the handle to one running agent. Every clone names the same session, and the session outlives your client's connection. [`Session::send_input`] returns [`WaitError::UnknownToken`] when no open wait holds the token; treat that as a normal race and call [`Session::resend_waits`]. [`Session::transcript`] reads the session's events from memory, so it cannot fail. [Launch an agent](#launch-an-agent) teaches this.
+[`RunControl`] steers one run from outside its future. Take it with [`Harness::control`] before [`Harness::run`]. Every clone steers the same run. [Stop a round and cancel a run](#stop-a-round-and-cancel-a-run) teaches this.
 
-- Every `subscribe_` receiver sees only what is sent after it subscribes; subscribe to events before you read `transcript`.
-- `send_input`: delivers `text` byte-exact; a refused answer changes nothing, so you need no cleanup.
-- [`Session::cancel`]: stops the current turn with no failure report; open waits get `Cancelled`, and the agent restarts over its transcript.
-- [`Session::close`]: ends the session for good; outstanding work is dropped, and once the run is done the state is `Closed`.
-- `cancel` and `close` both set `Closing`; the state alone cannot tell them apart.
+- [`RunControl::stop_round`]: drops every effect in flight except a question to the operator, and answers each `Dropped`; the run goes on.
+- [`RunControl::cancel`]: drops every effect in flight and ends the run `Cancelled`. Idempotent.
 
-## SessionEvent
+## RunReport
 
-A [`SessionEvent`] is one entry of a session's transcript. You get it live from [`Session::subscribe_events`], or replay it from [`Session::transcript`] after a reconnect. Live events and transcript reads stamp `reply` by the same rule, so you can merge the two by `reply` without special cases. [Stream a reply](#stream-a-reply) teaches this.
+[`RunReport`] is how a run ended. [Run a prompt](#run-a-prompt) reads one.
 
-- `index`: the entry's position in the whole transcript, from zero and continuing across relaunches; resume past the last one you saw.
-- `reply`: the reply number whose [`Delta`] pieces this event replaces; only thinking, reply, and tool-call events have one.
-- `event`: the event in its JSON shape, the same value the recorder received.
+- `run_id`: the run's id at the recorder; `None` when a cancel ended the run before the recorder began it.
+- `outcome`: how the run ended, as the recorder was told.
+- `output`: the text a completed run left at its declared output file, or an [`OutputError`].
 
-## SessionFailure
+## RunRequest
 
-A [`SessionFailure`] is one failure report for the operator, from [`Session::subscribe_errors`]. A report sent while no receiver is attached is dropped, and a receiver that falls behind misses reports. Then read the transcript, where a missed report shows as a turn without a reply. [Stop a turn](#stop-a-turn) teaches this.
+[`RunRequest`] is what to run. Build it as a struct literal and pass it to [`Harness::run`]. [Run a prompt](#run-a-prompt) teaches this.
 
-- `kind`: which failure this is, as a [`FailureKind`]; it is the contract, and the field to act on.
-- `message`: display text for the operator and the model; it can change, so never derive meaning from it.
+- `name`: the run's name, every event's `execution` and the run metadata's `session_id`.
+- `source`: the prompt's Markdown text.
+- `args`: the run's argument text, handed to the prompt as `args`.
+- `input_text`: written at the prompt's declared `input:` file before the run; with `None`, the store must already hold that file.
+- `vfs`: the run's whole filesystem; [Files](vfs) teaches it.
+- `host`: the [`HostSnapshot`] the run reads as it starts.
 
-## SessionId
+## Timer
 
-A [`SessionId`] names a session so that you can find it again through [`Harness::session`] after your client disconnects. It serializes as a bare string, and `Display` writes the raw id, so you can store it and send it to a client as plain text. [Reattach after a disconnect](#reattach-after-a-disconnect) teaches this.
-
-- [`SessionId::new`]: wraps any string without checking it, an empty one included; an id the Harness never minted finds no session.
-- [`SessionId::fresh`]: mints 128 random bits from the OS-seeded cryptographic RNG, hex-encoded.
-
-## SessionState
-
-[`SessionState`] says where a session's run stands; to wait for a close to finish, await `Closed` through [`Session::subscribe_state`]. A new session starts `Alive`, and stays `Alive` while its broker holds the model list, so `Alive` means the session is not closing, not that a model is at work. Only [`Session::cancel`] and [`Session::close`] set `Closing`, which means outstanding work is being answered or dropped. `Closed` means the run reported done, and nothing is outstanding. [Launch an agent](#launch-an-agent) teaches this.
-
-- [`SessionState::interrupted`]: maps `Alive` and `Closing` to `Closing`, and leaves `Closed` as `Closed`.
-- [`SessionState::done`]: maps every state to `Closed`.
+[`Timer`] is the trait your program implements to give a run its clock. A run sleeps on it for a timed wait. Return a future that resolves once the seconds have passed, on your own runtime; dropping it must tear the sleep down.
 
 ## USER_INPUT_ASK_TOOL
 
-[`USER_INPUT_ASK_TOOL`] is the id of the tool that asks the operator. Bind it under an alias in `tools:`, such as `ask: promptforge/user-input/ask`, and offer the alias with `tools.add` or `tools.always`. A script's `input.ask()` shows up as this id and returns `available`, which `input.connected()` reports without asking. `available` is `false` only for an agent declaring `promptforge/user-input` with `optional: true` on a Host without an input handler; the Harness gives every run one. [Answer the operator](#answer-the-operator) teaches this.
-
-## WaitError
-
-[`WaitError`] says why [`Session::send_input`] refused an answer. Its one variant, `UnknownToken`, means no open wait holds the token: it was never issued, already answered, or cancelled. Tokens are single use, so a second answer is refused and its text discarded, and every other open wait is untouched. Treat it as a normal race, and call [`Session::resend_waits`] to see which questions are still open. [Answer the operator](#answer-the-operator) teaches this.
-
-## WaitFrame
-
-A [`WaitFrame`] tells you that a session opened a question for the operator, or dropped one. `Required` means a wait opened, and the session wants operator input. `Cancelled` means a wait ended unanswered, as when its turn is cancelled, so its prompt is stale; an answered wait sends no `Cancelled`, so clear that prompt yourself. A frame lost to a dead connection is not sent again; call [`Session::resend_waits`], and every live wait reappears as `Required`. [Answer the operator](#answer-the-operator) teaches this.
-
-- `Required.token`: the single-use token your answer must echo, unique per wait.
-- `Cancelled.token`: the token whose wait is gone.
+[`USER_INPUT_ASK_TOOL`] is the id of the tool that asks the operator. Bind it under an alias in `tools:`, such as `ask: promptforge/user-input/ask`, and offer the alias with `tools.add` or `tools.always`. A script's `input.ask()` calls the same tool. [Answer the operator](#answer-the-operator) teaches this.
 
 ## display_chain
 
-[`display_chain`] renders an error and every cause in its `source()` chain as one line, joined with `: `. Use it to show a Harness error to a person or a model, because an error's `Display` holds only its own message. A cause whose text already appears in the line is left out, but its own causes are still visited, so the root cause survives. An empty cause is left out with no `: `. [Launch an agent](#launch-an-agent) shows it in use.
+[`display_chain`] renders an error and every cause in its `source()` chain as one line, joined with `: `. Use it to show a Harness error to a person or a model, because an error's `Display` holds only its own message.
 
 # Where to go next
 
-- [`cancel`]: stop async work safely, at its next safe point, instead of dropping it mid-step.
-- [`capability`]: install the capabilities your agents declare, and provide the services they read.
-- [`record`]: record every run to a store of your own, and read a session's transcript.
-- [`vfs`]: give a session files of your own instead of the empty store each run starts with.
-
+- [`capability`]: install the capabilities your prompts declare, and provide the services they read.
+- [`record`]: record every run to a store of your own, and read a run back.
+- [`vfs`]: give a run files of your own instead of a fresh empty store.
+- [`cancel`]: stop your program's own async work at its next safe point.

@@ -1,27 +1,19 @@
 #![doc = include_str!("lib.md")]
 
 pub use harness_capabilities::USER_INPUT_ASK_TOOL;
+pub use harness_runner::Harness;
+pub use harness_runner::HarnessError;
+pub use harness_runner::RunControl;
+pub use harness_runner::RunReport;
+pub use harness_runner::RunRequest;
 pub use harness_runner::display_chain;
+pub use harness_runner::environment::CurrentModelError;
 pub use harness_runner::environment::HostSnapshot;
+pub use harness_runner::files::OutputError;
 pub use harness_runner::performers::BoxFuture;
 pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::OnDelta;
-pub use harness_sessions::input::WaitError;
-pub use harness_sessions::input::WaitFrame;
-pub use harness_sessions::protocol::Delta;
-pub use harness_sessions::protocol::DeltaKind;
-pub use harness_sessions::protocol::LaunchRequest;
-pub use harness_sessions::protocol::SessionEvent;
-pub use harness_sessions::protocol::SessionId;
-pub use harness_sessions::runtime::Harness;
-pub use harness_sessions::runtime::HarnessConfig;
-pub use harness_sessions::runtime::LaunchError;
-pub use harness_sessions::runtime::LaunchOptions;
-pub use harness_sessions::session::FailureKind;
-pub use harness_sessions::session::OutputError;
-pub use harness_sessions::session::Session;
-pub use harness_sessions::session::SessionFailure;
-pub use harness_sessions::transition::SessionState;
+pub use harness_runner::performers::Timer;
 
 pub mod cancel {
     #![doc = include_str!("cancel.md")]
@@ -43,6 +35,9 @@ pub mod capability {
     pub use harness_capabilities::CapabilityRegistry;
     pub use harness_capabilities::Contribution;
     pub use harness_capabilities::HostServices;
+    pub use harness_capabilities::INPUT_BROKER;
+    pub use harness_capabilities::InputBroker;
+    pub use harness_capabilities::InputError;
     pub use harness_capabilities::RegistryError;
     pub use harness_capabilities::RegistryErrorKind;
     pub use harness_capabilities::RunServices;

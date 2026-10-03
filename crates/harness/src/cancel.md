@@ -1,28 +1,29 @@
 Stop async work at its next safe point, instead of dropping it halfway through a step.
 
-You need this when your program handles Ctrl-C, or stops helper tasks on its own schedule, and every session must stay in a clean state.
+You need this when your program handles Ctrl-C, or stops helper tasks on its own schedule, and every run must stay in a clean state.
 
 # Where this fits
 
-This page stops your program's own async work, such as the loop that reads a session's events and the helper tasks beside it. It does not stop the session's run; [`Session::cancel`](crate::Session::cancel) and [`Session::close`](crate::Session::close) do that. The tool is one shared stop flag, called a *cancel handle*. You install it by wrapping a piece of work in [`scope`], and after that any code running inside that work can find the flag without being passed it.
+This page stops your program's own async work, such as the loop that runs one prompt after another and the helper tasks beside it. It does not stop a run by itself; a run's [`RunControl`](crate::RunControl) does that. The tool is one shared stop flag, called a *cancel handle*. You install it by wrapping a piece of work in [`scope`], and after that any code running inside that work can find the flag without being passed it.
 
 # Stop work on Ctrl-C
 
-`desk` is the Host you built on the main page, meaning your own program that launches agents and relays what they say. It runs the `chat` agent for one person, and its loop reads the session's events. When the operator presses Ctrl-C, dropping the loop's future could stop it halfway through handling an event. You want a flag you set from one task, which the loop checks at points it chooses. That flag is a [`CancelHandle`].
+`desk` is the Host you built on the main page, meaning your own program that builds a Harness for each run. Its loop runs one prompt after another. When the operator presses Ctrl-C, dropping the loop's future could stop it halfway through a run. You want a flag you set from one task, which the loop checks at points it chooses. That flag is a [`CancelHandle`].
 
 A cancel handle feels like a shared [`Arc<AtomicBool>`](std::sync::atomic::AtomicBool) stop flag that your loop checks. Unlike a bare flag, you can also await it, and code deep inside the work can find it without you passing it down.
 
 ````
 use harness::cancel::{self, CancelHandle};
-use harness::Session;
-# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
+use harness::{Harness, RunRequest};
+use std::pin::pin;
+# use harness::capability::{CapabilityRegistry, HostServices};
 # use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
+# use harness::vfs::VfsRef;
+# use harness::{BoxFuture, HostSnapshot, InferenceBroker, OnDelta, Timer};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
-#     use harness::{BoxFuture, InferenceBroker, OnDelta};
-#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 #     struct Offline;
 #     impl InferenceBroker for Offline {
 #         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
@@ -33,46 +34,41 @@ use harness::Session;
 #             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #         }
 #     }
-#     let mut capabilities = CapabilityRegistry::new();
-#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
-#     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
-#     harness
-# }
-# fn chat() -> LaunchRequest {
-#     LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None }
-# }
-# async fn say(session: &Session, text: &str) -> Result<(), Box<dyn Error>> {
-#     let mut waits = session.subscribe_waits();
-#     session.resend_waits();
-#     loop {
-#         if let WaitFrame::Required { token } = waits.recv().await? {
-#             return Ok(session.send_input(&token, text.into(), || {})?);
+#     struct Clock;
+#     impl Timer for Clock {
+#         fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#             Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
 #         }
 #     }
+#     Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Offline), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new())
+# }
+# fn request(source: &str) -> RunRequest {
+#     RunRequest { name: "desk".into(), source: source.into(), args: String::new(), input_text: None, vfs: VfsRef::default(), host: HostSnapshot::default() }
 # }
 
-// 1. desk's loop races the session's events against `wait_cancelled`, its safe point.
-async fn desk_loop(session: &Session) -> Result<usize, Box<dyn Error>> {
-    let mut events = session.subscribe_events();
-    let mut shown = 0;
+// 1. desk's loop runs one prompt after another, and races each run against `wait_cancelled`, its safe point.
+async fn desk_loop(source: &str) -> Result<usize, Box<dyn Error>> {
+    let mut finished = 0;
     loop {
+        let harness = desk();
+        let control = harness.control();
+        let mut run = pin!(harness.run(request(source)));
         tokio::select! {
-            () = cancel::wait_cancelled() => return Ok(shown),
-            event = events.recv() => {
-                if event?.event["kind"] == "assistant_reply" {
-                    shown += 1;
-                }
+            () = cancel::wait_cancelled() => {
+                // The run is cancelled through its own control, and awaited to its end.
+                control.cancel();
+                run.await?;
+                return Ok(finished);
+            }
+            report = run.as_mut() => {
+                report?;
+                finished += 1;
             }
         }
     }
 }
 
-async fn stop_on_ctrl_c() -> Result<(), Box<dyn Error>> {
-#     let harness = desk();
-#     let session = harness.launch(chat()).await?;
-#     say(&session, "Hello, desk.").await?;
+async fn stop_on_ctrl_c(source: &str) -> Result<(), Box<dyn Error>> {
     // 2. Make one flag, and keep a clone for the Ctrl-C task.
     let handle = CancelHandle::new();
     let ctrl_c = handle.clone();
@@ -81,13 +77,12 @@ async fn stop_on_ctrl_c() -> Result<(), Box<dyn Error>> {
     let signal = tokio::spawn(async move { ctrl_c.cancel() });
 
     // 4. Install the flag with `scope` around desk's loop.
-    let outcome = cancel::scope(handle.clone(), desk_loop(&session)).await;
+    let outcome = cancel::scope(handle.clone(), desk_loop(source)).await;
     signal.await?;
 
     // 5. The loop returned on its own, and no flag stays installed after `scope` exits.
     assert!(outcome.is_ok() && handle.is_cancelled());
     assert!(cancel::current().is_none());
-    session.close();
     Ok(())
 }
 
@@ -95,11 +90,11 @@ async fn stop_on_ctrl_c() -> Result<(), Box<dyn Error>> {
 assert!(cancel::current().is_none() && !cancel::is_cancelled());
 ````
 
-The doc test wraps this block in its own `main` and never calls `desk_loop` or `stop_on_ctrl_c`, so only step 6's `assert!` runs. The hidden `desk` builds the Harness on an offline broker that lists no model and refuses every round, and counting a finished reply needs a broker that answers.
+The doc test wraps this block in its own `main` and never calls `desk_loop` or `stop_on_ctrl_c`, so only step 6's `assert!` runs. The hidden `desk` builds each run's Harness on an offline broker that lists no model and refuses every round.
 
-1. Step 1 defines `desk_loop`, which races each event from [`Session::subscribe_events`](crate::Session::subscribe_events) against [`wait_cancelled`] in [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html), and returns when the wait completes. Each [`SessionEvent`](crate::SessionEvent) carries the event as JSON in its `event` field, and a `kind` of `assistant_reply` marks one finished model answer, so the loop counts finished replies. The loop takes no flag, yet reaches the installed one, and stops only between events.
+1. Step 1 defines `desk_loop`, which builds a Harness for each run, takes the run's [`RunControl`](crate::RunControl), and races the run against [`wait_cancelled`] in [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html). When the wait completes first, the loop cancels the run through [`RunControl::cancel`](crate::RunControl::cancel) and awaits it, so the run ends `Cancelled` with every effect in flight answered, instead of being dropped mid-step. The loop takes no flag, yet reaches the installed one, and stops only at that safe point.
 2. Step 2 makes one flag with [`CancelHandle::new`], the same as [`Default`], and a clone for the Ctrl-C task. Cancelling any clone cancels them all.
-3. Step 3 spawns a task that calls [`CancelHandle::cancel`] on its clone. In your program, that task awaits [`tokio::signal::ctrl_c`](https://docs.rs/tokio/latest/tokio/signal/fn.ctrl_c.html) first. Here it cancels at once, maybe before `desk_loop` first runs. Either order ends the same way, because `wait_cancelled` returns at once when the flag is already cancelled, so the loop returns `Ok`, possibly with zero replies.
+3. Step 3 spawns a task that calls [`CancelHandle::cancel`] on its clone. In your program, that task awaits [`tokio::signal::ctrl_c`](https://docs.rs/tokio/latest/tokio/signal/fn.ctrl_c.html) first. Here it cancels at once, maybe before `desk_loop` first runs. Either order ends the same way, because `wait_cancelled` returns at once when the flag is already cancelled, so the loop returns `Ok`, possibly with zero runs finished.
 4. Step 4 installs the flag by wrapping `desk_loop` in [`scope`], which returns the loop's own output.
 5. Step 5 asserts the loop returned `Ok`, the flag reads cancelled, and [`current`] is `None` once `scope` exits.
 6. Step 6 runs outside every `scope`, where `current` returns `None` and the free function [`is_cancelled`] returns `false`.
@@ -108,7 +103,7 @@ Installing the flag does not stop the work. It stops only at a safe point, where
 
 - Async code awaits the free function `wait_cancelled()`, as `desk_loop` does.
 - Synchronous code, such as a loop with no `.await`, polls the free function `is_cancelled()`, which returns `false` when no flag is installed.
-- Code that holds the handle puts [`handle.cancelled()`](CancelHandle::cancelled) in `select!` beside the session's event channel.
+- Code that holds the handle puts [`handle.cancelled()`](CancelHandle::cancelled) in `select!` beside the run it races.
 
 Outside any `scope`, `wait_cancelled()` never completes and never errors, so call `current()` first to check for a flag.
 
@@ -120,7 +115,7 @@ When your function accepts an optional handle from its caller, use [`maybe_scope
 
 Nested scopes shadow each other, so code sees the innermost flag. Once cancelled, a flag stays cancelled, and `cancelled()` resolves at once every time, so a late waiter still stops.
 
-This `CancelHandle` is unrelated to [`promptforge::cancel::CancelHandle`], which shares its name, so importing the wrong one gives confusing type errors. A *run*, one execution of the agent file inside a session as the [main page](crate) describes, checks that other, synchronous flag and never this handle, and no public call connects the two. Cancelling this handle never stops a session's run; call [`Session::cancel`](crate::Session::cancel) to stop the turn, or [`Session::close`](crate::Session::close) to end the session, as the main page's [Stop a turn](crate#stop-a-turn) tour teaches.
+This `CancelHandle` is unrelated to [`promptforge::cancel::CancelHandle`], which shares its name, so importing the wrong one gives confusing type errors. A *run*, one execution of a prompt as the [main page](crate) describes, checks that other, synchronous flag and never this handle, and no public call connects the two. Cancelling this handle never stops a run; call [`RunControl::stop_round`](crate::RunControl::stop_round) to drop the run's round in flight, or [`RunControl::cancel`](crate::RunControl::cancel) to end the run, as the main page's [Stop a round and cancel a run](crate#stop-a-round-and-cancel-a-run) tour teaches.
 
 You might expect `cancel` to abort the work the way dropping a future or calling [`JoinHandle::abort`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html#method.abort) does. Instead, the work keeps running until it reaches a point that awaits `wait_cancelled()` or polls `is_cancelled()`.
 
@@ -212,7 +207,7 @@ Dropping a flag, or a [`cancelled()`](CancelHandle::cancelled) future that has n
 
 You might expect `child()` to be another name for `clone()`, so that cancelling a helper's flag stops the whole program. Instead, a child hears its parent's cancel, but its own cancel reaches only itself, its clones, and all of its descendants, including grandchildren.
 
-Cancels flow down the tree, never up. Next, the [record page](crate::record) shows how to record every run and read a session's transcript.
+Cancels flow down the tree, never up. Next, the [record page](crate::record) shows how to record every run and read a run back.
 
 # Reference
 

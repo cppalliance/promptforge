@@ -10,13 +10,10 @@ use axum::Router;
 use axum::http::HeaderMap;
 use axum::routing::get;
 
-use harness::Harness;
-use workshop_registry::{
-    BackgroundTaskAdapter, Registration, Registry, RouteRegistrarAdapter, ShutdownHandle,
-};
+use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
 use workshop_support::{RELAY_DEADLINE, with_deadline};
 
-use super::{AgentSessions, bindings, relay, socket};
+use super::{AgentSessions, relay, socket};
 use crate::websocket::SocketState;
 
 /// The shared state of the sessions subsystem's routes: the socket state
@@ -68,59 +65,30 @@ pub(crate) fn routes(state: SessionsState) -> Router {
     .with_state(state)
 }
 
-/// The sessions subsystem's registration guards: its routes, the Harness
-/// every agent session runs in, and the agent-session opener. Dropping
-/// them deregisters the subsystem.
+/// The sessions subsystem's registration guards: its routes and the
+/// agent-session launcher. Dropping them deregisters the subsystem.
 #[derive(Debug)]
 #[must_use = "dropping the registrations deregisters the subsystem"]
 pub(crate) struct SessionsRegistrations {
     /// The `/v1/models` and `/agents/ws` route registrar.
     pub(crate) routes: Registration,
-    /// The Harness as a state handle.
-    pub(crate) harness: Registration,
-    /// The agent-session opener as a state handle.
+    /// The agent-session launcher as a state handle.
     pub(crate) agents: Registration,
 }
 
 /// Registers the sessions subsystem into the registry: its routes, merged
-/// into the server's API router, the Harness every agent session runs in,
-/// and the agent-session opener, both as state handles. The returned
-/// guards keep the registrations alive; the composition root holds them
-/// for the process lifetime.
+/// into the server's API router, and the agent-session launcher as a
+/// state handle. The returned guards keep the registrations alive; the
+/// composition root holds them for the process lifetime.
 pub(crate) fn register(
     registry: &Registry,
     state: &SessionsState,
-    harness: Arc<Harness>,
     agents: &AgentSessions,
 ) -> SessionsRegistrations {
     let routes = registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
         let state = state.clone();
         move || routes(state.clone())
     })));
-    let harness = registry.register_state::<Harness>(harness);
     let agents = registry.register_state::<AgentSessions>(Arc::new(agents.clone()));
-    SessionsRegistrations {
-        routes,
-        harness,
-        agents,
-    }
-}
-
-/// Registers the sessions subsystem's background task: the bindings
-/// forwarder that pushes the server's Host snapshot into the registered
-/// Harness again whenever the selection or the granted roots change.
-/// The task spawns when the server starts serving and stops inside the
-/// graceful-shutdown signal. The returned guard keeps the registration
-/// alive; the composition root holds it for the process lifetime.
-pub(crate) fn register_tasks(registry: &Registry) -> Registration {
-    registry.register_task(Arc::new(BackgroundTaskAdapter::new({
-        let registry = registry.clone();
-        move || {
-            let forwarder = tokio::spawn(bindings::forward(registry.clone()));
-            ShutdownHandle::new(move || async move {
-                forwarder.abort();
-                let _ = forwarder.await;
-            })
-        }
-    })))
+    SessionsRegistrations { routes, agents }
 }

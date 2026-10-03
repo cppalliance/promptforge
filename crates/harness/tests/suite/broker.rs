@@ -1,22 +1,23 @@
-//! The inference broker a Host hands `Harness::new`: a section's
-//! streaming round reaches the session's live deltas, and a `models.infer`
-//! round publishes none.
+//! The inference broker a Host hands `Harness::new`: a section's own
+//! round reaches it with origin `Chat`, and a nested `models.infer` round
+//! with origin `Infer`, each under its run-wide round id.
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use harness::capability::{CapabilityRegistry, HostServices};
-use harness::record::MemoryRecorder;
-use harness::{
-    BoxFuture, DeltaKind, Harness, HarnessConfig, HostSnapshot, InferenceBroker, LaunchRequest,
-    OnDelta, SessionState,
-};
+use harness::record::{MemoryRecorder, RunOutcome};
+use harness::vfs::VfsRef;
+use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest};
 use promptforge::effect::Round;
+use promptforge::event::ReplyOrigin;
+use promptforge::ids::RoundId;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
-    ModelCatalog, ModelDescriptor, ModelId, StreamDelta, ThinkingMode, ToolSchema,
+    ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
+
+use crate::support::TokioTimer;
 
 /// The one model the scripted broker lists and the Host selects.
 const MODEL: &str = "scripted-model";
@@ -34,11 +35,11 @@ const INFERS_THEN_CHATS: &str = "---\nname: rounds\ndescription: infers then cha
     return inferred .. '|' .. msgs[#msgs].content\n\
     ```\n";
 
-/// Lists its catalog and replies `re: <last message>` to every round,
-/// sending the reply as one text delta first when the round has a
-/// callback.
+/// Lists its catalog, notes each round it serves, and replies
+/// `re: <last message>` to every round.
 struct ScriptedBroker {
     catalog: ModelCatalog,
+    rounds: Mutex<Vec<Round>>,
 }
 
 impl InferenceBroker for ScriptedBroker {
@@ -53,30 +54,26 @@ impl InferenceBroker for ScriptedBroker {
         messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
-        _round: Round,
-        on_delta: Option<OnDelta>,
+        round: Round,
+        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        self.rounds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(round);
         let asked = messages
             .last()
             .map(|message| message.content().to_owned())
             .unwrap_or_default();
         Box::pin(async move {
-            let reply = format!("re: {asked}");
-            if let Some(on_delta) = on_delta {
-                on_delta(StreamDelta::Text(reply.clone()));
-            }
-            Completion::from_result(CompletionResult::Text(reply), MODEL).map(Box::new)
+            Completion::from_result(CompletionResult::Text(format!("re: {asked}")), MODEL)
+                .map(Box::new)
         })
     }
 }
 
 #[tokio::test]
-async fn a_sections_streaming_round_reaches_the_sessions_deltas_and_an_infer_round_publishes_none()
-{
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let agents = dir.path().join("agents");
-    std::fs::create_dir_all(&agents).expect("the agents directory creates");
-    std::fs::write(agents.join("rounds.md"), INFERS_THEN_CHATS).expect("the agent writes");
+async fn a_sections_round_reaches_the_broker_as_chat_and_a_nested_infer_round_as_infer() {
     let catalog = ModelCatalog::new([ModelDescriptor::new(
         ModelId::gateway(MODEL).expect("a literal model name is valid"),
         "the scripted model",
@@ -84,47 +81,50 @@ async fn a_sections_streaming_round_reaches_the_sessions_deltas_and_an_infer_rou
         ThinkingMode::Never,
     )])
     .expect("one model is a valid catalog");
+    let broker = Arc::new(ScriptedBroker {
+        catalog,
+        rounds: Mutex::new(Vec::new()),
+    });
     let harness = Harness::new(
-        HarnessConfig {
-            agents_path: agents,
-        },
         Arc::new(MemoryRecorder::new()),
-        Arc::new(ScriptedBroker { catalog }),
+        broker.clone(),
+        Arc::new(TokioTimer),
         CapabilityRegistry::new(),
         HostServices::new(),
     );
-    harness.set_host(HostSnapshot {
-        selected_model: Some(MODEL.to_owned()),
-        ..HostSnapshot::default()
-    });
-
-    let session = harness
-        .launch(LaunchRequest {
-            agent: "rounds".to_owned(),
+    let report = harness
+        .run(RunRequest {
+            name: "rounds-1".to_owned(),
+            source: INFERS_THEN_CHATS.to_owned(),
             args: String::new(),
             input_text: None,
+            vfs: VfsRef::default(),
+            host: HostSnapshot {
+                selected_model: Some(MODEL.to_owned()),
+                ..HostSnapshot::default()
+            },
         })
         .await
-        .expect("the discovered agent launches");
-    // The session is running, but this single-threaded runtime has not
-    // polled it yet, so this receiver sees every delta of the run.
-    let mut deltas = session.subscribe_deltas();
-    let mut state = session.subscribe_state();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        state.wait_for(|current| *current == SessionState::Closed),
-    )
-    .await
-    .expect("the program returns in time")
-    .expect("the session's state watch stays open");
+        .expect("the run reaches an outcome");
 
-    let mut seen = Vec::new();
-    while let Ok(delta) = deltas.try_recv() {
-        seen.push((delta.kind, delta.content));
-    }
     assert_eq!(
-        seen,
-        [(DeltaKind::Text, "re: chat round".to_owned())],
-        "the section's chat round streams its reply, and the infer round streams nothing"
+        report.outcome,
+        RunOutcome::Completed {
+            final_text: "re: infer round|re: chat round".to_owned()
+        }
+    );
+    assert_eq!(
+        *broker.rounds.lock().expect("the round log is healthy"),
+        [
+            Round {
+                id: RoundId::new(0),
+                origin: ReplyOrigin::Infer,
+            },
+            Round {
+                id: RoundId::new(1),
+                origin: ReplyOrigin::Chat,
+            },
+        ],
+        "each round reaches the broker numbered in dispatch order, under the path that sent it"
     );
 }

@@ -1,6 +1,7 @@
-//! Gateway replacement against a live agent session: the Harness holds no
-//! gateway, so a replacement published while `chat` waits for input
-//! retires nothing, and the waiting turn's round reaches the replacement.
+//! Gateway replacement against a live agent conversation: the Harness
+//! holds no gateway, so a replacement published while `chat` waits for
+//! input retires nothing, and the waiting turn's round reaches the
+//! replacement.
 
 use super::*;
 
@@ -70,13 +71,10 @@ async fn a_replacement_published_while_chat_waits_keeps_the_wait_and_answers_on_
         );
         assert_eq!(requests[0]["model"], "test-model");
     }
-    let runs = state
-        .registry()
-        .state::<harness::Harness>()
-        .expect("the harness is registered")
-        .session(&harness::SessionId::new(&session))
-        .expect("the session remains registered")
-        .run_ids();
-    assert_eq!(runs.len(), 1, "the replacement relaunches nothing");
+    assert_eq!(
+        state.agents().run_id(&session),
+        Some(workshop_run_log::RunId::from_raw(1)),
+        "the replacement keeps the conversation's one run, the first the log began"
+    );
     socket.close().await;
 }

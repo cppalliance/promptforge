@@ -660,7 +660,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-3>
 
-### Step 3: Workshop owns its conversations through `workshop-agents`
+### Step 3: Workshop owns its conversations through `workshop-agents` [completed]
 
 - Component: Workshop conversations
 - Depends on: step 2 and its checkpoint.

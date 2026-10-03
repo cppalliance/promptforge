@@ -1,29 +1,30 @@
-Install the capabilities your agents declare, and provide the services those capabilities read.
+Install the capabilities your prompts declare, and provide the services those capabilities read.
 
-You need this when an agent lists a capability under `capabilities:` in its frontmatter, such as the built-in `chat`, which declares `promptforge/user-input` and `promptforge/web`.
+You need this when a prompt lists a capability under `capabilities:` in its frontmatter, such as Workshop's built-in `chat`, which declares `promptforge/user-input` and `promptforge/web`.
 
 # Where this fits
 
-[The crate overview](crate) builds `desk`, a Host that runs the built-in `chat` agent. A *capability* is a named set of tools and Lua that the Harness adds to a run when the agent declares it, such as `promptforge/user-input`, which gives the agent `input.ask()`. Your program registers each one it offers in a [`CapabilityRegistry`] and hands the registry to [`Harness::new`](crate::Harness::new). Every run of every session resolves its declarations against that registry, and the Harness adds no capability of its own. `promptforge/web`, the fetch and search tools `chat` declares, is the `harness_web::Web` capability of the `harness-web` crate, which your program registers like any other.
+[The crate overview](crate) builds `desk`, a Host that runs prompts for one person. A *capability* is a named set of tools and Lua that the Harness adds to a run when the prompt declares it, such as `promptforge/user-input`, which gives the prompt `input.ask()`. Your program registers each one it offers in a [`CapabilityRegistry`] and hands the registry to each run's [`Harness::new`](crate::Harness::new). The run resolves its declarations against that registry, and the Harness adds no capability of its own. `promptforge/web`, the fetch and search tools `chat` declares, is the `harness_web::Web` capability of the `harness-web` crate, which your program registers like any other.
 
-Some capabilities need something only your program has, such as a client, a setting, or a runtime handle. Each such thing is a *service*: an object your program puts in a [`HostServices`] map under a named id, beside the registry. A capability names the services it needs, and reads them when a run activates it.
+Some capabilities need something only your program has, such as a client, a setting, a runtime handle, or a way to reach the operator. Each such thing is a *service*: an object your program puts in a [`HostServices`] map under a named id, beside the registry. A capability names the services it needs, and reads them when a run activates it.
 
 # Install capabilities and their services
 
-`desk` wants `chat` to ask the operator, and wants its own agents to know the word limit `desk` sets for every reply. The first is the shipped [`UserInput`] capability. The second is a capability of `desk`'s own that reads the limit as a service.
+`desk` wants its prompts to ask the operator, and to know the word limit `desk` sets for every reply. The first is the shipped [`UserInput`] capability, which reads `desk`'s input broker as a service. The second is a capability of `desk`'s own that reads the limit as a service.
 
-Registering capabilities feels like building a router: you add each handler under its name once, and requests find them by name. Unlike a router, the registry is fixed when the Harness is built, and a run whose agent requires a name you never registered is refused as it prepares.
+Registering capabilities feels like building a router: you add each handler under its name once, and requests find them by name. Unlike a router, the registry is fixed when the Harness is built, and a run whose prompt requires a name you never registered is refused as it prepares.
 
 ````
+use async_trait::async_trait;
 use harness::capability::{
     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
-    RunServices, ServiceId, ServiceKey, UserInput,
+    INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, ServiceKey, UserInput,
 };
 use harness::record::MemoryRecorder;
-use harness::{Harness, HarnessConfig};
+use harness::Harness;
 use std::error::Error;
 use std::sync::Arc;
-# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # struct Offline;
 # impl InferenceBroker for Offline {
@@ -35,11 +36,17 @@ use std::sync::Arc;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
 # }
+# struct Clock;
+# impl Timer for Clock {
+#     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+#         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
+#     }
+# }
 
 // 1. desk's word limit is a service: an id bound to the type desk provides.
 const WORD_LIMIT: ServiceKey<u32> = ServiceKey::new("com.example.desk/word-limit");
 
-// 2. A capability that needs the limit, and hands it to the agent's Lua as `desk.word_limit`.
+// 2. A capability that needs the limit, and hands it to the prompt's Lua as `desk.word_limit`.
 struct Limits {
     id: CapabilityId,
 }
@@ -67,43 +74,54 @@ impl Capability for Limits {
     }
 }
 
-// 3. Register every capability desk's agents may declare.
+// 3. desk's input broker, which `UserInput` reads: here the operator always types the same text.
+struct Operator;
+
+#[async_trait]
+impl InputBroker for Operator {
+    async fn wait(&self) -> Result<String, InputError> {
+        Ok("Keep it short.".to_owned())
+    }
+}
+
+// 4. Register every capability desk's prompts may declare.
 let mut capabilities = CapabilityRegistry::new();
 capabilities.register(Arc::new(UserInput::new()))?;
 capabilities.register(Arc::new(Limits { id: CapabilityId::parse("com.example.desk/limits")? }))?;
 
-// 4. Provide the services those capabilities read.
+// 5. Provide the services those capabilities read.
 let mut services = HostServices::new();
 services.provide(&WORD_LIMIT, Arc::new(200))?;
-assert!(services.provides(&WORD_LIMIT.id()));
+let operator: Arc<dyn InputBroker> = Arc::new(Operator);
+services.provide(&INPUT_BROKER, operator)?;
+assert!(services.provides(&WORD_LIMIT.id()) && services.provides(&INPUT_BROKER.id()));
 
-// 5. Hand both to the Harness, beside the config, the recorder, and the broker.
-let config = HarnessConfig { agents_path: "desk/agents".into() };
-let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, services);
-assert_eq!(harness.discover(), ["chat"]);
+// 6. Hand both to the run's Harness, beside the recorder, the broker, and the timer.
+let _harness = Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Offline), Arc::new(Clock), capabilities, services);
 # Ok::<(), Box<dyn Error>>(())
 ````
 
 1. Step 1 declares the service's key as a `const`. A [`ServiceKey`] binds an id, `namespace/name` like a capability id, to the Rust type its provider has, here `u32`. Your program provides the service under the key, and the capability reads it under the same key.
-2. Step 2 implements [`Capability`] for `Limits`. [`Capability::needs`] lists the [`ServiceId`] of every service it reads. [`Capability::create`] runs once for each run that declares `com.example.desk/limits`, reads the limit from the [`RunServices`] it is given, and returns a [`Contribution`]. Its `prelude` is Lua every section of the run installs, so the agent reads `desk.word_limit`. A capability can also contribute [`Tool`]s, which the agent binds under `tools:`.
-3. Step 3 registers [`UserInput`], the `promptforge/user-input` capability `chat` declares, and `Limits` under `com.example.desk/limits`. [`CapabilityRegistry::register`] refuses a second capability with the same id, or one whose id differs from a registered one only by `-`, `_`, or `.`, with a [`RegistryError`].
-4. Step 4 provides the limit with [`HostServices::provide`], which refuses an id that is not `namespace/name`, or one already provided, with a [`ServiceError`]. [`HostServices::provides`] confirms the service is there under the key's type.
-5. Step 5 builds the Harness with both, after the broker, here `Offline`, an offline broker the example defines in hidden lines. It keeps them for as long as it lives, and every run of every session resolves against them.
+2. Step 2 implements [`Capability`] for `Limits`. [`Capability::needs`] lists the [`ServiceId`] of every service it reads. [`Capability::create`] runs once for each run that declares `com.example.desk/limits`, reads the limit from the [`RunServices`] it is given, and returns a [`Contribution`]. Its `prelude` is Lua every section of the run installs, so the prompt reads `desk.word_limit`. A capability can also contribute [`Tool`]s, which the prompt binds under `tools:`.
+3. Step 3 implements [`InputBroker`] for `Operator`: the service `UserInput` waits on for the operator's next message, as the main page's [Answer the operator](crate#answer-the-operator) tour teaches.
+4. Step 4 registers [`UserInput`], the `promptforge/user-input` capability, and `Limits` under `com.example.desk/limits`. [`CapabilityRegistry::register`] refuses a second capability with the same id, or one whose id differs from a registered one only by `-`, `_`, or `.`, with a [`RegistryError`].
+5. Step 5 provides the limit and the input broker with [`HostServices::provide`], which refuses an id that is not `namespace/name`, or one already provided, with a [`ServiceError`]. [`HostServices::provides`] confirms each service is there under its key's type.
+6. Step 6 builds the run's Harness with both, after the recorder, the broker, here `Offline`, and the timer, here `Clock`, both defined in hidden lines.
 
-The Harness supplies one service itself: each session hands its runs the operator's input handler, which `UserInput` reads. You register `UserInput`, and the session does the rest, so an agent that calls `input.ask()` reaches your operator through [`Session::subscribe_waits`](crate::Session::subscribe_waits).
+Each run gets its own Harness, so your program hands each one a clone of its registry and services. Cloning shares the capabilities and the providers. To reach the operator who launched one run, clone your base services for that run and provide its own input broker under [`INPUT_BROKER`] on the clone; leave `INPUT_BROKER` out of the base, because a second `provide` for the same id is refused.
 
-What reaches a run depends on how the agent declares the capability:
+What reaches a run depends on how the prompt declares the capability:
 
 - A required capability that is not registered refuses the run with `RequirementsUnmet`, and the notice says `missing required capability:` and its id.
 - A registered required capability that needs a service you did not provide refuses the run too, and the notice names the capability and the service id. Its `create` never runs.
 - An optional capability that is not registered is skipped, and the run goes on without it.
 - A registered optional capability whose service is missing still activates, and decides for itself how to work without it.
 
-Each refusal fails the run as it prepares, not the launch: [`Harness::launch`](crate::Harness::launch) returns the session, and [`Session::subscribe_errors`](crate::Session::subscribe_errors) reports [`FailureKind::RunFailed`](crate::FailureKind::RunFailed) as the session closes.
+Each refusal fails the run as it prepares: [`Harness::run`](crate::Harness::run) returns a report whose outcome is `Failed` with the kind `RequirementsUnmet`.
 
-You might expect the Harness to bring the capabilities PromptForge ships, the way a framework turns on its defaults. Instead, it adds none: `promptforge/user-input` reaches an agent only when your program registers [`UserInput`], and `promptforge/web` only when it registers `harness_web::Web` and provides the search provider and tokio runtime handle that crate's `SEARCH_PROVIDER` and `TOKIO_RUNTIME` keys name. Your program decides what every agent may do. A `desk` that registers only `UserInput`, as the example above does, has every `chat` run refused as it prepares, because `chat` requires `promptforge/web`.
+You might expect the Harness to bring the capabilities PromptForge ships, the way a framework turns on its defaults. Instead, it adds none: `promptforge/user-input` reaches a prompt only when your program registers [`UserInput`] and provides an input broker, and `promptforge/web` only when it registers `harness_web::Web` and provides the search provider and tokio runtime handle that crate's `SEARCH_PROVIDER` and `TOKIO_RUNTIME` keys name. Your program decides what every prompt may do.
 
-Register what your agents declare, provide what those capabilities need, and hand both to `Harness::new`. [Where to go next](crate#where-to-go-next) lists the other pages.
+Register what your prompts declare, provide what those capabilities need, and hand both to each run's `Harness::new`. [Where to go next](crate#where-to-go-next) lists the other pages.
 
 # Reference
 
@@ -111,7 +129,7 @@ Register what your agents declare, provide what those capabilities need, and han
 
 [`Capability`] is the trait a capability implements. Register one value per capability in a [`CapabilityRegistry`]. [Install capabilities and their services](#install-capabilities-and-their-services) implements one.
 
-- [`Capability::id`]: the `namespace/pack` id an agent declares; it must not change between calls.
+- [`Capability::id`]: the `namespace/pack` id a prompt declares; it must not change between calls.
 - [`Capability::needs`]: the services it reads; the default is none.
 - [`Capability::conflicts`]: capabilities it cannot run beside; declaring both refuses the run naming both.
 - [`Capability::create`]: runs once per run that declares it, and must not panic.
@@ -130,7 +148,7 @@ Register what your agents declare, provide what those capabilities need, and han
 
 ## CapabilityRegistry
 
-[`CapabilityRegistry`] holds the capabilities your program offers, by id. Pass it to [`Harness::new`](crate::Harness::new); an empty one is a Harness whose agents may declare no required capability.
+[`CapabilityRegistry`] holds the capabilities your program offers, by id. Pass a clone to each run's [`Harness::new`](crate::Harness::new); an empty one is a Harness whose prompt may declare no required capability.
 
 - [`CapabilityRegistry::register`]: refuses a repeated id, or a punctuation twin of a registered one, with a [`RegistryError`].
 - [`CapabilityRegistry::get`]: the capability under an id.
@@ -146,6 +164,18 @@ Register what your agents declare, provide what those capabilities need, and han
 - [`HostServices::provide`]: refuses an id that is not `namespace/name`, or one already provided, with a [`ServiceError`].
 - [`HostServices::get`]: the provider under a key, or `None` when it is missing or was provided as another type.
 - [`HostServices::provides`]: whether a provider of the id's type is there.
+
+## INPUT_BROKER
+
+[`INPUT_BROKER`] is the key a run's [`InputBroker`] is provided under, as an `Arc<dyn InputBroker>`. [`UserInput`] reads it. A run with no provider under it has nobody to ask.
+
+## InputBroker
+
+[`InputBroker`] is the trait your program implements to carry a question to the operator. Its one method, `wait`, returns the operator's next message byte for byte. The Harness polls it inside the run's future, so it must not block while polled, and the Harness drops its future when a cancel drops the question, so a broker that shows a prompt clears it then. It is an `async_trait` trait.
+
+## InputError
+
+[`InputError`] is an [`InputBroker`]'s failure to produce the operator's message. Build it with [`InputError::message`], or [`InputError::with_source`] to keep a cause behind [`Error::source`](std::error::Error::source). The prompt sees its message at its `input.ask()` call.
 
 ## RegistryError
 
@@ -177,4 +207,4 @@ Register what your agents declare, provide what those capabilities need, and han
 
 ## UserInput
 
-[`UserInput`] is the `promptforge/user-input` capability, which gives an agent `input.ask()` and the ask tool. Register it so agents such as `chat` can ask the operator. Each session supplies the input handler it needs.
+[`UserInput`] is the `promptforge/user-input` capability, which gives a prompt `input.ask()` and the ask tool. Register it, and provide an [`InputBroker`] under [`INPUT_BROKER`], so a prompt can ask the operator.

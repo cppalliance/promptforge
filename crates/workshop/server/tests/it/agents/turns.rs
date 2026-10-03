@@ -1,6 +1,6 @@
 //! The turn cycle over `/agents/ws`: a full turn's deltas and indexed
-//! durable events, reconnect replay with the pending wait resent, and
-//! turn-cancel returning the session to waiting.
+//! durable events, reconnect replay with the pending wait resent, and a
+//! stop that keeps the conversation's run and its open question.
 
 use super::*;
 
@@ -130,8 +130,47 @@ async fn reconnect_replays_the_log_and_resends_the_pending_wait() {
     socket.close().await;
 }
 
+/// Collects one turn as [`collect_turn`] does, refusing any
+/// `input_cancelled` frame on the way.
+async fn collect_turn_with_no_cancelled_wait(socket: &mut JsonSocket) -> Turn {
+    let mut deltas = Vec::new();
+    let mut events = Vec::new();
+    let mut waits = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let frame = socket.recv_json().await;
+            match frame["type"].as_str() {
+                Some("agent_delta") => deltas.push(frame),
+                Some("agent_event") => {
+                    let done = frame["event"]["kind"] == "agent_message";
+                    events.push(frame);
+                    if done {
+                        break;
+                    }
+                }
+                Some("input_required") => waits.push(
+                    frame["token"]
+                        .as_str()
+                        .expect("the wait announces its token")
+                        .to_owned(),
+                ),
+                Some("input_cancelled") => panic!("a stop cancels no question: {frame}"),
+                Some("error") => panic!("a stop is never an error: {frame}"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the turn completes within the deadline");
+    Turn {
+        deltas,
+        events,
+        waits,
+    }
+}
+
 #[tokio::test]
-async fn turn_cancel_returns_to_waiting_with_input_cancelled_and_no_error_frame() {
+async fn a_cancel_with_only_a_question_open_leaves_it_open_and_its_token_still_answers() {
     let (base, _dir, state) = spawn_agent_server().await;
     let mut socket = connect(&base).await;
     let session = launch_echo(&mut socket).await;
@@ -139,34 +178,62 @@ async fn turn_cancel_returns_to_waiting_with_input_cancelled_and_no_error_frame(
     assert_eq!(
         state.agents().unresolved_waits(&session),
         Some(vec![token.clone()]),
-        "the pending wait is retained by the session"
+        "the pending wait is retained by the conversation"
     );
 
     socket.send_json(&json!({ "type": "cancel" })).await;
-    let cancelled = socket
-        .recv_until(Duration::from_secs(10), |frame| {
-            assert_ne!(
-                frame["type"], "error",
-                "cancellation is a stop reason, never an error: {frame}"
-            );
-            frame["type"] == "input_cancelled"
-        })
-        .await;
     assert_eq!(
-        cancelled["token"], *token,
-        "the pending wait dies as an explicit input_cancelled"
+        state.agents().unresolved_waits(&session),
+        Some(vec![token.clone()]),
+        "a stop drops no question to the operator"
     );
 
-    // The relaunched agent rebuilds from the retained log and returns to
-    // waiting: a fresh wait opens, and the next input works.
-    let fresh = next_wait_token(&mut socket).await;
-    assert_ne!(fresh, token, "the relaunched run opens a fresh wait token");
-    answer(&mut socket, &fresh, "after cancel").await;
-    let turn = collect_turn(&mut socket).await;
+    // The original token still answers the question the stop left open,
+    // and the turn it starts is a full one.
+    answer(&mut socket, &token, "after cancel").await;
+    let turn = collect_turn_with_no_cancelled_wait(&mut socket).await;
     assert_eq!(
         delta_text(&turn),
         "echo:after cancel",
-        "the next input after a turn-cancel runs a full turn"
+        "the open question's own token runs the next turn"
+    );
+    socket.close().await;
+}
+
+#[tokio::test]
+async fn a_stop_keeps_the_conversations_one_run_while_transcript_indices_continue() {
+    let (base, _dir, state) = spawn_agent_server().await;
+    let mut socket = connect(&base).await;
+    let session = launch_echo(&mut socket).await;
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "ping").await;
+    let first = collect_turn(&mut socket).await;
+    let run = state
+        .agents()
+        .run_id(&session)
+        .expect("the conversation's run has begun");
+
+    let open = wait_after(&mut socket, &first).await;
+    socket.send_json(&json!({ "type": "cancel" })).await;
+    answer(&mut socket, &open, "pong").await;
+    let second = collect_turn_with_no_cancelled_wait(&mut socket).await;
+
+    assert_eq!(delta_text(&second), "echo:pong");
+    let indices: Vec<u64> = first
+        .events
+        .iter()
+        .chain(&second.events)
+        .filter_map(|event| event["index"].as_u64())
+        .collect();
+    assert_eq!(
+        indices,
+        [0, 1, 2, 3, 4, 5],
+        "the transcript keeps numbering across the stop"
+    );
+    assert_eq!(
+        state.agents().run_id(&session),
+        Some(run),
+        "the stop keeps the conversation's one run"
     );
     socket.close().await;
 }

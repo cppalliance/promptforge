@@ -14,8 +14,8 @@ description = "PromptForge Workshop HTTP server: serves the workshop API to the 
 async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
-# The Harness public API: the composition root constructs and registers
-# the Harness that runs the agent sessions.
+# The Harness public API: each conversation's launch builds the per-run
+# Harness that runs it.
 harness.workspace = true
 # The Gateway web search client the agent sessions' search provider
 # sends each search through.
@@ -39,6 +39,9 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 url.workspace = true
+# The conversation layer: the conversation table, transcripts, input
+# waits, agent discovery, and the recorder tee each run writes through.
+workshop-agents.workspace = true
 workshop-gateway.workspace = true
 workshop-menu.workspace = true
 workshop-protocol.workspace = true

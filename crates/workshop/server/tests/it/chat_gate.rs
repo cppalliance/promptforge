@@ -5,9 +5,9 @@
 //!
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
-//! a Markdown prompt on the unified runtime. A session's transcript sits
-//! in the Harness's memory, and the Harness records each run through the
-//! Host's recorder, so no gate here spans a server restart; reconnect
+//! a Markdown prompt on the unified runtime. A conversation's transcript
+//! sits in Workshop's memory, and the Harness records each run through
+//! the Host's recorder, so no gate here spans a server restart; reconnect
 //! within one process is the agents suite's.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
@@ -29,7 +29,7 @@ use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
 
-use workshop_server::fixtures::{gateway_updater, replace_gateway, spawn_bindings_forwarder};
+use workshop_server::fixtures::{gateway_updater, replace_gateway};
 use workshop_server::{AgentsConfig, AppState, Config, InputResponse};
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
@@ -135,10 +135,6 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
         ..test_config(&gateway_url, dir.path())
     };
     let (state, ws_base) = spawn_router(&config).await;
-    // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes Host snapshot changes
-    // into the Harness is spawned here.
-    spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models
             .iter()

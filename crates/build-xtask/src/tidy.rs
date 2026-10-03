@@ -35,10 +35,9 @@ const SERVICES: &[Tiered] = &[
     ("workshop-menu", "menu"),
     ("workshop-status", "status"),
 ];
-/// Tier 2: features. Depend on vocabulary and service crates. The
-/// sessions subsystem sits inside the server since Workshop moved onto the
-/// Harness, so it has no crate here.
+/// Tier 2: features. Depend on vocabulary and service crates.
 const FEATURES: &[Tiered] = &[
+    ("workshop-agents", "agents"),
     ("workshop-run-log", "run-log"),
     ("workshop-user-state", "user-state"),
     ("workshop-workspace", "workspace"),

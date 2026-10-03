@@ -1,18 +1,18 @@
 //! Table-driven tests for the agent socket's framing helpers: the pure
-//! render functions that map Harness vocabulary onto Workshop wire
-//! shapes, and the cursor and wire-index bookkeeping behind every
+//! render functions that map the conversation's vocabulary onto Workshop
+//! wire shapes, and the cursor and wire-index bookkeeping behind every
 //! durable `agent_event` frame.
 
-use harness::{Delta, SessionEvent, WaitFrame};
 use promptforge::event::Event;
 use promptforge::ids::{ChainId, Provenance, TaskId};
+use workshop_agents::{Delta, SessionEvent, WaitFrame};
 use workshop_protocol::InputFrame;
 
 use super::{advance, delta_frame, input_frame};
 use crate::agents::wire::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame};
 
 #[test]
-fn input_frames_map_harness_waits_to_wire_shapes() {
+fn input_frames_map_conversation_waits_to_wire_shapes() {
     let cases = [
         (
             WaitFrame::Required {
@@ -38,8 +38,8 @@ fn input_frames_map_harness_waits_to_wire_shapes() {
 }
 
 #[test]
-fn delta_frames_map_harness_channels_to_wire_shapes() {
-    // `Delta` is `#[non_exhaustive]` in `harness-sessions`, so each
+fn delta_frames_map_conversation_channels_to_wire_shapes() {
+    // The conversation's `Delta` is `#[non_exhaustive]`, so each
     // fixture is deserialized rather than written as a struct literal.
     let cases = [
         (

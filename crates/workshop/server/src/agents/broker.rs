@@ -1,21 +1,26 @@
-//! The agent sessions' inference broker: every model round and model list
-//! goes through the current Gateway generation.
+//! The agent conversations' inference brokers: [`WorkshopBroker`], which
+//! sends every model round and model list through the current Gateway
+//! generation, and [`RunBroker`], one run's view of it, which streams the
+//! run's own rounds into its conversation.
 //!
-//! The broker holds the server's [`Registry`] and reads the gateway
-//! through it on every call, as the search provider does, so a replaced
-//! gateway serves the next round. It keeps the Gateway broker of the last
-//! generation it served under. A model list first waits until the menu's
-//! catalog holds a chat-capable model, so a session launched before the
-//! Gateway's catalog arrives starts its run only once it can bind one.
+//! The Workshop broker holds the server's [`Registry`] and reads the
+//! gateway through it on every call, as the search provider does, so a
+//! replaced gateway serves the next round. It keeps the Gateway broker of
+//! the last generation it served under. A model list first waits until
+//! the menu's catalog holds a chat-capable model, so a conversation
+//! launched before the Gateway's catalog arrives starts its run only once
+//! it can bind one.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use harness::{BoxFuture, InferenceBroker, OnDelta};
 use harness_gateway_client::{CompletionError, CompletionErrorKind, GatewayBroker};
 use promptforge::effect::Round;
+use promptforge::event::ReplyOrigin;
 use promptforge::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
+use workshop_agents::Conversation;
 use workshop_menu::{CatalogBus, MenuHandles};
 use workshop_registry::Registry;
 
@@ -60,16 +65,21 @@ impl WorkshopBroker {
         *cached = Some((gateway.generation, broker.clone()));
         Ok(broker)
     }
+
+    /// Resolves once the menu's catalog holds a chat-capable model, at
+    /// once when no menu is registered.
+    pub(crate) async fn chat_model_ready(&self) {
+        if let Some(menu) = self.registry.state::<MenuHandles>() {
+            chat_model_published(menu.catalog()).await;
+        }
+    }
 }
 
 impl InferenceBroker for WorkshopBroker {
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
-        let menu = self.registry.state::<MenuHandles>();
         let broker = self.clone();
         Box::pin(async move {
-            if let Some(menu) = menu {
-                chat_model_published(menu.catalog()).await;
-            }
+            broker.chat_model_ready().await;
             broker.current()?.models().await
         })
     }
@@ -87,6 +97,47 @@ impl InferenceBroker for WorkshopBroker {
             Ok(broker) => broker.chat(binding, messages, tools, options, round, on_delta),
             Err(error) => Box::pin(async move { Err(error) }),
         }
+    }
+}
+
+/// One run's broker over the Workshop broker: a section's own round
+/// streams its live pieces into the run's conversation, stamped with the
+/// round's id, and every other call goes through as it came.
+pub(crate) struct RunBroker {
+    inner: WorkshopBroker,
+    conversation: Conversation,
+}
+
+impl RunBroker {
+    /// The broker for `conversation`'s run over `inner`.
+    pub(crate) fn new(inner: WorkshopBroker, conversation: Conversation) -> Self {
+        Self {
+            inner,
+            conversation,
+        }
+    }
+}
+
+impl InferenceBroker for RunBroker {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        self.inner.models()
+    }
+
+    fn chat(
+        &self,
+        binding: ModelBinding,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        round: Round,
+        _on_delta: Option<OnDelta>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        // Only a section's own round has a live reader; a nested
+        // `models.infer` round is read whole from its answer.
+        let on_delta =
+            (round.origin == ReplyOrigin::Chat).then(|| self.conversation.delta_sender(round.id));
+        self.inner
+            .chat(binding, messages, tools, options, round, on_delta)
     }
 }
 

@@ -57,15 +57,11 @@ async fn a_live_chat_wait_answers_on_the_replacement_port_and_key() {
         1,
         "the replacement endpoint and bearer complete the next turn"
     );
-    let runs = server
-        .state
-        .registry()
-        .state::<harness::Harness>()
-        .expect("the harness is registered")
-        .session(&harness::SessionId::new(&session))
-        .expect("the session remains registered")
-        .run_ids();
-    assert_eq!(runs.len(), 1, "the replacement relaunches nothing");
+    assert_eq!(
+        server.state.agents().run_id(&session),
+        Some(workshop_run_log::RunId::from_raw(1)),
+        "the replacement keeps the conversation's one run, the first the log began"
+    );
     socket.close().await;
 }
 
@@ -111,7 +107,7 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
 /// model is the dropdown selection bound at launch, so a selection that
 /// vanishes mid-turn no longer skips anything - the frozen binding drives
 /// the raced turn to completion, and the same run keeps serving turns
-/// until a turn-cancel or a close ends it.
+/// until a close ends it.
 #[tokio::test]
 async fn gate_selection_loss_leaves_the_runs_frozen_binding_untouched() {
     let server = spawn_chat_server(&["test-model"]).await;

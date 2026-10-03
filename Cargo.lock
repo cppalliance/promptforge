@@ -2594,11 +2594,10 @@ dependencies = [
 name = "harness"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "harness-capabilities",
  "harness-runner",
- "harness-sessions",
  "promptforge",
- "tempfile",
  "tokio",
  "workspace-hack",
 ]
@@ -8445,6 +8444,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-agents"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "harness",
+ "promptforge",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "workshop-gateway"
 version = "0.0.0"
 dependencies = [
@@ -8545,6 +8561,7 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+ "workshop-agents",
  "workshop-gateway",
  "workshop-menu",
  "workshop-protocol",

@@ -1,15 +1,16 @@
-//! Workspace revokes against a live agent session: a root revoked while
-//! the session runs is gone from the Host snapshot the turn-cancel
-//! relaunch reads.
+//! Workspace revokes against agent conversations: a root revoked while one
+//! conversation runs is gone from the Host snapshot the next
+//! conversation's run reads, and the running one keeps its launch
+//! snapshot.
 
 use tokio::sync::mpsc;
 use workshop_workspace::Workspace;
 
 use super::*;
 
-/// The roots agent: every run opens with a model round naming the `ui()`
-/// snapshot's workspace root, so each launch and relaunch reports the
-/// roots the Harness held when it started, then echoes inputs.
+/// The roots agent: its run opens with a model round naming the `ui()`
+/// snapshot's workspace root, then echoes each input with the root its
+/// `ui()` reports at that turn.
 const ROOTS_MD: &str = r"---
 name: roots
 description: The roots test agent on the unified runtime.
@@ -28,11 +29,19 @@ history:user('launch@' .. tostring(ui().workspace_root))
 models.loop(models.get('test-model'), history)
 while true do
     local text = input.ask()
-    history:user(text)
+    history:user(text .. '@' .. tostring(ui().workspace_root))
     models.loop(models.get('test-model'), history)
 end
 ```
 ";
+
+/// The last message of the next model round the gateway received.
+async fn next_round(rounds: &mut mpsc::UnboundedReceiver<String>) -> String {
+    tokio::time::timeout(Duration::from_secs(10), rounds.recv())
+        .await
+        .expect("the model round arrives in time")
+        .expect("the gateway is alive")
+}
 
 /// The content of a completion request's last message.
 fn last_content(body: &str) -> String {
@@ -46,17 +55,14 @@ fn last_content(body: &str) -> String {
 }
 
 #[tokio::test]
-async fn a_revoke_during_a_running_session_pushes_roots_without_the_revoked_folder() {
-    let (launches_tx, mut launches) = mpsc::unbounded_channel();
+async fn a_revoke_reaches_the_next_conversation_and_a_running_one_keeps_its_launch_snapshot() {
+    let (rounds_tx, mut rounds) = mpsc::unbounded_channel();
     let gateway = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
-            let launches_tx = launches_tx.clone();
+            let rounds_tx = rounds_tx.clone();
             async move {
-                let content = last_content(&body);
-                if content.starts_with("launch@") {
-                    let _ = launches_tx.send(content);
-                }
+                let _ = rounds_tx.send(last_content(&body));
                 echo_completions(body).await
             }
         }),
@@ -75,34 +81,37 @@ async fn a_revoke_during_a_running_session_pushes_roots_without_the_revoked_fold
         .await
         .expect("the folder grants");
 
-    let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
-    assert_eq!(socket.recv_json().await["type"], "agents");
-    let _session = launch(&mut socket, "roots").await;
-    let at_launch = tokio::time::timeout(Duration::from_secs(10), launches.recv())
-        .await
-        .expect("the launch opens its model round")
-        .expect("the gateway is alive");
+    let mut running = JsonSocket::connect(&format!("{base}/agents/ws")).await;
+    assert_eq!(running.recv_json().await["type"], "agents");
+    let _running = launch(&mut running, "roots").await;
     assert_eq!(
-        at_launch,
+        next_round(&mut rounds).await,
         format!("launch@{}", granted.display()),
         "the launch reads the granted folder"
     );
-    let _token = next_wait_token(&mut socket).await;
+    let token = next_wait_token(&mut running).await;
 
-    // The revoke lands while the run waits on its operator; the turn-cancel
-    // after it relaunches the program, which reads the Host snapshot anew.
+    // The revoke lands while the first conversation waits on its operator.
     workspace
         .revoke_and_persist(&granted)
         .await
         .expect("the folder revokes");
-    socket.send_json(&json!({ "type": "cancel" })).await;
-    let at_relaunch = tokio::time::timeout(Duration::from_secs(10), launches.recv())
-        .await
-        .expect("the turn-cancel relaunches the program")
-        .expect("the gateway is alive");
+
+    let mut next = JsonSocket::connect(&format!("{base}/agents/ws")).await;
+    assert_eq!(next.recv_json().await["type"], "agents");
+    let _next = launch(&mut next, "roots").await;
     assert_eq!(
-        at_relaunch, "launch@nil",
-        "the relaunch reads roots without the revoked folder"
+        next_round(&mut rounds).await,
+        "launch@nil",
+        "the next conversation reads roots without the revoked folder"
     );
-    socket.close().await;
+
+    answer(&mut running, &token, "turn").await;
+    assert_eq!(
+        next_round(&mut rounds).await,
+        format!("turn@{}", granted.display()),
+        "the running conversation keeps the snapshot it launched with"
+    );
+    running.close().await;
+    next.close().await;
 }

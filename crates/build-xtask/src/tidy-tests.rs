@@ -401,6 +401,10 @@ fn tier_table_grants_each_tier_only_lower_tiers() {
         Some(packages(&[VOCABULARY, SERVICES]))
     );
     assert_eq!(
+        allowed_dependencies("workshop-agents"),
+        Some(packages(&[VOCABULARY, SERVICES]))
+    );
+    assert_eq!(
         allowed_dependencies("workshop-server"),
         Some(packages(&[VOCABULARY, SERVICES, FEATURES]))
     );

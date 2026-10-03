@@ -5,8 +5,6 @@
 
 use std::sync::Arc;
 
-use harness::Harness;
-
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth, ResolvedGateway};
 use workshop_menu::MenuHandles;
 use workshop_menu::catalog::CatalogBus;
@@ -60,7 +58,6 @@ pub(super) fn compose(
     registry.require::<StatusBus>()?;
     registry.require::<MenuHandles>()?;
     registry.require::<GatewayHandles>()?;
-    registry.require::<Harness>()?;
     registry.require::<AgentSessions>()?;
     registry.require::<Workspace>()?;
     registry.require::<dyn WorkspaceRoots>()?;
@@ -187,9 +184,9 @@ fn register_user_state(
     }
 }
 
-/// The Harness (agent-sessions) subsystem: the Harness, the agent-session
-/// opener, and their route state, plus the routes and bindings task it
-/// self-registers.
+/// The agent-sessions subsystem: the agent-session launcher, which builds
+/// each conversation's per-run Harness, and its route state, plus the
+/// routes it self-registers.
 fn register_sessions(
     registry: &Registry,
     registrations: &mut Registrations,
@@ -197,19 +194,12 @@ fn register_sessions(
     backoff: &ReconnectBackoff,
     omit: Option<Omit>,
 ) {
-    // Agent sessions run in the Harness, built here like every other
-    // subsystem and reached through the registry; `agents` pushes the
-    // server's state through its public API.
-    let harness = agents::harness_for(config, registry);
-    let agents = AgentSessions::new(registry.clone(), backoff.clone());
+    let agents = AgentSessions::new(config, registry.clone(), backoff.clone());
     let sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
     if omit != Some(Omit::AgentSessions) {
-        let regs = agents::register(registry, &sessions, harness, &agents);
+        let regs = agents::register(registry, &sessions, &agents);
         registrations.hold(regs.routes);
-        registrations.hold(regs.harness);
         registrations.hold(regs.agents);
-        // The bindings forwarder, spawned with serving like every task.
-        registrations.hold(agents::register_tasks(registry));
     }
 }
 

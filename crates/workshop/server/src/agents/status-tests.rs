@@ -1,4 +1,4 @@
-//! Agent status tests: which session events push a status frame and reset the backoff.
+//! Agent status tests: which conversation events push a status frame and reset the backoff.
 
 use std::time::Duration;
 
@@ -139,7 +139,7 @@ fn a_completed_reply_pushes_idle_and_resets_the_backoff() {
 #[test]
 fn each_delta_pulses_the_activity_of_its_channel() {
     let (push, mut status_rx, _guards) = wired_push();
-    // `Delta` is `#[non_exhaustive]` in `harness-sessions`, so each
+    // The conversation's `Delta` is `#[non_exhaustive]`, so each
     // fixture is deserialized rather than written as a struct literal.
     let cases = [
         (

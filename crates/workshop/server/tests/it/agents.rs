@@ -1,8 +1,8 @@
 //! End-to-end agent-session tests over the `/agents/ws` socket: launch,
 //! the full turn cycle with reply-id coalescing and indexed durable
-//! frames, reconnect replay, turn-cancel, session isolation, status-bus
-//! order, backoff reset, and teardown wait cleanup - all in-process
-//! against an SSE mock gateway.
+//! frames, reconnect replay, the stop, conversation isolation,
+//! status-bus order, backoff reset, and teardown wait cleanup - all
+//! in-process against an SSE mock gateway.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant
@@ -20,9 +20,7 @@ use axum::response::Response;
 use axum::routing::post;
 use serde_json::json;
 
-use workshop_server::fixtures::{
-    gateway_updater, replace_gateway as replace_fixture_gateway, spawn_bindings_forwarder,
-};
+use workshop_server::fixtures::{gateway_updater, replace_gateway as replace_fixture_gateway};
 use workshop_server::{AgentsConfig, AppState, Config};
 
 use crate::common::{
@@ -111,12 +109,8 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
         ..test_config(&base_url, dir.path())
     };
     let (state, base) = spawn_router(&config).await;
-    // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes Host snapshot changes
-    // into the Harness is spawned here.
-    spawn_bindings_forwarder(&state);
-    // The broker holds a run's model list until the retained catalog has
-    // a chat-capable model, so the catalog lands before any test launches.
+    // A run starts only once the retained catalog has a chat-capable
+    // model, so the catalog lands before any test launches.
     state
         .catalog()
         .publish(vec![json!({ "id": "test-model", "object": "model" })]);
