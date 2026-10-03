@@ -57,9 +57,13 @@ pub enum CompletionErrorKind {
 impl CompletionErrorKind {
     /// Returns the fixed message for this kind: one lowercase phrase written
     /// for a model reader. A broker builds a [`CompletionError`] message
-    /// from it. Only `MalformedResponse`, `EmptyReply`, and `Unavailable`
-    /// may extend it with `: ` and a specific the broker's own code wrote
-    /// (see [`CompletionError`]).
+    /// from it, and a failure built from an HTTP status appends
+    /// ` (status N)`. A 401 or 403 is `Unavailable` with the message
+    /// `the model backend did not accept the credentials` in place of this
+    /// phrase. Only `MalformedResponse`, `EmptyReply`, and `Unavailable`
+    /// may extend it with `: ` and a specific the broker's own code wrote.
+    /// Provider text never enters the message; it goes in the
+    /// [`detail`](CompletionError::detail) (see [`CompletionError`]).
     ///
     /// # Examples
     ///
@@ -129,10 +133,13 @@ impl CompletionErrorKind {
 /// `harness-gateway-client` crate's `classify_http_failure` builds it.
 /// `#[non_exhaustive]`.
 ///
-/// The message is the kind's fixed phrase. `MalformedResponse`,
-/// `EmptyReply`, and `Unavailable` may extend it with `: ` and a specific
-/// that the broker's own code wrote (for example the byte limit that was
-/// hit); provider text never goes in the message.
+/// The message is the kind's fixed phrase, and a failure built from an HTTP
+/// status appends ` (status N)`. A 401 or 403 is `Unavailable` with the
+/// message `the model backend did not accept the credentials`.
+/// `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the
+/// message with `: ` and a specific the broker's own code wrote, such as
+/// the byte limit that was hit. Provider text never enters the message; it
+/// goes in the [`detail`](CompletionError::detail).
 ///
 /// # Examples
 ///
@@ -173,10 +180,13 @@ impl CompletionError {
     /// Builds a failure of `kind` with `message` as its display text.
     ///
     /// A broker uses the kind's fixed
-    /// [`phrase`](CompletionErrorKind::phrase). For `MalformedResponse`,
-    /// `EmptyReply`, and `Unavailable` it may extend the phrase with `: `
-    /// and a specific its own code wrote. The message must not carry
-    /// provider text, which belongs in
+    /// [`phrase`](CompletionErrorKind::phrase), and for a failure built
+    /// from an HTTP status it appends ` (status N)`. A 401 or 403 is
+    /// `Unavailable` with the message
+    /// `the model backend did not accept the credentials`. For
+    /// `MalformedResponse`, `EmptyReply`, and `Unavailable` the broker may
+    /// extend the phrase with `: ` and a specific its own code wrote.
+    /// Provider text never enters the message; it goes in
     /// [`with_detail`](CompletionError::with_detail).
     #[must_use]
     pub fn new(kind: CompletionErrorKind, message: impl Into<String>) -> CompletionError {

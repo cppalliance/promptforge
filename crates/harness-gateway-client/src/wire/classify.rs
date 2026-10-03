@@ -54,7 +54,9 @@ const CREDENTIALS_PHRASE: &str = "the model backend did not accept the credentia
 /// [`escape_controls`](crate::escape_controls); the classifier keeps
 /// exactly that text as the error's [`detail`](CompletionError::detail) and
 /// never puts it in the message. The message is the kind's fixed phrase
-/// with ` (status N)` appended. A body that matches no rule is `Rejected`
+/// with ` (status N)` appended; a 401 or 403 is `Unavailable` with the
+/// message `the model backend did not accept the credentials` in place of
+/// the phrase. A body that matches no rule is `Rejected`
 /// (or `ServerError` for a 5xx), never a success.
 ///
 /// # Examples
