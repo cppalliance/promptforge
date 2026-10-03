@@ -31,9 +31,9 @@
 //!   `workshop-status`), the feature crates (`workshop-run-log`,
 //!   `workshop-user-state`, `workshop-workspace`), the Harness's public
 //!   crates `harness`, `harness-gateway-client`, and `harness-web`, and
-//!   the Engine's public API `promptforge`. Read the repository-root
-//!   `AGENTS.md` and `crates/workshop/server/AGENTS.md` before adding
-//!   an import.
+//!   the Engine's public API `promptforge`. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries. Read
+//!   `crates/workshop/server/AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - One task owns each socket: a single `select!` loop reads inbound

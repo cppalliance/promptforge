@@ -9,8 +9,8 @@
 //!   today it names none of them. Outside the family it may name the
 //!   Harness's public API `harness`, the Engine's public API
 //!   `promptforge`, and `shared-*` crates. Never on `workshop-server`, a
-//!   private Harness, Engine, or Gateway crate. Read the repository-root
-//!   `AGENTS.md` before adding an import.
+//!   private Harness, Engine, or Gateway crate. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - The Harness holds no database and no storage path: this crate is
 //!   where the Host's recorder keeps a run's history. It reaches the
 //!   Harness only through `harness::record`.

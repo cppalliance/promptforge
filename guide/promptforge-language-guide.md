@@ -8946,7 +8946,7 @@ return tools.call('search', { query = 'rust async runtime' })
 {"query":"rust async runtime","results":[{"title":"T","url":"https://e.com","description":"D"}]}
 ````
 
-A successful search is an object with the `query` string and a `results` array whose rows each carry a non-empty `url`, a `title`, and a `description`, in that order. A row also carries `age`, `site_name`, and `extra_snippets` when the search provider reports them, and leaves each out when it does not. No other field reaches the prompt. The model sends the same search as `{"query": "rust async runtime"}` and receives the results the same way, as untrusted text inside the envelope.
+A successful search is an object with the `query` string and a `results` array whose rows each carry a `title`, a non-empty `url`, and a `description`, in that order. A row also carries `age`, `site_name`, and `extra_snippets` when the search provider reports them, and leaves each out when it does not. No other field reaches the prompt. The model sends the same search as `{"query": "rust async runtime"}` and receives the results the same way, as untrusted text inside the envelope.
 
 `query` is a string of 1 to 400 characters, counted as characters rather than bytes, with at least one character that is not whitespace. A blank query fails with `web_search: query must not be empty`, a query over 400 characters with `web_search: query exceeds 400 characters`, and a call with no `query` with `web_search: invalid arguments`; all three carry tool error kind `InvalidArguments`.
 

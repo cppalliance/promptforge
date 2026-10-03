@@ -19,8 +19,8 @@
 //! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
-//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
-//!   import.
+//!   private `promptforge-*` crate. `cargo test -p build-xtask` enforces the
+//!   product and container boundaries.
 //! - This crate depends on no capability provider: the provider crates
 //!   depend on it for the traits, never the reverse. The one capability
 //!   it holds itself, `promptforge/user-input`, needs nothing beyond this

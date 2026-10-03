@@ -12,8 +12,8 @@
 //! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
-//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
-//!   import.
+//!   private `promptforge-*` crate. `cargo test -p build-xtask` enforces the
+//!   product and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`],

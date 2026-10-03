@@ -35,8 +35,8 @@
 //!
 //! - Family: Harness, at the `crates/` root beside `harness`; may depend
 //!   on: `promptforge` and third-party crates only. Never on `harness` or
-//!   any `crates/harness-internal` crate. Read the repository-root
-//!   `AGENTS.md` before adding an import.
+//!   any `crates/harness-internal` crate. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - Every `Completion` and `ToolCall` is built through the public
 //!   validating constructors, so the Engine's neutral reply checks run on
 //!   every decoded turn.

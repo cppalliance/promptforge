@@ -31,8 +31,8 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-types`. Read the repository-root
-//!   `AGENTS.md` before adding an import.
+//! - May depend on: `promptforge-types`. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 

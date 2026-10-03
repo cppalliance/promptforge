@@ -220,7 +220,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Guide row order and layout prose
+### Step 2: Guide row order and layout prose [completed]
 
 - Component: `none`
 

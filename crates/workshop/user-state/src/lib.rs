@@ -9,7 +9,8 @@
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`. Never on
 //!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
-//!   `promptforge-*` crate. Read the repository-root `AGENTS.md` before adding an import.
+//!   `promptforge-*` crate. `cargo test -p build-xtask` enforces the product
+//!   and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - The server stores each value verbatim and never interprets it

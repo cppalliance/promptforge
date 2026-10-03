@@ -30,8 +30,8 @@
 //! ## Invariants
 //!
 //! - May depend on: no workspace crate beyond `workspace-hack` and the
-//!   doctest-only `promptforge` dev-dependency. Read the repository-root
-//!   `AGENTS.md` before adding an import.
+//!   doctest-only `promptforge` dev-dependency. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 

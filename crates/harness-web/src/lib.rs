@@ -36,8 +36,9 @@
 //!   on: `harness`, `promptforge`, and third-party crates only. Never on
 //!   a `crates/harness-internal` crate, `harness-gateway-client`, or a
 //!   `workshop-*`, `gateway-*`, or `shared-*` crate, and no
-//!   `crates/harness-internal` crate depends on it. Read the
-//!   repository-root `AGENTS.md` before adding an import.
+//!   `crates/harness-internal` crate depends on it.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Every model- or tool-selected URL and every resolved address is

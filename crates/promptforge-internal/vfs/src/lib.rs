@@ -16,8 +16,8 @@
 //! ## Invariants
 //!
 //! - May depend on: nothing. Std only, with no workspace or external
-//!   crate, which the manifest test enforces. Read the repository-root
-//!   `AGENTS.md` before adding an import.
+//!   crate, which the manifest test enforces. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 

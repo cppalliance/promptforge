@@ -9,8 +9,9 @@
 //!
 //! ## Invariants
 //!
-//! - Tier: desktop-app boundary; may depend on: `workshop-server` only. Read
-//!   the repository-root `AGENTS.md` before adding an import.
+//! - Tier: desktop-app boundary; may depend on: `workshop-server` only.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 //! - This crate is re-exports only: no types, functions, or logic of its
 //!   own. Anything the desktop app needs is a `pub use` of a `workshop-server`
 //!   item, and the desktop app's sole view of the server is this crate.

@@ -10,7 +10,8 @@
 //!
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`, and the service crates.
-//!   Read the repository-root `AGENTS.md` before adding an import.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Every request path is checked lexically (no `..`, and on Windows no

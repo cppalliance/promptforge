@@ -70,7 +70,8 @@ fn lib_rs(name: &str) -> String {
          //! ## Invariants\n\
          //!\n\
          //! - Tier: TODO (vocabulary | services | features | server); may depend\n\
-         //!   on: TODO. Read the repository-root `AGENTS.md` before adding an import.\n\
+         //!   on: TODO. `cargo test -p build-xtask` enforces the product and\n\
+         //!   container boundaries.\n\
          //! - Every file in this crate stays under 500 lines; split first, then\n\
          //!   edit.\n"
     )
