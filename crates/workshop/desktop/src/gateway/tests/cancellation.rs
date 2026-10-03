@@ -118,6 +118,7 @@ fn exit_joins_a_supervisor_blocked_in_health_wait_before_resolve() {
                 worker_resolves.fetch_add(1, Ordering::SeqCst);
                 Ok(Resolution::Absent)
             },
+            || None,
         );
         assert!(result.is_err(), "the cancelled health wait is rejected");
         worker_finished.store(true, Ordering::SeqCst);

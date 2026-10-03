@@ -1051,6 +1051,9 @@ Section Uninstall
  SetShellVarContext current
  RmDir /r "$APPDATA\${BUNDLEID}"
  RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+ ; The gateway and the Workshop keep their configuration, logs, sessions,
+ ; and downloaded models in the state directory, %USERPROFILE%\.promptforge.
+ RmDir /r "$PROFILE\.promptforge"
  ${EndIf}
 
  !ifmacrodef NSIS_HOOK_POSTUNINSTALL

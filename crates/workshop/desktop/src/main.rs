@@ -42,6 +42,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tauri::ipc::CapabilityBuilder;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt as _;
 use workshop_server_api::ServerHandle;
 
@@ -201,9 +202,12 @@ fn continue_teardown(
 /// The setup hook: connects the gateway (attach or launch), boots the
 /// in-process server, installs the window's exact-port capability and the
 /// menu, and opens the window on the server's URL. A boot failure prints
-/// its full error chain and exits the process directly: returning `Err`
-/// would surface as Tauri's "Failed to setup app" panic, losing the chain
-/// and the failure exit code.
+/// its full error chain, shows it in an error dialog, and exits the process
+/// directly once the dialog closes: a release build on Windows has no
+/// console, and returning `Err` would surface as Tauri's "Failed to setup
+/// app" panic, losing the chain and the failure exit code. The hook returns
+/// while the dialog is up, because some platforms run dialogs on the event
+/// loop.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     match boot() {
         Ok((server, url, attachment, supervisor)) => {
@@ -217,7 +221,12 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         }
         Err(error) => {
             eprintln!("{error:?}");
-            std::process::exit(1);
+            app.dialog()
+                .message(format!("{error:?}"))
+                .title("PromptForge could not start")
+                .kind(MessageDialogKind::Error)
+                .show(|_| std::process::exit(1));
+            Ok(())
         }
     }
 }
