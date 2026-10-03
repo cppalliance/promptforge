@@ -10,7 +10,7 @@ use crate::support::ScriptedBroker;
 /// A session program that infers once, then chats once: the mixed
 /// model-round sequence the reply-id rule must number in order. The second
 /// `input.ask()` parks the run between the two rounds, so the infer reply
-/// settles the accepted turn before any chat round exists.
+/// is recorded before any chat round exists.
 const MIXED: &str = "---\nname: mixed\ndescription: infers then chats\npromptforge: 0\n\
     capabilities:\n  - promptforge/user-input\n\
     models:\n  writer: {}\n---\n\n\
@@ -25,7 +25,7 @@ const MIXED: &str = "---\nname: mixed\ndescription: infers then chats\npromptfor
     return inferred .. '|' .. msgs[#msgs].content\n\
     ```\n";
 
-/// The model id the scripted broker lists and the catalog names.
+/// The model id the scripted broker lists.
 const MOCK_MODEL: &str = "mock-model";
 
 /// The reply the scripted broker gives every round.
@@ -33,13 +33,12 @@ const MOCK_REPLY: &str = "from the broker";
 
 /// A Harness over a fresh `<dir>/agents` directory holding `name.md` with
 /// `program`, on a scripted broker that lists [`MOCK_MODEL`] alone and
-/// answers [`MOCK_REPLY`], with a catalog whose one chat-capable entry names
-/// that model.
+/// answers [`MOCK_REPLY`].
 fn harness_for(dir: &Path, name: &str, program: &str) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join(format!("{name}.md")), program).unwrap();
-    let harness = Harness::new(
+    Harness::new(
         HarnessConfig {
             agents_path: agents,
         },
@@ -47,12 +46,7 @@ fn harness_for(dir: &Path, name: &str, program: &str) -> Harness {
         Arc::new(ScriptedBroker::new(&[MOCK_MODEL], MOCK_REPLY, MOCK_MODEL)),
         user_input_registry(),
         HostServices::new(),
-    );
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![serde_json::json!({ "kind": "chat", "id": MOCK_MODEL })],
-    });
-    harness
+    )
 }
 
 /// A Harness holding `mixed.md`: [`harness_for`] with [`MIXED`].
@@ -115,48 +109,6 @@ async fn a_mixed_infer_then_chat_session_numbers_each_reply_in_round_order() {
         vec![("infer", Some(0)), ("chat", Some(1))],
         "the infer reply takes round 0 and advances; the chat reply takes round 1"
     );
-}
-
-#[tokio::test]
-async fn an_infer_reply_settles_the_accepted_turn_so_a_new_catalog_retires_the_run() {
-    let dir = tempfile::tempdir().unwrap();
-    let harness = mixed_harness(dir.path());
-    let session = launch_agent(&harness, "mixed").await;
-    let mut waits = session.subscribe_waits();
-    let first = required_token(&mut waits).await;
-
-    // The answer arms the accepted turn; the infer reply settles it and the
-    // program parks on its second question.
-    session
-        .send_input(&first, "first".to_owned(), || {})
-        .unwrap();
-    let second = required_token(&mut waits).await;
-    assert_ne!(second, first, "wait tokens are single-use");
-
-    // The infer settled the accepted turn, so a replacement catalog retires
-    // the run at once. Were an infer-origin `AssistantReply` outside the
-    // settle arm, the still open accepted turn would defer the retirement
-    // onto a settlement that never arrives, and this test would time out on
-    // the cancelled frame.
-    harness.set_catalog(CatalogBinding {
-        generation: 2,
-        models: vec![serde_json::json!({
-            "kind": "chat",
-            "id": MOCK_MODEL,
-            "description": "other",
-        })],
-    });
-    cancelled_frame(&mut waits, &second).await;
-    let third = required_token(&mut waits).await;
-    assert_ne!(third, second, "the relaunch parks under a fresh token");
-    assert_eq!(
-        session.run_ids().len(),
-        2,
-        "the settled infer turn let the new catalog retire the run"
-    );
-
-    assert!(harness.close(session.id()));
-    wait_for(&session, SessionState::Closed).await;
 }
 
 #[tokio::test]

@@ -33,8 +33,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 # `sync` for the supervisor's typed event queues (`mpsc`), the wait
-# registry's `oneshot` and `broadcast` channels, and the catalog
-# generation watch.
+# registry's `oneshot` and `broadcast` channels, and the session state
+# watch.
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 workspace-hack.workspace = true

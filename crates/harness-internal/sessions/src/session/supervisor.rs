@@ -1,14 +1,13 @@
-//! Agent-run supervision across cancellation and catalog generations:
-//! the one task per session that collects events, feeds the pure reducer
-//! ([`transition`]), and executes the effect it selects.
+//! Agent-run supervision across cancellation: the one task per session
+//! that collects events, feeds the pure reducer ([`transition`]), and
+//! executes the effect it selects.
 //!
-//! Each run freezes one catalog generation; cancellation or a genuinely
-//! new usable generation relaunches over the retained transcript. A
-//! requested close cancels the run and then drains
-//! it: the effect loop answers every outstanding effect `Dropped` and
-//! steps the run to `Done` before the session reports `Closed`, so
-//! nothing is left in flight when the session leaves its Harness. The
-//! synthetic terminal frame for that interrupt is decided by
+//! The session's first run starts at launch, and a turn-cancel relaunches
+//! the program over the retained transcript. A requested close cancels
+//! the run and then drains it: the effect loop answers every outstanding
+//! effect `Dropped` and steps the run to `Done` before the session reports
+//! `Closed`, so nothing is left in flight when the session leaves its
+//! Harness. The synthetic terminal frame for that interrupt is decided by
 //! [`effective_interrupt`] and rendered in one place, after the drain.
 //!
 //! The raw deltas each run's delta callback sends are drained here too,
@@ -22,18 +21,18 @@ use std::sync::Arc;
 
 use harness_runner::recorder::RunOutcome;
 use promptforge::model::StreamDelta;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 
-use crate::environment::{Bindings, CatalogBinding};
+use crate::environment::Bindings;
 use crate::transition::{
-    CancelOrigin, CatalogDisposition, CloseReason, EffectiveInterrupt, HistoryEffect, Interrupt,
-    RelaunchEffect, RunCompletion, RunId, SupervisorEffect, SupervisorEvent, SupervisorState,
-    SyntheticTerminal, effective_interrupt, transition,
+    CloseReason, EffectiveInterrupt, HistoryEffect, Interrupt, RelaunchEffect, RunCompletion,
+    RunId, SupervisorEffect, SupervisorEvent, SupervisorState, SyntheticTerminal,
+    effective_interrupt, transition,
 };
 
 use crate::runtime::SessionTable;
 
-use super::run::{RunFailure, RunInputs, run_once};
+use super::run::{RunFailure, run_once};
 use super::{FailureKind, SessionCore};
 
 /// One owned run future paired with its reducer identity.
@@ -42,10 +41,6 @@ type RunFuture = Pin<Box<dyn Future<Output = (RunId, Result<RunOutcome, RunFailu
 /// Runtime data collected alongside one pure supervisor event.
 enum Collected {
     Supervisor(SupervisorEvent),
-    Catalog {
-        event: SupervisorEvent,
-        snapshot: Option<CatalogBinding>,
-    },
     Run {
         run: RunId,
         result: Result<RunOutcome, RunFailure>,
@@ -55,23 +50,20 @@ enum Collected {
 /// The result of executing one reducer-selected effect.
 enum Outcome {
     Continue,
-    Event(SupervisorEvent),
     Close,
 }
 
-/// One session's supervisor: its event sources and frozen bindings.
+/// One session's supervisor: its event sources and the bindings each run
+/// reads.
 pub(crate) struct Supervisor {
     core: Arc<SessionCore>,
     bindings: Arc<Bindings>,
     table: Arc<SessionTable>,
     lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
     cancellations: mpsc::Receiver<SupervisorEvent>,
-    catalog_watch: watch::Receiver<Option<u64>>,
     /// The raw delta stream; `None` once it closes, which cannot happen
     /// while the core holds its sender.
     raw_deltas: Option<mpsc::UnboundedReceiver<StreamDelta>>,
-    latest_catalog: Option<CatalogBinding>,
-    active_catalog: Option<CatalogBinding>,
     active_run: Option<RunFuture>,
     /// Whether a genuine terminal outcome has been observed for the
     /// current run; the input to [`effective_interrupt`].
@@ -91,8 +83,7 @@ pub(crate) struct SupervisorParts {
 }
 
 impl Supervisor {
-    /// Subscribes to the catalog watch before reading its snapshot, so a
-    /// replacement cannot disappear between the two.
+    /// The supervisor over a launch's parts.
     pub(crate) fn new(parts: SupervisorParts) -> Self {
         let SupervisorParts {
             core,
@@ -102,57 +93,41 @@ impl Supervisor {
             cancellations,
             raw_deltas,
         } = parts;
-        let catalog_watch = bindings.subscribe_catalog();
-        let latest_catalog = bindings.catalog();
         Self {
             core,
             bindings,
             table,
             lifecycle,
             cancellations,
-            catalog_watch,
             raw_deltas: Some(raw_deltas),
-            latest_catalog,
-            active_catalog: None,
             active_run: None,
             saw_terminal: false,
             interrupt: None,
         }
     }
 
-    /// Supervises the session until it closes, then drains its last run
-    /// and removes the session from its Harness.
+    /// Supervises the session from its start until it closes, then drains
+    /// its last run and removes the session from its Harness.
     pub(crate) async fn run(mut self) {
         let mut state = SupervisorState::new();
-        let mut pending = Some(self.initial_catalog_event());
+        let mut collected = Collected::Supervisor(SupervisorEvent::Start);
         loop {
-            let collected = match pending.take() {
-                Some(event) => Collected::Supervisor(event),
-                None => self.next().await,
-            };
             let event = self.event_from(collected);
             let next = transition(state, event);
             state = next.state;
             match self.execute(next.effect) {
                 Outcome::Continue => {}
-                Outcome::Event(event) => pending = Some(event),
                 Outcome::Close => break,
             }
+            collected = self.next().await;
         }
         self.drain().await;
         self.table.forget(&self.core.id);
     }
 
-    /// The catalog event the reducer starts from: the retained catalog,
-    /// or `Unavailable` at generation zero when none was pushed yet.
-    fn initial_catalog_event(&mut self) -> SupervisorEvent {
-        let observed = self.catalog_watch.borrow_and_update().unwrap_or(0);
-        classify(self.latest_catalog.as_ref(), observed, None)
-    }
-
     /// Waits for the next typed event, prioritizing synchronous lifecycle
-    /// events that causally precede a run wake or watched replacement,
-    /// and broadcasting deltas as they arrive without leaving the wait.
+    /// events that causally precede a run wake, and broadcasting deltas as
+    /// they arrive without leaving the wait.
     async fn next(&mut self) -> Collected {
         loop {
             tokio::select! {
@@ -160,7 +135,6 @@ impl Supervisor {
                 event = next_lifecycle_event(&mut self.lifecycle, &mut self.cancellations) => {
                     return Collected::Supervisor(event);
                 }
-                () = changed(&mut self.catalog_watch) => return self.catalog_event(),
                 received = recv_or_pending(&mut self.raw_deltas) => match received {
                     Some(delta) => self.core.publish_delta(delta),
                     None => self.raw_deltas = None,
@@ -172,36 +146,12 @@ impl Supervisor {
         }
     }
 
-    /// Classifies the catalog behind the watch that just changed.
-    fn catalog_event(&mut self) -> Collected {
-        let observed = self.catalog_watch.borrow_and_update().unwrap_or(0);
-        let snapshot = self.bindings.catalog();
-        let active = self.active_catalog.as_ref().map(|c| c.models.as_slice());
-        let event = classify(snapshot.as_ref(), observed, active);
-        Collected::Catalog { event, snapshot }
-    }
-
     /// Applies collected runtime data and returns only the pure event.
     fn event_from(&mut self, collected: Collected) -> SupervisorEvent {
         match collected {
             Collected::Supervisor(event) => event,
-            Collected::Catalog { event, snapshot } => {
-                if matches!(
-                    event,
-                    SupervisorEvent::CatalogGeneration {
-                        disposition: CatalogDisposition::Retained,
-                        ..
-                    }
-                ) && self.active_catalog.is_some()
-                {
-                    self.active_catalog.clone_from(&snapshot);
-                }
-                self.latest_catalog = snapshot;
-                event
-            }
             Collected::Run { run, result } => {
                 self.active_run = None;
-                self.core.finish_run(run);
                 self.core.done();
                 let result = self.completion(result);
                 SupervisorEvent::RunCompleted { run, result }
@@ -241,14 +191,16 @@ impl Supervisor {
     /// Executes one typed effect without making transition decisions.
     fn execute(&mut self, effect: SupervisorEffect) -> Outcome {
         match effect {
-            SupervisorEffect::Wait(_) | SupervisorEffect::Preserve(_) => Outcome::Continue,
-            SupervisorEffect::Cancel(origin) => {
-                self.report_cancel_origin(origin);
+            SupervisorEffect::Preserve(_) => Outcome::Continue,
+            SupervisorEffect::Cancel => {
                 self.core.interrupted();
                 self.core.cancel_current_run();
                 Outcome::Continue
             }
-            SupervisorEffect::Relaunch(relaunch) => self.relaunch(relaunch),
+            SupervisorEffect::Relaunch(relaunch) => {
+                self.relaunch(relaunch);
+                Outcome::Continue
+            }
             SupervisorEffect::Close(reason) => {
                 if reason == CloseReason::Requested && self.active_run.is_some() {
                     match effective_interrupt(Interrupt::Cancel, self.saw_terminal) {
@@ -263,58 +215,19 @@ impl Supervisor {
         }
     }
 
-    /// Resolves and launches one reducer-selected catalog generation.
-    fn relaunch(&mut self, relaunch: RelaunchEffect) -> Outcome {
-        let catalog = self
-            .latest_catalog
-            .as_ref()
-            .filter(|catalog| catalog.generation == relaunch.catalog_generation)
-            .cloned();
-        let Some(catalog) = catalog else {
-            return self.failed_relaunch(
-                relaunch.run,
-                "agent supervisor lost a reducer-selected binding",
-            );
-        };
+    /// Launches one reducer-selected run over the session's bindings.
+    fn relaunch(&mut self, relaunch: RelaunchEffect) {
         match relaunch.history {
             HistoryEffect::Preserve => {}
         }
-        self.active_catalog = Some(catalog);
-        let inputs = RunInputs {
-            run: relaunch.run,
-            host: self.bindings.host(),
-        };
+        let bindings = Arc::clone(&self.bindings);
         let core = Arc::clone(&self.core);
         let run = relaunch.run;
         self.core.alive();
         self.active_run = Some(Box::pin(async move {
-            let result = run_once(core, inputs).await;
+            let result = run_once(core, bindings).await;
             (run, result)
         }));
-        Outcome::Continue
-    }
-
-    /// Reports a relaunch that could not start and converts it into the
-    /// reducer's terminal event.
-    fn failed_relaunch(&mut self, run: RunId, message: &str) -> Outcome {
-        self.report_failure(message);
-        self.saw_terminal = true;
-        Outcome::Event(SupervisorEvent::RunCompleted {
-            run,
-            result: RunCompletion::Failed,
-        })
-    }
-
-    /// Records reducer-selected retirement separately from operator
-    /// cancellation.
-    fn report_cancel_origin(&self, origin: CancelOrigin) {
-        match origin {
-            CancelOrigin::Operator => {}
-            CancelOrigin::Catalog => tracing::debug!(
-                session = %self.core.id,
-                "agent run retired for a new catalog generation"
-            ),
-        }
     }
 
     /// Drains the last run after a close: the cancelled run answers its
@@ -323,8 +236,7 @@ impl Supervisor {
     /// rendered.
     async fn drain(&mut self) {
         if let Some(run) = self.active_run.take() {
-            let (run, result) = run.await;
-            self.core.finish_run(run);
+            let (_, result) = run.await;
             if let Err(failure) = result {
                 tracing::warn!(
                     session = %self.core.id,
@@ -338,37 +250,6 @@ impl Supervisor {
             self.core
                 .report(FailureKind::Interrupted, frame.message().to_owned());
         }
-    }
-}
-
-/// Classifies one retained catalog against the run's frozen bindings. No
-/// catalog pushed yet, or a catalog with no chat-capable entry, is
-/// unavailable: nothing a run could bind a model against.
-fn classify(
-    snapshot: Option<&CatalogBinding>,
-    observed_generation: u64,
-    active_models: Option<&[serde_json::Value]>,
-) -> SupervisorEvent {
-    let generation = snapshot.map_or(observed_generation, |catalog| catalog.generation);
-    let disposition = match (snapshot, active_models) {
-        (None, _) => CatalogDisposition::Unavailable,
-        (Some(catalog), _) if catalog.models.is_empty() => CatalogDisposition::Unavailable,
-        (Some(catalog), Some(active)) if catalog.models != active => {
-            CatalogDisposition::Replacement
-        }
-        (Some(_), _) => CatalogDisposition::Retained,
-    };
-    SupervisorEvent::CatalogGeneration {
-        generation,
-        disposition,
-    }
-}
-
-/// Waits for a watch to change; a dropped sender (the Harness is gone)
-/// pends forever, so the session ends through its own lifecycle.
-async fn changed(watch: &mut watch::Receiver<Option<u64>>) {
-    if watch.changed().await.is_err() {
-        std::future::pending::<()>().await;
     }
 }
 
@@ -391,7 +272,7 @@ async fn finished(run: &mut Option<RunFuture>) -> (RunId, Result<RunOutcome, Run
 /// Waits for the next synchronous lifecycle event, polling the guaranteed
 /// queue before the bounded cancellation queue. Cross-channel ordering is
 /// not load-bearing: a cancellation is valid in any reducer phase, and a
-/// close or settlement processed late lands on a phase that ignores it.
+/// close processed late lands on a phase that ignores it.
 async fn next_lifecycle_event(
     lifecycle: &mut mpsc::UnboundedReceiver<SupervisorEvent>,
     cancellations: &mut mpsc::Receiver<SupervisorEvent>,

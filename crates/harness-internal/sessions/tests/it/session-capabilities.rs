@@ -6,20 +6,16 @@ use std::sync::Arc;
 
 use harness_capabilities::CapabilityRegistry;
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
-use harness_sessions::environment::CatalogBinding;
 use harness_sessions::transition::SessionState;
 
-use super::{idless_chat_model, launch, launch_agent, unbound_harness_over, wait_for};
+use super::{harness_with_capabilities, launch, launch_agent, wait_for};
 
 #[tokio::test]
 async fn a_harness_whose_registry_lacks_user_input_refuses_an_agent_requiring_it() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
-    let harness = unbound_harness_over(dir.path(), recorder.clone(), CapabilityRegistry::new());
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![idless_chat_model()],
-    });
+    let harness =
+        harness_with_capabilities(dir.path(), recorder.clone(), CapabilityRegistry::new());
     let session = launch(&harness).await;
     wait_for(&session, SessionState::Closed).await;
     let runs = session.run_ids();
@@ -45,12 +41,9 @@ const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 
 async fn a_harness_whose_registry_lacks_web_refuses_an_agent_requiring_it() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
-    let harness = unbound_harness_over(dir.path(), recorder.clone(), CapabilityRegistry::new());
+    let harness =
+        harness_with_capabilities(dir.path(), recorder.clone(), CapabilityRegistry::new());
     std::fs::write(dir.path().join("agents").join("browses.md"), BROWSES).unwrap();
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![idless_chat_model()],
-    });
     let session = launch_agent(&harness, "browses").await;
     wait_for(&session, SessionState::Closed).await;
     let runs = session.run_ids();

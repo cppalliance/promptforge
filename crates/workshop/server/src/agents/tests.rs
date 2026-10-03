@@ -10,8 +10,7 @@ use std::time::Duration;
 use harness::capability::HostServices;
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::{
-    BoxFuture, CatalogBinding, Harness, HarnessConfig, InferenceBroker, LaunchRequest, OnDelta,
-    SessionState,
+    BoxFuture, Harness, HarnessConfig, InferenceBroker, LaunchRequest, OnDelta, SessionState,
 };
 use harness_gateway_client::{CompletionError, CompletionErrorKind};
 use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
@@ -50,12 +49,12 @@ impl InferenceBroker for OfflineBroker {
 }
 
 /// A Harness over the server's capabilities and `services`, with `browses`
-/// discoverable, the offline broker, and a usable catalog.
+/// discoverable and the offline broker.
 fn harness_over(dir: &Path, services: HostServices, recorder: Arc<MemoryRecorder>) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).expect("the agents directory creates");
     std::fs::write(agents.join("browses.md"), BROWSES).expect("the agent writes");
-    let harness = Harness::new(
+    Harness::new(
         HarnessConfig {
             agents_path: agents,
         },
@@ -63,12 +62,7 @@ fn harness_over(dir: &Path, services: HostServices, recorder: Arc<MemoryRecorder
         Arc::new(OfflineBroker),
         capabilities(),
         services,
-    );
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![serde_json::json!({ "kind": "chat" })],
-    });
-    harness
+    )
 }
 
 /// Launches `browses`, waits for its session to close, and returns the

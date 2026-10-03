@@ -107,8 +107,8 @@ pub(crate) fn register(
 }
 
 /// Registers the sessions subsystem's background task: the bindings
-/// forwarder that pushes the server's gateway binding, chat catalog, and
-/// Host snapshot into the registered Harness again on every replacement.
+/// forwarder that pushes the server's Host snapshot into the registered
+/// Harness again whenever the selection or the granted roots change.
 /// The task spawns when the server starts serving and stops inside the
 /// graceful-shutdown signal. The returned guard keeps the registration
 /// alive; the composition root holds it for the process lifetime.

@@ -378,7 +378,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-3>
 
-### Step 3: The catalog binding and its relaunches leave the Harness
+### Step 3: The catalog binding and its relaunches leave the Harness [completed]
 
 - Component: Broker seam
 - Depends on: step 2.

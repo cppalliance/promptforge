@@ -50,7 +50,7 @@ use crate::discovery::AgentSource;
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use crate::lifecycle::RunLifecycle;
 use crate::protocol::{Delta, DeltaKind, SessionEvent, SessionId};
-use crate::transition::{RunId, SessionState};
+use crate::transition::SessionState;
 
 /// Capacity of a session's event broadcast. The broadcast is the wakeup;
 /// a receiver that lags repairs by reading the transcript past its
@@ -216,12 +216,7 @@ impl Session {
         text: String,
         before_resume: impl FnOnce(),
     ) -> Result<(), WaitError> {
-        let accepted_run = self.core.lifecycle.accept_input();
-        let result = complete_input_response(&self.core.waits, token, text, before_resume);
-        if let (Err(_), Some(run)) = (&result, accepted_run) {
-            self.core.lifecycle.settle_turn(run);
-        }
-        result
+        complete_input_response(&self.core.waits, token, text, before_resume)
     }
 
     /// Cancels the current turn: the run dies as a stop reason (pending
@@ -273,7 +268,7 @@ pub(crate) struct SessionCore {
     pub(crate) args: String,
     /// The filesystem, input text, and collected output of every run.
     pub(crate) files: SessionFiles,
-    /// Cancellation provenance and the accepted-turn exclusion boundary.
+    /// The current run's cancel flag and the supervisor's event senders.
     pub(crate) lifecycle: Arc<RunLifecycle>,
     /// The session's unresolved user-input waits.
     pub(crate) waits: Arc<WaitRegistry>,
@@ -386,18 +381,13 @@ impl SessionCore {
     }
 
     /// Installs and retains the next run's fresh cancel handle.
-    pub(crate) fn arm_cancel(&self, run: RunId) -> promptforge::cancel::CancelHandle {
-        self.lifecycle.arm(run)
+    pub(crate) fn arm_cancel(&self) -> promptforge::cancel::CancelHandle {
+        self.lifecycle.arm()
     }
 
     /// Cancels the run selected by a reducer effect.
     pub(crate) fn cancel_current_run(&self) {
         self.lifecycle.cancel_current();
-    }
-
-    /// Clears the lifecycle identity after a run ends.
-    pub(crate) fn finish_run(&self, run: RunId) {
-        self.lifecycle.finish(run);
     }
 
     /// Reports one operator-facing failure of `kind` with its display
@@ -431,26 +421,20 @@ impl SessionCore {
     /// so a client woken by the event reads it in the transcript and sees
     /// a settled round count.
     pub(crate) fn observe(&self, event: &Event) {
-        match event {
-            // A failed model round or tool dispatch is operator-visible:
-            // the program survives it (the built-in chat pcalls
-            // models.loop and returns to waiting), so the run never fails
-            // and only the session can tell the client. Both are terminal
-            // for the turn.
-            Event::ModelTurnFailed { section, .. } | Event::ToolCallFailed { section, .. } => {
-                let (kind, boundary) = match event {
-                    Event::ModelTurnFailed { .. } => {
-                        (FailureKind::ModelTurnFailed, "Model turn failed")
-                    }
-                    _ => (FailureKind::ToolCallFailed, "Tool call failed"),
-                };
-                self.lifecycle.settle_current_turn();
-                self.report(kind, format!("{boundary} in agent `{section}`"));
-            }
-            Event::AssistantReply { .. } => {
-                self.lifecycle.settle_current_turn();
-            }
-            _ => {}
+        // A failed model round or tool dispatch is operator-visible: the
+        // program survives it (the built-in chat pcalls models.loop and
+        // returns to waiting), so the run never fails and only the
+        // session can tell the client.
+        if let Event::ModelTurnFailed { section, .. } | Event::ToolCallFailed { section, .. } =
+            event
+        {
+            let (kind, boundary) = match event {
+                Event::ModelTurnFailed { .. } => {
+                    (FailureKind::ModelTurnFailed, "Model turn failed")
+                }
+                _ => (FailureKind::ToolCallFailed, "Tool call failed"),
+            };
+            self.report(kind, format!("{boundary} in agent `{section}`"));
         }
         // No receiver means no client is attached; the transcript already
         // holds the entry, so a late client reads it there.

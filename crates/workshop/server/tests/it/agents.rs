@@ -19,7 +19,6 @@ use axum::Router;
 use axum::response::Response;
 use axum::routing::post;
 use serde_json::json;
-use tokio::sync::Notify;
 
 use workshop_server::fixtures::{
     gateway_updater, replace_gateway as replace_fixture_gateway, spawn_bindings_forwarder,
@@ -113,11 +112,11 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     };
     let (state, base) = spawn_router(&config).await;
     // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the Harness is spawned here.
+    // registered tasks, so the forwarder that pushes Host snapshot changes
+    // into the Harness is spawned here.
     spawn_bindings_forwarder(&state);
-    // The session's model catalog is built from the retained catalog at
-    // launch, so the catalog lands before any test launches.
+    // The broker holds a run's model list until the retained catalog has
+    // a chat-capable model, so the catalog lands before any test launches.
     state
         .catalog()
         .publish(vec![json!({ "id": "test-model", "object": "model" })]);

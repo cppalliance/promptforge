@@ -1,14 +1,17 @@
 //! The model a launch binds, resolved through the broker's model list: the
 //! Host's selection when one is set, the list's first model when none is,
 //! and a run that fails as `RunFailed` when the selection is absent from
-//! the list or the list cannot be fetched.
+//! the list or the list cannot be fetched. A broker that holds its list
+//! keeps the run waiting, and Stop and close still end that run.
 
+use harness_runner::performers::InferenceBroker;
 use harness_sessions::environment::HostSnapshot;
 use harness_sessions::session::{FailureKind, SessionFailure};
 use promptforge::model::CompletionErrorKind;
+use tokio::sync::mpsc;
 
 use super::*;
-use crate::support::{Rounds, ScriptedBroker};
+use crate::support::{HoldingBroker, Rounds, ScriptedBroker};
 
 /// A program whose one model call is a tool-less infer through its one
 /// declared role, so the round names the model the launch bound.
@@ -18,9 +21,12 @@ const RESOLVES: &str = "---\nname: resolves\ndescription: infers once\npromptfor
     ## Only\n\n```lua\nreturn models.infer('prose')\n```\n";
 
 /// A Harness on `broker` over a fresh agents directory holding
-/// `resolves.md`, with a usable catalog bound at generation 1 and the
-/// Host's selection set to `selected`.
-fn harness_on(dir: &Path, broker: ScriptedBroker, selected: Option<&str>) -> Harness {
+/// `resolves.md`, with the Host's selection set to `selected`.
+fn harness_on(
+    dir: &Path,
+    broker: impl InferenceBroker + 'static,
+    selected: Option<&str>,
+) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join("resolves.md"), RESOLVES).unwrap();
@@ -33,10 +39,6 @@ fn harness_on(dir: &Path, broker: ScriptedBroker, selected: Option<&str>) -> Har
         CapabilityRegistry::new(),
         HostServices::new(),
     );
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![idless_chat_model()],
-    });
     harness.set_host(HostSnapshot {
         selected_model: selected.map(str::to_owned),
         ..HostSnapshot::default()
@@ -128,4 +130,53 @@ async fn a_failed_model_listing_fails_the_run_with_the_brokers_message() {
         "the report carries the broker's message: {}",
         failure.message
     );
+}
+
+/// Waits until the holding broker has been asked for its model list once
+/// more.
+async fn next_listing(listings: &mut mpsc::UnboundedReceiver<()>) {
+    tokio::time::timeout(PATIENCE, listings.recv())
+        .await
+        .expect("the run asks the broker for its models in time")
+        .expect("the broker is alive");
+}
+
+#[tokio::test]
+async fn a_close_ends_a_session_whose_broker_never_lists_its_models() {
+    let dir = tempfile::tempdir().unwrap();
+    let (broker, mut listings) = HoldingBroker::new();
+    let harness = harness_on(dir.path(), broker, None);
+    let session = launch_agent(&harness, "resolves").await;
+    next_listing(&mut listings).await;
+
+    assert!(harness.close(session.id()), "the session was registered");
+    wait_for(&session, SessionState::Closed).await;
+    assert!(
+        session.run_ids().is_empty(),
+        "the run ended before the recorder began it"
+    );
+}
+
+#[tokio::test]
+async fn a_turn_cancel_relaunches_into_the_same_model_list_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    let (broker, mut listings) = HoldingBroker::new();
+    let harness = harness_on(dir.path(), broker, None);
+    let session = launch_agent(&harness, "resolves").await;
+    next_listing(&mut listings).await;
+
+    session.cancel();
+    next_listing(&mut listings).await;
+    assert_eq!(
+        session.state(),
+        SessionState::Alive,
+        "the relaunched run is waiting, and the session goes on"
+    );
+    assert!(
+        session.run_ids().is_empty(),
+        "neither run reached the recorder"
+    );
+
+    assert!(harness.close(session.id()), "the session was registered");
+    wait_for(&session, SessionState::Closed).await;
 }

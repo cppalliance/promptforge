@@ -1,15 +1,6 @@
 //! Pure state transitions for one agent-session supervisor: the reducer
 //! whose matches stay wildcard-free, so a new variant is a compile error.
 
-/// Why the current run's cancellation handle fires.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CancelOrigin {
-    /// The operator explicitly cancelled the current turn.
-    Operator,
-    /// A usable catalog generation replaced the run's frozen bindings.
-    Catalog,
-}
-
 /// One run's terminal result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunCompletion {
@@ -21,17 +12,6 @@ pub enum RunCompletion {
     Failed,
 }
 
-/// How a published catalog generation relates to the frozen run catalog.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CatalogDisposition {
-    /// No chat-capable catalog is currently available.
-    Unavailable,
-    /// The generation is usable without changing frozen model bindings.
-    Retained,
-    /// The generation is usable and changes frozen model bindings.
-    Replacement,
-}
-
 /// Identity assigned to one launched run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunId(u64);
@@ -39,6 +19,8 @@ pub struct RunId(u64);
 /// An input to the pure supervisor transition model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SupervisorEvent {
+    /// The session launched; its first run starts.
+    Start,
     /// A run produced its terminal result.
     RunCompleted {
         /// The run that completed.
@@ -46,30 +28,10 @@ pub enum SupervisorEvent {
         /// How it completed.
         result: RunCompletion,
     },
-    /// The Host published a catalog generation.
-    CatalogGeneration {
-        /// The catalog bus generation.
-        generation: u64,
-        /// Whether the frozen run can retain its bindings.
-        disposition: CatalogDisposition,
-    },
     /// The operator cancelled the current turn.
     OperatorCancellation,
-    /// A durable input event resumed this run.
-    AcceptedInput(RunId),
-    /// The accepted turn reached a durable terminal event.
-    TerminalSettlement(RunId),
     /// The owning session closed.
     Close,
-}
-
-/// The condition the supervisor must await.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitFor {
-    /// A usable chat catalog.
-    Catalog,
-    /// The accepted turn's durable terminal event.
-    TerminalSettlement,
 }
 
 /// Why the current ownership remains unchanged.
@@ -97,8 +59,6 @@ pub enum HistoryEffect {
 pub struct RelaunchEffect {
     /// Identity assigned to the replacement run.
     pub run: RunId,
-    /// Catalog generation frozen by the replacement.
-    pub catalog_generation: u64,
     /// Event-log treatment across replacement.
     pub history: HistoryEffect,
 }
@@ -117,10 +77,8 @@ pub enum CloseReason {
 /// One typed action selected by the transition model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SupervisorEffect {
-    /// Awaits a named condition.
-    Wait(WaitFor),
-    /// Cancels the current run with provenance.
-    Cancel(CancelOrigin),
+    /// Cancels the current run.
+    Cancel,
     /// Keeps the named ownership unchanged.
     Preserve(PreserveReason),
     /// Launches a replacement over retained history.
@@ -129,10 +87,10 @@ pub enum SupervisorEffect {
     Close(CloseReason),
 }
 
-/// Whether the session is waiting, running, retiring, or closed.
+/// Whether the session is starting, running, retiring, or closed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
-    WaitingForCatalog,
+    Starting,
     Running,
     Cancelling,
     Closed,
@@ -144,24 +102,16 @@ pub struct SupervisorState {
     phase: Phase,
     active_run: Option<RunId>,
     next_run: u64,
-    catalog_generation: Option<u64>,
-    observed_catalog_generation: Option<u64>,
-    catalog_retirement_pending: bool,
-    accepted_run: Option<RunId>,
 }
 
 impl SupervisorState {
-    /// Starts supervision before a usable chat catalog exists.
+    /// Starts supervision before the first run launches.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            phase: Phase::WaitingForCatalog,
+            phase: Phase::Starting,
             active_run: None,
             next_run: 1,
-            catalog_generation: None,
-            observed_catalog_generation: None,
-            catalog_retirement_pending: false,
-            accepted_run: None,
         }
     }
 }
@@ -189,62 +139,19 @@ pub fn transition(state: SupervisorState, event: SupervisorEvent) -> SupervisorT
     }
     match event {
         SupervisorEvent::Close => close(state, CloseReason::Requested),
-        SupervisorEvent::CatalogGeneration {
-            generation,
-            disposition,
-        } => catalog_changed(state, generation, disposition),
+        SupervisorEvent::Start => started(state),
         SupervisorEvent::OperatorCancellation => operator_cancelled(state),
-        SupervisorEvent::AcceptedInput(run) => input_accepted(state, run),
-        SupervisorEvent::TerminalSettlement(run) => turn_settled(state, run),
         SupervisorEvent::RunCompleted { run, result } => run_completed(state, run, result),
     }
 }
 
-fn catalog_changed(
-    mut state: SupervisorState,
-    generation: u64,
-    disposition: CatalogDisposition,
-) -> SupervisorTransition {
-    if state
-        .observed_catalog_generation
-        .is_some_and(|observed| generation <= observed)
-    {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        );
-    }
-    state.observed_catalog_generation = Some(generation);
-    state.catalog_generation =
-        (disposition != CatalogDisposition::Unavailable).then_some(generation);
-
+fn started(state: SupervisorState) -> SupervisorTransition {
     match state.phase {
-        Phase::WaitingForCatalog => {
-            if disposition == CatalogDisposition::Unavailable {
-                return changed(state, SupervisorEffect::Wait(WaitFor::Catalog));
-            }
-            relaunch(state)
-        }
-        Phase::Running => match disposition {
-            CatalogDisposition::Unavailable | CatalogDisposition::Retained => {
-                let effect =
-                    if state.catalog_retirement_pending && state.accepted_run == state.active_run {
-                        SupervisorEffect::Wait(WaitFor::TerminalSettlement)
-                    } else {
-                        SupervisorEffect::Preserve(PreserveReason::CurrentRun)
-                    };
-                changed(state, effect)
-            }
-            CatalogDisposition::Replacement => {
-                state.catalog_retirement_pending = true;
-                if state.accepted_run == state.active_run {
-                    changed(state, SupervisorEffect::Wait(WaitFor::TerminalSettlement))
-                } else {
-                    state.phase = Phase::Cancelling;
-                    changed(state, SupervisorEffect::Cancel(CancelOrigin::Catalog))
-                }
-            }
-        },
+        Phase::Starting => relaunch(state),
+        Phase::Running => changed(
+            state,
+            SupervisorEffect::Preserve(PreserveReason::CurrentRun),
+        ),
         Phase::Cancelling => changed(
             state,
             SupervisorEffect::Preserve(PreserveReason::CancellationPending),
@@ -255,68 +162,19 @@ fn catalog_changed(
 
 fn operator_cancelled(mut state: SupervisorState) -> SupervisorTransition {
     match state.phase {
-        Phase::WaitingForCatalog => changed(state, SupervisorEffect::Wait(WaitFor::Catalog)),
+        Phase::Starting => changed(
+            state,
+            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
+        ),
         Phase::Running => {
-            state.accepted_run = None;
             state.phase = Phase::Cancelling;
-            changed(state, SupervisorEffect::Cancel(CancelOrigin::Operator))
+            changed(state, SupervisorEffect::Cancel)
         }
         Phase::Cancelling => changed(
             state,
             SupervisorEffect::Preserve(PreserveReason::CancellationPending),
         ),
         Phase::Closed => changed(state, SupervisorEffect::Preserve(PreserveReason::Closed)),
-    }
-}
-
-fn input_accepted(mut state: SupervisorState, run: RunId) -> SupervisorTransition {
-    if state.phase != Phase::Running || state.active_run != Some(run) {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        );
-    }
-    if state.accepted_run == Some(run) {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        );
-    }
-    state.accepted_run = Some(run);
-    changed(
-        state,
-        SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-    )
-}
-
-fn turn_settled(mut state: SupervisorState, run: RunId) -> SupervisorTransition {
-    if state.active_run != Some(run) {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        );
-    }
-    if state.phase == Phase::Cancelling {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-        );
-    }
-    if state.accepted_run != Some(run) {
-        return changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        );
-    }
-    state.accepted_run = None;
-    if state.catalog_retirement_pending {
-        state.phase = Phase::Cancelling;
-        changed(state, SupervisorEffect::Cancel(CancelOrigin::Catalog))
-    } else {
-        changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-        )
     }
 }
 
@@ -332,7 +190,6 @@ fn run_completed(
         );
     }
     state.active_run = None;
-    state.accepted_run = None;
     match result {
         RunCompletion::Interrupted => relaunch(state),
         RunCompletion::Completed => close(state, CloseReason::RunCompleted),
@@ -341,21 +198,12 @@ fn run_completed(
 }
 
 fn relaunch(mut state: SupervisorState) -> SupervisorTransition {
-    let Some(catalog_generation) = state.catalog_generation else {
-        state.phase = Phase::WaitingForCatalog;
-        state.catalog_retirement_pending = false;
-        return changed(state, SupervisorEffect::Wait(WaitFor::Catalog));
-    };
     let run = RunId(state.next_run);
     state.next_run = state.next_run.saturating_add(1);
-    state.catalog_generation = Some(catalog_generation);
     state.active_run = Some(run);
-    state.accepted_run = None;
     state.phase = Phase::Running;
-    state.catalog_retirement_pending = false;
     let effect = RelaunchEffect {
         run,
-        catalog_generation,
         history: HistoryEffect::Preserve,
     };
     changed(state, SupervisorEffect::Relaunch(effect))
@@ -364,9 +212,6 @@ fn relaunch(mut state: SupervisorState) -> SupervisorTransition {
 fn close(mut state: SupervisorState, reason: CloseReason) -> SupervisorTransition {
     state.phase = Phase::Closed;
     state.active_run = None;
-    state.accepted_run = None;
-    state.catalog_generation = None;
-    state.catalog_retirement_pending = false;
     changed(state, SupervisorEffect::Close(reason))
 }
 

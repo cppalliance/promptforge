@@ -78,12 +78,6 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
     echo_stream(&model, &last)
 }
 
-/// A profile selection the gateway serves without a restart, whose
-/// refreshed catalog replaces the launch-time model with `model-b`.
-async fn switch_to_model_b() -> Response {
-    axum::Json(json!({"profile": "beta", "restart_required": false})).into_response()
-}
-
 /// One workshop server over the gate mock. The agents directory is
 /// missing on purpose: every `chat` launch runs the embedded built-in.
 struct GateServer {
@@ -98,8 +92,7 @@ struct GateServer {
 }
 
 /// Every id a gate may select, in the order the typed catalog lists
-/// them. `model-b` stays first: the profile-switch gates rely on the menu
-/// auto-selecting it from this list.
+/// them.
 const GATE_MODELS: &[&str] = &["model-b", "model-a", "test-model", "claude-opus-4-6"];
 
 /// Spawns the gate server with `models` in the retained catalog and the
@@ -123,7 +116,6 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
                     async move { gate_completions(&captured, &body) }
                 }),
             )
-            .route("/admin/switch-profile", post(switch_to_model_b))
             .route(
                 "/admin/profiles",
                 get(|| async { axum::Json(json!({"profiles": ["main", "beta"]})) }),
@@ -144,8 +136,8 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     };
     let (state, ws_base) = spawn_router(&config).await;
     // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the Harness is spawned here.
+    // registered tasks, so the forwarder that pushes Host snapshot changes
+    // into the Harness is spawned here.
     spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models

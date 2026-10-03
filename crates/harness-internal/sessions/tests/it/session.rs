@@ -2,10 +2,10 @@
 //! drives the program on the effect loop and records it through the
 //! Host's recorder; a reconnecting client's transcript read matches what
 //! the recorder holds and what a live subscriber saw; an operator's answer
-//! resumes the parked program and the run completes; a turn-cancel
+//! resumes the parked program and the run completes; and a turn-cancel
 //! relaunches the program as a second run whose transcript indices
-//! continue; and a catalog whose models changed retires the run. The close
-//! path - draining outstanding effects and reporting the interrupt as one
+//! continue. The close path - draining outstanding effects and reporting
+//! the interrupt as one
 //! `Interrupted` failure - sits in the `close` child module, the
 //! capabilities runs resolve against in the `capabilities` child module,
 //! the prompt's declared input and output files in the `files` child
@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use harness_capabilities::{CapabilityRegistry, HostServices, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunOutcome, RunRecorder};
-use harness_sessions::environment::CatalogBinding;
 use harness_sessions::input::{WaitError, WaitFrame};
 use harness_sessions::protocol::{LaunchRequest, SessionEvent, SessionId};
 use harness_sessions::runtime::{Harness, HarnessConfig, LaunchError};
@@ -56,13 +55,6 @@ const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge
 /// How long a test waits for the supervisor to act.
 const PATIENCE: Duration = Duration::from_secs(10);
 
-/// A chat-capable catalog entry with no `id`: usable, so a session
-/// launches under it. Model resolution reads the broker's list, not this
-/// entry, so the offline broker leaves every run without a model.
-fn idless_chat_model() -> serde_json::Value {
-    serde_json::json!({ "kind": "chat" })
-}
-
 /// A registry holding `promptforge/user-input`, which `asks.md` declares.
 fn user_input_registry() -> CapabilityRegistry {
     let mut registry = CapabilityRegistry::new();
@@ -72,8 +64,8 @@ fn user_input_registry() -> CapabilityRegistry {
 
 /// A Harness over a fresh agents directory holding `asks.md`, recording
 /// through `recorder` and resolving capabilities against `capabilities`,
-/// on the offline broker and with no catalog bound yet.
-fn unbound_harness_over(
+/// on the offline broker, which leaves every run without a model.
+fn harness_with_capabilities(
     dir: &Path,
     recorder: Arc<dyn RunRecorder>,
     capabilities: CapabilityRegistry,
@@ -92,20 +84,9 @@ fn unbound_harness_over(
     )
 }
 
-/// [`unbound_harness_over`] a fresh [`MemoryRecorder`] and user input.
-fn unbound_harness(dir: &Path) -> Harness {
-    unbound_harness_over(dir, Arc::new(MemoryRecorder::new()), user_input_registry())
-}
-
-/// [`unbound_harness_over`] user input, with a usable catalog bound at
-/// generation 1.
+/// [`harness_with_capabilities`] user input.
 fn harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
-    let harness = unbound_harness_over(dir, recorder, user_input_registry());
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![idless_chat_model()],
-    });
-    harness
+    harness_with_capabilities(dir, recorder, user_input_registry())
 }
 
 /// [`harness_over`] a fresh [`MemoryRecorder`], which the Harness alone
@@ -269,8 +250,7 @@ async fn an_answer_resumes_the_parked_wait_and_the_run_completes_with_it() {
     let mut waits = session.subscribe_waits();
     let token = required_token(&mut waits).await;
 
-    // A refused answer (the accept-then-settle path) leaves the wait
-    // open for the real one.
+    // A refused answer leaves the wait open for the real one.
     let refused = session
         .send_input("not-a-token", "ignored".to_owned(), || {})
         .expect_err("an unknown token is refused");
@@ -376,82 +356,6 @@ async fn a_turn_cancel_relaunches_as_a_second_run_with_indices_continuing() {
         tail.first().map(|event| event.index),
         Some(first_run_events),
         "the second run's first event takes the next index"
-    );
-
-    assert!(harness.close(session.id()));
-    wait_for(&session, SessionState::Closed).await;
-}
-
-#[tokio::test]
-async fn a_catalog_with_different_models_retires_the_run() {
-    let dir = tempfile::tempdir().unwrap();
-    let (harness, recorder) = recorded_harness(dir.path());
-    let session = launch(&harness).await;
-    let mut waits = session.subscribe_waits();
-    let first_token = required_token(&mut waits).await;
-
-    // Same models, new generation: retained, the run keeps going.
-    harness.set_catalog(CatalogBinding {
-        generation: 2,
-        models: vec![idless_chat_model()],
-    });
-    tokio::task::yield_now().await;
-    assert_eq!(session.unresolved_waits(), vec![first_token.clone()]);
-
-    // Different models: the frozen bindings are stale, so the run is
-    // retired and the program relaunched under the new catalog. The
-    // offline broker lists no model, so the relaunch binds none.
-    harness.set_catalog(CatalogBinding {
-        generation: 3,
-        models: vec![serde_json::json!({ "kind": "chat", "description": "other" })],
-    });
-    cancelled_frame(&mut waits, &first_token).await;
-    let second_token = required_token(&mut waits).await;
-    assert_eq!(session.state(), SessionState::Alive);
-    assert_eq!(session.unresolved_waits(), vec![second_token]);
-
-    let runs = session.run_ids();
-    assert_eq!(runs.len(), 2, "the retirement relaunched the program");
-    assert_eq!(
-        recorder.outcome(runs[0]),
-        Some(RunOutcome::Cancelled),
-        "the retired run ended as cancelled at the recorder"
-    );
-
-    assert!(harness.close(session.id()));
-    wait_for(&session, SessionState::Closed).await;
-}
-
-#[tokio::test]
-async fn an_empty_catalog_holds_the_session_until_a_chat_model_arrives() {
-    let dir = tempfile::tempdir().unwrap();
-    let harness = unbound_harness(dir.path());
-    // A catalog with no chat-capable entry is pushed as an empty list: the
-    // launch is acknowledged, but no run starts under it.
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: Vec::new(),
-    });
-    let session = launch(&harness).await;
-    let mut waits = session.subscribe_waits();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(200), waits.recv())
-            .await
-            .is_err(),
-        "no run starts while the catalog holds no chat-capable model"
-    );
-    assert!(session.run_ids().is_empty(), "no run row was opened");
-
-    // The first usable generation starts the program.
-    harness.set_catalog(CatalogBinding {
-        generation: 2,
-        models: vec![idless_chat_model()],
-    });
-    let _token = required_token(&mut waits).await;
-    assert_eq!(
-        session.run_ids().len(),
-        1,
-        "the usable catalog launched one run"
     );
 
     assert!(harness.close(session.id()));

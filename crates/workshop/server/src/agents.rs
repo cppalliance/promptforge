@@ -11,10 +11,11 @@
 //! subsystem handle; this module reaches it through the registry and opens
 //! every session through it. The Harness reaches the gateway only through
 //! the server's inference broker ([`broker`]), which follows the live
-//! gateway binding. Everything else the Harness knows about the server
-//! arrives as data pushed through its public API ([`bindings`]): the
-//! chat-capable catalog and the Host snapshot (the menu's selection and
-//! the workspace's granted roots). Status-bar reporting stays in the
+//! gateway binding and holds a model list until the menu's catalog has a
+//! chat-capable model. Everything else the Harness knows about the server
+//! arrives as data pushed through its public API ([`bindings`]): the Host
+//! snapshot (the menu's selection and the workspace's granted roots).
+//! Status-bar reporting stays in the
 //! server (`status`): a per-session reporter derives it from the session's
 //! events, deltas, and error reports.
 //!
@@ -59,13 +60,12 @@ const HARNESS_STATE_DIR: &str = "harness";
 
 /// The Harness every agent session runs in, built for `config` over the
 /// server's inference broker, which reaches the gateway `registry` holds,
-/// with the server's current state already pushed through its public API:
-/// the chat catalog and the Host snapshot, each read through `registry`
-/// from the subsystems registered before it. Its capabilities are
-/// [`capabilities`] and its services [`services`]. The composition root
-/// registers the returned handle and the forwarder task
-/// ([`register_tasks`]) that keeps the bindings current from the buses
-/// once the server serves. Nothing touches the filesystem here: the run
+/// with the server's current Host snapshot already pushed through its
+/// public API, read through `registry` from the subsystems registered
+/// before it. Its capabilities are [`capabilities`] and its services
+/// [`services`]. The composition root registers the returned handle and
+/// the forwarder task ([`register_tasks`]) that keeps the snapshot current
+/// from the buses once the server serves. Nothing touches the filesystem here: the run
 /// log opens under the state directory when the first run starts.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
     let harness = Arc::new(Harness::new(
@@ -169,8 +169,8 @@ impl AgentSessions {
             .map_or_else(Vec::new, |harness| harness.discover())
     }
 
-    /// Pushes the server's current catalog and Host state into the
-    /// Harness, so the next run the Harness prepares reads them.
+    /// Pushes the server's current Host snapshot into the Harness, so the
+    /// next run the Harness prepares reads it.
     pub(crate) fn sync_bindings(&self) {
         if let Some(harness) = self.harness() {
             push_bindings(&self.inner.registry, &harness);

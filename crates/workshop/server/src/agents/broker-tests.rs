@@ -1,10 +1,12 @@
 //! Workshop broker tests: with no gateway registered, or with one whose
 //! key cannot build, every round and model list fails as `Unavailable`
-//! with no URL or key in the message, and after a replacement binding is
+//! with no URL or key in the message, after a replacement binding is
 //! published the next round and the next model list reach the
-//! replacement.
+//! replacement, and a model list waits while the menu's catalog holds no
+//! chat-capable model.
 
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode, header};
@@ -17,6 +19,7 @@ use promptforge::model::{
 };
 use serde_json::json;
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
+use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Registration, Registry};
 
 use super::WorkshopBroker;
@@ -199,4 +202,32 @@ async fn after_a_replacement_the_next_round_and_model_list_reach_the_replacement
         "from second-model",
         "the next round reaches the replacement under its key"
     );
+}
+
+#[tokio::test]
+async fn a_model_list_waits_until_the_catalog_holds_a_chat_capable_model() {
+    let gateway = spawn_gateway(keyed_gateway("first-model", "first-key")).await;
+    let (registry, _binding, _guard) = registry_with_gateway(&gateway, "first-key");
+    let catalog = CatalogBus::new();
+    let menu = MenuBus::new(catalog.clone(), None);
+    let _menu_guards = workshop_menu::register(&registry, &catalog, &menu);
+    let broker = WorkshopBroker::new(registry);
+
+    let mut listing = Box::pin(listed(&broker));
+    catalog.publish(vec![
+        json!({ "id": "whisper-base-en", "kind": "transcription" }),
+    ]);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut listing)
+            .await
+            .is_err(),
+        "a catalog holding no chat-capable model keeps the list waiting"
+    );
+
+    catalog.publish(vec![json!({ "id": "first-model", "kind": "chat" })]);
+    let models = tokio::time::timeout(Duration::from_secs(10), listing)
+        .await
+        .expect("the list answers once a chat-capable model is published")
+        .expect("the gateway lists");
+    assert_eq!(models, ["first-model"], "the list is the gateway's own");
 }

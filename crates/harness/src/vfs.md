@@ -70,7 +70,7 @@ use harness::vfs::{Origin, VfsRef};
 use harness::{LaunchOptions, LaunchRequest, SessionState};
 # use harness::capability::{CapabilityRegistry, HostServices};
 # use harness::record::MemoryRecorder;
-# use harness::{BoxFuture, CatalogBinding, Harness, HarnessConfig, HostSnapshot, InferenceBroker, OnDelta};
+# use harness::{BoxFuture, Harness, HarnessConfig, HostSnapshot, InferenceBroker, OnDelta};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # use std::error::Error;
 # use std::sync::Arc;
@@ -99,7 +99,6 @@ use harness::{LaunchOptions, LaunchRequest, SessionState};
 # );
 # std::fs::write(agents.join("summarize.md"), source)?;
 # let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), CapabilityRegistry::new(), HostServices::new());
-# harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 
 // 1. Build an in-memory store, and keep a clone for desk.
@@ -166,7 +165,7 @@ use promptforge::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
 use std::sync::{Arc, Mutex};
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{BoxFuture, CatalogBinding, Harness, HarnessConfig, HostSnapshot, InferenceBroker, OnDelta};
+# use harness::{BoxFuture, Harness, HarnessConfig, HostSnapshot, InferenceBroker, OnDelta};
 # use harness::{LaunchOptions, LaunchRequest, Session, SessionState, WaitFrame};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # use std::error::Error;
@@ -199,7 +198,6 @@ use std::sync::{Arc, Mutex};
 # let mut capabilities = CapabilityRegistry::new();
 # capabilities.register(Arc::new(UserInput::new()))?;
 # let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-# harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 # fn review() -> LaunchRequest {
 #     LaunchRequest { agent: "review".into(), args: String::new(), input_text: None }

@@ -1,7 +1,8 @@
 //! The inference brokers the suites hand a Harness: a scripted broker that
 //! serves a fixed model list, answers every round with one reply, and
-//! keeps each round it was handed, and an offline broker that lists no
-//! model and refuses every round.
+//! keeps each round it was handed, an offline broker that lists no model
+//! and refuses every round, and a holding broker whose model list never
+//! answers.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -11,6 +12,7 @@ use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, CompletionResult, Message,
     ModelBinding, ModelCatalog, ModelDescriptor, ModelId, StreamDelta, ThinkingMode, ToolSchema,
 };
+use tokio::sync::mpsc;
 
 /// One round as a scripted broker saw it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +117,40 @@ pub(crate) struct OfflineBroker;
 impl InferenceBroker for OfflineBroker {
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
         Box::pin(async { Ok(ModelCatalog::empty()) })
+    }
+
+    fn chat(
+        &self,
+        _binding: ModelBinding,
+        _messages: Vec<Message>,
+        _tools: Vec<ToolSchema>,
+        _options: CompletionOptions,
+        _on_delta: Option<OnDelta>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        let kind = CompletionErrorKind::Unavailable;
+        Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+    }
+}
+
+/// Holds every model listing forever and announces each one as it is
+/// asked for: a Host whose broker has no model to offer yet. A round is
+/// never made.
+pub(crate) struct HoldingBroker {
+    listings: mpsc::UnboundedSender<()>,
+}
+
+impl HoldingBroker {
+    /// The broker and the receiver that hears each listing it holds.
+    pub(crate) fn new() -> (Self, mpsc::UnboundedReceiver<()>) {
+        let (listings, heard) = mpsc::unbounded_channel();
+        (Self { listings }, heard)
+    }
+}
+
+impl InferenceBroker for HoldingBroker {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        let _ = self.listings.send(());
+        Box::pin(std::future::pending())
     }
 
     fn chat(

@@ -51,7 +51,7 @@ fn the_host_snapshot_serves_the_first_root_and_the_selection() {
 async fn no_selection_and_an_empty_broker_catalog_bind_no_model() {
     // No selection and a broker that lists nothing: nothing to resolve,
     // so the roles stay unbound rather than the run failing.
-    let model = current_model(&HostSnapshot::default(), &EmptyBroker)
+    let (_, model) = current_model(&Bindings::new(), &EmptyBroker)
         .await
         .expect("an empty list is not a failure");
     assert!(model.is_none());

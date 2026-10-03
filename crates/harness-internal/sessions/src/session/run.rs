@@ -1,9 +1,11 @@
-//! One run of a session's program on the effect loop: resolve the
-//! client's current model through the Host's broker, arm the run's cancel
-//! flag, prepare the run over the broker and the session's delta callback
-//! (beginning it at the Host's recorder and staging the declared input
-//! file), drive it to its end, and read the declared output file once it
-//! completes.
+//! One run of a session's program on the effect loop: arm the run's
+//! cancel flag, resolve the client's current model through the Host's
+//! broker and read the Host snapshot once it answers (a cancel while the
+//! broker holds its model list ends the run as cancelled), prepare the
+//! run over the broker and the session's delta
+//! callback (beginning it at the Host's recorder and staging the declared
+//! input file), drive it to its end, and read the declared output file
+//! once it completes.
 //!
 //! Every event the run reports goes through the session core's sink once
 //! the recorder has taken it, so the recorder, the live broadcast, and the
@@ -23,9 +25,8 @@ use promptforge::model::StreamDelta;
 use tokio::sync::mpsc;
 
 use crate::discovery::AgentSource;
-use crate::environment::{CurrentModelError, HostSnapshot, current_model};
+use crate::environment::{Bindings, CurrentModelError, current_model};
 use crate::input::SessionInputBroker;
-use crate::transition::RunId;
 
 use super::SessionCore;
 
@@ -47,26 +48,18 @@ pub(crate) enum RunFailure {
     Drive(DriveError),
 }
 
-/// What one run needs beyond the session: the reducer's identity for it
-/// and the Host state read at launch.
-pub(crate) struct RunInputs {
-    /// The reducer's identity for the run.
-    pub(crate) run: RunId,
-    /// The Host snapshot read at launch.
-    pub(crate) host: HostSnapshot,
-}
-
-/// Runs the session's program once under `inputs` and reports how it
-/// ended.
+/// Runs the session's program once and reports how it ended. `bindings`
+/// is read for the Host snapshot once the broker has listed its models.
 pub(crate) async fn run_once(
     core: Arc<SessionCore>,
-    inputs: RunInputs,
+    bindings: Arc<Bindings>,
 ) -> Result<RunOutcome, RunFailure> {
-    let RunInputs { run, host } = inputs;
-    let model = current_model(&host, &*core.broker)
-        .await
-        .map_err(RunFailure::Model)?;
-    let cancel = core.arm_cancel(run);
+    let cancel = core.arm_cancel();
+    let (host, model) = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return Ok(RunOutcome::Cancelled),
+        resolved = current_model(&bindings, &*core.broker) => resolved.map_err(RunFailure::Model)?,
+    };
     let on_delta = delta_callback(core.delta_source.clone());
     let vfs = core.files.run_vfs();
     let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);

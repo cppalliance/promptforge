@@ -17,7 +17,7 @@ use harness::cancel::{self, CancelHandle};
 use harness::Session;
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
+# use harness::{Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
@@ -37,7 +37,6 @@ use harness::Session;
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
 #     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
-#     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
 # }

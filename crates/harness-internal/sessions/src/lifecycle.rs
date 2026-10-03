@@ -5,67 +5,56 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use promptforge::cancel::CancelHandle;
 use tokio::sync::mpsc;
 
-use crate::transition::{RunId, SupervisorEvent};
+use crate::transition::SupervisorEvent;
 
 /// Capacity of the bounded operator-cancellation queue.
 ///
-/// `OperatorCancellation` is the one loss-tolerant supervisor event: no
-/// reducer wait is ever conditioned on it, and a full queue already holds
-/// a pending cancellation that retires the current run, so dropping a
-/// concurrent duplicate preserves semantics. Producers are operator
-/// gestures, so one pending cancellation covers the entire in-flight set
-/// with headroom.
+/// `OperatorCancellation` is the one loss-tolerant supervisor event: a
+/// full queue already holds a pending cancellation that retires the
+/// current run, so dropping a concurrent duplicate preserves semantics.
+/// Producers are operator gestures, so one pending cancellation covers the
+/// entire in-flight set with headroom.
 pub const CANCELLATION_CAPACITY: usize = 1;
 
 /// Synchronous producers for one supervisor's typed event stream.
 #[derive(Debug)]
 pub struct RunLifecycle {
-    state: Mutex<RunState>,
+    /// The current run's cancellation handle.
+    cancel: Mutex<CancelHandle>,
     events: mpsc::UnboundedSender<SupervisorEvent>,
     cancellations: mpsc::Sender<SupervisorEvent>,
 }
 
-/// The current run identity and cancellation handle.
-#[derive(Debug)]
-struct RunState {
-    cancel: CancelHandle,
-    run: Option<RunId>,
-}
-
 impl RunLifecycle {
     /// Creates the lifecycle over the supervisor's event senders: the
-    /// unbounded queue holds the loss-intolerant events the reducer
-    /// waits on, the bounded queue holds operator cancellations.
+    /// unbounded queue holds close, the loss-intolerant event, and the
+    /// bounded queue holds operator cancellations.
     #[must_use]
     pub fn new(
         events: mpsc::UnboundedSender<SupervisorEvent>,
         cancellations: mpsc::Sender<SupervisorEvent>,
     ) -> Self {
         Self {
-            state: Mutex::new(RunState {
-                cancel: CancelHandle::new(),
-                run: None,
-            }),
+            cancel: Mutex::new(CancelHandle::new()),
             events,
             cancellations,
         }
     }
 
-    /// Locks lifecycle state, recovering from a panicking peer.
-    fn lock(&self) -> MutexGuard<'_, RunState> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Locks the current cancellation handle, recovering from a panicking
+    /// peer.
+    fn lock(&self) -> MutexGuard<'_, CancelHandle> {
+        self.cancel.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Arms the cancellation handle for `run` and returns it: the handle
-    /// is the only way the armed run observes a later cancel. It is the
-    /// Engine's own flag, so the run's context polls it and the effect
-    /// loop awaits it with no bridge between.
+    /// Arms a fresh cancellation handle for the next run and returns it:
+    /// the handle is the only way the armed run observes a later cancel.
+    /// It is the Engine's own flag, so the run's context polls it and the
+    /// effect loop awaits it with no bridge between.
     #[must_use]
-    pub fn arm(&self, run: RunId) -> CancelHandle {
+    pub fn arm(&self) -> CancelHandle {
         let fresh = CancelHandle::new();
-        let mut state = self.lock();
-        state.cancel = fresh.clone();
-        state.run = Some(run);
+        *self.lock() = fresh.clone();
         fresh
     }
 
@@ -80,36 +69,9 @@ impl RunLifecycle {
             .try_send(SupervisorEvent::OperatorCancellation);
     }
 
-    /// Publishes that input resumed the currently armed run.
-    pub fn accept_input(&self) -> Option<RunId> {
-        let run = self.lock().run?;
-        self.send(SupervisorEvent::AcceptedInput(run));
-        Some(run)
-    }
-
-    /// Publishes a durable terminal event for the currently armed run.
-    pub fn settle_current_turn(&self) {
-        if let Some(run) = self.lock().run {
-            self.settle_turn(run);
-        }
-    }
-
-    /// Publishes a terminal event scoped to `run`.
-    pub fn settle_turn(&self, run: RunId) {
-        self.send(SupervisorEvent::TerminalSettlement(run));
-    }
-
     /// Cancels the reducer-owned current run.
     pub fn cancel_current(&self) {
-        self.lock().cancel.cancel();
-    }
-
-    /// Clears `run` after its future completes or is dropped.
-    pub fn finish(&self, run: RunId) {
-        let mut state = self.lock();
-        if state.run == Some(run) {
-            state.run = None;
-        }
+        self.lock().cancel();
     }
 
     /// Publishes session close for reducer ownership.
@@ -118,10 +80,9 @@ impl RunLifecycle {
     }
 
     /// Sends one loss-intolerant event; a gone receiver means supervision
-    /// already ended. These events are sent on the unbounded queue because
-    /// the reducer awaits settlements and close, so their loss could hang a
-    /// state transition, and their volume is bounded by armed runs and
-    /// durable turns rather than by caller repetition.
+    /// already ended. Close is sent on the unbounded queue because its
+    /// loss would leave a closed session supervised, and the supervisor
+    /// stops reading once it has handled the first one.
     fn send(&self, event: SupervisorEvent) {
         let _ = self.events.send(event);
     }

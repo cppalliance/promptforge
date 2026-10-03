@@ -1,32 +1,25 @@
-//! The bindings the server pushes through the Harness's public API as
-//! data: the chat-capable model catalog and the Host snapshot a run's
-//! `ui()` and model resolution read (the menu's selected model and the
-//! workspace's granted roots).
+//! The binding the server pushes through the Harness's public API as
+//! data: the Host snapshot a run's `ui()` and model resolution read (the
+//! menu's selected model and the workspace's granted roots).
 //!
 //! The Harness never resolves a gateway, reads a menu, or names a
-//! workspace crate; it observes catalog generation changes through the
-//! values pushed here. [`push_bindings`] reads every source through the
-//! registry's collections and pushes both, the Host snapshot first, so
-//! the catalog that triggers a relaunch never finds a stale selection
-//! behind it. [`forward`] is the long-lived half: it wakes on the
-//! catalog's chat-generation watch, the menu's snapshot bus, and the
-//! workspace's grant-set generation watch, and pushes again.
+//! workspace crate; it reads the Host snapshot pushed here as each run
+//! starts. [`push_bindings`] reads every source through the registry's
+//! collections and pushes the snapshot. [`forward`] is the long-lived
+//! half: it wakes on the menu's snapshot bus and the workspace's
+//! grant-set generation watch, and pushes again.
 
-use harness::{CatalogBinding, Harness, HostSnapshot};
+use harness::{Harness, HostSnapshot};
 use tokio::sync::{broadcast, watch};
-use workshop_menu::{CatalogBus, MenuHandles};
+use workshop_menu::MenuHandles;
 use workshop_registry::{Registry, WorkspaceRoots};
 use workshop_support::recv_or_pending;
 
-/// Pushes the server's current Host snapshot and chat catalog into
-/// `harness`, each read through `registry` at this moment. An
-/// unregistered subsystem leaves its binding at whatever the Harness last
-/// saw (the Host snapshot's absent parts read as `null`).
+/// Pushes the server's current Host snapshot into `harness`, read through
+/// `registry` at this moment. An unregistered subsystem's part of the
+/// snapshot reads as `null`.
 pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     harness.set_host(host_snapshot(registry));
-    if let Some(menu) = registry.state::<MenuHandles>() {
-        harness.set_catalog(catalog_binding(menu.catalog()));
-    }
 }
 
 /// The Host snapshot: `selected_model` from the menu's retained workbench
@@ -47,28 +40,11 @@ fn host_snapshot(registry: &Registry) -> HostSnapshot {
     }
 }
 
-/// The chat catalog binding: the retained chat-capable generation, or,
-/// when no chat-capable model exists, the current generation with an
-/// empty list - which the Harness reads as no catalog to launch under.
-fn catalog_binding(catalog: &CatalogBus) -> CatalogBinding {
-    match catalog.latest_chat() {
-        Some(chat) => CatalogBinding {
-            generation: chat.generation,
-            models: chat.models,
-        },
-        None => CatalogBinding {
-            generation: *catalog.subscribe_chat_generation().borrow(),
-            models: Vec::new(),
-        },
-    }
-}
-
-/// Keeps the Harness's bindings current: pushes both again whenever the
-/// chat-capable catalog changes generation, the menu publishes a
-/// snapshot, or the workspace's granted roots change. Returns at once when
-/// no Harness is registered; otherwise it reads the Harness once and runs
-/// until every source has closed (the server's state is gone) or the
-/// graceful-shutdown handle aborts it.
+/// Keeps the Harness's Host snapshot current: pushes it again whenever
+/// the menu publishes a snapshot or the workspace's granted roots change.
+/// Returns at once when no Harness is registered; otherwise it reads the
+/// Harness once and runs until every source has closed (the server's
+/// state is gone) or the graceful-shutdown handle aborts it.
 ///
 /// A fresh watch receiver treats the current value as seen, so a change
 /// landing between the composition root's push and these subscriptions
@@ -78,30 +54,18 @@ pub(crate) async fn forward(registry: Registry) {
     let Some(harness) = registry.state::<Harness>() else {
         return;
     };
-    let (mut catalog_rx, mut menu_rx) =
-        registry
-            .state::<MenuHandles>()
-            .map_or((None, None), |handles| {
-                (
-                    Some(handles.catalog().subscribe_chat_generation()),
-                    Some(handles.menu().subscribe()),
-                )
-            });
+    let mut menu_rx = registry
+        .state::<MenuHandles>()
+        .map(|handles| handles.menu().subscribe());
     let mut roots_rx = registry
         .state::<dyn WorkspaceRoots>()
         .map(|roots| roots.subscribe());
     push_bindings(&registry, &harness);
     loop {
-        if catalog_rx.is_none() && menu_rx.is_none() && roots_rx.is_none() {
+        if menu_rx.is_none() && roots_rx.is_none() {
             return;
         }
         tokio::select! {
-            open = changed(&mut catalog_rx) => {
-                if !open {
-                    catalog_rx = None;
-                    continue;
-                }
-            }
             open = changed(&mut roots_rx) => {
                 if !open {
                     roots_rx = None;

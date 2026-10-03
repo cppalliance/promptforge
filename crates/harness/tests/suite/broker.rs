@@ -9,8 +9,8 @@ use std::time::Duration;
 use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::MemoryRecorder;
 use harness::{
-    BoxFuture, CatalogBinding, DeltaKind, Harness, HarnessConfig, HostSnapshot, InferenceBroker,
-    LaunchRequest, OnDelta, SessionState,
+    BoxFuture, DeltaKind, Harness, HarnessConfig, HostSnapshot, InferenceBroker, LaunchRequest,
+    OnDelta, SessionState,
 };
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
@@ -91,10 +91,6 @@ async fn a_sections_streaming_round_reaches_the_sessions_deltas_and_an_infer_rou
         CapabilityRegistry::new(),
         HostServices::new(),
     );
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models: vec![[("id", MODEL)].into_iter().collect()],
-    });
     harness.set_host(HostSnapshot {
         selected_model: Some(MODEL.to_owned()),
         ..HostSnapshot::default()

@@ -4,9 +4,9 @@
 //!
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, hands it the inference broker every run's
-//! model rounds and model resolution go through, pushes its chat catalog
-//! and Host snapshot as they change, and launches sessions by discovered
-//! agent name. Sessions outlive client connections: a client that
+//! model rounds and model resolution go through, pushes its Host snapshot
+//! as it changes, and launches sessions by discovered agent name. A
+//! session's first run starts at launch. Sessions outlive client connections: a client that
 //! reattaches looks its session up by id and reads the transcript past
 //! its cursor.
 
@@ -24,7 +24,7 @@ use promptforge::vfs::VfsRef;
 use tokio::sync::mpsc;
 
 use crate::discovery::{agent_source, discover_agents};
-use crate::environment::{Bindings, CatalogBinding, HostSnapshot};
+use crate::environment::{Bindings, HostSnapshot};
 use crate::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
 use crate::protocol::{LaunchRequest, SessionId};
 use crate::session::files::SessionFiles;
@@ -171,12 +171,6 @@ impl Harness {
     #[must_use]
     pub fn config(&self) -> &HarnessConfig {
         &self.config
-    }
-
-    /// Replaces the chat catalog binding; every session observes the new
-    /// generation and retires its run when the models changed.
-    pub fn set_catalog(&self, catalog: CatalogBinding) {
-        self.bindings.set_catalog(catalog);
     }
 
     /// Replaces the Host snapshot; the next launch reads it.

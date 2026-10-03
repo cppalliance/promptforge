@@ -1,25 +1,17 @@
-//! Tests for the supervisor transition table across catalog, cancel, and close events.
+//! Tests for the supervisor transition table across start, cancel, completion, and close events.
 
 use super::*;
 
 const RUN_1: RunId = RunId(1);
 const RUN_2: RunId = RunId(2);
 
-fn catalog(generation: u64, disposition: CatalogDisposition) -> SupervisorEvent {
-    SupervisorEvent::CatalogGeneration {
-        generation,
-        disposition,
-    }
-}
-
 fn completed(run: RunId, result: RunCompletion) -> SupervisorEvent {
     SupervisorEvent::RunCompleted { run, result }
 }
 
-fn relaunch(run: RunId, catalog: u64) -> SupervisorEffect {
+fn relaunch(run: RunId) -> SupervisorEffect {
     SupervisorEffect::Relaunch(RelaunchEffect {
         run,
-        catalog_generation: catalog,
         history: HistoryEffect::Preserve,
     })
 }
@@ -53,88 +45,60 @@ fn assert_scenarios(scenarios: Vec<Scenario>) {
 }
 
 #[test]
-fn transition_table_covers_wait_cancel_and_relaunch_effects() {
+fn transition_table_covers_start_cancel_and_relaunch_effects() {
     assert_scenarios(vec![
         Scenario {
-            name: "a delayed catalog launches on its first usable generation",
-            events: vec![
-                catalog(1, CatalogDisposition::Unavailable),
-                catalog(2, CatalogDisposition::Retained),
-            ],
-            effects: vec![SupervisorEffect::Wait(WaitFor::Catalog), relaunch(RUN_1, 2)],
+            name: "start launches the first run",
+            events: vec![SupervisorEvent::Start],
+            effects: vec![relaunch(RUN_1)],
             phase: Phase::Running,
         },
         Scenario {
-            name: "overlapping catalog retirement relaunches the newest applicable generation",
-            events: vec![
-                catalog(1, CatalogDisposition::Retained),
-                catalog(2, CatalogDisposition::Replacement),
-                catalog(3, CatalogDisposition::Retained),
-                completed(RUN_1, RunCompletion::Interrupted),
-            ],
+            name: "a repeated start keeps the current run",
+            events: vec![SupervisorEvent::Start, SupervisorEvent::Start],
             effects: vec![
-                relaunch(RUN_1, 1),
-                SupervisorEffect::Cancel(CancelOrigin::Catalog),
-                SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-                relaunch(RUN_2, 3),
+                relaunch(RUN_1),
+                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
             ],
             phase: Phase::Running,
         },
         Scenario {
-            name: "accepted input retires but unavailable catalog cannot relaunch",
+            name: "a cancellation before start has no run to retire",
             events: vec![
-                catalog(1, CatalogDisposition::Retained),
-                SupervisorEvent::AcceptedInput(RUN_1),
-                catalog(2, CatalogDisposition::Replacement),
-                catalog(3, CatalogDisposition::Unavailable),
-                SupervisorEvent::TerminalSettlement(RUN_1),
-                completed(RUN_1, RunCompletion::Interrupted),
-                catalog(4, CatalogDisposition::Retained),
+                SupervisorEvent::OperatorCancellation,
+                SupervisorEvent::Start,
             ],
             effects: vec![
-                relaunch(RUN_1, 1),
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-                SupervisorEffect::Wait(WaitFor::TerminalSettlement),
-                SupervisorEffect::Wait(WaitFor::TerminalSettlement),
-                SupervisorEffect::Cancel(CancelOrigin::Catalog),
-                SupervisorEffect::Wait(WaitFor::Catalog),
-                relaunch(RUN_2, 4),
-            ],
-            phase: Phase::Running,
-        },
-    ]);
-}
-
-#[test]
-fn transition_table_covers_preservation_and_immediate_retirement() {
-    assert_scenarios(vec![
-        Scenario {
-            name: "unavailable and retained catalogs preserve a running generation",
-            events: vec![
-                catalog(1, CatalogDisposition::Retained),
-                catalog(2, CatalogDisposition::Unavailable),
-                catalog(3, CatalogDisposition::Retained),
-                SupervisorEvent::TerminalSettlement(RUN_1),
-            ],
-            effects: vec![
-                relaunch(RUN_1, 1),
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
+                relaunch(RUN_1),
             ],
             phase: Phase::Running,
         },
         Scenario {
             name: "operator cancellation interrupts and relaunches",
             events: vec![
-                catalog(1, CatalogDisposition::Retained),
+                SupervisorEvent::Start,
                 SupervisorEvent::OperatorCancellation,
                 completed(RUN_1, RunCompletion::Interrupted),
             ],
+            effects: vec![relaunch(RUN_1), SupervisorEffect::Cancel, relaunch(RUN_2)],
+            phase: Phase::Running,
+        },
+        Scenario {
+            name: "a pending cancellation owns retirement through run completion",
+            events: vec![
+                SupervisorEvent::Start,
+                SupervisorEvent::OperatorCancellation,
+                SupervisorEvent::OperatorCancellation,
+                SupervisorEvent::Start,
+                completed(RUN_1, RunCompletion::Interrupted),
+            ],
             effects: vec![
-                relaunch(RUN_1, 1),
-                SupervisorEffect::Cancel(CancelOrigin::Operator),
-                relaunch(RUN_2, 1),
+                relaunch(RUN_1),
+                SupervisorEffect::Cancel,
+                SupervisorEffect::Preserve(PreserveReason::CancellationPending),
+                SupervisorEffect::Preserve(PreserveReason::CancellationPending),
+                relaunch(RUN_2),
             ],
             phase: Phase::Running,
         },
@@ -147,11 +111,11 @@ fn transition_table_covers_terminal_close_and_stale_events() {
         Scenario {
             name: "normal run completion closes supervision",
             events: vec![
-                catalog(1, CatalogDisposition::Retained),
+                SupervisorEvent::Start,
                 completed(RUN_1, RunCompletion::Completed),
             ],
             effects: vec![
-                relaunch(RUN_1, 1),
+                relaunch(RUN_1),
                 SupervisorEffect::Close(CloseReason::RunCompleted),
             ],
             phase: Phase::Closed,
@@ -159,40 +123,24 @@ fn transition_table_covers_terminal_close_and_stale_events() {
         Scenario {
             name: "failed run completion closes supervision",
             events: vec![
-                catalog(1, CatalogDisposition::Retained),
+                SupervisorEvent::Start,
                 completed(RUN_1, RunCompletion::Failed),
             ],
             effects: vec![
-                relaunch(RUN_1, 1),
+                relaunch(RUN_1),
                 SupervisorEffect::Close(CloseReason::RunFailed),
-            ],
-            phase: Phase::Closed,
-        },
-        Scenario {
-            name: "close settles a delayed supervisor",
-            events: vec![
-                catalog(1, CatalogDisposition::Unavailable),
-                SupervisorEvent::Close,
-                catalog(2, CatalogDisposition::Retained),
-            ],
-            effects: vec![
-                SupervisorEffect::Wait(WaitFor::Catalog),
-                SupervisorEffect::Close(CloseReason::Requested),
-                SupervisorEffect::Preserve(PreserveReason::Closed),
             ],
             phase: Phase::Closed,
         },
         Scenario {
             name: "stale run events preserve ownership",
             events: vec![
-                catalog(1, CatalogDisposition::Retained),
-                SupervisorEvent::AcceptedInput(RunId(99)),
-                SupervisorEvent::TerminalSettlement(RunId(99)),
+                SupervisorEvent::Start,
                 completed(RunId(99), RunCompletion::Interrupted),
+                completed(RunId(99), RunCompletion::Completed),
             ],
             effects: vec![
-                relaunch(RUN_1, 1),
-                SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
+                relaunch(RUN_1),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
             ],
@@ -202,100 +150,12 @@ fn transition_table_covers_terminal_close_and_stale_events() {
 }
 
 #[test]
-fn deferred_catalog_settlement_cancels_and_relaunches_exactly_once() {
-    let events = [
-        catalog(1, CatalogDisposition::Retained),
-        SupervisorEvent::AcceptedInput(RUN_1),
-        catalog(2, CatalogDisposition::Replacement),
-        catalog(2, CatalogDisposition::Replacement),
-        SupervisorEvent::TerminalSettlement(RUN_1),
-        SupervisorEvent::TerminalSettlement(RUN_1),
-        completed(RUN_1, RunCompletion::Interrupted),
-        completed(RUN_1, RunCompletion::Interrupted),
-    ];
-    let (state, effects) = apply(&events);
-    assert_eq!(
-        effects
-            .iter()
-            .filter(|effect| **effect == SupervisorEffect::Cancel(CancelOrigin::Catalog))
-            .count(),
-        1,
-        "duplicate generations and terminal events cannot cancel twice"
-    );
-    assert_eq!(
-        effects
-            .iter()
-            .filter(|effect| matches!(effect, SupervisorEffect::Relaunch(_)))
-            .count(),
-        2,
-        "one initial run and one replacement run launch"
-    );
-    assert_eq!(state.active_run, Some(RUN_2));
-    assert_eq!(state.catalog_generation, Some(2));
-}
-
-#[test]
-fn overlapping_retirement_causes_cancel_only_the_owned_run() {
-    let events = [
-        catalog(1, CatalogDisposition::Retained),
-        SupervisorEvent::OperatorCancellation,
-        catalog(2, CatalogDisposition::Replacement),
-        completed(RUN_1, RunCompletion::Interrupted),
-    ];
-    let (state, effects) = apply(&events);
-    assert_eq!(
-        effects
-            .iter()
-            .filter(|effect| matches!(effect, SupervisorEffect::Cancel(_)))
-            .count(),
-        1,
-        "the first retirement owns cancellation through run completion"
-    );
-    assert_eq!(
-        effects.last(),
-        Some(&relaunch(RUN_2, 2)),
-        "the one replacement consumes the latest catalog generation"
-    );
-    assert_eq!(state.active_run, Some(RUN_2));
-}
-
-#[test]
-fn terminal_settlement_is_scoped_to_the_run_that_accepted_input() {
-    let events = [
-        catalog(1, CatalogDisposition::Retained),
-        SupervisorEvent::OperatorCancellation,
-        completed(RUN_1, RunCompletion::Interrupted),
-        SupervisorEvent::AcceptedInput(RUN_2),
-        catalog(2, CatalogDisposition::Replacement),
-        SupervisorEvent::TerminalSettlement(RUN_1),
-        SupervisorEvent::TerminalSettlement(RUN_2),
-        SupervisorEvent::TerminalSettlement(RUN_2),
-    ];
-    let (state, effects) = apply(&events);
-
-    assert_eq!(
-        effects[5],
-        SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-        "a stale terminal event cannot settle the current run"
-    );
-    assert_eq!(
-        effects
-            .iter()
-            .filter(|effect| **effect == SupervisorEffect::Cancel(CancelOrigin::Catalog))
-            .count(),
-        1,
-        "the accepted run's terminal event retires it once"
-    );
-    assert_eq!(state.phase, Phase::Cancelling);
-    assert_eq!(state.accepted_run, None);
-}
-
-#[test]
 fn close_effect_is_emitted_exactly_once() {
     let events = [
-        catalog(1, CatalogDisposition::Retained),
+        SupervisorEvent::Start,
         SupervisorEvent::Close,
         SupervisorEvent::Close,
+        SupervisorEvent::Start,
         completed(RUN_1, RunCompletion::Interrupted),
         completed(RUN_1, RunCompletion::Completed),
     ];
