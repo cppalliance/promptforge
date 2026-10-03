@@ -27,10 +27,10 @@ use crate::wire::stream::escape_controls;
 ///
 /// The key is optional: a gateway on the same machine admits keyless
 /// loopback callers by default, and a client built without a key
-/// ([`GatewayClient::keyless`]) omits the `Authorization` header entirely.
+/// ([`GatewayChat::keyless`]) omits the `Authorization` header entirely.
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct GatewayClient {
+pub struct GatewayChat {
     transport: GatewayTransport,
     base_url: String,
     /// The bearer presented on every request, or `None` to present nothing.
@@ -72,31 +72,31 @@ impl ChunkSource for ResponseChunks {
     }
 }
 
-impl fmt::Debug for GatewayClient {
+impl fmt::Debug for GatewayChat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The bearer key is a credential and must never appear in Debug output,
         // logs, or panic messages. It is redacted to a fixed marker regardless of
         // whether one is set, so no length or presence signal leaks either.
-        f.debug_struct("GatewayClient")
+        f.debug_struct("GatewayChat")
             .field("base_url", &self.base_url)
             .field("key", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
 
-impl GatewayClient {
+impl GatewayChat {
     /// Builds a client from a validated [`GatewayEndpoint`] and a redacted
     /// [`SecretString`] bearer key (used by tests and by
-    /// [`GatewayClient::from_env`]).
+    /// [`GatewayChat::from_env`]).
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// use harness_gateway_client::{GatewayClient, GatewayEndpoint, SecretString};
+    /// use harness_gateway_client::{GatewayChat, GatewayEndpoint, SecretString};
     /// use promptforge::model::{CompletionOptions, Message};
     ///
-    /// let client = GatewayClient::new(
+    /// let client = GatewayChat::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
     ///     SecretString::new("bearer-token")?,
     /// );
@@ -109,8 +109,8 @@ impl GatewayClient {
     /// # }
     /// ```
     #[must_use]
-    pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayClient {
-        GatewayClient {
+    pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayChat {
+        GatewayChat {
             transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: endpoint.url,
             key: Some(key),
@@ -127,21 +127,21 @@ impl GatewayClient {
     /// unless its operator set `trust_loopback = false`; against any other
     /// gateway the requests fail with an `Unavailable` 401. Nothing here checks
     /// the endpoint's host - the caller decides, and
-    /// [`GatewayClient::from_env`] decides by [`GatewayEndpoint::is_loopback`].
+    /// [`GatewayChat::from_env`] decides by [`GatewayEndpoint::is_loopback`].
     ///
     /// # Examples
     ///
     /// ```
-    /// use harness_gateway_client::{GatewayClient, GatewayEndpoint};
+    /// use harness_gateway_client::{GatewayChat, GatewayEndpoint};
     ///
     /// let endpoint = GatewayEndpoint::new("http://127.0.0.1:8081/v1")?;
-    /// let client = GatewayClient::keyless(endpoint);
+    /// let client = GatewayChat::keyless(endpoint);
     /// let _ = client;
     /// # Ok::<(), harness_gateway_client::GatewayConfigError>(())
     /// ```
     #[must_use]
-    pub fn keyless(endpoint: GatewayEndpoint) -> GatewayClient {
-        GatewayClient {
+    pub fn keyless(endpoint: GatewayEndpoint) -> GatewayChat {
+        GatewayChat {
             transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: endpoint.url,
             key: None,
@@ -161,10 +161,10 @@ impl GatewayClient {
     ///
     /// ```
     /// # async fn run() {
-    /// use harness_gateway_client::{CompletionErrorKind, GatewayClient};
+    /// use harness_gateway_client::{CompletionErrorKind, GatewayChat};
     /// use promptforge::model::{CompletionOptions, Message};
     ///
-    /// let client = GatewayClient::disabled();
+    /// let client = GatewayChat::disabled();
     /// let options = CompletionOptions::new("m");
     /// let error = client
     ///     .complete(&[Message::user("hi")], None, &options, |_delta| {})
@@ -174,8 +174,8 @@ impl GatewayClient {
     /// # }
     /// ```
     #[must_use]
-    pub fn disabled() -> GatewayClient {
-        GatewayClient {
+    pub fn disabled() -> GatewayChat {
+        GatewayChat {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
             key: None,
@@ -206,10 +206,10 @@ impl GatewayClient {
     /// use std::num::NonZeroU64;
     /// use std::time::Duration;
     ///
-    /// use harness_gateway_client::GatewayClient;
+    /// use harness_gateway_client::GatewayChat;
     ///
     /// let cap = NonZeroU64::new(1024 * 1024).ok_or("cap is non-zero")?;
-    /// let client = GatewayClient::disabled().with_request_limits(Duration::from_secs(30), cap);
+    /// let client = GatewayChat::disabled().with_request_limits(Duration::from_secs(30), cap);
     /// let _ = client;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -218,7 +218,7 @@ impl GatewayClient {
         mut self,
         request_timeout: Duration,
         max_response_bytes: NonZeroU64,
-    ) -> GatewayClient {
+    ) -> GatewayChat {
         self.request_timeout = request_timeout;
         self.max_response_bytes = max_response_bytes.get();
         self
@@ -241,7 +241,7 @@ impl GatewayClient {
     /// unset or invalid, when either variable is set to a non-Unicode value,
     /// or when the URL's host is not loopback (a LAN or remote gateway) and
     /// `PROMPTFORGE_GATEWAY_API_KEY` is unset or empty.
-    pub fn from_env() -> Result<GatewayClient, GatewayConfigError> {
+    pub fn from_env() -> Result<GatewayChat, GatewayConfigError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
             Err(std::env::VarError::NotPresent) => Ok(None),
@@ -276,7 +276,7 @@ impl GatewayClient {
     /// # Errors
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
     /// (F11 - the full reachable set):
-    /// - `Unavailable` when this client was built with [`GatewayClient::disabled`],
+    /// - `Unavailable` when this client was built with [`GatewayChat::disabled`],
     ///   or the gateway answers 401 or 403;
     /// - `Timeout` when no headers or next chunk arrive within the timeout;
     /// - `Transport` on any other transport-layer failure (connection) or
@@ -354,7 +354,7 @@ impl GatewayClient {
     }
 }
 
-/// The environment-driven constructor behind [`GatewayClient::from_env`],
+/// The environment-driven constructor behind [`GatewayChat::from_env`],
 /// with the variable lookup injected so tests need not touch the process
 /// environment.
 ///
@@ -363,7 +363,7 @@ impl GatewayClient {
 /// `Result::ok` folds that refusal into `None`).
 pub(crate) fn from_env_with(
     lookup: impl Fn(&str) -> Result<Option<String>, GatewayConfigError>,
-) -> Result<GatewayClient, GatewayConfigError> {
+) -> Result<GatewayChat, GatewayConfigError> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
         .ok_or_else(|| GatewayConfigError::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url)?;
@@ -371,8 +371,8 @@ pub(crate) fn from_env_with(
         .map(SecretString::new)
         .and_then(Result::ok);
     match key {
-        Some(key) => Ok(GatewayClient::new(endpoint, key)),
-        None if endpoint.is_loopback() => Ok(GatewayClient::keyless(endpoint)),
+        Some(key) => Ok(GatewayChat::new(endpoint, key)),
+        None if endpoint.is_loopback() => Ok(GatewayChat::keyless(endpoint)),
         None => Err(GatewayConfigError::MissingEnv(
             "PROMPTFORGE_GATEWAY_API_KEY".into(),
         )),

@@ -12,7 +12,7 @@ use crate::CompletionErrorKind;
 #[tokio::test]
 async fn complete_on_a_disabled_client_is_an_unavailable_error() {
     // F14: a disabled client never touches the network.
-    let client = GatewayClient::disabled();
+    let client = GatewayChat::disabled();
     let err = client
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
@@ -209,7 +209,7 @@ fn stream_close() -> String {
 }
 
 /// A keyed client for `base` whose timeout is `budget`.
-fn budgeted_client(base: &str, budget: Duration) -> GatewayClient {
+fn budgeted_client(base: &str, budget: Duration) -> GatewayChat {
     keyed_client(base).with_request_limits(budget, NonZeroU64::new(1024 * 1024).expect("non-zero"))
 }
 

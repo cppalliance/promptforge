@@ -31,7 +31,7 @@ fn timeout(source: impl std::error::Error + Send + Sync + 'static) -> Completion
     CompletionError::new(kind, kind.phrase()).with_source(source)
 }
 
-/// The failure of a client built with `GatewayClient::disabled`: model
+/// The failure of a client built with `GatewayChat::disabled`: model
 /// access is off, so no round is sent.
 pub(crate) fn unavailable() -> CompletionError {
     let kind = CompletionErrorKind::Unavailable;

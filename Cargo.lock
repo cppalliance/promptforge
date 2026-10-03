@@ -2620,9 +2620,11 @@ dependencies = [
 name = "harness-gateway-client"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "axum",
  "bytes",
  "harness",
+ "harness-web",
  "promptforge",
  "reqwest",
  "serde",

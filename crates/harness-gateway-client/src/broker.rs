@@ -18,10 +18,10 @@ use promptforge::model::{
 
 use crate::catalog::fetch_model_catalog;
 use crate::config::{GatewayEndpoint, SecretString};
-use crate::transport::GatewayClient;
+use crate::transport::GatewayChat;
 
 /// The [`InferenceBroker`] a Host hands the Harness to reach the Gateway:
-/// it performs the Engine's `Chat` effects on a [`GatewayClient`] and lists
+/// it performs the Engine's `Chat` effects on a [`GatewayChat`] and lists
 /// the Gateway's models through [`fetch_model_catalog`], both at one API
 /// root under one bearer key.
 ///
@@ -48,7 +48,7 @@ use crate::transport::GatewayClient;
 /// ```
 #[derive(Clone)]
 pub struct GatewayBroker {
-    client: GatewayClient,
+    client: GatewayChat,
     endpoint: GatewayEndpoint,
     key: SecretString,
 }
@@ -71,7 +71,7 @@ impl GatewayBroker {
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayBroker {
         let limits = RunLimits::new();
-        let client = GatewayClient::new(endpoint.clone(), key.clone())
+        let client = GatewayChat::new(endpoint.clone(), key.clone())
             .with_request_limits(limits.timeout(), limits.response_bytes());
         GatewayBroker {
             client,

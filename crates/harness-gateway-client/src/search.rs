@@ -1,10 +1,15 @@
-//! The Gateway web search client: one `POST {api_root}/tools/web_search`
-//! with the bearer key under a fixed deadline, a bounded and sanitized
-//! error body, and a capped success body parsed into the wire types that
-//! mirror the Gateway's request and response.
+//! The Gateway web search provider: each search is one
+//! `POST {api_root}/tools/web_search` with the bearer key under a fixed
+//! deadline, a bounded and sanitized error body, and a capped success body
+//! parsed into private wire types that mirror the Gateway's request and
+//! response, then mapped into the provider's results and errors.
 
 use std::fmt;
 use std::time::Duration;
+
+use harness_web::{
+    SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult, SearchResults,
+};
 
 use crate::config::{GatewayEndpoint, SecretString};
 
@@ -29,31 +34,31 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Only `query` is required. An absent option or an empty domain list is
 /// left out of the body, and the Gateway applies its own default.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
-pub struct GatewaySearchRequest {
+pub(crate) struct GatewaySearchRequest {
     /// The search query.
-    pub query: String,
+    pub(crate) query: String,
     /// The number of results wanted; the Gateway clamps it to its maximum.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub count: Option<u8>,
+    pub(crate) count: Option<u8>,
     /// The freshness filter: `pd`, `pw`, `pm`, `py`, or a
     /// `YYYY-MM-DDtoYYYY-MM-DD` range.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub freshness: Option<String>,
+    pub(crate) freshness: Option<String>,
     /// The country code for the search.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub country: Option<String>,
+    pub(crate) country: Option<String>,
     /// The search language code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub search_lang: Option<String>,
+    pub(crate) search_lang: Option<String>,
     /// The SafeSearch level: `off`, `moderate`, or `strict`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub safesearch: Option<String>,
+    pub(crate) safesearch: Option<String>,
     /// Keep only results from these hostnames.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub include_domains: Vec<String>,
+    pub(crate) include_domains: Vec<String>,
     /// Drop results from these hostnames.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub exclude_domains: Vec<String>,
+    pub(crate) exclude_domains: Vec<String>,
 }
 
 /// The reply to a Gateway web search, mirroring the Gateway's
@@ -63,12 +68,12 @@ pub struct GatewaySearchRequest {
 /// is a malformed response. Every other field defaults when absent, and
 /// unknown fields are ignored so the Gateway can grow its reply.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct GatewaySearchResponse {
+pub(crate) struct GatewaySearchResponse {
     /// The query the Gateway ran, after its trimming.
     #[serde(default)]
-    pub query: String,
+    pub(crate) query: String,
     /// The result rows, in the Gateway's order.
-    pub results: Vec<GatewaySearchResult>,
+    pub(crate) results: Vec<GatewaySearchResult>,
 }
 
 /// One row of a [`GatewaySearchResponse`].
@@ -76,22 +81,22 @@ pub struct GatewaySearchResponse {
 /// The `url` is required but may be empty; judging an empty `url` is left
 /// to the caller.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct GatewaySearchResult {
+pub(crate) struct GatewaySearchResult {
     /// The result's title.
     #[serde(default)]
-    pub title: String,
+    pub(crate) title: String,
     /// The result's URL.
-    pub url: String,
+    pub(crate) url: String,
     /// A short description or snippet.
     #[serde(default)]
-    pub description: String,
+    pub(crate) description: String,
     /// The result's age, when the provider reports one.
-    pub age: Option<String>,
+    pub(crate) age: Option<String>,
     /// The hostname of `url`, when the Gateway could derive one.
-    pub site_name: Option<String>,
+    pub(crate) site_name: Option<String>,
     /// Extra snippets from the provider.
     #[serde(default)]
-    pub extra_snippets: Vec<String>,
+    pub(crate) extra_snippets: Vec<String>,
 }
 
 /// Which side of a Gateway web search failed.
@@ -148,13 +153,13 @@ impl GatewaySearchError {
     }
 }
 
-/// A web search client bound to one Gateway API root and its shared bearer
-/// key.
+/// The [`SearchProvider`] a Host supplies to search the web through the
+/// Gateway, bound to one Gateway API root and its shared bearer key.
 ///
 /// Each search POSTs `{api_root}/tools/web_search` under a 30-second
 /// deadline that covers the whole round, body included. The search
-/// vendor's credential stays in the Gateway; this client presents only the
-/// Gateway's key.
+/// vendor's credential stays in the Gateway; this provider presents only
+/// the Gateway's key.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewaySearch {
@@ -174,27 +179,30 @@ impl fmt::Debug for GatewaySearch {
 }
 
 impl GatewaySearch {
-    /// Builds a search client from a validated [`GatewayEndpoint`] and a
+    /// Builds a search provider from a validated [`GatewayEndpoint`] and a
     /// redacted [`SecretString`] bearer key.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// use harness_gateway_client::{
-    ///     GatewayEndpoint, GatewaySearch, GatewaySearchRequest, SecretString,
-    /// };
+    /// use std::sync::Arc;
+    ///
+    /// use harness_gateway_client::{GatewayEndpoint, GatewaySearch, SecretString};
+    /// use harness_web::{SearchProvider, SearchQuery};
     ///
     /// let search = GatewaySearch::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
     ///     SecretString::new("bearer-token")?,
     /// );
-    /// let request = GatewaySearchRequest {
+    /// // What a Host supplies under `harness_web::SEARCH_PROVIDER`.
+    /// let provider: Arc<dyn SearchProvider> = Arc::new(search);
+    /// let query = SearchQuery {
     ///     query: "boost asio".to_owned(),
-    ///     ..GatewaySearchRequest::default()
+    ///     ..SearchQuery::default()
     /// };
-    /// let response = search.search(&request).await?;
-    /// let _ = response.results;
+    /// let results = provider.search(query).await?;
+    /// let _ = results.results;
     /// # Ok(())
     /// # }
     /// ```
@@ -216,21 +224,9 @@ impl GatewaySearch {
         }
     }
 
-    /// Runs one web search and returns the Gateway's parsed reply.
-    ///
-    /// # Errors
-    /// Returns a [`GatewaySearchError`] whose
-    /// [`kind`](GatewaySearchError::kind) is:
-    /// - `Transport` when the request cannot be sent (`request failed`) or
-    ///   the reply cannot be read (`reading response failed`), including
-    ///   when the deadline passes;
-    /// - `Backend` when the Gateway answers a failure status
-    ///   (`backend returned {code}: {body}`, or `backend returned {code},
-    ///   and its error body could not be read`), or a success body that is
-    ///   over 256 KiB (`response body exceeded {limit} bytes`), not UTF-8
-    ///   (`response body was not valid UTF-8`), or not a search reply
-    ///   (`malformed search response`).
-    pub async fn search(
+    /// Runs one web search and returns the Gateway's parsed reply, failing
+    /// as the [`SearchProvider`] impl documents.
+    pub(crate) async fn search(
         &self,
         request: &GatewaySearchRequest,
     ) -> Result<GatewaySearchResponse, GatewaySearchError> {
@@ -289,6 +285,75 @@ impl GatewaySearch {
             )
         })
     }
+}
+
+#[async_trait::async_trait]
+impl SearchProvider for GatewaySearch {
+    /// Runs `query` as one Gateway web search and returns the reply's rows
+    /// field by field.
+    ///
+    /// # Errors
+    /// Returns a [`SearchError`] with the message of the
+    /// [`GatewaySearchError`] it keeps as its source. Its kind is:
+    /// - `Transport` when the request cannot be sent (`request failed`) or
+    ///   the reply cannot be read (`reading response failed`), including
+    ///   when the deadline passes;
+    /// - `Backend` when the Gateway answers a failure status
+    ///   (`backend returned {code}: {body}`, or `backend returned {code},
+    ///   and its error body could not be read`), or a success body that is
+    ///   over 256 KiB (`response body exceeded {limit} bytes`), not UTF-8
+    ///   (`response body was not valid UTF-8`), or not a search reply
+    ///   (`malformed search response`).
+    async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError> {
+        let request = gateway_request(query);
+        let response = self.search(&request).await.map_err(search_error)?;
+        Ok(search_results(response))
+    }
+}
+
+/// The Gateway's request for a validated query.
+fn gateway_request(query: SearchQuery) -> GatewaySearchRequest {
+    GatewaySearchRequest {
+        query: query.query,
+        count: query.count,
+        freshness: query
+            .freshness
+            .map(|freshness| freshness.as_str().to_owned()),
+        country: query.country,
+        search_lang: query.search_lang,
+        safesearch: query.safesearch.map(|level| level.as_str().to_owned()),
+        include_domains: query.include_domains,
+        exclude_domains: query.exclude_domains,
+    }
+}
+
+/// The provider's results for the Gateway's reply.
+fn search_results(response: GatewaySearchResponse) -> SearchResults {
+    SearchResults {
+        query: response.query,
+        results: response
+            .results
+            .into_iter()
+            .map(|result| SearchResult {
+                title: result.title,
+                url: result.url,
+                description: result.description,
+                age: result.age,
+                site_name: result.site_name,
+                extra_snippets: result.extra_snippets,
+            })
+            .collect(),
+    }
+}
+
+/// The provider's error for a failed Gateway search: its kind and text,
+/// with the Gateway's error as the cause.
+fn search_error(error: GatewaySearchError) -> SearchError {
+    let kind = match error.kind {
+        GatewaySearchErrorKind::Backend => SearchErrorKind::Backend,
+        GatewaySearchErrorKind::Transport => SearchErrorKind::Transport,
+    };
+    SearchError::with_source(kind, error.to_string(), error)
 }
 
 /// Escapes control characters in an external diagnostic body so a hostile

@@ -22,8 +22,8 @@ pub(crate) async fn serve(app: axum::Router) -> String {
 
 /// Serves `app` on a loopback port and returns a keyed client pointed at
 /// its `/v1` root.
-pub(crate) async fn client_for(app: axum::Router) -> GatewayClient {
-    GatewayClient::new(
+pub(crate) async fn client_for(app: axum::Router) -> GatewayChat {
+    GatewayChat::new(
         GatewayEndpoint::new(&serve(app).await).expect("valid test endpoint"),
         SecretString::new("tok").expect("non-empty test key"),
     )
@@ -62,7 +62,7 @@ pub(crate) fn sse_app(body: String) -> axum::Router {
 
 /// A client pointed at a mock gateway that answers every completion with
 /// the given SSE body.
-pub(crate) async fn sse_client(body: String) -> GatewayClient {
+pub(crate) async fn sse_client(body: String) -> GatewayChat {
     client_for(sse_app(body)).await
 }
 
@@ -108,8 +108,8 @@ async fn spawn_raw_gateway(status: axum::http::StatusCode, body: &'static str) -
 }
 
 /// A keyed client pointed at the `/v1` base `base`.
-fn keyed_client(base: &str) -> GatewayClient {
-    GatewayClient::new(
+fn keyed_client(base: &str) -> GatewayChat {
+    GatewayChat::new(
         GatewayEndpoint::new(base).expect("valid endpoint"),
         SecretString::new("tok").expect("non-empty test key"),
     )

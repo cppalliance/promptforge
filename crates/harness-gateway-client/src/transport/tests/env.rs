@@ -150,7 +150,7 @@ async fn keyless_client_sends_no_authorization_header() {
     // Authorization header at all - a presented-but-wrong bearer is still
     // 401 - so a keyless client must omit the header, not send an empty one.
     let (base, captured) = spawn_auth_capturing_gateway().await;
-    let client = GatewayClient::keyless(GatewayEndpoint::new(&base).expect("valid endpoint"));
+    let client = GatewayChat::keyless(GatewayEndpoint::new(&base).expect("valid endpoint"));
     client
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
@@ -186,7 +186,7 @@ async fn keyed_client_still_sends_the_bearer_header() {
 fn keyless_client_debug_is_indistinguishable_from_a_keyed_one() {
     // No presence signal leaks through Debug either way.
     let keyless =
-        GatewayClient::keyless(GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid"));
+        GatewayChat::keyless(GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid"));
     let rendered = format!("{keyless:?}");
     assert!(rendered.contains("<redacted>"), "got: {rendered}");
     assert!(!rendered.contains("None"), "got: {rendered}");
@@ -194,7 +194,7 @@ fn keyless_client_debug_is_indistinguishable_from_a_keyed_one() {
 
 #[test]
 fn debug_redacts_the_bearer_key_and_never_leaks_it() {
-    let client = GatewayClient::new(
+    let client = GatewayChat::new(
         GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid test endpoint"),
         SecretString::new("super-secret-token").expect("non-empty test key"),
     );

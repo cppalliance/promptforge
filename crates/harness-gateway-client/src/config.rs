@@ -203,7 +203,7 @@ impl GatewayEndpoint {
     /// True for `localhost`, `127.0.0.1` (and the rest of `127.0.0.0/8`), and
     /// `::1`; false for every other name or address. A loopback gateway admits
     /// keyless same-machine callers by default, so
-    /// [`GatewayClient::from_env`](crate::GatewayClient::from_env) makes the
+    /// [`GatewayChat::from_env`](crate::GatewayChat::from_env) makes the
     /// bearer key optional exactly when this holds.
     ///
     /// # Examples

@@ -1,28 +1,30 @@
 //! harness-gateway-client - the standard way a Host talks to the
 //! PromptForge Gateway: the inference broker a Host hands the Harness, the
-//! HTTP client that sends a `Chat` effect's round to the Gateway and
-//! fetches its model catalog, and the OpenAI chat-completions wire code
-//! under it that turns the round into a request body, a streamed reply
-//! into a [`Completion`](promptforge::model::Completion), and a failed
-//! response into the [`CompletionError`] the round carries.
+//! search provider it supplies for web search, the HTTP client that sends
+//! a `Chat` effect's round to the Gateway and fetches its model catalog,
+//! and the OpenAI chat-completions wire code under it that turns the round
+//! into a request body, a streamed reply into a
+//! [`Completion`](promptforge::model::Completion), and a failed response
+//! into the [`CompletionError`] the round carries.
 //!
 //! [`GatewayBroker`] is the [`harness::InferenceBroker`] a Gateway Host
 //! passes to `Harness::new`: it runs every model round on a
-//! [`GatewayClient`] under the Engine's default run limits and lists the
+//! [`GatewayChat`] under the Engine's default run limits and lists the
 //! Gateway's models through [`fetch_model_catalog`].
 //!
-//! [`GatewayClient`] speaks the always-streaming `/chat/completions` SSE
+//! [`GatewayChat`] speaks the always-streaming `/chat/completions` SSE
 //! shape to one Gateway URL with, usually, the Gateway's shared bearer
-//! key: [`GatewayClient::complete`] sends the request body, reads the
+//! key: [`GatewayChat::complete`] sends the request body, reads the
 //! stream under the run's byte cap and timeout, invokes the caller's delta
 //! callback live, and returns the one completion the round produced.
 //! [`fetch_model_catalog`] reads the Gateway's typed model list. The
 //! client holds only the Gateway's URL and the shared key; the vendor
 //! credential sits in the Gateway.
 //!
-//! [`GatewaySearch`] runs one web search through the Gateway's
-//! `/tools/web_search` relay under a 30-second deadline and parses the
-//! reply into a [`GatewaySearchResponse`]; the search vendor's credential
+//! [`GatewaySearch`] is the [`harness_web::SearchProvider`] a Gateway Host
+//! supplies: it runs each search through the Gateway's
+//! `/tools/web_search` relay under a 30-second deadline and maps the
+//! reply into the provider's results; the search vendor's credential
 //! stays in the Gateway too.
 //!
 //! [`build_request_body`] builds the one JSON body every round sends.
@@ -39,7 +41,8 @@
 //! ## Invariants
 //!
 //! - Family: Harness, at the `crates/` root beside `harness`; may depend
-//!   on: `promptforge`, `harness`, and third-party crates only. Never on
+//!   on: `promptforge`, `harness`, `harness-web`, and third-party crates
+//!   only. Never on
 //!   any `crates/harness-internal` crate. `cargo test -p build-xtask`
 //!   enforces the product and container boundaries.
 //! - Every `Completion` and `ToolCall` is built through the public
@@ -75,10 +78,7 @@ pub use promptforge::model::CompletionErrorKind;
 pub use search::GatewaySearch;
 pub use search::GatewaySearchError;
 pub use search::GatewaySearchErrorKind;
-pub use search::GatewaySearchRequest;
-pub use search::GatewaySearchResponse;
-pub use search::GatewaySearchResult;
-pub use transport::GatewayClient;
+pub use transport::GatewayChat;
 pub use wire::classify::classify_http_failure;
 pub use wire::classify::classify_stream_error;
 pub use wire::read::ChunkSource;

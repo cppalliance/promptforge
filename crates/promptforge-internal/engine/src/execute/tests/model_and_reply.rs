@@ -7,7 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn models_use_forwards_binding_completion_options_to_the_gateway() {
-    // models.use -> completion_options -> GatewayClient::complete must set
+    // models.use -> completion_options -> GatewayChat::complete must set
     // the binding's model, the hard-keyword thinking switch, and the
     // section's `models.use` sampling options on the chat body. Roles
     // declare no sampling fields, so a section on the prompt-wide default

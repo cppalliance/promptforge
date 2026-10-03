@@ -198,3 +198,6 @@ async fn parses_every_gateway_result_field_and_defaults_the_optional_ones() {
 
 #[path = "search-tests-responses.rs"]
 mod responses;
+
+#[path = "search-tests-provider.rs"]
+mod provider;

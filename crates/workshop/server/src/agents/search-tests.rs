@@ -1,16 +1,13 @@
-//! Search provider tests: a mock Gateway's reply and error status map into
-//! the provider's results and errors, a replaced gateway serves the next
-//! search, and a missing or down gateway fails as `request failed`.
+//! Search provider tests: a replaced gateway serves the next search, and a
+//! missing or down gateway fails as `request failed`.
 
 use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::Router;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::routing::post;
-use harness_web::{
-    Freshness, SafeSearch, SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult,
-};
+use harness_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery};
 use serde_json::{Value, json};
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
 use workshop_registry::{Registration, Registry};
@@ -64,87 +61,6 @@ fn recording_gateway(seen: Seen, reply: Value) -> Router {
             }
         }),
     )
-}
-
-#[tokio::test]
-async fn a_gateway_reply_maps_into_results_and_the_query_into_its_request() {
-    let seen = Seen::default();
-    let reply = json!({
-        "query": "hi",
-        "results": [
-            {
-                "title": "T", "url": "https://e.com", "description": "D",
-                "age": "2 days ago", "site_name": "e.com", "extra_snippets": ["more"]
-            },
-            { "url": "https://f.com" }
-        ]
-    });
-    let base = spawn_gateway(recording_gateway(Arc::clone(&seen), reply)).await;
-    let (registry, _binding, _health, _guard) = registry_with_gateway(&base);
-    let provider = GatewaySearchProvider::new(registry);
-
-    let results = provider
-        .search(SearchQuery {
-            count: Some(3),
-            freshness: Some(Freshness::Pw),
-            safesearch: Some(SafeSearch::Strict),
-            include_domains: vec!["e.com".to_owned()],
-            ..query("hi")
-        })
-        .await
-        .expect("the search succeeds");
-
-    assert_eq!(results.query, "hi");
-    assert_eq!(
-        results.results,
-        [
-            SearchResult {
-                title: "T".to_owned(),
-                url: "https://e.com".to_owned(),
-                description: "D".to_owned(),
-                age: Some("2 days ago".to_owned()),
-                site_name: Some("e.com".to_owned()),
-                extra_snippets: vec!["more".to_owned()],
-            },
-            SearchResult {
-                url: "https://f.com".to_owned(),
-                ..SearchResult::default()
-            },
-        ]
-    );
-    let seen = seen.lock().expect("the capture lock is healthy");
-    assert_eq!(seen.len(), 1, "one search reached the Gateway");
-    assert_eq!(seen[0].0.as_deref(), Some("Bearer test-key"));
-    assert_eq!(
-        seen[0].1,
-        json!({
-            "query": "hi", "count": 3, "freshness": "pw", "safesearch": "strict",
-            "include_domains": ["e.com"]
-        })
-    );
-}
-
-#[tokio::test]
-async fn a_gateway_error_status_maps_as_backend_with_the_gateway_error_as_source() {
-    let base = spawn_gateway(Router::new().route(
-        "/v1/tools/web_search",
-        post(|| async { (StatusCode::BAD_GATEWAY, "upstream down") }),
-    ))
-    .await;
-    let (registry, _binding, _health, _guard) = registry_with_gateway(&base);
-    let provider = GatewaySearchProvider::new(registry);
-
-    let error = provider
-        .search(query("hi"))
-        .await
-        .expect_err("a 502 fails the search");
-    assert_eq!(error.kind(), SearchErrorKind::Backend);
-    assert_eq!(error.to_string(), "backend returned 502: upstream down");
-    let source = std::error::Error::source(&error).expect("the failure keeps a cause");
-    assert!(
-        source.is::<harness_gateway_client::GatewaySearchError>(),
-        "the Gateway's error is the cause: {source}"
-    );
 }
 
 #[tokio::test]

@@ -421,7 +421,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-4>
 
-### Step 4: GatewayChat and the Gateway search provider
+### Step 4: GatewayChat and the Gateway search provider [completed]
 
 - Component: Gateway client surface
 - Depends on: step 2, after which no `harness-internal` crate depends on the client. It needs nothing from step 3.

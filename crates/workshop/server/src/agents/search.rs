@@ -3,15 +3,13 @@
 //!
 //! The provider holds the server's [`Registry`] and reads the gateway
 //! handles through it on every search, as the inference broker does, so a
-//! replaced gateway serves the next search. It keeps the client of the
-//! last generation it searched under. The paths into `harness_gateway_client`
-//! stay qualified, because `workshop_gateway` has a `GatewayClient` too.
+//! replaced gateway serves the next search. It keeps the [`GatewaySearch`]
+//! of the last generation it searched under and hands each search to it.
 
 use std::sync::{Mutex, PoisonError};
 
-use harness_web::{
-    SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult, SearchResults,
-};
+use harness_gateway_client::GatewaySearch;
+use harness_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResults};
 use workshop_gateway::GatewayHandles;
 use workshop_registry::Registry;
 
@@ -26,7 +24,7 @@ pub(crate) struct GatewaySearchProvider {
     /// The subsystem registry the gateway handles are read through.
     registry: Registry,
     /// The client built for the last generation searched under.
-    cached: Mutex<Option<(u64, harness_gateway_client::GatewaySearch)>>,
+    cached: Mutex<Option<(u64, GatewaySearch)>>,
 }
 
 impl GatewaySearchProvider {
@@ -42,7 +40,7 @@ impl GatewaySearchProvider {
     /// search under it. A missing gateway registration, a gateway the
     /// heartbeat reports down, or an endpoint or key that cannot be built
     /// fails as transport with [`NO_GATEWAY`].
-    fn client(&self) -> Result<harness_gateway_client::GatewaySearch, SearchError> {
+    fn client(&self) -> Result<GatewaySearch, SearchError> {
         let no_gateway = || SearchError::new(SearchErrorKind::Transport, NO_GATEWAY);
         let handles = self
             .registry
@@ -59,7 +57,7 @@ impl GatewaySearchProvider {
         {
             return Ok(client.clone());
         }
-        let client = harness_gateway_client::GatewaySearch::new(gateway.endpoint, gateway.key);
+        let client = GatewaySearch::new(gateway.endpoint, gateway.key);
         *cached = Some((gateway.generation, client.clone()));
         Ok(client)
     }
@@ -69,58 +67,8 @@ impl GatewaySearchProvider {
 impl SearchProvider for GatewaySearchProvider {
     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError> {
         let client = self.client()?;
-        let response = client
-            .search(&gateway_request(query))
-            .await
-            .map_err(search_error)?;
-        Ok(search_results(response))
+        SearchProvider::search(&client, query).await
     }
-}
-
-/// The Gateway's request for a validated query.
-fn gateway_request(query: SearchQuery) -> harness_gateway_client::GatewaySearchRequest {
-    harness_gateway_client::GatewaySearchRequest {
-        query: query.query,
-        count: query.count,
-        freshness: query
-            .freshness
-            .map(|freshness| freshness.as_str().to_owned()),
-        country: query.country,
-        search_lang: query.search_lang,
-        safesearch: query.safesearch.map(|level| level.as_str().to_owned()),
-        include_domains: query.include_domains,
-        exclude_domains: query.exclude_domains,
-    }
-}
-
-/// The provider's results for the Gateway's reply.
-fn search_results(response: harness_gateway_client::GatewaySearchResponse) -> SearchResults {
-    SearchResults {
-        query: response.query,
-        results: response
-            .results
-            .into_iter()
-            .map(|result| SearchResult {
-                title: result.title,
-                url: result.url,
-                description: result.description,
-                age: result.age,
-                site_name: result.site_name,
-                extra_snippets: result.extra_snippets,
-            })
-            .collect(),
-    }
-}
-
-/// The provider's error for a failed Gateway search: its kind and text,
-/// with the Gateway's error as the cause.
-fn search_error(error: harness_gateway_client::GatewaySearchError) -> SearchError {
-    let kind = if error.kind() == harness_gateway_client::GatewaySearchErrorKind::Backend {
-        SearchErrorKind::Backend
-    } else {
-        SearchErrorKind::Transport
-    };
-    SearchError::with_source(kind, error.to_string(), error)
 }
 
 #[cfg(test)]
