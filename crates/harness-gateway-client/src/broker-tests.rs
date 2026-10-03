@@ -1,8 +1,9 @@
 //! The Gateway broker against the transport suite's mock gateways:
 //! `chat_streaming` hands each piece to its callback in wire order, the
-//! `InferenceBroker` round answers with the whole reply, and `models`
-//! lists the catalog the gateway serves under the broker's key. Its
-//! `Debug` never prints the bearer key.
+//! `InferenceBroker` round answers with the whole reply, every round is
+//! labeled with the model its request named, and `models` lists the
+//! catalog the gateway serves under the broker's key. Its `Debug` never
+//! prints the bearer key.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -142,6 +143,66 @@ async fn the_inference_broker_round_answers_with_the_whole_reply() {
         "one two three",
         "a headless Host's round streams nowhere, and the completed reply travels in the answer"
     );
+}
+
+/// A one-chunk reply whose chunks name `model`, or no model at all.
+fn reply_naming(model: Option<&str>) -> String {
+    let mut chunks = vec![
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": { "content": "ok" }, "finish_reason": null }]
+        }),
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+        }),
+    ];
+    if let Some(model) = model {
+        for chunk in &mut chunks {
+            chunk["model"] = Value::from(model);
+        }
+    }
+    sse_body(&chunks)
+}
+
+#[tokio::test]
+async fn every_round_whole_or_streamed_is_labeled_with_the_model_its_request_named() {
+    for body_model in [Some("served-elsewhere"), None] {
+        let broker = broker_for(sse_app(reply_naming(body_model))).await;
+        let whole = broker
+            .chat(
+                binding(),
+                vec![Message::user("hi")],
+                Vec::new(),
+                CompletionOptions::new("routed-to"),
+                round(ReplyOrigin::Chat),
+            )
+            .await
+            .expect("the mock round completes");
+        let (on_piece, _kept) = recording();
+        let streamed = broker
+            .chat_streaming(
+                binding(),
+                vec![Message::user("hi")],
+                Vec::new(),
+                CompletionOptions::new("routed-to"),
+                on_piece,
+            )
+            .await
+            .expect("the mock round completes");
+        for completion in [&whole, &streamed] {
+            assert_eq!(
+                completion.model(),
+                "routed-to",
+                "the label is the requested model, whatever the body named ({body_model:?})"
+            );
+        }
+        if body_model.is_none() {
+            assert_eq!(
+                streamed.metadata_diagnostics(),
+                ["completion response named no string `model`; labeled with the requested model"],
+                "the diagnostic says where the label came from"
+            );
+        }
+    }
 }
 
 #[test]

@@ -293,13 +293,17 @@ pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
 ///
 /// Every backend that speaks this protocol names the model in its response,
 /// so a missing or non-string value is anomalous: it records an empty
-/// string and a diagnostic, never fails the call.
+/// string and a diagnostic, never fails the call. The stream's finish
+/// labels the completion with the model the request named either way, so
+/// the diagnostic says the label came from the request.
 fn parse_model(body: &Value, diagnostics: &mut Vec<String>) -> String {
     if let Some(Value::String(model)) = body.get("model") {
         model.clone()
     } else {
-        diagnostics
-            .push("completion response named no string `model`; recorded as empty".to_owned());
+        diagnostics.push(
+            "completion response named no string `model`; labeled with the requested model"
+                .to_owned(),
+        );
         String::new()
     }
 }

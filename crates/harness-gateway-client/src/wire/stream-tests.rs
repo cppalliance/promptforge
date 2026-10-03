@@ -145,7 +145,11 @@ fn finish_normalizes_the_turn_and_returns_the_metadata() {
         other => panic!("expected text, got {other:?}"),
     }
     assert_eq!(completion.finish_reason(), Some("stop"));
-    assert_eq!(completion.model(), "qwen3-30b");
+    assert_eq!(
+        completion.model(),
+        "m",
+        "the label is the requested model, not the body's"
+    );
     let metrics = completion.metrics().expect("the usage chunk was measured");
     assert_eq!(
         metrics.usage.as_ref().map(|usage| usage.total_tokens),

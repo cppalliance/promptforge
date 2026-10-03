@@ -10,7 +10,12 @@
 //! the menu's catalog holds a chat-capable model, so a conversation
 //! launched before the Gateway's catalog arrives starts its run only once
 //! it can bind one.
+//!
+//! Each round reads the dropdown's pick through the registry as it is
+//! sent, so a model picked between rounds serves the next one; a round
+//! already in flight finishes on its model.
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use harness::{BoxFuture, InferenceBroker};
@@ -74,8 +79,44 @@ impl WorkshopBroker {
         }
     }
 
+    /// `options` sent to the dropdown's current pick: when the menu's
+    /// selected model differs from the model `options` names, it replaces
+    /// that model and every other field stays. With no menu or no pick,
+    /// `options` goes as it came. A pick whose context window, as the
+    /// menu's catalog lists it, is smaller than `binding`'s is logged and
+    /// still sent.
+    fn routed(&self, binding: &ModelBinding, options: CompletionOptions) -> CompletionOptions {
+        let Some(menu) = self.registry.state::<MenuHandles>() else {
+            return options;
+        };
+        let Some(pick) = menu
+            .menu()
+            .latest()
+            .and_then(|snapshot| snapshot.selected_model)
+        else {
+            return options;
+        };
+        if pick == options.model() {
+            return options;
+        }
+        let models = menu
+            .catalog()
+            .latest()
+            .map_or_else(Vec::new, |push| push.models);
+        if let Some(pick_window) = narrower_pick_window(&models, &pick, binding.context()) {
+            tracing::warn!(
+                pick_window,
+                binding_window = binding.context().get(),
+                "the selected model's context window is smaller than the launch model's; \
+                 the round is sent to the selected model anyway"
+            );
+        }
+        options.with_model(pick)
+    }
+
     /// Runs one round through the current generation's Gateway broker,
-    /// handing `on_piece` each live piece of the reply as it arrives.
+    /// sent to the dropdown's current pick, handing `on_piece` each live
+    /// piece of the reply as it arrives.
     pub(crate) fn chat_streaming(
         &self,
         binding: ModelBinding,
@@ -85,7 +126,10 @@ impl WorkshopBroker {
         on_piece: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         match self.current() {
-            Ok(broker) => broker.chat_streaming(binding, messages, tools, options, on_piece),
+            Ok(broker) => {
+                let options = self.routed(&binding, options);
+                broker.chat_streaming(binding, messages, tools, options, on_piece)
+            }
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
@@ -109,10 +153,30 @@ impl InferenceBroker for WorkshopBroker {
         round: Round,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         match self.current() {
-            Ok(broker) => broker.chat(binding, messages, tools, options, round),
+            Ok(broker) => {
+                let options = self.routed(&binding, options);
+                broker.chat(binding, messages, tools, options, round)
+            }
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
+}
+
+/// The context window `models`, the menu's catalog, lists for `pick`
+/// when it is smaller than `bound`, the window the round's binding holds.
+/// A pick the catalog does not list, or lists without a window, has
+/// nothing to compare.
+fn narrower_pick_window(
+    models: &[serde_json::Value],
+    pick: &str,
+    bound: NonZeroU32,
+) -> Option<u64> {
+    models
+        .iter()
+        .find(|model| model.get("id").and_then(serde_json::Value::as_str) == Some(pick))
+        .and_then(|model| model.get("context"))
+        .and_then(serde_json::Value::as_u64)
+        .filter(|window| *window < u64::from(bound.get()))
 }
 
 /// One run's broker over the Workshop broker: a section's own round

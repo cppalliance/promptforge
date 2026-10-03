@@ -269,7 +269,8 @@ impl GatewayChat {
     /// `tool_choice` set to `auto`); passing `None` or an empty slice omits
     /// the `tools` field, preserving the plain chat-completions behavior.
     ///
-    /// `options.model` names the model on the wire. Optional `temperature`,
+    /// `options.model` names the model on the wire and labels the returned
+    /// completion, whatever name the response gave. Optional `temperature`,
     /// `max_tokens`, and `thinking` extend the request when present.
     ///
     /// # Errors

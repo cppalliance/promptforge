@@ -12,7 +12,8 @@
 //! the server's inference broker ([`broker`]), the tokio timer, a clone of
 //! the server's capability registry, and a clone of the server's services
 //! with the conversation's input broker. The Harness reaches the gateway
-//! only through that broker, which follows the live gateway binding. The
+//! only through that broker, which follows the live gateway binding and
+//! sends each round to the dropdown's current pick. The
 //! run's request carries the Host snapshot ([`bindings`]): the menu's
 //! pick and the workspace's granted roots, read once the menu's catalog
 //! holds a chat-capable model. Status-bar reporting stays in the server

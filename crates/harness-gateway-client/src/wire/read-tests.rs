@@ -151,6 +151,45 @@ fn read_completion_stream_reassembles_the_turn_and_times_it_on_the_injected_cloc
 }
 
 #[test]
+fn read_completion_stream_labels_the_completion_with_the_model_its_request_named() {
+    for body_model in [Some("served-elsewhere"), None] {
+        let mut chunks = vec![
+            text_chunk("ok"),
+            json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] }),
+        ];
+        if let Some(model) = body_model {
+            for chunk in &mut chunks {
+                chunk["model"] = json!(model);
+            }
+        }
+        let body = sse(&chunks) + "data: [DONE]\n\n";
+        let mut source = Canned::of(&[&body]);
+        let started = Instant::now();
+        let completion = block_on(read_completion_stream(
+            &mut source,
+            json!({ "model": "routed-to" }),
+            1024,
+            |_| {},
+            started,
+            || started,
+        ))
+        .expect("a whole stream reassembles");
+        assert_eq!(
+            completion.model(),
+            "routed-to",
+            "the label is the requested model, whatever the body named ({body_model:?})"
+        );
+        if body_model.is_none() {
+            assert_eq!(
+                completion.metadata_diagnostics(),
+                ["completion response named no string `model`; labeled with the requested model"],
+                "the diagnostic says where the label came from"
+            );
+        }
+    }
+}
+
+#[test]
 fn read_completion_stream_rounds_timings_to_microseconds_for_the_log() {
     let body = sse(&[
         text_chunk("a"),

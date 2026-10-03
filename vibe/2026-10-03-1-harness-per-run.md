@@ -762,7 +762,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-6>
 
-### Step 6: The brokers route model swaps and label each completion
+### Step 6: The brokers route model swaps and label each completion [completed]
 
 - Component: Broker streaming and routing
 - Depends on: step 5.

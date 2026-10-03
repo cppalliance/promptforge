@@ -94,7 +94,8 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// `request_body` is the body the transport sent, as
 /// [`build_request_body`](crate::build_request_body) returned it; the
 /// completion carries it back, so a run's debug capture records exactly
-/// what was sent. `on_delta` receives each
+/// what was sent, and is labeled with the model it names rather than the
+/// name the response gave. `on_delta` receives each
 /// [`StreamDelta`] as it is decoded, for a Host that shows the reply as it
 /// arrives; the completion holds the whole turn either way.
 ///

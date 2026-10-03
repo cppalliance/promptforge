@@ -87,8 +87,8 @@ struct GateServer {
     state: AppState,
     /// The mock's captured request bodies.
     captured: CapturedRequests,
-    /// Keeps the state directory alive.
-    _dir: tempfile::TempDir,
+    /// The state directory the run log sits under, kept alive.
+    dir: tempfile::TempDir,
 }
 
 /// Every id a gate may select, in the order the typed catalog lists
@@ -151,7 +151,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
         ws_base,
         state,
         captured,
-        _dir: dir,
+        dir,
     }
 }
 

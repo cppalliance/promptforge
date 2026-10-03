@@ -128,7 +128,11 @@ async fn streamed_text_usage_timings_and_client_timing_accumulate() {
         "each content fragment reaches the callback live, in order"
     );
     assert_eq!(completion.finish_reason(), Some("stop"));
-    assert_eq!(completion.model(), "qwen3-30b");
+    assert_eq!(
+        completion.model(),
+        "m",
+        "the label is the requested model, not the body's `qwen3-30b`"
+    );
     let metrics = completion.metrics().expect("the round reported metrics");
     let usage = metrics.usage.as_ref().expect("usage from the final chunk");
     assert_eq!(usage.total_tokens, 10);

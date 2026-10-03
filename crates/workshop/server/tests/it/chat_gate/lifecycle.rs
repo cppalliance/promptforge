@@ -1,17 +1,48 @@
-//! Run lifecycle gates: the model binding frozen at launch, and delayed
-//! startup convergence on the server broker's catalog wait.
+//! Run lifecycle gates: the dropdown's pick serving each next round, and
+//! delayed startup convergence on the server broker's catalog wait.
+
+use workshop_run_log::{RecordFilter, RecordKind, RunId, RunLog};
 
 use super::*;
 
-/// GATE 3 - model switch. Current-chat behavior: the run's model is the
-/// dropdown selection bound at launch, so selecting another model leaves
-/// the live run untouched; the reply is attributed to the model that
-/// produced it.
+/// The model each answered round of `run` names in the run log, in
+/// round order, read once the run is recorded whole.
+async fn answered_models(server: &GateServer, run: RunId) -> Vec<String> {
+    let log_file = server.dir.path().join("harness").join("runs.db");
+    let log = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(log) = RunLog::open(&log_file).await
+                && let Ok(row) = log.run(run).await
+                && row.outcome.is_some()
+            {
+                return log;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the run is recorded and closed within the deadline");
+    let answers = RecordFilter {
+        kind: Some(RecordKind::Answer),
+        last: None,
+    };
+    log.records(run, answers)
+        .await
+        .expect("the answers read back")
+        .iter()
+        .filter_map(|stored| stored.record.payload.pointer("/Chat/Ok/model"))
+        .map(|model| model.as_str().expect("a round's model is text").to_owned())
+        .collect()
+}
+
+/// GATE 3 - model switch. The dropdown's pick is read at each round, so
+/// a model picked between turns serves the live run's next round, and
+/// that round's reply event and its answer in the run log name it.
 #[tokio::test]
-async fn gate_model_switch_never_reaches_a_launched_run() {
+async fn gate_a_model_picked_between_turns_serves_the_next_round() {
     let server = spawn_chat_server(&["model-a", "model-b"]).await;
     let mut socket = connect_chat(&server.ws_base).await;
-    let _session = launch_chat(&mut socket).await;
+    let session = launch_chat(&mut socket).await;
 
     let token = next_wait_token(&mut socket).await;
     answer(&mut socket, &token, "one").await;
@@ -28,24 +59,34 @@ async fn gate_model_switch_never_reaches_a_launched_run() {
         .set_selected("model-b")
         .expect("model-b is in the retained catalog");
 
-    // The live run's binding is frozen at launch: the next turn still
-    // runs on the launch-time model.
     let token = wait_after(&mut socket, &turn).await;
     answer(&mut socket, &token, "two").await;
     let turn = collect_turn(&mut socket).await;
     let reply = turn.events.last().expect("the second turn completes");
     assert_eq!(
-        reply["event"]["model"], "model-a",
-        "a selection change never reaches a run already launched"
+        reply["event"]["model"], "model-b",
+        "the next round's reply names the model picked between turns"
     );
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
         assert_eq!(requests[0]["model"], "model-a");
         assert_eq!(
-            requests[1]["model"], "model-a",
-            "the frozen run keeps its launch-time model after the switch"
+            requests[1]["model"], "model-b",
+            "the next round is sent to the new pick"
         );
     }
+
+    let run = server
+        .state
+        .agents()
+        .run_id(&session)
+        .expect("the conversation's run has begun");
+    assert!(server.state.agents().close(&session), "the session closes");
+    assert_eq!(
+        answered_models(&server, run).await,
+        ["model-a", "model-b"],
+        "each round's answer record names the model that served it"
+    );
     socket.close().await;
 }
 

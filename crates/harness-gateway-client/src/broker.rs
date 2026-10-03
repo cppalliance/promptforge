@@ -5,7 +5,9 @@
 //! `InferenceBroker` round returns it whole. A Host that shows the reply
 //! as it forms runs the round through [`GatewayBroker::chat_streaming`]
 //! instead, which hands each live piece to the Host's callback as it
-//! arrives, so no fragment ever reaches the Host's recorder.
+//! arrives, so no fragment ever reaches the Host's recorder. Either way
+//! the completion names the model the round's options sent it to, so a
+//! Host that routes a round to another model sees that model on its reply.
 
 use std::fmt;
 use std::sync::Arc;

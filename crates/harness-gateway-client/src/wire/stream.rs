@@ -311,8 +311,10 @@ impl StreamAccumulator {
     /// Finishes the accumulation into the [`Completion`] the turn produced:
     /// the truncation rule, the strict turn normalizer, and the lenient
     /// metadata parser, in that order. `request_body` is the body the
-    /// transport sent; with the reassembled response it becomes the
-    /// completion's [`RawExchange`] for the debug capture. `client_timing`
+    /// transport sent; the completion is labeled with the model it names,
+    /// in place of the name the response gave, and with the reassembled
+    /// response it becomes the completion's [`RawExchange`] for the debug
+    /// capture. `client_timing`
     /// is what the transport measured on its own clock; it joins the
     /// backend's sections in the completion's [`CallMetrics`], which is
     /// absent when nothing was measured.
@@ -357,6 +359,9 @@ impl StreamAccumulator {
             || metrics.client.is_some();
         let mut completion = Completion::from_result(turn.outcome, metadata.model)?
             .with_metadata_diagnostics(metadata.diagnostics);
+        if let Some(Value::String(model)) = request_body.get("model") {
+            completion = completion.with_model(model.clone());
+        }
         if let Some(reason) = turn.finish_reason {
             completion = completion.with_finish_reason(reason);
         }

@@ -4,8 +4,9 @@
 //! published the next round and the next model list reach the
 //! replacement, a model list waits while the menu's catalog holds no
 //! chat-capable model, a streaming round hands its pieces to its callback
-//! and answers whole, and a run's broker streams only its section's own
-//! rounds into the conversation.
+//! and answers whole, a run's broker streams only its section's own
+//! rounds into the conversation, and the window comparison flags a pick
+//! whose context window is smaller than the round's binding's.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -29,7 +30,7 @@ use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
 use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Registration, Registry};
 
-use super::{RunBroker, WorkshopBroker};
+use super::{RunBroker, WorkshopBroker, narrower_pick_window};
 use crate::app::test_helpers::spawn_gateway;
 
 /// A registry holding gateway handles bound to `base_url` under `key`,
@@ -340,4 +341,32 @@ async fn a_sections_round_streams_into_its_conversation_under_the_round_id_and_a
     assert_eq!(delta.kind, DeltaKind::Text);
     assert_eq!(delta.content, "from first-model");
     assert_eq!(delta.reply, 3, "the piece carries its round's id");
+}
+
+#[test]
+fn the_window_comparison_flags_a_pick_smaller_than_the_binding_and_not_an_equal_or_larger_one() {
+    let models = [
+        json!({ "id": "smaller", "kind": "chat", "context": 4095 }),
+        json!({ "id": "equal", "kind": "chat", "context": 4096 }),
+        json!({ "id": "larger", "kind": "chat", "context": 131_072 }),
+        json!({ "id": "unsized", "kind": "chat" }),
+    ];
+    let bound = NonZeroU32::new(4096).expect("4096 is non-zero");
+    assert_eq!(
+        narrower_pick_window(&models, "smaller", bound),
+        Some(4095),
+        "a pick one token short of the binding's window warns"
+    );
+    assert_eq!(narrower_pick_window(&models, "equal", bound), None);
+    assert_eq!(narrower_pick_window(&models, "larger", bound), None);
+    assert_eq!(
+        narrower_pick_window(&models, "unsized", bound),
+        None,
+        "a pick the catalog lists without a window has nothing to compare"
+    );
+    assert_eq!(
+        narrower_pick_window(&models, "unlisted", bound),
+        None,
+        "a pick the catalog does not list has nothing to compare"
+    );
 }
