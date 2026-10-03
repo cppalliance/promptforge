@@ -406,8 +406,9 @@ impl Completion {
         &self.metadata_diagnostics
     }
 
-    /// Returns the model that served the call, as the backend named it in the
-    /// response body (empty when the body named none).
+    /// Returns the model that served the call: the name a broker labeled
+    /// the completion with through [`with_model`](Completion::with_model),
+    /// else the one the response body named (empty when it named none).
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model

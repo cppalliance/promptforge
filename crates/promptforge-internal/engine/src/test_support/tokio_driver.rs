@@ -50,9 +50,9 @@ use crate::lua::run_store_op;
 use crate::test_support::scripted_chat::ScriptedChat;
 use crate::{Error, Result};
 
-#[cfg(test)]
-use crate::execute::EffectRecord;
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
+#[cfg(test)]
+use crate::execute::{EffectRecord, Round};
 #[cfg(test)]
 use crate::test_support::RunHarness;
 
@@ -157,6 +157,9 @@ pub(crate) struct TokioDriver<'a> {
     /// Test-only: the record of every effect performed, in issue order.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
+    /// Test-only: the round of every `Chat` effect issued, in issue order.
+    #[cfg(test)]
+    rounds: Option<Arc<Mutex<Vec<Round>>>>,
 }
 
 impl<'a> TokioDriver<'a> {
@@ -204,6 +207,8 @@ impl<'a> TokioDriver<'a> {
             cancel,
             #[cfg(test)]
             tap: None,
+            #[cfg(test)]
+            rounds: None,
             #[cfg(test)]
             shuffle: None,
         }

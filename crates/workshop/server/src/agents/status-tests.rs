@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use promptforge::ids::{ChainId, Provenance, TaskId};
+use promptforge::ids::{ChainId, Provenance, RoundId, TaskId};
 use workshop_protocol::Severity;
 use workshop_registry::Registry;
 use workshop_status::StatusBus;
@@ -42,6 +42,7 @@ fn reply_event() -> Event {
             seq: 0,
         },
         turn: 1,
+        round: RoundId::new(0),
         text: "hello".to_owned(),
         finish_reason: None,
         model: "m".to_owned(),

@@ -24,9 +24,10 @@ impl Completion {
     /// [`with_metrics`](Completion::with_metrics),
     /// [`with_raw`](Completion::with_raw),
     /// [`with_finish_reason`](Completion::with_finish_reason),
-    /// [`with_reasoning_content`](Completion::with_reasoning_content), and
-    /// [`with_metadata_diagnostics`](Completion::with_metadata_diagnostics)
-    /// add what a broker knows beyond the result.
+    /// [`with_reasoning_content`](Completion::with_reasoning_content),
+    /// [`with_metadata_diagnostics`](Completion::with_metadata_diagnostics),
+    /// and [`with_model`](Completion::with_model) add what a broker knows
+    /// beyond the result.
     ///
     /// # Errors
     /// Returns an `EmptyReply`-kind [`CompletionError`] for an empty
@@ -97,6 +98,16 @@ impl Completion {
     #[must_use]
     pub fn with_metadata_diagnostics(mut self, diagnostics: Vec<String>) -> Completion {
         self.metadata_diagnostics = diagnostics;
+        self
+    }
+
+    /// Returns the completion with `model` as the model that served it,
+    /// replacing the name it held. A broker that routed the round labels
+    /// the completion with the model it routed to; the round's reply and
+    /// thinking events and its answer record report this name.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Completion {
+        self.model = model.into();
         self
     }
 }

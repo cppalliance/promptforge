@@ -39,6 +39,7 @@ use crate::{Error, Result};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
+use promptforge_types::ids::RoundId;
 
 use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
@@ -164,19 +165,21 @@ impl Scheduler {
         chain
             .anchor
             .sending(binding.id().clone(), conversation.clone());
+        let round = self.number_round(ReplyOrigin::Chat);
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
             messages: conversation,
             tools: schemas,
-            stream: true,
+            round,
         };
-        self.issue(id, effect, Continuation::Chat);
+        self.issue(id, effect, Continuation::Chat(round.id));
         Ok(ChatDispatch::Issued)
     }
 
     /// Classifies one arrived chat round into the chain's answer, emitting
-    /// the round's events through the chain's task-scoped emitter.
+    /// the round's events through the chain's task-scoped emitter, each
+    /// content event stamped with `round`.
     ///
     /// A `ContextOverflow` failure is the overflow answer under a failed
     /// turn. An `EmptyReply` is a completed round with the reply absent -
@@ -199,6 +202,7 @@ impl Scheduler {
     pub(super) fn accept_chat(
         &mut self,
         id: ChainIndex,
+        round: RoundId,
         result: Result<Box<Completion>>,
     ) -> Result<Answer<Error>> {
         let chain = &self.chains[id.index()];
@@ -207,7 +211,8 @@ impl Scheduler {
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         let handles = frame.reporting_handles();
-        let round = Round {
+        let round = ArrivedRound {
+            id: round,
             section: chain.section_name().to_owned(),
             emitter: handles.emitter,
             turns: handles.turns,
@@ -225,7 +230,7 @@ impl Scheduler {
         let turn = advance_turn(&round.turns);
         let (outcome, served) = round.served(*completion, turn);
         let result = match outcome {
-            CompletionResult::Text(text) => Ok(Round::text_reply(&served, text, turn)),
+            CompletionResult::Text(text) => Ok(ArrivedRound::text_reply(&served, text, turn)),
             CompletionResult::ToolCalls(calls) => {
                 // The scope is recorded before the round is spawned; its
                 // absence is a scheduler fault, never an author-visible
@@ -253,16 +258,17 @@ impl Scheduler {
     }
 }
 
-/// One arrived round's reporting context: the chain's section label, its
-/// task-scoped emitter, and the turn counter it advances (a task chain's
-/// own, so its turns count against its own cap).
-struct Round {
+/// One arrived round's reporting context: the round's id, the chain's
+/// section label, its task-scoped emitter, and the turn counter it
+/// advances (a task chain's own, so its turns count against its own cap).
+struct ArrivedRound {
+    id: RoundId,
     section: String,
     emitter: Arc<Emitter>,
     turns: Arc<AtomicU32>,
 }
 
-impl Round {
+impl ArrivedRound {
     /// Classifies a round that produced no completion. A `ContextOverflow`
     /// failure is the overflow answer under a failed turn. An `EmptyReply`
     /// is a completed round with the reply absent - the turn advances and
@@ -315,6 +321,7 @@ impl Round {
             &self.emitter,
             &self.section,
             turn,
+            self.id,
             completion,
             ReplyOrigin::Chat,
         )
@@ -363,7 +370,7 @@ impl Round {
             })
             .collect();
         self.emitter
-            .assistant_tool_calls(&self.section, turn, &served.model, &events);
+            .assistant_tool_calls(&self.section, turn, self.id, &served.model, &events);
         if let Some(rogue) = calls
             .iter()
             .find(|call| !advertised.contains_key(call.name()))

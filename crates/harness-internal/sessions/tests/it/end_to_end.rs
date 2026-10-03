@@ -174,7 +174,7 @@ fn assert_effects_and_answers(records: &[Record], round: &Round) -> String {
         store.payload,
         json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
     );
-    assert_eq!(chat.payload["Chat"]["model"], "m");
+    assert_eq!(chat.payload["Chat"]["round"], 0, "the run's first round");
     assert_eq!(chat.payload["Chat"]["alias"], "writer");
     assert_eq!(chat.payload["Chat"]["tools"], json!([]));
     assert_eq!(

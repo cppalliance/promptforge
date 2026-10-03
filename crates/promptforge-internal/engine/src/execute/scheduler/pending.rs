@@ -10,6 +10,7 @@
 use crate::execute::protocol::VfsOp;
 use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
+use promptforge_types::ids::RoundId;
 
 use super::ChainIndex;
 
@@ -17,11 +18,13 @@ use super::ChainIndex;
 /// the chain parked on it.
 pub(super) enum Continuation {
     /// A nested `models.infer`: the completion becomes the round's text
-    /// under the single-prose-round reporting rules.
-    Infer,
+    /// under the single-prose-round reporting rules. The round's id waits
+    /// here for the answer, whose events it stamps.
+    Infer(RoundId),
     /// A `chat` round: the completion is classified against the scope the
-    /// chain advertised and reported as one model turn.
-    Chat,
+    /// chain advertised and reported as one model turn. The round's id
+    /// waits here for the answer, whose events it stamps.
+    Chat(RoundId),
     /// A bound tool call: the tool's own output goes through the shared
     /// dispatch body (counts already taken at dispatch, then the
     /// succeeded/failed event, the trust rule, and the `ToolResult`).

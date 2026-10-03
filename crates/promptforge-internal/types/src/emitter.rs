@@ -29,7 +29,7 @@ use serde_json::Value;
 use crate::event::Event;
 use crate::event::ReplyOrigin;
 use crate::event::lifecycle::Lifecycle;
-use crate::ids::{ChainId, Provenance, TaskId};
+use crate::ids::{ChainId, Provenance, RoundId, TaskId};
 use crate::metrics::{CallMetrics, ToolCallEvent};
 use crate::tools::OutputTrust;
 
@@ -257,28 +257,30 @@ impl Emitter {
         });
     }
 
-    /// Reports one completed block of model thinking.
-    pub fn thinking(&self, section: &str, turn: u32, model: &str, text: &str) {
+    /// Reports one completed block of model thinking from `round`.
+    pub fn thinking(&self, section: &str, turn: u32, round: RoundId, model: &str, text: &str) {
         self.emit(section, |execution, section, provenance| Event::Thinking {
             execution,
             section,
             provenance,
             turn,
+            round,
             model: model.to_owned(),
             text: text.to_owned(),
         });
     }
 
-    /// Reports one completed assistant reply: a model round's text reply
-    /// with its [`ReplyOrigin`] provenance.
+    /// Reports one completed assistant reply: `round`'s text reply with
+    /// its [`ReplyOrigin`] provenance.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the reply report names its full run coordinates, including the origin, in one call"
+        reason = "the reply report names its full run coordinates, including the round and origin, in one call"
     )]
     pub fn assistant_reply(
         &self,
         section: &str,
         turn: u32,
+        round: RoundId,
         text: &str,
         finish_reason: Option<&str>,
         model: &str,
@@ -291,6 +293,7 @@ impl Emitter {
                 section,
                 provenance,
                 turn,
+                round,
                 text: text.to_owned(),
                 finish_reason: finish_reason.map(str::to_owned),
                 model: model.to_owned(),
@@ -300,11 +303,13 @@ impl Emitter {
         });
     }
 
-    /// Reports one batch of tool calls the model requested, unexecuted.
+    /// Reports one batch of tool calls the model requested in `round`,
+    /// unexecuted.
     pub fn assistant_tool_calls(
         &self,
         section: &str,
         turn: u32,
+        round: RoundId,
         model: &str,
         calls: &[ToolCallEvent],
     ) {
@@ -314,6 +319,7 @@ impl Emitter {
                 section,
                 provenance,
                 turn,
+                round,
                 model: model.to_owned(),
                 calls: calls.to_vec(),
             }

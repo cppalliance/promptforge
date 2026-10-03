@@ -5,7 +5,7 @@ use serde_json::json;
 use super::Event;
 use super::ReplyOrigin;
 use super::lifecycle::{self, Lifecycle};
-use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
+use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
 
 fn task(path: &str) -> TaskId {
@@ -208,6 +208,7 @@ fn content_samples() -> Vec<Event> {
         section: "Gather".to_owned(),
         provenance: provenance("0", seq),
         turn: 2,
+        round: RoundId::new(1),
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
@@ -220,6 +221,7 @@ fn content_samples() -> Vec<Event> {
             section: "Gather".to_owned(),
             provenance: provenance("0", 14),
             turn: 2,
+            round: RoundId::new(1),
             model: "llama-3".to_owned(),
             text: "considering".to_owned(),
         },
@@ -230,6 +232,7 @@ fn content_samples() -> Vec<Event> {
             section: "Gather".to_owned(),
             provenance: provenance("0", 4),
             turn: 2,
+            round: RoundId::new(1),
             model: "llama-3".to_owned(),
             calls: vec![ToolCallEvent {
                 id: "call_1".to_owned(),
@@ -329,12 +332,13 @@ fn a_reply_origin_defaults_to_chat() {
 }
 
 #[test]
-fn a_reply_serializes_its_origin() {
+fn a_reply_serializes_its_origin_and_its_round() {
     let event = Event::AssistantReply {
         execution: "run-1".to_owned(),
         section: "Gather".to_owned(),
         provenance: provenance("0", 20),
         turn: 1,
+        round: RoundId::new(4),
         text: "inferred".to_owned(),
         finish_reason: None,
         model: "llama-3".to_owned(),
@@ -346,14 +350,17 @@ fn a_reply_serializes_its_origin() {
         line.contains(r#""origin":"infer""#),
         "the origin must reach the wire: {line}"
     );
+    assert!(
+        line.contains(r#""round":4"#),
+        "the round must reach the wire as a bare number: {line}"
+    );
 }
 
 #[test]
-fn an_older_reply_without_origin_reads_back_as_chat() {
-    // Backward compatibility: a log line written before `origin` existed
-    // must still parse, defaulting to a chat reply. Without
-    // `#[serde(default)]` this deserialization fails.
-    let line = r#"{"kind":"assistant_reply","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":1},"turn":1,"text":"hi","finish_reason":null,"model":"llama-3","metrics":null}"#;
+fn a_reply_without_origin_reads_back_as_chat() {
+    // A line that leaves `origin` out still parses, defaulting to a chat
+    // reply. Without `#[serde(default)]` this deserialization fails.
+    let line = r#"{"kind":"assistant_reply","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":1},"turn":1,"round":0,"text":"hi","finish_reason":null,"model":"llama-3","metrics":null}"#;
     let event: Event = serde_json::from_str(line).expect("an old reply parses");
     match event {
         Event::AssistantReply { origin, .. } => assert_eq!(origin, ReplyOrigin::Chat),

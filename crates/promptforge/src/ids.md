@@ -341,6 +341,12 @@ You might expect cancelling a run to report its live tasks as cancelled. Instead
 - [`Provenance::task`] is the task whose chain emitted the item. The main walk is task `0`, and a `call` child reports its caller's task.
 - [`Provenance::seq`] counts effects and events per task, so events alone skip numbers. Parse events start task `0` at 0; the run continues only with [`RunContext::provenance_start`](crate::RunContext::provenance_start).
 
+## RoundId
+
+[`RoundId`] numbers one model round in the order the run dispatched it, from 0, a section's chat rounds and its `models.infer` rounds alike. A round's [`Chat`](crate::effect::Effect::Chat) effect holds it in its [`Round`](crate::effect::Round), and the round's thinking, reply, and tool-call events hold it too, so use it to match a round's live pieces and events. Unlike [`Provenance`], it is run-wide, so when tasks run concurrently your answer order can change which round gets which number. It serializes as a bare number.
+
+- [`RoundId::new`] builds the id for a number, and [`RoundId::get`] reads the number back.
+
 ## TaskId
 
 [`TaskId`] names one task by the id of the chain that runs it, wrapped so a task-keyed table cannot take an arbitrary chain by mistake. Use it to key tables or APIs by task, such as fetching one task's events. It displays, serializes, and orders exactly as its chain id does. Parsing fails with [`ParseIdError`] under the same rules as [`ChainId`]; check that the text is a dotted path such as `0.2`. [Group a log by task](#group-a-log-by-task) teaches it.

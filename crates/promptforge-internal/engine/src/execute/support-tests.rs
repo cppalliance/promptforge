@@ -1,14 +1,17 @@
 //! Tests for the shared model-turn report: a completion's metadata
 //! diagnostics reach the run log as `model_metadata_degraded` events, in
 //! their fixed place after `model_turn_completed`; its metrics ride the
-//! reply event; and its raw exchange feeds the debug capture.
+//! reply event; its raw exchange feeds the debug capture; and its content
+//! events carry the round's id and the model the completion names.
 
 use promptforge_model_client::client::RawExchange;
 use promptforge_types::emitter::{DebugMode, EventSink};
+use promptforge_types::ids::RoundId;
 use promptforge_types::metrics::{CallMetrics, Usage};
 use serde_json::{Value, json};
 
 use super::*;
+use crate::execute::ChatAnswerRecord;
 
 /// A text completion `hi` as a wire client hands it over: served by
 /// `model` and finished by `stop`, holding one diagnostic line per
@@ -51,17 +54,25 @@ fn usage_metrics(prompt_tokens: u32, completion_tokens: u32) -> CallMetrics {
     }
 }
 
-/// Reports `completion` as chat turn 3 and returns the events it pushed.
+/// Reports `completion` as chat turn 3, round 5, and returns the events it
+/// pushed.
 fn report(completion: Completion) -> Vec<Event> {
     report_with(completion, DebugMode::Off)
 }
 
-/// Reports `completion` as chat turn 3 under `debug` and returns the events
-/// it pushed.
+/// Reports `completion` as chat turn 3, round 5, under `debug` and returns
+/// the events it pushed.
 fn report_with(completion: Completion, debug: DebugMode) -> Vec<Event> {
     let sink = EventSink::default();
     let emitter = Emitter::root(sink.clone(), "run-1", debug);
-    let _ = report_model_turn(&emitter, "Chat", 3, completion, ReplyOrigin::Chat);
+    let _ = report_model_turn(
+        &emitter,
+        "Chat",
+        3,
+        RoundId::new(5),
+        completion,
+        ReplyOrigin::Chat,
+    );
     sink.take()
 }
 
@@ -259,6 +270,43 @@ fn a_completion_with_no_raw_exchange_still_reports_its_pair_with_null_bodies() {
         }],
         "{events:?}"
     );
+}
+
+#[test]
+fn the_thinking_and_reply_events_carry_the_round_they_were_reported_under() {
+    let events = report(canned().with_reasoning_content("hmm"));
+    let rounds: Vec<RoundId> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Thinking { round, .. } | Event::AssistantReply { round, .. } => Some(*round),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rounds, vec![RoundId::new(5), RoundId::new(5)], "{events:?}");
+}
+
+#[test]
+fn the_content_events_and_the_answer_record_name_the_model_the_completion_names() {
+    let completion = canned()
+        .with_reasoning_content("hmm")
+        .with_model("routed-model");
+    let record = ChatAnswerRecord::from(&completion);
+    let events = report(completion);
+    let models: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Thinking { model, .. } | Event::AssistantReply { model, .. } => {
+                Some(model.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        models,
+        ["routed-model", "routed-model"],
+        "the events follow the completion's label, not the name it was built with"
+    );
+    assert_eq!(record.model, "routed-model");
 }
 
 #[test]

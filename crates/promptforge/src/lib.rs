@@ -27,6 +27,7 @@ pub mod effect {
     pub use promptforge_engine::EffectAnswer;
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
+    pub use promptforge_engine::Round;
     pub use promptforge_engine::ToolAnswerRecord;
     pub use promptforge_engine::ToolCallOrigin;
     pub use promptforge_engine::ToolCaller;
@@ -47,6 +48,7 @@ pub mod ids {
     pub use promptforge_types::ids::ChainId;
     pub use promptforge_types::ids::ParseIdError;
     pub use promptforge_types::ids::Provenance;
+    pub use promptforge_types::ids::RoundId;
     pub use promptforge_types::ids::TaskId;
     pub use promptforge_types::ids::TaskOrigin;
 }

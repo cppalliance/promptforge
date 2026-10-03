@@ -6,7 +6,7 @@
 use std::sync::Mutex;
 
 use promptforge_types::event::ReplyOrigin;
-use promptforge_types::ids::{ChainId, Provenance, TaskId};
+use promptforge_types::ids::{ChainId, Provenance, RoundId, TaskId};
 use promptforge_types::metrics::ToolCallEvent;
 
 use super::*;
@@ -176,6 +176,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
             section: "A".to_owned(),
             provenance: provenance(),
             turn: 1,
+            round: RoundId::new(0),
             text: "hi".to_owned(),
             finish_reason: Some("stop".to_owned()),
             model: "m".to_owned(),
@@ -187,6 +188,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
             section: "A".to_owned(),
             provenance: provenance(),
             turn: 1,
+            round: RoundId::new(0),
             model: "m".to_owned(),
             text: "hmm".to_owned(),
         },
@@ -237,6 +239,7 @@ fn a_reply_forwards_its_origin_to_the_observer() {
             section: "A".to_owned(),
             provenance: provenance(),
             turn: 1,
+            round: RoundId::new(0),
             text: "inferred".to_owned(),
             finish_reason: Some("stop".to_owned()),
             model: "m".to_owned(),

@@ -22,6 +22,8 @@
 use std::sync::Arc;
 
 use promptforge_model_client::detail::tool_schema_name;
+use promptforge_types::event::ReplyOrigin;
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,6 +55,24 @@ impl std::fmt::Display for EffectId {
     }
 }
 
+/// One model round's identity on its [`Effect::Chat`]: the round's id and
+/// the path that dispatched it.
+///
+/// The id numbers the run's rounds from 0 in dispatch order, a section's
+/// chat rounds and its nested `models.infer` rounds alike, and the
+/// thinking, reply, and tool-call events the round's answer reports hold
+/// the same id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Round {
+    /// The round's run-wide id.
+    pub id: RoundId,
+    /// The path that dispatched the round: [`ReplyOrigin::Chat`] for a
+    /// section's `chat` round (the `models.loop` rounds a Host streams
+    /// live deltas from), [`ReplyOrigin::Infer`] for a nested
+    /// `models.infer`, where only the completed reply is consumed.
+    pub origin: ReplyOrigin,
+}
+
 /// One piece of work the Engine asks the Harness to perform.
 #[derive(Debug)]
 pub enum Effect {
@@ -69,13 +89,11 @@ pub enum Effect {
         tools: Vec<ToolSchema>,
         /// The per-request fields, built from `binding`.
         options: CompletionOptions,
-        /// Whether the Harness forwards the round's live deltas to its delta
-        /// hook: `true` for a section's `chat` round (the `models.loop`
-        /// rounds the hook is documented for), `false` for a nested
-        /// `models.infer`, where only the completed reply is consumed.
-        /// Not part of the record: a delta is not an event, and the hint
-        /// changes no request body.
-        stream: bool,
+        /// The round's id and origin. The Harness forwards the round's
+        /// live deltas to its delta hook only when the origin is
+        /// [`ReplyOrigin::Chat`]. The record keeps the id and leaves out
+        /// the origin, which changes no request body.
+        round: Round,
     },
     /// One bound tool call: `tool` is the stable identity the performer
     /// resolves to an implementation (the Harness against its activated
@@ -135,11 +153,12 @@ impl Effect {
                 binding,
                 messages,
                 tools,
+                round,
                 ..
             } => {
                 let invocation = binding.invocation();
                 EffectRecord::Chat {
-                    model: binding.id().name().to_owned(),
+                    round: round.id,
                     alias: binding.alias().to_owned(),
                     messages: messages.iter().map(wire_value).collect(),
                     tools: tools
@@ -171,17 +190,19 @@ impl Effect {
 /// An [`Effect`] minus its live handles: what a run log stores for the
 /// effect and what a replay compares a re-issued effect against.
 ///
-/// The `Chat` record flattens the binding to what identifies the round -
-/// the model, the alias, and the frozen invocation - and stores the
-/// messages in their wire form, so the record reads the same as the
-/// request body the Harness would build from it.
+/// The `Chat` record flattens the round to what identifies it - its id,
+/// the alias of the slot it ran under, and the frozen invocation - and
+/// stores the messages in their wire form. It names the slot by alias
+/// rather than by the bound model, because a Host's broker may serve the
+/// slot with another model; the answer's [`ChatAnswerRecord`] names the
+/// model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectRecord {
     /// One model round.
     Chat {
-        /// The bound model's name.
-        model: String,
-        /// The prompt-local alias the round ran under.
+        /// The round's run-wide id, the one its content events hold.
+        round: RoundId,
+        /// The prompt-local alias of the slot the round ran under.
         alias: String,
         /// The conversation, one wire-form message per entry.
         messages: Vec<Value>,
@@ -319,7 +340,7 @@ pub enum AnswerRecord {
 /// answer without the request and response bodies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatAnswerRecord {
-    /// The model that served the round, as the response body named it.
+    /// The model that served the round, as the completion names it.
     pub model: String,
     /// The provider's finish reason, when it sent one.
     pub finish_reason: Option<String>,

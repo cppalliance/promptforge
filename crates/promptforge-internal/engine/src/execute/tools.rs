@@ -16,6 +16,7 @@ use crate::Error;
 use crate::model::{Completion, CompletionError, CompletionResult};
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
+use promptforge_types::ids::RoundId;
 
 use super::support::{advance_turn, report_model_turn};
 use promptforge_types::emitter::Emitter;
@@ -24,16 +25,25 @@ use promptforge_types::emitter::Emitter;
 /// renders its text. The report fires the turn advance's round events - the
 /// debug capture pair, the completed boundary, the thinking side channel,
 /// the `length` truncation observation - plus the [`Emitter::assistant_reply`]
-/// content report tagged `origin = infer`. The no-tools-advertised
-/// violation check is what keeps the round tool-free.
+/// content report tagged `origin = infer`, each content report stamped
+/// with `round`. The no-tools-advertised violation check is what keeps the
+/// round tool-free.
 fn accept_infer_completion(
     completion: Completion,
+    round: RoundId,
     emitter: &Emitter,
     section: &str,
     turns: &AtomicU32,
 ) -> Result<String, Error> {
     let turn = advance_turn(turns);
-    let (outcome, _) = report_model_turn(emitter, section, turn, completion, ReplyOrigin::Infer);
+    let (outcome, _) = report_model_turn(
+        emitter,
+        section,
+        turn,
+        round,
+        completion,
+        ReplyOrigin::Infer,
+    );
     match outcome {
         CompletionResult::Text(text) => Ok(text),
         // No tools were advertised, so a tool-call turn is a backend
@@ -52,7 +62,8 @@ fn accept_infer_completion(
 
 /// Applies one infer round's answer - the completion the performer
 /// obtained, or its failure - reporting it exactly like one prose round
-/// through the chain's `emitter` under `section`, and renders its text.
+/// of `round` through the chain's `emitter` under `section`, and renders
+/// its text.
 ///
 /// A failed completion is a failed turn and the call's error. The
 /// performer's task is aborted on cancellation before any answer lands,
@@ -63,6 +74,7 @@ fn accept_infer_completion(
 /// produced tool calls (none were advertised) or an unrecognized outcome.
 pub(crate) fn accept_infer(
     result: std::result::Result<Box<Completion>, CompletionError>,
+    round: RoundId,
     emitter: &Emitter,
     section: &str,
     turns: &AtomicU32,
@@ -74,5 +86,5 @@ pub(crate) fn accept_infer(
             return Err(Error::from(error));
         }
     };
-    accept_infer_completion(*completion, emitter, section, turns)
+    accept_infer_completion(*completion, round, emitter, section, turns)
 }

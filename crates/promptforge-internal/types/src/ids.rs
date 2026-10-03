@@ -20,7 +20,8 @@
 //! [`AbandonReason`] names how a task's owner ended while the task was
 //! still live, for the `abandoned` terminal state. [`Provenance`] extends a
 //! task's id with a per-task sequence number: the replay key stamped on
-//! every effect and event the Engine emits.
+//! every effect and event the Engine emits. [`RoundId`] numbers the run's
+//! model rounds, so a round's effect and its content events name it alike.
 //!
 //! Ids order as paths: a chain before its descendants, siblings by index.
 //! The tasks one chain owns are its direct children, so sorting their ids
@@ -210,6 +211,34 @@ pub struct Provenance {
     pub task: TaskId,
     /// The item's position among the task's effects and events.
     pub seq: u32,
+}
+
+/// The id of one model round: its position in the run's dispatch order,
+/// from 0.
+///
+/// One run-wide counter numbers every round, a section's chat rounds and
+/// its nested `models.infer` rounds alike. A round's `Chat` effect holds
+/// its id, and so do the thinking, reply, and tool-call events its answer
+/// reports, so a Host pairs a round's live pieces with the events that
+/// settle it. Like an effect id it is run-wide, so when tasks run
+/// concurrently the order the Host answers in can change which round gets
+/// which number. Serializes as a bare number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RoundId(u64);
+
+impl RoundId {
+    /// The round numbered `id`.
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The round's number.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
 }
 
 /// The principal that started a task.

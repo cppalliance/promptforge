@@ -77,3 +77,17 @@ fn completion_options_read_back_every_field_they_were_built_with() {
     assert_eq!(set.max_tokens(), NonZeroU32::new(256));
     assert_eq!(set.thinking(), Some(false));
 }
+
+#[test]
+fn with_model_replaces_the_model_name_and_keeps_every_other_field() {
+    let picked = CompletionOptions::new("bound")
+        .with_temperature(0.2)
+        .expect("0.2 is valid")
+        .with_max_tokens(NonZeroU32::new(256).expect("256 is non-zero"))
+        .with_thinking(true)
+        .with_model("picked");
+    assert_eq!(picked.model(), "picked");
+    assert_eq!(picked.temperature().map(Temperature::get), Some(0.2));
+    assert_eq!(picked.max_tokens(), NonZeroU32::new(256));
+    assert_eq!(picked.thinking(), Some(true));
+}

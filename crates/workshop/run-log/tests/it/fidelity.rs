@@ -6,7 +6,7 @@
 //! order changes, would make a replayed run differ from the run that ran.
 
 use promptforge::event::{Event, ReplyOrigin};
-use promptforge::ids::{ParseIdError, Provenance, TaskId};
+use promptforge::ids::{ParseIdError, Provenance, RoundId, TaskId};
 use promptforge::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::{Map, Value, json};
 use workshop_run_log::{Record, RecordFilter, RecordKind, RunLog, RunMeta};
@@ -130,6 +130,7 @@ async fn a_real_assistant_reply_with_metrics_round_trips_through_the_log() {
         section: "chat".to_owned(),
         provenance: provenance().unwrap(),
         turn: 2,
+        round: RoundId::new(1),
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),

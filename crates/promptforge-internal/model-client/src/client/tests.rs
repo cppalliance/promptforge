@@ -183,6 +183,21 @@ fn the_builders_set_the_reasoning_content_and_the_metadata_diagnostics() {
 }
 
 #[test]
+fn with_model_replaces_the_served_model_name_and_keeps_the_rest() {
+    let completion = Completion::from_result(CompletionResult::Text("pong".to_owned()), "reported")
+        .expect("a text result is accepted")
+        .with_finish_reason("stop")
+        .with_model("routed");
+    assert_eq!(completion.model(), "routed");
+    assert_eq!(completion.finish_reason(), Some("stop"));
+    assert_eq!(
+        completion.result(),
+        &CompletionResult::Text("pong".to_owned()),
+        "the label leaves the outcome as it was"
+    );
+}
+
+#[test]
 fn a_tool_schema_reads_back_its_name_description_and_parameters() {
     let schema = tool_schema_new("web.search", "Search the web.", json_object())
         .expect("a valid schema is accepted");

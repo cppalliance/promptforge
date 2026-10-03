@@ -108,6 +108,7 @@ auto promptforge::effect::Effect: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !Un
 auto promptforge::effect::EffectAnswer: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::Round: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolCallOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolCaller: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -118,6 +119,7 @@ auto promptforge::ids::AbandonReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, 
 auto promptforge::ids::ChainId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::ParseIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::Provenance: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::RoundId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::TaskId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::TaskOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::metrics::CallMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -229,6 +231,7 @@ derives promptforge::effect::Effect: Debug
 derives promptforge::effect::EffectAnswer: Debug
 derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::effect::Round: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolCallOrigin: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolCaller: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
@@ -239,6 +242,7 @@ derives promptforge::ids::AbandonReason: Clone, Copy, Debug, Deserialize, Eq, Ha
 derives promptforge::ids::ChainId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::ids::ParseIdError: Clone, Debug, Eq, PartialEq
 derives promptforge::ids::Provenance: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::ids::RoundId: Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::ids::TaskId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::ids::TaskOrigin: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
 derives promptforge::metrics::CallMetrics: Clone, Debug, Deserialize, PartialEq, Serialize
@@ -377,6 +381,8 @@ impl promptforge::vfs::Vfs for promptforge::vfs::RealBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::VfsRef
 impl<'a> promptforge::vfs::OpEvent<'a>
 pub const fn promptforge::effect::EffectId::get(self) -> u64
+pub const fn promptforge::ids::RoundId::get(self) -> u64
+pub const fn promptforge::ids::RoundId::new(id: u64) -> Self
 pub const fn promptforge::replay::Flags::bits(self) -> u32
 pub const fn promptforge::replay::Flags::contains(self, other: promptforge::replay::Flags) -> bool
 pub const fn promptforge::replay::Flags::from_bits(bits: u32) -> Self
@@ -499,6 +505,7 @@ pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::Com
 pub fn promptforge::model::Completion::with_finish_reason(self, finish_reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_metadata_diagnostics(self, diagnostics: alloc::vec::Vec<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_metrics(self, metrics: promptforge::metrics::CallMetrics) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::with_model(self, model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_raw(self, raw: promptforge::model::RawExchange) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_reasoning_content(self, reasoning_content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
@@ -519,6 +526,7 @@ pub fn promptforge::model::CompletionOptions::new(model: impl core::convert::Int
 pub fn promptforge::model::CompletionOptions::temperature(&self) -> core::option::Option<promptforge::model::Temperature>
 pub fn promptforge::model::CompletionOptions::thinking(&self) -> core::option::Option<bool>
 pub fn promptforge::model::CompletionOptions::with_max_tokens(self, max_tokens: core::num::nonzero::NonZeroU32) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::CompletionOptions::with_model(self, model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionOptions
 pub fn promptforge::model::CompletionOptions::with_temperature(self, temperature: f64) -> core::result::Result<promptforge::model::CompletionOptions, promptforge::model::TemperatureError>
 pub fn promptforge::model::CompletionOptions::with_thinking(self, thinking: bool) -> promptforge::model::CompletionOptions
 pub fn promptforge::model::Message::assistant(content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Message
@@ -785,7 +793,7 @@ pub promptforge::effect::Effect::Chat { .. }
 pub promptforge::effect::Effect::Chat::binding: promptforge::model::ModelBinding
 pub promptforge::effect::Effect::Chat::messages: alloc::vec::Vec<promptforge::model::Message>
 pub promptforge::effect::Effect::Chat::options: promptforge::model::CompletionOptions
-pub promptforge::effect::Effect::Chat::stream: bool
+pub promptforge::effect::Effect::Chat::round: promptforge::effect::Round
 pub promptforge::effect::Effect::Chat::tools: alloc::vec::Vec<promptforge::model::ToolSchema>
 pub promptforge::effect::Effect::Timer { .. }
 pub promptforge::effect::Effect::Timer::seconds: f64
@@ -809,7 +817,7 @@ pub promptforge::effect::EffectRecord::Chat { .. }
 pub promptforge::effect::EffectRecord::Chat::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
 pub promptforge::effect::EffectRecord::Chat::messages: alloc::vec::Vec<serde_json::value::Value>
-pub promptforge::effect::EffectRecord::Chat::model: alloc::string::String
+pub promptforge::effect::EffectRecord::Chat::round: promptforge::ids::RoundId
 pub promptforge::effect::EffectRecord::Chat::temperature: core::option::Option<f64>
 pub promptforge::effect::EffectRecord::Chat::thinking: core::option::Option<bool>
 pub promptforge::effect::EffectRecord::Chat::tools: alloc::vec::Vec<alloc::string::String>
@@ -822,6 +830,8 @@ pub promptforge::effect::EffectRecord::ToolCall::origin: promptforge::effect::To
 pub promptforge::effect::EffectRecord::ToolCall::tool: promptforge::tools::ToolId
 pub promptforge::effect::EffectRecord::Vfs { .. }
 pub promptforge::effect::EffectRecord::Vfs::op: promptforge::vfs::VfsOp
+pub promptforge::effect::Round::id: promptforge::ids::RoundId
+pub promptforge::effect::Round::origin: promptforge::event::ReplyOrigin
 pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
 pub promptforge::effect::ToolAnswerRecord::trusted: bool
 pub promptforge::effect::ToolCallOrigin::caller: promptforge::effect::ToolCaller
@@ -838,6 +848,7 @@ pub promptforge::event::Event::AssistantReply::metrics: core::option::Option<pro
 pub promptforge::event::Event::AssistantReply::model: alloc::string::String
 pub promptforge::event::Event::AssistantReply::origin: promptforge::event::ReplyOrigin
 pub promptforge::event::Event::AssistantReply::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::AssistantReply::round: promptforge::ids::RoundId
 pub promptforge::event::Event::AssistantReply::section: alloc::string::String
 pub promptforge::event::Event::AssistantReply::text: alloc::string::String
 pub promptforge::event::Event::AssistantReply::turn: u32
@@ -846,6 +857,7 @@ pub promptforge::event::Event::AssistantToolCalls::calls: alloc::vec::Vec<prompt
 pub promptforge::event::Event::AssistantToolCalls::execution: alloc::string::String
 pub promptforge::event::Event::AssistantToolCalls::model: alloc::string::String
 pub promptforge::event::Event::AssistantToolCalls::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::AssistantToolCalls::round: promptforge::ids::RoundId
 pub promptforge::event::Event::AssistantToolCalls::section: alloc::string::String
 pub promptforge::event::Event::AssistantToolCalls::turn: u32
 pub promptforge::event::Event::Lua { .. }
@@ -1039,6 +1051,7 @@ pub promptforge::event::Event::Thinking { .. }
 pub promptforge::event::Event::Thinking::execution: alloc::string::String
 pub promptforge::event::Event::Thinking::model: alloc::string::String
 pub promptforge::event::Event::Thinking::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::Thinking::round: promptforge::ids::RoundId
 pub promptforge::event::Event::Thinking::section: alloc::string::String
 pub promptforge::event::Event::Thinking::text: alloc::string::String
 pub promptforge::event::Event::Thinking::turn: u32
@@ -1362,11 +1375,13 @@ pub struct promptforge::capabilities::GlobalName { /* private fields */ }
 pub struct promptforge::capabilities::Prelude { /* private fields */ }
 pub struct promptforge::effect::ChatAnswerRecord { .. }
 pub struct promptforge::effect::EffectId(/* private fields */)
+pub struct promptforge::effect::Round { .. }
 pub struct promptforge::effect::ToolAnswerRecord { .. }
 pub struct promptforge::effect::ToolCallOrigin { .. }
 pub struct promptforge::ids::ChainId(/* private fields */)
 pub struct promptforge::ids::ParseIdError { /* private fields */ }
 pub struct promptforge::ids::Provenance { .. }
+pub struct promptforge::ids::RoundId(/* private fields */)
 pub struct promptforge::ids::TaskId(/* private fields */)
 pub struct promptforge::metrics::CallMetrics { .. }
 pub struct promptforge::metrics::ClientTiming { .. }

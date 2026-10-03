@@ -96,8 +96,8 @@ pub trait TimerPerformer: Send + Sync {
 pub struct Performers {
     /// Performs `Chat` effects.
     pub broker: Arc<dyn InferenceBroker>,
-    /// Receives the live deltas of each `Chat` effect whose `stream` is
-    /// true.
+    /// Receives the live deltas of each `Chat` effect whose round has the
+    /// `Chat` origin.
     pub on_delta: OnDelta,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,

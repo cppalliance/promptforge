@@ -183,10 +183,11 @@ assert_eq!(transcript, ["Infer reply: hi there", "shout for the script: HI THERE
    - To match a variant you skip, write it with braces, such as `Event::SectionStarted { .. }`, because every variant has the three coordinates as fields. End the match with a wildcard arm, because later versions can add variants.
    - Pair a `ToolResult` with the call it answers by `turn` and `tool_call_id` together. Providers reuse call ids across rounds, so the id alone can match the wrong call. When a script, not the model, made the call, `tool_call_id` is empty, so the greeter's result prints as the script's.
    - Read the reply's `origin`, a [`ReplyOrigin`], to place it. `Chat` belongs in the conversation. `Infer` came from a `models.infer` call, like this one, and your transcript can show it apart or leave it out.
+   - Group a round's `Thinking`, `AssistantReply`, and `AssistantToolCalls` by their `round`, the id the round's [`Chat`](crate::effect::Effect::Chat) effect held, to show them together or to replace the live pieces you streamed for that round.
 
 Treat reply, thinking, tool call, and tool result text as untrusted, and escape it before you render it. The text comes from a model, a tool, or a user, and can hold markup or instructions. `ToolResult.trusted` is `true` only for tool output marked [`OutputTrust::Trusted`](crate::tools::OutputTrust::Trusted).
 
-A reply written before `origin` existed reads back as `Chat`, so older logs load into the same transcript code.
+A reply without `origin` reads back as `Chat`. Every model content event needs its `round`, so a log written before rounds were numbered does not load.
 
 When a model's reply is cut off by its token limit, the run reports a [`ModelTurnTruncated`](Event::ModelTurnTruncated) event with no payload. Show it as a notice that the reply was cut short, because a cut-off reply otherwise reads like a finished one. Show [`ModelMetadataDegraded`](Event::ModelMetadataDegraded) as a warning: the turn succeeded, so its reply is still good. It reports a response with no `model` name, or each of its metadata sections, the top-level `usage`, `timings`, and `metrics` objects, that fails to parse, not a prompt's `##` section.
 
@@ -376,9 +377,9 @@ Turn capture on only to debug, and guard the bodies like the private text they a
 | [`TaskCancelled`](Event::TaskCancelled) | Carries `task`. Its owner cancelled it on purpose. It reports once, and a repeated cancel reports nothing. |
 | [`TaskAbandoned`](Event::TaskAbandoned) | Carries `task` and `reason`. The owner chain ended while the task was live, and `reason` says how the owner ended. Unlike `TaskCancelled`, nobody stopped it on purpose. |
 | [`TaskResumed`](Event::TaskResumed) | Carries `task`. A task was revived from its record. |
-| [`Thinking`](Event::Thinking) | Carries `turn`, `model`, and `text`. One completed block of model thinking, where `text` is untrusted model output. |
-| [`AssistantReply`](Event::AssistantReply) | Carries `turn`, `text`, `finish_reason`, `model`, `metrics`, and `origin`. One completed model round's text reply. `metrics` is present only when anything was measured, and a record without `origin` reads back as `chat`. |
-| [`AssistantToolCalls`](Event::AssistantToolCalls) | Carries `turn`, `model`, and `calls`. One batch of tool calls the model asked for, not yet run, with untrusted names and arguments. |
+| [`Thinking`](Event::Thinking) | Carries `turn`, `round`, `model`, and `text`. One completed block of model thinking, where `text` is untrusted model output. `round` is the [`RoundId`](crate::ids::RoundId) the round's [`Chat`](crate::effect::Effect::Chat) effect held. |
+| [`AssistantReply`](Event::AssistantReply) | Carries `turn`, `round`, `text`, `finish_reason`, `model`, `metrics`, and `origin`. One completed model round's text reply. `model` is the model the answer's [`Completion`](crate::model::Completion) names, `metrics` is present only when anything was measured, and a record without `origin` reads back as `chat`. |
+| [`AssistantToolCalls`](Event::AssistantToolCalls) | Carries `turn`, `round`, `model`, and `calls`. One batch of tool calls the model asked for, not yet run, with untrusted names and arguments. |
 | [`ToolResult`](Event::ToolResult) | Carries `turn`, `tool_call_id`, `alias`, `content`, and `trusted`. The result of one dispatched tool call. `tool_call_id` is empty when a script made the call, and identifies a call only together with `turn`. `content` is untrusted unless `trusted` is `true`, which holds only for trusted tool output that was not nonce-wrapped. |
 | [`TaskNotice`](Event::TaskNotice) | Carries `turn`, `task`, and `text`. The run's sentence telling an owner's model how a task it started ended, as queued, under the owner's section. A completed task's final text is embedded nonce-wrapped. |
 | [`TaskNote`](Event::TaskNote) | Carries `task` and `text`. A task's `tasks.note` progress note. |
@@ -387,8 +388,8 @@ Turn capture on only to debug, and guard the bodies like the private text they a
 
 ## ReplyOrigin
 
-[`ReplyOrigin`] says which path produced one [`Event::AssistantReply`]: a chat turn or an inference round. Read it to tell a user-facing chat turn from a programmatic inference round you may keep out of the conversation. It serializes as a bare snake_case string, `"chat"` or `"infer"`. A stored string this version does not know fails to deserialize, with no fallback; read that log with a version that knows it. [Show a transcript](#show-a-transcript) teaches it.
+[`ReplyOrigin`] says which path produced one [`Event::AssistantReply`]: a chat turn or an inference round. Read it to tell a user-facing chat turn from a programmatic inference round you may keep out of the conversation. The same value is the `origin` of each [`Round`](crate::effect::Round) on a `Chat` effect, where it says whether the round streams live pieces. It serializes as a bare snake_case string, `"chat"` or `"infer"`. A stored string this version does not know fails to deserialize, with no fallback; read that log with a version that knows it. [Show a transcript](#show-a-transcript) teaches it.
 
-- `Chat`: the default, filled in when `origin` is missing, so older logs read back as chat replies; the reply belongs in the conversation.
+- `Chat`: the default, filled in when a reply's `origin` is missing; the reply belongs in the conversation.
 - `Infer`: a programmatic round from `models.infer`, reported as the same `AssistantReply` variant; the Host may treat it apart.
 

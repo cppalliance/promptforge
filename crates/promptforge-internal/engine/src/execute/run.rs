@@ -2,9 +2,9 @@
 //! events as values. The Harness loop is documented on the `promptforge`
 //! facade's crate page and its `effect` and `cancel` modules.
 //!
-//! The effect vocabulary itself - [`Effect`], its serializable
-//! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is defined in the
-//! `effect` child module and is re-exported here.
+//! The effect vocabulary itself - [`Effect`] and its [`Round`], its
+//! serializable [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is
+//! defined in the `effect` child module and is re-exported here.
 
 use std::sync::Arc;
 
@@ -14,8 +14,8 @@ use promptforge_types::ids::Provenance;
 mod effect;
 
 pub use effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, ToolAnswerRecord,
-    ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round,
+    ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;

@@ -7,6 +7,7 @@ use promptforge_model_client::detail::{completion_into_result, completion_metada
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::lifecycle;
 use promptforge_types::event::{Event, ReplyOrigin};
+use promptforge_types::ids::RoundId;
 use promptforge_types::metrics::CallMetrics;
 
 use crate::model::{Completion, CompletionResult};
@@ -81,11 +82,14 @@ pub(crate) struct Served {
 /// then exactly one `assistant_reply` content report carrying `origin` -
 /// the chat arm's [`ReplyOrigin::Chat`] or the nested-inference arm's
 /// [`ReplyOrigin::Infer`]. A non-text outcome fires the shared prefix and
-/// no content report.
+/// no content report. The thinking and the reply carry `round`, the id
+/// the round's `Chat` effect held, and name the model the completion
+/// names.
 pub(crate) fn report_model_turn(
     emitter: &Emitter,
     section: &str,
     turn: u32,
+    round: RoundId,
     completion: Completion,
     origin: ReplyOrigin,
 ) -> (CompletionResult, Served) {
@@ -126,10 +130,10 @@ pub(crate) fn report_model_turn(
         });
     }
     // The content reports every Host transcript is built from: the
-    // thinking side channel first, then the reply, each with model and
-    // metrics.
+    // thinking side channel first, then the reply, each with the round,
+    // the model, and the metrics.
     if let Some(thinking) = &thinking {
-        emitter.thinking(section, turn, &model, thinking);
+        emitter.thinking(section, turn, round, &model, thinking);
     }
     let served = Served {
         finish_reason,
@@ -146,6 +150,7 @@ pub(crate) fn report_model_turn(
         emitter.assistant_reply(
             section,
             turn,
+            round,
             text,
             finish_reason,
             &served.model,

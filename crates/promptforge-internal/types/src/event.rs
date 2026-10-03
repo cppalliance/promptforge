@@ -52,7 +52,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
+use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent};
 
 #[path = "event-lifecycle.rs"]
@@ -138,9 +138,10 @@ macro_rules! events {
 /// turn ([`Chat`](Self::Chat)) or a programmatic inference round
 /// ([`Infer`](Self::Infer)).
 ///
-/// The default is `chat`, so an older log written before the field existed
-/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a Host
-/// matches the two known origins and keeps a wildcard for a future one.
+/// The default is `chat`, so a reply that carries no `origin` reads back
+/// as a chat reply. The same value is the origin of the round on a `Chat`
+/// effect. The enum is `#[non_exhaustive]`, so a Host matches the two known
+/// origins and keeps a wildcard for a future one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -351,6 +352,8 @@ events! {
         Thinking {
             /// The model-turn counter the block was produced under.
             turn: u32,
+            /// The round that produced it: the id its `Chat` effect held.
+            round: RoundId,
             /// The model that produced it.
             model: String,
             /// The thinking text: untrusted model output.
@@ -361,6 +364,8 @@ events! {
         AssistantReply {
             /// The model-turn counter the reply was produced under.
             turn: u32,
+            /// The round that produced it: the id its `Chat` effect held.
+            round: RoundId,
             /// The reply text: untrusted model output.
             text: String,
             /// The provider's stop label, when it sent one.
@@ -371,7 +376,7 @@ events! {
             metrics: Option<CallMetrics>,
             /// The provenance a Host inspects to distinguish an inference
             /// round (`infer`) from a user-facing chat turn (`chat`).
-            /// Defaults to `chat` when an older log carries no `origin`.
+            /// Defaults to `chat` when a reply carries no `origin`.
             #[serde(default)]
             origin: ReplyOrigin,
         },
@@ -379,6 +384,8 @@ events! {
         AssistantToolCalls {
             /// The model-turn counter the batch was requested under.
             turn: u32,
+            /// The round that requested it: the id its `Chat` effect held.
+            round: RoundId,
             /// The model that requested the calls.
             model: String,
             /// The calls: untrusted model-authored names and arguments.

@@ -13,6 +13,7 @@
 //! answer resumes the chain with the cancelled error, whatever it was
 //! parked on.
 
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{ToolError, ToolOutput};
 use promptforge_vfs::VfsError;
 
@@ -34,8 +35,8 @@ use super::{
 /// its slot instead, before this is reached.
 fn dropped_answer(resume: &Continuation) -> Answer<Error> {
     match resume {
-        Continuation::Infer => Answer::Infer(Err(Error::Interrupted)),
-        Continuation::Chat => Answer::Chat(Err(Error::Interrupted)),
+        Continuation::Infer(_) => Answer::Infer(Err(Error::Interrupted)),
+        Continuation::Chat(_) => Answer::Chat(Err(Error::Interrupted)),
         Continuation::ToolCall(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
         // A timer's drop never reaches here; the cancelled store answer
         // is the harmless stand-in should it ever do so.
@@ -72,11 +73,11 @@ impl Scheduler {
                 return Ok(());
             }
             (resume, EffectAnswer::Dropped) => dropped_answer(&resume),
-            (Continuation::Infer, EffectAnswer::Chat(result)) => {
-                Answer::Infer(self.accept_infer(chain, result))
+            (Continuation::Infer(round), EffectAnswer::Chat(result)) => {
+                Answer::Infer(self.accept_infer(chain, round, result))
             }
-            (Continuation::Chat, EffectAnswer::Chat(result)) => {
-                self.accept_chat(chain, result.map_err(Error::from))?
+            (Continuation::Chat(round), EffectAnswer::Chat(result)) => {
+                self.accept_chat(chain, round, result.map_err(Error::from))?
             }
             (Continuation::ToolCall(call), EffectAnswer::ToolCall(result)) => {
                 Answer::ToolCallResult(self.accept_tool_call(chain, &call, result))
@@ -102,15 +103,18 @@ impl Scheduler {
     }
 
     /// Applies a nested infer round's completion: the single-prose-round
-    /// reporting through the chain's own emitter, then the round's text.
+    /// reporting through the chain's own emitter, stamped with `round`,
+    /// then the round's text.
     fn accept_infer(
         &self,
         chain: ChainIndex,
+        round: RoundId,
         result: std::result::Result<Box<Completion>, CompletionError>,
     ) -> Result<String> {
         let chain = &self.chains[chain.index()];
         accept_infer(
             result,
+            round,
             chain.ctx.emitter(),
             chain.section_name(),
             chain.ctx.turns(),

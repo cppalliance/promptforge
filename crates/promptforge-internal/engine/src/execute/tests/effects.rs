@@ -1,17 +1,19 @@
 //! Effects as values: every leaf request kind a section yields - `infer`
 //! and `chat`, `tool_call`, `store`, `timer` - issues
 //! exactly one `Effect` out of the run's `step`, and each effect's record
-//! round-trips through serde; only a `chat` round streams its deltas to
-//! the Harness. The run's answer rules (a drop, an orphan, a wrong kind) are
-//! pinned beside `Run` itself.
+//! round-trips through serde; only a round of `Chat` origin streams its
+//! deltas to the Harness. The run's answer rules (a drop, an orphan, a wrong
+//! kind) are pinned beside `Run` itself.
 
+use promptforge_types::event::ReplyOrigin;
+use promptforge_types::ids::RoundId;
 use promptforge_types::wire::StreamDelta;
 
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::protocol::VfsOp;
-use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
+use crate::execute::run::{EffectRecord, Round, ToolCallOrigin, ToolCaller};
 use crate::lua::ToolSet;
 use crate::test_support::tokio_driver::TokioDriver;
 
@@ -87,7 +89,7 @@ async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     assert_eq!(
         *records,
         vec![EffectRecord::Chat {
-            model: "test-model".to_owned(),
+            round: RoundId::new(0),
             alias: "writer".to_owned(),
             messages: vec![json!({ "role": "user", "content": "ask" })],
             tools: Vec::new(),
@@ -268,7 +270,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_chat_round_streams_its_deltas_to_the_harness() {
     // The scripted gateway serves every reply as two content fragments,
-    // so a streaming round forwards exactly two text deltas.
+    // so a round of `Chat` origin forwards exactly two text deltas.
     let gateway = ScriptedChat::new(vec![resp_text("answer")]);
     let prompt = parse(&loop_prompt(
         "local msgs = messages.new()\n\
@@ -279,8 +281,17 @@ async fn a_chat_round_streams_its_deltas_to_the_harness() {
     let (seen, delta_harness) = delta_hook();
     let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
     let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "answer");
+    assert_eq!(
+        *rounds.lock().expect("the round tap mutex is not poisoned"),
+        vec![Round {
+            id: RoundId::new(0),
+            origin: ReplyOrigin::Chat,
+        }],
+        "the section's round is the run's first and has the chat origin"
+    );
     assert_eq!(
         *seen.lock().expect("the delta log mutex is not poisoned"),
         vec![
@@ -300,8 +311,17 @@ async fn a_nested_infer_round_streams_no_deltas_to_the_harness() {
     let (seen, delta_harness) = delta_hook();
     let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
     let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
+    assert_eq!(
+        *rounds.lock().expect("the round tap mutex is not poisoned"),
+        vec![Round {
+            id: RoundId::new(0),
+            origin: ReplyOrigin::Infer,
+        }],
+        "the nested round is the run's first and has the infer origin"
+    );
     assert!(
         seen.lock()
             .expect("the delta log mutex is not poisoned")

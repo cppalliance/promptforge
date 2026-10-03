@@ -9,7 +9,8 @@ use std::sync::Arc;
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_model_client::model::{ModelInvocation, Temperature};
 use promptforge_types::detail::model_id_from_validated;
-use promptforge_types::event::Event;
+use promptforge_types::event::{Event, ReplyOrigin};
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::ToolId;
 use serde_json::json;
 
@@ -17,6 +18,9 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
+
+#[path = "tests-drops.rs"]
+mod drops;
 
 /// A context for the run `run-test` under fixed Harness inputs; nothing here
 /// reads the seed or `sys.when`.
@@ -50,7 +54,7 @@ fn binding() -> ModelBinding {
 }
 
 #[test]
-fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
+fn a_chat_effect_records_its_round_alias_messages_tools_and_invocation() {
     let binding = binding();
     let effect = Effect::Chat {
         options: binding.completion_options(),
@@ -60,13 +64,16 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
             tool_schema_new("grab", "Grab a value", json!({ "type": "object" }))
                 .expect("a valid schema"),
         ],
-        stream: true,
+        round: Round {
+            id: RoundId::new(3),
+            origin: ReplyOrigin::Chat,
+        },
     };
     let record = effect.record();
     assert_eq!(
         record,
         EffectRecord::Chat {
-            model: "test-model".to_owned(),
+            round: RoundId::new(3),
             alias: "writer".to_owned(),
             messages: vec![json!({ "role": "user", "content": "ask" })],
             tools: vec!["grab".to_owned()],
@@ -74,6 +81,31 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
             max_tokens: Some(256),
             thinking: Some(false),
         }
+    );
+    assert_eq!(round_trip(&record), record);
+}
+
+#[test]
+fn a_chat_record_serializes_its_round_and_its_alias_and_no_model() {
+    let record = EffectRecord::Chat {
+        round: RoundId::new(3),
+        alias: "writer".to_owned(),
+        messages: Vec::new(),
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+    };
+    let wire = serde_json::to_value(&record).expect("a record serializes");
+    assert_eq!(
+        wire["Chat"]["round"],
+        json!(3),
+        "the round is a bare number"
+    );
+    assert_eq!(wire["Chat"]["alias"], json!("writer"));
+    assert!(
+        wire["Chat"].get("model").is_none(),
+        "the record names its slot by alias, not by a model: {wire}"
     );
     assert_eq!(round_trip(&record), record);
 }

@@ -84,17 +84,17 @@ mod walk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use promptforge_types::ids::{Provenance, TaskId};
+use promptforge_types::ids::{Provenance, RoundId, TaskId};
 use promptforge_vfs::Origin;
 use promptforge_vfs::detail::ScopeHandle;
 
 use crate::parser::{Block, Prompt, Section};
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle;
+use promptforge_types::event::{ReplyOrigin, lifecycle};
 
 use super::context::RunState;
 use super::protocol::Answer;
-use super::run::{Effect, EffectAnswer, EffectId};
+use super::run::{Effect, EffectAnswer, EffectId, Round};
 use chain_record::{Chain, ChatAnchor};
 use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
@@ -270,6 +270,9 @@ pub(crate) struct Scheduler {
     /// The next effect id: a run-wide counter, so every effect the run
     /// issues has a distinct in-flight handle.
     next_effect: u64,
+    /// The next round id: a run-wide counter numbering the model rounds
+    /// in dispatch order, chat and nested-infer rounds alike.
+    next_round: u64,
     /// The run's scope, taken where the run acquires its root identity:
     /// closed when the run reaches `Done` or is dropped before it, so a
     /// store view the Harness still holds never outlives the run.
@@ -304,6 +307,7 @@ impl Scheduler {
             phase: Phase::Fresh,
             max_chains: u32::MAX as usize,
             next_effect: 0,
+            next_round: 0,
             scope: None,
         }
     }
@@ -347,5 +351,13 @@ impl Scheduler {
         self.issued.push((id, provenance, effect));
         self.pending.insert(id, Pending { chain, resume });
         id
+    }
+
+    /// Numbers the model round about to be issued with `origin`: the run's
+    /// next round id, in dispatch order.
+    fn number_round(&mut self, origin: ReplyOrigin) -> Round {
+        let id = RoundId::new(self.next_round);
+        self.next_round += 1;
+        Round { id, origin }
     }
 }

@@ -409,6 +409,7 @@ mod observations;
 mod precheck_anchor;
 mod preludes;
 mod provenance;
+mod rounds;
 mod run_inputs;
 mod run_termination;
 mod scheduler;

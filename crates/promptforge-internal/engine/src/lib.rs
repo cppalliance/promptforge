@@ -30,7 +30,7 @@ pub(crate) use crate::error::{Error, Result};
 // `promptforge_engine::X`, not a module path.
 pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
-    EffectRecord, Environment, MissingService, ModelBindings, RequirementCheck, Requirements, Run,
-    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
+    EffectRecord, Environment, MissingService, ModelBindings, RequirementCheck, Requirements,
+    Round, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
     ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement, perform_vfs_op,
 };

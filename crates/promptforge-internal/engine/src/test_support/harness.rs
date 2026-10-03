@@ -6,8 +6,8 @@
 //! belong to whoever performs the effects. `RunHarness` is that bundle for
 //! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
 //! [`TestToolTable`] a `ToolCall` effect's id resolves in, the delta hook
-//! a streaming round forwards to, and the observer and capture the run's
-//! events are replayed onto. [`performers`](RunHarness::performers) and
+//! a round of `Chat` origin forwards to, and the observer and capture the
+//! run's events are replayed onto. [`performers`](RunHarness::performers) and
 //! [`sink`](RunHarness::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
 //! effects and answers; the Harness builds its own [`Performers`] and
@@ -16,7 +16,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_types::event::Event;
+use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::wire::StreamDelta;
 
 use super::recording::{self, DebugCapture, NullObserver, Observer};
@@ -39,7 +39,8 @@ pub trait ChatClient: Send + Sync {
     /// Performs one round: sends `messages` (with `tools` advertised when
     /// non-empty) under `options`, bounded by `limits`' request timeout
     /// and response cap, forwarding each live delta to `on_delta` when
-    /// the round streams, and returns the completion or its failure.
+    /// the round has the `Chat` origin, and returns the completion or its
+    /// failure.
     fn complete(
         &self,
         messages: Vec<Message>,
@@ -144,18 +145,19 @@ impl RunHarness {
                         messages,
                         tools,
                         options,
-                        stream,
+                        round,
                         ..
                     } = effect
                     else {
                         return EffectAnswer::Dropped;
                     };
                     // The bundle's delta callback is the live consumer of a
-                    // streaming round; without one, or for a round the
-                    // effect marks non-streaming (a nested infer), the
-                    // chunks drop at the leaf and the completed reply is
-                    // the repair.
-                    let on_delta = stream.then_some(on_delta).flatten();
+                    // round of `Chat` origin; without one, or for a nested
+                    // infer round, the chunks drop at the leaf and the
+                    // completed reply is the repair.
+                    let on_delta = (round.origin == ReplyOrigin::Chat)
+                        .then_some(on_delta)
+                        .flatten();
                     let result = client
                         .complete(messages, tools, options, limits, on_delta)
                         .await

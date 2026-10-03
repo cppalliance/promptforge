@@ -124,7 +124,7 @@ assert_eq!(text, "hi there / HI THERE");
 ````
 
 1. `answer` matches each effect with its answer.
-   - For [`Effect::Chat`], forward live pieces to your streaming callback only when `stream` is `true`, as in rounds of `models.loop`, the section's chat loop. A `models.infer` round, a nested one-shot call over one user message with no tools, sets it `false`, so no live pieces arrive and a callback waiting on them never hears anything.
+   - For [`Effect::Chat`], forward live pieces to your streaming callback only when its `round`, a [`Round`], has the origin [`ReplyOrigin::Chat`](crate::event::ReplyOrigin::Chat), as in rounds of `models.loop`, the section's chat loop. A `models.infer` round, a nested one-shot call over one user message with no tools, has the origin `Infer`, so no live pieces arrive and a callback waiting on them never hears anything. The round's `id` is also on the thinking, reply, and tool-call events the round reports, so you can match a round's live pieces to the events that settle it.
    - [`Effect::ToolCall`]'s `origin`, a [`ToolCallOrigin`], says whether Lua ([`ToolCaller::Script`]) or a model round ([`ToolCaller::Model`]) asked, so you can let a script call a tool freely and still check the call when a model asks for it.
    - [`Effect::Vfs`] holds `access`, an [`Arc`](std::sync::Arc) around an [`Access`](crate::vfs::Access), the chain's permission to the store, where a *chain* is one walk over sibling sections. Pass it to [`perform_vfs_op`](crate::vfs::perform_vfs_op) as given, and never build a second access from it, widen it to more of the store, or use it for any store work beyond this one operation. Holding the `Arc` afterward is harmless, because the access refuses every operation once the run reaches `Done` or is dropped.
    - Sleep for [`Effect::Timer`]'s `seconds`, then answer [`EffectAnswer::Timer`].
@@ -294,12 +294,12 @@ assert_eq!(write["answer"], json!({ "Vfs": { "Ok": "Unit" } }));
 
 The records keep what identifies the work:
 
-- [`EffectRecord::Chat`]'s `model` is the bound model's name, and [`ChatAnswerRecord`]'s `model` is the one that served the round; log both to audit which model answered.
+- [`EffectRecord::Chat`] names the round's slot by `alias` and the round by its `round` id, and [`ChatAnswerRecord`]'s `model` is the model that served the round; log both to audit which model answered each slot.
 - An `AnswerRecord` stores failures as display text, so you cannot recover a [`CompletionError`](crate::model::CompletionError), [`ToolError`](crate::tools::ToolError), or [`VfsError`](crate::vfs::VfsError); branch on the live answer before logging it.
 - A chat answer record keeps the reply text or the tool names, never both, and no arguments, ids, bodies, or metrics.
 - A text round's metrics arrive in the `metrics` field of [`Event::AssistantReply`](crate::event::Event::AssistantReply), and its raw bodies only as debug events, which are off by default; [Capture raw model traffic](crate::event#capture-raw-model-traffic) shows how to log them.
 - [`ToolAnswerRecord`]'s `text` is the tool's raw output before trust handling, and its `trusted` is `true` only when the tool declared its output [`OutputTrust::Trusted`](crate::tools::OutputTrust::Trusted); every other trust level records `false`.
-- An `EffectRecord::Chat` leaves out `stream`, so rounds that differ only in streaming log the same.
+- An `EffectRecord::Chat` keeps the round's id and leaves out its origin, which changes nothing the model is sent.
 
 You might expect to serialize each [`Effect`] straight into your log. Instead, `Effect` is not `Serialize`, `Clone`, or `PartialEq`, because it may hold a live store handle, so you log its record, which drops the handle and keeps the operation.
 
@@ -311,7 +311,7 @@ Log the records, keyed by provenance. Next, [ids](crate::ids) explains the tasks
 
 [`ChatAnswerRecord`] records a completed model round in your log, keeping what identifies the answer and leaving out the request and response bodies. It is the success payload of [`AnswerRecord::Chat`], which [`EffectAnswer::record`] builds from a [`Completion`](crate::model::Completion). It serializes as `{ "model": ..., "finish_reason": "stop", "reply": ..., "tool_calls": [] }`. [Log effects and answers](#log-effects-and-answers) shows what it keeps.
 
-- `model`: the model that served the round, as the response named it, which can differ from the bound name in [`EffectRecord::Chat`].
+- `model`: the model that served the round, as the [`Completion`](crate::model::Completion) names it, which can differ from the model bound to the slot that [`EffectRecord::Chat`] names by alias.
 - `reply`: the reply text for a text reply, and `None` for a tool-call reply, so `reply` and `tool_calls` are never both filled.
 - `tool_calls`: only the requested tools' names, in call order, without arguments or ids; empty for a text reply.
 
@@ -358,8 +358,8 @@ An [`Effect`] is one piece of outside work a run asks your program to perform; t
 | `Vfs` | one operation on the run's store view, one of the eight `store.*` calls; other code that touches the VFS does not appear as this effect |
 | `Timer` | one sleep of `seconds`, the timeout behind a timed wait |
 
-- `record`: the request minus its live handles; it keeps only tool names, and leaves out `stream`, `options`, and the store access.
-- `Chat.stream`: when `true`, forward the round's live pieces to your streaming callback; a `models.infer` round sets `false` and sends none.
+- `record`: the request minus its live handles; it keeps only tool names and the round's id, and leaves out the round's origin, `options`, and the store access.
+- `Chat.round`: the round's [`Round`], its run-wide id and its origin; forward the round's live pieces to your streaming callback only when the origin is `Chat`, because a `models.infer` round has the origin `Infer` and sends none.
 - `Vfs.access`: the chain's permission to the store; use it exactly as given, and it refuses every operation once the run reaches `Done` or is dropped.
 - `Timer.seconds`: the sleep length, documented as non-negative and finite.
 
@@ -383,15 +383,23 @@ An [`EffectRecord`] is an [`Effect`] minus its live handles, in the form a run l
 
 | Variant | What it records |
 |---|---|
-| `Chat` | the round's model name, alias, wire-form messages, tool names, and frozen invocation settings |
+| `Chat` | the round's id, its slot's alias, wire-form messages, tool names, and frozen invocation settings |
 | [`ToolCall`](EffectRecord::ToolCall) | the effect's tool identity, alias, arguments, and origin, copied unchanged |
 | `Vfs` | the validated operation, such as `{ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } }` |
 | `Timer` | the sleep length in seconds |
 
-- `Chat.model`: the bound model's name, which can differ from the served model that [`ChatAnswerRecord`] records.
+- `Chat.round`: the round's run-wide id, a bare number, the same id its thinking, reply, and tool-call events hold.
+- `Chat.alias`: the prompt-local alias of the slot the round ran under. The record names no model, because your broker may serve the slot with another one; [`ChatAnswerRecord`] records the model that served it.
 - `Chat.messages`: one wire-form JSON value per request message.
 - `Chat.tools`: the advertised tool names only, in schema order; a round with no tools records `[]`.
 - `Chat.temperature`: the frozen sampling temperature, or `None` when the binding declared none; `max_tokens` and `thinking` work the same way.
+
+## Round
+
+A [`Round`] identifies one model round on its [`Effect::Chat`]. Read it to decide whether to stream the round, and to match the round to its events. [Answer every kind of effect](#answer-every-kind-of-effect) introduces it.
+
+- `id`: a [`RoundId`](crate::ids::RoundId) numbering the run's rounds from 0 in the order the run dispatched them, a section's chat rounds and its `models.infer` rounds alike. The round's [`Thinking`](crate::event::Event::Thinking), [`AssistantReply`](crate::event::Event::AssistantReply), and [`AssistantToolCalls`](crate::event::Event::AssistantToolCalls) events hold the same id, and so does [`EffectRecord::Chat`]. It is run-wide, so when tasks run concurrently your answer order can change which round gets which number.
+- `origin`: a [`ReplyOrigin`](crate::event::ReplyOrigin), `Chat` for a section's `models.loop` round, whose live pieces your streaming callback takes, and `Infer` for a nested `models.infer` round, which sends none.
 
 ## ToolCaller
 

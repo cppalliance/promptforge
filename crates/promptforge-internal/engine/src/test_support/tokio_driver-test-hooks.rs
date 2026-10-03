@@ -1,12 +1,12 @@
 //! The tokio driver's test-only surface: the seeded shuffle that holds
-//! and permutes each wave of answers, the effect tap, and the accessors
-//! the suites reach the run and its scheduler through.
+//! and permutes each wave of answers, the effect and round taps, and the
+//! accessors the suites reach the run and its scheduler through.
 
 use std::sync::{Arc, Mutex};
 
 use crate::cancel::CancelHandle;
 use crate::execute::scheduler::Scheduler;
-use crate::execute::{Effect, EffectAnswer, EffectId, EffectRecord, Run};
+use crate::execute::{Effect, EffectAnswer, EffectId, EffectRecord, Round, Run};
 
 use super::TokioDriver;
 
@@ -55,6 +55,15 @@ impl TokioDriver<'_> {
         tap
     }
 
+    /// Records the round of every `Chat` effect issued from here on: its
+    /// id, and its origin, which the effect's record leaves out.
+    #[cfg(test)]
+    pub(crate) fn record_rounds_for_test(&mut self) -> Arc<Mutex<Vec<Round>>> {
+        let rounds = Arc::new(Mutex::new(Vec::new()));
+        self.rounds = Some(Arc::clone(&rounds));
+        rounds
+    }
+
     /// Test-only: seeds the completion-order shuffle, so each seed
     /// yields one deterministic interleaving of concurrently completed
     /// effects.
@@ -63,7 +72,8 @@ impl TokioDriver<'_> {
         self.shuffle = Some(seed);
     }
 
-    /// Appends one step's issued effects to the tap, in issue order.
+    /// Appends one step's issued effects to the tap, and their rounds to
+    /// the round tap, in issue order.
     #[cfg(test)]
     pub(super) fn record(
         &self,
@@ -73,6 +83,15 @@ impl TokioDriver<'_> {
             tap.lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend(effects.iter().map(|(_, _, effect)| effect.record()));
+        }
+        if let Some(rounds) = &self.rounds {
+            rounds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend(effects.iter().filter_map(|(_, _, effect)| match effect {
+                    Effect::Chat { round, .. } => Some(*round),
+                    _ => None,
+                }));
         }
     }
 

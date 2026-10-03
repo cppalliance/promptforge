@@ -20,7 +20,7 @@ The greeter is the small program built on the crate page that runs one prompt fi
 
 ````
 # use promptforge::event::{Event, ReplyOrigin};
-# use promptforge::ids::{ChainId, Provenance, TaskId};
+# use promptforge::ids::{ChainId, Provenance, RoundId, TaskId};
 # use promptforge::model::{Completion, CompletionResult};
 use promptforge::metrics::{CallMetrics, ClientTiming, Usage};
 
@@ -46,6 +46,7 @@ let mut event = Event::AssistantReply {
 #     section: "Greet".to_owned(),
 #     provenance: Provenance { task: TaskId::from(ChainId::root()), seq: 0 },
 #     turn: 1,
+#     round: RoundId::new(0),
     text: "hi there".to_owned(),
 #     finish_reason: Some("stop".to_owned()),
 #     model: "canned".to_owned(),

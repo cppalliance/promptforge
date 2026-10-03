@@ -4,7 +4,7 @@
 //! the same way.
 
 use promptforge::event::ReplyOrigin;
-use promptforge::ids::Provenance;
+use promptforge::ids::{Provenance, RoundId};
 
 use super::*;
 
@@ -32,6 +32,7 @@ fn a_reply_of_either_origin_stamps_the_current_round_and_advances() {
                 section,
                 provenance,
                 turn: 3,
+                round: RoundId::new(2),
                 text: "42".to_owned(),
                 finish_reason: Some("stop".to_owned()),
                 model: "some-model".to_owned(),
@@ -62,6 +63,7 @@ fn thinking_stamps_the_current_round_without_advancing() {
             section,
             provenance,
             turn: 3,
+            round: RoundId::new(2),
             model: "some-model".to_owned(),
             text: "weighing options".to_owned(),
         },

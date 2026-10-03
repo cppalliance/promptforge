@@ -62,7 +62,7 @@ pub use requirements::{
     CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement,
 };
 pub use run::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, Step,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,
     ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 // The store vocabulary a `Vfs` effect holds and its answer returns, for

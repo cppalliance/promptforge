@@ -41,7 +41,7 @@ use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
-use promptforge::event::Event;
+use promptforge::event::{Event, ReplyOrigin};
 use promptforge::ids::Provenance;
 use promptforge::vfs::{Access, VfsOp};
 use promptforge::{Run, RunError, RunResult, Step};
@@ -335,10 +335,11 @@ impl<'a> Driver<'a> {
                 messages,
                 tools,
                 options,
-                stream,
+                round,
             } => {
                 let answer = Answering::new(self.tx.clone(), id);
-                let on_delta = stream.then(|| self.performers.on_delta.clone());
+                let on_delta =
+                    (round.origin == ReplyOrigin::Chat).then(|| self.performers.on_delta.clone());
                 let round = self
                     .performers
                     .broker
