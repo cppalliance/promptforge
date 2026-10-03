@@ -14,7 +14,13 @@
 //! text, since a path of unbounded depth has no integer form. Timestamps
 //! are UTC milliseconds since the Unix epoch.
 
-/// The DDL, idempotent so an existing file opens without change.
+/// The layout these tables describe, stamped into `layout`. Bump it with
+/// any change to them, so a file written in an older layout is set aside
+/// instead of written into with columns it lacks.
+pub(crate) const LAYOUT_VERSION: i64 = 1;
+
+/// The DDL, idempotent so a file in the current layout opens without
+/// change.
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runs (
     run_id        INTEGER PRIMARY KEY,
@@ -42,7 +48,21 @@ CREATE TABLE IF NOT EXISTS records (
     at        INTEGER NOT NULL,
     PRIMARY KEY (run_id, seq)
 );
+
+CREATE TABLE IF NOT EXISTS layout (
+    version INTEGER NOT NULL
+);
 ";
+
+/// Whether the file holds a table named `?1`.
+pub(crate) const SELECT_TABLE: &str =
+    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1";
+
+/// The layout version the file was stamped with.
+pub(crate) const SELECT_LAYOUT: &str = "SELECT version FROM layout";
+
+/// Stamps a file's layout version, once.
+pub(crate) const INSERT_LAYOUT: &str = "INSERT INTO layout (version) VALUES (?1)";
 
 /// Opens a run: every column of `runs` that `begin_run` knows.
 pub(crate) const INSERT_RUN: &str = "INSERT INTO runs \

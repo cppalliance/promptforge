@@ -35,6 +35,10 @@
 //!   call, and an open that fails leaves nothing behind, so the next call
 //!   tries again. A write the log refuses fails the run it belongs to; the
 //!   recorder never skips a record.
+//! - A file is written only in the layout this build stamps into its
+//!   `layout` table. A file in any other layout, or one that predates the
+//!   table, is renamed aside with its write-ahead log and never written
+//!   into or deleted; recorded runs carry no migration.
 //! - The `agent` column is the Host's, not the Harness's: the
 //!   `AgentRecorder` a launch gets from `TursoRecorder::for_agent` is the
 //!   only `RunRecorder` here, and it writes its agent at `begin_run`.
@@ -43,6 +47,7 @@
 
 mod append;
 mod error;
+mod layout;
 mod read;
 mod record;
 mod recorder;

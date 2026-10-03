@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::LogError;
+use crate::layout;
 use crate::record::{Record, RunId, RunMeta, RunOutcome, Seq};
 use crate::schema;
 
@@ -29,17 +30,26 @@ impl fmt::Debug for RunLog {
 impl RunLog {
     /// Opens the log at `path`, creating the file and the schema when
     /// absent. The parent directory must already exist: this creates the
-    /// file, never a directory.
+    /// file, never a directory. A file written in another layout is
+    /// renamed to `<file name>.stale-<millis>` beside `path`, with its
+    /// write-ahead log, and a fresh log opens in its place.
     ///
     /// # Errors
     /// Returns [`LogError::Io`] when `path` is not UTF-8 (Turso addresses
-    /// databases by string) and [`LogError::Database`] when the database
-    /// cannot open the file or apply the schema.
+    /// databases by string) or a stale file cannot be renamed, and
+    /// [`LogError::Database`] when the database cannot open the file or
+    /// apply the schema.
     pub async fn open(path: &Path) -> Result<Self, LogError> {
-        let path = path.to_str().ok_or_else(|| {
+        let name = path.to_str().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "run log path must be utf-8")
         })?;
-        Self::open_str(path).await
+        let conn = connect(name).await?;
+        if layout::is_stale(&conn).await? {
+            drop(conn);
+            layout::set_aside(path, now_ms()).await?;
+            return Self::open_str(name).await;
+        }
+        Self::over(conn).await
     }
 
     /// Opens a log that lives only as long as this value: for tests and
@@ -53,9 +63,13 @@ impl RunLog {
     }
 
     async fn open_str(path: &str) -> Result<Self, LogError> {
-        let database = turso::Builder::new_local(path).build().await?;
-        let conn = database.connect()?;
+        Self::over(connect(path).await?).await
+    }
+
+    /// The log over `conn`, with the schema applied and the layout stamped.
+    async fn over(conn: turso::Connection) -> Result<Self, LogError> {
         conn.execute_batch(schema::SCHEMA).await?;
+        layout::stamp(&conn).await?;
         Ok(Self { conn })
     }
 
@@ -185,6 +199,13 @@ impl RunLog {
             .map(Seq::from_raw)
             .map_err(|_| LogError::Corrupt(format!("expected a non-negative seq, found {next}")))
     }
+}
+
+/// One connection to the database at `path`, which Turso creates when
+/// absent.
+async fn connect(path: &str) -> Result<turso::Connection, LogError> {
+    let database = turso::Builder::new_local(path).build().await?;
+    Ok(database.connect()?)
 }
 
 /// A `u64` as the `i64` SQLite stores: the same bits, so the round trip
