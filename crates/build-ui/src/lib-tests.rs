@@ -4,7 +4,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{UiBuild, find_esbuild, nearest_lockfile, watched_paths, workspace_members};
+use super::{
+    UiBuild, esbuild_command, find_esbuild, nearest_lockfile, watched_paths, workspace_members,
+};
 
 const ESBUILD_SHIM: &str = if cfg!(windows) {
     "esbuild.cmd"
@@ -66,6 +68,36 @@ fn an_install_above_the_install_root_is_not_used() {
     write(&root.join("package-lock.json"), "{}");
     install_esbuild(temp.path());
     assert_eq!(find_esbuild(&ui), None);
+}
+
+#[test]
+fn the_shim_gets_its_argument_intact_when_both_paths_have_a_space() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let ui = temp.path().join("game projects").join("ui");
+    fs::create_dir_all(&ui).unwrap();
+    let shim = install_esbuild(&ui);
+    if cfg!(windows) {
+        write(&shim, "@echo off\r\necho %~1\r\n");
+    } else {
+        write(&shim, "#!/bin/sh\nprintf '%s\\n' \"$1\"\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let outfile = format!("--outfile={}", ui.join("dist").join("app.js").display());
+    let output = esbuild_command(&ui)
+        .unwrap()
+        .arg(&outfile)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "the shim failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), outfile);
 }
 
 #[test]
