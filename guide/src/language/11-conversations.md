@@ -264,7 +264,7 @@ The model's [sampling options](10-models.md#sampling-options) apply to every rou
 
 The round count advances once for every round that returns a reply, whether a text reply or a batch of tool calls, and an empty reply advances it too; a round that overflows the model's context window, and a round that fails, do not. A [task](15-tasks.md#starting-a-task) counts its rounds against its own round count, which its status table shows as the `turns` field. The round count is separate from the round cap, the most rounds a single `models.loop` call may make, which each call counts for itself.
 
-When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
+The Harness streams nothing: it hands every round to the Host's broker, the part of the Host that talks to the model, and takes the finished reply. When the Host shows live output, its broker streams a section's own rounds, each `models.loop` round among them, showing each text fragment as it arrives in the order the model streamed it, and the reply in the terminal record holds the whole text those fragments carried. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round reaches the broker marked as an infer round, so a Host can tell it from the section's conversation and read it whole. A Host that stops showing a round's fragments does not fail the round.
 
 ## How the list reaches the model
 

@@ -619,3 +619,24 @@ Catching a cancel does not keep the run going. Once the Host cancels, running Lu
 - A `models.infer` round in flight is aborted before its reply lands.
 - A cancel that lands while a block waits on a `store.write` ends the run with the cancelled outcome the same way.
 - A run cancelled before a [`fanout`](14-fanout.md#the-fanout-call) begins ends with the cancelled outcome without running any arms.
+
+### A stopped round
+
+A Host can also stop the round in flight without cancelling the run, as when the operator stops a reply that is heading the wrong way. A stop reaches the calls waiting on a model or a tool when it lands, and each one resumes with the same interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
+
+- `models.infer`, and each `models.loop` round
+- `tools.call`, and tool calls the model makes
+
+A stop leaves the run's cancel flag clear, so running Lua goes on, and a caught stop keeps the run going. This block returns `stopped` when the Host stops its round, and the run completes:
+
+````lua
+local ok, out = pcall(models.infer, 'Draft the summary.')
+if not ok and out.kind == 'cancelled' then
+  return 'stopped'
+end
+return out
+````
+
+Under a cancel, the same block's `return 'stopped'` changes nothing: the run still ends with the cancelled outcome, so a prompt need not tell a stop from a cancel. Left uncaught, the interrupted error from a stop ends the run with the cancelled outcome too.
+
+A question to the operator stays open through a stop. `input.ask()`, and the ask tool a model calls, keep waiting for the operator's answer, so a person in the middle of typing never loses the question. A `store` call is never cut short by a stop, because the Harness answers every `store` call before it next waits, and a stop takes effect only while it waits.

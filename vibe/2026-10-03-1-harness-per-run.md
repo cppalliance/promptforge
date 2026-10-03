@@ -803,7 +803,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-8>
 
-### Step 8: The docs describe the per-run Harness, and the exit criteria pass
+### Step 8: The docs describe the per-run Harness, and the exit criteria pass [completed]
 
 - Component: Docs and exit criteria
 - Depends on: steps 6 and 7.

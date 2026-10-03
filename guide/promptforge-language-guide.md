@@ -7395,7 +7395,7 @@ The model's [sampling options](10-models.md#sampling-options) apply to every rou
 
 The round count advances once for every round that returns a reply, whether a text reply or a batch of tool calls, and an empty reply advances it too; a round that overflows the model's context window, and a round that fails, do not. A [task](15-tasks.md#starting-a-task) counts its rounds against its own round count, which its status table shows as the `turns` field. The round count is separate from the round cap, the most rounds a single `models.loop` call may make, which each call counts for itself.
 
-When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
+The Harness streams nothing: it hands every round to the Host's broker, the part of the Host that talks to the model, and takes the finished reply. When the Host shows live output, its broker streams a section's own rounds, each `models.loop` round among them, showing each text fragment as it arrives in the order the model streamed it, and the reply in the terminal record holds the whole text those fragments carried. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round reaches the broker marked as an infer round, so a Host can tell it from the section's conversation and read it whole. A Host that stops showing a round's fragments does not fail the round.
 
 ## How the list reaches the model
 
@@ -11793,6 +11793,27 @@ Catching a cancel does not keep the run going. Once the Host cancels, running Lu
 - A `models.infer` round in flight is aborted before its reply lands.
 - A cancel that lands while a block waits on a `store.write` ends the run with the cancelled outcome the same way.
 - A run cancelled before a [`fanout`](14-fanout.md#the-fanout-call) begins ends with the cancelled outcome without running any arms.
+
+### A stopped round
+
+A Host can also stop the round in flight without cancelling the run, as when the operator stops a reply that is heading the wrong way. A stop reaches the calls waiting on a model or a tool when it lands, and each one resumes with the same interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
+
+- `models.infer`, and each `models.loop` round
+- `tools.call`, and tool calls the model makes
+
+A stop leaves the run's cancel flag clear, so running Lua goes on, and a caught stop keeps the run going. This block returns `stopped` when the Host stops its round, and the run completes:
+
+````lua
+local ok, out = pcall(models.infer, 'Draft the summary.')
+if not ok and out.kind == 'cancelled' then
+  return 'stopped'
+end
+return out
+````
+
+Under a cancel, the same block's `return 'stopped'` changes nothing: the run still ends with the cancelled outcome, so a prompt need not tell a stop from a cancel. Left uncaught, the interrupted error from a stop ends the run with the cancelled outcome too.
+
+A question to the operator stays open through a stop. `input.ask()`, and the ask tool a model calls, keep waiting for the operator's answer, so a person in the middle of typing never loses the question. A `store` call is never cut short by a stop, because the Harness answers every `store` call before it next waits, and a stop takes effect only while it waits.
 
 ---
 
