@@ -1,29 +1,34 @@
-//! Harness clippy-ban check: every internal Harness crate forbids raw
-//! tokio spawns.
+//! Harness tokio ban: no Harness crate declares `tokio` or `tokio-util` as
+//! a normal dependency.
 //!
-//! The Harness spawns only through one instrumented wrapper in
-//! `harness-runner` that tags each task with its `EffectId` and
-//! `Provenance`, so every crate under `crates/harness-internal/` has a
-//! `clippy.toml` whose `disallowed-methods` names `tokio::spawn` and
-//! `tokio::task::spawn_blocking`. Clippy reads the nearest `clippy.toml`
-//! above each crate's manifest directory, so the file must sit in the crate
-//! itself, not only at the workspace root. The `crates/harness/` facade
-//! holds only re-exports, so it has no `clippy.toml` and is not checked.
+//! The Harness polls every effect inside the run's own future and starts
+//! no task, so any executor can drive a run. The `crates/harness/` facade
+//! and every crate under `crates/harness-internal/` therefore may not name
+//! `tokio` or `tokio-util` in `[dependencies]` or its target-specific
+//! forms. `[dev-dependencies]` are outside the ban: the suites and doc
+//! examples drive runs on tokio, as a real Host does.
 //!
-//! The check is vacuously true while the container is empty or absent.
+//! The check reads declared dependencies, not the resolved graph, so
+//! `workspace-hack` unification is irrelevant to it. It is vacuously true
+//! while the container is empty or absent and the facade is absent.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The methods every Harness `clippy.toml` must disallow.
-const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
+/// The crates a Harness manifest may not declare outside
+/// `[dev-dependencies]`.
+const BANNED: [&str; 2] = ["tokio", "tokio-util"];
 
-/// Checks every crate under `container` for a complete clippy ban list.
+/// The dependency tables the ban scans, directly and under `[target]`.
+const CHECKED_KINDS: [&str; 1] = ["dependencies"];
+
+/// Checks every Harness crate's manifest for a banned normal dependency.
 #[must_use]
-pub(crate) fn harness_clippy_bans(container: &Path) -> Vec<String> {
-    let mut crates = Vec::new();
-    collect_crates(container, &mut crates);
-    crates.iter().filter_map(|dir| check_crate(dir)).collect()
+pub(crate) fn harness_tokio_bans(container: &Path, public_crate: &Path) -> Vec<String> {
+    harness_crates(container, public_crate)
+        .iter()
+        .flat_map(|dir| check_manifest(&dir.join("Cargo.toml")))
+        .collect()
 }
 
 /// The Harness family's crate directories: every crate under `container`
@@ -58,64 +63,44 @@ fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     }
 }
 
-/// The violation for one crate directory, or `None` when its
-/// `clippy.toml` names every banned method.
-fn check_crate(dir: &Path) -> Option<String> {
-    let path = dir.join("clippy.toml");
-    let text = match fs::read_to_string(&path) {
+/// The violations in one manifest: one per banned entry, or one when the
+/// manifest cannot be read or parsed.
+fn check_manifest(manifest: &Path) -> Vec<String> {
+    let text = match fs::read_to_string(manifest) {
         Ok(text) => text,
         Err(error) => {
-            return Some(format!(
-                "{}: {}; every harness crate has a clippy.toml whose disallowed-methods names {}",
-                path.display(),
-                if path.exists() {
-                    format!("unreadable clippy.toml: {error}")
-                } else {
-                    "missing clippy.toml".to_owned()
-                },
-                BANNED.join(" and ")
-            ));
+            return vec![format!(
+                "{}: unreadable manifest: {error}",
+                manifest.display()
+            )];
         }
     };
     let value: toml::Value = match toml::from_str(&text) {
         Ok(value) => value,
         Err(error) => {
-            return Some(format!(
-                "{}: unparseable clippy.toml: {error}",
-                path.display()
-            ));
+            return vec![format!(
+                "{}: unparseable manifest: {error}",
+                manifest.display()
+            )];
         }
     };
-    let named = disallowed_methods(&value);
-    let missing: Vec<&str> = BANNED
-        .iter()
-        .copied()
-        .filter(|method| !named.contains(method))
-        .collect();
-    if missing.is_empty() {
-        return None;
+    let mut violations = Vec::new();
+    for (table, entries) in crate::manifest::dependency_tables(&value, &CHECKED_KINDS) {
+        for (key, entry) in entries {
+            let package = entry
+                .get("package")
+                .and_then(toml::Value::as_str)
+                .unwrap_or(key);
+            if BANNED.contains(&package) {
+                violations.push(format!(
+                    "{}: [{table}] declares {package}; harness crates declare {} only under [dev-dependencies]",
+                    manifest.display(),
+                    BANNED.join(" and ")
+                ));
+            }
+        }
     }
-    Some(format!(
-        "{}: disallowed-methods lacks {}",
-        path.display(),
-        missing.join(", ")
-    ))
-}
-
-/// The method paths a `clippy.toml` disallows, in either entry form: a
-/// bare string or a table with a `path` key.
-fn disallowed_methods(value: &toml::Value) -> Vec<&str> {
-    value
-        .get("disallowed-methods")
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            entry
-                .as_str()
-                .or_else(|| entry.get("path").and_then(toml::Value::as_str))
-        })
-        .collect()
+    violations
 }
 
 #[cfg(test)]

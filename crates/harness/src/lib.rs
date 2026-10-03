@@ -14,17 +14,6 @@ pub use harness_runner::performers::BoxFuture;
 pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
-pub mod cancel {
-    #![doc = include_str!("cancel.md")]
-
-    pub use harness_runner::cancel::CancelHandle;
-    pub use harness_runner::cancel::current;
-    pub use harness_runner::cancel::is_cancelled;
-    pub use harness_runner::cancel::maybe_scope;
-    pub use harness_runner::cancel::scope;
-    pub use harness_runner::cancel::wait_cancelled;
-}
-
 pub mod capability {
     #![doc = include_str!("capability.md")]
 

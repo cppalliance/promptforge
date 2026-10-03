@@ -64,8 +64,9 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     violations.extend(lint_inheritance_violations(root));
     violations.extend(walled_tier_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
-    violations.extend(crate::harness_bans::harness_clippy_bans(
+    violations.extend(crate::harness_bans::harness_tokio_bans(
         &root.join("crates").join("harness-internal"),
+        &root.join("crates").join("harness"),
     ));
     violations.extend(crate::engine_guards::engine_guard_violations(root));
     violations.extend(crate::facade_shape::facade_shape_violations(root));

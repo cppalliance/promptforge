@@ -781,7 +781,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-7>
 
-### Step 7: The Harness drops tokio
+### Step 7: The Harness drops tokio [completed]
 
 - Component: Runtime-agnostic Harness
 - Depends on: step 5, and through it step 4, which removed the last tokio channels in the Harness tier. It needs nothing from step 6.

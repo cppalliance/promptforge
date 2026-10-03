@@ -1,6 +1,6 @@
-//! Fixture tests for the Harness clippy-ban check, plus the live check over
-//! this workspace's `crates/harness-internal/` container and the coverage
-//! of its `crates/harness/` facade.
+//! Fixture tests for the Harness tokio ban, plus the live check over this
+//! workspace's `crates/harness-internal/` container and its
+//! `crates/harness/` facade.
 
 use std::path::Path;
 
@@ -20,25 +20,25 @@ fn facade(root: &Path) -> std::path::PathBuf {
     root.join("crates").join("harness")
 }
 
-/// Writes a crate directory with a manifest and, when given, a `clippy.toml`.
-fn write_crate(dir: &Path, clippy: Option<&str>) {
+/// Writes a crate directory whose manifest is a fixture package followed by
+/// `tables`.
+fn write_crate(dir: &Path, tables: &str) {
     std::fs::create_dir_all(dir).expect("the crate directory creates");
-    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"fixture\"\n")
-        .expect("the manifest writes");
-    if let Some(text) = clippy {
-        std::fs::write(dir.join("clippy.toml"), text).expect("clippy.toml writes");
-    }
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!("[package]\nname = \"fixture\"\n{tables}"),
+    )
+    .expect("the manifest writes");
 }
 
-const COMPLETE: &str = "disallowed-methods = [\n\
-    \"tokio::spawn\",\n\
-    { path = \"tokio::task::spawn_blocking\", reason = \"spawn through harness-runner\" },\n\
-]\n";
+fn bans(root: &Path) -> Vec<String> {
+    harness_tokio_bans(&container(root), &facade(root))
+}
 
 #[test]
 fn an_absent_container_is_vacuously_clean() {
     let root = fake_root();
-    let violations = harness_clippy_bans(&container(root.path()));
+    let violations = bans(root.path());
     assert!(violations.is_empty(), "{violations:?}");
 }
 
@@ -46,106 +46,102 @@ fn an_absent_container_is_vacuously_clean() {
 fn an_empty_container_is_vacuously_clean() {
     let root = fake_root();
     std::fs::create_dir_all(container(root.path())).expect("the container creates");
-    let violations = harness_clippy_bans(&container(root.path()));
+    let violations = bans(root.path());
     assert!(violations.is_empty(), "{violations:?}");
 }
 
 #[test]
-fn a_crate_missing_its_clippy_toml_is_reported() {
-    let root = fake_root();
-    write_crate(&container(root.path()).join("runner"), None);
-    let violations = harness_clippy_bans(&container(root.path()));
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("runner") && violations[0].contains("clippy.toml"),
-        "the missing file is named: {violations:?}"
-    );
-}
-
-#[test]
-fn a_clippy_toml_missing_a_banned_method_is_reported() {
+fn tokio_as_a_normal_dependency_of_an_internal_crate_is_reported() {
     let root = fake_root();
     write_crate(
         &container(root.path()).join("runner"),
-        Some("disallowed-methods = [\"tokio::spawn\"]\n"),
+        "[dependencies]\ntokio = { workspace = true, features = [\"rt\"] }\n",
     );
-    let violations = harness_clippy_bans(&container(root.path()));
+    let violations = bans(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("tokio::task::spawn_blocking")
-            && !violations[0].contains("tokio::spawn,"),
-        "only the absent method is reported: {violations:?}"
+        violations[0].contains("runner")
+            && violations[0].contains("[dependencies]")
+            && violations[0].contains("tokio"),
+        "the violation names the crate, the table, and the package: {violations:?}"
     );
 }
 
 #[test]
-fn a_clippy_toml_without_the_disallowed_methods_key_is_reported() {
+fn tokio_as_a_dev_dependency_passes() {
     let root = fake_root();
     write_crate(
         &container(root.path()).join("runner"),
-        Some("allow-unwrap-in-tests = true\n"),
+        "[dependencies]\nfutures-util.workspace = true\n\
+         [dev-dependencies]\ntokio = { workspace = true, features = [\"macros\", \"rt\"] }\n\
+         tokio-util.workspace = true\n",
     );
-    let violations = harness_clippy_bans(&container(root.path()));
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("tokio::spawn") && violations[0].contains("spawn_blocking"),
-        "both methods are reported absent: {violations:?}"
-    );
-}
-
-#[test]
-fn a_complete_clippy_toml_in_either_entry_form_passes() {
-    let root = fake_root();
-    write_crate(&container(root.path()).join("runner"), Some(COMPLETE));
-    write_crate(
-        &container(root.path()).join("log"),
-        Some(
-            "disallowed-methods = [\n\
-             { path = \"tokio::spawn\" },\n\
-             { path = \"tokio::task::spawn_blocking\" },\n\
-             \"std::process::exit\",\n]\n",
-        ),
-    );
-    let violations = harness_clippy_bans(&container(root.path()));
-    assert!(violations.is_empty(), "{violations:?}");
-}
-
-#[test]
-fn a_facade_without_a_clippy_toml_passes_though_it_is_a_harness_crate() {
-    let root = fake_root();
-    write_crate(&container(root.path()).join("runner"), Some(COMPLETE));
-    write_crate(&facade(root.path()), None);
-    assert!(
-        harness_crates(&container(root.path()), &facade(root.path()))
-            .contains(&facade(root.path())),
-        "the facade is listed as a harness crate"
-    );
-    let violations = harness_clippy_bans(&container(root.path()));
+    let violations = bans(root.path());
     assert!(
         violations.is_empty(),
-        "the facade defines nothing to spawn from, so it carries no ban: {violations:?}"
+        "the suites drive runs on tokio, so dev-dependencies are outside the ban: {violations:?}"
+    );
+}
+
+#[test]
+fn a_renamed_tokio_util_in_a_target_table_is_reported() {
+    let root = fake_root();
+    write_crate(
+        &container(root.path()).join("capabilities"),
+        "[target.'cfg(windows)'.dependencies]\ntu = { package = \"tokio-util\", version = \"0.7\" }\n",
+    );
+    let violations = bans(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("cfg(windows)") && violations[0].contains("tokio-util"),
+        "the target table and the package behind the rename are named: {violations:?}"
+    );
+}
+
+#[test]
+fn the_facade_is_held_to_the_ban() {
+    let root = fake_root();
+    write_crate(&container(root.path()).join("runner"), "");
+    write_crate(&facade(root.path()), "[dependencies]\ntokio = \"1\"\n");
+    let violations = bans(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains(&facade(root.path()).display().to_string()),
+        "the facade's manifest is named: {violations:?}"
     );
 }
 
 #[test]
 fn a_crate_nested_under_a_manifestless_subdirectory_is_checked() {
     let root = fake_root();
-    write_crate(&container(root.path()).join("stt").join("engine"), None);
-    let violations = harness_clippy_bans(&container(root.path()));
+    write_crate(
+        &container(root.path()).join("stt").join("engine"),
+        "[dependencies]\ntokio = \"1\"\n",
+    );
+    let violations = bans(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(violations[0].contains("engine"), "{violations:?}");
 }
 
 #[test]
-fn an_unparseable_clippy_toml_is_reported() {
+fn an_unparseable_manifest_is_reported() {
     let root = fake_root();
-    write_crate(
-        &container(root.path()).join("runner"),
-        Some("disallowed-methods = [ not toml\n"),
-    );
-    let violations = harness_clippy_bans(&container(root.path()));
+    write_crate(&container(root.path()).join("runner"), "[dependencies\n");
+    let violations = bans(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(violations[0].contains("unparseable"), "{violations:?}");
+}
+
+#[test]
+fn a_facade_directory_without_a_manifest_is_reported() {
+    let root = fake_root();
+    std::fs::create_dir_all(facade(root.path())).expect("the facade directory creates");
+    let violations = bans(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("unreadable manifest"),
+        "{violations:?}"
+    );
 }
 
 #[test]
@@ -173,12 +169,16 @@ fn the_harness_crates_are_the_two_container_crates_and_the_facade() {
 }
 
 #[test]
-fn harness_crates_ban_raw_tokio_spawns() {
+fn harness_crates_declare_no_tokio_outside_dev_dependencies() {
     let root = crate::product::test_support::workspace_root();
-    let violations = harness_clippy_bans(&root.join("crates").join("harness-internal"));
+    let crates_dir = root.join("crates");
+    let violations = harness_tokio_bans(
+        &crates_dir.join("harness-internal"),
+        &crates_dir.join("harness"),
+    );
     assert!(
         violations.is_empty(),
-        "harness clippy-ban violations:\n{}",
+        "harness tokio-ban violations:\n{}",
         violations.join("\n")
     );
 }

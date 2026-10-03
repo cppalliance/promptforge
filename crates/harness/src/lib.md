@@ -479,4 +479,3 @@ Stream where the operator watches, and let the recorded reply have the last word
 - [`capability`]: install the capabilities your prompts declare, and provide the services they read.
 - [`record`]: record every run to a store of your own, and read a run back.
 - [`vfs`]: give a run files of your own instead of a fresh empty store.
-- [`cancel`]: stop your program's own async work at its next safe point.

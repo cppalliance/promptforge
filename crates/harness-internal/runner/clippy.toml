@@ -2,12 +2,3 @@
 # with it, so the root's test allowances are restated here.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
-
-# The Harness polls every effect inside the run's own future and starts no
-# task, so nothing in this crate calls the raw tokio spawns.
-# `cargo test -p build-xtask` checks that every Harness crate names both
-# methods.
-disallowed-methods = [
-    { path = "tokio::spawn", reason = "the Harness starts no task; poll the work inside the run's future" },
-    { path = "tokio::task::spawn_blocking", reason = "the Harness starts no task; hand blocking work to the Host's runtime" },
-]

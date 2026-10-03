@@ -22,8 +22,9 @@
 //!   no task, so any executor can drive a run. Performers must not block
 //!   while polled: one that blocks stalls every other effect of the run,
 //!   and a performer with blocking or CPU-heavy work hands it to the
-//!   Host's own runtime. The crate's async needs come from `futures-util`;
-//!   `cancel` is the one module that names tokio.
+//!   Host's own runtime. The crate's async needs come from `futures-util`,
+//!   and `tokio` and `tokio-util` appear only under `[dev-dependencies]`
+//!   (enforced by the Harness tokio ban in `cargo test -p build-xtask`).
 //! - The recorder is written in loop order: a step's events before the
 //!   step's effects are issued, each effect before its performer starts,
 //!   each answer before the run resumes with it. Every effect record has
@@ -32,7 +33,6 @@
 //!   from the run's own word (`Step`, `Run::decided`), the cancel flag,
 //!   and the Host's stop.
 
-pub mod cancel;
 mod display_chain;
 pub mod effect_loop;
 pub mod environment;
