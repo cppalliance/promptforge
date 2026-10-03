@@ -61,6 +61,9 @@ pub(crate) const SELECT_TABLE: &str =
 /// The layout version the file was stamped with.
 pub(crate) const SELECT_LAYOUT: &str = "SELECT version FROM layout";
 
+/// Whether the file holds any run.
+pub(crate) const SELECT_ANY_RUN: &str = "SELECT 1 FROM runs LIMIT 1";
+
 /// Stamps a file's layout version, once.
 pub(crate) const INSERT_LAYOUT: &str = "INSERT INTO layout (version) VALUES (?1)";
 

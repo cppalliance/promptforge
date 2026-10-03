@@ -25,7 +25,7 @@ mod tool;
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 
 pub use tool::SessionInputBroker;
 
@@ -38,10 +38,12 @@ pub use tool::SessionInputBroker;
 /// against a dead token - cancellation is an outcome, never silence.
 ///
 /// Delivery is durable through the registry rather than the channel: the
-/// [`WaitRegistry`] retains every unresolved wait and
-/// [`resend_unresolved`](WaitRegistry::resend_unresolved) re-announces
-/// them, so a push lost to a dead socket is repaired by the resent set -
-/// a live wait reappears, and a cancelled one vanishes by its absence.
+/// [`WaitRegistry`] retains every unresolved wait, and the agent socket
+/// re-announces them from
+/// [`Conversation::unresolved_waits()`](crate::Conversation::unresolved_waits)
+/// on reconnect and after lag, so a push lost to a dead socket is
+/// repaired by the resent set - a live wait reappears, and a cancelled
+/// one vanishes by its absence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WaitFrame {
     /// A wait opened: the conversation wants operator input for `token`.
@@ -73,8 +75,9 @@ struct Wait {
 /// receiving half; [`complete`](Self::complete) resolves the wait with the
 /// operator's text and consumes the token; [`cancel`](Self::cancel) kills
 /// it. Unresolved waits are retained - conversations outlive sockets -
-/// and [`resend_unresolved`](Self::resend_unresolved) re-announces them
-/// to a reconnecting client in creation order.
+/// and the agent socket re-announces them in creation order from
+/// [`Conversation::unresolved_waits()`](crate::Conversation::unresolved_waits)
+/// on reconnect and after lag.
 #[derive(Default)]
 pub struct WaitRegistry {
     /// The unresolved waits in creation order. A `Vec` rather than a map:
@@ -217,33 +220,6 @@ impl WaitRegistry {
     #[must_use]
     pub fn unresolved(&self) -> Vec<String> {
         self.lock().iter().map(|wait| wait.token.clone()).collect()
-    }
-
-    /// Re-announces every unresolved wait to `frames` as a
-    /// [`WaitFrame::Required`], in creation order.
-    ///
-    /// The reconnect half of the durable-delivery promise: a client that
-    /// missed pushes rebuilds its prompt state from this resend - a live
-    /// wait reappears, and a stale prompt vanishes by its absence.
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::{WaitFrame, WaitRegistry};
-    ///
-    /// let registry = WaitRegistry::new();
-    /// let (token, _receiver) = registry.create();
-    /// let (frames, mut socket) = tokio::sync::broadcast::channel(8);
-    /// registry.resend_unresolved(&frames);
-    /// assert_eq!(socket.try_recv()?, WaitFrame::Required { token });
-    /// # Ok::<(), tokio::sync::broadcast::error::TryRecvError>(())
-    /// ```
-    pub fn resend_unresolved(&self, frames: &broadcast::Sender<WaitFrame>) {
-        for token in self.unresolved() {
-            // No receiver means the client vanished again between
-            // subscribing and this resend; the registry still holds the
-            // wait, so the next reconnect resends it once more.
-            let _ = frames.send(WaitFrame::Required { token });
-        }
     }
 }
 

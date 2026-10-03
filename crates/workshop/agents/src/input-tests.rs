@@ -12,6 +12,7 @@ use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
+use tokio::sync::broadcast;
 
 use crate::timer::TokioTimer;
 
@@ -118,26 +119,6 @@ fn the_registry_debug_shows_the_count_and_never_a_token() {
     assert!(
         !rendered.contains(&token),
         "a token in a log would let the log's reader answer the prompt"
-    );
-}
-
-#[tokio::test]
-async fn reconnect_resends_unresolved_waits_in_creation_order() {
-    let registry = WaitRegistry::new();
-    let (first, _first_receiver) = registry.create();
-    let (second, _second_receiver) = registry.create();
-    // The reconnecting client subscribes, then the conversation resends.
-    let (frames, mut socket) = broadcast::channel(8);
-    registry.resend_unresolved(&frames);
-    assert_eq!(
-        socket.recv().await.expect("the first resend arrives"),
-        WaitFrame::Required { token: first },
-        "resend replays the retained waits"
-    );
-    assert_eq!(
-        socket.recv().await.expect("the second resend arrives"),
-        WaitFrame::Required { token: second },
-        "resend preserves creation order"
     );
 }
 

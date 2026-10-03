@@ -17,8 +17,12 @@ const SIDECARS: [&str; 2] = ["-wal", "-shm"];
 
 /// Whether `conn`'s file holds tables in a layout other than
 /// [`schema::LAYOUT_VERSION`]. A file with no `runs` table is new, not
-/// stale. A `layout` table with no row is stale too: only an open cut
-/// short between creating the tables and stamping them leaves one.
+/// stale, and a file with no `layout` table is stale. A `layout` table
+/// with no row is stale only when `runs` holds a row. With no run, it is
+/// an open caught between creating the tables and stamping them, still
+/// running or cut short, and [`stamp`] finishes it. Two opens that both
+/// find it unstamped both stamp it; the duplicate rows name the same
+/// version, and `stamped` reads the first.
 pub(crate) async fn is_stale(conn: &turso::Connection) -> Result<bool, LogError> {
     if !has_table(conn, "runs").await? {
         return Ok(false);
@@ -26,7 +30,10 @@ pub(crate) async fn is_stale(conn: &turso::Connection) -> Result<bool, LogError>
     if !has_table(conn, "layout").await? {
         return Ok(true);
     }
-    Ok(stamped(conn).await? != Some(schema::LAYOUT_VERSION))
+    match stamped(conn).await? {
+        Some(version) => Ok(version != schema::LAYOUT_VERSION),
+        None => has_run(conn).await,
+    }
 }
 
 /// Stamps `conn`'s file with [`schema::LAYOUT_VERSION`] unless it already
@@ -65,6 +72,12 @@ async fn stamped(conn: &turso::Connection) -> Result<Option<i64>, LogError> {
         Some(row) => Ok(Some(row.get::<i64>(0)?)),
         None => Ok(None),
     }
+}
+
+/// Whether `conn`'s `runs` table holds any row.
+async fn has_run(conn: &turso::Connection) -> Result<bool, LogError> {
+    let mut rows = conn.query(schema::SELECT_ANY_RUN, ()).await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// Whether `conn`'s file holds a table named `name`.

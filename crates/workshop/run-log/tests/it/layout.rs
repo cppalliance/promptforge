@@ -77,6 +77,20 @@ fn set_aside(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The layout versions stamped into the file at `path`, in row order.
+async fn stamps(path: &Path) -> Vec<i64> {
+    let mut rows = raw(path)
+        .await
+        .query("SELECT version FROM layout", ())
+        .await
+        .unwrap();
+    let mut versions = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        versions.push(row.get::<i64>(0).unwrap());
+    }
+    versions
+}
+
 /// A run begins, takes nothing, and ends in `log`.
 async fn round_trip(log: &mut RunLog) {
     let run = log.begin_run(meta(), "chat").await.unwrap();
@@ -127,6 +141,54 @@ async fn a_file_stamped_with_another_layout_is_set_aside() {
     drop(log);
 
     assert_eq!(set_aside(dir.path()).len(), 1);
+}
+
+#[tokio::test]
+async fn an_unstamped_file_with_no_runs_is_stamped_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("runs.db");
+    drop(RunLog::open(&path).await.unwrap());
+    let current = stamps(&path).await;
+    // A second open racing the first sees the tables before their stamp.
+    raw(&path)
+        .await
+        .execute("DELETE FROM layout", ())
+        .await
+        .unwrap();
+
+    let mut log = RunLog::open(&path).await.unwrap();
+    round_trip(&mut log).await;
+    drop(log);
+
+    assert!(
+        set_aside(dir.path()).is_empty(),
+        "a file with no runs has nothing to set aside"
+    );
+    assert_eq!(stamps(&path).await, current, "the reopen stamps the file");
+}
+
+#[tokio::test]
+async fn an_unstamped_file_with_runs_is_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("runs.db");
+    let mut log = RunLog::open(&path).await.unwrap();
+    round_trip(&mut log).await;
+    drop(log);
+    raw(&path)
+        .await
+        .execute("DELETE FROM layout", ())
+        .await
+        .unwrap();
+
+    let mut log = RunLog::open(&path).await.unwrap();
+    round_trip(&mut log).await;
+    drop(log);
+
+    assert_eq!(
+        set_aside(dir.path()).len(),
+        1,
+        "a file whose runs carry no stamp is kept beside the new one"
+    );
 }
 
 #[tokio::test]
