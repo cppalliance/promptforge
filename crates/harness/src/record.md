@@ -68,7 +68,7 @@ impl RunRecorder for DeskRecorder {
     fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
         Box::pin(async move {
             let run = RunId::from_raw(self.runs.fetch_add(1, Ordering::SeqCst) + 1);
-            self.note(format!("run {run} begins: {}", meta.session_id))?;
+            self.note(format!("run {run} begins: {}", meta.name))?;
             Ok(run)
         })
     }
@@ -109,7 +109,7 @@ assert!(lines.iter().any(|line| line == "run 1: event"));
 ````
 
 1. Step 1 defines `DeskRecorder`. One recorder may serve every run your program makes, and calls from different runs may overlap, so its state sits behind an atomic and a lock. Calls within one run never overlap. The `lines` list stands in for a store of your own.
-2. Step 2 implements `begin_run`. It receives a [`RunMeta`], what the Harness knows when a run starts, and returns the [`RunId`] the run will carry in every later call. The recorder picks the number, so a database can hand out its own row ids. `session_id` holds the request's `name`.
+2. Step 2 implements `begin_run`. It receives a [`RunMeta`], what the Harness knows when a run starts, and returns the [`RunId`] the run will carry in every later call. The recorder picks the number, so a database can hand out its own row ids. `name` holds the request's `name`.
 3. Step 3 implements `append`, which receives one [`Record`] for every effect the Engine issues, every answer the Harness gives it, and every event it reports. `desk` keeps only the kind. A real store would keep the `payload`, which is JSON.
 4. Step 4 implements `end_run`, which receives how the run ended as a [`RunOutcome`].
 5. Step 5 hands an `Arc<dyn RunRecorder>` to [`Harness::new`](crate::Harness::new) as its first argument, and keeps a typed handle to read the store back. The broker, `Offline`, and the timer, `Clock`, are defined in hidden lines.
@@ -147,8 +147,7 @@ assert!(recorder.meta(RunId::from_raw(1)).is_none());
 
 // 2. Begin a run by hand: ids start at 1, and the run is open until it ends.
 let meta = RunMeta {
-    session_id: "desk-hello-1".into(),
-    agent: String::new(),
+    name: "desk-hello-1".into(),
     prompt_hash: "sha256:00".into(),
     seed: 7,
     flags: 0,
@@ -156,7 +155,7 @@ let meta = RunMeta {
 };
 let run = recorder.begin_run(meta).await?;
 assert_eq!(run.get(), 1);
-assert_eq!(recorder.meta(run).map(|meta| meta.session_id), Some("desk-hello-1".to_owned()));
+assert_eq!(recorder.meta(run).map(|meta| meta.name), Some("desk-hello-1".to_owned()));
 assert_eq!(recorder.outcome(run), None);
 
 // 3. End the run; a second end is refused, and the first outcome stays.
@@ -301,8 +300,7 @@ A [`Record`] is one effect, answer, or event of a run, as the Harness appends it
 
 [`RunMeta`] is what the Harness knows about a run when it begins, and what [`RunRecorder::begin_run`] receives.
 
-- `session_id`: the run's name, the [`RunRequest`](crate::RunRequest)'s `name`.
-- `agent`: empty from the Harness; a recorder in front of another may fill it in before handing the call on.
+- `name`: the run's name, the [`RunRequest`](crate::RunRequest)'s `name`.
 - `prompt_hash`: `sha256:` and the lowercase hex digest of the prompt's text, so a history can be matched to the exact text that produced it.
 - `seed`: the Harness-drawn seed the Engine received.
 - `flags`: the Engine's behavior flags as a bit set; `0` until a flag exists.

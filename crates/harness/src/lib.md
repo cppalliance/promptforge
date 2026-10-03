@@ -466,7 +466,7 @@ Stream where the operator watches, and let the recorded reply have the last word
 
 [`RunRequest`] is what to run. Build it as a struct literal and pass it to [`Harness::run`]. [Run a prompt](#run-a-prompt) teaches this.
 
-- `name`: the run's name, every event's `execution` and the run metadata's `session_id`.
+- `name`: the run's name, every event's `execution` and the run metadata's `name`.
 - `source`: the prompt's Markdown text.
 - `args`: the run's argument text, handed to the prompt as `args`.
 - `input_text`: written at the prompt's declared `input:` file before the run; with `None`, the store must already hold that file.

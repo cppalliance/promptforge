@@ -18,8 +18,7 @@ use super::*;
 
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "conversation-1".to_owned(),
-        agent: String::new(),
+        name: "conversation-1".to_owned(),
         prompt_hash: "sha256:00".to_owned(),
         seed: 7,
         flags: 0,
@@ -156,14 +155,14 @@ async fn effects_and_answers_reach_the_inner_recorder_and_not_the_transcript() {
 }
 
 #[tokio::test]
-async fn begin_run_names_the_conversations_agent_and_notes_the_run() {
+async fn begin_run_hands_the_meta_on_unchanged_and_notes_the_run() {
     let (conversation, inner, tee) = watched(false);
     assert_eq!(conversation.run_id(), None, "no run has begun");
     let run = tee.begin_run(meta()).await.unwrap();
     assert_eq!(
-        inner.inner.meta(run).map(|meta| meta.agent),
-        Some("echo".to_owned()),
-        "the run's metadata names the agent the conversation runs"
+        inner.inner.meta(run),
+        Some(meta()),
+        "the inner recorder receives the Harness's metadata as it was"
     );
     assert_eq!(conversation.run_id(), Some(run));
 }

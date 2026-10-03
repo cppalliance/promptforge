@@ -11,11 +11,13 @@ const ALL: RecordFilter = RecordFilter {
     last: None,
 };
 
+/// The agent the Host launched, stored beside the Harness's metadata.
+const AGENT: &str = "chat";
+
 /// A run's opening row as the Harness would write it.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "chat".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
         seed: u64::MAX - 1,
         flags: 0,
@@ -37,7 +39,7 @@ fn record(kind: RecordKind, task_seq: u32, effect_id: Option<u64>) -> Record {
 #[tokio::test]
 async fn a_run_with_three_records_round_trips_through_an_in_memory_log() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
 
     log.append(run, record(RecordKind::Effect, 0, Some(7)))
         .await
@@ -52,6 +54,7 @@ async fn a_run_with_three_records_round_trips_through_an_in_memory_log() {
     let row = log.run(run).await.unwrap();
     assert_eq!(row.id, run);
     assert_eq!(row.meta, meta());
+    assert_eq!(row.agent, AGENT, "the agent is stored beside the meta");
     assert_eq!(row.ended_at, None);
     assert_eq!(row.outcome, None);
 
@@ -79,7 +82,7 @@ async fn a_run_with_three_records_round_trips_through_an_in_memory_log() {
 #[tokio::test]
 async fn seq_is_assigned_in_call_order_and_strictly_increases() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
 
     let mut seqs = Vec::new();
     for task_seq in 0..5 {
@@ -105,8 +108,8 @@ async fn seq_is_assigned_in_call_order_and_strictly_increases() {
 #[tokio::test]
 async fn seq_is_per_run_so_two_runs_each_start_at_zero() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let first = log.begin_run(meta()).await.unwrap();
-    let second = log.begin_run(meta()).await.unwrap();
+    let first = log.begin_run(meta(), AGENT).await.unwrap();
+    let second = log.begin_run(meta(), AGENT).await.unwrap();
     assert_ne!(first, second);
 
     log.append(first, record(RecordKind::Event, 0, None))
@@ -124,7 +127,7 @@ async fn seq_is_per_run_so_two_runs_each_start_at_zero() {
 #[tokio::test]
 async fn a_filter_selects_by_kind_and_keeps_the_last_n() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     // Two tasks interleaved (the main walk and its first child); records
     // come back in loop order, not in any one task's `task_seq` order.
     let appended = [
@@ -190,7 +193,7 @@ async fn a_filter_selects_by_kind_and_keeps_the_last_n() {
 #[tokio::test]
 async fn end_run_fills_ended_at_and_outcome() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     log.end_run(
         run,
         RunOutcome::Completed {
@@ -213,7 +216,7 @@ async fn end_run_fills_ended_at_and_outcome() {
 #[tokio::test]
 async fn a_failed_outcome_keeps_its_kind_and_message() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     let outcome = RunOutcome::Failed {
         kind: "tool".to_owned(),
         message: "expected a reply, got nothing".to_owned(),
@@ -221,7 +224,7 @@ async fn a_failed_outcome_keeps_its_kind_and_message() {
     log.end_run(run, outcome.clone()).await.unwrap();
     assert_eq!(log.run(run).await.unwrap().outcome, Some(outcome));
 
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     log.end_run(run, RunOutcome::Cancelled).await.unwrap();
     assert_eq!(
         log.run(run).await.unwrap().outcome,
@@ -232,7 +235,7 @@ async fn a_failed_outcome_keeps_its_kind_and_message() {
 #[tokio::test]
 async fn a_run_ends_exactly_once() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     log.end_run(run, RunOutcome::Cancelled).await.unwrap();
 
     let again = log.end_run(run, RunOutcome::Cancelled).await;
@@ -264,7 +267,7 @@ async fn a_log_on_disk_keeps_its_rows_across_reopen() {
 
     let run = {
         let mut log = RunLog::open(&path).await.unwrap();
-        let run = log.begin_run(meta()).await.unwrap();
+        let run = log.begin_run(meta(), AGENT).await.unwrap();
         log.append(run, record(RecordKind::Event, 0, None))
             .await
             .unwrap();

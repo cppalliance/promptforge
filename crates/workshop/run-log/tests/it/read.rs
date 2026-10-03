@@ -3,11 +3,13 @@
 use serde_json::json;
 use workshop_run_log::{LogError, Record, RecordKind, RunId, RunLog, RunMeta};
 
+/// The agent the Host launched.
+const AGENT: &str = "chat";
+
 /// A run's opening row.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "chat".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
         seed: 3,
         flags: 0,
@@ -31,7 +33,7 @@ fn record(task_id: &str, task_seq: u32, kind: RecordKind) -> Record {
 /// an effect and its answer mixed in so the event-only transcript has
 /// something to exclude. Returns the run.
 async fn interleaved_run(log: &mut RunLog) -> Result<RunId, LogError> {
-    let run = log.begin_run(meta()).await?;
+    let run = log.begin_run(meta(), AGENT).await?;
     let appended = [
         ("0", 0, RecordKind::Event),
         ("0.0", 2, RecordKind::Event),
@@ -81,7 +83,7 @@ async fn transcript_returns_every_event_in_seq_order_and_nothing_else() {
 #[tokio::test]
 async fn transcript_of_a_run_with_no_events_is_empty() {
     let mut log = RunLog::in_memory().await.unwrap();
-    let run = log.begin_run(meta()).await.unwrap();
+    let run = log.begin_run(meta(), AGENT).await.unwrap();
     log.append(run, record("0", 0, RecordKind::Effect))
         .await
         .unwrap();

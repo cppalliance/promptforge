@@ -59,18 +59,19 @@ impl RunLog {
         Ok(Self { conn })
     }
 
-    /// Opens a run and returns its identity. `meta.started_at` is stored as
-    /// given; the log stamps nothing at begin.
+    /// Opens a run of `agent`, the agent the Host launched, and returns its
+    /// identity. `meta.started_at` is stored as given; the log stamps
+    /// nothing at begin.
     ///
     /// # Errors
     /// Returns [`LogError::Database`] when the row cannot be written.
-    pub async fn begin_run(&mut self, meta: RunMeta) -> Result<RunId, LogError> {
+    pub async fn begin_run(&mut self, meta: RunMeta, agent: &str) -> Result<RunId, LogError> {
         self.conn
             .execute(
                 schema::INSERT_RUN,
                 (
-                    meta.session_id,
-                    meta.agent,
+                    meta.name,
+                    agent,
                     meta.prompt_hash,
                     signed(meta.seed),
                     i64::from(meta.flags),

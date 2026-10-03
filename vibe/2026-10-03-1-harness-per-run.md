@@ -714,7 +714,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-4>
 
-### Step 4: `harness-sessions` is deleted, and runs are named
+### Step 4: `harness-sessions` is deleted, and runs are named [completed]
 
 - Component: Workshop conversations
 - Depends on: step 3.

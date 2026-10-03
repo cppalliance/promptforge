@@ -283,11 +283,7 @@ async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder()
             prepared.started_at.unix_millis(),
             "the recorder holds the start the run was given"
         );
-        assert_eq!(
-            meta.session_id, "session-1",
-            "the metadata holds the run's name"
-        );
-        assert_eq!(meta.agent, "", "preparation names no agent");
+        assert_eq!(meta.name, "session-1", "the metadata holds the run's name");
         assert!(
             meta.prompt_hash.starts_with("sha256:"),
             "the prompt hash names its algorithm: {}",

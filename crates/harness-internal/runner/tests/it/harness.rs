@@ -30,8 +30,8 @@ mod errors;
 #[path = "harness-stop.rs"]
 mod stop;
 
-/// The request's name: every event's `execution` and the run's
-/// `session_id`.
+/// The request's name: every event's `execution` and the run
+/// metadata's `name`.
 const NAME: &str = "harness-test";
 
 /// How long a test waits for a run before it fails.
@@ -174,11 +174,7 @@ async fn run_returns_the_declared_output_and_the_outcome_under_the_requests_name
         "the recorder ends the run with the reported outcome"
     );
     let meta = recorder.meta(run_id).expect("the recorder began the run");
-    assert_eq!(
-        meta.session_id, NAME,
-        "the metadata holds the request's name"
-    );
-    assert_eq!(meta.agent, "", "the Harness names no agent");
+    assert_eq!(meta.name, NAME, "the metadata holds the request's name");
 
     let records = recorder.records(run_id);
     let kinds: Vec<RecordKind> = records.iter().map(|record| record.kind).collect();

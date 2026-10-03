@@ -66,6 +66,8 @@ pub struct RunRow {
     pub id: RunId,
     /// What the Harness knew when the run began.
     pub meta: RunMeta,
+    /// The agent the Host launched, written beside the Harness's metadata.
+    pub agent: String,
     /// When the run ended, UTC milliseconds since the Unix epoch; `None`
     /// while the run is open.
     pub ended_at: Option<i64>,

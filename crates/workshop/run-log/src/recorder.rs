@@ -1,6 +1,7 @@
 //! The recorder that writes the Harness's runs to a run log.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use harness::record::{
     Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
@@ -12,7 +13,8 @@ use crate::{LogError, RunLog};
 /// The file under the state directory the run log is stored in.
 const RUNS_FILE: &str = "runs.db";
 
-/// A [`RunRecorder`] that keeps every run in a Turso [`RunLog`].
+/// The Turso [`RunLog`] a Host keeps every run in, shared by the
+/// [`AgentRecorder`] of each launch.
 ///
 /// The log is one file, `runs.db`, under the state directory the recorder
 /// is built with. Building the recorder touches nothing. The first call
@@ -20,8 +22,10 @@ const RUNS_FILE: &str = "runs.db";
 /// the recorder unopened, so the next call tries again. Every call takes
 /// the recorder's own lock, so runs that overlap write one at a time.
 ///
-/// A failed write comes back as a [`RecorderError`] whose cause is the
-/// log's [`LogError`]. The Harness stops the run that hit it.
+/// The Harness writes through the handle [`for_agent`](Self::for_agent)
+/// returns, which names the launched agent in the row of each run it
+/// begins. A failed write comes back as a [`RecorderError`] whose cause is
+/// the log's [`LogError`]. The Harness stops the run that hit it.
 #[derive(Debug)]
 pub struct TursoRecorder {
     /// The directory the database file sits in.
@@ -53,6 +57,17 @@ impl TursoRecorder {
         &self.path
     }
 
+    /// The recorder for one launch of `agent`: each run it begins is
+    /// written to this log with `agent` in its row. Building it touches
+    /// nothing.
+    #[must_use]
+    pub fn for_agent(self: &Arc<Self>, agent: impl Into<String>) -> AgentRecorder {
+        AgentRecorder {
+            recorder: Arc::clone(self),
+            agent: agent.into(),
+        }
+    }
+
     /// The open log in `slot`, opening it first when no call has yet.
     async fn open<'a>(&self, slot: &'a mut Option<RunLog>) -> Result<&'a mut RunLog, LogError> {
         if let Some(log) = slot {
@@ -65,19 +80,40 @@ impl TursoRecorder {
     }
 }
 
-impl RunRecorder for TursoRecorder {
+/// A [`RunRecorder`] for one launch: it writes to its [`TursoRecorder`]'s
+/// log and fills the `agent` column of each run it begins with the agent
+/// the Host launched.
+#[derive(Debug)]
+pub struct AgentRecorder {
+    /// The log every call writes to.
+    recorder: Arc<TursoRecorder>,
+    /// The launched agent, written at `begin_run`.
+    agent: String,
+}
+
+impl RunRecorder for AgentRecorder {
     fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
         Box::pin(async move {
-            let mut slot = self.log.lock().await;
-            let log = self.open(&mut slot).await.map_err(RecorderError::new)?;
-            log.begin_run(meta).await.map_err(RecorderError::new)
+            let mut slot = self.recorder.log.lock().await;
+            let log = self
+                .recorder
+                .open(&mut slot)
+                .await
+                .map_err(RecorderError::new)?;
+            log.begin_run(meta, &self.agent)
+                .await
+                .map_err(RecorderError::new)
         })
     }
 
     fn append(&self, run: RunId, record: Record) -> RecorderFuture<'_, ()> {
         Box::pin(async move {
-            let mut slot = self.log.lock().await;
-            let log = self.open(&mut slot).await.map_err(RecorderError::new)?;
+            let mut slot = self.recorder.log.lock().await;
+            let log = self
+                .recorder
+                .open(&mut slot)
+                .await
+                .map_err(RecorderError::new)?;
             log.append(run, record)
                 .await
                 .map(drop)
@@ -87,8 +123,12 @@ impl RunRecorder for TursoRecorder {
 
     fn end_run(&self, run: RunId, outcome: RunOutcome) -> RecorderFuture<'_, ()> {
         Box::pin(async move {
-            let mut slot = self.log.lock().await;
-            let log = self.open(&mut slot).await.map_err(RecorderError::new)?;
+            let mut slot = self.recorder.log.lock().await;
+            let log = self
+                .recorder
+                .open(&mut slot)
+                .await
+                .map_err(RecorderError::new)?;
             log.end_run(run, outcome).await.map_err(RecorderError::new)
         })
     }

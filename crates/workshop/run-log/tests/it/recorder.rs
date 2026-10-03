@@ -1,5 +1,5 @@
-//! `TursoRecorder`: a whole run goes in through the Harness's recorder
-//! trait and comes back out through `RunLog`.
+//! `TursoRecorder`: a whole run goes in through a per-run handle's
+//! recorder trait and comes back out through `RunLog`.
 
 // clippy.toml's allow-unwrap-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking is what these are for.
@@ -11,6 +11,7 @@
 use std::error::Error as _;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use harness::record::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
 use serde_json::json;
@@ -22,11 +23,13 @@ const ALL: RecordFilter = RecordFilter {
     last: None,
 };
 
+/// The agent the Host launched.
+const AGENT: &str = "chat";
+
 /// A run's opening row as the Harness would write it.
-fn meta(session_id: &str) -> RunMeta {
+fn meta(name: &str) -> RunMeta {
     RunMeta {
-        session_id: session_id.to_owned(),
-        agent: "chat".to_owned(),
+        name: name.to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
         seed: u64::MAX - 1,
         flags: 0,
@@ -66,12 +69,13 @@ fn log_failure(error: &RecorderError) -> &LogError {
 async fn a_whole_run_goes_in_through_the_recorder_and_reads_back_through_the_log() {
     let dir = tempfile::TempDir::new().unwrap();
     let state = dir.path().join("harness");
-    let recorder = TursoRecorder::new(&state);
-    let path = recorder.path().to_path_buf();
+    let turso = Arc::new(TursoRecorder::new(&state));
+    let path = turso.path().to_path_buf();
     assert_eq!(path.parent(), Some(state.as_path()));
+    let recorder = turso.for_agent(AGENT);
     assert!(
         !state.exists(),
-        "building the recorder touches no file; the first run does"
+        "building the recorder and its handle touches no file; the first run does"
     );
 
     let run = recorder.begin_run(meta("session-1")).await.unwrap();
@@ -91,11 +95,12 @@ async fn a_whole_run_goes_in_through_the_recorder_and_reads_back_through_the_log
         final_text: "done".to_owned(),
     };
     recorder.end_run(run, outcome.clone()).await.unwrap();
-    drop(recorder);
+    drop((recorder, turso));
 
     let log = read_back(&path).await;
     let row = log.run(run).await.unwrap();
     assert_eq!(row.meta, meta("session-1"));
+    assert_eq!(row.agent, AGENT, "the handle writes its agent");
     assert_eq!(row.outcome, Some(outcome));
     assert!(row.ended_at.is_some());
 
@@ -128,11 +133,35 @@ async fn a_whole_run_goes_in_through_the_recorder_and_reads_back_through_the_log
 }
 
 #[tokio::test]
+async fn each_handle_writes_its_own_agent_into_the_shared_log() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let turso = Arc::new(TursoRecorder::new(dir.path().join("harness")));
+    let path = turso.path().to_path_buf();
+    let chat = turso.for_agent("chat");
+    let echo = turso.for_agent("echo");
+
+    let first = chat.begin_run(meta("session-1")).await.unwrap();
+    let second = echo.begin_run(meta("session-2")).await.unwrap();
+    assert_ne!(first, second, "both handles write one log");
+    chat.end_run(first, RunOutcome::Cancelled).await.unwrap();
+    echo.end_run(second, RunOutcome::Cancelled).await.unwrap();
+    drop((chat, echo, turso));
+
+    let log = read_back(&path).await;
+    for (run, name, agent) in [(first, "session-1", "chat"), (second, "session-2", "echo")] {
+        let row = log.run(run).await.unwrap();
+        assert_eq!(row.meta.name, name);
+        assert_eq!(row.agent, agent, "run {run} names its own handle's agent");
+    }
+}
+
+#[tokio::test]
 async fn a_failed_open_is_retried_by_the_next_call() {
     let dir = tempfile::TempDir::new().unwrap();
     let state = dir.path().join("harness");
     fs::write(&state, b"a file where the state directory belongs").unwrap();
-    let recorder = TursoRecorder::new(&state);
+    let turso = Arc::new(TursoRecorder::new(&state));
+    let recorder = turso.for_agent(AGENT);
 
     let error = recorder.begin_run(meta("session-1")).await.unwrap_err();
     assert!(
@@ -147,8 +176,8 @@ async fn a_failed_open_is_retried_by_the_next_call() {
         .await
         .unwrap();
     recorder.end_run(run, RunOutcome::Cancelled).await.unwrap();
-    let path = recorder.path().to_path_buf();
-    drop(recorder);
+    let path = turso.path().to_path_buf();
+    drop((recorder, turso));
 
     let log = read_back(&path).await;
     assert_eq!(
@@ -163,35 +192,43 @@ async fn the_same_file_reopens_with_its_rows() {
     let dir = tempfile::TempDir::new().unwrap();
     let state = dir.path().join("harness");
 
-    let first = TursoRecorder::new(&state);
-    let earlier = first.begin_run(meta("session-1")).await.unwrap();
-    first
+    let first = Arc::new(TursoRecorder::new(&state));
+    let handle = first.for_agent(AGENT);
+    let earlier = handle.begin_run(meta("session-1")).await.unwrap();
+    handle
         .append(earlier, record(RecordKind::Event, 0, None, "first"))
         .await
         .unwrap();
-    first.end_run(earlier, RunOutcome::Cancelled).await.unwrap();
-    drop(first);
+    handle
+        .end_run(earlier, RunOutcome::Cancelled)
+        .await
+        .unwrap();
+    drop((handle, first));
 
-    let second = TursoRecorder::new(&state);
-    let later = second.begin_run(meta("session-2")).await.unwrap();
+    let second = Arc::new(TursoRecorder::new(&state));
+    let later = second
+        .for_agent(AGENT)
+        .begin_run(meta("session-2"))
+        .await
+        .unwrap();
     assert_ne!(later, earlier, "a reopened file issues a fresh run id");
     let path = second.path().to_path_buf();
     drop(second);
 
     let log = read_back(&path).await;
     let kept = log.run(earlier).await.unwrap();
-    assert_eq!(kept.meta.session_id, "session-1");
+    assert_eq!(kept.meta.name, "session-1");
     assert_eq!(kept.outcome, Some(RunOutcome::Cancelled));
     assert_eq!(log.records(earlier, ALL).await.unwrap().len(), 1);
     let open = log.run(later).await.unwrap();
-    assert_eq!(open.meta.session_id, "session-2");
+    assert_eq!(open.meta.name, "session-2");
     assert_eq!(open.outcome, None);
 }
 
 #[tokio::test]
 async fn a_write_the_log_refuses_reaches_the_caller_as_a_recorder_error() {
     let dir = tempfile::TempDir::new().unwrap();
-    let recorder = TursoRecorder::new(dir.path().join("harness"));
+    let recorder = Arc::new(TursoRecorder::new(dir.path().join("harness"))).for_agent(AGENT);
 
     let unknown = RunId::from_raw(41);
     let error = recorder
@@ -216,7 +253,7 @@ async fn a_write_the_log_refuses_reaches_the_caller_as_a_recorder_error() {
 }
 
 /// Begins a run for `owner`, appends three events, and ends it.
-async fn whole_run(recorder: &TursoRecorder, owner: &str) -> RunId {
+async fn whole_run(recorder: &impl RunRecorder, owner: &str) -> RunId {
     let run = recorder.begin_run(meta(owner)).await.unwrap();
     for task_seq in 0..3 {
         recorder
@@ -231,12 +268,13 @@ async fn whole_run(recorder: &TursoRecorder, owner: &str) -> RunId {
 #[tokio::test]
 async fn runs_that_overlap_keep_their_own_records() {
     let dir = tempfile::TempDir::new().unwrap();
-    let recorder = TursoRecorder::new(dir.path().join("harness"));
+    let turso = Arc::new(TursoRecorder::new(dir.path().join("harness")));
+    let recorder = turso.for_agent(AGENT);
 
     let (one, two) = tokio::join!(whole_run(&recorder, "one"), whole_run(&recorder, "two"));
     assert_ne!(one, two);
-    let path = recorder.path().to_path_buf();
-    drop(recorder);
+    let path = turso.path().to_path_buf();
+    drop((recorder, turso));
 
     let log = read_back(&path).await;
     for (run, owner) in [(one, "one"), (two, "two")] {

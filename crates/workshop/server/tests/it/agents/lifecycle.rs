@@ -226,8 +226,8 @@ async fn a_launched_run_is_recorded_in_the_run_log_under_the_state_directory() {
     })
     .await
     .expect("the run is recorded and closed within the deadline");
-    assert_eq!(row.meta.session_id, session);
-    assert_eq!(row.meta.agent, "echo");
+    assert_eq!(row.meta.name, session);
+    assert_eq!(row.agent, "echo", "Workshop writes the launched agent");
     let events = log.transcript(run).await.expect("the events read back");
     assert!(
         events

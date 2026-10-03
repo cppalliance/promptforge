@@ -12,10 +12,9 @@ use harness_runner::recorder::{
 };
 use serde_json::json;
 
-fn meta(session_id: &str) -> RunMeta {
+fn meta(name: &str) -> RunMeta {
     RunMeta {
-        session_id: session_id.to_owned(),
-        agent: "recorder-test".to_owned(),
+        name: name.to_owned(),
         prompt_hash: "sha256:00".to_owned(),
         seed: 7,
         flags: 0,

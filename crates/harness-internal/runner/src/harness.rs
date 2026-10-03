@@ -57,7 +57,7 @@ impl std::fmt::Debug for Harness {
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     /// The run's name: every event's `execution` and the run metadata's
-    /// `session_id`.
+    /// `name`.
     pub name: String,
     /// The prompt's Markdown source: the Harness's one prompt input.
     pub source: String,

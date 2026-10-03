@@ -35,6 +35,9 @@
 //!   call, and an open that fails leaves nothing behind, so the next call
 //!   tries again. A write the log refuses fails the run it belongs to; the
 //!   recorder never skips a record.
+//! - The `agent` column is the Host's, not the Harness's: the
+//!   `AgentRecorder` a launch gets from `TursoRecorder::for_agent` is the
+//!   only `RunRecorder` here, and it writes its agent at `begin_run`.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 
@@ -50,4 +53,4 @@ pub use error::LogError;
 pub use record::{
     Record, RecordFilter, RecordKind, RunId, RunMeta, RunOutcome, RunRow, Seq, StoredRecord,
 };
-pub use recorder::TursoRecorder;
+pub use recorder::{AgentRecorder, TursoRecorder};

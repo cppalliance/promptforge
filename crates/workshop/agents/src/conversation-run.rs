@@ -23,8 +23,8 @@ const INTERRUPTED: &str = "the agent run was interrupted";
 
 impl Conversation {
     /// The recorder the run writes through: every call goes on to
-    /// `inner`, the run's metadata names this conversation's agent, and
-    /// each event `inner` accepted reaches this conversation.
+    /// `inner`, and each event `inner` accepted reaches this
+    /// conversation.
     #[must_use]
     pub fn recorder(&self, inner: Arc<dyn RunRecorder>) -> Arc<dyn RunRecorder> {
         Arc::new(ConversationRecorder::new(self.clone(), inner))

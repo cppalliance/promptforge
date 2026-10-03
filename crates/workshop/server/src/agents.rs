@@ -7,7 +7,8 @@
 //!
 //! Each launch opens a conversation in `workshop-agents` and builds that
 //! conversation's one run its own [`Harness`]: over the conversation's
-//! recorder tee on the run log's [`TursoRecorder`], a per-run broker over
+//! recorder tee on a handle of the run log's [`TursoRecorder`] that names
+//! the launched agent, a per-run broker over
 //! the server's inference broker ([`broker`]), the tokio timer, a clone of
 //! the server's capability registry, and a clone of the server's services
 //! with the conversation's input broker. The Harness reaches the gateway
@@ -41,7 +42,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use harness::capability::{CapabilityRegistry, HostServices, UserInput};
-use harness::record::{RunId, RunRecorder};
+use harness::record::RunId;
 use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
 use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
@@ -116,8 +117,9 @@ struct Inner {
     backoff: ReconnectBackoff,
     /// The folder the launchable agents are discovered in.
     agents_path: PathBuf,
-    /// The run log every run is recorded in, behind each run's tee.
-    recorder: Arc<dyn RunRecorder>,
+    /// The run log every run is recorded in, through a handle naming its
+    /// agent behind each run's tee.
+    recorder: Arc<TursoRecorder>,
     /// The inference broker behind each run's broker.
     broker: WorkshopBroker,
     /// The capabilities every run resolves its declarations against.
@@ -231,7 +233,9 @@ impl AgentSessions {
     /// The Harness for `conversation`'s run.
     fn harness_for(&self, conversation: &Conversation) -> Harness {
         Harness::new(
-            conversation.recorder(Arc::clone(&self.inner.recorder)),
+            conversation.recorder(Arc::new(
+                self.inner.recorder.for_agent(conversation.agent()),
+            )),
             Arc::new(RunBroker::new(
                 self.inner.broker.clone(),
                 conversation.clone(),

@@ -20,13 +20,13 @@ impl RunLog {
             return Err(LogError::UnknownRun(run));
         };
         let meta = RunMeta {
-            session_id: row.get(0)?,
-            agent: row.get(1)?,
+            name: row.get(0)?,
             prompt_hash: row.get(2)?,
             seed: unsigned(row.get(3)?),
             flags: to_u32(row.get(4)?, "flags")?,
             started_at: row.get(5)?,
         };
+        let agent = row.get(1)?;
         let ended_at: Option<i64> = row.get(6)?;
         let outcome = match row.get::<Option<String>>(7)? {
             None => None,
@@ -40,6 +40,7 @@ impl RunLog {
         Ok(RunRow {
             id: run,
             meta,
+            agent,
             ended_at,
             outcome,
         })

@@ -18,7 +18,7 @@
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runs (
     run_id        INTEGER PRIMARY KEY,
-    session_id    TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
     agent         TEXT    NOT NULL,
     prompt_hash   TEXT    NOT NULL,
     seed          INTEGER NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS records (
 
 /// Opens a run: every column of `runs` that `begin_run` knows.
 pub(crate) const INSERT_RUN: &str = "INSERT INTO runs \
-    (session_id, agent, prompt_hash, seed, flags, started_at) \
+    (name, agent, prompt_hash, seed, flags, started_at) \
     VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
 /// Whether a run exists and whether it has ended: one row with `ended_at`.
@@ -69,7 +69,7 @@ pub(crate) const UPDATE_RUN_ENDED: &str = "UPDATE runs SET \
 
 /// One run row, columns in [`crate::read`]'s order.
 pub(crate) const SELECT_RUN: &str = "SELECT \
-    session_id, agent, prompt_hash, seed, flags, started_at, \
+    name, agent, prompt_hash, seed, flags, started_at, \
     ended_at, outcome, final_text, error_kind, error_message \
     FROM runs WHERE run_id = ?1";
 

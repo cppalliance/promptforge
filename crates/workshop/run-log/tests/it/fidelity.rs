@@ -24,8 +24,7 @@ const ALL: RecordFilter = RecordFilter {
 /// A run's opening row, as the Harness would write it.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "chat".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
         seed: 3,
         flags: 0,
@@ -45,7 +44,7 @@ fn provenance() -> Result<Provenance, ParseIdError> {
 /// returns the identical value and the identical text.
 async fn round_trips(payload: Value) -> Result<(), Box<dyn std::error::Error>> {
     let mut log = RunLog::in_memory().await?;
-    let run = log.begin_run(meta()).await?;
+    let run = log.begin_run(meta(), "chat").await?;
     log.append(
         run,
         Record {

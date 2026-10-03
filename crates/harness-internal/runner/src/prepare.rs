@@ -76,7 +76,7 @@ pub struct Services {
     pub broker: Arc<dyn InferenceBroker>,
     /// Performs the run's `Timer` effects.
     pub timer: Arc<dyn Timer>,
-    /// The run's name: the run metadata's `session_id` and every event's
+    /// The run's name: the run metadata's `name` and every event's
     /// `execution`.
     pub name: String,
     /// The Host's current model, when one is selected; prepare binds
@@ -241,8 +241,7 @@ pub async fn prepare(
     let started_at = now_timestamp();
     let run_id = recorder
         .begin_run(RunMeta {
-            session_id: name.clone(),
-            agent: String::new(),
+            name: name.clone(),
             prompt_hash: prompt_hash(source),
             seed,
             flags: 0,

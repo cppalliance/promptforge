@@ -113,10 +113,8 @@ impl fmt::Display for RunId {
 /// What the Harness knows about a run when it begins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunMeta {
-    /// The session that launched the run.
-    pub session_id: String,
-    /// The agent the session runs.
-    pub agent: String,
+    /// The run's name, as the Host requested it.
+    pub name: String,
     /// A content hash of the prompt file, so a transcript can be matched
     /// to the exact text that produced it.
     pub prompt_hash: String,

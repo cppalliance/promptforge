@@ -2,10 +2,9 @@
 //! to the inner recorder, and what the inner recorder accepted also
 //! reaches the conversation.
 //!
-//! The tee names the conversation's agent in the run's metadata, notes
-//! the run the inner recorder begins, and hands each event record the
-//! inner recorder accepted to the conversation, so the record, the live
-//! broadcast, and the transcript agree event for event. A refused write
+//! The tee notes the run the inner recorder begins and hands each event
+//! record the inner recorder accepted to the conversation, so the record,
+//! the live broadcast, and the transcript agree event for event. A refused write
 //! is returned as the inner recorder's own, and its event reaches no one.
 
 use std::sync::Arc;
@@ -36,10 +35,6 @@ impl ConversationRecorder {
 impl RunRecorder for ConversationRecorder {
     fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
         Box::pin(async move {
-            let meta = RunMeta {
-                agent: self.conversation.agent().to_owned(),
-                ..meta
-            };
             let run = self.inner.begin_run(meta).await?;
             self.conversation.note_run(run);
             Ok(run)

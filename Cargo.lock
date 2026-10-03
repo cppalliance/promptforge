@@ -2653,24 +2653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-sessions"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "harness-capabilities",
- "harness-runner",
- "promptforge",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "workspace-hack",
-]
-
-[[package]]
 name = "harness-web"
 version = "0.3.0"
 dependencies = [

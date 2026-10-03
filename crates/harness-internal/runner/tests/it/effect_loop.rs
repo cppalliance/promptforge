@@ -35,8 +35,7 @@ mod vfs;
 /// A run's opening metadata; the loop ends the run.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "runner-test".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:fixture".to_owned(),
         seed: 7,
         flags: 0,
