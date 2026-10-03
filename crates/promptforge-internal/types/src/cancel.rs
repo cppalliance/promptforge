@@ -8,11 +8,11 @@
 //! cancelled without touching its siblings or its owner.
 //!
 //! This is the handle the Engine's `RunContext` holds and the one
-//! `RunServices` hands a capability; the tokio-aware token a Host selects
-//! over is `harness::cancel::CancelHandle`, defined in `harness-runner`,
-//! and it bridges to this flag. A Harness that steps the Engine and must
-//! wait on the flag itself awaits [`CancelHandle::cancelled`], a std-only
-//! future the cancel itself wakes, in place of a timer that polls the flag.
+//! `RunServices` hands a capability; a Host stops a run through
+//! `harness::RunControl::cancel`, which sets this flag. A Harness that
+//! steps the Engine and must wait on the flag itself awaits
+//! [`CancelHandle::cancelled`], a std-only future the cancel itself wakes,
+//! in place of a timer that polls the flag.
 
 use std::fmt;
 use std::future::Future;

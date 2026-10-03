@@ -136,6 +136,7 @@ Owns:
 - item: promptforge::effect::EffectAnswer
 - item: promptforge::effect::EffectRecord
 - item: promptforge::effect::ToolCaller
+- item: promptforge::effect::Round
 
 </page-effect>
 
@@ -204,6 +205,7 @@ Owns:
 - item: promptforge::ids::TaskId
 - item: promptforge::ids::AbandonReason
 - item: promptforge::ids::TaskOrigin
+- item: promptforge::ids::RoundId
 
 </page-ids>
 
@@ -256,7 +258,6 @@ Owns:
 - item: promptforge::model::CompletionResult
 - item: promptforge::model::ModelCatalogError
 - item: promptforge::model::RawExchange
-- item: promptforge::model::StreamDelta
 - item: promptforge::model::TemperatureError
 - item: promptforge::model::ThinkingMode
 

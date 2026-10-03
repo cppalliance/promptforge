@@ -15,9 +15,10 @@ use harness_runner::files::{InputFileError, read_output};
 use harness_runner::prepare::{PrepareError, Prepared, prepare};
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
 use promptforge::cancel::CancelHandle;
+use promptforge::event::Event;
 use promptforge::vfs::{MemoryBackend, Mode, ModePolicy, Origin, VfsError, VfsRef};
 
-use super::{PLAIN, assert_events_are_the_recorded_ones, completed, recorder, services};
+use super::{PLAIN, completed, recorded_parse_events, recorder, services};
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its
 /// output, whose one section writes the output from the input.
@@ -42,15 +43,10 @@ async fn prepare_over(
 }
 
 /// Checks that `error` is an input refusal whose run ended under the
-/// `Input` kind with the cause chain as its message, and that it carries
-/// the parse events the recorder holds. Returns the cause.
+/// `Input` kind with the cause chain as its message, and that the
+/// recorder holds only the run's parse events. Returns the cause.
 fn refused(recorder: &MemoryRecorder, error: PrepareError) -> InputFileError {
-    let PrepareError::Input {
-        run_id,
-        events,
-        source,
-    } = error
-    else {
+    let PrepareError::Input { run_id, source, .. } = error else {
         panic!("the failure is an input refusal: {error}");
     };
     assert_eq!(
@@ -61,7 +57,11 @@ fn refused(recorder: &MemoryRecorder, error: PrepareError) -> InputFileError {
         }),
         "the recorder holds the refusal under the Input kind"
     );
-    assert_events_are_the_recorded_ones(recorder, run_id, &events);
+    let events = recorded_parse_events(recorder, run_id);
+    assert!(
+        matches!(events.last(), Some(Event::ParseSucceeded { .. })),
+        "the prompt parsed before its input was refused: {events:?}"
+    );
     source
 }
 

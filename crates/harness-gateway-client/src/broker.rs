@@ -32,6 +32,11 @@ use crate::wire::delta::StreamDelta;
 /// Every round runs under the Engine's default run limits: the per-receive
 /// timeout and the response byte cap of [`RunLimits::new`].
 ///
+/// The broker's futures, [`models`](InferenceBroker::models) included, need
+/// a tokio runtime with its reactor and timer, so a Host that uses this
+/// broker awaits `Harness::run` inside one. The Harness itself needs no
+/// runtime.
+///
 /// # Examples
 ///
 /// ```

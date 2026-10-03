@@ -21,8 +21,8 @@
 //! cannot be put in place) is a run that ended before
 //! it began: the recorder ends it as failed with the refusal as the
 //! message, so the record answers "why did this run fail" for a run the
-//! loop never saw. The error carries the events recorded so far, so the
-//! caller can show them too.
+//! loop never saw. `Harness::run_to_end` reports that ended run, and its
+//! caller reads the events recorded so far from the recorder.
 //!
 //! The input staging is store work and runs inline, like every other VFS
 //! operation of the run.
@@ -99,24 +99,19 @@ impl fmt::Debug for Services {
     }
 }
 
-/// A run ready for the effect loop, with the inputs the Harness drew for it.
+/// A run ready for the effect loop, whose seed, start, and parse events are
+/// already at the recorder.
 #[derive(Debug)]
 pub struct Prepared {
     /// The run, built over the prepared context.
     pub run: Run,
     /// The run's id at the recorder, begun and still open, for
-    /// [`drive_run`](crate::effect_loop::drive_run).
+    /// `Harness::run_to_end` to drive; the run's events, its parse events
+    /// first, are read from the recorder under this id.
     pub run_id: RunId,
-    /// The seed the run was given, as handed to the recorder.
-    pub seed: u64,
-    /// The start the run was given, as handed to the recorder.
-    pub started_at: Timestamp,
     /// The performers for the run: the caller's inference broker and timer
     /// beside the runner's own tool performer over the activated tools.
     pub performers: Performers,
-    /// What parsing reported, already recorded ahead of the run's own
-    /// events.
-    pub parse_events: Vec<Event>,
     /// The prompt's declared `output:` path, which the caller reads with
     /// [`read_output`](crate::files::read_output) once the run completes.
     pub output_path: Option<String>,
@@ -132,8 +127,6 @@ pub enum PrepareError {
     Parse {
         /// The run, ended with this failure.
         run_id: RunId,
-        /// What parsing reported, in the order it was recorded.
-        events: Vec<Event>,
         /// The parse failure.
         #[source]
         source: ParseError,
@@ -147,8 +140,6 @@ pub enum PrepareError {
     Refused {
         /// The run, ended with this refusal.
         run_id: RunId,
-        /// What parsing reported, in the order it was recorded.
-        events: Vec<Event>,
         /// The refusal, of kind `RequirementsUnmet`.
         #[source]
         error: RunError,
@@ -161,8 +152,6 @@ pub enum PrepareError {
     Input {
         /// The run, ended with this refusal.
         run_id: RunId,
-        /// What parsing reported, in the order it was recorded.
-        events: Vec<Event>,
         /// Why the input could not be put in place.
         #[source]
         source: InputFileError,
@@ -186,9 +175,9 @@ impl PrepareError {
     /// run the recorder issued and its refusal.
     pub(crate) fn ended(self) -> Result<(RunId, RunOutcome), (Option<RunId>, RecorderError)> {
         match self {
-            PrepareError::Parse { run_id, source, .. } => Ok((run_id, failed("Parse", &source))),
-            PrepareError::Refused { run_id, error, .. } => Ok((run_id, failed_outcome(&error))),
-            PrepareError::Input { run_id, source, .. } => Ok((run_id, failed("Input", &source))),
+            PrepareError::Parse { run_id, source } => Ok((run_id, failed("Parse", &source))),
+            PrepareError::Refused { run_id, error } => Ok((run_id, failed_outcome(&error))),
+            PrepareError::Input { run_id, source } => Ok((run_id, failed("Input", &source))),
             PrepareError::Recorder { run, source } => Err((run, source)),
         }
     }
@@ -205,17 +194,10 @@ impl PrepareError {
 /// Returns [`PrepareError::Parse`] when the source does not parse,
 /// [`PrepareError::Input`] when its declared input file cannot be put in
 /// place, and [`PrepareError::Refused`] when the environment cannot
-/// satisfy it (in these three cases the run is ended as failed and the
-/// error carries the events recorded so far), and
-/// [`PrepareError::Recorder`] when the recorder refuses a write.
-#[expect(
-    clippy::result_large_err,
-    reason = "the error is returned once per launch and carries the events recorded before the failure"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "preparation is one linear ceremony whose every stage ends the same begun run on failure"
-)]
+/// satisfy it (in these three cases the run is ended as failed, and
+/// `Harness::run_to_end` reports it while the events recorded so far stay
+/// at the recorder), and [`PrepareError::Recorder`] when the recorder
+/// refuses a write.
 pub async fn prepare(
     source: &str,
     args: &str,
@@ -268,11 +250,7 @@ pub async fn prepare(
                 .end_run(run_id, failed("Parse", &source))
                 .await
                 .map_err(recorded)?;
-            return Err(PrepareError::Parse {
-                run_id,
-                events: parse_events,
-                source,
-            });
+            return Err(PrepareError::Parse { run_id, source });
         }
     };
 
@@ -285,11 +263,7 @@ pub async fn prepare(
             .end_run(run_id, failed("Input", &source))
             .await
             .map_err(recorded)?;
-        return Err(PrepareError::Input {
-            run_id,
-            events: parse_events,
-            source,
-        });
+        return Err(PrepareError::Input { run_id, source });
     }
     let output_path = prompt
         .frontmatter()
@@ -328,11 +302,7 @@ pub async fn prepare(
             .end_run(run_id, failed_outcome(&error))
             .await
             .map_err(recorded)?;
-        return Err(PrepareError::Refused {
-            run_id,
-            events: parse_events,
-            error,
-        });
+        return Err(PrepareError::Refused { run_id, error });
     }
 
     let run = Run::new(Arc::new(prompt), args, ctx);
@@ -344,10 +314,7 @@ pub async fn prepare(
     Ok(Prepared {
         run,
         run_id,
-        seed,
-        started_at,
         performers,
-        parse_events,
         output_path,
     })
 }
