@@ -23,7 +23,7 @@ use super::bindings::{ModelBindings, ToolBindings};
 ///
 /// The caller builds a context with `new` and the builder methods. The
 /// prepare step of an [`Environment`](super::Environment) then adds the
-/// tool catalog, the capability preludes, and the model and tool
+/// tool catalog, the Plugin preludes, and the model and tool
 /// bindings. The Engine owns the context for the run. Each context
 /// belongs to exactly one run.
 ///
@@ -60,7 +60,7 @@ pub struct RunContext {
     pub(super) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
     /// Always 0 today - the sub-run adapter that increments it lands with
-    /// the deferred prompt-pack.
+    /// the deferred prompts-as-tools Plugin.
     depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
@@ -72,7 +72,7 @@ pub struct RunContext {
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
     /// flag reaches them all; the Harness hands the same flag to the
-    /// capabilities it activates.
+    /// Plugins it activates.
     pub(super) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     /// The Host-state snapshot the `ui()` global serves, taken by the Host
@@ -94,7 +94,7 @@ pub struct RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function: which concrete model each declared role is bound to.
     pub(super) model_bindings: ModelBindings,
-    /// The run's assembled tool catalog: the activated capabilities'
+    /// The run's assembled tool catalog: the activated Plugins'
     /// contributed tools in declaration order, with tool
     /// prefix-containment enforced at assembly. Written by
     /// [`Environment::prepare`](super::Environment::prepare); the
@@ -105,7 +105,7 @@ pub struct RunContext {
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
     pub(super) tool_bindings: ToolBindings,
-    /// The run's capability preludes, in install order. Written by
+    /// The run's Plugin preludes, in install order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before the
     /// shared library replays. Empty on a caller-built context that was
@@ -167,7 +167,7 @@ impl RunContext {
     /// between chain steps and from the Lua instruction hook. A caller that
     /// cancels through an awaitable token must bridge the token to this
     /// flag by setting the flag when the token fires. The caller hands the
-    /// same flag to the capabilities it activates, so one cancel reaches
+    /// same flag to the Plugins it activates, so one cancel reaches
     /// them all.
     #[must_use]
     pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
@@ -243,10 +243,10 @@ impl RunContext {
     /// fresh memory store at `/`.
     ///
     /// [`Environment::prepare`](super::Environment::prepare) keeps a handle
-    /// set here as given. So a caller that activates capabilities builds
+    /// set here as given. So a caller that activates Plugins builds
     /// the run's handle first, then passes it both to the services that
-    /// capability activation receives and to this builder. The
-    /// capabilities and the run then share one filesystem.
+    /// Plugin activation receives and to this builder. The
+    /// Plugins and the run then share one filesystem.
     /// The caller seeds files before the run and extracts output after it
     /// through the prepared handle, returned by
     /// [`vfs_handle`](RunContext::vfs_handle).
@@ -275,7 +275,7 @@ impl RunContext {
 
     /// Returns the run's cancel flag.
     ///
-    /// The caller hands this flag to the capabilities it activates, so one
+    /// The caller hands this flag to the Plugins it activates, so one
     /// cancel reaches them and the run. Replace the flag with
     /// [`cancel`](RunContext::cancel).
     #[must_use]
@@ -298,7 +298,7 @@ impl RunContext {
     /// Returns the run's assembled tool catalog.
     ///
     /// [`Environment::prepare`](super::Environment::prepare) writes the
-    /// catalog from the activated capabilities' contributions, in
+    /// catalog from the activated Plugins' contributions, in
     /// declaration order. On a caller-built context, the catalog is empty
     /// until prepare runs.
     #[must_use]

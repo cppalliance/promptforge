@@ -12,7 +12,7 @@
 //! catalog, descriptor). [`tools`] is the runtime-agnostic tool vocabulary:
 //! the implementation-free [`ToolDescriptor`](tools::ToolDescriptor), the
 //! caller-provided [`ToolCatalog`](tools::ToolCatalog), trusted output, and
-//! the model-safe tool error, and [`plugins`] is the capability
+//! the model-safe tool error, and [`plugins`] is the Plugin
 //! identity vocabulary, the [`PluginId`](plugins::PluginId) a
 //! prompt declares and a tool id sits under. The implementation traits
 //! behind them (`Tool`, `Plugin`) are the Harness's, in

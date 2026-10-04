@@ -159,7 +159,7 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
 
 // The helper takes no resolver: live tool binding resolves elsewhere, so a
 // resolver argument would imply a resolution path the helper does not
-// exercise. Exact slots fill by identity against the fixture capability's
+// exercise. Exact slots fill by identity against the fixture Plugin's
 // contributed tools at prepare.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();
@@ -317,7 +317,7 @@ pub(super) async fn run(
         // catalog the run binds its frontmatter slots against, and the
         // implementations go to the Harness's tool table the driver's tool
         // performer resolves a `ToolCall` effect in - the two halves a
-        // Harness assembles from its activated capabilities.
+        // Harness assembles from its activated Plugins.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
         harness = harness.tools(table);

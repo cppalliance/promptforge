@@ -1,16 +1,16 @@
 //! The frontmatter contract keys: `plugins`, `tools`, `args`, `models`.
 //!
-//! The YAML is the whole contract: capabilities install, tools bind, models
-//! declare, args type. Parsing validates the static shape - capability id
-//! arity, each capability declared once, the alias grammar on slot keys,
+//! The YAML is the whole contract: Plugins install, tools bind, models
+//! declare, args type. Parsing validates the static shape - Plugin id
+//! arity, each Plugin declared once, the alias grammar on slot keys,
 //! the reserved names no tool alias or model role label may take, no tool
-//! slot backed by an optional capability, the closed model-keyword
+//! slot backed by an optional Plugin, the closed model-keyword
 //! vocabulary, arg name and type sanity - and exposes the FULL declaration
 //! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
 //! against the Harness's environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
-//! capability and tool-slot shapes plus the map deserializer all four keys
+//! Plugin and tool-slot shapes plus the map deserializer all four keys
 //! share.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -143,8 +143,8 @@ where
     }
 }
 
-/// Parses a capability id: a [`GlobalName`] of exactly two segments
-/// (`namespace/pack`).
+/// Parses a Plugin id: a [`GlobalName`] of exactly two segments
+/// (`namespace/plugin`).
 ///
 /// The grammar accepts two or three segments, so the arity check counts
 /// separators: exactly one `/` is two segments. A `@` version pin never
@@ -160,10 +160,10 @@ fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
     Ok(name)
 }
 
-/// One capability declared in a prompt's `plugins` frontmatter list.
+/// One Plugin declared in a prompt's `plugins` frontmatter list.
 ///
 /// A declaration takes one of two forms. A plain id string declares a
-/// required capability. A map names the id under `ref` and may also set
+/// required Plugin. A map names the id under `ref` and may also set
 /// `optional` (default `false`) and `config`.
 ///
 /// `config` holds only data written in the prompt. User-specific
@@ -172,9 +172,9 @@ fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PluginDecl {
-    /// The capability's global id (`namespace/pack`, exactly 2 segments).
+    /// The Plugin's global id (`namespace/plugin`, exactly 2 segments).
     id: GlobalName,
-    /// Whether an absent capability skips with a log line instead of
+    /// Whether an absent Plugin skips with a log line instead of
     /// failing preparation.
     optional: bool,
     /// Prompt-side configuration data, when declared.
@@ -182,15 +182,15 @@ pub struct PluginDecl {
 }
 
 impl PluginDecl {
-    /// Returns the capability's global id (`namespace/pack`).
+    /// Returns the Plugin's global id (`namespace/plugin`).
     #[must_use]
     pub fn id(&self) -> &GlobalName {
         &self.id
     }
 
-    /// Returns whether the capability is optional.
+    /// Returns whether the Plugin is optional.
     ///
-    /// When an optional capability is absent, preparation logs a line, skips
+    /// When an optional Plugin is absent, preparation logs a line, skips
     /// it, and continues.
     #[must_use]
     pub fn is_optional(&self) -> bool {
@@ -213,7 +213,7 @@ impl<'de> Deserialize<'de> for PluginDecl {
     }
 }
 
-/// Deserializes a capability declaration from either frontmatter form: a
+/// Deserializes a Plugin declaration from either frontmatter form: a
 /// bare id string or a `ref` map. A streaming visitor (not an untagged
 /// buffer) so rejections keep their source position.
 struct PluginDeclVisitor;
@@ -401,7 +401,7 @@ pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> 
     }
 }
 
-/// Refuses a `plugins:` list that names one capability id twice,
+/// Refuses a `plugins:` list that names one Plugin id twice,
 /// whatever each entry's form, `optional` flag, and `config`. Returns the
 /// refusal's message, naming the first id declared again.
 pub(crate) fn check_distinct_plugins(plugins: &[PluginDecl]) -> Result<(), String> {
@@ -415,8 +415,8 @@ pub(crate) fn check_distinct_plugins(plugins: &[PluginDecl]) -> Result<(), Strin
     }
 }
 
-/// Refuses a tool slot whose capability is declared optional: a slot
-/// requires its capability, so an absent optional one would fail the run
+/// Refuses a tool slot whose Plugin is declared optional: a slot
+/// requires its Plugin, so an absent optional one would fail the run
 /// anyway. Returns the refusal's message, naming the first offending alias
 /// in sorted order.
 pub(crate) fn check_slot_plugins(tools: &ToolSlots, plugins: &[PluginDecl]) -> Result<(), String> {
@@ -437,7 +437,7 @@ pub(crate) fn check_slot_plugins(tools: &ToolSlots, plugins: &[PluginDecl]) -> R
 }
 
 /// Whether `decl` declares `plugin`. Both ids have exactly two
-/// segments, so equal namespace and pack segments are equal ids.
+/// segments, so equal namespace and Plugin segments are equal ids.
 fn declares(decl: &PluginDecl, plugin: &PluginId) -> bool {
     decl.id().namespace() == plugin.namespace() && decl.id().plugin() == plugin.name()
 }

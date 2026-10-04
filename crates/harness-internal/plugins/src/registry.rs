@@ -1,11 +1,11 @@
-//! The explicit Host-built capability registry: [`PluginRegistry`].
+//! The explicit Host-built Plugin registry: [`PluginRegistry`].
 //!
-//! Linking a capability crate alone registers nothing: the Host builds one
-//! registry, registers each installed capability by hand, and hands it to
+//! Linking a Plugin crate alone registers nothing: the Host builds one
+//! registry, registers each installed Plugin by hand, and hands it to
 //! the Harness, which passes it to [`activate`](crate::activate) for each
 //! run. v1 is
-//! unversioned - one capability per id - so a duplicate registration is
-//! rejected rather than shadowing the installed capability, and an id
+//! unversioned - one Plugin per id - so a duplicate registration is
+//! rejected rather than shadowing the installed Plugin, and an id
 //! differing from a registered id only by `-`/`_`/`.` punctuation is
 //! rejected as a normalization collision: punctuation twins would be
 //! indistinguishable to a model reading a catalog.
@@ -26,23 +26,23 @@ use crate::plugin::Plugin;
 #[path = "registry-tests.rs"]
 mod tests;
 
-/// A registry of the capabilities a Host has installed.
+/// A registry of the Plugins a Host has installed.
 ///
-/// The Host registers each installed capability by hand and hands the
+/// The Host registers each installed Plugin by hand and hands the
 /// registry to the Harness, which passes it to
 /// [`activate`](crate::activate) for each run.
 ///
-/// The registry holds one capability per id. Registering a second
-/// capability under an id that is already registered fails, and the first
+/// The registry holds one Plugin per id. Registering a second
+/// Plugin under an id that is already registered fails, and the first
 /// registration stays in place. Registering an id that differs from a
 /// registered id only by `-`, `_`, or `.` punctuation also fails, as a
 /// normalization collision.
 ///
-/// A clone shares the capabilities registered so far. After that, each
+/// A clone shares the Plugins registered so far. After that, each
 /// copy takes its own registrations.
 #[derive(Clone)]
 pub struct PluginRegistry {
-    /// The installed capabilities, keyed by their stable ids.
+    /// The installed Plugins, keyed by their stable ids.
     plugins: BTreeMap<PluginId, Arc<dyn Plugin>>,
 }
 
@@ -55,11 +55,11 @@ impl PluginRegistry {
         }
     }
 
-    /// Registers an installed capability.
+    /// Registers an installed Plugin.
     ///
     /// # Errors
     /// Returns [`RegistryError`] with [`RegistryErrorKind::DuplicateId`]
-    /// when a capability with the same id is already registered. The
+    /// when a Plugin with the same id is already registered. The
     /// registry keeps the first registration. Returns [`RegistryError`]
     /// with [`RegistryErrorKind::NormalizationCollision`] when the id
     /// differs from a registered id only by `-`, `_`, or `.`
@@ -89,7 +89,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    /// Returns the capability registered under `id`, when present.
+    /// Returns the Plugin registered under `id`, when present.
     #[must_use]
     pub fn get(&self, id: &PluginId) -> Option<&Arc<dyn Plugin>> {
         self.plugins.get(id)
@@ -116,7 +116,7 @@ impl fmt::Debug for PluginRegistry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RegistryErrorKind {
-    /// A capability with the same id was already registered.
+    /// A Plugin with the same id was already registered.
     DuplicateId,
     /// The id differs from a registered id only by `-`, `_`, or `.`
     /// punctuation. Such ids are indistinguishable to a model reading a
@@ -124,7 +124,7 @@ pub enum RegistryErrorKind {
     NormalizationCollision,
 }
 
-/// The reason a capability registration was rejected.
+/// The reason a Plugin registration was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RegistryError {
@@ -185,7 +185,7 @@ impl fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-/// Normalizes a capability id for the punctuation-twin check: each
+/// Normalizes a Plugin id for the punctuation-twin check: each
 /// separator byte (`-`, `_`, `.`) maps to one canonical byte, so two ids
 /// differing only in separator choice compare equal. The global-name
 /// charset is lowercase-only, so case needs no handling.

@@ -3,8 +3,8 @@
 //! to its run, and the producer seam that completes a wait with the
 //! operator's text.
 //!
-//! An agent prompt asks its operator for input through a capability that
-//! holds the run's broker: the `promptforge/user-input` capability's
+//! An agent prompt asks its operator for input through a Plugin that
+//! holds the run's broker: the `promptforge/user-input` Plugin's
 //! `input.ask()` calls its ask tool, which waits on the broker. The
 //! broker performs each wait by registering it, announcing it with a
 //! durable [`WaitFrame::Required`], and suspending on the wait's receiver

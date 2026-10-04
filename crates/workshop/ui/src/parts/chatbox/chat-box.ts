@@ -14,8 +14,8 @@
 // state is mirrored onto the DOM as a data attribute beside the classes
 // the skin already relies on. The `@` typeahead's items come from the
 // injected mentionSource (a three-item stub by default) through the
-// suggestion plugin, which owns the debounce, the abort, and the
-// stale-result guard; the box only forwards the plugin's signal.
+// ProseMirror suggestion plugin, which owns the debounce, the abort, and
+// the stale-result guard; the box only forwards the plugin's signal.
 
 import "./chat-box.css";
 
@@ -50,9 +50,9 @@ import type {
 const DEFAULT_MIN_HEIGHT_PX = 36;
 const DEFAULT_MAX_HEIGHT_PX = 200;
 
-// The suggestion plugin waits this long after the last keystroke before
-// asking the source, and aborts the in-flight query when a newer one
-// arrives; the box adds no timing logic of its own.
+// The ProseMirror suggestion plugin waits this long after the last
+// keystroke before asking the source, and aborts the in-flight query when
+// a newer one arrives; the box adds no timing logic of its own.
 const MENTION_DEBOUNCE_MS = 60;
 
 // STUB for the future workspace file index: three canned entries keep
@@ -79,10 +79,10 @@ const NO_COMMANDS: ChipSource = () => Promise.resolve([]);
 
 /**
  * Whether a typeahead session owns the keyboard: editorProps handlers
- * run before the suggestion state plugin's, so the box's Enter and Tab
- * handling must yield while a trigger's session is active or the send
- * would fire instead of the selection. One key today (`@`); the `/`
- * trigger joins this list when it is wired.
+ * run before the ProseMirror suggestion state plugin's, so the box's
+ * Enter and Tab handling must yield while a trigger's session is active
+ * or the send would fire instead of the selection. One key today (`@`);
+ * the `/` trigger joins this list when it is wired.
  */
 function suggestionActive(state: EditorState): boolean {
   return MentionSuggestionPluginKey.getState(state)?.active === true;
@@ -148,9 +148,9 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   private readonly variant: NonNullable<ChatBoxProps["variant"]>;
   private readonly dynamic: ResolvedDynamicProps;
   private attachments: ChipRef[] = [];
-  // Held for the `/` trigger, which is not wired to a plugin in this
-  // plan: a typed `/` stays text. The seam exists so the owning part's
-  // source is in place when the command chip arrives.
+  // Held for the `/` trigger, which is not wired to a ProseMirror plugin
+  // in this plan: a typed `/` stays text. The seam exists so the owning
+  // part's source is in place when the command chip arrives.
   private readonly commandSource: ChipSource;
 
   // Two locks, one property: the pending-wait gate (the editable prop)
@@ -226,7 +226,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
         // Plain-text schema: everything in StarterKit is off except the
         // document scaffolding (document, paragraph, text, gapcursor),
         // hardBreak, whose Shift-Enter binding supplies newlines, and
-        // undoRedo, whose history plugin backs the text-control
+        // undoRedo, whose ProseMirror history plugin backs the text-control
         // adapter's undo/redo (its Mod-z keymap never fires in the app:
         // the keybinding dispatcher claims the chord in the capture
         // phase).
@@ -257,7 +257,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
         }),
         // Inline mention pills (@-referenced chips) with this box's
         // source and the typeahead popup wired into the extension's
-        // suggestion seam. The plugin owns the async handling: it
+        // suggestion seam. The ProseMirror plugin owns the async handling: it
         // debounces, hands the source an AbortSignal it fires on a
         // newer keystroke, discards a stale resolution, and reports
         // `loading` to the popup. minQueryLength 0 means a bare `@`
@@ -281,8 +281,8 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           "aria-multiline": "true",
         },
         handleKeyDown: (view, event) => {
-          // An open typeahead owns Enter and Tab - both insert the
-          // highlighted item - so the box yields them to the plugin.
+          // An open typeahead owns Enter and Tab - both insert the highlighted
+          // item - so the box yields them to the ProseMirror plugin.
           if ((event.key === "Enter" || event.key === "Tab") && suggestionActive(view.state)) {
             return false;
           }
@@ -327,10 +327,10 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     // The box is its own text-control adapter: the Edit menu's
     // undo/redo/select-all route here whenever the box holds focus. The
     // adapter registers only when the owning part supplied a registrar
-    // and the history plugin is present - without it the commands would
-    // no-op, and the native execCommand fallback is the better path.
-    // canUndo/canRedo read the history depth so an empty stack falls back
-    // instead of swallowing the command.
+    // and the ProseMirror history plugin is present - without it the
+    // commands would no-op, and the native execCommand fallback is the
+    // better path. canUndo/canRedo read the history depth so an empty
+    // stack falls back instead of swallowing the command.
     const hasHistory = this.editor.extensionManager.extensions.some(
       (extension) => extension.name === "undoRedo",
     );

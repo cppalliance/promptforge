@@ -13,7 +13,7 @@
 // written to and read from a data attribute so the pill survives the
 // clipboard (copy renders HTML, paste parses it) and JSON persistence alike.
 // The suggestion here is configured only as far as the schema cares
-// (trigger, plugin key, no spaces); the item source, the popup
+// (trigger, ProseMirror plugin key, no spaces); the item source, the popup
 // renderer, and the fetch timing are the chat box's to configure per
 // instance (chat-box.ts), so this module stays free of the popup.
 
@@ -123,11 +123,11 @@ interface MentionSuggestionState {
 }
 
 /**
- * The plugin key of the mention suggestion session. The prompt input's
- * Enter handling reads it to yield while the typeahead is open:
- * editorProps handlers run before state plugins, so without the state
- * check a submitting Enter would fire instead of the typeahead's
- * selection.
+ * The ProseMirror plugin key of the mention suggestion session. The
+ * prompt input's Enter handling reads it to yield while the typeahead is
+ * open: editorProps handlers run before ProseMirror state plugins, so
+ * without the state check a submitting Enter would fire instead of the
+ * typeahead's selection.
  */
 export const MentionSuggestionPluginKey = new PluginKey<MentionSuggestionState>(
   "mentionNodeSuggestion",

@@ -352,9 +352,9 @@ jobs:
 
       # The gateway holds vendor credentials, so it links exactly one rustls
       # crypto backend, aws-lc-rs. This fails when `ring` re-enters its
-      # normal-edge closure (through a reqwest bump, a plugin default, or a
-      # hakari regeneration) and when `cargo tree` itself cannot run; only a
-      # successful, ring-free result passes.
+      # normal-edge closure (through a reqwest bump, a Tauri plugin default,
+      # or a hakari regeneration) and when `cargo tree` itself cannot run;
+      # only a successful, ring-free result passes.
       - name: One rustls crypto backend in the gateway
         shell: bash
         run: |

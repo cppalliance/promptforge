@@ -4,7 +4,7 @@
 //! Every section driver - the walk's section entry and the
 //! fanout arm - runs the identical setup sequence: inject the Engine values,
 //! install the persistent Engine globals, install the control globals, install
-//! the capability preludes, replay the shared library as the section's first
+//! the Plugin preludes, replay the shared library as the section's first
 //! chunk, then install the captured alias bindings (so a declared alias wins
 //! over a same-named shared global).
 //! Only the deltas live at the call site: the driver builds its own `sys`
@@ -84,7 +84,7 @@ pub(crate) struct SectionVmSetup<'a> {
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
     /// so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
-    /// The run's capability preludes, installed in order after the yield
+    /// The run's Plugin preludes, installed in order after the yield
     /// shims and before the shared replay.
     pub(crate) preludes: &'a [Prelude],
     /// Every tool and model alias the prompt's frontmatter declares: the
@@ -105,7 +105,7 @@ pub(crate) struct SectionVmSetup<'a> {
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
 /// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims), the run's
-/// capability preludes, [`SectionVm::replay_shared`], and
+/// Plugin preludes, [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
 /// limits itself before calling, so a limits failure propagates without
 /// touching the VM's teardown observation path.

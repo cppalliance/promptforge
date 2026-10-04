@@ -62,7 +62,7 @@ const WRITES_THEN_INFERS: &str = "---\nname: writes-infers\ndescription: d\nprom
     # WritesInfers\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\nstore.write('note.md', 'kept')\nreturn models.infer('after')\n```\n";
 
-/// A registry holding only the user-input capability.
+/// A registry holding only the user-input Plugin.
 fn user_input_registry() -> PluginRegistry {
     let mut plugins = PluginRegistry::new();
     plugins.register(Arc::new(UserInput::new())).unwrap();

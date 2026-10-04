@@ -1,4 +1,4 @@
-//! Tests for the `promptforge/user-input` capability: its ask tool with
+//! Tests for the `promptforge/user-input` Plugin: its ask tool with
 //! and without a broker, the prelude it writes, and the service it needs.
 
 use std::sync::Arc;
@@ -60,7 +60,7 @@ fn with_broker(broker: impl InputBroker + 'static) -> RunServices {
     RunServices::with_host(CancelHandle::new(), host)
 }
 
-/// The one tool the capability contributes under `services`.
+/// The one tool the Plugin contributes under `services`.
 fn ask_tool(services: &RunServices) -> Arc<dyn Tool> {
     let contribution = UserInput::new()
         .create(services)
@@ -69,7 +69,7 @@ fn ask_tool(services: &RunServices) -> Arc<dyn Tool> {
     Arc::clone(&contribution.tools[0])
 }
 
-/// The prelude the capability writes under `services`.
+/// The prelude the Plugin writes under `services`.
 fn prelude(services: &RunServices) -> String {
     UserInput::new()
         .create(services)

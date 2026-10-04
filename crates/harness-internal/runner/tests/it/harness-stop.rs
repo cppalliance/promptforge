@@ -222,7 +222,7 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
     );
 }
 
-/// A Harness on `operator` with the user-input capability and a broker no
+/// A Harness on `operator` with the user-input Plugin and a broker no
 /// round reaches.
 fn asking_harness(recorder: &Arc<MemoryRecorder>, operator: &Arc<Operator>) -> Harness {
     let mut plugins = hold_registry(&Arc::default());

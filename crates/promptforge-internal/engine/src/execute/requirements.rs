@@ -10,7 +10,7 @@ mod tests;
 ///
 /// [`Environment::prepare`](super::Environment::prepare) returns one
 /// together with the prepared context. The report lists only what needs a
-/// person's attention. A skipped optional capability is logged.
+/// person's attention. A skipped optional Plugin is logged.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
@@ -22,27 +22,27 @@ pub struct Requirements {
     /// `thinking` against a model whose thinking mode is `Never`. Only
     /// model binding in `Environment::prepare` adds these.
     pub unmet_requirements: Vec<UnmetRequirement>,
-    /// The required capabilities that the run lacks.
+    /// The required Plugins that the run lacks.
     ///
-    /// Capability activation adds a capability that is missing from the
+    /// Plugin activation adds a Plugin that is missing from the
     /// registry or that fails to activate. `Environment::prepare` adds the
-    /// capability of an exact tool slot when that capability is absent
+    /// Plugin of an exact tool slot when that Plugin is absent
     /// from the tool catalog. The run fails until every one is satisfied.
     pub missing_required: Vec<PluginId>,
-    /// The required capabilities that are registered but need a service
+    /// The required Plugins that are registered but need a service
     /// the application lacks.
     ///
-    /// There is one entry for each capability and missing service.
-    /// Capability activation adds these and skips each such capability.
+    /// There is one entry for each Plugin and missing service.
+    /// Plugin activation adds these and skips each such Plugin.
     /// The run fails until the application provides the service or the
-    /// prompt declares the capability optional.
+    /// prompt declares the Plugin optional.
     pub missing_services: Vec<MissingService>,
-    /// The declared conflicts: pairs of registered capabilities that
+    /// The declared conflicts: pairs of registered Plugins that
     /// exclude each other in a run.
     ///
     /// For example, `bashkit` and `terminal` each give the run its own
     /// view of the filesystem, so a run gets one or the other. Only
-    /// capability activation adds these, and it skips both members of each
+    /// Plugin activation adds these, and it skips both members of each
     /// pair. The run fails until the prompt declares only one of them.
     pub conflicts: Vec<PluginConflict>,
 }
@@ -51,8 +51,8 @@ impl Requirements {
     /// Returns whether the report lets the run proceed.
     ///
     /// That holds when every model requirement is met, every required
-    /// capability is present and has the services it needs, and every
-    /// pair of capabilities is compatible.
+    /// Plugin is present and has the services it needs, and every
+    /// pair of Plugins is compatible.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
@@ -63,16 +63,16 @@ impl Requirements {
 
     /// Adds the entries of `other` to this report.
     ///
-    /// Use it to combine the capability activation report with the report
+    /// Use it to combine the Plugin activation report with the report
     /// from `Environment::prepare`, so that one refusal names every gap.
-    /// The merge skips a capability already reported missing and a service
-    /// already reported missing for the same capability.
+    /// The merge skips a Plugin already reported missing and a service
+    /// already reported missing for the same Plugin.
     ///
-    /// The merge drops the `missing_required` entry of a capability that
+    /// The merge drops the `missing_required` entry of a Plugin that
     /// lacks a service. That entry can come only from the tool slot check
     /// in `Environment::prepare`. That check finds an exact slot whose
-    /// capability is absent from the catalog, because activation skipped
-    /// the capability for the missing service. The service entry already
+    /// Plugin is absent from the catalog, because activation skipped
+    /// the Plugin for the missing service. The service entry already
     /// names the real cause.
     pub fn merge(&mut self, other: Requirements) {
         for id in other.missing_required {
@@ -160,16 +160,16 @@ impl Requirements {
     }
 }
 
-/// A declared conflict between two registered capabilities that exclude
+/// A declared conflict between two registered Plugins that exclude
 /// each other in a run.
 ///
 /// The pair is named in the order the prompt declares them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PluginConflict {
-    /// The earlier-declared capability.
+    /// The earlier-declared Plugin.
     pub first: PluginId,
-    /// The later-declared capability.
+    /// The later-declared Plugin.
     pub second: PluginId,
 }
 
@@ -177,22 +177,22 @@ impl PluginConflict {
     /// Creates a conflict between `first` and `second`, where the prompt
     /// declares `first` before `second`.
     ///
-    /// Only capability activation reports these.
+    /// Only Plugin activation reports these.
     #[must_use]
     pub fn new(first: PluginId, second: PluginId) -> PluginConflict {
         PluginConflict { first, second }
     }
 }
 
-/// A service that a required capability needs and the application lacks.
+/// A service that a required Plugin needs and the application lacks.
 ///
-/// For example, a capability that asks the operator a question needs a
+/// For example, a Plugin that asks the operator a question needs a
 /// service that reaches the operator, and a batch application runs on its
 /// own, so it lacks that service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MissingService {
-    /// The registered, required capability that needs the service.
+    /// The registered, required Plugin that needs the service.
     pub plugin: PluginId,
     /// The name of the missing service.
     ///
@@ -205,7 +205,7 @@ impl MissingService {
     /// Creates an entry stating that `plugin` needs the service named
     /// `service`, which the application lacks.
     ///
-    /// Only capability activation reports these.
+    /// Only Plugin activation reports these.
     #[must_use]
     pub fn new(plugin: PluginId, service: impl Into<String>) -> MissingService {
         MissingService {

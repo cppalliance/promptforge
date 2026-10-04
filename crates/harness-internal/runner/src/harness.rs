@@ -2,7 +2,7 @@
 //! supplies, which drives that one run as a single future.
 //!
 //! A Host builds a [`Harness`] from its recorder, inference broker, timer,
-//! capability registry, and services, takes the run's [`RunControl`], and
+//! Plugin registry, and services, takes the run's [`RunControl`], and
 //! awaits [`Harness::run`] on whatever executor it likes. The run resolves
 //! the launch model through the broker, prepares the request's source,
 //! drives the run through the effect loop, and reads the declared output
@@ -34,7 +34,7 @@ pub(crate) use control::StopSignal;
 /// Drives one run of a prompt for a Host.
 ///
 /// It holds what the Host supplies for the run: a recorder, an inference
-/// broker, a timer, a capability registry, and services. [`Harness::run`]
+/// broker, a timer, a Plugin registry, and services. [`Harness::run`]
 /// consumes it.
 pub struct Harness {
     recorder: Arc<dyn RunRecorder>,
@@ -126,7 +126,7 @@ impl Harness {
     ///
     /// The Harness records the run through `recorder`. It resolves the
     /// run's model and gets the model's replies through `broker`. It sleeps
-    /// through `timer`. It activates the capabilities the prompt declares
+    /// through `timer`. It activates the Plugins the prompt declares
     /// from `plugins` and hands them `services`. All of this work
     /// happens in [`Harness::run`].
     #[must_use]

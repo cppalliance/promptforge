@@ -1,7 +1,7 @@
 //! The Harness, which runs one prompt for a Host and records the run.
 //!
 //! A Host builds one Harness for each run. [`Harness::new`] takes the
-//! Host's recorder, inference broker, timer, capability registry, and
+//! Host's recorder, inference broker, timer, Plugin registry, and
 //! services. [`Harness::run`] runs the prompt to its end and returns its
 //! [`RunReport`]. While the run goes on, the Host steers it through the
 //! [`RunControl`] it took from `Harness::control` before the run started.
@@ -23,7 +23,7 @@ pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
 pub mod plugin {
-    //! Capabilities, the registry a Host installs them in, the services
+    //! Plugins, the registry a Host installs them in, the services
     //! they read, and the context each tool call lends its tool.
 
     pub use harness_plugins::Contribution;

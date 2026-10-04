@@ -10,7 +10,7 @@
 //! recorder tee on a handle of the run log's [`TursoRecorder`] that names
 //! the launched agent, a per-run broker over
 //! the server's inference broker ([`broker`]), the tokio timer, a clone of
-//! the server's capability registry, and a clone of the server's services
+//! the server's Plugin registry, and a clone of the server's services
 //! with the conversation's input broker. The Harness reaches the gateway
 //! only through that broker, which follows the live gateway binding and
 //! sends each round to the dropdown's current pick. The
@@ -65,7 +65,7 @@ pub(crate) use state::{SessionsState, register};
 /// the `runs.db` every conversation's run is recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
 
-/// The capabilities agents may declare: `promptforge/user-input`, so they
+/// The Plugins agents may declare: `promptforge/user-input`, so they
 /// can ask the operator, and `promptforge/web`.
 fn plugins() -> PluginRegistry {
     let mut plugins = PluginRegistry::new();
@@ -100,7 +100,7 @@ fn services(registry: &Registry) -> HostServices {
 /// run's Harness and the status reporter.
 ///
 /// Typed and construction-phased: the registry, the server's backoff, the
-/// run log, and every run's capabilities and services are captured when
+/// run log, and every run's Plugins and services are captured when
 /// the composition root builds it, and the other subsystems are read
 /// through the registry at the point of use, so this handle never holds
 /// another subsystem's handle.
@@ -123,7 +123,7 @@ struct Inner {
     recorder: Arc<TursoRecorder>,
     /// The inference broker behind each run's broker.
     broker: WorkshopBroker,
-    /// The capabilities every run resolves its declarations against.
+    /// The Plugins every run resolves its declarations against.
     plugins: PluginRegistry,
     /// The services every run's clone starts from.
     services: HostServices,

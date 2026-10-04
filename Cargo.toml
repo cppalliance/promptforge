@@ -232,8 +232,8 @@ tauri-build = "2.6.3"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-process = "2.3.1"
-# default-features off drops the plugin's `rustls-tls` default, which is the
-# one dependency in the tree that pins rustls to the `ring` backend (and
+# default-features off drops the Tauri plugin's `rustls-tls` default, which is
+# the one dependency in the tree that pins rustls to the `ring` backend (and
 # installs it as the process-global CryptoProvider). Through workspace-hack
 # that feature would put `ring` back into every member, the gateway included.
 # The plugin's reqwest calls still get TLS: cargo unifies reqwest's features

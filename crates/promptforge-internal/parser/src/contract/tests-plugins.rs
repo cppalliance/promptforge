@@ -1,5 +1,5 @@
-//! Tests for the `plugins` and `tools` keys: capability ids, tool slot
-//! paths and aliases, and the slots an optional capability cannot back.
+//! Tests for the `plugins` and `tools` keys: Plugin ids, tool slot
+//! paths and aliases, and the slots an optional Plugin cannot back.
 
 use super::*;
 
@@ -163,9 +163,9 @@ fn an_optional_plugin_without_a_tool_slot_still_parses() {
 
 #[test]
 fn a_slot_on_a_required_plugin_parses_beside_optional_ones_sharing_one_segment() {
-    // Each optional capability matches the slot's capability in exactly one
-    // segment, so a check comparing only the namespace or only the pack
-    // would refuse this prompt.
+    // Each optional Plugin matches the slot's Plugin in exactly one
+    // segment, so a check comparing only the namespace or only the Plugin
+    // segment would refuse this prompt.
     let prompt = parse(concat!(
         "name: x\ndescription: d\n",
         "plugins:\n",

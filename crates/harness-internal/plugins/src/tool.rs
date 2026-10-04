@@ -93,7 +93,7 @@ pub trait Tool: Send + Sync {
     ///
     /// The Harness calls this when it assembles a run's catalog. The returned
     /// descriptor has an empty conflict list. The Harness adds the contributing
-    /// capability's conflicts during assembly.
+    /// Plugin's conflicts during assembly.
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor::new(
             self.id(),

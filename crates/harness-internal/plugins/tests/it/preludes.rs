@@ -1,5 +1,5 @@
-//! Preludes at activation: each activated capability's prelude is
-//! returned in declaration order, and a capability that does not
+//! Preludes at activation: each activated Plugin's prelude is
+//! returned in declaration order, and a Plugin that does not
 //! activate (absent, in a conflicting pair, or failing in `create`)
 //! contributes none.
 
@@ -17,7 +17,7 @@ fn id(text: &str) -> PluginId {
     PluginId::parse(text).expect("the fixture id is valid")
 }
 
-/// A fixture capability contributing `prelude` when it has one and no
+/// A fixture Plugin contributing `prelude` when it has one and no
 /// tools. It conflicts with each id in `conflicts`, and `fail` turns its
 /// activation into an error.
 struct Preluder {
@@ -97,7 +97,7 @@ fn activate_declaring(plugins: &str, installed: Vec<Preluder>) -> Activation {
 
 #[test]
 fn activation_returns_each_contributed_prelude_in_declaration_order() {
-    // The registry keeps its capabilities sorted by id, so declaring them
+    // The registry keeps its Plugins sorted by id, so declaring them
     // in reverse order tells declaration order apart from registry order.
     let activation = activate_declaring(
         "  - acme/omega\n  - acme/quiet\n  - acme/alpha\n",

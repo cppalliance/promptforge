@@ -151,7 +151,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
-    // The bound slots arrive from the frontmatter: the capability installs
+    // The bound slots arrive from the frontmatter: the Plugin installs
     // the tool, the exact slot binds the alias, and the captured alias
     // globals install in every section VM - H1 never runs a bind.
     let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
@@ -175,7 +175,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
-    // The Harness pattern: the fixture capability is activated into the
+    // The Harness pattern: the fixture Plugin is activated into the
     // catalog and the Harness's tool table; the run's tool slot fills by id.
     let out = super::run(
         &TestPrompt {

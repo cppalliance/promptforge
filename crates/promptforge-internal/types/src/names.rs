@@ -1,8 +1,8 @@
 //! The one global naming grammar.
 //!
-//! Kind is encoded by arity: capabilities are `namespace/pack` (2 segments)
-//! and tools are `namespace/pack/name` (3 segments), so a reader can tell the
-//! kind of any name by counting segments. A namespace is reverse-DNS
+//! Kind is encoded by arity: Plugins are `namespace/plugin` (2 segments)
+//! and tools are `namespace/plugin/name` (3 segments), so a reader can tell
+//! the kind of any name by counting segments. A namespace is reverse-DNS
 //! (`org.rustalliance`) or the reserved first-party prefix `promptforge`.
 //! Segments are lowercase ASCII alphanumeric plus `-`, `_`, `.`, and
 //! comparison is case-sensitive. v1 is unversioned: a `@` is a parse error.
@@ -13,17 +13,17 @@ use std::fmt;
 #[path = "names-tests.rs"]
 mod tests;
 
-/// A validated global name for a capability or a tool.
+/// A validated global name for a Plugin or a tool.
 ///
 /// A name has two or three segments separated by `/`. Two segments name a
-/// capability (`namespace/pack`). Three segments name a tool
-/// (`namespace/pack/name`).
+/// Plugin (`namespace/plugin`). Three segments name a tool
+/// (`namespace/plugin/name`).
 ///
 /// Every value comes from [`GlobalName::parse`], so each segment always
 /// consists of one or more lowercase ASCII letters, digits, `-`, `_`, and `.`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalName {
-    /// The `/`-separated segments: exactly 2 (capability) or 3 (tool).
+    /// The `/`-separated segments: exactly 2 (Plugin) or 3 (tool).
     segments: Vec<String>,
 }
 
@@ -69,7 +69,7 @@ impl GlobalName {
         &self.segments[0]
     }
 
-    /// Returns the pack, which is the second segment.
+    /// Returns the second segment, which names the Plugin.
     #[must_use]
     pub fn plugin(&self) -> &str {
         &self.segments[1]
@@ -82,7 +82,7 @@ impl GlobalName {
         &self.segments
     }
 
-    /// Returns the 2-segment capability prefix of a 3-segment (tool) name.
+    /// Returns the 2-segment Plugin prefix of a 3-segment (tool) name.
     ///
     /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
     pub(crate) fn plugin_prefix(&self) -> GlobalName {

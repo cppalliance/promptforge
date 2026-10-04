@@ -4,11 +4,12 @@ Multi-crate Rust workspace for the Engine, the Harness that runs it, the Gateway
 
 ## Definitions
 
-Three words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
+Four words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
 
 - **Engine**: the `promptforge` and `promptforge-*` crates. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for its caller to answer it. In production the caller is the Harness.
 - **Harness**: the `harness` and `harness-*` crates. The Harness steps the Engine, performs every effect, returns each answer, and records every run through the recorder the Host supplies. Production code runs prompts only through the Harness.
 - **Host**: an application that runs prompts through the Harness, such as Workshop or Papergate. The Host makes every policy decision. It runs prompts only through the Harness; it may also use the Engine's parser and types to read prompts and show events.
+- **Plugin**: a named unit of tools, and optionally a Lua prelude, that the Host installs for its runs, such as `promptforge/web`. Every tool it adds sits under its two-segment id (`promptforge/web/fetch`). A prompt declares the Plugins it requires under `plugins:` in its frontmatter, and the Harness activates them when the run starts. A Plugin has no other name: never capability, pack, or addon.
 
 ### Using the terms
 
@@ -18,7 +19,7 @@ Three words have exactly one meaning each, everywhere in this repository: code c
   - "machine" for the computer something runs on
   - the part's own name for a program or UI part that embeds another, such as "the desktop app" or "the container element"
   - "run", "serve", "embed", or "hold" for the verb
-- "Engine" and "Harness" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
+- "Engine", "Harness", and "Plugin" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness, a Tauri or ProseMirror plugin. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
 - Engine docs call the code that steps a run and answers its effects "the caller", and never name the Harness or the `harness` crates.
 - Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host and target vocabulary and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
 - Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Code names follow the same terms.
@@ -28,9 +29,9 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 ## Principles
 
 - Do more with less. Prefer simple, foundational primitives over specific solutions: a primitive that naturally enables today's functionality and also generalizes beats a custom mechanism specified as a laundry list of requirements. Generality is the payoff, not a goal.
-- When evaluating how to implement a capability, check whether the existing facilities subsume the work before building new machinery. Prioritize in this order:
+- When evaluating how to implement a feature, check whether the existing facilities subsume the work before building new machinery. Prioritize in this order:
   1. Reuse an existing facility
-  2. Make the smallest improvement to an existing facility which enables the capability.
+  2. Make the smallest improvement to an existing facility which enables the feature.
   3. Add a new facility. New machinery must have a material benefit beyond tidiness.
 - When improving an existing facility, prefer an improvement that serves a problem class beyond the current case over one that solves only the case at hand, when the general shape costs no more.
 - Error and status messages are designed assuming model consumption: concise, factual, and self-contained, naming what is missing or unmet with required versus actual, because a message may arrive as tool output that a model reasons about.

@@ -1,4 +1,4 @@
-//! Tests for the capability identity vocabulary.
+//! Tests for the Plugin identity vocabulary.
 
 use super::{PluginId, PluginIdErrorKind};
 use crate::tools::ToolId;
@@ -44,7 +44,7 @@ fn plugin_id_contains_exactly_the_tools_under_it() {
     assert!(web.contains(&fetch));
     let stray = ToolId::parse("promptforge/other/fetch").expect("a static valid id");
     assert!(!web.contains(&stray));
-    // Containment is by identity, not by prefix text: a pack whose name
+    // Containment is by identity, not by prefix text: a Plugin whose name
     // merely extends this one is not contained.
     let extended = ToolId::parse("promptforge/web2/fetch").expect("a static valid id");
     assert!(!web.contains(&extended));

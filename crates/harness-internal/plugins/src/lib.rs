@@ -1,13 +1,13 @@
-//! harness-plugins - the Harness's capability layer: the registry,
+//! harness-plugins - the Harness's Plugin layer: the registry,
 //! activation with co-activation conflict checking, the [`Plugin`]
-//! and [`Tool`] traits the first-party capability crates implement, and
-//! one core capability of its own, [`UserInput`] (`promptforge/user-input`).
+//! and [`Tool`] traits the first-party Plugin crates implement, and
+//! one core Plugin of its own, [`UserInput`] (`promptforge/user-input`).
 //!
 //! The Engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
 //! are defined here, in the Harness. The Host builds one
-//! [`PluginRegistry`] of installed capabilities and a
+//! [`PluginRegistry`] of installed Plugins and a
 //! [`HostServices`] map and hands both to the Harness, which calls
 //! [`activate`] per run to turn a prompt's declarations into the run's
 //! catalog, its preludes, and its [`ToolTable`] of implementations, hands
@@ -16,8 +16,8 @@
 //!
 //! ## Invariants
 //!
-//! - This crate depends on no capability provider: the provider crates
-//!   depend on it for the traits, never the reverse. The one capability
+//! - This crate depends on no Plugin provider: the provider crates
+//!   depend on it for the traits, never the reverse. The one Plugin
 //!   it holds itself, `promptforge/user-input`, needs nothing beyond this
 //!   crate's traits and the broker it receives through [`RunServices`].
 //! - This crate names no async runtime: `tokio` and `tokio-util` appear
@@ -44,6 +44,6 @@ pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
 pub use tool::{Tool, ToolContext};
 pub use user_input::{INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 
-/// The capability identity vocabulary, re-exported from the Engine's types
+/// The Plugin identity vocabulary, re-exported from the Engine's types
 /// so a provider names one crate for the whole contract.
 pub use promptforge::plugins::{PluginId, PluginIdError, PluginIdErrorKind};

@@ -59,7 +59,7 @@ impl RunOptions {
 /// prepared context, the Harness that holds the observer, and the run's own VFS
 /// handle - the prepared router - for seeding before the run and
 /// extraction after. The fixture tools are accepted for signature parity
-/// only; contributing them to a run takes a capability and a declared
+/// only; contributing them to a run takes a Plugin and a declared
 /// slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,

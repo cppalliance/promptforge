@@ -44,7 +44,7 @@ impl InferenceBroker for Offline {
 }
 
 /// A prompt whose one section runs `lua`, declaring the operator-input
-/// capability.
+/// Plugin.
 pub(crate) fn prompt(lua: &str) -> String {
     format!(
         "---\nname: fixture\ndescription: a conversation fixture\npromptforge: 0\n\

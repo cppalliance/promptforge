@@ -10,7 +10,7 @@ publish = false
 # The Harness public API: the `InferenceBroker` trait the Gateway broker
 # implements, with its boxed future.
 harness.workspace = true
-# The `promptforge/web` capability's `SearchProvider` trait and its query,
+# The `promptforge/web` Plugin's `SearchProvider` trait and its query,
 # result, and error vocabulary, which `GatewaySearch` implements.
 harness-web.workspace = true
 # The Engine's public API: the chat vocabulary (Message, ToolSchema,

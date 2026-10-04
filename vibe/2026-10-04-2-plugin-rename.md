@@ -335,7 +335,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
 </step-1>
 <step-2>
 
-### Step 2: Define Plugin and sweep the repository's prose
+### Step 2: Define Plugin and sweep the repository's prose [completed]
 
 - Component: Plugin prose
 - Tests first:

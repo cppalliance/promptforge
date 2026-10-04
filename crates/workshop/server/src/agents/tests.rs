@@ -1,5 +1,5 @@
 //! The agent conversations' Harness setup: a prompt declaring
-//! `promptforge/web` prepares over the server's capabilities and
+//! `promptforge/web` prepares over the server's Plugins and
 //! services, a Harness without the search provider refuses it naming
 //! that service, and outside a runtime the services leave the runtime
 //! out.
@@ -22,7 +22,7 @@ use workshop_registry::Registry;
 
 use super::{plugins, services};
 
-/// A prompt that requires the web capability and returns a fixed text.
+/// A prompt that requires the web Plugin and returns a fixed text.
 const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 0\n\
     plugins:\n  - promptforge/web\n---\n\n\
     # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n";
@@ -49,7 +49,7 @@ impl InferenceBroker for OfflineBroker {
     }
 }
 
-/// Runs `browses` as one conversation over the server's capabilities and
+/// Runs `browses` as one conversation over the server's Plugins and
 /// `services`, then reads the conversation's state and the outcome of its
 /// one run.
 async fn browse(services: &HostServices) -> Option<RunOutcome> {

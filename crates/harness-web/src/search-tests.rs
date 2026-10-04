@@ -147,7 +147,7 @@ fn descriptor_is_stable_and_faithful() {
 #[test]
 fn the_migrated_id_names_its_contributing_plugin() {
     // promptforge/web_search migrated to promptforge/web/search: dropping the
-    // last segment must yield the contributing capability's id.
+    // last segment must yield the contributing Plugin's id.
     let (tool, _fake) = tool();
     let id = tool.id();
     assert_eq!(id.name(), "search");

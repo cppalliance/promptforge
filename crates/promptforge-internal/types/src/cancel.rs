@@ -8,7 +8,7 @@
 //! cancelled without touching its siblings or its owner.
 //!
 //! This is the handle the Engine's `RunContext` holds and the one
-//! `RunServices` hands a capability; a Host stops a run through
+//! `RunServices` hands a Plugin; a Host stops a run through
 //! `harness::RunControl::cancel`, which sets this flag. A Harness that
 //! steps the Engine and must wait on the flag itself awaits
 //! [`CancelHandle::cancelled`], a std-only future the cancel itself wakes,

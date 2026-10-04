@@ -17,13 +17,13 @@ export interface RunContractFile {
   readonly description: string;
 }
 
-/** A declared capability: its global id and optionality. */
+/** A declared Plugin: its global id and optionality. */
 export interface RunContractPlugin {
   readonly id: string;
   readonly optional: boolean;
 }
 
-/** One tool slot: its alias and the canonical namespace/pack/name path. */
+/** One tool slot: its alias and the canonical namespace/plugin/name path. */
 export interface RunContractTool {
   readonly kind: "exact";
   readonly alias: string;

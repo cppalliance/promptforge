@@ -75,7 +75,7 @@ pub(crate) struct RunState {
     emitter: Arc<Emitter>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
-    /// same flag the activated capabilities and the run's `cancel` share.
+    /// same flag the activated Plugins and the run's `cancel` share.
     cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
     /// the values themselves - their provenance included - without
@@ -116,7 +116,7 @@ pub(crate) struct RunState {
     /// The run's Host-state snapshot; its presence gives every section VM
     /// the `ui()` global and the raw-model-id `models.get` fallback.
     ui: Option<Arc<serde_json::Value>>,
-    /// The run's capability preludes, in install order: every section VM
+    /// The run's Plugin preludes, in install order: every section VM
     /// installs each one before the shared library replays.
     preludes: Arc<[Prelude]>,
     /// Every tool and model alias the prompt's frontmatter declares: the
@@ -137,7 +137,7 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free) - the full-id bindings of `ctx`'s catalog, and the
+    /// Plugin-free) - the full-id bindings of `ctx`'s catalog, and the
     /// prompt's frontmatter alias names that `ctx`'s preludes are checked
     /// against; the nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs

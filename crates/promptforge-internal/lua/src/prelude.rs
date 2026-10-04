@@ -1,4 +1,4 @@
-//! Capability preludes: the Lua source an activated capability contributes,
+//! Plugin preludes: the Lua source an activated Plugin contributes,
 //! installed into every section VM before the shared library replays.
 //!
 //! A prelude runs once per VM as a main chunk, in an environment table of
@@ -49,7 +49,7 @@ const VISIBLE_GLOBALS: [&str; 19] = [
     "untrusted",
 ];
 
-/// Installs the run's capability preludes, in order, into a section VM.
+/// Installs the run's Plugin preludes, in order, into a section VM.
 ///
 /// Each prelude loads from source under the chunk name
 /// `@plugin:<id>` in its own restricted environment (see the module
@@ -66,8 +66,8 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// coroutine, so a prelude that calls `tools.call` while loading fails.
 ///
 /// # Errors
-/// Returns [`Error::LuaRuntime`] naming the capability when a prelude
-/// fails to load, and [`Error::Lua`] naming the capability, the global,
+/// Returns [`Error::LuaRuntime`] naming the Plugin when a prelude
+/// fails to load, and [`Error::Lua`] naming the Plugin, the global,
 /// and what it collides with when a global collides or is not named by a
 /// string.
 pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Result<()> {

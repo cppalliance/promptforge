@@ -63,7 +63,7 @@ impl Tool for Record {
     }
 }
 
-/// A fixture capability contributing the record tool.
+/// A fixture Plugin contributing the record tool.
 struct Context {
     id: PluginId,
 }
@@ -91,7 +91,7 @@ impl Plugin for Context {
     }
 }
 
-/// A registry holding the fixture capability.
+/// A registry holding the fixture Plugin.
 fn context_registry() -> Arc<PluginRegistry> {
     let mut registry = PluginRegistry::new();
     registry

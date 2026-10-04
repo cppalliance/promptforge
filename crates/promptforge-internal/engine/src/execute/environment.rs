@@ -11,11 +11,11 @@ use super::config::RunContext;
 use super::fill::{fill_model_bindings, fill_tool_bindings};
 use super::requirements::Requirements;
 
-/// The tools and capability preludes that a deployment makes available to
+/// The tools and Plugin preludes that a deployment makes available to
 /// its runs.
 ///
 /// An environment holds the catalog of tools the caller has made
-/// available and the Lua preludes its activated capabilities contributed.
+/// available and the Lua preludes its activated Plugins contributed.
 /// It is safe to share across concurrent runs (it is `Sync`). Everything
 /// that can change per run sits on the [`RunContext`]. The catalog holds
 /// tool descriptors only. The tool implementations stay with the caller,
@@ -28,10 +28,10 @@ use super::requirements::Requirements;
 #[non_exhaustive]
 pub struct Environment {
     /// The tools a run may bind, as descriptors: assembled by the Harness from
-    /// its activated capabilities. The default is empty, so every exact
-    /// slot's capability is reported missing.
+    /// its activated Plugins. The default is empty, so every exact
+    /// slot's Plugin is reported missing.
     tools: ToolCatalog,
-    /// The Lua source the Harness's activated capabilities contributed, in
+    /// The Lua source the caller's activated Plugins contributed, in
     /// install order: every section VM of a run installs each one before
     /// the shared library replays. The default is empty.
     preludes: Vec<Prelude>,
@@ -51,7 +51,7 @@ impl Environment {
     /// Sets the catalog of tools that a run may bind.
     ///
     /// The catalog holds the tool descriptors the caller assembled from its
-    /// activated capabilities. The caller activates its capabilities and
+    /// activated Plugins. The caller activates its Plugins and
     /// installs the resulting catalog here before it calls
     /// [`prepare`](Environment::prepare). `prepare` then fills the prompt's
     /// exact slots against the catalog by identity.
@@ -61,11 +61,11 @@ impl Environment {
         self
     }
 
-    /// Sets the capability preludes that every section VM of a run installs.
+    /// Sets the Plugin preludes that every section VM of a run installs.
     ///
     /// A prelude is Lua source that one of the caller's activated
-    /// capabilities contributed. The caller passes them in install order,
-    /// which is the order the prompt declares the capabilities.
+    /// Plugins contributed. The caller passes them in install order,
+    /// which is the order the prompt declares the Plugins.
     /// [`prepare`](Environment::prepare) copies them onto the context.
     /// Every section VM of the run installs each prelude after the Engine
     /// globals and before the shared library replays, so the shared library
@@ -94,12 +94,12 @@ impl Environment {
     ///
     /// Tool slots fill against the catalog. An exact slot fills by
     /// identity, and the first two segments of its path name its
-    /// capability. If that capability is absent from the catalog, the
-    /// capability is listed in [`Requirements::missing_required`]. If the
-    /// capability is in the catalog but the named tool is absent, the slot
+    /// Plugin. If that Plugin is absent from the catalog, the
+    /// Plugin is listed in [`Requirements::missing_required`]. If the
+    /// Plugin is in the catalog but the named tool is absent, the slot
     /// stays empty and the report omits it. Advertising the slot's alias
     /// fails at run time. Every fill is recorded in the context's tool
-    /// bindings. Capability resolution, co-activation conflicts, and
+    /// bindings. Plugin resolution, co-activation conflicts, and
     /// activation happen in the caller before `prepare`, and the caller
     /// merges that report into the one `prepare` returns.
     ///

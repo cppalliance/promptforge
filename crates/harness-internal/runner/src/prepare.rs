@@ -9,8 +9,8 @@
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
 //! directories and the declared store, to the context as given, and the
-//! cancel flag and the Host's services to the capabilities' services;
-//! activate the prompt's declared capabilities against the caller's
+//! cancel flag and the Host's services to the Plugins' services;
+//! activate the prompt's declared Plugins against the caller's
 //! registry, which assembles the catalog, the preludes, and the
 //! implementation table; install the
 //! catalog and the preludes and prepare the context; merge activation's
@@ -50,15 +50,15 @@ use crate::performers::{ActivatedTools, InferenceBroker, Performers, Timer};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
 
 /// What the caller owns and preparation borrows: the registry of
-/// installed capabilities and the Host's services, the real directories,
+/// installed Plugins and the Host's services, the real directories,
 /// the run's cancel flag, the recorder, the inference broker and the
 /// timer that reach beyond the runner, and the run's name.
 pub struct Services {
-    /// The installed capabilities the prompt's declarations resolve
-    /// against; `None` is a Harness with no capabilities, where every
+    /// The installed Plugins the prompt's declarations resolve
+    /// against; `None` is a Harness with no Plugins, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<PluginRegistry>>,
-    /// The Host's services: the run's capabilities read them, its input
+    /// The Host's services: the run's Plugins read them, its input
     /// broker among them when it has one.
     pub services: HostServices,
     /// The run's whole filesystem: the real directories and the declared store,
@@ -67,7 +67,7 @@ pub struct Services {
     /// The text staged at the prompt's declared `input:` path before the
     /// run, when the launch supplied one.
     pub input_text: Option<String>,
-    /// The run's cancel flag: handed to the context, to every capability
+    /// The run's cancel flag: handed to the context, to every Plugin
     /// activated for the run, and polled by the Engine.
     pub cancel: CancelHandle,
     /// The recorder the run begins at and the loop will write to.
@@ -131,8 +131,8 @@ pub enum PrepareError {
         #[source]
         source: ParseError,
     },
-    /// The environment cannot satisfy the prompt: a required capability
-    /// is missing, two declared capabilities conflict, or the current
+    /// The environment cannot satisfy the prompt: a required Plugin
+    /// is missing, two declared Plugins conflict, or the current
     /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run is
     /// ended as failed with that notice.
@@ -186,7 +186,7 @@ impl PrepareError {
 /// Prepares the prompt `source` for one run with `args`: draws the run's
 /// seed and start and begins the run at its recorder, parses the prompt,
 /// puts its declared input file in place, activates its declared
-/// capabilities against the caller's registry, prepares the context,
+/// Plugins against the caller's registry, prepares the context,
 /// refuses an unsatisfiable prompt, and builds the `Run` and its
 /// performers.
 ///
@@ -284,7 +284,7 @@ pub async fn prepare(
     }
     // The activate-prepare-refuse ceremony: the run's whole filesystem,
     // the real directories and the declared store, goes to the context as
-    // given, and the capabilities' services hold the cancel flag and the
+    // given, and the Plugins' services hold the cancel flag and the
     // Host's services; the activated catalog is what prepare fills slots
     // against, its preludes go to every section VM, and the
     // implementations stay here for the tool performer.

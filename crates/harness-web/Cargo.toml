@@ -7,7 +7,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-# The Harness public API: the capability, tool, and service vocabulary.
+# The Harness public API: the Plugin, tool, and service vocabulary.
 harness.workspace = true
 # The Engine's public API: tool id, output, and error vocabulary.
 promptforge.workspace = true

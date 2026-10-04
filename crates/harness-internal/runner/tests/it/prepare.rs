@@ -6,10 +6,10 @@
 //! recorder when the run begins under the run's name; and the prepared tool
 //! performer resolves a `ToolCall` effect's id in the activated table. The
 //! Host's optional input broker - one of its services, handed to every
-//! activated capability and behind the `promptforge/user-input`
-//! capability - sits in the `input` child module, the Host's services
+//! activated Plugin and behind the `promptforge/user-input`
+//! Plugin - sits in the `input` child module, the Host's services
 //! reaching activation sit in the `host_services` child module, a
-//! capability's prelude reaching the prepared run sits in the `prelude`
+//! Plugin's prelude reaching the prepared run sits in the `prelude`
 //! child module, and the prompt's declared input and output files sit in
 //! the `files` child module.
 
@@ -43,7 +43,7 @@ mod input;
 #[path = "prepare-prelude.rs"]
 mod prelude;
 
-/// A prompt declaring `promptforge/web` as a required capability that no
+/// A prompt declaring `promptforge/web` as a required Plugin that no
 /// registry here provides.
 const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
     plugins:\n  - promptforge/web\n---\n\n# Title\n\n## Only\n\nDone.\n";
@@ -51,7 +51,7 @@ const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
 /// A prompt with unclosed frontmatter, so it does not parse.
 const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
 
-/// A capability-free prompt whose one section returns a constant.
+/// A Plugin-free prompt whose one section returns a constant.
 const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
@@ -148,7 +148,7 @@ impl Tool for Echo {
     }
 }
 
-/// A fixture capability contributing the echo tool.
+/// A fixture Plugin contributing the echo tool.
 struct Tools {
     id: PluginId,
 }
@@ -176,7 +176,7 @@ impl Plugin for Tools {
     }
 }
 
-/// A registry holding the fixture capability.
+/// A registry holding the fixture Plugin.
 fn fixture_registry() -> Arc<PluginRegistry> {
     let mut registry = PluginRegistry::new();
     registry

@@ -62,7 +62,7 @@ pub struct Frontmatter {
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
     output: Option<FileDecl>,
-    /// Capabilities the prompt activates at prepare, in declaration order.
+    /// Plugins the prompt activates at prepare, in declaration order.
     #[serde(default)]
     plugins: Vec<PluginDecl>,
     /// Declared tool slots: alias to exact path.
@@ -183,7 +183,7 @@ impl Frontmatter {
         self.output.as_ref()
     }
 
-    /// Returns the declared capabilities, in declaration order.
+    /// Returns the declared Plugins, in declaration order.
     #[must_use]
     pub fn plugins(&self) -> &[PluginDecl] {
         &self.plugins

@@ -5,8 +5,8 @@
 //! user drags, once more on close - and reapplies them when the SPA opens,
 //! saves as, or duplicates a workspace file (its
 //! `promptforge:workspace-opened` event). The workspace file, not a
-//! plugin-owned location, owns the geometry: an ephemeral workspace has
-//! nowhere to keep it and the server answers `saved: false`.
+//! Tauri-plugin-owned location, owns the geometry: an ephemeral workspace
+//! has nowhere to keep it and the server answers `saved: false`.
 //!
 //! Every failure here logs and continues: a window that opens at the
 //! default size is a nuisance, a window that never opens is a boot

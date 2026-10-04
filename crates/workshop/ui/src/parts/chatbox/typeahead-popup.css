@@ -1,8 +1,8 @@
 /* TypeaheadPopup (src/parts/chatbox/typeahead-popup.ts): the floating
-   @-mention suggestion list. The suggestion plugin's managed mount
-   appends the popup to document.body and writes position, left, and top
-   inline from the cursor rect (Floating UI), so this file owns only the
-   surface and the list. Themed values come from the :root tokens in
+   @-mention suggestion list. The ProseMirror suggestion plugin's managed
+   mount appends the popup to document.body and writes position, left, and
+   top inline from the cursor rect (Floating UI), so this file owns only
+   the surface and the list. Themed values come from the :root tokens in
    @workshop/look/tokens.css, each with a fallback so a missing token degrades instead of
    breaking the property. */
 

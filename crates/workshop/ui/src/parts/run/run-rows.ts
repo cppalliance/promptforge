@@ -4,7 +4,7 @@
 // description, and promptforge read-only; input a text field plus
 // Browse; output a text field; one control per arg by type with
 // required markers and defaults (the implicit declaration is the single
-// prose box); capabilities as checkboxes, disabled when required; tools
+// prose box); Plugins as checkboxes, disabled when required; tools
 // and model roles read-only; max_tool_iterations numeric with the
 // runtime-default placeholder. No bind-time validation runs here -
 // validation is the parser's alone.
@@ -135,7 +135,7 @@ export function renderContractRows(
     field.type = "checkbox";
     field.className = "ws-run-panel__checkbox";
     field.checked = true;
-    // A required capability cannot be switched off.
+    // A required Plugin cannot be switched off.
     field.disabled = !plugin.optional;
     rows.appendChild(row(plugin.id, field));
   }

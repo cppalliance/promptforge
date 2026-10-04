@@ -13,7 +13,7 @@ ManifestDPIAwareness PerMonitorV2
  SetCompressor /SOLID "{{compression}}"
 !endif
 
-; Keep above !include to stay ahead of any plugin command
+; Keep above !include to stay ahead of any NSIS plugin command
 ; see https://github.com/tauri-apps/tauri/pull/15422#discussion_r3289239624
 {{#if signed_plugins_path}}
 !addplugindir "{{signed_plugins_path}}"
@@ -129,7 +129,7 @@ VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 
-# additional plugins
+# additional NSIS plugins
 !addplugindir "${ADDITIONALPLUGINSPATH}"
 
 ; Uninstaller signing command

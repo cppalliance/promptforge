@@ -1,10 +1,10 @@
 //! The input broker: the part of the Host that carries a question to a
-//! person; a capability waits on it for the operator's next message.
+//! person; a Plugin waits on it for the operator's next message.
 //!
 //! When the Host has an operator, it supplies an [`InputBroker`] among
 //! its services under [`INPUT_BROKER`](crate::INPUT_BROKER), and the run's
 //! [`RunServices`](crate::RunServices) carry it; a Host without one (a
-//! batch or eval Host) supplies none, and a capability reads that absence
+//! batch or eval Host) supplies none, and a Plugin reads that absence
 //! as "there is nobody to ask". A Host binds each run's broker to whoever
 //! launched the run, so a wait reaches the right operator without naming
 //! the run or the section. A broker that is present stays present for the
@@ -12,7 +12,7 @@
 
 use std::fmt;
 
-/// Waits for the operator's next message on a capability's behalf.
+/// Waits for the operator's next message on a Plugin's behalf.
 ///
 /// # Invariants
 ///

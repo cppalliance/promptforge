@@ -1,6 +1,6 @@
 //! Tests for activation by service id: a need is met only by a provider
 //! under the id with the id's type, and an unmet need refuses a required
-//! capability or records a gap for an optional one, naming the id.
+//! Plugin or records a gap for an optional one, naming the id.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,7 +24,7 @@ fn timed_id() -> PluginId {
     PluginId::parse("acme/timed").expect("the fixture id is valid")
 }
 
-/// A fixture capability that needs [`CLOCK`] and counts its activations.
+/// A fixture Plugin that needs [`CLOCK`] and counts its activations.
 struct Timed {
     id: PluginId,
     creates: Arc<AtomicUsize>,

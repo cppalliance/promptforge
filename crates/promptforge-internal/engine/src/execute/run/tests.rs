@@ -213,7 +213,7 @@ fn a_timer_effect_records_its_seconds() {
     assert_eq!(round_trip(&record), record);
 }
 
-/// A run over one section whose only Lua block is `body`, capability-free.
+/// A run over one section whose only Lua block is `body`, Plugin-free.
 fn run_of(body: &str, ctx: RunContext) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\n{body}\n```\n"
@@ -403,7 +403,7 @@ fn a_context_without_a_harness_handle_shares_its_one_flag_with_prepare_and_the_r
     let prompt = Prompt::parse(source, "run-test")
         .0
         .expect("the run test prompt parses");
-    // The flag `prepare` hands the capabilities is the context's own.
+    // The flag `prepare` hands the Plugins is the context's own.
     let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, run_context());
     let plugins_flag = ctx.cancel.clone();
     let mut run = Run::new(Arc::new(prompt), "", ctx);

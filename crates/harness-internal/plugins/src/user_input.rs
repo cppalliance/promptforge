@@ -1,7 +1,7 @@
-//! The `promptforge/user-input` capability: a prompt section pauses and
+//! The `promptforge/user-input` Plugin: a prompt section pauses and
 //! asks the operator for their next message.
 //!
-//! A prompt declares the capability in its frontmatter, required or
+//! A prompt declares the Plugin in its frontmatter, required or
 //! optional, and its sections then have an `input` table with two
 //! functions:
 //!
@@ -14,15 +14,15 @@
 //! local text, available = input.ask()
 //! ````
 //!
-//! A prompt that does not declare the capability has no `input` global.
+//! A prompt that does not declare the Plugin has no `input` global.
 //! By the end of this page you know what the Harness supplies for the
-//! capability, what the script receives with and without an operator,
+//! Plugin, what the script receives with and without an operator,
 //! how a failed wait reaches the script, and how a prompt lets its model
 //! ask.
 //!
 //! # Where this fits
 //!
-//! The capability contributes one tool, the ask tool, under the full id
+//! The Plugin contributes one tool, the ask tool, under the full id
 //! [`USER_INPUT_ASK_TOOL`], and a prelude: the Lua source that defines
 //! `input` in every section of the run. `input.ask()` calls the ask tool
 //! by its full id, so every ask reaches the Harness as an ordinary
@@ -32,7 +32,7 @@
 //! bound to the session that launched it, so the question reaches the
 //! right operator without naming the run or the section.
 //!
-//! Whether a broker is present is fixed when the capability activates: a
+//! Whether a broker is present is fixed when the Plugin activates: a
 //! broker that is present stays present for the whole run. The prelude
 //! records that fact, so `input.connected()` answers it without a tool
 //! call, and `input.ask()` returns it as its second value, `available`.
@@ -51,10 +51,10 @@
 //!
 //! For a Host with nobody to ask, such as a batch or eval Host, the
 //! Harness supplies no broker. What happens then depends on how the
-//! prompt declared the capability.
+//! prompt declared the Plugin.
 //!
 //! - A required declaration is refused before the run starts. The
-//!   capability's [`needs`](Plugin::needs) names
+//!   Plugin's [`needs`](Plugin::needs) names
 //!   [`INPUT_BROKER`], so activation never calls
 //!   [`create`](Plugin::create) and the refusal notice holds the line
 //!   "- promptforge/user-input needs promptforge/input-broker, and this
@@ -99,7 +99,7 @@
 //! - The model can ask the operator only when the prompt opts in: it
 //!   binds the ask tool under an alias in its `tools:` frontmatter, for
 //!   example `ask: promptforge/user-input/ask`, and advertises that alias
-//!   with `tools.add` or `tools.always`. Declaring the capability alone
+//!   with `tools.add` or `tools.always`. Declaring the Plugin alone
 //!   advertises nothing to the model.
 
 use std::sync::Arc;
@@ -133,7 +133,7 @@ pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("promptfor
 /// What the ask tool answers on a Host with nobody to ask.
 const FALLBACK: &str = "User input is unavailable in this host; continue without it.";
 
-/// The first-party capability that lets a prompt section pause and ask the
+/// The first-party Plugin that lets a prompt section pause and ask the
 /// operator for their next message.
 ///
 /// Its id is `promptforge/user-input`. It needs the input broker provided
@@ -152,12 +152,12 @@ pub struct UserInput {
 }
 
 impl UserInput {
-    /// Builds the capability.
+    /// Builds the Plugin.
     ///
     /// The input broker it needs arrives with each run, in [`RunServices`].
     ///
     /// # Panics
-    /// Panics only if the built-in capability id or tool id fails to parse.
+    /// Panics only if the built-in Plugin id or tool id fails to parse.
     /// That would be a defect in the Harness.
     #[must_use]
     pub fn new() -> UserInput {

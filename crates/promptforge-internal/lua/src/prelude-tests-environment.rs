@@ -1,4 +1,4 @@
-//! Tests for a capability prelude's restricted environment: the globals
+//! Tests for a Plugin prelude's restricted environment: the globals
 //! it sees, the read-only `var` view at every depth, and its tool calls
 //! yielding from a block.
 

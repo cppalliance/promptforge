@@ -1,4 +1,4 @@
-//! Capability preludes in a run: every section VM installs the preludes
+//! Plugin preludes in a run: every section VM installs the preludes
 //! handed to `Environment::preludes`, the shared chunk, fanout arms, and
 //! spawned task chains included; a prelude that fails to load or whose
 //! global collides fails the run as a Lua failure before it issues any
@@ -13,7 +13,7 @@ use crate::execute::protocol::VfsOp;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
 use crate::test_support::drive;
 
-/// A prelude contributed by the capability `id`.
+/// A prelude contributed by the Plugin `id`.
 fn prelude(id: &str, source: &str) -> Prelude {
     Prelude::new(PluginId::parse(id).expect("a valid Plugin id"), source)
 }

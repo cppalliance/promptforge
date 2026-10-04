@@ -1,14 +1,14 @@
-//! Host services: typed objects the Host hands to the capabilities it
+//! Host services: typed objects the Host hands to the Plugins it
 //! installs, each under a named id.
 //!
-//! A capability names the services it needs as [`ServiceId`]s in
+//! A Plugin names the services it needs as [`ServiceId`]s in
 //! [`Plugin::needs`](crate::Plugin::needs), and reads them at
 //! activation through a [`ServiceKey`], which binds an id literal to the
 //! provider's Rust type. The Host fills a [`HostServices`] map, and the
 //! Harness hands it to each run in [`RunServices`](crate::RunServices).
 //!
-//! An id literal is a two-segment `namespace/name` in the capability id
-//! grammar. [`HostServices::provide`] refuses one that does not parse.
+//! An id literal is a [`GlobalName`] with exactly one `/`, as in
+//! `namespace/name`. [`HostServices::provide`] refuses any other literal.
 
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
@@ -75,7 +75,7 @@ impl fmt::Display for ServiceId {
 /// provider supplies.
 ///
 /// The crate that defines a service declares its key once, as a `const`.
-/// The Host provides the service under that key, and a capability reads
+/// The Host provides the service under that key, and a Plugin reads
 /// the service through the same key.
 pub struct ServiceKey<T: ?Sized + Send + Sync + 'static> {
     id: ServiceId,

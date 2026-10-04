@@ -1,16 +1,16 @@
-//! The capability identity vocabulary: [`PluginId`] and its parse
-//! error, plus [`Prelude`], the Lua source an activated capability hands
+//! The Plugin identity vocabulary: [`PluginId`] and its parse
+//! error, plus [`Prelude`], the Lua source an activated Plugin hands
 //! the Engine.
 //!
-//! A capability is the activation unit: code that runs at run setup and
-//! makes services available to the run. Capabilities are delivered in packs
-//! (crates now, DLLs via adapters later) and identified by a 2-segment
-//! [`GlobalName`] - kind is encoded by arity, so a capability id is
-//! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. The Engine knows capabilities by identity alone:
+//! A Plugin is the activation unit: code that runs at run setup and
+//! makes services available to the run. Plugins ship in crates now, and as
+//! DLLs through an adapter later, and are identified by a 2-segment
+//! [`GlobalName`] - kind is encoded by arity, so a Plugin id is
+//! `namespace/plugin` and every tool it contributes sits under
+//! `namespace/plugin/name`. The Engine knows Plugins by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
-//! records the conflicts of the capability that contributed it. The
+//! records the conflicts of the Plugin that contributed it. The
 //! activation contract - the `Plugin` trait, the services it is handed,
 //! and the contribution it returns - is the Harness's, in
 //! `harness-plugins`; the Engine never activates anything.
@@ -22,22 +22,22 @@ use crate::tools::ToolId;
 #[path = "plugins-tests.rs"]
 mod tests;
 
-/// The stable identity of an installed capability.
+/// The stable identity of an installed Plugin.
 ///
-/// A capability id is a [`GlobalName`] with exactly 2 segments
-/// (`namespace/pack`). The segment count tells what a name refers to: 2
-/// segments name a capability and 3 name a tool. A capability's id is the
+/// A Plugin id is a [`GlobalName`] with exactly 2 segments
+/// (`namespace/plugin`). The segment count tells what a name refers to: 2
+/// segments name a Plugin and 3 name a tool. A Plugin's id is the
 /// prefix of every tool id it contributes: `promptforge/web` contributes
 /// `promptforge/web/fetch`. An id is the name alone, and a name resolves to
-/// the only installed capability of that name. A `@` version marker in the
+/// the only installed Plugin of that name. A `@` version marker in the
 /// id is a parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct PluginId(GlobalName);
 
 impl PluginId {
-    /// Parses a capability identity, requiring exactly 2 segments
-    /// (`namespace/pack`).
+    /// Parses a Plugin identity, requiring exactly 2 segments
+    /// (`namespace/plugin`).
     ///
     /// # Errors
     /// Returns [`PluginIdError`] when the id has fewer or more than 2
@@ -62,7 +62,7 @@ impl PluginId {
     ///
     /// Crate-internal: backs [`crate::tools::ToolId::plugin`]. The
     /// source tool id was validated at parse, so its first two segments
-    /// are already a valid capability id.
+    /// are already a valid Plugin id.
     pub(crate) fn from_prefix(prefix: GlobalName) -> PluginId {
         debug_assert!(
             prefix.segments().len() == 2,
@@ -74,24 +74,24 @@ impl PluginId {
     /// Returns the namespace segment.
     ///
     /// A namespace is meant to be a reverse-DNS name such as
-    /// `org.rustalliance`, or `promptforge` for first-party capabilities.
+    /// `org.rustalliance`, or `promptforge` for first-party Plugins.
     /// `PluginId::parse` accepts any valid segment as the namespace.
     #[must_use]
     pub fn namespace(&self) -> &str {
         self.0.namespace()
     }
 
-    /// Returns the pack segment.
+    /// Returns the Plugin segment.
     #[must_use]
     pub fn name(&self) -> &str {
         self.0.plugin()
     }
 
-    /// Returns whether `tool` belongs to this capability.
+    /// Returns whether `tool` belongs to this Plugin.
     ///
-    /// A tool belongs to a capability when dropping the last segment of the
-    /// tool's id leaves exactly the capability's id, so `namespace/pack/name`
-    /// belongs to `namespace/pack`. Every tool a capability contributes
+    /// A tool belongs to a Plugin when dropping the last segment of the
+    /// tool's id leaves exactly the Plugin's id, so `namespace/plugin/name`
+    /// belongs to `namespace/plugin`. Every tool a Plugin contributes
     /// belongs to it. The caller must check this when it assembles the run's
     /// catalog.
     #[must_use]
@@ -101,21 +101,21 @@ impl PluginId {
 }
 
 impl std::fmt::Display for PluginId {
-    /// The canonical `namespace/pack` string form.
+    /// The canonical `namespace/plugin` string form.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl serde::Serialize for PluginId {
-    /// Serializes the id as a single `namespace/pack` string.
+    /// Serializes the id as a single `namespace/plugin` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for PluginId {
-    /// Deserializes the id from its `namespace/pack` string and validates it
+    /// Deserializes the id from its `namespace/plugin` string and validates it
     /// the same way `PluginId::parse` does. An invalid string fails
     /// deserialization.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -129,7 +129,7 @@ impl<'de> serde::Deserialize<'de> for PluginId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginIdErrorKind {
-    /// The id had fewer or more than 2 segments (`namespace/pack`).
+    /// The id had fewer or more than 2 segments (`namespace/plugin`).
     SegmentCount,
     /// A segment was empty.
     Empty,
@@ -156,7 +156,7 @@ impl PluginIdError {
         self.kind
     }
 
-    /// Maps a global-name rejection onto the capability-id error vocabulary.
+    /// Maps a global-name rejection onto the Plugin-id error vocabulary.
     fn from_global_name_kind(global_kind: GlobalNameErrorKind) -> PluginIdError {
         let (kind, reason) = match global_kind {
             GlobalNameErrorKind::SegmentCount => (
@@ -173,23 +173,23 @@ impl PluginIdError {
     }
 }
 
-/// Lua source that an activated capability adds to the Lua VM of every
+/// Lua source that an activated Plugin adds to the Lua VM of every
 /// section in a run.
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
-/// call the capability's own tools through `tools.call`. The Engine runs
-/// the source knowing only the capability's id, which names the prelude in
+/// call the Plugin's own tools through `tools.call`. The Engine runs
+/// the source knowing only the Plugin's id, which names the prelude in
 /// tracebacks and error messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prelude {
-    /// The capability that contributed the source.
+    /// The Plugin that contributed the source.
     plugin: PluginId,
     /// The Lua source, compiled from text in every section VM.
     source: String,
 }
 
 impl Prelude {
-    /// Pairs a capability's id with the prelude source it contributes.
+    /// Pairs a Plugin's id with the prelude source it contributes.
     #[must_use]
     pub fn new(plugin: PluginId, source: impl Into<String>) -> Prelude {
         Prelude {
@@ -198,7 +198,7 @@ impl Prelude {
         }
     }
 
-    /// Returns the id of the capability that contributed this prelude.
+    /// Returns the id of the Plugin that contributed this prelude.
     #[must_use]
     pub fn plugin(&self) -> &PluginId {
         &self.plugin

@@ -1,4 +1,4 @@
-//! Naming capabilities and adding their Lua: a capability id holds exactly
+//! Naming Plugins and adding their Lua: a Plugin id holds exactly
 //! its own tools, and a prelude on the environment defines a function
 //! every section can call.
 

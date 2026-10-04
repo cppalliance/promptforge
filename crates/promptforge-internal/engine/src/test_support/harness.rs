@@ -11,7 +11,7 @@
 //! [`sink`](RunHarness::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
 //! effects and answers; the Harness builds its own [`Performers`] and
-//! sink in production, and activates its own capabilities.
+//! sink in production, and activates its own Plugins.
 
 use std::fmt;
 use std::sync::Arc;
@@ -101,7 +101,7 @@ impl RunHarness {
     /// The catalog the Engine binds against is the caller's to install on
     /// the [`Environment`](crate::execute::Environment) (see
     /// [`TestToolTable::catalog`]); in production the Harness assembles
-    /// both from its activated capabilities.
+    /// both from its activated Plugins.
     #[must_use]
     pub fn tools(mut self, tools: TestToolTable) -> RunHarness {
         self.tools = tools;
@@ -146,7 +146,7 @@ impl RunHarness {
                 };
                 // Resolved by the stable identity against the suites'
                 // fixture table, as the Harness resolves it against its
-                // activated capabilities; the alias is the record's, not
+                // activated Plugins; the alias is the record's, not
                 // the resolver's.
                 let Some(tool) = tools.get(&tool) else {
                     return refuse_tool_call();

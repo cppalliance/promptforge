@@ -23,7 +23,7 @@ use super::{
 use crate::scripted::{Listing, ScriptedBroker};
 use crate::support::FailingRecorder;
 
-/// A capability-free prompt whose one section returns a constant.
+/// A Plugin-free prompt whose one section returns a constant.
 const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
@@ -39,7 +39,7 @@ const CATCHES_A_ROUND: &str = "---\nname: catches\ndescription: d\npromptforge: 
     local ok, err = pcall(models.infer, 'asked')\n\
     return tostring(ok) .. ':' .. err.kind\n```\n";
 
-/// A Harness over `recorder` and `broker` with no capabilities and no
+/// A Harness over `recorder` and `broker` with no Plugins and no
 /// Host services.
 fn harness_over(recorder: &Arc<FailingRecorder>, broker: ScriptedBroker) -> Harness {
     Harness::new(

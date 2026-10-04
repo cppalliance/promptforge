@@ -1,4 +1,4 @@
-//! A capability's prelude through preparation: the prelude its `create`
+//! A Plugin's prelude through preparation: the prelude its `create`
 //! returns reaches every section VM of the prepared run, and each tool
 //! call a prelude function makes is recorded as a `ToolCall` effect
 //! attributed to the calling script, its execution, and its section.
@@ -24,7 +24,7 @@ const SPEAKS: &str = "---\nname: speaks\ndescription: d\npromptforge: 0\n\
     local sealed = not pcall(function() speaker.say = nil end)\n\
     return speaker.say('two') .. '|' .. tostring(sealed)\n```\n";
 
-/// A fixture capability contributing the echo tool under its own id and
+/// A fixture Plugin contributing the echo tool under its own id and
 /// a prelude that calls it.
 struct Speaker {
     id: PluginId,

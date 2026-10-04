@@ -1,6 +1,6 @@
 //! The scripted Host the Harness suites run against: a broker that lists
 //! one model and plays each round from a script, performers whose every
-//! future is held until it is torn down, a capability whose one tool is
+//! future is held until it is torn down, a Plugin whose one tool is
 //! held, and an operator who answers each question with the next text a
 //! test sends.
 
@@ -192,7 +192,7 @@ pub(crate) fn held_broker(held: &Arc<Held>) -> ScriptedBroker {
     ScriptedBroker::new(move |_round, _messages| held.hold())
 }
 
-/// The fixture capability `tests/harness`, contributing the one tool
+/// The fixture Plugin `tests/harness`, contributing the one tool
 /// `tests/harness/hold`, whose every call is held.
 struct HoldPlugin {
     id: PluginId,
@@ -256,7 +256,7 @@ impl Tool for HoldTool {
     }
 }
 
-/// A registry holding the hold capability over `held`.
+/// A registry holding the hold Plugin over `held`.
 pub(crate) fn hold_registry(held: &Arc<Held>) -> PluginRegistry {
     let mut registry = PluginRegistry::new();
     registry

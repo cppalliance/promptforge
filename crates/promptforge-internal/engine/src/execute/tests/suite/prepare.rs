@@ -15,7 +15,7 @@ use promptforge_vfs::Origin;
 use super::super::{ScriptedChat, gateway_client, resp_text};
 use super::support::context;
 
-/// A prompt declaring no capabilities at all.
+/// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(
     "---\n",
     "name: declares-nothing\n",
@@ -220,7 +220,7 @@ async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
     );
 }
 
-/// A prompt declaring one tool slot whose capability is not declared at
+/// A prompt declaring one tool slot whose Plugin is not declared at
 /// all.
 const DECLARES_ORPHAN_SLOT: &str = concat!(
     "---\n",
@@ -240,8 +240,8 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
 #[tokio::test]
 async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // An empty catalog: the slot's capability contributed nothing, which
-    // prepare reports as the missing capability.
+    // An empty catalog: the slot's Plugin contributed nothing, which
+    // prepare reports as the missing Plugin.
     let result = run_with_harness(
         &Environment::new(),
         &prompt,

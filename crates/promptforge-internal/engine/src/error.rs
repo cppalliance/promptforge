@@ -273,9 +273,9 @@ pub(crate) enum Error {
     #[error("unsupported promptforge version: {0} (this build supports major 0)")]
     UnsupportedVersion(u32),
 
-    /// The environment cannot satisfy the prompt: a required capability is
-    /// missing, a required capability needs a Host service this Host lacks,
-    /// two declared capabilities conflict, the filled model
+    /// The environment cannot satisfy the prompt: a required Plugin is
+    /// missing, a required Plugin needs a Host service this Host lacks,
+    /// two declared Plugins conflict, the filled model
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
     ///

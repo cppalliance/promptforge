@@ -1,4 +1,4 @@
-//! [`Web`], the `promptforge/web` capability, and the keys of the two
+//! [`Web`], the `promptforge/web` Plugin, and the keys of the two
 //! services it reads.
 //!
 //! The fetch client is built once, at construction, with the fetch policy;
@@ -33,7 +33,7 @@ pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
 /// this key.
 pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio-runtime");
 
-/// A capability that gives a run web access: one tool that fetches a page
+/// A Plugin that gives a run web access: one tool that fetches a page
 /// and one that searches the web.
 ///
 /// Its id is `promptforge/web`. `promptforge/web/fetch` fetches a URL
@@ -43,7 +43,7 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 ///
 /// It needs two services: the search provider registered under the key
 /// [`SEARCH_PROVIDER`] and the tokio runtime handle registered under the
-/// key [`TOKIO_RUNTIME`]. A run that requires the capability is refused
+/// key [`TOKIO_RUNTIME`]. A run that requires the Plugin is refused
 /// when either service is missing. A run that declares it optional gets
 /// the web tools only when both services are present.
 #[derive(Debug, Clone)]
@@ -55,13 +55,13 @@ pub struct Web {
 }
 
 impl Web {
-    /// Builds the capability with the default fetch policy.
+    /// Builds the Plugin with the default fetch policy.
     ///
     /// The HTTP client is built here, once, and every run's fetch tool
     /// shares it.
     ///
     /// # Panics
-    /// Panics only if the built-in capability id `promptforge/web` fails to
+    /// Panics only if the built-in Plugin id `promptforge/web` fails to
     /// parse, or if the HTTP client fails to build for the default policy
     /// because the TLS backend failed to initialize. Either would be a
     /// defect outside the caller's control.

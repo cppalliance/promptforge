@@ -101,7 +101,7 @@ pub(in super::super) fn arm_tools_scoped(
 }
 
 /// The test's tools as the two halves the Harness assembles from its
-/// activated capabilities: the catalog of descriptors the run's
+/// activated Plugins: the catalog of descriptors the run's
 /// frontmatter tool slots (under `tests/tools`) fill against at prepare,
 /// and the table of implementations the driver's tool performer resolves
 /// a `ToolCall` effect's id in.

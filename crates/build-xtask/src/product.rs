@@ -140,7 +140,7 @@ const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"]
 /// `crates/harness-internal/`.
 const HARNESS_FACADE: &str = "harness";
 /// The Harness family's three public root crates, the facade, the gateway
-/// client, and the web capability: the only Harness crates outside crates
+/// client, and the web Plugin: the only Harness crates outside crates
 /// may name.
 const PUBLIC_HARNESS: [&str; 3] = [HARNESS_FACADE, "harness-gateway-client", "harness-web"];
 /// The hakari feature-unification crate: the one unaffiliated crate Harness

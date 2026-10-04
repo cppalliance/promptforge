@@ -8,7 +8,7 @@ use promptforge::{Environment, RunErrorKind, RunResult};
 
 use super::support::{Fixture, captured_logs, context, parse, prepare_activated, run_activated};
 
-/// A prompt declaring `promptforge/web` as a required capability.
+/// A prompt declaring `promptforge/web` as a required Plugin.
 pub(super) const DECLARES_REQUIRED: &str = concat!(
     "---\n",
     "name: declares-required\n",
@@ -22,7 +22,7 @@ pub(super) const DECLARES_REQUIRED: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` as an optional capability.
+/// A prompt declaring `promptforge/web` as an optional Plugin.
 const DECLARES_OPTIONAL: &str = concat!(
     "---\n",
     "name: declares-optional\n",
@@ -57,7 +57,7 @@ const RUNS_AFTER_ACTIVATION: &str = concat!(
 #[test]
 fn a_missing_required_plugin_is_reported() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    // No registry: activation reports the declared required capability
+    // No registry: activation reports the declared required Plugin
     // absent, and the merged prepare report includes it.
     let (_ctx, requirements, _) = prepare_activated(
         Environment::new(),
@@ -124,7 +124,7 @@ fn a_required_activation_failure_is_logged_and_reported() {
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let logs = captured_logs(|| {
-        // A present-but-failing required capability leaves the run
+        // A present-but-failing required Plugin leaves the run
         // without something the prompt declared: it is reported like an
         // absent one, and the failure is also a log line.
         let (_ctx, requirements, _) = prepare_activated(
@@ -152,7 +152,7 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let logs = captured_logs(|| {
-        // An optional capability that fails to activate is only a log
+        // An optional Plugin that fails to activate is only a log
         // line: the prompt declared it could run without.
         let (_ctx, requirements, _) = prepare_activated(
             Environment::new(),
@@ -172,7 +172,7 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
 fn the_run_path_refuses_a_missing_required_plugin_with_a_notice_naming_it() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // An empty registry: activation reports the declared required
-    // capability absent, and the run path folds that report into its
+    // Plugin absent, and the run path folds that report into its
     // refusal.
     let result = run_activated(&PluginRegistry::new(), &prompt, context("refuse-missing"));
     let RunResult::Failure(error) = result else {

@@ -53,7 +53,7 @@ fn prompt(lua: &str) -> Arc<Prompt> {
     Arc::new(prompt.expect("the fixture prompt parses"))
 }
 
-/// A capability-free run over `prompt` with a fixed seed and start,
+/// A Plugin-free run over `prompt` with a fixed seed and start,
 /// prepared against the fixture [`catalog`], over the run's filesystem
 /// `vfs`.
 fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
@@ -66,20 +66,20 @@ fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
     Run::new(prompt, "", ctx)
 }
 
-/// A capability-free run over `lua` with a fixed seed and start, over a
+/// A Plugin-free run over `lua` with a fixed seed and start, over a
 /// fresh memory store.
 pub(crate) fn run(lua: &str) -> Run {
     run_over(lua, VfsRef::default())
 }
 
-/// A capability-free run over `lua` whose `store` table operates on
+/// A Plugin-free run over `lua` whose `store` table operates on
 /// `vfs`: the test holds the handle, so it can read what the run wrote or
 /// mount a backend of its own.
 pub(crate) fn run_over(lua: &str, vfs: VfsRef) -> Run {
     prepared(prompt(lua), vfs)
 }
 
-/// A capability-free run over two sections: `## Main` runs `main`, and
+/// A Plugin-free run over two sections: `## Main` runs `main`, and
 /// `## Child` runs `child` when the main spawns it as a task.
 pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     let source = format!(

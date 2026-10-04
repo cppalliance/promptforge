@@ -2,7 +2,7 @@
 //! [`Harness`] resolves the launch model through the Host's broker,
 //! prepares an Engine `Run` from the prompt's source (drawing the inputs
 //! the Engine refuses to draw itself, putting the declared input file in
-//! place, activating capabilities, beginning the run at its recorder),
+//! place, activating Plugins, beginning the run at its recorder),
 //! steps it, performs each chat, tool-call, and timer effect through its
 //! performer and answers each Vfs effect inline, feeds the answers back,
 //! hands every event, effect, and answer to the run's recorder, and reads

@@ -1,4 +1,4 @@
-//! Tests for the `promptforge/web` capability: what activation contributes
+//! Tests for the `promptforge/web` Plugin: what activation contributes
 //! with both services, without either, and on a cancelled run; the custom
 //! fetch policy; and the two service keys.
 

@@ -1,4 +1,4 @@
-//! Declared service needs at activation: a capability that needs the
+//! Declared service needs at activation: a Plugin that needs the
 //! input broker, declared required or optional, on a Host that has or
 //! lacks one.
 
@@ -14,7 +14,7 @@ use promptforge::{MissingService, RunErrorKind, RunResult};
 
 use super::support::{captured_logs, context, parse, run_activated};
 
-/// A prompt declaring `acme/asker` as a required capability.
+/// A prompt declaring `acme/asker` as a required Plugin.
 const REQUIRES_ASKER: &str = concat!(
     "---\n",
     "name: requires-asker\n",
@@ -28,7 +28,7 @@ const REQUIRES_ASKER: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring `acme/asker` as an optional capability.
+/// A prompt declaring `acme/asker` as an optional Plugin.
 const OPTIONAL_ASKER: &str = concat!(
     "---\n",
     "name: optional-asker\n",
@@ -47,7 +47,7 @@ fn asker_id() -> PluginId {
     PluginId::parse("acme/asker").expect("the fixture id is valid")
 }
 
-/// A fixture capability that needs the input service and counts how
+/// A fixture Plugin that needs the input service and counts how
 /// often its `create` runs.
 struct Asker {
     id: PluginId,

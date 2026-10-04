@@ -1,4 +1,4 @@
-//! Tests for the capability activation contract.
+//! Tests for the Plugin activation contract.
 
 use std::sync::Arc;
 
@@ -8,7 +8,7 @@ use promptforge::plugins::PluginId;
 use super::{Contribution, Plugin, PluginError, PluginErrorKind, RunServices};
 use crate::{HostServices, INPUT_BROKER, InputBroker, InputError, ServiceError, ServiceKey};
 
-/// A minimal in-process capability: a static id, no contributed tools, and
+/// A minimal in-process Plugin: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
 /// services it was handed.
 struct StubPlugin {
@@ -43,7 +43,7 @@ impl Plugin for StubPlugin {
     }
 }
 
-/// Compile-time proof that a capability can be shared across tasks and
+/// Compile-time proof that a Plugin can be shared across tasks and
 /// threads behind a trait object: the registry stores `Arc<dyn Plugin>`.
 const fn _assert_plugin_trait_object_is_shareable() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}

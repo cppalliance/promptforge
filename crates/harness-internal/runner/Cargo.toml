@@ -28,7 +28,7 @@ tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The scripted capabilities' tools and input brokers are `async_trait`
+# The scripted Plugins' tools and input brokers are `async_trait`
 # traits.
 async-trait.workspace = true
 # The suites drive runs on tokio's test runtime, pace performers with its

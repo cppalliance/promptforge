@@ -16,7 +16,7 @@ use promptforge::{
     Environment, ParseErrorKind, Prompt, RequirementCheck, Run, RunContext, RunResult, Step,
 };
 
-/// Declares two files, one capability, one tool slot, `times` then `name`,
+/// Declares two files, one Plugin, one tool slot, `times` then `name`,
 /// and one model role.
 const CONTRACT: &str = concat!(
     "---\n",

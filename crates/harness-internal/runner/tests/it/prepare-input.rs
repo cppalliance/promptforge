@@ -1,10 +1,10 @@
 //! The Host's optional input broker at preparation, supplied among its
 //! services under `INPUT_BROKER`: activation hands it to every declared
-//! capability, or hands none when the Host has nobody to ask; and the
-//! `promptforge/user-input` capability's `input.ask()` reaches it, is
+//! Plugin, or hands none when the Host has nobody to ask; and the
+//! `promptforge/user-input` Plugin's `input.ask()` reaches it, is
 //! refused when required on a Host without one, and degrades when
 //! optional. A frontmatter alias named `input` collides with the
-//! capability's prelude global and fails the run before any effect, while
+//! Plugin's prelude global and fails the run before any effect, while
 //! an alias of another name runs beside it.
 
 use super::*;
@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use harness_plugins::{INPUT_BROKER, InputBroker, InputError, UserInput, activate};
 use promptforge::Prompt;
 
-/// A prompt declaring the probe capability, with nothing to run.
+/// A prompt declaring the probe Plugin, with nothing to run.
 const DECLARES_PROBE: &str = "---\nname: declares-probe\ndescription: d\npromptforge: 0\n\
     plugins:\n  - tests/probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
@@ -42,7 +42,7 @@ impl InputBroker for Failing {
     }
 }
 
-/// A fixture capability contributing nothing, which records whether each
+/// A fixture Plugin contributing nothing, which records whether each
 /// activation's services carried a broker.
 struct Probe {
     id: PluginId,
@@ -150,7 +150,7 @@ const OPTIONAL: &str = "  - ref: promptforge/user-input\n    optional: true\n";
 const ASKS_ONCE: &str = "local text, available = input.ask()\n\
     return tostring(input.connected()) .. '|' .. text .. '|' .. tostring(available)";
 
-/// A one-section prompt that declares the user-input capability with
+/// A one-section prompt that declares the user-input Plugin with
 /// `declaration` (none when empty) and runs `lua`.
 fn user_input_prompt(declaration: &str, lua: &str) -> String {
     let plugins = if declaration.is_empty() {
@@ -164,7 +164,7 @@ fn user_input_prompt(declaration: &str, lua: &str) -> String {
     )
 }
 
-/// A registry holding the first-party user-input capability.
+/// A registry holding the first-party user-input Plugin.
 fn user_input_registry() -> Arc<PluginRegistry> {
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(UserInput::new())).unwrap();

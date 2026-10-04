@@ -1,7 +1,7 @@
 //! Catalog assembly and conflict checks: activation assembles the
-//! activated capabilities' contributed tools into the run's catalog in
+//! activated Plugins' contributed tools into the run's catalog in
 //! declaration order, enforcing tool prefix-containment at assembly, and
-//! rejects capability co-activation conflicts naming both; the Engine's
+//! rejects Plugin co-activation conflicts naming both; the Engine's
 //! prepare fills exact slots against the catalog it is handed.
 
 use std::sync::Arc;
@@ -84,7 +84,7 @@ fn web_registry() -> PluginRegistry {
 fn a_co_activation_conflict_fails_preparation_naming_both() {
     let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
     // The check is symmetric: the conflict is found whether the earlier-
-    // or the later-declared capability declares it.
+    // or the later-declared Plugin declares it.
     for (bashkit_conflicts, terminal_conflicts) in [
         (vec!["promptforge/terminal"], vec![]),
         (vec![], vec!["promptforge/bashkit"]),
@@ -117,7 +117,7 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
                 requirements.conflicts
             );
         };
-        // Both capabilities are named, in declaration order.
+        // Both Plugins are named, in declaration order.
         assert_eq!(conflict.first.to_string(), "promptforge/bashkit");
         assert_eq!(conflict.second.to_string(), "promptforge/terminal");
         // A context gets one filesystem reality or the other, never
@@ -258,7 +258,7 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
         vec![
             fixture_tool("promptforge/web/fetch"),
             fixture_tool("promptforge/web/search"),
-            // The repeat: one capability contributes the same id twice.
+            // The repeat: one Plugin contributes the same id twice.
             fixture_tool("promptforge/web/fetch"),
         ],
     );
@@ -335,7 +335,7 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
 #[test]
 fn a_plugin_both_activation_and_prepare_report_missing_is_named_once() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    // The declared capability is absent from an empty registry (activation
+    // The declared Plugin is absent from an empty registry (activation
     // reports it) and its exact slot finds nothing in the catalog (prepare
     // reports it): the merged refusal names it once.
     let result = run_activated(&PluginRegistry::new(), &prompt, context("refuse-once"));

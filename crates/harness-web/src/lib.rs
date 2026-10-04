@@ -1,14 +1,14 @@
-//! Web access for prompts: a capability that gives a run two tools, one
+//! Web access for prompts: a Plugin that gives a run two tools, one
 //! that fetches a page and one that searches the web.
 //!
-//! A Host registers [`Web`] in its capability registry. A prompt turns it
+//! A Host registers [`Web`] in its Plugin registry. A prompt turns it
 //! on with one frontmatter line, `plugins: [promptforge/web]`. The
 //! run then gets both tools: `promptforge/web/fetch`, which fetches a URL
 //! and returns its content as text, and `promptforge/web/search`, which
 //! runs a search through the Host's [`SearchProvider`]. The two tools
 //! always come together.
 //!
-//! The Host also provides two services beside the capability. Its
+//! The Host also provides two services beside the Plugin. Its
 //! [`SearchProvider`] is registered under the key [`SEARCH_PROVIDER`]. The
 //! tokio runtime handle that every fetch is spawned onto is registered
 //! under the key [`TOKIO_RUNTIME`]. A run gets the web tools only when

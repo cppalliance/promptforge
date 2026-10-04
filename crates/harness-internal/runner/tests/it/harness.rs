@@ -56,7 +56,7 @@ fn request(source: &str) -> RunRequest {
     }
 }
 
-/// A Harness over `recorder` and `broker` with no capabilities, no Host
+/// A Harness over `recorder` and `broker` with no Plugins, no Host
 /// services, and a timer no test here reaches.
 fn plain_harness(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker) -> Harness {
     Harness::new(

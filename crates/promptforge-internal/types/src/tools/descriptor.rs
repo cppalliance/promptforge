@@ -11,9 +11,9 @@ use crate::plugins::PluginId;
 ///
 /// A descriptor holds the tool's stable id, its wire name, the description
 /// the model reads, its parameter schema, whether its output is structured,
-/// and the capabilities that conflict with the contributing capability.
+/// and the Plugins that conflict with the contributing Plugin.
 ///
-/// The caller collects the descriptors of its activated capabilities into a
+/// The caller collects the descriptors of its activated Plugins into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay in the
 /// caller's own table, keyed by [`ToolId`]. The Engine binds its tool slots
 /// to the descriptors and advertises them to the model. It issues each tool
@@ -36,8 +36,8 @@ pub struct ToolDescriptor {
     /// script that calls the tool receives the output as data. Otherwise the
     /// script receives it as a string.
     pub structured_output: bool,
-    /// The capabilities that conflict with the contributing capability. Each
-    /// of them and the contributing capability exclude each other in a run.
+    /// The Plugins that conflict with the contributing Plugin. Each
+    /// of them and the contributing Plugin exclude each other in a run.
     /// The descriptor only records them. The caller checks them before
     /// activation.
     pub conflicts: Vec<PluginId>,
@@ -70,8 +70,8 @@ impl ToolDescriptor {
         self
     }
 
-    /// Sets the capabilities that conflict with the contributing capability.
-    /// Each of them and the contributing capability exclude each other in a
+    /// Sets the Plugins that conflict with the contributing Plugin.
+    /// Each of them and the contributing Plugin exclude each other in a
     /// run.
     #[must_use]
     pub fn with_conflicts(mut self, conflicts: Vec<PluginId>) -> ToolDescriptor {

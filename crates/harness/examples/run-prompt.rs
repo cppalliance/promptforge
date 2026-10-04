@@ -1,5 +1,5 @@
 //! A Host runs one prompt through a Harness: it supplies a recorder, an
-//! offline inference broker, a tokio timer, and an empty capability
+//! offline inference broker, a tokio timer, and an empty Plugin
 //! registry, hands the run the operator's name, and prints the greeting
 //! the run leaves at its output file.
 
@@ -63,7 +63,7 @@ impl Timer for Clock {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Build one Harness for this run from the Host's recorder, broker,
-    //    timer, capabilities, and services.
+    //    timer, Plugins, and services.
     let recorder = Arc::new(MemoryRecorder::new());
     let harness = Harness::new(
         recorder.clone(),

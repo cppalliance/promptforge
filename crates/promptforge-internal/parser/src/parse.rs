@@ -30,8 +30,8 @@ impl Prompt {
     ///
     /// - `Frontmatter` when the `---` delimiters are missing, the frontmatter
     ///   fails to decode, a tool alias or model role label is a reserved name,
-    ///   one name is both a tool alias and a model role label, a capability is
-    ///   declared twice, or a tool slot names a capability declared optional.
+    ///   one name is both a tool alias and a model role label, a Plugin is
+    ///   declared twice, or a tool slot names a Plugin declared optional.
     /// - `Structure` when the H1 is missing, there is more than one H1, the H1
     ///   title is empty, a section heading skips a level (such as an H4
     ///   directly under an H2), a section heading is empty, or two sibling

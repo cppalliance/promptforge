@@ -1,5 +1,5 @@
 //! Shared fixtures for the activation suite: the activate-then-prepare
-//! ceremony, the run driver, fixture capabilities and tools, and the log
+//! ceremony, the run driver, fixture Plugins and tools, and the log
 //! capture.
 
 use std::io;
@@ -34,7 +34,7 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
 
 /// The Harness's activate-then-prepare ceremony spelled out, so a test can
 /// inspect what the run path folds into one refusal: activates the
-/// prompt's declared capabilities against `registry` with the run's own
+/// prompt's declared Plugins against `registry` with the run's own
 /// services - its cancel flag - installs the resulting catalog, prepares
 /// the context, and merges activation's report into prepare's. Returns
 /// the prepared context, the merged report, and the activation (for its
@@ -53,7 +53,7 @@ pub(super) fn prepare_activated(
     (ctx, requirements, activation)
 }
 
-/// The Harness's run path with capabilities: activates against
+/// The Harness's run path with Plugins: activates against
 /// `registry`, installs the catalog, prepares, merges the activation
 /// report, refuses an unsatisfiable prompt, and otherwise drives the run
 /// on the store-only loop below (no fixture here performs a chat, tool,
@@ -97,7 +97,7 @@ pub(super) struct Observed {
     pub(super) cancel: CancelHandle,
 }
 
-/// A fixture capability recording each activation's services. `fail`
+/// A fixture Plugin recording each activation's services. `fail`
 /// turns every activation into a [`PluginError`].
 pub(super) struct Fixture {
     id: PluginId,
@@ -107,7 +107,7 @@ pub(super) struct Fixture {
 }
 
 impl Fixture {
-    /// Builds a fixture capability registered under `id`.
+    /// Builds a fixture Plugin registered under `id`.
     pub(super) fn new(id: &str, fail: bool) -> (Arc<Fixture>, Arc<Mutex<Vec<Observed>>>) {
         let activations = Arc::new(Mutex::new(Vec::new()));
         let fixture = Arc::new(Fixture {
@@ -213,7 +213,7 @@ impl Tool for BadWireTool {
     }
 }
 
-/// A fixture capability contributing tools and declaring co-activation
+/// A fixture Plugin contributing tools and declaring co-activation
 /// conflicts.
 pub(super) struct ToolFixture {
     id: PluginId,

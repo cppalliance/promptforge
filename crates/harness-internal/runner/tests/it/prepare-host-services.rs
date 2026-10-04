@@ -1,7 +1,7 @@
-//! The Host's services at preparation: a declared capability that needs a
+//! The Host's services at preparation: a declared Plugin that needs a
 //! service activates with the provider the Host's map holds; a run whose
 //! Host provides no such service is refused naming the service when the
-//! capability is required, and prepares with the capability activated
+//! Plugin is required, and prepares with the Plugin activated
 //! without it, recording the gap, when optional.
 
 use super::*;
@@ -14,17 +14,17 @@ use promptforge::Prompt;
 /// The test-only service the fixture needs.
 const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
 
-/// A prompt declaring the greeter capability, with nothing to run.
+/// A prompt declaring the greeter Plugin, with nothing to run.
 const DECLARES_GREETER: &str = "---\nname: declares-greeter\ndescription: d\npromptforge: 0\n\
     plugins:\n  - tests/greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
-/// A prompt declaring the greeter capability as optional, with nothing to
+/// A prompt declaring the greeter Plugin as optional, with nothing to
 /// run.
 const DECLARES_GREETER_OPTIONALLY: &str = "---\nname: declares-greeter\ndescription: d\n\
     promptforge: 0\nplugins:\n  - ref: tests/greeter\n    optional: true\n---\n\n\
     # Title\n\n## Only\n\nDone.\n";
 
-/// A fixture capability needing [`GREETING`], which records the greeting
+/// A fixture Plugin needing [`GREETING`], which records the greeting
 /// each activation read, or `None` when it activated without one.
 struct Greeter {
     id: PluginId,

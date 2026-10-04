@@ -255,7 +255,7 @@ impl InferenceBroker for NoChat {
 #[tokio::test]
 async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     // The broker behind a real run: a section parked on `input.ask()`
-    // calls the user-input capability's ask tool, the tool waits on the
+    // calls the user-input Plugin's ask tool, the tool waits on the
     // conversation's broker, the registry completes the wait with the
     // operator's text, and the answer resumes the run to its result.
     let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\

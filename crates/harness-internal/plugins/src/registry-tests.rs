@@ -8,7 +8,7 @@ use promptforge::plugins::PluginId;
 use super::{PluginRegistry, RegistryErrorKind};
 use crate::{Contribution, Plugin, PluginError, RunServices};
 
-/// A minimal capability with a fixed id and description.
+/// A minimal Plugin with a fixed id and description.
 struct Stub {
     id: PluginId,
     description: String,
@@ -27,12 +27,12 @@ impl Plugin for Stub {
     }
 }
 
-/// Parses a test capability id.
+/// Parses a test Plugin id.
 fn plugin_id(id: &str) -> PluginId {
     PluginId::parse(id).expect("test ids are valid Plugin ids")
 }
 
-/// Builds a stub capability with a fixed id and description.
+/// Builds a stub Plugin with a fixed id and description.
 fn stub(id: &str, description: &str) -> Arc<dyn Plugin> {
     Arc::new(Stub {
         id: plugin_id(id),

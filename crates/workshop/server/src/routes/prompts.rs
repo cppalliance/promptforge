@@ -52,7 +52,7 @@ struct ContractResponse {
     input: Option<FileDto>,
     /// The declared output file; `null` when absent.
     output: Option<FileDto>,
-    /// The declared capabilities, in declaration order.
+    /// The declared Plugins, in declaration order.
     plugins: Vec<PluginDto>,
     /// The declared tool slots, sorted by alias.
     tools: Vec<ToolDto>,
@@ -80,12 +80,12 @@ impl From<&FileDecl> for FileDto {
     }
 }
 
-/// A declared capability: its global id and optionality.
+/// A declared Plugin: its global id and optionality.
 #[derive(Debug, Serialize)]
 struct PluginDto {
-    /// The capability's global id (`namespace/pack`).
+    /// The Plugin's global id (`namespace/plugin`).
     id: String,
-    /// Whether an absent capability skips instead of failing.
+    /// Whether an absent Plugin skips instead of failing.
     optional: bool,
 }
 
@@ -106,7 +106,7 @@ enum ToolDto {
     Exact {
         /// The prompt-local alias.
         alias: String,
-        /// The canonical `namespace/pack/name` path.
+        /// The canonical `namespace/plugin/name` path.
         path: String,
     },
 }

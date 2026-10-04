@@ -1,18 +1,18 @@
 // The mention typeahead: the floating list of chips that opens while
 // the operator types a mention in the chat box. One instance lives for
 // one suggestion session - the render lifecycle's onStart constructs it
-// and onExit disposes it, a pair the suggestion plugin always closes
-// (the stopped transition, or the view destroy mid-session) - so the DOM
-// and listeners never outlive the session. Positioning is owned by the
-// plugin's managed mount(): it appends the popup to document.body,
+// and onExit disposes it, a pair the ProseMirror suggestion plugin always
+// closes (the stopped transition, or the view destroy mid-session) - so
+// the DOM and listeners never outlive the session. Positioning is owned
+// by the plugin's managed mount(): it appends the popup to document.body,
 // anchors it to the live cursor rect, and repositions on scroll and
 // resize through Floating UI's autoUpdate; the unmount it returns tears
 // all of that down.
 //
 // The rows are chips: each draws the chip's icon, its label, and its
-// `description` dimmed to the right. Items with a `group` are
-// ordered by group with a non-selectable header at each boundary;
-// keyboard navigation indexes the items only. The plugin's `loading`
+// `description` dimmed to the right. Items with a `group` are ordered by
+// group with a non-selectable header at each boundary; keyboard
+// navigation indexes the items only. The ProseMirror plugin's `loading`
 // flag renders a loading row while the source is pending. The popup
 // writes no fetch, debounce, or staleness logic of its own: the plugin
 // supplies the items, the abort, and the flag; the popup only draws.
@@ -25,7 +25,7 @@ import { renderChipIcon } from "./chip-view";
 import { type ChipNodeAttrs, attrsFromChip } from "./mention-chip";
 import type { ChipRef } from "./types";
 
-// The plugin hands the popup ChipRef items and takes the node's
+// The ProseMirror plugin hands the popup ChipRef items and takes the node's
 // attributes back through command(): the popup converts at that edge,
 // so typeahead-only fields (description, group) never reach the node.
 type TypeaheadProps = SuggestionProps<ChipRef, ChipNodeAttrs>;
@@ -74,8 +74,8 @@ function layoutRows(items: readonly ChipRef[]): Row[] {
  * popup <div>. ArrowUp/ArrowDown cycle the highlight over the items
  * with wraparound (headers are skipped), Enter and Tab command the
  * highlighted item, and every other key falls through to the editor.
- * Escape needs no handling here: the plugin dismisses the session on
- * Escape itself, which fires onExit.
+ * Escape needs no handling here: the ProseMirror plugin dismisses the
+ * session on Escape itself, which fires onExit.
  */
 export class TypeaheadPopup extends Disposable {
   private readonly element: HTMLDivElement;
@@ -169,8 +169,8 @@ export class TypeaheadPopup extends Disposable {
   private renderRows(rows: readonly Row[]): void {
     this.list.textContent = "";
     // A settled query with no matches shows nothing; the session stays
-    // alive until the plugin dismisses it. A pending query shows the
-    // loading row instead, so the popup does not blink shut mid-search.
+    // alive until the ProseMirror plugin dismisses it. A pending query shows
+    // the loading row instead, so the popup does not blink shut mid-search.
     this.element.hidden = rows.length === 0 && !this.loading;
     if (rows.length === 0 && this.loading) {
       const pending = document.createElement("li");

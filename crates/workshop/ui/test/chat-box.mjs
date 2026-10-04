@@ -9,8 +9,8 @@
 // the test stubs it to drive the clamp, and pins the exported clamp
 // directly); getText returns paragraphs and breaks as single newlines;
 // clear empties; update({ editable }) toggles contenteditable; the box
-// registers a prosemirror text-control adapter through the injected
-// registrar whose canUndo/canRedo track the history plugin's depth;
+// registers a prosemirror text-control adapter through the injected registrar
+// whose canUndo/canRedo track the ProseMirror history plugin's depth;
 // dispose destroys the editor. The contract: defaults, data-* state
 // mirrors (variant, editable, action, mic), the send button's three
 // states, the mic button's rendering per state, the controls slot, the
@@ -22,9 +22,9 @@
 // missing or unknown `v` leaves the box unchanged. The typeahead seams:
 // the default stub source lists its three entries when `@` is typed;
 // an injected mentionSource replaces the stub and the popup lists its
-// items; the source receives the plugin's AbortSignal, which fires when
-// a newer keystroke arrives; an older query resolving after a newer one
-// does not overwrite the newer results; `/` is plain text with no
+// items; the source receives the ProseMirror plugin's AbortSignal, which
+// fires when a newer keystroke arrives; an older query resolving after a
+// newer one does not overwrite the newer results; `/` is plain text with no
 // popup (commandSource's default is stored, not wired). The static
 // renderer (src/parts/chatbox/chat-box-view.ts): renderDraft turns a
 // SerializedDraft with text, one inline pill, and one attachment into
@@ -81,7 +81,7 @@ globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.HTMLInputElement = dom.window.HTMLInputElement;
 globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
 globalThis.Node = dom.window.Node;
-// The suggestion plugin's managed mount reads the DOMRect global.
+// The ProseMirror suggestion plugin's managed mount reads the DOMRect global.
 globalThis.DOMRect = dom.window.DOMRect;
 // Tiptap's focus command schedules with the bare globals.
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
@@ -136,9 +136,9 @@ function sendButton(input) {
   return input.element.querySelector(".ws-agent-session__send");
 }
 
-// The suggestion plugin debounces its item fetch (the component
-// configures 50 to 100 ms), so a typeahead assertion waits past that
-// window plus the mount's computePosition before reading the popup.
+// The ProseMirror suggestion plugin debounces its item fetch (the
+// component configures 50 to 100 ms), so a typeahead assertion waits past
+// that window plus the mount's computePosition before reading the popup.
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 160));
 }

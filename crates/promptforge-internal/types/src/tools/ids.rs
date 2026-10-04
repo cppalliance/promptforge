@@ -6,14 +6,14 @@ use crate::plugins::PluginId;
 /// The stable identity of a tool.
 ///
 /// A tool id is a three-segment [`GlobalName`] of the form
-/// `namespace/pack/name`. In global names, the segment count tells what a name
-/// refers to: two segments name a capability and three name a tool. The first
-/// two segments of any tool id are the id of the capability that contributed
+/// `namespace/plugin/name`. In global names, the segment count tells what a name
+/// refers to: two segments name a Plugin and three name a tool. The first
+/// two segments of any tool id are the id of the Plugin that contributed
 /// the tool. For example, `promptforge/web/fetch` comes from
 /// `promptforge/web`.
 ///
 /// A tool's wire name is the name a model request uses for it. The tool id
-/// stays its identity under any wire name. When a capability is bound to a
+/// stays its identity under any wire name. When a Plugin is bound to a
 /// prompt, a selected tool can be offered under a prompt-local alias. Calls
 /// under that alias still reach the same tool.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -22,7 +22,7 @@ pub struct ToolId(GlobalName);
 
 impl ToolId {
     /// Parses a tool id, which must have exactly 3 segments
-    /// (`namespace/pack/name`).
+    /// (`namespace/plugin/name`).
     ///
     /// # Errors
     /// Returns [`ToolIdError`] when the segment count differs from 3
@@ -49,7 +49,7 @@ impl ToolId {
         &self.0.segments()[2]
     }
 
-    /// Returns the id of the capability that contributed this tool, which is
+    /// Returns the id of the Plugin that contributed this tool, which is
     /// the tool id's first two segments.
     ///
     /// Every tool id has this prefix, and it was validated when the tool id
@@ -62,21 +62,21 @@ impl ToolId {
 }
 
 impl std::fmt::Display for ToolId {
-    /// Formats the id in its canonical `namespace/pack/name` string form.
+    /// Formats the id in its canonical `namespace/plugin/name` string form.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl serde::Serialize for ToolId {
-    /// Serializes the id as a single `namespace/pack/name` string.
+    /// Serializes the id as a single `namespace/plugin/name` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for ToolId {
-    /// Deserializes the id from its `namespace/pack/name` string.
+    /// Deserializes the id from its `namespace/plugin/name` string.
     ///
     /// The string is validated with the same rules as `ToolId::parse`. An
     /// invalid string is a deserialization error.
@@ -93,7 +93,7 @@ impl<'de> serde::Deserialize<'de> for ToolId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolIdErrorKind {
-    /// The id had fewer or more than 3 segments (`namespace/pack/name`).
+    /// The id had fewer or more than 3 segments (`namespace/plugin/name`).
     SegmentCount,
     /// A segment (or a wire name) was empty.
     Empty,

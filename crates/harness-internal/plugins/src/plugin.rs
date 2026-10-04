@@ -1,12 +1,12 @@
-//! The capability activation contract.
+//! The Plugin activation contract.
 //!
-//! A capability is the activation unit: code that runs at run setup and
-//! makes services available to the run. Capabilities are delivered in packs
-//! (crates now, DLLs via adapters later) and identified by a 2-segment
-//! [`PluginId`] - kind is encoded by arity, so a capability id is
-//! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. Before a run is prepared, the Harness activates
-//! each declared capability by calling [`Plugin::create`] with the
+//! A Plugin is the activation unit: code that runs at run setup and
+//! makes services available to the run. Plugins ship in crates now, and as
+//! DLLs through an adapter later, and are identified by a 2-segment
+//! [`PluginId`] - kind is encoded by arity, so a Plugin id is
+//! `namespace/plugin` and every tool it contributes sits under
+//! `namespace/plugin/name`. Before a run is prepared, the Harness activates
+//! each declared Plugin by calling [`Plugin::create`] with the
 //! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
 //! optional Lua prelude, and grows without redesign. An activation failure
 //! is a [`PluginError`]: a stable kind for code plus a message written
@@ -27,35 +27,35 @@ mod tests;
 
 /// Code that runs when a run is set up and makes services available to it.
 ///
-/// A capability is delivered in a pack and declared in a prompt's
+/// A Plugin ships in a crate and is declared in a prompt's
 /// frontmatter by its [`id`](Plugin::id). Before a run is prepared, the
 /// Harness calls [`create`](Plugin::create) at most once per declared
-/// capability, in declaration order. It assembles each returned
+/// Plugin, in declaration order. It assembles each returned
 /// [`Contribution`] into the run's tool catalog and its preludes.
 ///
 /// # Invariants
 ///
 /// - [`id`](Plugin::id) returns the same value on every call; it is the
 ///   registry key and must be unique within a registry.
-/// - Every contributed tool's id sits under the capability's own id:
-///   `namespace/pack/name` for a `namespace/pack` capability. Containment is
+/// - Every contributed tool's id sits under the Plugin's own id:
+///   `namespace/plugin/name` for a `namespace/plugin` Plugin. Containment is
 ///   total and is checked when the run's catalog is assembled.
 /// - [`create`](Plugin::create) must not panic and should return
 ///   promptly when the run is cancelled.
 pub trait Plugin: Send + Sync {
-    /// Returns the capability's stable identity (`namespace/pack`).
+    /// Returns the Plugin's stable identity (`namespace/plugin`).
     fn id(&self) -> &PluginId;
 
-    /// Returns a one-sentence description of the capability, shown to
+    /// Returns a one-sentence description of the Plugin, shown to
     /// Hosts.
     fn description(&self) -> &str;
 
-    /// Returns the capabilities that conflict with this one when declared
+    /// Returns the Plugins that conflict with this one when declared
     /// in the same run.
     ///
     /// For example, bashkit and a terminal each give the run its own
     /// filesystem, so a run uses at most one of the two. Activation checks
-    /// every pair of declared capabilities that are present. The check is
+    /// every pair of declared Plugins that are present. The check is
     /// symmetric, so only one member of a pair needs to name the other. A
     /// conflicting pair fails preparation, and the failure names both
     /// members. The default returns an empty list.
@@ -63,45 +63,45 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
-    /// Returns the ids of the run services this capability needs from
+    /// Returns the ids of the run services this Plugin needs from
     /// [`RunServices`].
     ///
     /// Activation checks each id with [`RunServices::provides`] before it
-    /// calls this capability's [`create`](Plugin::create). A provider
+    /// calls this Plugin's [`create`](Plugin::create). A provider
     /// registered under the id but supplied as a different type than the
-    /// id names counts as missing. When a required capability needs a
+    /// id names counts as missing. When a required Plugin needs a
     /// missing service, activation skips its `create` and refuses the run,
-    /// naming the capability and the service. When the capability is
-    /// optional, activation calls `create` anyway, and the capability
+    /// naming the Plugin and the service. When the Plugin is
+    /// optional, activation calls `create` anyway, and the Plugin
     /// decides how to handle the missing service. The default returns an
     /// empty list.
     fn needs(&self) -> &[ServiceId] {
         &[]
     }
 
-    /// Activates the capability for one run.
+    /// Activates the Plugin for one run.
     ///
     /// The Harness calls this at most once per run, before the run is
     /// prepared, and passes the run's services. The run receives the
-    /// capability's tools and prelude only when this call succeeds.
+    /// Plugin's tools and prelude only when this call succeeds.
     ///
     /// # Errors
     /// Returns a [`PluginError`] whose message is safe to show to a
-    /// model when the capability fails to activate, for example when a
+    /// model when the Plugin fails to activate, for example when a
     /// backend handshake fails or the run is cancelled.
     fn create(&self, services: &RunServices) -> Result<Contribution, PluginError>;
 }
 
-/// The cancellation flag and services a capability receives when it
+/// The cancellation flag and services a Plugin receives when it
 /// activates for a run.
 ///
-/// Configuration the Host supplies for a capability arrives here, never
+/// Configuration the Host supplies for a Plugin arrives here, never
 /// through the prompt.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RunServices {
     /// The run's cancellation flag. It is the same synchronous handle the
-    /// Engine polls, so a capability sees a cancellation by the Host by
+    /// Engine polls, so a Plugin sees a cancellation by the Host by
     /// polling it too.
     pub cancel: CancelHandle,
     /// The services the run has, read through [`get`](RunServices::get)
@@ -151,17 +151,17 @@ impl std::fmt::Debug for RunServices {
     }
 }
 
-/// The tools and optional Lua prelude that a capability adds to a run.
+/// The tools and optional Lua prelude that a Plugin adds to a run.
 #[derive(Default)]
 pub struct Contribution {
-    /// The tools the capability adds to the run. Each tool's id sits under
-    /// the capability's own id: `namespace/pack/name` for a
-    /// `namespace/pack` capability.
+    /// The tools the Plugin adds to the run. Each tool's id sits under
+    /// the Plugin's own id: `namespace/plugin/name` for a
+    /// `namespace/plugin` Plugin.
     pub tools: Vec<Arc<dyn Tool>>,
     /// Lua source that every section VM of the run installs.
     /// [`Plugin::create`] builds it for this run, so it can embed facts
     /// fixed at activation. A prelude defines tables and functions that
-    /// call the capability's tools through `tools.call` by full id. It may
+    /// call the Plugin's tools through `tools.call` by full id. It may
     /// call a tool or the store only after it has loaded.
     pub prelude: Option<String>,
 }
@@ -183,11 +183,11 @@ impl std::fmt::Debug for Contribution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginErrorKind {
-    /// The capability failed to activate in [`Plugin::create`].
+    /// The Plugin failed to activate in [`Plugin::create`].
     Activation,
     /// The run was cancelled before or during activation.
     Cancelled,
-    /// Any other capability failure.
+    /// Any other Plugin failure.
     Other,
 }
 

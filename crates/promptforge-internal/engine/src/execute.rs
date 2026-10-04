@@ -13,7 +13,7 @@
 //! - `config` - the public [`RunContext`] and [`RunLimits`].
 //! - `context` - the ambient `RunState` run state.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
-//!   against the Harness-supplied catalog; capability activation itself is the
+//!   against the caller's catalog; Plugin activation itself is the
 //!   Harness's, in `harness-plugins`.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's tool- and model-slot fill functions.
@@ -133,8 +133,8 @@ pub fn perform_vfs_op(
 ///   only classifies errors raised while the run is still going. The run
 ///   itself ends in [`RunResult::Cancelled`].
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
-/// - [`RunErrorKind::RequirementsUnmet`] - a missing required capability,
-///   a service the caller left out, a capability conflict, a model
+/// - [`RunErrorKind::RequirementsUnmet`] - a missing required Plugin,
+///   a service the caller left out, a Plugin conflict, a model
 ///   requirement a bound model fails to meet (a context minimum or a hard
 ///   keyword), or an H1 block that failed the prompt's hard gate.
 #[derive(Debug)]

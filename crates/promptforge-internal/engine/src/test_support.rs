@@ -132,10 +132,10 @@ pub fn drive(
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on `harness` ([`RunHarness::tools`]). Capability activation
+/// implementations on `harness` ([`RunHarness::tools`]). Plugin activation
 /// is the Harness's and never happens here.
 ///
-/// An unsatisfiable prompt - a missing required capability or an unmet
+/// An unsatisfiable prompt - a missing required Plugin or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.

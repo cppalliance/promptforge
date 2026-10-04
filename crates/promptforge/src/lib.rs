@@ -111,7 +111,7 @@ pub mod tools {
 }
 
 pub mod plugins {
-    //! Capability ids, the Lua preludes capabilities add to a run, and the
+    //! Plugin ids, the Lua preludes Plugins add to a run, and the
     //! global names those preludes may define.
 
     pub use promptforge_types::names::GlobalName;
@@ -124,7 +124,7 @@ pub mod plugins {
 }
 
 pub mod prompt {
-    //! What a prompt's frontmatter declares: its files, capabilities, tool
+    //! What a prompt's frontmatter declares: its files, Plugins, tool
     //! slots, arguments, and model roles.
 
     pub use promptforge_parser::ArgDecl;

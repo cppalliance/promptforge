@@ -14,12 +14,12 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 /// catalog, journaling every fill into the returned bindings.
 ///
 /// Exact slots fill by identity: an exact path's first two segments name
-/// its capability, so a slot whose capability contributed nothing to the
+/// its Plugin, so a slot whose Plugin contributed nothing to the
 /// catalog - it was never activated - lands in
 /// [`Requirements::missing_required`] and the run fails until satisfied. A
-/// slot whose capability DID contribute to the catalog but not the named
-/// tool - the contribution was rejected at assembly, or the capability
-/// never offered that name - is not a missing capability: installing
+/// slot whose Plugin DID contribute to the catalog but not the named
+/// tool - the contribution was rejected at assembly, or the Plugin
+/// never offered that name - is not a missing Plugin: installing
 /// changes nothing. It is warned and left unfilled, and advertising the
 /// unfilled alias fails at run time.
 pub(super) fn fill_tool_bindings(
@@ -41,7 +41,7 @@ pub(super) fn fill_tool_bindings(
         }
         let plugin = id.plugin();
         let plugin_present = catalog.tools().iter().any(|tool| plugin.contains(&tool.id));
-        // A capability that contributed to the catalog but not this tool
+        // A Plugin that contributed to the catalog but not this tool
         // (the contribution was rejected at assembly or never made) is not
         // missing: reporting it would fail the run unsatisfiably, since
         // installing it changes nothing. The alias stays unbound instead,

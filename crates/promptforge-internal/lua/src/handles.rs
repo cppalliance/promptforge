@@ -24,7 +24,7 @@ pub enum ToolOutputKind {
 
 /// One prompt-local alias bound to one stable live tool identity, holding
 /// the tool's data - its schema, description, output kind, and the
-/// contributing capability's conflicts - and never its implementation.
+/// contributing Plugin's conflicts - and never its implementation.
 ///
 /// Run-time execution (schema preparation, script dispatch) reads the
 /// binding alone; a call is issued as an effect naming the identity, and
@@ -48,7 +48,7 @@ pub struct ToolBinding {
     /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
     pub output_kind: ToolOutputKind,
-    /// The co-activation conflicts of the capability that contributed the
+    /// The co-activation conflicts of the Plugin that contributed the
     /// tool, kept for the record.
     pub conflicts: Vec<PluginId>,
 }

@@ -116,7 +116,7 @@ async fn descriptor_is_stable_and_faithful() {
 #[tokio::test]
 async fn the_migrated_id_names_its_contributing_plugin() {
     // promptforge/web_fetch migrated to promptforge/web/fetch: dropping the
-    // last segment must yield the contributing capability's id.
+    // last segment must yield the contributing Plugin's id.
     let id = on_this_runtime(&FetchClient::new()).id();
     assert_eq!(id.name(), "fetch");
     assert_eq!(

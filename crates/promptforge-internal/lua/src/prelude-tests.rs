@@ -1,4 +1,4 @@
-//! Tests for capability prelude install: the restricted environment, the
+//! Tests for Plugin prelude install: the restricted environment, the
 //! collision checks, the top-level seal, and load failures.
 
 use std::num::NonZeroU32;
