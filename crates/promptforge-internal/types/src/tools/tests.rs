@@ -77,6 +77,20 @@ fn tool_error_classifies_and_hides_source() {
 }
 
 #[test]
+fn a_tool_error_built_with_a_source_is_a_backend_error() {
+    use super::{ToolError, ToolErrorKind};
+    let err = ToolError::with_source("backend failed", std::io::Error::other("boom"));
+    assert_eq!(err.kind(), ToolErrorKind::Backend);
+    assert!(std::error::Error::source(&err).is_some());
+}
+
+#[test]
+fn an_empty_catalog_builds_and_holds_no_tools() {
+    let catalog = ToolCatalog::new(&[]).expect("an empty catalog builds");
+    assert!(catalog.tools().is_empty());
+}
+
+#[test]
 fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
     // The descriptor is the tool as data: identity, wire name, description,
     // schema, and the output kind, so a catalog built from descriptors holds

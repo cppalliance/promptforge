@@ -33,18 +33,6 @@
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
-//!
-//! # Examples
-//!
-//! ```no_run
-//! use gateway_config::Config;
-//! use std::path::Path;
-//!
-//! let inputs = gateway_config::ProfileSelection::new(Some("work"), None);
-//! let config = Config::load(Path::new("gateway.toml"), &inputs)?;
-//! println!("{} models configured", config.models().len());
-//! # Ok::<(), gateway_config::ConfigError>(())
-//! ```
 
 mod api_error;
 mod config;

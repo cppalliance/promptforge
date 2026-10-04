@@ -51,23 +51,6 @@ static NEXT_WAITER: AtomicU64 = AtomicU64::new(0);
 /// Reading walks the ancestor chain, one atomic load per level. The chain is
 /// as deep as the run's task nesting, which the Engine caps, so a poll from
 /// the instruction hook stays a handful of loads.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::cancel::CancelHandle;
-///
-/// let run = CancelHandle::new();
-/// let task = run.child();
-/// let other = run.child();
-///
-/// task.cancel();
-/// assert!(task.is_cancelled());
-/// assert!(!run.is_cancelled() && !other.is_cancelled());
-///
-/// run.cancel();
-/// assert!(other.is_cancelled());
-/// ```
 #[derive(Clone, Default)]
 pub struct CancelHandle {
     inner: Arc<Node>,
@@ -233,23 +216,6 @@ impl CancelHandle {
     /// if it already does, otherwise when a cancel lands on it or on an
     /// ancestor. This is how a Harness that must wait on the flag waits
     /// without polling it on a timer.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::future::Future;
-    /// use std::pin::pin;
-    /// use std::task::{Context, Poll, Waker};
-    ///
-    /// use promptforge::cancel::CancelHandle;
-    ///
-    /// let run = CancelHandle::new();
-    /// let mut waiting = pin!(run.child().cancelled());
-    /// let mut cx = Context::from_waker(Waker::noop());
-    /// assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
-    /// run.cancel();
-    /// assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
-    /// ```
     pub fn cancelled(&self) -> Cancelled {
         Cancelled {
             waiter: Waiter {

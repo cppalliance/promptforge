@@ -249,19 +249,7 @@ impl GatewayBinding {
 ///
 /// Replacements accept only validated capabilities, and shutdown reads the
 /// same current immutable snapshot as every workshop consumer. Raw connection
-/// files cannot cross the publication boundary, shown here through the
-/// `replace_sidecar` test seam:
-///
-/// ```compile_fail
-/// use gateway_api_discovery::GatewayDiscoveryFile;
-///
-/// # fn publish(
-/// #     updater: &workshop_gateway::GatewayUpdater,
-/// #     raw: &GatewayDiscoveryFile,
-/// # ) -> Result<(), workshop_gateway::GatewayPublicationError> {
-/// updater.replace_sidecar(raw)
-/// # }
-/// ```
+/// files cannot cross the publication boundary.
 #[derive(Clone)]
 pub struct GatewayUpdater {
     binding: GatewayBinding,

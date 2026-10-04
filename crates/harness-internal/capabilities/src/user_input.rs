@@ -47,44 +47,6 @@
 //! Operator input is trusted, so the ask tool answers with
 //! [`ToolOutput::trusted`] and the text is never guard-wrapped.
 //!
-//! ```
-//! use std::sync::Arc;
-//!
-//! use harness_capabilities::{
-//!     Capability, HostServices, INPUT_BROKER, InputBroker, InputError, RunServices, Tool,
-//!     USER_INPUT_ASK_TOOL, UserInput,
-//! };
-//! use promptforge::cancel::CancelHandle;
-//! use promptforge::tools::OutputTrust;
-//!
-//! /// Stands in for the Host's own way of reaching a person.
-//! struct Operator;
-//!
-//! #[async_trait::async_trait]
-//! impl InputBroker for Operator {
-//!     async fn wait(&self) -> Result<String, InputError> {
-//!         Ok("hello operator".to_owned())
-//!     }
-//! }
-//!
-//! # #[tokio::main(flavor = "current_thread")]
-//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut host = HostServices::new();
-//! let operator: Arc<dyn InputBroker> = Arc::new(Operator);
-//! host.provide(&INPUT_BROKER, operator)?;
-//! let services =
-//!     RunServices::with_host(promptforge::vfs::VfsRef::default(), CancelHandle::new(), host);
-//! let contribution = UserInput::new().create(&services)?;
-//! let ask = &contribution.tools[0];
-//! assert_eq!(ask.id().to_string(), USER_INPUT_ASK_TOOL);
-//!
-//! let answer = ask.call(serde_json::json!({})).await?;
-//! assert_eq!(answer.text(), "hello operator");
-//! assert_eq!(answer.trust(), OutputTrust::Trusted);
-//! # Ok(())
-//! # }
-//! ```
-//!
 //! # Answering without an operator
 //!
 //! For a Host with nobody to ask, such as a batch or eval Host, the
@@ -170,18 +132,6 @@ const FALLBACK: &str = "User input is unavailable in this host; continue without
 /// Needs [`INPUT_BROKER`]. Contributes the ask tool,
 /// [`USER_INPUT_ASK_TOOL`], and a prelude defining `input.ask()` and
 /// `input.connected()`. The module page covers what a script receives.
-///
-/// # Examples
-///
-/// ```
-/// use harness_capabilities::{Capability, CapabilityRegistry, INPUT_BROKER, UserInput};
-///
-/// let mut registry = CapabilityRegistry::new();
-/// registry.register(std::sync::Arc::new(UserInput::new()))?;
-/// assert_eq!(UserInput::new().id().to_string(), "promptforge/user-input");
-/// assert_eq!(UserInput::new().needs(), [INPUT_BROKER.id()]);
-/// # Ok::<(), harness_capabilities::RegistryError>(())
-/// ```
 #[derive(Debug, Clone)]
 pub struct UserInput {
     /// The stable identity, `promptforge/user-input`.

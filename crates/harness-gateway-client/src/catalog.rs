@@ -161,18 +161,6 @@ async fn get_authed(
 /// `Transport` or `Timeout` on transport failure, the kind
 /// [`classify_http_failure`] reads from a non-success status, and
 /// `MalformedResponse` when the body is not a model list.
-///
-/// # Examples
-///
-/// ```no_run
-/// # async fn run() -> Result<(), harness_gateway_client::CompletionError> {
-/// use harness_gateway_client::fetch_model_catalog;
-///
-/// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
-/// println!("gateway offers {} models", catalog.models().len());
-/// # Ok(())
-/// # }
-/// ```
 pub async fn fetch_model_catalog(
     base_url: &str,
     token: &str,

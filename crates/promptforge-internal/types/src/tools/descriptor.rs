@@ -40,21 +40,6 @@ pub struct ToolDescriptor {
 
 impl ToolDescriptor {
     /// Builds a plain-output descriptor with no conflicts.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolDescriptor, ToolId};
-    ///
-    /// let echo = ToolDescriptor::new(
-    ///     ToolId::parse("example/echo/echo")?,
-    ///     "echo",
-    ///     "Echo the `text` argument back.",
-    ///     serde_json::json!({"type": "object", "properties": {}}),
-    /// );
-    /// assert_eq!(echo.wire_name, "echo");
-    /// assert!(!echo.structured_output);
-    /// # Ok::<(), promptforge::tools::ToolIdError>(())
-    /// ```
     #[must_use]
     pub fn new(
         id: ToolId,

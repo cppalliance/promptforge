@@ -194,17 +194,6 @@ impl<'de> Deserialize<'de> for TaskId {
 /// the spawning principal.
 ///
 /// Orders by task path, then by sequence.
-///
-/// # Examples
-/// ```
-/// use promptforge::ids::{Provenance, TaskId};
-///
-/// let task: TaskId = "0.2".parse()?;
-/// let first = Provenance { task: task.clone(), seq: 0 };
-/// let second = Provenance { task, seq: 1 };
-/// assert!(first < second);
-/// # Ok::<(), promptforge::ids::ParseIdError>(())
-/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Provenance {
     /// The nearest enclosing task.

@@ -10,20 +10,6 @@ type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// Every broker maps its failures into these kinds, and retryability is
 /// fixed per kind (see [`CompletionError::is_retryable`]).
 /// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::CompletionErrorKind;
-///
-/// let kind = CompletionErrorKind::RateLimited;
-/// let advice = match kind {
-///     CompletionErrorKind::RateLimited | CompletionErrorKind::Overloaded => "back off, then retry",
-///     CompletionErrorKind::ContextOverflow => "compact the conversation",
-///     _ => "inspect",
-/// };
-/// assert_eq!(advice, "back off, then retry");
-/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionErrorKind {
@@ -64,17 +50,6 @@ impl CompletionErrorKind {
     /// may extend it with `: ` and a specific the broker's own code wrote.
     /// Provider text never enters the message; it goes in the
     /// [`detail`](CompletionError::detail) (see [`CompletionError`]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::model::{CompletionError, CompletionErrorKind};
-    ///
-    /// let kind = CompletionErrorKind::Timeout;
-    /// assert_eq!(kind.phrase(), "the model backend did not answer in time");
-    /// let error = CompletionError::new(kind, kind.phrase());
-    /// assert_eq!(error.to_string(), kind.phrase());
-    /// ```
     #[must_use]
     pub fn phrase(self) -> &'static str {
         match self {
@@ -140,30 +115,6 @@ impl CompletionErrorKind {
 /// message with `: ` and a specific the broker's own code wrote, such as
 /// the byte limit that was hit. Provider text never enters the message; it
 /// goes in the [`detail`](CompletionError::detail).
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::{CompletionError, CompletionErrorKind};
-///
-/// let error = CompletionError::new(
-///     CompletionErrorKind::Timeout,
-///     "the model backend did not answer in time",
-/// )
-/// .with_detail("no chunk for 120 seconds");
-/// assert_eq!(error.kind(), CompletionErrorKind::Timeout);
-/// assert!(error.is_retryable());
-/// assert_eq!(error.to_string(), "the model backend did not answer in time");
-/// assert_eq!(error.detail(), Some("no chunk for 120 seconds"));
-///
-/// let overflow = CompletionError::context_overflow(
-///     Some(5120),
-///     Some(4096),
-///     "the request is larger than the model's context window",
-/// );
-/// assert_eq!(overflow.overflow(), (Some(5120), Some(4096)));
-/// assert!(!overflow.is_retryable());
-/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionError {

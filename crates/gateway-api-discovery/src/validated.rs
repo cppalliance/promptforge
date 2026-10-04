@@ -50,46 +50,10 @@ pub enum ValidationError {
 ///
 /// The bearer is deliberately absent from [`Debug`](fmt::Debug) output.
 ///
-/// ```compile_fail
-/// use gateway_api_discovery::ValidatedConnection;
-///
-/// let _raw = ValidatedConnection {
-///     connection: panic!("external code cannot fill the private field"),
-/// };
-/// ```
-///
 /// No test-fixture feature exposes another production-capability
-/// constructor:
+/// constructor.
 ///
-/// ```compile_fail
-/// use gateway_api_discovery::{GatewayDiscoveryFile, ValidatedConnection};
-///
-/// let raw = GatewayDiscoveryFile {
-///     port: 8081,
-///     api_key: "forged".into(),
-///     pid: std::process::id(),
-///     epoch: 1,
-///     version: "test".into(),
-///     started_at: "2026-09-07T00:00:00Z".into(),
-/// };
-/// let _ = ValidatedConnection::validate_for_test(raw);
-/// ```
-///
-/// The crate-private named validator is equally unavailable:
-///
-/// ```compile_fail
-/// use gateway_api_discovery::{GatewayDiscoveryFile, ValidatedConnection};
-///
-/// let raw = GatewayDiscoveryFile {
-///     port: 8081,
-///     api_key: "forged".into(),
-///     pid: std::process::id(),
-///     epoch: 1,
-///     version: "test".into(),
-///     started_at: "2026-09-07T00:00:00Z".into(),
-/// };
-/// let _ = ValidatedConnection::validate_named(raw, "my-test-binary");
-/// ```
+/// The crate-private named validator is equally unavailable.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ValidatedConnection {

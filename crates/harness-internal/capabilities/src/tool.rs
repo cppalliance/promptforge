@@ -22,55 +22,7 @@ mod tests;
 ///
 /// A complete implementation supplies a stable identity, a transport wire name,
 /// a model-facing description, a JSON-Schema parameter object, and an async
-/// [`call`](Tool::call). A minimal doctested implementation:
-///
-/// ```
-/// use harness_capabilities::Tool;
-/// use promptforge::tools::{
-///     OutputTrust, ToolError, ToolErrorKind, ToolId, ToolOutput,
-/// };
-///
-/// struct Echo {
-///     id: ToolId,
-/// }
-///
-/// #[async_trait::async_trait]
-/// impl Tool for Echo {
-///     fn id(&self) -> ToolId {
-///         // The identity is validated once at construction, so this accessor
-///         // is infallible and never panics.
-///         self.id.clone()
-///     }
-///     fn wire_name(&self) -> &str {
-///         "echo"
-///     }
-///     fn description(&self) -> &str {
-///         "Echo the `text` argument back to the model."
-///     }
-///     fn parameters_schema(&self) -> serde_json::Value {
-///         serde_json::json!({
-///             "type": "object",
-///             "properties": { "text": { "type": "string" } },
-///             "required": ["text"],
-///         })
-///     }
-///     async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-///         let text = args.get("text").and_then(serde_json::Value::as_str).ok_or_else(|| {
-///             ToolError::message("echo: missing string `text`")
-///                 .with_kind(ToolErrorKind::InvalidArguments)
-///         })?;
-///         // First-party, non-attacker content: trusted.
-///         Ok(ToolOutput::trusted(text.to_owned()))
-///     }
-/// }
-///
-/// let echo = Echo { id: ToolId::parse("example/echo/echo")? };
-/// assert_eq!(echo.wire_name(), "echo");
-/// assert_eq!(echo.id().name(), "echo");
-/// assert_eq!(echo.descriptor().wire_name, "echo");
-/// # let _ = OutputTrust::Trusted;
-/// # Ok::<(), promptforge::tools::ToolIdError>(())
-/// ```
+/// [`call`](Tool::call).
 ///
 /// # Compatibility policy
 ///

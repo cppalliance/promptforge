@@ -116,6 +116,15 @@ fn section_vm_requires_delayed_single_value_injection() {
 }
 
 #[test]
+fn a_section_vm_reads_back_an_empty_var_after_injection() {
+    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
+    assert_eq!(vm.var().expect("var must serialize"), json!({}));
+    vm.teardown(&null_emitter(), "Test");
+}
+
+#[test]
 fn section_vm_value_injection_bypasses_shared_global_metatables() {
     // Engine values inject before the shared replay, and the captured alias
     // globals raw-set after it, so a metatable the shared library installs on

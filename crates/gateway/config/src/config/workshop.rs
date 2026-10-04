@@ -32,23 +32,6 @@ pub struct WorkshopConfig {
 
 impl WorkshopConfig {
     /// Returns the socket address the workshop listener binds.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 0
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop]
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let workshop = config.workshop().expect("workshop section present");
-    /// assert_eq!(workshop.bind().to_string(), "127.0.0.1:7910");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn bind(&self) -> SocketAddr {
         self.bind
@@ -56,23 +39,6 @@ impl WorkshopConfig {
 
     /// Returns whether the gateway opens the system browser at the workshop
     /// URL once it is serving.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 0
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop]
-    /// # open_browser = true
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert!(config.workshop().expect("workshop section present").open_browser());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn open_browser(&self) -> bool {
         self.open_browser

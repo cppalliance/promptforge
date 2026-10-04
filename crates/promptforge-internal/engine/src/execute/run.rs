@@ -59,27 +59,6 @@ pub enum Step {
 /// `Run` is `Send`: one caller drives it at a time, and the thread may
 /// change between calls. It owns its prompt through an `Arc`, so the Harness
 /// keeps parsing once and running many times.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so the
-/// Harness drives it to `Done` in one step:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{Prompt, Run, RunContext, RunResult, Step};
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let mut run = Run::new(Arc::new(prompt), "", ctx);
-/// let Step::Done { result: RunResult::Ok(text), .. } = run.step() else {
-///     panic!("the literal run is done at once");
-/// };
-/// assert_eq!(text, "hello");
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub struct Run {
     /// The scheduler, present unless construction failed.
     scheduler: Option<Scheduler>,

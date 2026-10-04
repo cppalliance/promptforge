@@ -464,7 +464,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-2>
 
-### Step 2: Remove every doctest and replace the doctest gate
+### Step 2: Remove every doctest and replace the doctest gate [completed]
 
 - Component: Docs out of rustdoc
 - Work item: 2, for every crate with a compiled doc-comment block, then the tidy check, then the gate.

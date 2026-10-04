@@ -8,28 +8,6 @@
 /// The Host provides one under [`SEARCH_PROVIDER`](crate::SEARCH_PROVIDER).
 /// The tool validates the model's arguments before it calls the provider,
 /// and sets no deadline of its own: the provider bounds its own round.
-///
-/// # Examples
-///
-/// ```
-/// use harness_web::{SearchError, SearchProvider, SearchQuery, SearchResult, SearchResults};
-///
-/// struct Canned;
-///
-/// #[async_trait::async_trait]
-/// impl SearchProvider for Canned {
-///     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError> {
-///         Ok(SearchResults {
-///             query: query.query,
-///             results: vec![SearchResult {
-///                 title: "Example".to_owned(),
-///                 url: "https://example.com".to_owned(),
-///                 ..SearchResult::default()
-///             }],
-///         })
-///     }
-/// }
-/// ```
 #[async_trait::async_trait]
 pub trait SearchProvider: Send + Sync {
     /// Runs `query` and returns its results.
@@ -173,18 +151,6 @@ pub enum SearchErrorKind {
 ///
 /// The search tool keeps the whole error as its own error's source, so
 /// the cause survives the provider boundary.
-///
-/// # Examples
-///
-/// ```
-/// use harness_web::{SearchError, SearchErrorKind};
-///
-/// let cause = std::io::Error::other("connection reset");
-/// let error = SearchError::with_source(SearchErrorKind::Transport, "request failed", cause);
-/// assert_eq!(error.kind(), SearchErrorKind::Transport);
-/// assert_eq!(error.to_string(), "request failed");
-/// assert!(std::error::Error::source(&error).is_some());
-/// ```
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SearchError {

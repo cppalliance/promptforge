@@ -58,19 +58,6 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// destroys all Lua memory belonging to that section. Once Lua allocation
 /// succeeds, construction, shared-load, and captured-binding failures cross
 /// the same explicit observed teardown boundary as later lifecycle failures.
-///
-/// # Examples
-/// ```no_run
-/// use promptforge_lua::SectionVm;
-/// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-/// use promptforge_types::untrusted::GuardNonce;
-///
-/// let nonce = GuardNonce::from_seed(1);
-/// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-/// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
-/// vm.teardown(&emitter, "Example");
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug)]
 pub struct SectionVm {
     lua: Lua,
@@ -271,19 +258,6 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use promptforge_lua::SectionVm;
-    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_types::untrusted::GuardNonce;
-    ///
-    /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn new(nonce: &GuardNonce, emitter: &Emitter, section: &str) -> Result<Self> {
         #[cfg(feature = "test-support")]
         let tally = vm_tally::Guard::enter();
@@ -405,19 +379,6 @@ impl SectionVm {
     /// Destroys this section VM at an explicit observed lifecycle boundary.
     ///
     /// The emitter is borrowed only for this synchronous call.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use promptforge_lua::SectionVm;
-    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_types::untrusted::GuardNonce;
-    ///
-    /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn teardown(self, emitter: &Emitter, section: &str) {
         emitter.report(section, lifecycle::LUA_TEARDOWN_STARTED);
         drop(self);

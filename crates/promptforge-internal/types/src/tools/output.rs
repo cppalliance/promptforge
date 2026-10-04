@@ -29,15 +29,6 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     /// Builds a trusted output whose text is appended to the model verbatim.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// let out = ToolOutput::trusted("done");
-    /// assert_eq!(out.trust(), OutputTrust::Trusted);
-    /// assert_eq!(out.text(), "done");
-    /// ```
     #[must_use]
     pub fn trusted(text: impl Into<String>) -> ToolOutput {
         ToolOutput {
@@ -47,14 +38,6 @@ impl ToolOutput {
     }
 
     /// Builds an untrusted output that is nonce-wrapped before reaching a model.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// let out = ToolOutput::untrusted("<html>...");
-    /// assert_eq!(out.trust(), OutputTrust::Untrusted);
-    /// ```
     #[must_use]
     pub fn untrusted(text: impl Into<String>) -> ToolOutput {
         ToolOutput {
@@ -64,26 +47,12 @@ impl ToolOutput {
     }
 
     /// Borrows the output text.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::ToolOutput;
-    ///
-    /// assert_eq!(ToolOutput::trusted("hi").text(), "hi");
-    /// ```
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
     /// Returns whether the output is trusted or untrusted.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// assert_eq!(ToolOutput::untrusted("x").trust(), OutputTrust::Untrusted);
-    /// ```
     #[must_use]
     pub fn trust(&self) -> OutputTrust {
         self.trust
@@ -121,14 +90,6 @@ pub struct ToolError {
 
 impl ToolError {
     /// Builds a model-safe error with only a message (kind `Other`).
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("could not read the page");
-    /// assert_eq!(err.kind(), ToolErrorKind::Other);
-    /// ```
     #[must_use]
     pub fn message(text: impl Into<String>) -> ToolError {
         ToolError {
@@ -142,16 +103,6 @@ impl ToolError {
     ///
     /// The initial kind is [`ToolErrorKind::Backend`]; use
     /// [`ToolError::with_kind`] when the source represents another class.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let io = std::io::Error::other("boom");
-    /// let err = ToolError::with_source("backend failed", io);
-    /// assert_eq!(err.kind(), ToolErrorKind::Backend);
-    /// assert!(std::error::Error::source(&err).is_some());
-    /// ```
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,
@@ -165,14 +116,6 @@ impl ToolError {
     }
 
     /// Sets the classification, returning the updated error.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("bad args").with_kind(ToolErrorKind::InvalidArguments);
-    /// assert_eq!(err.kind(), ToolErrorKind::InvalidArguments);
-    /// ```
     #[must_use]
     pub fn with_kind(mut self, kind: ToolErrorKind) -> ToolError {
         self.kind = kind;
@@ -186,28 +129,12 @@ impl ToolError {
     }
 
     /// Returns whether the failure was a cancellation.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("stopped").with_kind(ToolErrorKind::Cancelled);
-    /// assert!(err.is_cancelled());
-    /// ```
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self.kind, ToolErrorKind::Cancelled)
     }
 
     /// Returns whether retrying the same call could plausibly succeed.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("timeout").with_kind(ToolErrorKind::Transport);
-    /// assert!(err.is_retryable());
-    /// ```
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self.kind, ToolErrorKind::Transport)

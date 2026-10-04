@@ -42,17 +42,6 @@ impl CapabilityId {
     /// ([`CapabilityIdErrorKind::SegmentCount`]), a segment is empty
     /// ([`CapabilityIdErrorKind::Empty`]), or a segment contains a character
     /// outside the global-name charset ([`CapabilityIdErrorKind::Control`]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    ///
-    /// let id = CapabilityId::parse("promptforge/web")?;
-    /// assert_eq!(id.namespace(), "promptforge");
-    /// assert_eq!(id.pack(), "web");
-    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
-    /// ```
     pub fn parse(id: &str) -> Result<CapabilityId, CapabilityIdError> {
         let name = GlobalName::parse(id)
             .map_err(|e| CapabilityIdError::from_global_name_kind(e.kind()))?;
@@ -80,32 +69,12 @@ impl CapabilityId {
     }
 
     /// Returns the namespace segment (reverse-DNS or `promptforge`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    ///
-    /// let id = CapabilityId::parse("org.rustalliance/core")?;
-    /// assert_eq!(id.namespace(), "org.rustalliance");
-    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
-    /// ```
     #[must_use]
     pub fn namespace(&self) -> &str {
         self.0.namespace()
     }
 
     /// Returns the pack segment.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    ///
-    /// let id = CapabilityId::parse("promptforge/web")?;
-    /// assert_eq!(id.pack(), "web");
-    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
-    /// ```
     #[must_use]
     pub fn pack(&self) -> &str {
         self.0.pack()
@@ -118,20 +87,6 @@ impl CapabilityId {
     /// (`namespace/pack/name` for a `namespace/pack` capability), so
     /// dropping the tool's last segment must yield exactly this id.
     /// The Harness enforces containment when the run's catalog is assembled.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    /// use promptforge::tools::ToolId;
-    ///
-    /// let web = CapabilityId::parse("promptforge/web")?;
-    /// let fetch = ToolId::parse("promptforge/web/fetch")?;
-    /// let stray = ToolId::parse("promptforge/other/fetch")?;
-    /// assert!(web.contains(&fetch));
-    /// assert!(!web.contains(&stray));
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
         tool.capability() == *self

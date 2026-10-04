@@ -47,19 +47,6 @@ pub struct LocalRuntime {
 ///
 /// Successfully started children remain owned by [`runtime`](Self::runtime)
 /// when another configured model fails to start.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-/// use gateway_local::LocalRuntime;
-///
-/// let config = Config::from_toml_str(
-///     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-/// )?;
-/// let outcome = LocalRuntime::start_partial(&config, None)?;
-/// assert!(outcome.failures().is_empty());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct LocalStartOutcome {
@@ -69,56 +56,18 @@ pub struct LocalStartOutcome {
 
 impl LocalStartOutcome {
     /// Returns the successfully started local runtime.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # use gateway_local::LocalRuntime;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// # )?;
-    /// let outcome = LocalRuntime::start_partial(&config, None)?;
-    /// assert_eq!(outcome.runtime().child_count(), 0);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn runtime(&self) -> &LocalRuntime {
         &self.runtime
     }
 
     /// Returns one failure for each local model that did not start.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # use gateway_local::LocalRuntime;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// # )?;
-    /// let outcome = LocalRuntime::start_partial(&config, None)?;
-    /// assert!(outcome.failures().is_empty());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn failures(&self) -> &[LocalStartFailure] {
         &self.failures
     }
 
     /// Splits the outcome into its running children and failures.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # use gateway_local::LocalRuntime;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// # )?;
-    /// let outcome = LocalRuntime::start_partial(&config, None)?;
-    /// let (runtime, failures) = outcome.into_parts();
-    /// assert_eq!(runtime.child_count(), 0);
-    /// assert!(failures.is_empty());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn into_parts(self) -> (LocalRuntime, Vec<LocalStartFailure>) {
         (self.runtime, self.failures)
@@ -137,38 +86,12 @@ pub struct LocalStartFailure {
 
 impl LocalStartFailure {
     /// Returns the configured model name.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use gateway_config::Config;
-    /// # use gateway_local::LocalRuntime;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// # )?;
-    /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
-    ///     eprintln!("{} did not start", failure.model());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model
     }
 
     /// Returns the startup failure.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use gateway_config::Config;
-    /// # use gateway_local::LocalRuntime;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// # )?;
-    /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
-    ///     eprintln!("{}", failure.error());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn error(&self) -> &LocalError {
         &self.error
@@ -236,19 +159,6 @@ impl LocalRuntime {
     ///
     /// # Errors
     /// Returns [`LocalError`] when shared runtime provisioning fails.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::Config;
-    /// use gateway_local::LocalRuntime;
-    ///
-    /// let config = Config::from_toml_str(
-    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
-    /// )?;
-    /// let outcome = LocalRuntime::start_partial(&config, None)?;
-    /// assert_eq!(outcome.runtime().child_count(), 0);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn start_partial(
         config: &Config,
         progress: Option<&Activity>,
@@ -1062,6 +972,26 @@ endpoints = ["e"]
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
         assert!(runtime.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn start_partial_with_no_local_models_returns_an_empty_runtime_and_no_failures() {
+        let config = Config::from_toml_str(
+            r#"
+config-version = 0
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test"
+"#,
+        )
+        .expect("config");
+        let outcome = LocalRuntime::start_partial(&config, None).expect("empty partial start");
+        assert_eq!(outcome.runtime().child_count(), 0);
+        assert!(outcome.failures().is_empty());
+        let (runtime, failures) = outcome.into_parts();
+        assert_eq!(runtime.child_count(), 0);
+        assert!(failures.is_empty());
     }
 
     #[test]

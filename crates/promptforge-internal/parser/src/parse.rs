@@ -20,25 +20,6 @@ impl Prompt {
     /// identifier and reported under task `0`, since no run exists yet.
     /// They are values for the caller to log; nothing is read back.
     ///
-    /// ```
-    /// use promptforge::event::Event;
-    /// use promptforge::{ParseErrorKind, Prompt};
-    ///
-    /// let source = "---\nname: greeter\ndescription: says hi\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
-    /// let (prompt, events) = Prompt::parse(source, "docs");
-    /// let prompt = prompt?;
-    /// assert_eq!(prompt.frontmatter().name(), "greeter");
-    /// assert_eq!(prompt.title(), "Greeter");
-    /// assert!(matches!(events.first(), Some(Event::ParseStarted { .. })));
-    /// assert!(matches!(events.last(), Some(Event::ParseSucceeded { .. })));
-    ///
-    /// // A malformed prompt reports a classified error, and the events say so.
-    /// let (err, events) = Prompt::parse("no frontmatter here", "docs");
-    /// assert_eq!(err.unwrap_err().kind(), ParseErrorKind::Frontmatter);
-    /// assert!(matches!(events.last(), Some(Event::ParseFailed { .. })));
-    /// # Ok::<(), promptforge::ParseError>(())
-    /// ```
-    ///
     /// # Errors
     /// The first half of the pair is a [`ParseError`] classified `Frontmatter` when the frontmatter
     /// delimiters are missing or the frontmatter is invalid, a tool alias or

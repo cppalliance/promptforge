@@ -22,19 +22,6 @@ use tokio::sync::watch;
 /// Cheap to clone through an `Arc`; the hub sits in the gateway's
 /// application state for the process lifetime and activities register
 /// and remove themselves by their own lifetimes.
-///
-/// # Examples
-///
-/// ```
-/// use gateway_progress::ProgressHub;
-///
-/// let hub = ProgressHub::new();
-/// assert!(!hub.current().busy);
-/// let activity = hub.begin("Loading profile");
-/// assert_eq!(hub.current().text, "Loading profile");
-/// drop(activity);
-/// assert!(!hub.current().busy);
-/// ```
 #[derive(Debug)]
 pub struct ProgressHub {
     inner: Arc<Inner>,

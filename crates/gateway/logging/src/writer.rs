@@ -27,20 +27,6 @@ const TRUNCATION_MARKER: &str = " [truncated]\n";
 /// values are replaced without invoking their formatting implementation.
 /// Obtained from
 /// [`LogRuntime::writer`](crate::LogRuntime::writer).
-///
-/// # Examples
-/// ```
-/// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-writer-", env!("CARGO_PKG_VERSION")));
-/// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
-/// let writer = runtime.writer();
-/// let _subscriber = tracing_subscriber::fmt()
-///     .fmt_fields(writer.clone())
-///     .with_writer(writer)
-///     .finish();
-/// runtime.shutdown()?;
-/// # std::fs::remove_dir_all(&dir).ok();
-/// # Ok::<(), gateway_logging::LogError>(())
-/// ```
 #[derive(Debug, Clone)]
 pub struct LogWriter {
     queue: Arc<LogQueue>,

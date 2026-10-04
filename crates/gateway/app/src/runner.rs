@@ -149,35 +149,6 @@ impl Gateway {
     ///
     /// # Errors
     /// Returns [`StartupError`] when routing construction fails.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway::{Config, Gateway, ProfilesContext};
-    ///
-    /// let toml = r#"
-    /// config-version = 0
-    ///
-    /// [server]
-    /// bind = "127.0.0.1:0"
-    /// api_key = "secret"
-    ///
-    /// [[endpoint]]
-    /// id = "e"
-    /// protocol = "openai"
-    /// base_url = "http://127.0.0.1:9"
-    /// api_key = ""
-    ///
-    /// [[model]]
-    /// name = "m"
-    /// description = "a model"
-    /// context = 8192
-    /// upstream = "u"
-    /// endpoints = ["e"]
-    /// "#;
-    /// let config = Config::from_toml_str(toml).unwrap();
-    /// let gateway = Gateway::new(&config, ProfilesContext::default()).unwrap();
-    /// let _router = gateway.router();
-    /// ```
     pub fn new(config: &Config, profiles: ProfilesContext) -> Result<Gateway, StartupError> {
         Self::new_with_hub(
             config,
@@ -247,35 +218,6 @@ impl Gateway {
     /// # Errors
     /// Returns [`StartupError`] when local provisioning or routing construction
     /// fails.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway::{Config, Gateway, ProfilesContext};
-    ///
-    /// let toml = r#"
-    /// config-version = 0
-    ///
-    /// [server]
-    /// bind = "127.0.0.1:0"
-    /// api_key = "secret"
-    ///
-    /// [[endpoint]]
-    /// id = "e"
-    /// protocol = "openai"
-    /// base_url = "http://127.0.0.1:9"
-    /// api_key = ""
-    ///
-    /// [[model]]
-    /// name = "m"
-    /// description = "a model"
-    /// context = 8192
-    /// upstream = "u"
-    /// endpoints = ["e"]
-    /// "#;
-    /// let config = Config::from_toml_str(toml).unwrap();
-    /// let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
-    /// let _router = gateway.router();
-    /// ```
     pub fn from_config(
         config: &Config,
         profiles: ProfilesContext,
@@ -807,21 +749,6 @@ struct Ready {
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// starting the gateway thread fails; classify with [`StartupError::kind`].
-///
-/// # Examples
-/// ```no_run
-/// use gateway::{ProfileName, ServeOptions, spawn};
-/// use std::path::PathBuf;
-///
-/// let options = ServeOptions::new(
-///     Some(PathBuf::from("/etc/promptforge/gateway.toml")),
-///     ProfileName::parse("dev")?,
-/// );
-/// let gateway = spawn(&options)?;
-/// println!("serving on {}", gateway.url());
-/// gateway.shutdown()?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
     let browser = options.browser;
     let (ready_tx, ready_rx) = mpsc::channel();

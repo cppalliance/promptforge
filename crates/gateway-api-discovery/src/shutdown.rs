@@ -53,21 +53,6 @@ impl From<ProbeError> for ShutdownError {
 /// Returns [`ShutdownError::Io`] when the gateway cannot be connected or
 /// its answer cannot be read, and [`ShutdownError::Rejected`] when the
 /// answer's status is not 2xx.
-///
-/// # Examples
-/// ```no_run
-/// # let file = gateway_api_discovery::GatewayDiscoveryFile {
-/// #     port: 8081,
-/// #     api_key: "secret".into(),
-/// #     pid: 42,
-/// #     epoch: 1,
-/// #     version: "0.2.0".into(),
-/// #     started_at: "2026-09-07T00:00:00Z".into(),
-/// # };
-/// let connection = gateway_api_discovery::ValidatedConnection::validate(file)?;
-/// gateway_api_discovery::request_shutdown(&connection)?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn request_shutdown(connection: &ValidatedConnection) -> Result<(), ShutdownError> {
     request_shutdown_file(connection.gateway_discovery_file())
 }

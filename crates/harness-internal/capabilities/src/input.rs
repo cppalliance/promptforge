@@ -14,23 +14,6 @@ use std::fmt;
 
 /// Waits for the operator's next message on a capability's behalf.
 ///
-/// # Implementing
-///
-/// ```
-/// use harness_capabilities::{InputBroker, InputError};
-///
-/// /// A broker whose operator always types the same text.
-/// struct Scripted(&'static str);
-///
-/// #[async_trait::async_trait]
-/// impl InputBroker for Scripted {
-///     async fn wait(&self) -> Result<String, InputError> {
-///         Ok(self.0.to_owned())
-///     }
-/// }
-/// # let _ = Scripted("hello");
-/// ```
-///
 /// # Invariants
 ///
 /// - [`wait`](InputBroker::wait) returns the operator's text byte-exact:
@@ -64,15 +47,6 @@ pub struct InputError {
 
 impl InputError {
     /// Builds a failure with only a message.
-    ///
-    /// # Examples
-    /// ```
-    /// use harness_capabilities::InputError;
-    ///
-    /// let error = InputError::message("the input wait was cancelled");
-    /// assert_eq!(error.to_string(), "the input wait was cancelled");
-    /// assert!(std::error::Error::source(&error).is_none());
-    /// ```
     #[must_use]
     pub fn message(text: impl Into<String>) -> InputError {
         InputError {
@@ -82,16 +56,6 @@ impl InputError {
     }
 
     /// Builds a failure with `source` as the hidden cause.
-    ///
-    /// # Examples
-    /// ```
-    /// use harness_capabilities::InputError;
-    ///
-    /// let cause = std::io::Error::other("socket reset");
-    /// let error = InputError::with_source("the operator's window closed", cause);
-    /// assert_eq!(error.to_string(), "the operator's window closed");
-    /// assert!(std::error::Error::source(&error).is_some());
-    /// ```
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,

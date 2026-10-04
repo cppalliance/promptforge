@@ -29,18 +29,6 @@ nz!(nz_usize, NonZeroUsize, usize);
 /// The defaults are safe, non-environment values that a clean build can use
 /// as they are. Frontmatter `max_tool_iterations`, when present, still
 /// overrides [`RunLimits::max_tool_iterations`] for that prompt.
-///
-/// # Examples
-/// ```
-/// use std::num::NonZeroU32;
-///
-/// use promptforge::RunLimits;
-///
-/// let eight = NonZeroU32::new(8).ok_or("8 is non-zero")?;
-/// let limits = RunLimits::new().max_tool_iterations(eight);
-/// assert_eq!(limits.tool_iterations().get(), 8);
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct RunLimits {
@@ -57,13 +45,6 @@ impl RunLimits {
     /// concurrency, 16 MiB
     /// response cap, 64 MiB Lua memory, 1024 Lua log events, and a 120 s
     /// longest wait for the next model receive).
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::RunLimits;
-    ///
-    /// assert_eq!(RunLimits::new().tool_iterations().get(), 24);
-    /// ```
     #[must_use]
     pub fn new() -> RunLimits {
         RunLimits {
@@ -189,5 +170,11 @@ mod tests {
         assert_eq!(built.response_bytes().get(), 4 * 1024);
         assert_eq!(built.lua_logs().get(), 7);
         assert_eq!(built.timeout(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn the_tool_iteration_builder_replaces_the_default_limit() {
+        let limits = RunLimits::new().max_tool_iterations(const { nz_u32(8) });
+        assert_eq!(limits.tool_iterations().get(), 8);
     }
 }

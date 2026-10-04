@@ -27,17 +27,6 @@ pub use content::pending_var_references;
 mod tests;
 
 /// Paths staged by one pending configuration write.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::save_config_shadow;
-/// use std::path::Path;
-///
-/// let document = toml::from_str("config-version = 0")?;
-/// let shadows = save_config_shadow(Path::new("gateway.toml"), document)?;
-/// assert!(shadows.config.ends_with("gateway.toml.next"));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PendingShadows {
@@ -46,16 +35,6 @@ pub struct PendingShadows {
 }
 
 /// Summary of pending single-file changes.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::pending_report;
-/// use std::path::Path;
-///
-/// let report = pending_report(Path::new("gateway.toml"))?;
-/// assert!(report.changed_sections.windows(2).all(|pair| pair[0] <= pair[1]));
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PendingReport {
@@ -69,17 +48,6 @@ pub struct PendingReport {
 /// Returns a managed file's shadow path.
 ///
 /// `gateway.toml` maps to `gateway.toml.next`.
-///
-/// # Examples
-/// ```
-/// use gateway_config::shadow_path;
-/// use std::path::Path;
-///
-/// assert_eq!(
-///     shadow_path(Path::new("gateway.toml")),
-///     Path::new("gateway.toml.next")
-/// );
-/// ```
 #[must_use]
 pub fn shadow_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().map_or_else(
@@ -94,16 +62,6 @@ pub fn shadow_path(path: &Path) -> PathBuf {
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when writing or renaming fails.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::write_shadow;
-/// use std::path::Path;
-///
-/// let path = write_shadow(Path::new("gateway.toml"), "config-version = 0\n")?;
-/// assert!(path.ends_with("gateway.toml.next"));
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn write_shadow(target: &Path, contents: &str) -> Result<PathBuf, crate::ConfigError> {
     write_shadow_repr(target, contents).map_err(crate::ConfigError::from)
 }
@@ -122,15 +80,6 @@ fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when writing or renaming fails.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::write_atomic;
-/// use std::path::Path;
-///
-/// write_atomic(Path::new("gateway.toml"), "config-version = 0\n")?;
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn write_atomic(target: &Path, contents: &str) -> Result<(), crate::ConfigError> {
     write_atomic_repr(target, contents).map_err(crate::ConfigError::from)
 }
@@ -215,15 +164,6 @@ fn replace_file(source_path: &Path, destination: &Path) -> Result<(), Repr> {
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when the shadow is absent or
 /// the rename fails.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::promote_shadow;
-/// use std::path::Path;
-///
-/// promote_shadow(Path::new("gateway.toml"))?;
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
     let shadow = shadow_path(target);
     if !shadow.is_file() {
@@ -244,16 +184,6 @@ pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when rendering, writing, or
 /// replacing the sibling state file fails.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::{ProfileName, persist_profile_state};
-/// use std::path::Path;
-///
-/// let profile = ProfileName::parse("work")?;
-/// persist_profile_state(Path::new("gateway.toml"), &profile)?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn persist_profile_state(
     config_path: &Path,
     profile: &ProfileName,
@@ -271,15 +201,6 @@ pub fn persist_profile_state(
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when the state file exists
 /// and cannot be removed.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::clear_profile_state;
-/// use std::path::Path;
-///
-/// clear_profile_state(Path::new("gateway.toml"))?;
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError> {
     let path = crate::profile_state_path(config_path);
     match fs::remove_file(&path) {
@@ -311,17 +232,6 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 /// Returns [`ConfigError`](crate::ConfigError) when the document is malformed
 /// or contains `active_profile`, a secret cannot be restored, the config is
 /// invalid, or the shadow cannot be written.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::save_config_shadow;
-/// use std::path::Path;
-///
-/// let document = toml::from_str("config-version = 0")?;
-/// let shadows = save_config_shadow(Path::new("gateway.toml"), document)?;
-/// assert!(shadows.config.ends_with("gateway.toml.next"));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn save_config_shadow(
     config_path: &Path,
     mut document: Value,
@@ -360,19 +270,6 @@ pub fn save_config_shadow(
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) under the same conditions as
 /// [`Config::load`], or when a pending shadow cannot be read.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::{ProfileSelection, load_pending_config};
-/// use std::path::Path;
-///
-/// let config = load_pending_config(
-///     Path::new("gateway.toml"),
-///     &ProfileSelection::new(Some("work"), None),
-/// )?;
-/// assert_eq!(config.active_profile().map(|profile| profile.name()), Some("work"));
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn load_pending_config(
     config_path: &Path,
     inputs: &ProfileSelection,
@@ -404,16 +301,6 @@ pub fn load_pending_config(
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when a real file or shadow
 /// cannot be read or parsed.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::pending_report;
-/// use std::path::Path;
-///
-/// let report = pending_report(Path::new("gateway.toml"))?;
-/// assert!(report.changed_sections.windows(2).all(|pair| pair[0] <= pair[1]));
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn pending_report(config_path: &Path) -> Result<PendingReport, crate::ConfigError> {
     let real = read_toml(config_path).map_err(crate::ConfigError::from)?;
     let config_shadow_path = shadow_path(config_path);

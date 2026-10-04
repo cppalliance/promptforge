@@ -40,16 +40,6 @@ pub struct Message {
 
 impl Message {
     /// Constructs a `user` message.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::model::Message;
-    ///
-    /// let message = Message::user("hello");
-    /// assert_eq!(message.role(), "user");
-    /// assert_eq!(message.content(), "hello");
-    /// ```
     #[must_use]
     pub fn user(content: impl Into<String>) -> Message {
         Message {
@@ -261,30 +251,9 @@ impl ToolArguments<'_> {
 /// which implements `Eq`, so structural equivalence over the outcome is
 /// total.
 ///
-/// # Examples
-///
 /// A caller matches the outcome and, for a tool turn, reads each call's typed
 /// accessors ([`ToolCall::id`], [`ToolCall::name`], [`ToolCall::arguments`]) and
-/// the borrowed [`ToolArguments`] view. Obtaining a result performs gateway
-/// I/O, so the example is `no_run`:
-///
-/// ```no_run
-/// # async fn example(completion: promptforge::model::Completion) {
-/// use promptforge::model::CompletionResult;
-///
-/// match completion.result() {
-///     CompletionResult::Text(reply) => println!("text: {reply}"),
-///     CompletionResult::ToolCalls(calls) => {
-///         for call in calls {
-///             let args = call.arguments();
-///             println!("{} -> {} {}", call.id(), call.name(), args.to_json_string());
-///             let _ = args.contains("query");
-///         }
-///     }
-///     _ => {}
-/// }
-/// # }
-/// ```
+/// the borrowed [`ToolArguments`] view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CompletionResult {
@@ -302,20 +271,6 @@ pub enum CompletionResult {
 /// them to the debug capture and nothing else. Build one with
 /// [`RawExchange::new`]; a completion built without a transport carries
 /// none.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::RawExchange;
-/// use serde_json::json;
-///
-/// let raw = RawExchange::new(
-///     json!({ "model": "m", "messages": [] }),
-///     json!({ "choices": [] }),
-/// );
-/// assert_eq!(raw.request()["model"], "m");
-/// assert_eq!(raw.response()["choices"], json!([]));
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RawExchange {

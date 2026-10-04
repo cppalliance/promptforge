@@ -99,14 +99,6 @@ impl fmt::Debug for WaitRegistry {
 
 impl WaitRegistry {
     /// Opens an empty registry.
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::WaitRegistry;
-    ///
-    /// let registry = WaitRegistry::new();
-    /// assert!(registry.unresolved().is_empty());
-    /// ```
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -125,17 +117,6 @@ impl WaitRegistry {
     /// The token is 128 bits from the OS-seeded cryptographic RNG
     /// (`rand::rng`, a ChaCha-based CSPRNG), hex-encoded, so it cannot be
     /// guessed by anything that has not seen the [`WaitFrame::Required`].
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::WaitRegistry;
-    ///
-    /// let registry = WaitRegistry::new();
-    /// let (token, mut receiver) = registry.create();
-    /// registry.complete(&token, "hello".to_owned())?;
-    /// assert_eq!(receiver.try_recv(), Ok("hello".to_owned()));
-    /// # Ok::<(), workshop_agents::WaitError>(())
-    /// ```
     #[must_use]
     pub fn create(&self) -> (String, oneshot::Receiver<String>) {
         use rand::Rng as _;
@@ -157,21 +138,6 @@ impl WaitRegistry {
     /// `token` - never created, already completed, cancelled, or its
     /// suspended call dropped concurrently. The undelivered `value` is
     /// discarded with the error: a dead wait has no consumer left.
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::{WaitError, WaitRegistry};
-    ///
-    /// let registry = WaitRegistry::new();
-    /// let (token, mut receiver) = registry.create();
-    /// registry.complete(&token, "typed".to_owned())?;
-    /// assert_eq!(receiver.try_recv(), Ok("typed".to_owned()));
-    /// assert_eq!(
-    ///     registry.complete(&token, "again".to_owned()),
-    ///     Err(WaitError::UnknownToken),
-    /// );
-    /// # Ok::<(), workshop_agents::WaitError>(())
-    /// ```
     pub fn complete(&self, token: &str, value: String) -> Result<(), WaitError> {
         let wait = {
             let mut waits = self.lock();
@@ -189,17 +155,6 @@ impl WaitRegistry {
     ///
     /// Cancelling a token with no wait is a no-op, because a cancel
     /// racing the wait's own completion is normal.
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::WaitRegistry;
-    ///
-    /// let registry = WaitRegistry::new();
-    /// let (token, mut receiver) = registry.create();
-    /// registry.cancel(&token);
-    /// assert!(receiver.try_recv().is_err(), "the wait resolves as dead");
-    /// assert!(registry.unresolved().is_empty());
-    /// ```
     pub fn cancel(&self, token: &str) {
         self.lock().retain(|wait| wait.token != token);
     }
@@ -208,15 +163,6 @@ impl WaitRegistry {
     ///
     /// This is the retained state behind reconnect resend and the
     /// leaked-wait assertion in conversation teardown tests.
-    ///
-    /// # Examples
-    /// ```
-    /// use workshop_agents::WaitRegistry;
-    ///
-    /// let registry = WaitRegistry::new();
-    /// let (token, _receiver) = registry.create();
-    /// assert_eq!(registry.unresolved(), vec![token]);
-    /// ```
     #[must_use]
     pub fn unresolved(&self) -> Vec<String> {
         self.lock().iter().map(|wait| wait.token.clone()).collect()
@@ -248,19 +194,6 @@ pub enum WaitError {
 /// # Errors
 /// Returns [`WaitError::UnknownToken`] when no unresolved wait holds
 /// `token`.
-///
-/// # Examples
-/// ```
-/// use workshop_agents::{WaitRegistry, complete_input_response};
-///
-/// let registry = WaitRegistry::new();
-/// let (token, mut receiver) = registry.create();
-/// let mut accepted = false;
-/// complete_input_response(&registry, &token, "typed".to_owned(), || accepted = true)?;
-/// assert!(accepted);
-/// assert_eq!(receiver.try_recv(), Ok("typed".to_owned()));
-/// # Ok::<(), workshop_agents::WaitError>(())
-/// ```
 pub fn complete_input_response(
     registry: &WaitRegistry,
     token: &str,

@@ -36,25 +36,6 @@ use crate::wire::delta::StreamDelta;
 /// a tokio runtime with its reactor and timer, so a Host that uses this
 /// broker awaits `Harness::run` inside one. The Harness itself needs no
 /// runtime.
-///
-/// # Examples
-///
-/// ```
-/// use std::sync::Arc;
-///
-/// use harness::InferenceBroker;
-/// use harness_gateway_client::{GatewayBroker, GatewayEndpoint, SecretString};
-///
-/// let broker = GatewayBroker::new(
-///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
-///     SecretString::new("bearer-token")?,
-/// );
-/// assert!(!format!("{broker:?}").contains("bearer-token"));
-/// // What a Host passes to `harness::Harness::new`.
-/// let broker: Arc<dyn InferenceBroker> = Arc::new(broker);
-/// # let _ = broker;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Clone)]
 pub struct GatewayBroker {
     client: GatewayChat,

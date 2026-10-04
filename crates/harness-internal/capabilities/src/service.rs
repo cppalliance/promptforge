@@ -9,22 +9,6 @@
 //!
 //! An id literal is a two-segment `namespace/name` in the capability id
 //! grammar. [`HostServices::provide`] refuses one that does not parse.
-//!
-//! # Examples
-//!
-//! ```
-//! use std::sync::Arc;
-//!
-//! use harness_capabilities::{HostServices, ServiceKey};
-//!
-//! const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
-//!
-//! let mut services = HostServices::new();
-//! services.provide(&GREETING, Arc::from("hello"))?;
-//! assert_eq!(services.get(&GREETING).as_deref(), Some("hello"));
-//! assert!(services.provides(&GREETING.id()));
-//! # Ok::<(), harness_capabilities::ServiceError>(())
-//! ```
 
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
@@ -91,17 +75,6 @@ impl fmt::Display for ServiceId {
 /// The crate that defines a service declares its key once, as a `const`,
 /// and both the Host that provides the service and the capability that
 /// reads it name that key.
-///
-/// # Examples
-///
-/// ```
-/// use harness_capabilities::{ServiceId, ServiceKey};
-///
-/// const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
-/// const NEEDS: &[ServiceId] = &[GREETING.id()];
-///
-/// assert_eq!(NEEDS[0].to_string(), "acme/greeting");
-/// ```
 pub struct ServiceKey<T: ?Sized + Send + Sync + 'static> {
     id: ServiceId,
     provider: PhantomData<fn() -> Arc<T>>,

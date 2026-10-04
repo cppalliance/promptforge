@@ -35,38 +35,6 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 /// [`TOKIO_RUNTIME`]: a run that requires the capability is refused when
 /// either is missing, and a run that declares it optional gets no web
 /// tools.
-///
-/// # Examples
-///
-/// ```
-/// use std::sync::Arc;
-///
-/// use harness::capability::{Capability, CapabilityRegistry, HostServices};
-/// use harness_web::{
-///     SEARCH_PROVIDER, SearchError, SearchProvider, SearchQuery, SearchResults, TOKIO_RUNTIME,
-///     Web,
-/// };
-///
-/// struct NoResults;
-///
-/// #[async_trait::async_trait]
-/// impl SearchProvider for NoResults {
-///     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError> {
-///         Ok(SearchResults { query: query.query, results: Vec::new() })
-///     }
-/// }
-///
-/// let runtime = tokio::runtime::Runtime::new()?;
-/// let web = Web::new();
-/// assert_eq!(web.id().to_string(), "promptforge/web");
-///
-/// let mut capabilities = CapabilityRegistry::new();
-/// capabilities.register(Arc::new(web))?;
-/// let mut services = HostServices::new();
-/// services.provide(&SEARCH_PROVIDER, Arc::new(NoResults))?;
-/// services.provide(&TOKIO_RUNTIME, Arc::new(runtime.handle().clone()))?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone)]
 pub struct Web {
     /// The stable identity, `promptforge/web`.

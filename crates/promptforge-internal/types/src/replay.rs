@@ -32,16 +32,6 @@ mod tests;
 /// are preserved through [`from_bits`](Self::from_bits) and
 /// [`bits`](Self::bits), so a record written by a newer Engine keeps its
 /// flags through an older reader.
-///
-/// # Examples
-/// ```
-/// use promptforge::replay::Flags;
-///
-/// let recorded = Flags::from_bits(0b101);
-/// assert!(recorded.contains(Flags::from_bits(0b100)));
-/// assert!(!recorded.contains(Flags::from_bits(0b010)));
-/// assert!(Flags::EMPTY.is_empty());
-/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 #[serde(transparent)]

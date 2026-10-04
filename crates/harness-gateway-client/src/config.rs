@@ -54,18 +54,6 @@ impl SecretString {
     /// # Errors
     /// Returns [`SecretError::Empty`] when `secret` is empty (F12), so a client
     /// can never be built to authenticate with a blank bearer credential.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use harness_gateway_client::SecretString;
-    ///
-    /// let secret = SecretString::new("bearer-token")?;
-    /// assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
-    /// assert_eq!(format!("{secret}"), "<redacted>");
-    /// assert!(SecretString::new("").is_err());
-    /// # Ok::<(), harness_gateway_client::SecretError>(())
-    /// ```
     pub fn new(secret: impl Into<String>) -> std::result::Result<SecretString, SecretError> {
         let secret = secret.into();
         if secret.is_empty() {
@@ -138,18 +126,6 @@ impl GatewayEndpoint {
     /// API root is a bare path). Parsing goes through a strict URL type (F12)
     /// rather than a hand-rolled prefix/host scan. No error echoes `url`,
     /// which can embed a credential.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use harness_gateway_client::GatewayEndpoint;
-    ///
-    /// let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")?;
-    /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
-    /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
-    /// assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
-    /// # Ok::<(), harness_gateway_client::GatewayConfigError>(())
-    /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, GatewayConfigError> {
         let reject = GatewayConfigError::InvalidConfig;
         let trimmed = url.trim();
@@ -205,19 +181,6 @@ impl GatewayEndpoint {
     /// keyless same-machine callers by default, so
     /// [`GatewayChat::from_env`](crate::GatewayChat::from_env) makes the
     /// bearer key optional exactly when this holds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use harness_gateway_client::GatewayEndpoint;
-    ///
-    /// assert!(GatewayEndpoint::new("http://127.0.0.1:8081/v1")?.is_loopback());
-    /// assert!(GatewayEndpoint::new("http://[::1]:8081/v1")?.is_loopback());
-    /// assert!(GatewayEndpoint::new("http://localhost:8081/v1")?.is_loopback());
-    /// assert!(!GatewayEndpoint::new("http://192.168.1.20:8081/v1")?.is_loopback());
-    /// assert!(!GatewayEndpoint::new("https://gateway.example.com/v1")?.is_loopback());
-    /// # Ok::<(), harness_gateway_client::GatewayConfigError>(())
-    /// ```
     #[must_use]
     pub fn is_loopback(&self) -> bool {
         self.loopback

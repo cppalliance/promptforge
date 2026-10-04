@@ -31,24 +31,7 @@
 //! # Serialized form
 //! One event serializes to one JSON object tagged by `kind` (the variant
 //! name in `snake_case`) with the three coordinates and then the payload
-//! fields beside it:
-//!
-//! ```
-//! use promptforge_types::event::Event;
-//! use promptforge_types::ids::Provenance;
-//!
-//! let event = Event::SectionStarted {
-//!     execution: "run-1".to_owned(),
-//!     section: "Gather".to_owned(),
-//!     provenance: Provenance { task: "0".parse()?, seq: 4 },
-//! };
-//! assert_eq!(
-//!     serde_json::to_string(&event)?,
-//!     r#"{"kind":"section_started","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":4}}"#
-//! );
-//! assert_eq!(event.provenance().seq, 4);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//! fields beside it.
 
 use serde::{Deserialize, Serialize};
 

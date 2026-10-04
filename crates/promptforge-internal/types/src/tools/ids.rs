@@ -26,18 +26,6 @@ impl ToolId {
     /// ([`ToolIdErrorKind::SegmentCount`]), a segment is empty
     /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character outside
     /// the global-name charset ([`ToolIdErrorKind::Control`]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    /// use promptforge::tools::ToolId;
-    ///
-    /// let id = ToolId::parse("promptforge/web/fetch")?;
-    /// assert_eq!(id.name(), "fetch");
-    /// assert_eq!(id.capability(), CapabilityId::parse("promptforge/web")?);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
         let name =
             GlobalName::parse(id).map_err(|e| ToolIdError::from_global_name_kind(e.kind()))?;
@@ -52,16 +40,6 @@ impl ToolId {
     }
 
     /// Returns the tool's name segment (the last of the three).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::tools::ToolId;
-    ///
-    /// let id = ToolId::parse("promptforge/web/fetch")?;
-    /// assert_eq!(id.name(), "fetch");
-    /// # Ok::<(), promptforge::tools::ToolIdError>(())
-    /// ```
     #[must_use]
     pub fn name(&self) -> &str {
         &self.0.segments()[2]
@@ -73,17 +51,6 @@ impl ToolId {
     /// yields the id of the capability that contributed it. The prefix was
     /// validated when the tool id was parsed, so it builds the
     /// [`CapabilityId`] directly, with no re-parse.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::CapabilityId;
-    /// use promptforge::tools::ToolId;
-    ///
-    /// let id = ToolId::parse("promptforge/web/fetch")?;
-    /// assert_eq!(id.capability(), CapabilityId::parse("promptforge/web")?);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn capability(&self) -> CapabilityId {
         CapabilityId::from_prefix(self.0.capability_prefix())

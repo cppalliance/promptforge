@@ -416,13 +416,6 @@ fn response_status(head: &str) -> Option<u16> {
 /// Returns [`HealthError::NotHttp`] when `base_url` is not an
 /// `http://host:port` URL, and [`HealthError::Timeout`] when the endpoint
 /// does not answer 200 within `timeout`.
-///
-/// # Examples
-/// ```no_run
-/// # use std::time::Duration;
-/// gateway_api_discovery::wait_for_health("http://127.0.0.1:8081", Duration::from_secs(5))?;
-/// # Ok::<(), gateway_api_discovery::HealthError>(())
-/// ```
 pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthError> {
     wait_for_health_cancellable_with(
         base_url,

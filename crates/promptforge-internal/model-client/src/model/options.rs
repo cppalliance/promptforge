@@ -207,20 +207,6 @@ pub struct CompletionOptions {
 impl CompletionOptions {
     /// Builds options for `model` with no temperature, token cap, or thinking
     /// switch.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge::model::CompletionOptions;
-    ///
-    /// let options = CompletionOptions::new("analyst")
-    ///     .with_temperature(0.2)?
-    ///     .with_max_tokens(NonZeroU32::new(256).ok_or("max tokens is non-zero")?)
-    ///     .with_thinking(false);
-    /// let _ = options;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn new(model: impl Into<String>) -> CompletionOptions {
         CompletionOptions {

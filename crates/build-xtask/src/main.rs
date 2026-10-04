@@ -18,6 +18,7 @@ mod facade_shape;
 mod harness_bans;
 mod manifest;
 mod new_crate;
+mod no_doctests;
 mod product;
 mod retired_symbols;
 mod site;

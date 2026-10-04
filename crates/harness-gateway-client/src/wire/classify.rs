@@ -58,27 +58,6 @@ const CREDENTIALS_PHRASE: &str = "the model backend did not accept the credentia
 /// message `the model backend did not accept the credentials` in place of
 /// the phrase. A body that matches no rule is `Rejected`
 /// (or `ServerError` for a 5xx), never a success.
-///
-/// # Examples
-///
-/// ```
-/// use harness_gateway_client::classify_http_failure;
-/// use promptforge::model::CompletionErrorKind;
-///
-/// let error = classify_http_failure(503, "upstream is busy");
-/// assert_eq!(error.kind(), CompletionErrorKind::Overloaded);
-/// assert!(error.is_retryable());
-/// assert_eq!(error.to_string(), "the model backend is overloaded (status 503)");
-/// assert_eq!(error.detail(), Some("upstream is busy"));
-///
-/// let overflow = classify_http_failure(
-///     400,
-///     "This model's maximum context length is 4096 tokens. However, your \
-///      messages resulted in 5120 tokens.",
-/// );
-/// assert_eq!(overflow.kind(), CompletionErrorKind::ContextOverflow);
-/// assert_eq!(overflow.overflow(), (Some(5120), Some(4096)));
-/// ```
 #[must_use]
 pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
     let lower = body.to_lowercase();
@@ -119,20 +98,6 @@ pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
 /// message is the kind's fixed phrase with no status, and `body` is kept as
 /// the error's [`detail`](CompletionError::detail). `body` must already be
 /// bounded and control-escaped.
-///
-/// # Examples
-///
-/// ```
-/// use harness_gateway_client::classify_stream_error;
-/// use promptforge::model::CompletionErrorKind;
-///
-/// let dropped = classify_stream_error("upstream closed the connection");
-/// assert_eq!(dropped.kind(), CompletionErrorKind::Transport);
-///
-/// let busy = classify_stream_error("overloaded_error: try again later");
-/// assert_eq!(busy.kind(), CompletionErrorKind::Overloaded);
-/// assert_eq!(busy.to_string(), "the model backend is overloaded");
-/// ```
 #[must_use]
 pub fn classify_stream_error(body: &str) -> CompletionError {
     let lower = body.to_lowercase();

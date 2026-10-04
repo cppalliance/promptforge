@@ -69,6 +69,24 @@ fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
 }
 
 #[test]
+fn shadow_path_appends_next_to_the_file_name() {
+    assert_eq!(
+        shadow_path(Path::new("gateway.toml")),
+        Path::new("gateway.toml.next")
+    );
+}
+
+#[test]
+fn write_shadow_returns_the_shadow_it_staged() {
+    let (_temp, path) = write_config();
+
+    let shadow = write_shadow(&path, "config-version = 0\n").expect("stage shadow");
+
+    assert!(shadow.ends_with("gateway.toml.next"));
+    assert!(shadow.is_file());
+}
+
+#[test]
 fn active_profile_in_the_pending_document_is_refused_and_writes_no_shadow() {
     let (_temp, path) = write_config();
     let mut document = document(CONFIG);
@@ -231,6 +249,44 @@ fn pending_report_lists_only_the_config_shadow() {
 
     assert_eq!(report.shadowed_files, std::slice::from_ref(&path));
     assert_eq!(report.changed_sections, ["local_model"]);
+}
+
+#[test]
+fn pending_report_sorts_and_dedups_changed_sections() {
+    let (_temp, path) = write_config();
+    write_shadow(
+        &path,
+        &CONFIG
+            .replace("api_key = \"secret\"", "api_key = \"rotated\"")
+            .replace("description = \"local model\"", "description = \"edited\"")
+            .replace("name = \"travel\"", "name = \"home\""),
+    )
+    .expect("write config shadow");
+
+    let report = pending_report(&path).expect("report");
+
+    assert_eq!(
+        report.changed_sections,
+        ["local_model", "profile", "server"]
+    );
+}
+
+#[test]
+fn pending_var_references_skip_empty_names() {
+    let (_temp, path) = write_config();
+    write_shadow(
+        &path,
+        &CONFIG.replace(
+            "description = \"local model\"",
+            "description = \"${} costs ${MODEL_PRICE}\"",
+        ),
+    )
+    .expect("write config shadow");
+
+    let references = pending_var_references(&path).expect("references");
+
+    assert!(references.keys().all(|name| !name.is_empty()));
+    assert!(references.contains_key("MODEL_PRICE"));
 }
 
 #[test]

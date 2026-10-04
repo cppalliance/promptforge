@@ -20,15 +20,6 @@ mod tests;
 /// A UTC instant: signed milliseconds since the Unix epoch.
 ///
 /// Serializes as that integer. Orders chronologically.
-///
-/// # Examples
-/// ```
-/// use promptforge::timestamp::Timestamp;
-///
-/// let stamp = Timestamp::from_unix_millis(951_782_400_000);
-/// assert_eq!(stamp.to_rfc3339(), "2000-02-29T00:00:00Z");
-/// assert_eq!(stamp.unix_millis(), 951_782_400_000);
-/// ```
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]

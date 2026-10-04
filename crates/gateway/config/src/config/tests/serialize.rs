@@ -191,6 +191,12 @@ fn every_secret_field_serializes_as_redacted() {
 }
 
 #[test]
+fn to_json_redacts_the_server_key() {
+    let config = Config::from_toml_str(MINIMAL).expect("minimal config parses");
+    assert_eq!(config.to_json()["server"]["api_key"], "***");
+}
+
+#[test]
 fn serialized_output_never_contains_a_secret_value() {
     let text = serde_json::to_string(&raw(FULL)).expect("serializes");
     for secret in [

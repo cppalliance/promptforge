@@ -66,15 +66,6 @@ impl Config {
     /// match the workshop schema, [`ConfigError::UnresolvedVar`] if a
     /// `${VAR}` names a variable whose value is not valid Unicode, and
     /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = workshop_support::Config::from_toml_str(
-    ///     "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
-    /// )?;
-    /// assert_eq!(config.server.bind, "127.0.0.1:7910");
-    /// # Ok::<(), workshop_support::ConfigError>(())
-    /// ```
     pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
         Self::parse(raw, None)
     }

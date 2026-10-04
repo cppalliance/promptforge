@@ -362,6 +362,14 @@ fn absent_selection_loads_with_no_profile_and_every_remote_model() {
 }
 
 #[test]
+fn an_in_memory_document_has_no_active_profile_or_stale_selection() {
+    let config = Config::from_toml_str(CATALOG).expect("catalog parses");
+
+    assert!(config.active_profile().is_none());
+    assert_eq!(config.stale_state_selection(), None);
+}
+
+#[test]
 fn clear_profile_state_deletes_the_state_file_and_tolerates_absence() {
     let (_temp, path) = file_fixture();
     let state_path = profile_state_path(&path);

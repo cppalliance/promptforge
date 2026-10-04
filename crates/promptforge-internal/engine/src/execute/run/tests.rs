@@ -433,6 +433,19 @@ fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
 }
 
 #[test]
+fn a_run_whose_only_section_returns_a_literal_is_done_at_its_first_step() {
+    let mut run = run_of("return 'hello'", run_context());
+    let Step::Done {
+        result: RunResult::Ok(text),
+        ..
+    } = run.step()
+    else {
+        panic!("the literal run is done at once");
+    };
+    assert_eq!(text, "hello");
+}
+
+#[test]
 fn a_stillborn_run_reports_its_failure_on_the_first_step() {
     let source = "---\nname: t\ndescription: d\npromptforge: 7\n---\n\n# Run\n\n## Only\n\ndone\n";
     let prompt = Prompt::parse(source, "run-test")

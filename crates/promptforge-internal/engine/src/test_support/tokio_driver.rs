@@ -80,38 +80,6 @@ pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 ///
 /// The future is boxed internally: the step machinery is large, and the
 /// caller's own future stays small.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so
-/// the refusing performers are never called:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge::cancel::CancelHandle;
-/// use promptforge_engine::test_support::{Performers, drive_tokio};
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{Prompt, Run, RunContext, RunResult};
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let run = Run::new(Arc::new(prompt), "", ctx);
-/// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// let mut events = Vec::new();
-/// let result = runtime.block_on(drive_tokio(
-///     run,
-///     Performers::refusing(),
-///     |event| events.push(event),
-///     CancelHandle::new(),
-/// ));
-/// let RunResult::Ok(text) = result else {
-///     panic!("the literal run succeeds: {result:?}");
-/// };
-/// assert_eq!(text, "hello");
-/// assert!(!events.is_empty());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub async fn drive_tokio(
     run: Run,
     performers: Performers,

@@ -36,18 +36,6 @@ use super::bindings::{ModelBindings, ToolBindings};
 /// the same answers a run reproduces its nonces, `sys.when`, effects, and
 /// events. Both are required: for a live run the Harness draws
 /// the seed from its own CSPRNG and stamps its own clock.
-///
-/// # Examples
-/// ```
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{RunContext, RunLimits};
-///
-/// let ctx = RunContext::new("example-run", 7, Timestamp::from_unix_millis(951_782_400_000))
-///     .limits(RunLimits::new());
-/// assert_eq!(ctx.name(), "example-run");
-/// assert_eq!(ctx.seed(), 7);
-/// assert_eq!(ctx.started_at().to_rfc3339(), "2000-02-29T00:00:00Z");
-/// ```
 #[non_exhaustive]
 pub struct RunContext {
     /// Run identity, stamped on every report and event.

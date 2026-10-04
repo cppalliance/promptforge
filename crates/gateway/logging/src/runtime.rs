@@ -20,16 +20,6 @@ const MAX_EMERGENCY_START_WAIT: Duration = Duration::from_millis(10);
 /// [`writer`](Self::writer), and closed by [`shutdown`](Self::shutdown),
 /// which the caller runs last so a healthy sink receives final records
 /// without allowing a stalled sink to hold process exit forever.
-///
-/// # Examples
-/// ```
-/// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-runtime-", env!("CARGO_PKG_VERSION")));
-/// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
-/// assert!(runtime.path().ends_with("gateway.log"));
-/// runtime.shutdown()?;
-/// # std::fs::remove_dir_all(&dir).ok();
-/// # Ok::<(), gateway_logging::LogError>(())
-/// ```
 #[derive(Debug)]
 pub struct LogRuntime {
     queue: Arc<LogQueue>,
@@ -52,14 +42,6 @@ impl LogRuntime {
     /// existing log cannot be rotated, the fresh file cannot be opened, or
     /// the worker thread cannot be spawned; classify with
     /// [`LogError::is_io`].
-    ///
-    /// # Examples
-    /// ```no_run
-    /// let runtime = gateway_logging::LogRuntime::start(
-    ///     gateway_logging::LogConfig::new("/home/user/.promptforge"),
-    /// )?;
-    /// # Ok::<(), gateway_logging::LogError>(())
-    /// ```
     pub fn start(config: LogConfig) -> Result<Self, LogError> {
         let state_dir = config.into_state_dir();
         let (path, file) = open_log_file(&state_dir)
@@ -74,32 +56,12 @@ impl LogRuntime {
     }
 
     /// A cloneable factory for the fmt layer's per-event writers.
-    ///
-    /// # Examples
-    /// ```
-    /// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-getwriter-", env!("CARGO_PKG_VERSION")));
-    /// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
-    /// let writer = runtime.writer();
-    /// runtime.shutdown()?;
-    /// # std::fs::remove_dir_all(&dir).ok();
-    /// # Ok::<(), gateway_logging::LogError>(())
-    /// ```
     #[must_use]
     pub fn writer(&self) -> LogWriter {
         LogWriter::new(Arc::clone(&self.queue))
     }
 
     /// The path of the log file this run writes.
-    ///
-    /// # Examples
-    /// ```
-    /// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-path-", env!("CARGO_PKG_VERSION")));
-    /// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
-    /// assert_eq!(runtime.path().file_name().and_then(|name| name.to_str()), Some("gateway.log"));
-    /// runtime.shutdown()?;
-    /// # std::fs::remove_dir_all(&dir).ok();
-    /// # Ok::<(), gateway_logging::LogError>(())
-    /// ```
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -115,15 +77,6 @@ impl LogRuntime {
     /// # Errors
     /// Returns [`LogError`] when the worker thread panicked instead of
     /// draining cleanly.
-    ///
-    /// # Examples
-    /// ```
-    /// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-shutdown-", env!("CARGO_PKG_VERSION")));
-    /// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
-    /// runtime.shutdown()?;
-    /// # std::fs::remove_dir_all(&dir).ok();
-    /// # Ok::<(), gateway_logging::LogError>(())
-    /// ```
     pub fn shutdown(self) -> Result<(), LogError> {
         self.shutdown_with(LOG_LIMITS.shutdown_wait, write_emergency_diagnostic)
             .map(|_| ())

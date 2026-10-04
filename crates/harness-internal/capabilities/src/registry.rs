@@ -13,46 +13,6 @@
 //! Tools exist only after [`Capability::create`], so tool
 //! prefix-containment is checked when a run's catalog is assembled, not
 //! at registration.
-//!
-//! # Examples
-//!
-//! ```
-//! use std::sync::Arc;
-//!
-//! use harness_capabilities::{
-//!     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-//!     RegistryErrorKind, RunServices,
-//! };
-//!
-//! struct Web {
-//!     id: CapabilityId,
-//! }
-//!
-//! impl Capability for Web {
-//!     fn id(&self) -> &CapabilityId {
-//!         &self.id
-//!     }
-//!     fn description(&self) -> &str {
-//!         "Web fetch and search tools."
-//!     }
-//!     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
-//!         let _ = services;
-//!         Ok(Contribution::default())
-//!     }
-//! }
-//!
-//! let mut registry = CapabilityRegistry::new();
-//! let id = CapabilityId::parse("promptforge/web")?;
-//! registry.register(Arc::new(Web { id: id.clone() }))?;
-//! assert!(registry.get(&id).is_some());
-//!
-//! let duplicate = registry.register(Arc::new(Web { id: id.clone() }));
-//! assert_eq!(
-//!     duplicate.map(|_| ()).unwrap_err().kind(),
-//!     RegistryErrorKind::DuplicateId
-//! );
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
 
 use std::collections::BTreeMap;
 use std::fmt;

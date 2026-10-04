@@ -12,21 +12,6 @@ const DEFAULT_STT_INTERVAL_MS: u64 = 500;
 ///
 /// Model sources and roles are defined in global `[[stt_model]]` catalog
 /// entries and profiles enable them through membership.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-///
-/// let config = Config::from_toml_str(
-///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-///      [stt]\nwindow_seconds = 8\n",
-/// )?;
-/// assert_eq!(
-///     config.stt().map(|stt| stt.window_seconds()),
-///     Some(8)
-/// );
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct SttPipelineConfig {
@@ -130,13 +115,6 @@ impl SttPipelineConfig {
 }
 
 /// The speech engine slot a speech-to-text model fills.
-///
-/// # Examples
-/// ```
-/// use gateway_config::SttRole;
-///
-/// assert_ne!(SttRole::Interim, SttRole::Final);
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -148,18 +126,6 @@ pub enum SttRole {
 }
 
 /// One speech-to-text model declared as `[[stt_model]]`.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-///
-/// let config = Config::from_toml_str(
-///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-///      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-/// )?;
-/// assert_eq!(config.catalog_stt_models()[0].name(), "speech");
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -182,102 +148,36 @@ pub struct SttModelConfig {
 
 impl SttModelConfig {
     /// Returns the catalog name.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].name(), "speech");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the speech engine slot this model fills.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::{Config, SttRole};
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].role(), SttRole::Interim);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub const fn role(&self) -> SttRole {
         self.role
     }
 
     /// Returns the artifact source.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].source(), "/speech.bin");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
     }
 
     /// Returns the optional lowercase hexadecimal SHA-256 pin.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].sha256(), None);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn sha256(&self) -> Option<&str> {
         self.sha256.as_deref()
     }
 
     /// Returns the estimated VRAM use in gibibytes.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].vram_gb(), 1.0);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn vram_gb(&self) -> f64 {
         self.vram_gb
     }
 
     /// Returns the optional local dominion binding.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let config = Config::from_toml_str(
-    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-    /// # )?;
-    /// assert_eq!(config.catalog_stt_models()[0].dominion(), None);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn dominion(&self) -> Option<&str> {
         self.dominion.as_deref()
@@ -289,14 +189,6 @@ impl SttModelConfig {
 /// Recommended entries are immutable catalog seeds for the Config UI's
 /// restore action. Both entries use canonical whisper.cpp URLs and SHA-256
 /// digests captured from Hugging Face LFS metadata.
-///
-/// # Examples
-/// ```
-/// use gateway_config::RECOMMENDED_STT_MODELS;
-///
-/// let model = RECOMMENDED_STT_MODELS[0];
-/// assert!(model.source().starts_with("https://"));
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct RecommendedSttModel {
@@ -309,65 +201,30 @@ pub struct RecommendedSttModel {
 
 impl RecommendedSttModel {
     /// Returns the recommended catalog name.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::RECOMMENDED_STT_MODELS;
-    ///
-    /// assert_eq!(RECOMMENDED_STT_MODELS[0].name(), "whisper-base-en");
-    /// ```
     #[must_use]
     pub const fn name(self) -> &'static str {
         self.name
     }
 
     /// Returns the recommended speech engine role.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::{RECOMMENDED_STT_MODELS, SttRole};
-    ///
-    /// assert_eq!(RECOMMENDED_STT_MODELS[0].role(), SttRole::Interim);
-    /// ```
     #[must_use]
     pub const fn role(self) -> SttRole {
         self.role
     }
 
     /// Returns the canonical whisper.cpp download URL.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::RECOMMENDED_STT_MODELS;
-    ///
-    /// assert!(RECOMMENDED_STT_MODELS[0].source().contains("whisper.cpp"));
-    /// ```
     #[must_use]
     pub const fn source(self) -> &'static str {
         self.source
     }
 
     /// Returns the verified lowercase hexadecimal SHA-256 pin.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::RECOMMENDED_STT_MODELS;
-    ///
-    /// assert_eq!(RECOMMENDED_STT_MODELS[0].sha256().len(), 64);
-    /// ```
     #[must_use]
     pub const fn sha256(self) -> &'static str {
         self.sha256
     }
 
     /// Returns the conservative VRAM estimate in gibibytes.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::RECOMMENDED_STT_MODELS;
-    ///
-    /// assert!(RECOMMENDED_STT_MODELS[0].vram_gb() > 0.0);
-    /// ```
     #[must_use]
     pub const fn vram_gb(self) -> f64 {
         self.vram_gb
@@ -379,14 +236,6 @@ impl RecommendedSttModel {
 /// `base.en` supplies responsive interim results and `small.en` supplies the
 /// more accurate final pass. The estimates include headroom above the model
 /// files' resident-memory footprints.
-///
-/// # Examples
-/// ```
-/// use gateway_config::{RECOMMENDED_STT_MODELS, SttRole};
-///
-/// assert_eq!(RECOMMENDED_STT_MODELS.len(), 2);
-/// assert_eq!(RECOMMENDED_STT_MODELS[1].role(), SttRole::Final);
-/// ```
 pub const RECOMMENDED_STT_MODELS: [RecommendedSttModel; 2] = [
     RecommendedSttModel {
         name: "whisper-base-en",
@@ -460,6 +309,19 @@ mod tests {
                     .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
             );
             assert!(model.vram_gb().is_normal());
+        }
+    }
+
+    #[test]
+    fn recommended_pair_is_whisper_base_en_then_small_en() {
+        assert_eq!(RECOMMENDED_STT_MODELS[0].name(), "whisper-base-en");
+        assert_eq!(RECOMMENDED_STT_MODELS[1].name(), "whisper-small-en");
+    }
+
+    #[test]
+    fn recommended_vram_estimates_are_positive() {
+        for model in RECOMMENDED_STT_MODELS {
+            assert!(model.vram_gb() > 0.0, "{} estimate", model.name());
         }
     }
 

@@ -34,18 +34,6 @@ impl GlobalName {
     /// ([`GlobalNameErrorKind::SegmentCount`]), a segment is empty
     /// ([`GlobalNameErrorKind::Empty`]), or a segment contains a character
     /// outside the allowed set ([`GlobalNameErrorKind::Control`]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::GlobalName;
-    ///
-    /// let name = GlobalName::parse("promptforge/web/fetch")?;
-    /// assert_eq!(name.namespace(), "promptforge");
-    /// assert_eq!(name.pack(), "web");
-    /// assert_eq!(name.to_string(), "promptforge/web/fetch");
-    /// # Ok::<(), promptforge::capabilities::GlobalNameError>(())
-    /// ```
     pub fn parse(s: &str) -> Result<GlobalName, GlobalNameError> {
         let segments: Vec<&str> = s.split('/').collect();
         if !(2..=3).contains(&segments.len()) {

@@ -33,17 +33,6 @@ impl ModelId {
     /// # Errors
     /// Returns [`ModelIdError`] if `server` or `name` is empty or contains a
     /// control character, so an unusable identity is unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::model::ModelId;
-    ///
-    /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
-    /// assert_eq!(id.server(), "gateway");
-    /// assert_eq!(id.name(), "claude-sonnet-4-6");
-    /// # Ok::<(), promptforge::model::ModelIdError>(())
-    /// ```
     pub fn new(
         server: impl Into<String>,
         name: impl Into<String>,
@@ -136,17 +125,6 @@ pub enum ModelCatalogError {
 }
 
 /// Whether a catalogued model can emit thinking tokens.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::ThinkingMode;
-///
-/// // Deserialized from the lowercase gateway wire form.
-/// let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
-/// assert_eq!(mode, ThinkingMode::Switchable);
-/// # Ok::<(), serde_json::Error>(())
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -177,24 +155,6 @@ impl ModelDescriptor {
     ///
     /// The context window is a [`NonZeroU32`], so a zero-token window is
     /// unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-    ///
-    /// let context = NonZeroU32::new(131_072).ok_or("context is non-zero")?;
-    /// let model = ModelDescriptor::new(
-    ///     ModelId::gateway("analyst")?,
-    ///     "A careful analysis model",
-    ///     context,
-    ///     ThinkingMode::Switchable,
-    /// );
-    /// assert_eq!(model.context(), context);
-    /// assert_eq!(model.thinking(), ThinkingMode::Switchable);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -251,25 +211,6 @@ impl ModelCatalog {
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
     /// stable [`ModelId`], so an ambiguous catalog is unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-    ///
-    /// let ctx = NonZeroU32::new(8_192).ok_or("context is non-zero")?;
-    /// let id = ModelId::gateway("small")?;
-    /// let catalog = ModelCatalog::new([ModelDescriptor::new(
-    ///     id.clone(),
-    ///     "A tiny model",
-    ///     ctx,
-    ///     ThinkingMode::Never,
-    /// )])?;
-    /// assert!(catalog.contains(&id));
-    /// assert_eq!(catalog.models().len(), 1);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn new(
         models: impl IntoIterator<Item = ModelDescriptor>,
     ) -> std::result::Result<ModelCatalog, ModelCatalogError> {
@@ -341,6 +282,48 @@ mod tests {
         assert!(ModelId::new("server", "").is_err());
         assert!(ModelId::new("server", "na\nme").is_err());
         assert!(ModelId::gateway("valid-alias").is_ok());
+    }
+
+    #[test]
+    fn a_model_id_exposes_its_server_and_name() {
+        let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6").expect("a valid model id");
+        assert_eq!(id.server(), "gateway");
+        assert_eq!(id.name(), "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn a_thinking_mode_deserializes_from_its_lowercase_wire_form() {
+        let mode: ThinkingMode =
+            serde_json::from_str("\"switchable\"").expect("a thinking mode deserializes");
+        assert_eq!(mode, ThinkingMode::Switchable);
+    }
+
+    #[test]
+    fn a_model_descriptor_keeps_its_context_window_and_thinking_mode() {
+        let context = NonZeroU32::new(131_072).expect("test context window is non-zero");
+        let model = ModelDescriptor::new(
+            ModelId::gateway("analyst").expect("test model alias is valid"),
+            "A careful analysis model",
+            context,
+            ThinkingMode::Switchable,
+        );
+        assert_eq!(model.context(), context);
+        assert_eq!(model.thinking(), ThinkingMode::Switchable);
+    }
+
+    #[test]
+    fn a_model_catalog_contains_each_descriptor_it_was_built_from() {
+        let ctx = NonZeroU32::new(8_192).expect("test context window is non-zero");
+        let id = ModelId::gateway("small").expect("test model alias is valid");
+        let catalog = ModelCatalog::new([ModelDescriptor::new(
+            id.clone(),
+            "A tiny model",
+            ctx,
+            ThinkingMode::Never,
+        )])
+        .expect("a catalog with one descriptor builds");
+        assert!(catalog.contains(&id));
+        assert_eq!(catalog.models().len(), 1);
     }
 
     #[test]

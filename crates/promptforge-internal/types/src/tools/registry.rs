@@ -44,16 +44,6 @@ impl ToolCatalog {
     /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a
     /// descriptor's wire name is empty or contains a `/` separator or a
     /// control character.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::tools::ToolCatalog;
-    ///
-    /// let catalog = ToolCatalog::new(&[])?;
-    /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge::tools::ToolCatalogError>(())
-    /// ```
     pub fn new(tools: &[ToolDescriptor]) -> Result<Self, ToolCatalogError> {
         let mut seen = std::collections::BTreeSet::new();
         for tool in tools {
@@ -83,33 +73,12 @@ impl ToolCatalog {
     /// This is the bind-time lookup, a cold path run once per declared
     /// slot, so it scans linearly rather than keeping a cached-identity
     /// index.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::tools::{ToolCatalog, ToolId};
-    ///
-    /// let catalog = ToolCatalog::new(&[])?;
-    /// let missing = ToolId::parse("promptforge/tools/missing")?;
-    /// assert!(catalog.get(&missing).is_none());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.iter().find(|tool| tool.id == *id)
     }
 
     /// Returns the catalog's descriptors in supplied order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::tools::ToolCatalog;
-    ///
-    /// let catalog = ToolCatalog::new(&[])?;
-    /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge::tools::ToolCatalogError>(())
-    /// ```
     #[must_use]
     pub fn tools(&self) -> &[ToolDescriptor] {
         &self.tools

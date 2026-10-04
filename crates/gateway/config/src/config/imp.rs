@@ -34,16 +34,6 @@ impl Config {
     /// cannot be read, the TOML or interpolation is invalid, a removed layout
     /// feature is present, a selected name is malformed, an ephemeral
     /// selection names an undefined profile, or semantic validation fails.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use gateway_config::{Config, ProfileSelection};
-    /// use std::path::Path;
-    ///
-    /// let inputs = ProfileSelection::new(Some("work"), None);
-    /// let config = Config::load(Path::new("gateway.toml"), &inputs)?;
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     pub fn load(
         path: &Path,
         inputs: &ProfileSelection,
@@ -139,20 +129,6 @@ impl Config {
     /// Panics if the raw shape fails to serialize. Its serializers are
     /// infallible (plain data plus the redacting `Secret` marker), so a
     /// failure is a schema bug, not operator input.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// let toml = r#"
-    /// config-version = 0
-    /// [server]
-    /// bind = "127.0.0.1:8080"
-    /// api_key = "secret"
-    /// "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.to_json()["server"]["api_key"], "***");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self.to_raw()).unwrap_or_else(|error| {
@@ -167,34 +143,6 @@ impl Config {
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) for a malformed or unresolved
     /// interpolation, invalid TOML, or a failed semantic check.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::Config;
-    ///
-    /// let toml = r#"
-    /// config-version = 0
-    /// [server]
-    /// bind = "127.0.0.1:8080"
-    /// api_key = "secret"
-    ///
-    /// [[endpoint]]
-    /// id = "e"
-    /// protocol = "openai"
-    /// base_url = "http://127.0.0.1:9"
-    /// api_key = ""
-    ///
-    /// [[model]]
-    /// name = "m"
-    /// description = "a model"
-    /// context = 8192
-    /// upstream = "u"
-    /// endpoints = ["e"]
-    /// "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.models()[0].name(), "m");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, crate::api_error::ConfigError> {
         Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
     }
@@ -210,22 +158,6 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) when `name` is not defined.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::{Config, ProfileName};
-    ///
-    /// let config = Config::from_toml_str(
-    ///     "config-version = 0\n\
-    ///      [server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-    ///      [[profile]]\nname = \"work\"\nmodels = []\n",
-    /// )?;
-    /// let selected = config.select_profile(Some(&ProfileName::parse("work")?))?;
-    /// assert_eq!(selected.active_profile().map(|profile| profile.name()), Some("work"));
-    /// let unselected = config.select_profile(None)?;
-    /// assert!(unselected.active_profile().is_none());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn select_profile(
         &self,
         name: Option<&ProfileName>,

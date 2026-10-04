@@ -255,18 +255,6 @@ impl TryFrom<RawConfig> for Config {
 /// `[[local_model]]` and `[[stt_model]]` catalog, and that list is the whole
 /// of a profile. Remote `[[model]]` entries are always served and may not be
 /// listed.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-///
-/// let config = Config::from_toml_str(
-///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-///      [[profile]]\nname = \"work\"\nmodels = []\n",
-/// )?;
-/// assert_eq!(config.profiles()[0].name(), "work");
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]

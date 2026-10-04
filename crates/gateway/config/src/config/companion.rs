@@ -24,17 +24,6 @@ use crate::error::ConfigError;
 /// fb0e6b6), and the MTP implementation clamps the value to the drafter's
 /// nextn layer count at runtime (`common/speculative.cpp`), so 16 is a
 /// documented, generous ceiling rather than an upstream limit.
-///
-/// # Examples
-/// ```
-/// use gateway_config::DraftTokenMax;
-///
-/// let max = DraftTokenMax::new(2)?;
-/// assert_eq!(max.get(), 2);
-/// assert!(DraftTokenMax::new(0).is_err());
-/// assert!(DraftTokenMax::new(17).is_err());
-/// # Ok::<(), gateway_config::DraftTokenMaxError>(())
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct DraftTokenMax(NonZeroU32);
@@ -121,39 +110,6 @@ pub enum SpeculationType {
 /// Parsed from a `[local_model.speculative]` sub-table with a `type` (only
 /// `draft-mtp` is supported), a `source`, a `sha256` pin when the source is
 /// remote, and a `draft_max` in the supported llama.cpp range.
-///
-/// # Examples
-/// ```
-/// use gateway_config::{Config, SpeculationType};
-///
-/// let digest = "9eba819938efccfd6044f8af84e3bbfddc639a2bcf32ebc36420e6a649191919";
-/// let toml = format!(r#"
-/// config-version = 0
-/// [server]
-/// bind = "127.0.0.1:8080"
-/// api_key = "secret"
-///
-/// [[local_model]]
-/// name = "gemma-4"
-/// description = "a local model"
-/// source = "/models/gemma-4-E2B-it-UD-Q4_K_XL.gguf"
-/// context = 131072
-///
-/// [local_model.speculative]
-/// type = "draft-mtp"
-/// source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mtp-gemma-4-E2B-it.gguf"
-/// sha256 = "{digest}"
-/// draft_max = 2
-/// "#);
-/// let config = Config::from_toml_str(&toml)?;
-/// let speculative = config.local_models()[0]
-///     .speculative()
-///     .ok_or("missing speculative companion")?;
-/// assert_eq!(speculative.kind(), SpeculationType::DraftMtp);
-/// assert_eq!(speculative.draft_max().get(), 2);
-/// assert_eq!(speculative.sha256(), Some(digest));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -214,35 +170,6 @@ impl SpeculativeConfig {
 ///
 /// Parsed from a `[local_model.multimodal_projector]` sub-table with a
 /// `source` and a `sha256` pin when the source is remote.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-///
-/// let digest = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa";
-/// let toml = format!(r#"
-/// config-version = 0
-/// [server]
-/// bind = "127.0.0.1:8080"
-/// api_key = "secret"
-///
-/// [[local_model]]
-/// name = "gemma-4"
-/// description = "a local model"
-/// source = "/models/gemma-4-E2B-it-UD-Q4_K_XL.gguf"
-/// context = 131072
-///
-/// [local_model.multimodal_projector]
-/// source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf"
-/// sha256 = "{digest}"
-/// "#);
-/// let config = Config::from_toml_str(&toml)?;
-/// let projector = config.local_models()[0]
-///     .multimodal_projector()
-///     .ok_or("missing projector companion")?;
-/// assert_eq!(projector.sha256(), Some(digest));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -283,26 +210,6 @@ impl MultimodalProjectorConfig {
 impl LocalModelConfig {
     /// Returns the speculative-decoding drafter companion
     /// (`[local_model.speculative]`), when set. Chat kind only.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 0
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[local_model]]
-    /// # name = "q"
-    /// # description = "a local model"
-    /// # source = "/models/q.gguf"
-    /// # context = 4096
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert!(config.local_models()[0].speculative().is_none());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub const fn speculative(&self) -> Option<&SpeculativeConfig> {
         self.speculative.as_ref()
@@ -310,26 +217,6 @@ impl LocalModelConfig {
 
     /// Returns the multimodal projector companion
     /// (`[local_model.multimodal_projector]`), when set. Chat kind only.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 0
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[local_model]]
-    /// # name = "q"
-    /// # description = "a local model"
-    /// # source = "/models/q.gguf"
-    /// # context = 4096
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert!(config.local_models()[0].multimodal_projector().is_none());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub const fn multimodal_projector(&self) -> Option<&MultimodalProjectorConfig> {
         self.multimodal_projector.as_ref()

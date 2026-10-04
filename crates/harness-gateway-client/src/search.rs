@@ -181,31 +181,6 @@ impl fmt::Debug for GatewaySearch {
 impl GatewaySearch {
     /// Builds a search provider from a validated [`GatewayEndpoint`] and a
     /// redacted [`SecretString`] bearer key.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// use std::sync::Arc;
-    ///
-    /// use harness_gateway_client::{GatewayEndpoint, GatewaySearch, SecretString};
-    /// use harness_web::{SearchProvider, SearchQuery};
-    ///
-    /// let search = GatewaySearch::new(
-    ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
-    ///     SecretString::new("bearer-token")?,
-    /// );
-    /// // What a Host supplies under `harness_web::SEARCH_PROVIDER`.
-    /// let provider: Arc<dyn SearchProvider> = Arc::new(search);
-    /// let query = SearchQuery {
-    ///     query: "boost asio".to_owned(),
-    ///     ..SearchQuery::default()
-    /// };
-    /// let results = provider.search(query).await?;
-    /// let _ = results.results;
-    /// # Ok(())
-    /// # }
-    /// ```
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewaySearch {
         GatewaySearch::with_timeout(endpoint, key, REQUEST_TIMEOUT)

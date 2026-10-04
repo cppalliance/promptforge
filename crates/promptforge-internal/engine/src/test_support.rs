@@ -90,33 +90,6 @@ impl ChatClient for scripted_chat::ScriptedChat {
 /// `perform` is handed the effect's id beside the effect so a scripted
 /// performer can correlate answers however it likes; it must return an
 /// answer of the effect's own kind (or `Dropped`), as the run requires.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so the
-/// performer is never called:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge_engine::test_support::drive;
-/// use promptforge_engine::{Run, RunContext, RunResult};
-/// use promptforge_parser::Prompt;
-/// use promptforge_types::event::Event;
-/// use promptforge_types::timestamp::Timestamp;
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let run = Run::new(Arc::new(prompt), "", ctx);
-/// let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
-/// let RunResult::Ok(text) = result else {
-///     panic!("the literal run succeeds: {result:?}");
-/// };
-/// assert_eq!(text, "hello");
-/// assert!(matches!(events.first(), Some(Event::RunStarted { .. })));
-/// assert!(matches!(events.last(), Some(Event::RunSucceeded { .. })));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn drive(
     mut run: Run,
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,

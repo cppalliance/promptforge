@@ -38,16 +38,6 @@ impl LogError {
 
     /// Whether the failure came from an operating-system resource (the
     /// filesystem or thread spawn) rather than a worker panic.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// match gateway_logging::LogRuntime::start(config) {
-    ///     Ok(runtime) => drop(runtime),
-    ///     Err(error) if error.is_io() => eprintln!("log file unavailable: {error}"),
-    ///     Err(error) => eprintln!("logging failed: {error}"),
-    /// }
-    /// ```
     #[must_use]
     pub fn is_io(&self) -> bool {
         matches!(self.0, Repr::Open { .. } | Repr::Spawn(_))

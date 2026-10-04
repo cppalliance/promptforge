@@ -87,26 +87,6 @@ impl GatewayChat {
     /// Builds a client from a validated [`GatewayEndpoint`] and a redacted
     /// [`SecretString`] bearer key (used by tests and by
     /// [`GatewayChat::from_env`]).
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// use harness_gateway_client::{GatewayChat, GatewayEndpoint, SecretString};
-    /// use promptforge::model::{CompletionOptions, Message};
-    ///
-    /// let client = GatewayChat::new(
-    ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
-    ///     SecretString::new("bearer-token")?,
-    /// );
-    /// let options = CompletionOptions::new("analyst");
-    /// let completion = client
-    ///     .complete(&[Message::user("hello")], None, &options, |_delta| {})
-    ///     .await?;
-    /// let _ = completion.result();
-    /// # Ok(())
-    /// # }
-    /// ```
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayChat {
         GatewayChat {
@@ -127,17 +107,6 @@ impl GatewayChat {
     /// gateway the requests fail with an `Unavailable` 401. Nothing here checks
     /// the endpoint's host - the caller decides, and
     /// [`GatewayChat::from_env`] decides by [`GatewayEndpoint::is_loopback`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use harness_gateway_client::{GatewayChat, GatewayEndpoint};
-    ///
-    /// let endpoint = GatewayEndpoint::new("http://127.0.0.1:8081/v1")?;
-    /// let client = GatewayChat::keyless(endpoint);
-    /// let _ = client;
-    /// # Ok::<(), harness_gateway_client::GatewayConfigError>(())
-    /// ```
     #[must_use]
     pub fn keyless(endpoint: GatewayEndpoint) -> GatewayChat {
         GatewayChat {
@@ -155,23 +124,6 @@ impl GatewayChat {
     /// Any attempted model call fails with an `Unavailable`-kind
     /// [`CompletionError`]; the client reads no gateway configuration and
     /// sends no HTTP.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # async fn run() {
-    /// use harness_gateway_client::{CompletionErrorKind, GatewayChat};
-    /// use promptforge::model::{CompletionOptions, Message};
-    ///
-    /// let client = GatewayChat::disabled();
-    /// let options = CompletionOptions::new("m");
-    /// let error = client
-    ///     .complete(&[Message::user("hi")], None, &options, |_delta| {})
-    ///     .await
-    ///     .expect_err("a disabled client cannot complete");
-    /// assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
-    /// # }
-    /// ```
     #[must_use]
     pub fn disabled() -> GatewayChat {
         GatewayChat {
@@ -198,20 +150,6 @@ impl GatewayChat {
     /// one that stalls fails as a timeout. The response body is refused
     /// once it would exceed `max_response_bytes` before any UTF-8 or JSON
     /// decoding runs.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU64;
-    /// use std::time::Duration;
-    ///
-    /// use harness_gateway_client::GatewayChat;
-    ///
-    /// let cap = NonZeroU64::new(1024 * 1024).ok_or("cap is non-zero")?;
-    /// let client = GatewayChat::disabled().with_request_limits(Duration::from_secs(30), cap);
-    /// let _ = client;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn with_request_limits(
         mut self,

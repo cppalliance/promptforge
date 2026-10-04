@@ -65,12 +65,6 @@ pub struct LogConfig {
 impl LogConfig {
     /// Builds a config rooted at `state_dir`; the log file lives at
     /// `state_dir/logs/gateway.log`.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(config.state_dir(), std::path::Path::new("/tmp/pf-state"));
-    /// ```
     #[must_use]
     pub fn new(state_dir: impl Into<PathBuf>) -> Self {
         Self {
@@ -79,27 +73,12 @@ impl LogConfig {
     }
 
     /// The state directory the log file is rooted under.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(config.state_dir(), std::path::Path::new("/tmp/pf-state"));
-    /// ```
     #[must_use]
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
     }
 
     /// The log file this run writes: `<state dir>/logs/gateway.log`.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(
-    ///     config.log_path(),
-    ///     std::path::Path::new("/tmp/pf-state").join("logs").join("gateway.log"),
-    /// );
-    /// ```
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
         self.state_dir.join("logs").join("gateway.log")
@@ -108,15 +87,6 @@ impl LogConfig {
     /// The retained log segment paths, `gateway.log.1` (newest) through
     /// `gateway.log.5` (oldest). Diagnostics enumerates these without
     /// starting a runtime, so the log layout has exactly one owner.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// let retained = config.retained_log_paths();
-    /// assert_eq!(retained.len(), 5);
-    /// assert!(retained[0].ends_with("gateway.log.1"));
-    /// assert!(retained[4].ends_with("gateway.log.5"));
-    /// ```
     #[must_use]
     pub fn retained_log_paths(&self) -> Vec<PathBuf> {
         (1..=RETAINED_SEGMENTS)

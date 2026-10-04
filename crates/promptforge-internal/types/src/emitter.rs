@@ -79,20 +79,6 @@ impl EventBuffer {
 
 /// The shared handle onto one run's event buffer: every chain's emitter
 /// pushes through a clone, and the run drains through its own.
-///
-/// # Examples
-/// ```
-/// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-/// use promptforge_types::event::{Event, lifecycle};
-///
-/// let sink = EventSink::default();
-/// let emitter = Emitter::root(sink.clone(), "run-1", DebugMode::Off);
-/// emitter.report("Gather", lifecycle::SECTION_STARTED);
-/// let events = sink.take();
-/// assert!(matches!(events.as_slice(), [Event::SectionStarted { section, .. }] if section == "Gather"));
-/// assert_eq!(events[0].provenance().task.to_string(), "0");
-/// assert!(sink.take().is_empty(), "a drain empties the buffer");
-/// ```
 #[derive(Clone, Debug, Default)]
 pub struct EventSink(Arc<Mutex<EventBuffer>>);
 

@@ -124,16 +124,6 @@ fn canonical_host(host: &str) -> String {
 /// that a constructor already checked, so no field can hold an invalid state.
 /// Take the built-in safe policy with [`FetchConfig::default`], or customize one
 /// through [`FetchConfig::builder`].
-///
-/// # Examples
-/// ```
-/// use harness_web::FetchConfig;
-///
-/// let policy = FetchConfig::default();
-/// let custom = FetchConfig::builder().allow_http(true).build()?;
-/// assert_ne!(policy, custom);
-/// # Ok::<(), harness_web::ConfigError>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchConfig {
     /// Whether to permit `http://` URLs; `https://` is always allowed.
@@ -164,14 +154,6 @@ pub struct FetchConfig {
 
 impl FetchConfig {
     /// Starts a builder seeded with the built-in default policy.
-    ///
-    /// # Examples
-    /// ```
-    /// use harness_web::FetchConfig;
-    ///
-    /// let policy = FetchConfig::builder().max_chars(10_000).build()?;
-    /// # Ok::<(), harness_web::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn builder() -> FetchConfigBuilder {
         FetchConfigBuilder::default()
@@ -406,17 +388,6 @@ impl FetchConfigBuilder {
     /// Returns [`ConfigError`] for a header-invalid user agent, a zero or
     /// over-ceiling `max_bytes`/`max_chars`, an over-ceiling `max_redirects`, a
     /// zero timeout, a malformed denied CIDR, or a malformed exact host.
-    ///
-    /// # Examples
-    /// ```
-    /// use harness_web::FetchConfig;
-    ///
-    /// let policy = FetchConfig::builder()
-    ///     .deny_cidr("203.0.114.0/24")
-    ///     .max_bytes(1024)
-    ///     .build()?;
-    /// # Ok::<(), harness_web::ConfigError>(())
-    /// ```
     pub fn build(self) -> Result<FetchConfig, ConfigError> {
         let user_agent = validate_user_agent(self.user_agent)?;
         let max_bytes = validate_limit("max_bytes", self.max_bytes, MAX_BYTES_CEILING)?;

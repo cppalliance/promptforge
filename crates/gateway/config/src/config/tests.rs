@@ -525,6 +525,7 @@ fn unclosed_interpolation_is_an_error() {
     ));
 }
 
+mod accessors;
 mod schema;
 mod serialize;
 mod validation;

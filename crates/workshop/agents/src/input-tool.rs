@@ -56,17 +56,6 @@ impl Drop for WaitGuard {
 /// dying wait is an outcome, never silence: a future dropped by a close
 /// removes the entry and pushes [`WaitFrame::Cancelled`], so the client
 /// never pins its input box to a dead token.
-///
-/// # Examples
-/// ```
-/// use std::sync::Arc;
-///
-/// use workshop_agents::{SessionInputBroker, WaitRegistry};
-///
-/// let registry = Arc::new(WaitRegistry::new());
-/// let (frames, _receiver) = tokio::sync::broadcast::channel(8);
-/// let _broker = SessionInputBroker::new(registry, frames);
-/// ```
 #[derive(Debug)]
 pub struct SessionInputBroker {
     /// The conversation's wait registry, shared with the conversation
