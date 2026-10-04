@@ -1,4 +1,9 @@
-#![doc = include_str!("lib.md")]
+//! The Harness a Host builds for each run. [`Harness::new`] takes the
+//! Host's recorder, inference broker, timer, capability registry, and
+//! services, [`Harness::run`] runs one prompt to its [`RunReport`], and the
+//! Host steers that run through its [`RunControl`].
+//!
+//! The crate's `run-prompt` example runs one prompt from start to end.
 
 pub use harness_capabilities::USER_INPUT_ASK_TOOL;
 pub use harness_runner::Harness;
@@ -15,7 +20,8 @@ pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
 pub mod capability {
-    #![doc = include_str!("capability.md")]
+    //! Capabilities, the registry a Host installs them in, and the services
+    //! they read.
 
     pub use harness_capabilities::Capability;
     pub use harness_capabilities::CapabilityError;
@@ -38,7 +44,8 @@ pub mod capability {
 }
 
 pub mod record {
-    #![doc = include_str!("record.md")]
+    //! The recorder a run writes every effect, answer, and event to, and an
+    //! in-memory recorder.
 
     pub use harness_runner::recorder::MemoryRecorder;
     pub use harness_runner::recorder::Record;
@@ -52,7 +59,8 @@ pub mod record {
 }
 
 pub mod vfs {
-    #![doc = include_str!("vfs.md")]
+    //! The file handle a Host hands a run, and the origin each operation
+    //! carries.
 
     pub use promptforge::vfs::Origin;
     pub use promptforge::vfs::VfsError;

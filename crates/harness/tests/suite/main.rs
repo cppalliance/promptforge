@@ -2,5 +2,7 @@
 //! the public API alone.
 
 mod broker;
+mod host;
 mod launch;
 mod support;
+mod vfs;

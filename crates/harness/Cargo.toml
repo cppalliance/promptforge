@@ -18,9 +18,9 @@ harness-runner.workspace = true
 promptforge.workspace = true
 workspace-hack.workspace = true
 
-# The doc examples and the suite run a Host on tokio, as a real Host
-# does; the facade's own items name no tokio type. The doc examples
-# implement `InputBroker`, an `async_trait` trait.
+# The suite and the `run-prompt` example run a Host on tokio, as a real
+# Host does; the facade's own items name no tokio type. The suite
+# implements `InputBroker`, an `async_trait` trait.
 [dev-dependencies]
 async-trait.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "signal", "time"] }

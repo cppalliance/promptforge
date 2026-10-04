@@ -10,7 +10,20 @@
 )]
 
 mod auto_traits;
+mod cancel;
+mod capabilities;
+mod effect;
+mod event;
+mod greeter;
+mod ids;
+mod metrics;
+mod model;
 mod parsing;
 mod prepare;
+mod prompt;
+mod replay;
 mod shipped;
 mod support;
+mod timestamp;
+mod tools;
+mod vfs;

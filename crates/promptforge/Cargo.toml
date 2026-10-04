@@ -21,7 +21,9 @@ promptforge-vfs.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The prepare suite's tool descriptors carry JSON parameter schemas.
+# The suite's and the `greeter` example's tool descriptors carry JSON
+# parameter schemas, and the suite reads its effect and event logs back
+# as JSON.
 serde_json.workspace = true
 
 [lints]

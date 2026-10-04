@@ -1,4 +1,14 @@
-#![doc = include_str!("lib.md")]
+//! Parses PromptForge prompt files and runs them for a Harness that does
+//! their outside work.
+//!
+//! A [`Prompt`] is a parsed prompt file. A [`Run`] executes one prompt and
+//! performs no I/O: [`Run::step`] returns [`Step::Pending`] with the effects
+//! the run waits on, the Harness performs each one and hands its answer to
+//! [`Run::resume`], and the run ends at [`Step::Done`] with its
+//! [`RunResult`]. Before the run starts, [`Environment::prepare`] binds the
+//! prompt's model roles and tool slots into its [`RunContext`].
+//!
+//! The crate's `greeter` example is that whole loop in one program.
 
 pub use promptforge_engine::CapabilityConflict;
 pub use promptforge_engine::Environment;
@@ -19,7 +29,8 @@ pub use promptforge_parser::ParseErrorKind;
 pub use promptforge_parser::Prompt;
 
 pub mod effect {
-    #![doc = include_str!("effect.md")]
+    //! The outside work a run asks for, the answers it takes back, and the
+    //! records a Harness logs for both.
 
     pub use promptforge_engine::AnswerRecord;
     pub use promptforge_engine::ChatAnswerRecord;
@@ -34,7 +45,7 @@ pub mod effect {
 }
 
 pub mod event {
-    #![doc = include_str!("event.md")]
+    //! The events a run reports for the Harness to log.
 
     pub use promptforge_types::emitter::DebugMode;
     pub use promptforge_types::event::Event;
@@ -42,7 +53,8 @@ pub mod event {
 }
 
 pub mod ids {
-    #![doc = include_str!("ids.md")]
+    //! Task, chain, and round ids, and the provenance that orders a run's
+    //! records.
 
     pub use promptforge_types::ids::AbandonReason;
     pub use promptforge_types::ids::ChainId;
@@ -54,7 +66,8 @@ pub mod ids {
 }
 
 pub mod model {
-    #![doc = include_str!("model.md")]
+    //! Model descriptions and catalogs, the models a prompt's roles are
+    //! bound to, and the chat vocabulary of a model round.
 
     pub use promptforge_engine::ModelBindings;
     pub use promptforge_model_client::client::Completion;
@@ -80,7 +93,8 @@ pub mod model {
 }
 
 pub mod tools {
-    #![doc = include_str!("tools.md")]
+    //! Tool descriptions and catalogs, the tools a prompt's slots are bound
+    //! to, and the output or error that answers a tool call.
 
     pub use promptforge_engine::ToolBindings;
     pub use promptforge_types::tools::OutputTrust;
@@ -97,7 +111,8 @@ pub mod tools {
 }
 
 pub mod capabilities {
-    #![doc = include_str!("capabilities.md")]
+    //! Capability ids, the Lua preludes capabilities add to a run, and the
+    //! global names those preludes may define.
 
     pub use promptforge_types::capabilities::CapabilityId;
     pub use promptforge_types::capabilities::CapabilityIdError;
@@ -109,7 +124,8 @@ pub mod capabilities {
 }
 
 pub mod prompt {
-    #![doc = include_str!("prompt.md")]
+    //! What a prompt's frontmatter declares: its files, capabilities, tool
+    //! slots, arguments, and model roles.
 
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
@@ -125,7 +141,8 @@ pub mod prompt {
 }
 
 pub mod vfs {
-    #![doc = include_str!("vfs.md")]
+    //! A run's files: the store every section shares, real directories
+    //! beside it, and the policy that decides what the run may change.
 
     pub use promptforge_engine::perform_vfs_op;
     pub use promptforge_lua::VfsOp;
@@ -159,20 +176,21 @@ pub mod vfs {
 }
 
 pub mod cancel {
-    #![doc = include_str!("cancel.md")]
+    //! Cancel handles that stop runs and tasks from any thread.
 
     pub use promptforge_types::cancel::CancelHandle;
     pub use promptforge_types::cancel::Cancelled;
 }
 
 pub mod timestamp {
-    #![doc = include_str!("timestamp.md")]
+    //! The start time a run's context carries and its Lua reads as
+    //! `sys.when`.
 
     pub use promptforge_types::timestamp::Timestamp;
 }
 
 pub mod metrics {
-    #![doc = include_str!("metrics.md")]
+    //! The token counts and timings of a model call.
 
     pub use promptforge_types::metrics::CallMetrics;
     pub use promptforge_types::metrics::ClientTiming;
@@ -183,7 +201,7 @@ pub mod metrics {
 }
 
 pub mod replay {
-    #![doc = include_str!("replay.md")]
+    //! The behavior flags a run's record keeps and hands back unchanged.
 
     pub use promptforge_types::replay::Flags;
 }
