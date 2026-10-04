@@ -211,7 +211,7 @@ pub(crate) fn reject_profiles_directory(path: &Path) -> Result<(), ConfigError> 
         return Err(ConfigError::HardBreak {
             path: path.to_owned(),
             line: 1,
-            key: "profiles/",
+            problem: "unsupported `profiles/` directory beside this file".to_owned(),
             replacement: "move every profile into this file as a [[profile]] checklist",
         });
     }
@@ -300,21 +300,22 @@ fn reject_removed_layout(raw: &str, path: Option<&Path>) -> Result<(), ConfigErr
 
     match probe.config_version {
         Some(version) if version.get_ref().as_integer() == Some(0) => Ok(()),
-        Some(version) => Err(hard_break(
+        Some(version) => Err(ConfigError::HardBreak {
             path,
-            line_for_span(raw, version.span()),
-            "config-version",
-            "set config-version = 0 and use the single-file profile layout",
-        )),
-        None => Err(hard_break(
+            line: line_for_span(raw, version.span()),
+            problem: format!("unsupported config-version {}", version.get_ref()),
+            replacement: "set config-version = 0 and use the single-file profile layout",
+        }),
+        None => Err(ConfigError::HardBreak {
             path,
-            1,
-            "config-version",
-            "add config-version = 0 before the first table",
-        )),
+            line: 1,
+            problem: "missing config-version".to_owned(),
+            replacement: "add config-version = 0 before the first table",
+        }),
     }
 }
 
+/// A hard break for a key the current layout removed.
 fn hard_break(
     path: std::path::PathBuf,
     line: usize,
@@ -324,7 +325,7 @@ fn hard_break(
     ConfigError::HardBreak {
         path,
         line,
-        key,
+        problem: format!("removed config key `{key}`"),
         replacement,
     }
 }

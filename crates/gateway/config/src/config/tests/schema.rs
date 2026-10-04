@@ -131,7 +131,10 @@ fn hard_breaks_name_file_key_line_and_replacement() {
         let message = error.to_string();
         assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
         assert!(message.contains("<memory>"), "file named: {message}");
-        assert!(message.contains(key), "key named: {message}");
+        assert!(
+            message.contains(&format!("removed config key `{key}`")),
+            "key named as removed: {message}"
+        );
         assert!(message.contains(line), "line named: {message}");
         assert!(
             message.contains(replacement),
@@ -189,15 +192,35 @@ const PREVIOUS_VERSION: u32 = 2;
 
 #[test]
 fn missing_or_wrong_config_version_is_a_located_hard_break() {
-    for raw in [
-        "[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
-        "config-version = 1\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
-        format!("config-version = {PREVIOUS_VERSION}\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n"),
+    for (raw, problem) in [
+        (
+            "[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
+            "missing config-version".to_string(),
+        ),
+        (
+            "config-version = 1\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
+            "unsupported config-version 1".to_string(),
+        ),
+        (
+            format!(
+                "config-version = {PREVIOUS_VERSION}\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n"
+            ),
+            format!("unsupported config-version {PREVIOUS_VERSION}"),
+        ),
+        (
+            "config-version = \"0\"\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
+            "unsupported config-version \"0\"".to_string(),
+        ),
     ] {
         let error = Config::from_toml_str(&raw).expect_err("version must be explicit");
         let message = error.to_string();
         assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
         assert!(message.contains(":1:"), "line named: {message}");
+        assert!(message.contains(&problem), "problem named: {message}");
+        assert!(
+            !message.contains("removed config key"),
+            "the key is present, not removed: {message}"
+        );
         assert!(
             message.contains("config-version = 0"),
             "replacement names the required value: {message}"
@@ -243,7 +266,10 @@ fn sibling_profiles_directory_is_a_hard_break() {
         message.contains("gateway.toml:1"),
         "file and line: {message}"
     );
-    assert!(message.contains("profiles/"), "feature named: {message}");
+    assert!(
+        message.contains("unsupported `profiles/` directory"),
+        "feature named as a directory, not a config key: {message}"
+    );
     assert!(
         message.contains("[[profile]]"),
         "replacement named: {message}"

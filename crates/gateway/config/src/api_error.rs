@@ -30,7 +30,8 @@ pub enum ConfigErrorKind {
     UnresolvedVar,
     /// The configuration parsed but failed a semantic check.
     Validation,
-    /// A removed configuration layout feature was found.
+    /// A layout the loader rejects was found: a removed key or directory,
+    /// or a missing or unsupported `config-version`.
     HardBreak,
     /// A shadow file could not be written.
     Write,
@@ -130,7 +131,7 @@ mod tests {
                 ConfigErrorRepr::HardBreak {
                     path: PathBuf::from("a.toml"),
                     line: 4,
-                    key: "include",
+                    problem: "removed config key `include`".to_owned(),
                     replacement: "use one gateway.toml with [[profile]] entries",
                 },
                 ConfigErrorKind::HardBreak,
