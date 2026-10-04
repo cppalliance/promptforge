@@ -48,7 +48,7 @@ impl InputBroker for Withdrawn {
 
 /// Run services with no broker.
 fn headless() -> RunServices {
-    RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
+    RunServices::new(CancelHandle::new())
 }
 
 /// Run services whose broker is `broker`, supplied among the Host's
@@ -58,11 +58,7 @@ fn with_broker(broker: impl InputBroker + 'static) -> RunServices {
     let broker: Arc<dyn InputBroker> = Arc::new(broker);
     host.provide(&INPUT_BROKER, broker)
         .expect("an empty map takes the broker");
-    RunServices::with_host(
-        promptforge::vfs::VfsRef::default(),
-        CancelHandle::new(),
-        host,
-    )
+    RunServices::with_host(CancelHandle::new(), host)
 }
 
 /// The one tool the capability contributes under `services`.

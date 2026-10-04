@@ -16,7 +16,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::{Origin, perform_vfs_op};
+use promptforge::vfs::perform_vfs_op;
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
 /// A [`RunContext`] for the run `name` under fixed Harness inputs: no fixture
@@ -35,10 +35,9 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
 /// The Harness's activate-then-prepare ceremony spelled out, so a test can
 /// inspect what the run path folds into one refusal: activates the
 /// prompt's declared capabilities against `registry` with the run's own
-/// services - its filesystem handle and cancel flag - installs the
-/// resulting catalog, prepares the context over the handle it already
-/// holds, and merges activation's report into prepare's. Returns the
-/// prepared context, the merged report, and the activation (for its
+/// services - its cancel flag - installs the resulting catalog, prepares
+/// the context, and merges activation's report into prepare's. Returns
+/// the prepared context, the merged report, and the activation (for its
 /// implementation table).
 pub(super) fn prepare_activated(
     env: Environment,
@@ -46,7 +45,7 @@ pub(super) fn prepare_activated(
     prompt: &Prompt,
     ctx: RunContext,
 ) -> (RunContext, Requirements, Activation) {
-    let services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
+    let services = RunServices::new(ctx.cancel_handle());
     let activation = activate(registry, prompt, &services);
     let env = env.tools(activation.catalog.clone());
     let (ctx, mut requirements) = env.prepare(prompt, ctx);
@@ -91,12 +90,9 @@ fn drive_store_only(mut run: Run) -> RunResult {
     }
 }
 
-/// What one activation observed: the marker round-trip through the
-/// services VFS and the cancellation handle it was handed.
+/// What one activation observed: the cancellation handle it was handed.
 #[derive(Debug)]
 pub(super) struct Observed {
-    /// The marker read back through the services VFS, when it round-tripped.
-    pub(super) marker: Option<String>,
     /// The cancellation handle `create` received.
     pub(super) cancel: CancelHandle,
 }
@@ -135,27 +131,10 @@ impl Capability for Fixture {
         if self.fail {
             return Err(CapabilityError::message("the fixture cannot activate"));
         }
-        // The run's filesystem is the services VFS, with the declared
-        // store at its root: a relative path lands in the store, which is
-        // where the prompt's `store.read` sees it.
-        let access = services
-            .vfs
-            .acquire(Origin::new("fixture activation"))
-            .map_err(|error| {
-                CapabilityError::with_source("the fixture could not acquire", error)
-            })?;
-        access
-            .write("activated.txt", b"active")
-            .map_err(|error| CapabilityError::with_source("the fixture could not write", error))?;
-        let marker = access
-            .read("activated.txt")
-            .ok()
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         self.activations
             .lock()
             .expect("the activations lock is not poisoned")
             .push(Observed {
-                marker,
                 cancel: services.cancel.clone(),
             });
         Ok(Contribution::default())

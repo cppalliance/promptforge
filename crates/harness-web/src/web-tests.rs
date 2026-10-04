@@ -9,7 +9,6 @@ use harness::capability::{
 };
 use promptforge::cancel::CancelHandle;
 use promptforge::tools::ToolId;
-use promptforge::vfs::VfsRef;
 use tokio::runtime::Handle;
 
 use super::{SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
@@ -41,7 +40,7 @@ fn services_with(provider: bool, runtime: bool, cancel: CancelHandle) -> RunServ
         host.provide(&TOKIO_RUNTIME, Arc::new(Handle::current()))
             .expect("an empty map takes the runtime");
     }
-    RunServices::with_host(VfsRef::default(), cancel, host)
+    RunServices::with_host(cancel, host)
 }
 
 /// Run services holding both services, with a live cancel handle.

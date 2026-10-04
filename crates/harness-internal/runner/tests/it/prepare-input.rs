@@ -251,7 +251,7 @@ async fn an_optional_user_input_declaration_without_a_broker_runs_on_the_fallbac
 fn an_optional_user_input_declaration_without_a_broker_records_the_service_gap() {
     let source = user_input_prompt(OPTIONAL, ASKS_ONCE);
     let prompt = Prompt::parse(&source, "asks-input").0.unwrap();
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(CancelHandle::new());
     let activation = activate(Some(&user_input_registry()), &prompt, &services);
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");

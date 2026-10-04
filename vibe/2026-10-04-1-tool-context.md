@@ -381,7 +381,7 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 
 <step-3>
 
-### Step 3: Stop handing capabilities the run's filesystem
+### Step 3: Stop handing capabilities the run's filesystem [completed]
 
 - Component: Capability services without a filesystem
 - Placement: last. The compiler does not tie it to Steps 1 and 2, but it comes after Step 2 so the supported way into the run's files (the context) exists before the unsupported one (`RunServices::vfs`) goes. It also edits two test files Step 2 edits, `crates/harness-internal/capabilities/src/user_input-tests.rs` and `crates/harness-internal/capabilities/tests/it/support.rs`, so it is built after Step 2 rather than beside it.

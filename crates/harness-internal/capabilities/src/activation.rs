@@ -133,7 +133,7 @@ pub struct ServiceGap {
 /// missing service; an optional one activates anyway, and each missing
 /// service becomes a [`ServiceGap`] in [`Activation::service_gaps`] and a
 /// warning. Each remaining capability is activated with `services` (the
-/// run's VFS, cancellation handle, and the services it has); an
+/// run's cancellation handle and the services it has); an
 /// activation failure is logged and the capability contributes nothing -
 /// and when the failed capability is required, it also lands in
 /// [`Requirements::missing_required`], since the run cannot have what the

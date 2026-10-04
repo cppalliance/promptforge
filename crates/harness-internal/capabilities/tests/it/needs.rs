@@ -10,7 +10,6 @@ use harness_capabilities::{
     HostServices, INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, activate,
 };
 use promptforge::cancel::CancelHandle;
-use promptforge::vfs::VfsRef;
 use promptforge::{MissingService, RunErrorKind, RunResult};
 
 use super::support::{captured_logs, context, parse, run_activated};
@@ -115,7 +114,7 @@ fn activate_asker(source: &str, with_broker: bool) -> (Activation, usize) {
         host.provide(&INPUT_BROKER, broker)
             .expect("an empty map takes the broker");
     }
-    let services = RunServices::with_host(VfsRef::default(), CancelHandle::new(), host);
+    let services = RunServices::with_host(CancelHandle::new(), host);
     let activation = activate(Some(&registry), &prompt, &services);
     (activation, creates.load(Ordering::SeqCst))
 }

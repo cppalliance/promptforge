@@ -8,10 +8,11 @@
 //! the ceremony the Engine's `Environment` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
-//! directories and the declared store, to the capabilities' services
-//! beside the Host's, and to the context as given; activate the prompt's
-//! declared capabilities against the caller's registry, which assembles the
-//! catalog, the preludes, and the implementation table; install the
+//! directories and the declared store, to the context as given, and the
+//! cancel flag and the Host's services to the capabilities' services;
+//! activate the prompt's declared capabilities against the caller's
+//! registry, which assembles the catalog, the preludes, and the
+//! implementation table; install the
 //! catalog and the preludes and prepare the context; merge activation's
 //! report into prepare's and refuse an
 //! unsatisfiable prompt with the Engine's model-readable notice; and
@@ -61,8 +62,7 @@ pub struct Services {
     /// broker among them when it has one.
     pub services: HostServices,
     /// The run's whole filesystem: the real directories and the declared store,
-    /// passed straight to the context's VFS and handed to the capabilities
-    /// as the run's services.
+    /// passed straight to the context's VFS.
     pub vfs: VfsRef,
     /// The text staged at the prompt's declared `input:` path before the
     /// run, when the launch supplied one.
@@ -255,8 +255,7 @@ pub async fn prepare(
     };
 
     // The declared input is in place before anything else sees the
-    // store: the capabilities activate over the same filesystem, and the
-    // run's first section may read it.
+    // store: the run's first section may read it.
     let declared = prompt.frontmatter().input().map(FileDecl::path);
     if let Err(source) = stage_input(&vfs, declared, input_text) {
         recorder
@@ -284,15 +283,14 @@ pub async fn prepare(
         ctx = ctx.model(model);
     }
     // The activate-prepare-refuse ceremony: the run's whole filesystem,
-    // the real directories and the declared store, is handed to the
-    // capabilities' services beside the Host's and to the context as
-    // given, so the capabilities and the run share one filesystem; the
-    // activated catalog is what prepare fills slots against, its preludes
-    // go to every section VM, and the implementations stay here for the
-    // tool performer.
+    // the real directories and the declared store, goes to the context as
+    // given, and the capabilities' services hold the cancel flag and the
+    // Host's services; the activated catalog is what prepare fills slots
+    // against, its preludes go to every section VM, and the
+    // implementations stay here for the tool performer.
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
-    let run_services = RunServices::with_host(ctx.vfs_handle().clone(), ctx.cancel_handle(), host);
+    let run_services = RunServices::with_host(ctx.cancel_handle(), host);
     let activation = activate(registry.as_deref(), &prompt, &run_services);
     let env = env.tools(activation.catalog).preludes(activation.preludes);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);

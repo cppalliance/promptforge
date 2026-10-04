@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
-use promptforge::vfs::VfsRef;
 use promptforge::{MissingService, Prompt};
 
 use super::{Activation, ServiceGap, activate};
@@ -58,7 +57,7 @@ impl Capability for Timed {
 
 /// Run services with nothing provided.
 fn bare() -> RunServices {
-    RunServices::new(VfsRef::default(), CancelHandle::new())
+    RunServices::new(CancelHandle::new())
 }
 
 /// Run services providing the clock under its own type.

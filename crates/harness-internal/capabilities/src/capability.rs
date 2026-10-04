@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
-use promptforge::vfs::VfsRef;
 
 use crate::service::{HostServices, ServiceId, ServiceKey};
 use crate::tool::Tool;
@@ -93,17 +92,14 @@ pub trait Capability: Send + Sync {
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
 }
 
-/// The filesystem, cancellation flag, and services a capability receives
-/// when it activates for a run.
+/// The cancellation flag and services a capability receives when it
+/// activates for a run.
 ///
 /// Configuration the Host supplies for a capability arrives here, never
 /// through the prompt.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RunServices {
-    /// The run's whole filesystem: the real directories and the declared
-    /// store, handed over by the Harness before activation.
-    pub vfs: VfsRef,
     /// The run's cancellation flag. It is the same synchronous handle the
     /// Engine polls, so a capability sees a cancellation by the Host by
     /// polling it too.
@@ -118,15 +114,15 @@ impl RunServices {
     /// Builds the services handed to [`Capability::create`] for one run,
     /// with an empty set of Host services.
     #[must_use]
-    pub fn new(vfs: VfsRef, cancel: CancelHandle) -> RunServices {
-        RunServices::with_host(vfs, cancel, HostServices::new())
+    pub fn new(cancel: CancelHandle) -> RunServices {
+        RunServices::with_host(cancel, HostServices::new())
     }
 
     /// Builds the services handed to [`Capability::create`] for one run,
     /// with `host` as the services the run has.
     #[must_use]
-    pub fn with_host(vfs: VfsRef, cancel: CancelHandle, host: HostServices) -> RunServices {
-        RunServices { vfs, cancel, host }
+    pub fn with_host(cancel: CancelHandle, host: HostServices) -> RunServices {
+        RunServices { cancel, host }
     }
 
     /// Returns the run's provider registered under the id of `key`, or
@@ -149,7 +145,6 @@ impl std::fmt::Debug for RunServices {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RunServices")
-            .field("vfs", &self.vfs)
             .field("cancel", &self.cancel)
             .field("host", &self.host)
             .finish()

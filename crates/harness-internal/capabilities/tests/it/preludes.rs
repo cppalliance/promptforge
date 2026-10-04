@@ -11,7 +11,6 @@ use harness_capabilities::{
 };
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::Prelude;
-use promptforge::vfs::VfsRef;
 
 use super::support::parse;
 
@@ -93,7 +92,7 @@ fn activate_declaring(capabilities: &str, installed: Vec<Preluder>) -> Activatio
             .register(Arc::new(capability))
             .expect("the fixture registers");
     }
-    let services = RunServices::new(VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(CancelHandle::new());
     activate(Some(&registry), &prompt, &services)
 }
 

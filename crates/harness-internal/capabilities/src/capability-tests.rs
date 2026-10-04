@@ -103,7 +103,7 @@ fn contribution_debug_says_whether_a_prelude_is_present_without_showing_it() {
 #[test]
 fn create_receives_the_run_services() {
     let capability = StubCapability::web();
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(CancelHandle::new());
     let contribution = capability
         .create(&services)
         .expect("activation succeeds on a live run");
@@ -111,7 +111,7 @@ fn create_receives_the_run_services() {
 
     let cancel = CancelHandle::new();
     cancel.cancel();
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), cancel);
+    let services = RunServices::new(cancel);
     let error = capability
         .create(&services)
         .expect_err("a cancelled run fails activation");
@@ -139,7 +139,7 @@ fn host_with_broker(broker: Scripted) -> HostServices {
 
 #[tokio::test]
 async fn new_services_have_no_input_broker_and_the_hosts_services_supply_one() {
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(CancelHandle::new());
     assert!(
         services.get(&INPUT_BROKER).is_none(),
         "a host that supplies no broker leaves the run without one"
@@ -149,11 +149,7 @@ async fn new_services_have_no_input_broker_and_the_hosts_services_supply_one() {
         "Debug lists the provided service ids: {services:?}"
     );
 
-    let services = RunServices::with_host(
-        promptforge::vfs::VfsRef::default(),
-        CancelHandle::new(),
-        host_with_broker(Scripted("typed")),
-    );
+    let services = RunServices::with_host(CancelHandle::new(), host_with_broker(Scripted("typed")));
     let broker = services
         .get(&INPUT_BROKER)
         .expect("the host's services supply the broker");
@@ -166,13 +162,9 @@ async fn new_services_have_no_input_broker_and_the_hosts_services_supply_one() {
 
 #[test]
 fn the_input_service_is_provided_exactly_when_a_broker_is_present() {
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    let services = RunServices::new(CancelHandle::new());
     assert!(!services.provides(&INPUT_BROKER.id()));
-    let services = RunServices::with_host(
-        promptforge::vfs::VfsRef::default(),
-        CancelHandle::new(),
-        host_with_broker(Scripted("typed")),
-    );
+    let services = RunServices::with_host(CancelHandle::new(), host_with_broker(Scripted("typed")));
     assert!(services.provides(&INPUT_BROKER.id()));
 }
 
@@ -195,11 +187,7 @@ async fn a_second_input_broker_is_refused_and_the_first_stays() {
         ),
         "a provider of another type under the same literal is refused"
     );
-    let services = RunServices::with_host(
-        promptforge::vfs::VfsRef::default(),
-        CancelHandle::new(),
-        host,
-    );
+    let services = RunServices::with_host(CancelHandle::new(), host);
     let broker = services
         .get(&INPUT_BROKER)
         .expect("the first broker is provided");

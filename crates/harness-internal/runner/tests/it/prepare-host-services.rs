@@ -133,11 +133,7 @@ fn an_optional_capability_whose_service_the_host_lacks_records_the_service_gap()
     let prompt = Prompt::parse(DECLARES_GREETER_OPTIONALLY, "declares-greeter")
         .0
         .unwrap();
-    let services = RunServices::with_host(
-        promptforge::vfs::VfsRef::default(),
-        CancelHandle::new(),
-        HostServices::new(),
-    );
+    let services = RunServices::with_host(CancelHandle::new(), HostServices::new());
     let activation = activate(Some(&registry), &prompt, &services);
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");

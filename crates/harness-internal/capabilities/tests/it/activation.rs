@@ -4,7 +4,6 @@
 
 use harness_capabilities::{CapabilityId, CapabilityRegistry};
 use promptforge::cancel::CancelHandle;
-use promptforge::vfs::Origin;
 use promptforge::{Environment, RunErrorKind, RunResult};
 
 use super::support::{Fixture, captured_logs, context, parse, prepare_activated, run_activated};
@@ -38,11 +37,11 @@ const DECLARES_OPTIONAL: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` as required and returning the
-/// marker its activation wrote into the run's store.
-const READS_ACTIVATION_MARKER: &str = concat!(
+/// A prompt declaring `promptforge/web` as required and returning a fixed
+/// text from Lua, so the run completes without a model.
+const RUNS_AFTER_ACTIVATION: &str = concat!(
     "---\n",
-    "name: reads-activation-marker\n",
+    "name: runs-after-activation\n",
     "description: d\n",
     "promptforge: 0\n",
     "capabilities:\n",
@@ -51,7 +50,7 @@ const READS_ACTIVATION_MARKER: &str = concat!(
     "# Title\n\n",
     "## Only\n\n",
     "```lua\n",
-    "return store.read('activated.txt')\n",
+    "return 'ran'\n",
     "```\n",
 );
 
@@ -100,7 +99,7 @@ fn activation_receives_the_runs_own_services() {
     let mut registry = CapabilityRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let cancel = CancelHandle::new();
-    let (ctx, requirements, _) = prepare_activated(
+    let (_ctx, requirements, _) = prepare_activated(
         Environment::new(),
         Some(&registry),
         &prompt,
@@ -110,25 +109,11 @@ fn activation_receives_the_runs_own_services() {
     // The Harness-supplied cancellation handle reached `create` unchanged.
     let activations = activations.lock().expect("the lock is not poisoned");
     assert_eq!(activations.len(), 1, "create ran exactly once");
-    assert_eq!(activations[0].marker.as_deref(), Some("active"));
     assert!(!activations[0].cancel.is_cancelled());
     cancel.cancel();
     assert!(
         activations[0].cancel.is_cancelled(),
         "the activated handle is the run's own"
-    );
-    drop(activations);
-    // The services VFS is the run's own handle: the Harness handed it to
-    // activation and to the context, so the activation's marker - written
-    // into the declared store at `/` - is readable through the context's
-    // handle after prepare.
-    let access = ctx
-        .vfs_handle()
-        .acquire(Origin::new("post-prepare read"))
-        .expect("the prepared handle acquires");
-    assert_eq!(
-        access.read("activated.txt").expect("the marker persists"),
-        b"active"
     );
 }
 
@@ -206,19 +191,16 @@ fn the_run_path_refuses_a_missing_required_capability_with_a_notice_naming_it() 
 }
 
 #[test]
-fn the_run_path_activates_over_the_store_the_run_reads() {
-    let prompt = parse(READS_ACTIVATION_MARKER, "reads-activation-marker");
+fn the_run_path_activates_a_declared_capability_exactly_once() {
+    let prompt = parse(RUNS_AFTER_ACTIVATION, "runs-after-activation");
     let (fixture, activations) = Fixture::new("promptforge/web", false);
     let mut registry = CapabilityRegistry::new();
     registry.register(fixture).expect("the fixture registers");
-    // The run path activates exactly once, over the run's own router: the
-    // marker the capability wrote through its services is what the prompt
-    // reads back through `store`.
     let result = run_activated(&registry, &prompt, context("activate-once"));
     let RunResult::Ok(text) = result else {
-        panic!("the activated run reads its capability's marker: {result:?}");
+        panic!("the activated run completes: {result:?}");
     };
-    assert_eq!(text, "active");
+    assert_eq!(text, "ran");
     assert_eq!(
         activations.lock().expect("the lock is not poisoned").len(),
         1,
