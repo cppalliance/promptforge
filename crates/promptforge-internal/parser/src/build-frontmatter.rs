@@ -1,7 +1,7 @@
 //! The [`Frontmatter`] model and its `max_tool_iterations` cap, and the
 //! frontmatter splitting and version detection that read a prompt's source.
 
-use crate::contract::{ArgsDecl, CapabilityDecl, ModelRoles, ToolSlots};
+use crate::contract::{ArgsDecl, ModelRoles, PluginDecl, ToolSlots};
 use crate::{Error, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
@@ -64,7 +64,7 @@ pub struct Frontmatter {
     output: Option<FileDecl>,
     /// Capabilities the prompt activates at prepare, in declaration order.
     #[serde(default)]
-    capabilities: Vec<CapabilityDecl>,
+    plugins: Vec<PluginDecl>,
     /// Declared tool slots: alias to exact path.
     #[serde(default)]
     tools: ToolSlots,
@@ -185,8 +185,8 @@ impl Frontmatter {
 
     /// Returns the declared capabilities, in declaration order.
     #[must_use]
-    pub fn capabilities(&self) -> &[CapabilityDecl] {
-        &self.capabilities
+    pub fn plugins(&self) -> &[PluginDecl] {
+        &self.plugins
     }
 
     /// Returns the declared tool slots, which map each alias to an exact tool

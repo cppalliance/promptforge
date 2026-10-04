@@ -8,7 +8,7 @@
 //!
 //! The crate's `run-prompt` example runs one prompt from start to end.
 
-pub use harness_capabilities::USER_INPUT_ASK_TOOL;
+pub use harness_plugins::USER_INPUT_ASK_TOOL;
 pub use harness_runner::Harness;
 pub use harness_runner::HarnessError;
 pub use harness_runner::RunControl;
@@ -22,31 +22,31 @@ pub use harness_runner::performers::BoxFuture;
 pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
-pub mod capability {
+pub mod plugin {
     //! Capabilities, the registry a Host installs them in, the services
     //! they read, and the context each tool call lends its tool.
 
-    pub use harness_capabilities::Capability;
-    pub use harness_capabilities::CapabilityError;
-    pub use harness_capabilities::CapabilityErrorKind;
-    pub use harness_capabilities::CapabilityRegistry;
-    pub use harness_capabilities::Contribution;
-    pub use harness_capabilities::HostServices;
-    pub use harness_capabilities::INPUT_BROKER;
-    pub use harness_capabilities::InputBroker;
-    pub use harness_capabilities::InputError;
-    pub use harness_capabilities::RegistryError;
-    pub use harness_capabilities::RegistryErrorKind;
-    pub use harness_capabilities::RunServices;
-    pub use harness_capabilities::ServiceError;
-    pub use harness_capabilities::ServiceId;
-    pub use harness_capabilities::ServiceKey;
-    pub use harness_capabilities::Tool;
-    pub use harness_capabilities::ToolContext;
-    pub use harness_capabilities::UserInput;
-    pub use promptforge::capabilities::CapabilityId;
+    pub use harness_plugins::Contribution;
+    pub use harness_plugins::HostServices;
+    pub use harness_plugins::INPUT_BROKER;
+    pub use harness_plugins::InputBroker;
+    pub use harness_plugins::InputError;
+    pub use harness_plugins::Plugin;
+    pub use harness_plugins::PluginError;
+    pub use harness_plugins::PluginErrorKind;
+    pub use harness_plugins::PluginRegistry;
+    pub use harness_plugins::RegistryError;
+    pub use harness_plugins::RegistryErrorKind;
+    pub use harness_plugins::RunServices;
+    pub use harness_plugins::ServiceError;
+    pub use harness_plugins::ServiceId;
+    pub use harness_plugins::ServiceKey;
+    pub use harness_plugins::Tool;
+    pub use harness_plugins::ToolContext;
+    pub use harness_plugins::UserInput;
     pub use promptforge::effect::ToolCallOrigin;
     pub use promptforge::effect::ToolCaller;
+    pub use promptforge::plugins::PluginId;
 }
 
 pub mod record {

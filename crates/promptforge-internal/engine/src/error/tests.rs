@@ -154,14 +154,14 @@ fn frontmatter_locations_surface_through_the_run_error() {
         "---\n",
         "name: x\n",
         "description: d\n",
-        "capabilities:\n",
-        "  - not a capability id\n",
+        "plugins:\n",
+        "  - not a Plugin id\n",
         "---\n",
         "\n# T\n\n## S\n\np\n",
     );
     let parse = Prompt::parse(source, "test")
         .0
-        .expect_err("a capability id with spaces must be rejected");
+        .expect_err("a Plugin id with spaces must be rejected");
     let run_error = crate::RunError::from(Error::from(parse));
     assert_eq!(run_error.kind(), crate::RunErrorKind::Parse);
     let location = run_error

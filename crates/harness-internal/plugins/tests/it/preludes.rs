@@ -5,33 +5,32 @@
 
 use std::sync::Arc;
 
-use harness_capabilities::{
-    Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    RunServices, activate,
+use harness_plugins::{
+    Activation, Contribution, Plugin, PluginError, PluginId, PluginRegistry, RunServices, activate,
 };
 use promptforge::cancel::CancelHandle;
-use promptforge::capabilities::Prelude;
+use promptforge::plugins::Prelude;
 
 use super::support::parse;
 
-fn id(text: &str) -> CapabilityId {
-    CapabilityId::parse(text).expect("the fixture id is valid")
+fn id(text: &str) -> PluginId {
+    PluginId::parse(text).expect("the fixture id is valid")
 }
 
 /// A fixture capability contributing `prelude` when it has one and no
 /// tools. It conflicts with each id in `conflicts`, and `fail` turns its
 /// activation into an error.
 struct Preluder {
-    id: CapabilityId,
+    id: PluginId,
     prelude: Option<&'static str>,
-    conflicts: Vec<CapabilityId>,
+    conflicts: Vec<PluginId>,
     fail: bool,
 }
 
 impl Preluder {
-    fn new(capability: &str, prelude: Option<&'static str>) -> Preluder {
+    fn new(plugin: &str, prelude: Option<&'static str>) -> Preluder {
         Preluder {
-            id: id(capability),
+            id: id(plugin),
             prelude,
             conflicts: Vec::new(),
             fail: false,
@@ -49,26 +48,26 @@ impl Preluder {
     }
 }
 
-impl Capability for Preluder {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Preluder {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
-        "A fixture capability contributing a prelude."
+        "A fixture Plugin contributing a prelude."
     }
 
-    fn conflicts(&self) -> &[CapabilityId] {
+    fn conflicts(&self) -> &[PluginId] {
         &self.conflicts
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         if self.fail {
-            return Err(CapabilityError::message("the fixture cannot activate"));
+            return Err(PluginError::message("the fixture cannot activate"));
         }
         Ok(Contribution {
             tools: Vec::new(),
@@ -77,19 +76,19 @@ impl Capability for Preluder {
     }
 }
 
-/// Activates a prompt whose frontmatter declares `capabilities` (the
+/// Activates a prompt whose frontmatter declares `plugins` (the
 /// YAML list entries, one per line) against a registry holding
 /// `installed`, on a Host with no input broker.
-fn activate_declaring(capabilities: &str, installed: Vec<Preluder>) -> Activation {
+fn activate_declaring(plugins: &str, installed: Vec<Preluder>) -> Activation {
     let source = format!(
-        "---\nname: preludes\ndescription: d\npromptforge: 0\ncapabilities:\n{capabilities}\
+        "---\nname: preludes\ndescription: d\npromptforge: 0\nplugins:\n{plugins}\
          ---\n\n# Title\n\n## Only\n\nDone.\n"
     );
     let prompt = parse(&source, "preludes");
-    let mut registry = CapabilityRegistry::new();
-    for capability in installed {
+    let mut registry = PluginRegistry::new();
+    for plugin in installed {
         registry
-            .register(Arc::new(capability))
+            .register(Arc::new(plugin))
             .expect("the fixture registers");
     }
     let services = RunServices::new(CancelHandle::new());
@@ -115,12 +114,12 @@ fn activation_returns_each_contributed_prelude_in_declaration_order() {
             Prelude::new(id("acme/omega"), "omega = {}"),
             Prelude::new(id("acme/alpha"), "alpha = {}"),
         ],
-        "one prelude per contributing capability, in declaration order"
+        "one prelude per contributing Plugin, in declaration order"
     );
 }
 
 #[test]
-fn an_absent_capability_contributes_no_prelude() {
+fn an_absent_plugin_contributes_no_prelude() {
     let activation = activate_declaring(
         "  - acme/alpha\n  - ref: acme/absent\n    optional: true\n",
         vec![Preluder::new("acme/alpha", Some("alpha = {}"))],
@@ -155,7 +154,7 @@ fn a_conflicting_pair_contributes_no_prelude() {
 }
 
 #[test]
-fn a_capability_whose_create_fails_contributes_no_prelude() {
+fn a_plugin_whose_create_fails_contributes_no_prelude() {
     let activation = activate_declaring(
         "  - ref: acme/broken\n    optional: true\n  - acme/alpha\n",
         vec![

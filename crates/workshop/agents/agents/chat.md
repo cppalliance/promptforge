@@ -2,7 +2,7 @@
 name: chat
 description: The built-in Workshop chat agent on the unified runtime.
 promptforge: 0
-capabilities:
+plugins:
   - promptforge/web
   - promptforge/user-input
 tools:

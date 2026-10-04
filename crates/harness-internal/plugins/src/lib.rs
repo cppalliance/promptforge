@@ -1,5 +1,5 @@
-//! harness-capabilities - the Harness's capability layer: the registry,
-//! activation with co-activation conflict checking, the [`Capability`]
+//! harness-plugins - the Harness's capability layer: the registry,
+//! activation with co-activation conflict checking, the [`Plugin`]
 //! and [`Tool`] traits the first-party capability crates implement, and
 //! one core capability of its own, [`UserInput`] (`promptforge/user-input`).
 //!
@@ -7,7 +7,7 @@
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
 //! are defined here, in the Harness. The Host builds one
-//! [`CapabilityRegistry`] of installed capabilities and a
+//! [`PluginRegistry`] of installed capabilities and a
 //! [`HostServices`] map and hands both to the Harness, which calls
 //! [`activate`] per run to turn a prompt's declarations into the run's
 //! catalog, its preludes, and its [`ToolTable`] of implementations, hands
@@ -27,8 +27,8 @@
 //!   [`InputBroker`] must not block while polled.
 
 mod activation;
-mod capability;
 mod input;
+mod plugin;
 mod registry;
 mod service;
 #[cfg(test)]
@@ -37,13 +37,13 @@ mod tool;
 mod user_input;
 
 pub use activation::{Activation, ServiceGap, ToolTable, activate};
-pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
 pub use input::{InputBroker, InputError};
-pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
+pub use plugin::{Contribution, Plugin, PluginError, PluginErrorKind, RunServices};
+pub use registry::{PluginRegistry, RegistryError, RegistryErrorKind};
 pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
 pub use tool::{Tool, ToolContext};
 pub use user_input::{INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 
 /// The capability identity vocabulary, re-exported from the Engine's types
 /// so a provider names one crate for the whole contract.
-pub use promptforge::capabilities::{CapabilityId, CapabilityIdError, CapabilityIdErrorKind};
+pub use promptforge::plugins::{PluginId, PluginIdError, PluginIdErrorKind};

@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
-use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::{Emitter, EventSink};
 use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::plugins::Prelude;
 
 use crate::Result;
 use crate::cancel::CancelHandle;
@@ -460,7 +460,7 @@ impl fmt::Debug for RunState {
                 &self
                     .preludes
                     .iter()
-                    .map(Prelude::capability)
+                    .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
             .field("frontmatter_aliases", &self.frontmatter_aliases)

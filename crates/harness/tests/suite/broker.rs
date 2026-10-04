@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use harness::capability::{CapabilityRegistry, HostServices};
+use harness::plugin::{HostServices, PluginRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -88,7 +88,7 @@ async fn a_sections_round_reaches_the_broker_as_chat_and_a_nested_infer_round_as
         Arc::new(MemoryRecorder::new()),
         broker.clone(),
         Arc::new(Clock),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     );
     let report = harness

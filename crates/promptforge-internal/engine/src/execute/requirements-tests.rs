@@ -1,15 +1,15 @@
 //! Tests for the preflight report's missing Host services.
 
-use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::plugins::PluginId;
 
-use super::{CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement};
+use super::{MissingService, PluginConflict, RequirementCheck, Requirements, UnmetRequirement};
 
-fn id(text: &str) -> CapabilityId {
-    CapabilityId::parse(text).expect("a static valid id")
+fn id(text: &str) -> PluginId {
+    PluginId::parse(text).expect("a static valid id")
 }
 
-fn missing_input(capability: &str) -> MissingService {
-    MissingService::new(id(capability), "an input broker")
+fn missing_input(plugin: &str) -> MissingService {
+    MissingService::new(id(plugin), "an input broker")
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn merge_folds_in_missing_services_without_repeating_one() {
 }
 
 #[test]
-fn merge_drops_an_incoming_missing_capability_already_named_as_lacking_a_service() {
+fn merge_drops_an_incoming_missing_plugin_already_named_as_lacking_a_service() {
     let mut requirements = Requirements::default();
     requirements
         .missing_services
@@ -64,7 +64,7 @@ fn merge_drops_an_incoming_missing_capability_already_named_as_lacking_a_service
 }
 
 #[test]
-fn merge_drops_a_missing_capability_the_incoming_report_names_as_lacking_a_service() {
+fn merge_drops_a_missing_plugin_the_incoming_report_names_as_lacking_a_service() {
     let mut requirements = Requirements::default();
     requirements
         .missing_required
@@ -83,7 +83,7 @@ fn merge_drops_a_missing_capability_the_incoming_report_names_as_lacking_a_servi
 }
 
 #[test]
-fn the_notice_names_the_capability_and_the_service_it_lacks() {
+fn the_notice_names_the_plugin_and_the_service_it_lacks() {
     let mut requirements = Requirements::default();
     requirements
         .missing_services
@@ -96,7 +96,7 @@ fn the_notice_names_the_capability_and_the_service_it_lacks() {
 }
 
 #[test]
-fn the_notice_lists_missing_services_after_missing_capabilities() {
+fn the_notice_lists_missing_services_after_missing_plugins() {
     let mut requirements = Requirements::default();
     requirements
         .missing_services
@@ -105,7 +105,7 @@ fn the_notice_lists_missing_services_after_missing_capabilities() {
     assert_eq!(
         requirements.notice(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required capability: promptforge/web\n\
+         - missing required Plugin: promptforge/web\n\
          - promptforge/user-input needs an input broker, and this host provides none"
     );
 }
@@ -119,7 +119,7 @@ fn the_notice_lists_a_conflict_after_missing_services_and_before_unmet_requireme
         required: "200000".to_owned(),
         actual: "32000".to_owned(),
     });
-    requirements.conflicts.push(CapabilityConflict::new(
+    requirements.conflicts.push(PluginConflict::new(
         id("promptforge/bashkit"),
         id("promptforge/terminal"),
     ));
@@ -130,9 +130,9 @@ fn the_notice_lists_a_conflict_after_missing_services_and_before_unmet_requireme
     assert_eq!(
         requirements.notice(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required capability: promptforge/web\n\
+         - missing required Plugin: promptforge/web\n\
          - promptforge/user-input needs an input broker, and this host provides none\n\
-         - conflicting capabilities: promptforge/bashkit and promptforge/terminal cannot be \
+         - conflicting Plugins: promptforge/bashkit and promptforge/terminal cannot be \
          activated together; declare one or the other\n\
          - role 'writer': requires a context of at least 200000 tokens; \
          the current model provides 32000"

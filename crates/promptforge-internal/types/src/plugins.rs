@@ -1,4 +1,4 @@
-//! The capability identity vocabulary: [`CapabilityId`] and its parse
+//! The capability identity vocabulary: [`PluginId`] and its parse
 //! error, plus [`Prelude`], the Lua source an activated capability hands
 //! the Engine.
 //!
@@ -11,15 +11,15 @@
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
 //! records the conflicts of the capability that contributed it. The
-//! activation contract - the `Capability` trait, the services it is handed,
+//! activation contract - the `Plugin` trait, the services it is handed,
 //! and the contribution it returns - is the Harness's, in
-//! `harness-capabilities`; the Engine never activates anything.
+//! `harness-plugins`; the Engine never activates anything.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
 
 #[cfg(test)]
-#[path = "capabilities-tests.rs"]
+#[path = "plugins-tests.rs"]
 mod tests;
 
 /// The stable identity of an installed capability.
@@ -33,49 +33,49 @@ mod tests;
 /// id is a parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
-pub struct CapabilityId(GlobalName);
+pub struct PluginId(GlobalName);
 
-impl CapabilityId {
+impl PluginId {
     /// Parses a capability identity, requiring exactly 2 segments
     /// (`namespace/pack`).
     ///
     /// # Errors
-    /// Returns [`CapabilityIdError`] when the id has fewer or more than 2
-    /// segments ([`CapabilityIdErrorKind::SegmentCount`]), a segment is empty
-    /// ([`CapabilityIdErrorKind::Empty`]), or a segment contains a character
+    /// Returns [`PluginIdError`] when the id has fewer or more than 2
+    /// segments ([`PluginIdErrorKind::SegmentCount`]), a segment is empty
+    /// ([`PluginIdErrorKind::Empty`]), or a segment contains a character
     /// other than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
-    /// ([`CapabilityIdErrorKind::Control`]).
-    pub fn parse(id: &str) -> Result<CapabilityId, CapabilityIdError> {
-        let name = GlobalName::parse(id)
-            .map_err(|e| CapabilityIdError::from_global_name_kind(e.kind()))?;
+    /// ([`PluginIdErrorKind::Control`]).
+    pub fn parse(id: &str) -> Result<PluginId, PluginIdError> {
+        let name =
+            GlobalName::parse(id).map_err(|e| PluginIdError::from_global_name_kind(e.kind()))?;
         if name.segments().len() != 2 {
-            return Err(CapabilityIdError {
-                kind: CapabilityIdErrorKind::SegmentCount,
-                reason: "a capability id must have exactly 2 segments (namespace/pack)",
+            return Err(PluginIdError {
+                kind: PluginIdErrorKind::SegmentCount,
+                reason: "a Plugin id must have exactly 2 segments (namespace/plugin)",
             });
         }
-        Ok(CapabilityId(name))
+        Ok(PluginId(name))
     }
 
     /// Builds an identity from a 2-segment prefix split off a validated
     /// tool id.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::capability`]. The
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`]. The
     /// source tool id was validated at parse, so its first two segments
     /// are already a valid capability id.
-    pub(crate) fn from_prefix(prefix: GlobalName) -> CapabilityId {
+    pub(crate) fn from_prefix(prefix: GlobalName) -> PluginId {
         debug_assert!(
             prefix.segments().len() == 2,
-            "a tool id's capability prefix must have exactly 2 segments (namespace/pack)"
+            "a tool id's Plugin prefix must have exactly 2 segments (namespace/plugin)"
         );
-        CapabilityId(prefix)
+        PluginId(prefix)
     }
 
     /// Returns the namespace segment.
     ///
     /// A namespace is meant to be a reverse-DNS name such as
     /// `org.rustalliance`, or `promptforge` for first-party capabilities.
-    /// `CapabilityId::parse` accepts any valid segment as the namespace.
+    /// `PluginId::parse` accepts any valid segment as the namespace.
     #[must_use]
     pub fn namespace(&self) -> &str {
         self.0.namespace()
@@ -83,8 +83,8 @@ impl CapabilityId {
 
     /// Returns the pack segment.
     #[must_use]
-    pub fn pack(&self) -> &str {
-        self.0.pack()
+    pub fn name(&self) -> &str {
+        self.0.plugin()
     }
 
     /// Returns whether `tool` belongs to this capability.
@@ -96,39 +96,39 @@ impl CapabilityId {
     /// catalog.
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
-        tool.capability() == *self
+        tool.plugin() == *self
     }
 }
 
-impl std::fmt::Display for CapabilityId {
+impl std::fmt::Display for PluginId {
     /// The canonical `namespace/pack` string form.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl serde::Serialize for CapabilityId {
+impl serde::Serialize for PluginId {
     /// Serializes the id as a single `namespace/pack` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
-impl<'de> serde::Deserialize<'de> for CapabilityId {
+impl<'de> serde::Deserialize<'de> for PluginId {
     /// Deserializes the id from its `namespace/pack` string and validates it
-    /// the same way `CapabilityId::parse` does. An invalid string fails
+    /// the same way `PluginId::parse` does. An invalid string fails
     /// deserialization.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        CapabilityId::parse(&text).map_err(serde::de::Error::custom)
+        PluginId::parse(&text).map_err(serde::de::Error::custom)
     }
 }
 
-/// A stable classification of a [`CapabilityIdError`] that callers can match
+/// A stable classification of a [`PluginIdError`] that callers can match
 /// on to handle each kind of failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum CapabilityIdErrorKind {
+pub enum PluginIdErrorKind {
     /// The id had fewer or more than 2 segments (`namespace/pack`).
     SegmentCount,
     /// A segment was empty.
@@ -138,40 +138,38 @@ pub enum CapabilityIdErrorKind {
     Control,
 }
 
-/// The reason a [`CapabilityId`] failed to parse.
+/// The reason a [`PluginId`] failed to parse.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid capability id: {reason}")]
+#[error("invalid Plugin id: {reason}")]
 #[non_exhaustive]
-pub struct CapabilityIdError {
+pub struct PluginIdError {
     /// A stable classification of why the id was rejected.
-    kind: CapabilityIdErrorKind,
+    kind: PluginIdErrorKind,
     /// A human-readable reason.
     reason: &'static str,
 }
 
-impl CapabilityIdError {
+impl PluginIdError {
     /// Returns the stable classification of this error.
     #[must_use]
-    pub fn kind(&self) -> CapabilityIdErrorKind {
+    pub fn kind(&self) -> PluginIdErrorKind {
         self.kind
     }
 
     /// Maps a global-name rejection onto the capability-id error vocabulary.
-    fn from_global_name_kind(global_kind: GlobalNameErrorKind) -> CapabilityIdError {
+    fn from_global_name_kind(global_kind: GlobalNameErrorKind) -> PluginIdError {
         let (kind, reason) = match global_kind {
             GlobalNameErrorKind::SegmentCount => (
-                CapabilityIdErrorKind::SegmentCount,
-                "a capability id must have exactly 2 segments (namespace/pack)",
+                PluginIdErrorKind::SegmentCount,
+                "a Plugin id must have exactly 2 segments (namespace/plugin)",
             ),
-            GlobalNameErrorKind::Empty => {
-                (CapabilityIdErrorKind::Empty, "segments must not be empty")
-            }
+            GlobalNameErrorKind::Empty => (PluginIdErrorKind::Empty, "segments must not be empty"),
             GlobalNameErrorKind::Control => (
-                CapabilityIdErrorKind::Control,
+                PluginIdErrorKind::Control,
                 "segments may contain only lowercase ASCII letters, digits, '-', '_', '.'",
             ),
         };
-        CapabilityIdError { kind, reason }
+        PluginIdError { kind, reason }
     }
 }
 
@@ -185,7 +183,7 @@ impl CapabilityIdError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prelude {
     /// The capability that contributed the source.
-    capability: CapabilityId,
+    plugin: PluginId,
     /// The Lua source, compiled from text in every section VM.
     source: String,
 }
@@ -193,17 +191,17 @@ pub struct Prelude {
 impl Prelude {
     /// Pairs a capability's id with the prelude source it contributes.
     #[must_use]
-    pub fn new(capability: CapabilityId, source: impl Into<String>) -> Prelude {
+    pub fn new(plugin: PluginId, source: impl Into<String>) -> Prelude {
         Prelude {
-            capability,
+            plugin,
             source: source.into(),
         }
     }
 
     /// Returns the id of the capability that contributed this prelude.
     #[must_use]
-    pub fn capability(&self) -> &CapabilityId {
-        &self.capability
+    pub fn plugin(&self) -> &PluginId {
+        &self.plugin
     }
 
     /// Returns the prelude's Lua source.

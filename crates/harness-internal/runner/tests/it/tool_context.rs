@@ -5,9 +5,8 @@
 
 use std::sync::Arc;
 
-use harness_capabilities::{
-    Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, RunServices, Tool,
-    ToolContext,
+use harness_plugins::{
+    Contribution, Plugin, PluginError, PluginId, PluginRegistry, RunServices, Tool, ToolContext,
 };
 use harness_runner::effect_loop::drive_run;
 use harness_runner::prepare::prepare;
@@ -24,7 +23,7 @@ const WRITTEN: &str = "written through the context";
 /// A prompt binding `record` to the fixture tool, calling it from the
 /// section's script, and returning its answer beside the file it wrote.
 const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/context\ntools:\n  record: tests/context/record\n---\n\n\
+    plugins:\n  - tests/context\ntools:\n  record: tests/context/record\n---\n\n\
     # Title\n\n## Only\n\n```lua\nlocal caller = tools.call('record')\n\
     return caller .. '|' .. store.read('from-tool.md')\n```\n";
 
@@ -66,23 +65,23 @@ impl Tool for Record {
 
 /// A fixture capability contributing the record tool.
 struct Context {
-    id: CapabilityId,
+    id: PluginId,
 }
 
-impl Capability for Context {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Context {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "The tool context fixture."
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Record {
                 id: ToolId::parse("tests/context/record").unwrap(),
@@ -93,11 +92,11 @@ impl Capability for Context {
 }
 
 /// A registry holding the fixture capability.
-fn context_registry() -> Arc<CapabilityRegistry> {
-    let mut registry = CapabilityRegistry::new();
+fn context_registry() -> Arc<PluginRegistry> {
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Context {
-            id: CapabilityId::parse("tests/context").unwrap(),
+            id: PluginId::parse("tests/context").unwrap(),
         }))
         .unwrap();
     Arc::new(registry)

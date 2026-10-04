@@ -32,7 +32,7 @@ use std::fmt::{self, Write as _};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_capabilities::{CapabilityRegistry, HostServices, RunServices, activate};
+use harness_plugins::{HostServices, PluginRegistry, RunServices, activate};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
@@ -57,7 +57,7 @@ pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
     /// against; `None` is a Harness with no capabilities, where every
     /// required declaration is reported missing.
-    pub registry: Option<Arc<CapabilityRegistry>>,
+    pub registry: Option<Arc<PluginRegistry>>,
     /// The Host's services: the run's capabilities read them, its input
     /// broker among them when it has one.
     pub services: HostServices,

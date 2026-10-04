@@ -47,7 +47,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 
-use harness_capabilities::USER_INPUT_ASK_TOOL;
+use harness_plugins::USER_INPUT_ASK_TOOL;
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
 use promptforge::event::Event;

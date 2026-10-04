@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Poll, Waker};
 
 use async_trait::async_trait;
-use harness::capability::{
-    CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, InputError, UserInput,
+use harness::plugin::{
+    HostServices, INPUT_BROKER, InputBroker, InputError, PluginRegistry, UserInput,
 };
 use harness::record::{MemoryRecorder, RecordKind, RunOutcome};
 use harness::vfs::VfsRef;
@@ -28,7 +28,7 @@ use crate::support::{Clock, Offline};
 /// Asks the operator once and returns the answer.
 const ASKS: &str = concat!(
     "---\nname: asks\ndescription: Asks the operator once\npromptforge: 0\n",
-    "capabilities:\n  - promptforge/user-input\n",
+    "plugins:\n  - promptforge/user-input\n",
     "---\n\n# Asks\n\n## Only\n\n```lua\n",
     "return input.ask()\n",
     "```\n",
@@ -154,7 +154,7 @@ fn stuck_harness(catalog: ModelCatalog) -> (Harness, Arc<Started>) {
         Arc::new(MemoryRecorder::new()),
         Arc::new(broker),
         Arc::new(Clock),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     );
     (harness, started)
@@ -204,10 +204,10 @@ impl InferenceBroker for Streaming {
 
 #[tokio::test]
 async fn input_ask_returns_what_the_hosts_input_broker_answers_byte_for_byte() {
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities
+    let mut plugins = PluginRegistry::new();
+    plugins
         .register(Arc::new(UserInput::new()))
-        .expect("the user input capability registers once");
+        .expect("the user input Plugin registers once");
     let mut services = HostServices::new();
     let operator: Arc<dyn InputBroker> = Arc::new(Operator("Hello, desk."));
     services
@@ -217,7 +217,7 @@ async fn input_ask_returns_what_the_hosts_input_broker_answers_byte_for_byte() {
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
         Arc::new(Clock),
-        capabilities,
+        plugins,
         services,
     );
 
@@ -273,7 +273,7 @@ async fn a_hosts_own_broker_streams_a_section_round_under_the_round_id_the_run_r
         recorder.clone(),
         Arc::new(broker),
         Arc::new(Clock),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     );
     let report = harness

@@ -34,8 +34,8 @@ use crate::error::{Error, Result};
 // is re-exported here, so the `promptforge` facade names
 // `promptforge_engine::X`, not a module path.
 pub use crate::execute::{
-    AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
-    EffectRecord, Environment, MissingService, ModelBindings, RequirementCheck, Requirements,
-    Round, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Environment,
+    MissingService, ModelBindings, PluginConflict, RequirementCheck, Requirements, Round, Run,
+    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
     ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement, perform_vfs_op,
 };

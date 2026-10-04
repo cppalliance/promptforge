@@ -257,6 +257,6 @@ async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required capability: promptforge/web"
+         - missing required Plugin: promptforge/web"
     );
 }

@@ -35,7 +35,7 @@ const ECHO_MD: &str = r"---
 name: echo
 description: The echo test agent on the unified runtime.
 promptforge: 0
-capabilities:
+plugins:
   - promptforge/user-input
 ---
 

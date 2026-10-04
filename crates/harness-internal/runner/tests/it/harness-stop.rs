@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use harness_capabilities::{HostServices, USER_INPUT_ASK_TOOL, UserInput};
+use harness_plugins::{HostServices, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::Harness;
 use harness_runner::recorder::MemoryRecorder;
 use promptforge::model::{Completion, CompletionResult, ToolCall};
@@ -27,7 +27,7 @@ use crate::scripted::{
 /// then joins both children and returns how its own wait ended beside
 /// both children's reports.
 const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/harness\nmodels:\n  writer: {}\n---\n\n\
+    plugins:\n  - tests/harness\nmodels:\n  writer: {}\n---\n\n\
     # Stops\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\
     local chat = tasks.spawn('## Chat')\n\
@@ -51,7 +51,7 @@ const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\npromptforge: 
 /// The built-in chat's shape: ask the operator, run the model loop under
 /// a `pcall`, and ask again, with the held tool advertised to the model.
 const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/harness\n  - promptforge/user-input\n\
+    plugins:\n  - tests/harness\n  - promptforge/user-input\n\
     tools:\n  hold: tests/harness/hold\nmodels:\n  writer: {}\n---\n\n\
     # Chats\n\n```lua\nmodels.default('writer')\ntools.always('hold')\n```\n\n\
     ## Conversation\n\n```lua\n\
@@ -64,7 +64,7 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
 
 /// A prompt that returns the operator's answer to one question.
 const ASKS: &str = "---\nname: asks\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - promptforge/user-input\n---\n\n\
+    plugins:\n  - promptforge/user-input\n---\n\n\
     # Asks\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
 
 #[tokio::test]
@@ -163,14 +163,14 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
     let tool = Arc::new(Held::default());
     let (operator, answers) = Operator::new();
     let asked = Arc::clone(&operator.asked);
-    let mut capabilities = hold_registry(&tool);
-    capabilities.register(Arc::new(UserInput::new())).unwrap();
+    let mut plugins = hold_registry(&tool);
+    plugins.register(Arc::new(UserInput::new())).unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
     let harness = Harness::new(
         recorder.clone(),
         Arc::new(calls_hold_once()),
         Arc::new(PendingTimer::default()),
-        capabilities,
+        plugins,
         operator.services(),
     );
     let watched = Arc::clone(&tool);
@@ -225,13 +225,13 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
 /// A Harness on `operator` with the user-input capability and a broker no
 /// round reaches.
 fn asking_harness(recorder: &Arc<MemoryRecorder>, operator: &Arc<Operator>) -> Harness {
-    let mut capabilities = hold_registry(&Arc::default());
-    capabilities.register(Arc::new(UserInput::new())).unwrap();
+    let mut plugins = hold_registry(&Arc::default());
+    plugins.register(Arc::new(UserInput::new())).unwrap();
     Harness::new(
         recorder.clone(),
         Arc::new(ScriptedBroker::replying()),
         Arc::new(PendingTimer::default()),
-        capabilities,
+        plugins,
         operator.services(),
     )
 }

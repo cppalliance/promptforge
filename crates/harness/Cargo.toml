@@ -10,7 +10,7 @@ publish = false
 # defining crate's path. The Engine's types a Harness signature names are
 # re-exported through the `promptforge` facade, their one public path.
 [dependencies]
-harness-capabilities.workspace = true
+harness-plugins.workspace = true
 harness-runner.workspace = true
 promptforge.workspace = true
 workspace-hack.workspace = true

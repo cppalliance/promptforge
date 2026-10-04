@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/workshop/agents", "crates/harness-internal/runner", "crates/harness-internal/capabilities"]
+members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/workshop/agents", "crates/harness-internal/runner", "crates/harness-internal/plugins"]
 # crates/shared-ui is not a Rust crate: it is the TypeScript+CSS package
 # the Gateway config UI consumes (the Workshop uses its fork in
 # crates/workshop/look), so the crates/* glob skips it.
@@ -45,7 +45,7 @@ gateway-api-discovery = { path = "crates/gateway-api-discovery" }
 harness = { path = "crates/harness" }
 harness-gateway-client = { path = "crates/harness-gateway-client" }
 harness-runner = { path = "crates/harness-internal/runner" }
-harness-capabilities = { path = "crates/harness-internal/capabilities" }
+harness-plugins = { path = "crates/harness-internal/plugins" }
 harness-web = { path = "crates/harness-web" }
 gateway-routing = { path = "crates/gateway/routing" }
 promptforge-lua = { path = "crates/promptforge-internal/lua" }

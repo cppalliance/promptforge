@@ -39,7 +39,7 @@ const CONTRACT = {
   max_tool_iterations: 12,
   input: { path: "in/papers.md", description: "the papers" },
   output: { path: "out/verdicts.md", description: "the verdicts" },
-  capabilities: [{ id: "tools/web", optional: false }],
+  plugins: [{ id: "tools/web", optional: false }],
   tools: [{ kind: "exact", alias: "search", path: "tools/web/search" }],
   args: {
     implicit: false,
@@ -96,10 +96,10 @@ const json = (body, status = 200) => ({
       contract.output?.description === "the verdicts",
   );
   check(
-    "capabilities narrow",
-    contract.capabilities.length === 1 &&
-      contract.capabilities[0].id === "tools/web" &&
-      contract.capabilities[0].optional === false,
+    "plugins narrow",
+    contract.plugins.length === 1 &&
+      contract.plugins[0].id === "tools/web" &&
+      contract.plugins[0].optional === false,
   );
   check(
     "tool slots narrow to alias and exact path",
@@ -139,7 +139,7 @@ const json = (body, status = 200) => ({
       max_tool_iterations: null,
       input: null,
       output: null,
-      capabilities: [],
+      plugins: [],
       tools: [],
       args: {
         implicit: true,

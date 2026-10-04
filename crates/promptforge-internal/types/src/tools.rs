@@ -11,7 +11,7 @@
 //! [`ToolDescriptor`] and the Harness-supplied [`ToolCatalog`] of descriptors,
 //! trusted output ([`ToolOutput`], [`OutputTrust`]), the model-safe
 //! [`ToolError`], and the contract errors. The implementation trait behind a
-//! descriptor (`Tool`) is the Harness's, in `harness-capabilities`, beside
+//! descriptor (`Tool`) is the Harness's, in `harness-plugins`, beside
 //! the concrete tool crates; the prompt parser and the executor sit in their
 //! own crates and depend on `promptforge-types`.
 

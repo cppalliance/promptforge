@@ -8,7 +8,7 @@ use super::*;
 
 use std::sync::Mutex;
 
-use harness_capabilities::{ServiceId, ServiceKey, activate};
+use harness_plugins::{ServiceId, ServiceKey, activate};
 use promptforge::Prompt;
 
 /// The test-only service the fixture needs.
@@ -16,29 +16,29 @@ const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
 
 /// A prompt declaring the greeter capability, with nothing to run.
 const DECLARES_GREETER: &str = "---\nname: declares-greeter\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - tests/greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A prompt declaring the greeter capability as optional, with nothing to
 /// run.
 const DECLARES_GREETER_OPTIONALLY: &str = "---\nname: declares-greeter\ndescription: d\n\
-    promptforge: 0\ncapabilities:\n  - ref: tests/greeter\n    optional: true\n---\n\n\
+    promptforge: 0\nplugins:\n  - ref: tests/greeter\n    optional: true\n---\n\n\
     # Title\n\n## Only\n\nDone.\n";
 
 /// A fixture capability needing [`GREETING`], which records the greeting
 /// each activation read, or `None` when it activated without one.
 struct Greeter {
-    id: CapabilityId,
+    id: PluginId,
     greetings: Arc<Mutex<Vec<Option<String>>>>,
 }
 
-impl Capability for Greeter {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Greeter {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "Records the greeting the Host provides."
@@ -49,7 +49,7 @@ impl Capability for Greeter {
         NEEDS
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         let greeting = services.get(&GREETING).map(|greeting| greeting.to_string());
         self.greetings.lock().unwrap().push(greeting);
         Ok(Contribution::default())
@@ -57,11 +57,11 @@ impl Capability for Greeter {
 }
 
 /// A registry holding the greeter, which records into `greetings`.
-fn greeter_registry(greetings: &Arc<Mutex<Vec<Option<String>>>>) -> CapabilityRegistry {
-    let mut registry = CapabilityRegistry::new();
+fn greeter_registry(greetings: &Arc<Mutex<Vec<Option<String>>>>) -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Greeter {
-            id: CapabilityId::parse("tests/greeter").unwrap(),
+            id: PluginId::parse("tests/greeter").unwrap(),
             greetings: Arc::clone(greetings),
         }))
         .unwrap();
@@ -84,7 +84,7 @@ async fn prepare_greeter(
 }
 
 #[tokio::test]
-async fn a_capability_activates_with_the_service_the_hosts_map_provides() {
+async fn a_plugin_activates_with_the_service_the_hosts_map_provides() {
     let mut host = HostServices::new();
     host.provide(&GREETING, Arc::from("hello")).unwrap();
     let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, host).await;
@@ -97,37 +97,37 @@ async fn a_capability_activates_with_the_service_the_hosts_map_provides() {
 }
 
 #[tokio::test]
-async fn a_capability_whose_service_the_host_lacks_is_refused_naming_the_service() {
+async fn a_plugin_whose_service_the_host_lacks_is_refused_naming_the_service() {
     let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, HostServices::new()).await;
     let Err(PrepareError::Refused { error, .. }) = prepared else {
-        panic!("a required capability without its service refuses the run");
+        panic!("a required Plugin without its service refuses the run");
     };
     assert!(
         error
             .to_string()
             .contains("- tests/greeter needs tests/greeting, and this host provides none"),
-        "the notice names the capability and the missing service: {error}"
+        "the notice names the Plugin and the missing service: {error}"
     );
-    assert!(greetings.is_empty(), "the capability never activated");
+    assert!(greetings.is_empty(), "the Plugin never activated");
 }
 
 #[tokio::test]
-async fn an_optional_capability_whose_service_the_host_lacks_activates_without_it() {
+async fn an_optional_plugin_whose_service_the_host_lacks_activates_without_it() {
     let (prepared, greetings) =
         prepare_greeter(DECLARES_GREETER_OPTIONALLY, HostServices::new()).await;
     assert!(
         prepared.is_ok(),
-        "an optional capability's gap does not refuse the run"
+        "an optional Plugin's gap does not refuse the run"
     );
     assert_eq!(
         greetings,
         [None::<String>],
-        "the capability activated without the greeting"
+        "the Plugin activated without the greeting"
     );
 }
 
 #[test]
-fn an_optional_capability_whose_service_the_host_lacks_records_the_service_gap() {
+fn an_optional_plugin_whose_service_the_host_lacks_records_the_service_gap() {
     let greetings = Arc::new(Mutex::new(Vec::new()));
     let registry = greeter_registry(&greetings);
     let prompt = Prompt::parse(DECLARES_GREETER_OPTIONALLY, "declares-greeter")
@@ -138,6 +138,6 @@ fn an_optional_capability_whose_service_the_host_lacks_records_the_service_gap()
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
     let gap = &activation.service_gaps[0];
-    assert_eq!(gap.capability.to_string(), "tests/greeter");
+    assert_eq!(gap.plugin.to_string(), "tests/greeter");
     assert_eq!(gap.service, GREETING.id());
 }

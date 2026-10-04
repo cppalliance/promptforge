@@ -4,8 +4,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use promptforge::capabilities::CapabilityIdErrorKind;
-
 use super::{HostServices, ServiceError, ServiceId, ServiceKey};
 
 /// A text service, built in a `const` as every key is.
@@ -14,7 +12,7 @@ const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
 /// A second key with the greeting's literal and another type.
 const GREETING_AS_NUMBER: ServiceKey<u32> = ServiceKey::new("acme/greeting");
 
-/// A static slice of ids, the shape `Capability::needs` returns.
+/// A static slice of ids, the shape `Plugin::needs` returns.
 const NEEDS: &[ServiceId] = &[GREETING.id()];
 
 #[test]
@@ -72,36 +70,65 @@ fn a_second_provider_under_a_provided_id_is_refused_and_the_first_stays() {
 
 #[test]
 fn an_id_outside_the_namespace_name_grammar_is_refused() {
-    for (literal, kind) in [
-        ("greeting", CapabilityIdErrorKind::SegmentCount),
-        ("acme/greeting/extra", CapabilityIdErrorKind::SegmentCount),
-        ("acme/", CapabilityIdErrorKind::Empty),
-        ("Acme/Greeting", CapabilityIdErrorKind::Control),
-        ("acme/greet ing", CapabilityIdErrorKind::Control),
+    for literal in [
+        "greeting",
+        "acme/greeting/extra",
+        "acme/",
+        "Acme/Greeting",
+        "acme/greet ing",
     ] {
         let key: ServiceKey<str> = ServiceKey::new(literal);
         let mut services = HostServices::new();
         let error = services
             .provide(&key, Arc::from("hello"))
             .expect_err("an unparseable id is refused");
-        let ServiceError::InvalidId { id, source } = &error else {
+        let ServiceError::InvalidId { id } = &error else {
             panic!("{literal}: the refusal names an invalid id: {error:?}");
         };
         assert_eq!(*id, literal);
-        assert_eq!(source.kind(), kind, "{literal}: {source:?}");
         assert_eq!(
             error.to_string(),
             format!("service id {literal} is not a namespace/name id")
         );
         assert!(
-            std::error::Error::source(&error).is_some(),
-            "{literal}: the parse failure is the cause"
+            std::error::Error::source(&error).is_none(),
+            "{literal}: the refusal carries no cause"
         );
         assert!(
             !services.provides(&key.id()),
             "{literal}: nothing is stored"
         );
     }
+}
+
+#[test]
+fn a_service_id_is_a_global_name_with_exactly_one_slash() {
+    for literal in ["acme/greeting/extra", "acme/greet ing", "greeting"] {
+        let key: ServiceKey<str> = ServiceKey::new(literal);
+        let mut services = HostServices::new();
+        let error = services
+            .provide(&key, Arc::from("hello"))
+            .expect_err("a literal outside the service id grammar is refused");
+        assert!(
+            matches!(&error, ServiceError::InvalidId { id, .. } if *id == literal),
+            "{literal}: {error:?}"
+        );
+        assert!(
+            std::error::Error::source(&error).is_none(),
+            "{literal}: the refusal carries no Plugin id parse failure: {error:?}"
+        );
+        assert!(
+            !services.provides(&key.id()),
+            "{literal}: nothing is stored"
+        );
+    }
+    let mut services = HostServices::new();
+    services
+        .provide(
+            &ServiceKey::<str>::new("acme.corp/greeting-v2"),
+            Arc::from("hello"),
+        )
+        .expect("a two-segment literal is accepted");
 }
 
 #[test]

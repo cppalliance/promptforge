@@ -87,7 +87,7 @@ fn tokio_as_a_dev_dependency_passes() {
 fn a_renamed_tokio_util_in_a_target_table_is_reported() {
     let root = fake_root();
     write_crate(
-        &container(root.path()).join("capabilities"),
+        &container(root.path()).join("plugins"),
         "[target.'cfg(windows)'.dependencies]\ntu = { package = \"tokio-util\", version = \"0.7\" }\n",
     );
     let violations = bans(root.path());
@@ -151,7 +151,7 @@ fn the_harness_crates_are_the_two_container_crates_and_the_facade() {
     let covered = harness_crates(&internal, &root.join("crates").join("harness"));
     let expected = [
         internal.join("runner"),
-        internal.join("capabilities"),
+        internal.join("plugins"),
         root.join("crates").join("harness"),
     ];
     assert_eq!(

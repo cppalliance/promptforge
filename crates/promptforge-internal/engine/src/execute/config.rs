@@ -5,8 +5,8 @@ use std::fmt;
 #[path = "config-limits.rs"]
 mod limits;
 
-use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::DebugMode;
+use promptforge_types::plugins::Prelude;
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
@@ -378,7 +378,7 @@ impl fmt::Debug for RunContext {
                 &self
                     .preludes
                     .iter()
-                    .map(Prelude::capability)
+                    .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
             .finish()

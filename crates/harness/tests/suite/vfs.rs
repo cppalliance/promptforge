@@ -6,8 +6,8 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
-use harness::capability::{
-    CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, InputError, UserInput,
+use harness::plugin::{
+    HostServices, INPUT_BROKER, InputBroker, InputError, PluginRegistry, UserInput,
 };
 use harness::record::MemoryRecorder;
 use harness::vfs::{Origin, VfsError, VfsRef};
@@ -19,7 +19,7 @@ use crate::support::{Clock, Offline};
 /// Reads the notes, asks the operator, and writes the approved notes.
 const REVIEW: &str = concat!(
     "---\nname: review\ndescription: Reads the notes, then asks the operator\npromptforge: 0\n",
-    "capabilities:\n  - promptforge/user-input\n",
+    "plugins:\n  - promptforge/user-input\n",
     "input: { path: notes.md, description: The operator's notes }\n",
     "output: { path: summary.md, description: The approved notes }\n",
     "---\n\n# Review\n\n## Approve\n\n```lua\n",
@@ -116,15 +116,15 @@ async fn a_hosts_edit_of_a_file_the_run_read_conflicts_while_the_run_waits_on_it
     services
         .provide(&INPUT_BROKER, operator)
         .expect("the input broker is provided once");
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities
+    let mut plugins = PluginRegistry::new();
+    plugins
         .register(Arc::new(UserInput::new()))
-        .expect("the user input capability registers once");
+        .expect("the user input Plugin registers once");
     let harness = Harness::new(
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
         Arc::new(Clock),
-        capabilities,
+        plugins,
         services,
     );
     let request = RunRequest {

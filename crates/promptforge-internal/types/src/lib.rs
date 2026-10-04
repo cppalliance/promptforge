@@ -12,11 +12,11 @@
 //! catalog, descriptor). [`tools`] is the runtime-agnostic tool vocabulary:
 //! the implementation-free [`ToolDescriptor`](tools::ToolDescriptor), the
 //! caller-provided [`ToolCatalog`](tools::ToolCatalog), trusted output, and
-//! the model-safe tool error, and [`capabilities`] is the capability
-//! identity vocabulary, the [`CapabilityId`](capabilities::CapabilityId) a
+//! the model-safe tool error, and [`plugins`] is the capability
+//! identity vocabulary, the [`PluginId`](plugins::PluginId) a
 //! prompt declares and a tool id sits under. The implementation traits
-//! behind them (`Tool`, `Capability`) are the Harness's, in
-//! `harness-capabilities`; the Engine issues effects naming ids and never
+//! behind them (`Tool`, `Plugin`) are the Harness's, in
+//! `harness-plugins`; the Engine issues effects naming ids and never
 //! holds an implementation. [`ids`] is the hierarchical, deterministic
 //! identity of a run's chains and tasks and the [`Provenance`](ids::Provenance)
 //! replay key stamped on every effect and event; [`timestamp`] is the UTC
@@ -36,7 +36,6 @@
 //!   replay or tool-call wire payloads.
 
 pub mod cancel;
-pub mod capabilities;
 pub mod detail;
 pub mod emitter;
 pub mod event;
@@ -44,6 +43,7 @@ pub mod ids;
 pub mod metrics;
 pub mod models;
 pub mod names;
+pub mod plugins;
 pub mod replay;
 pub mod timestamp;
 pub mod tools;

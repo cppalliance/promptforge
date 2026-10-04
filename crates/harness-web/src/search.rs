@@ -5,7 +5,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use harness::capability::{Tool, ToolContext};
+use harness::plugin::{Tool, ToolContext};
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::provider::{SearchErrorKind, SearchProvider};

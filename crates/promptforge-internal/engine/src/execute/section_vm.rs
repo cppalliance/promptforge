@@ -24,8 +24,8 @@
 
 use std::sync::Arc;
 
-use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::Emitter;
+use promptforge_types::plugins::Prelude;
 
 use crate::lua::{LuaProgram, SectionVm};
 use crate::{Error, Result};

@@ -6,13 +6,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use promptforge::cancel::CancelHandle;
-use promptforge::capabilities::CapabilityId;
+use promptforge::plugins::PluginId;
 use promptforge::{MissingService, Prompt};
 
 use super::{Activation, ServiceGap, activate};
 use crate::{
-    Capability, CapabilityError, CapabilityRegistry, Contribution, RunServices, ServiceId,
-    ServiceKey,
+    Contribution, Plugin, PluginError, PluginRegistry, RunServices, ServiceId, ServiceKey,
 };
 
 /// The service the fixture needs.
@@ -21,27 +20,27 @@ const CLOCK: ServiceKey<str> = ServiceKey::new("acme/clock");
 /// A key with the clock's literal and another type.
 const CLOCK_AS_NUMBER: ServiceKey<u64> = ServiceKey::new("acme/clock");
 
-fn timed_id() -> CapabilityId {
-    CapabilityId::parse("acme/timed").expect("the fixture id is valid")
+fn timed_id() -> PluginId {
+    PluginId::parse("acme/timed").expect("the fixture id is valid")
 }
 
 /// A fixture capability that needs [`CLOCK`] and counts its activations.
 struct Timed {
-    id: CapabilityId,
+    id: PluginId,
     creates: Arc<AtomicUsize>,
 }
 
-impl Capability for Timed {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Timed {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
-        "A fixture capability that needs a clock."
+        "A fixture Plugin that needs a clock."
     }
 
     fn needs(&self) -> &[ServiceId] {
@@ -49,7 +48,7 @@ impl Capability for Timed {
         NEEDS
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         self.creates.fetch_add(1, Ordering::SeqCst);
         Ok(Contribution::default())
     }
@@ -90,14 +89,14 @@ fn activate_timed(optional: bool, services: &RunServices) -> (Activation, usize)
         "  - acme/timed\n"
     };
     let source = format!(
-        "---\nname: timed\ndescription: d\npromptforge: 0\ncapabilities:\n{declaration}---\n\n\
+        "---\nname: timed\ndescription: d\npromptforge: 0\nplugins:\n{declaration}---\n\n\
          # Title\n\n## Only\n\nDone.\n"
     );
     let prompt = Prompt::parse(&source, "timed")
         .0
         .expect("the fixture prompt parses");
     let creates = Arc::new(AtomicUsize::new(0));
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Timed {
             id: timed_id(),
@@ -116,7 +115,7 @@ fn clock_refusal() -> [MissingService; 1] {
 /// The gap an optional `acme/timed` records without its clock.
 fn clock_gap() -> [ServiceGap; 1] {
     [ServiceGap {
-        capability: timed_id(),
+        plugin: timed_id(),
         service: CLOCK.id(),
     }]
 }
@@ -132,7 +131,7 @@ fn a_provider_of_the_needed_type_satisfies_the_need() {
 }
 
 #[test]
-fn a_required_capability_without_its_service_is_refused_naming_the_id() {
+fn a_required_plugin_without_its_service_is_refused_naming_the_id() {
     let (activation, creates) = activate_timed(false, &bare());
     assert_eq!(creates, 0, "activation refuses before create runs");
     assert_eq!(activation.requirements.missing_services, clock_refusal());
@@ -141,24 +140,24 @@ fn a_required_capability_without_its_service_is_refused_naming_the_id() {
 }
 
 #[test]
-fn an_optional_capability_without_its_service_records_a_gap_naming_the_id() {
+fn an_optional_plugin_without_its_service_records_a_gap_naming_the_id() {
     let (activation, creates) = activate_timed(true, &bare());
-    assert_eq!(creates, 1, "an optional capability still activates");
+    assert_eq!(creates, 1, "an optional Plugin still activates");
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps, clock_gap());
 }
 
 #[test]
-fn a_wrong_typed_provider_counts_as_missing_for_a_required_capability() {
+fn a_wrong_typed_provider_counts_as_missing_for_a_required_plugin() {
     let (activation, creates) = activate_timed(false, &with_wrong_typed_clock());
     assert_eq!(creates, 0, "activation refuses before create runs");
     assert_eq!(activation.requirements.missing_services, clock_refusal());
 }
 
 #[test]
-fn a_wrong_typed_provider_counts_as_missing_for_an_optional_capability() {
+fn a_wrong_typed_provider_counts_as_missing_for_an_optional_plugin() {
     let (activation, creates) = activate_timed(true, &with_wrong_typed_clock());
-    assert_eq!(creates, 1, "an optional capability still activates");
+    assert_eq!(creates, 1, "an optional Plugin still activates");
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps, clock_gap());
 }

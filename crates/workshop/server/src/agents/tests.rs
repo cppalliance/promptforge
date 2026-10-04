@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use harness::capability::HostServices;
+use harness::plugin::HostServices;
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -20,11 +20,11 @@ use promptforge::model::{
 use workshop_agents::{Conversations, SessionState, TokioTimer};
 use workshop_registry::Registry;
 
-use super::{capabilities, services};
+use super::{plugins, services};
 
 /// A prompt that requires the web capability and returns a fixed text.
 const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 0\n\
-    capabilities:\n  - promptforge/web\n---\n\n\
+    plugins:\n  - promptforge/web\n---\n\n\
     # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n";
 
 /// Lists no model and refuses every round as `Unavailable`, so a run
@@ -59,7 +59,7 @@ async fn browse(services: &HostServices) -> Option<RunOutcome> {
         conversation.recorder(recorder.clone()),
         Arc::new(OfflineBroker),
         Arc::new(TokioTimer),
-        capabilities(),
+        plugins(),
         conversation.services(services),
     );
     let request = RunRequest {
@@ -82,7 +82,7 @@ async fn browse(services: &HostServices) -> Option<RunOutcome> {
 }
 
 #[tokio::test]
-async fn a_prompt_declaring_web_prepares_on_the_servers_capabilities_and_services() {
+async fn a_prompt_declaring_web_prepares_on_the_servers_plugins_and_services() {
     assert_eq!(
         browse(&services(&Registry::new())).await,
         Some(RunOutcome::Completed {
@@ -106,7 +106,7 @@ async fn a_harness_without_the_search_provider_refuses_a_prompt_requiring_web() 
     assert_eq!(kind, "RequirementsUnmet");
     assert!(
         message.contains("promptforge/web") && message.contains("promptforge/search-provider"),
-        "the refusal names the capability and the missing service: {message}"
+        "the refusal names the Plugin and the missing service: {message}"
     );
 }
 

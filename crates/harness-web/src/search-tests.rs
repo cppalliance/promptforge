@@ -10,7 +10,7 @@ use crate::provider::{
     SearchResults,
 };
 use crate::test_support::TestContext;
-use harness::capability::Tool;
+use harness::plugin::Tool;
 use promptforge::tools::{OutputTrust, ToolError, ToolErrorKind, ToolId};
 
 /// A provider that records every query and answers each with `reply`.
@@ -145,16 +145,15 @@ fn descriptor_is_stable_and_faithful() {
 }
 
 #[test]
-fn the_migrated_id_names_its_contributing_capability() {
+fn the_migrated_id_names_its_contributing_plugin() {
     // promptforge/web_search migrated to promptforge/web/search: dropping the
     // last segment must yield the contributing capability's id.
     let (tool, _fake) = tool();
     let id = tool.id();
     assert_eq!(id.name(), "search");
     assert_eq!(
-        id.capability(),
-        promptforge::capabilities::CapabilityId::parse("promptforge/web")
-            .expect("a valid capability id")
+        id.plugin(),
+        promptforge::plugins::PluginId::parse("promptforge/web").expect("a valid Plugin id")
     );
 }
 

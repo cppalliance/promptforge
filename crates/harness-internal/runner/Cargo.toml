@@ -12,7 +12,7 @@ publish = false
 # stop flag's `AtomicWaker`, and the race between a model listing and
 # the run's cancel.
 futures-util.workspace = true
-harness-capabilities.workspace = true
+harness-plugins.workspace = true
 # The Engine's public API: the Run this crate drives, the effects and
 # answers it correlates, and the run's VFS handle.
 promptforge.workspace = true

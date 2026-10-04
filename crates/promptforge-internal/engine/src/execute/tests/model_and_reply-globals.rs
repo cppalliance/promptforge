@@ -41,7 +41,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
     // The first script dispatch runs the one-time scope install, which
     // enriches `sys.model` with the bound catalog id; a prose read after it
     // substitutes the catalog id, not the alias.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\nModel id is {{ sys.model }}.\n\n\
@@ -61,7 +61,7 @@ models.default('writer')\n```\n\n\
 
 #[tokio::test]
 async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n";
@@ -80,7 +80,7 @@ models.default('writer')\n```\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\

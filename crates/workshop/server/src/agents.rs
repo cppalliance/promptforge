@@ -42,7 +42,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use harness::capability::{CapabilityRegistry, HostServices, UserInput};
+use harness::plugin::{HostServices, PluginRegistry, UserInput};
 use harness::record::RunId;
 use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
@@ -67,13 +67,13 @@ const HARNESS_STATE_DIR: &str = "harness";
 
 /// The capabilities agents may declare: `promptforge/user-input`, so they
 /// can ask the operator, and `promptforge/web`.
-fn capabilities() -> CapabilityRegistry {
-    let mut capabilities = CapabilityRegistry::new();
+fn plugins() -> PluginRegistry {
+    let mut plugins = PluginRegistry::new();
     // Two unrelated ids into an empty registry, so neither registration
     // can be refused.
-    let _ = capabilities.register(Arc::new(UserInput::new()));
-    let _ = capabilities.register(Arc::new(Web::new()));
-    capabilities
+    let _ = plugins.register(Arc::new(UserInput::new()));
+    let _ = plugins.register(Arc::new(Web::new()));
+    plugins
 }
 
 /// The services `promptforge/web` reads: the search provider over the
@@ -124,7 +124,7 @@ struct Inner {
     /// The inference broker behind each run's broker.
     broker: WorkshopBroker,
     /// The capabilities every run resolves its declarations against.
-    capabilities: CapabilityRegistry,
+    plugins: PluginRegistry,
     /// The services every run's clone starts from.
     services: HostServices,
     /// The running conversations.
@@ -154,7 +154,7 @@ impl AgentSessions {
                     config.server.state_dir.join(HARNESS_STATE_DIR),
                 )),
                 broker: WorkshopBroker::new(registry.clone()),
-                capabilities: capabilities(),
+                plugins: plugins(),
                 services: services(&registry),
                 conversations: Conversations::new(),
                 registry,
@@ -242,7 +242,7 @@ impl AgentSessions {
                 conversation.clone(),
             )),
             Arc::new(TokioTimer),
-            self.inner.capabilities.clone(),
+            self.inner.plugins.clone(),
             conversation.services(&self.inner.services),
         )
     }

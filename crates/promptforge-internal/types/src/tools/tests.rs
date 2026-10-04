@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::{ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolId};
-use crate::capabilities::CapabilityId;
+use crate::plugins::PluginId;
 
 fn inspect_id() -> ToolId {
     ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
@@ -180,12 +180,12 @@ fn a_three_segment_tool_id_parses_and_exposes_its_name() {
 }
 
 #[test]
-fn a_tool_ids_capability_is_always_its_two_segment_prefix() {
+fn a_tool_ids_plugin_is_always_its_two_segment_prefix() {
     let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
     assert_eq!(
-        id.capability(),
-        CapabilityId::parse("promptforge/web").expect("a valid capability id"),
-        "dropping the last segment must yield the contributing capability's id"
+        id.plugin(),
+        PluginId::parse("promptforge/web").expect("a valid Plugin id"),
+        "dropping the last segment must yield the contributing Plugin's id"
     );
 }
 
@@ -194,13 +194,13 @@ fn containment_holds_for_a_reverse_dns_namespace() {
     let id = ToolId::parse("org.rustalliance/core/search").expect("a valid tool id");
     assert_eq!(id.name(), "search");
     assert_eq!(
-        id.capability(),
-        CapabilityId::parse("org.rustalliance/core").expect("a valid capability id")
+        id.plugin(),
+        PluginId::parse("org.rustalliance/core").expect("a valid Plugin id")
     );
 }
 
 #[test]
-fn a_two_segment_capability_name_is_rejected_as_a_tool_id() {
+fn a_two_segment_plugin_name_is_rejected_as_a_tool_id() {
     use super::ToolIdErrorKind;
     assert_eq!(
         tool_id_error_kind("promptforge/web"),

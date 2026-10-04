@@ -15,7 +15,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
 use std::time::Duration;
 
-use harness_capabilities::{CapabilityRegistry, HostServices};
+use harness_plugins::{HostServices, PluginRegistry};
 use harness_runner::environment::HostSnapshot;
 use harness_runner::files::OutputError;
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
@@ -63,7 +63,7 @@ fn plain_harness(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker) -> Harn
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     )
 }

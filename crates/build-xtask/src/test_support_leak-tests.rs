@@ -83,8 +83,8 @@ fn a_dependencies_table_enabling_an_engine_test_support_feature_is_reported() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\n\
          promptforge-engine = { workspace = true, features = [\"test-support\"] }\n",
     );
@@ -93,7 +93,7 @@ fn a_dependencies_table_enabling_an_engine_test_support_feature_is_reported() {
     assert!(
         violations[0].contains("[dependencies]")
             && violations[0].contains("promptforge-engine/test-support")
-            && violations[0].contains("capabilities"),
+            && violations[0].contains("plugins"),
         "the leak names the table, the feature, and the consuming crate: {violations:?}"
     );
 }
@@ -103,8 +103,8 @@ fn a_dev_dependencies_table_enabling_an_engine_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\npromptforge-engine = { workspace = true }\n\
          [dev-dependencies]\n\
          promptforge-engine = { workspace = true, features = [\"test-support\"] }\n\
@@ -131,7 +131,7 @@ fn build_and_target_tables_are_scanned_renames_resolved_and_non_engine_features_
          promptforge-lua = { workspace = true, features = [\"serialize\", \"test-support\"] }\n\
          [dependencies]\n\
          promptforge-types = { workspace = true, features = [\"serde\"] }\n\
-         harness-capabilities = { workspace = true, features = [\"test-support\"] }\n",
+         harness-plugins = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
@@ -180,11 +180,11 @@ fn a_features_value_enabling_an_engine_test_support_feature_is_reported() {
          promptforge-engine = { workspace = true }\n\
          rt-types = { package = \"promptforge-types\", workspace = true, optional = true }\n\
          promptforge-lua = { workspace = true, optional = true }\n\
-         harness-capabilities = { workspace = true }\n\
+         harness-plugins = { workspace = true }\n\
          [features]\n\
          default = [\"promptforge-engine/test-support\"]\n\
          types = [\"rt-types?/test-support\"]\n\
-         fixtures = [\"dep:promptforge-lua\", \"harness-capabilities/test-support\", \"promptforge-lua/serialize\"]\n",
+         fixtures = [\"dep:promptforge-lua\", \"harness-plugins/test-support\", \"promptforge-lua/serialize\"]\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
@@ -261,8 +261,8 @@ fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\n\
          harness-runner = { workspace = true, features = [\"test-support\"] }\n",
     );
@@ -271,7 +271,7 @@ fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
     assert!(
         violations[0].contains("[dependencies]")
             && violations[0].contains("harness-runner/test-support")
-            && violations[0].contains("capabilities"),
+            && violations[0].contains("plugins"),
         "the leak names the table, the feature, and the consuming crate: {violations:?}"
     );
 }
@@ -281,8 +281,8 @@ fn a_dev_dependencies_table_enabling_a_harness_test_support_feature_passes() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [dev-dependencies]\n\
          harness-runner = { workspace = true, features = [\"test-support\"] }\n",
@@ -316,8 +316,8 @@ fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported()
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [features]\ndefault = [\"harness-runner/test-support\"]\n\
          test-support = [\"harness-runner/test-support\"]\n",
@@ -327,7 +327,7 @@ fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported()
     assert!(
         violations[0].contains("[features] default")
             && violations[0].contains("harness-runner/test-support")
-            && violations[0].contains("capabilities"),
+            && violations[0].contains("plugins"),
         "only a crate's own test-support feature is exempt when forwarding a sibling's: {violations:?}"
     );
 }
@@ -337,8 +337,8 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\npromptforge-lua = { workspace = true }\n\
          [features]\ntest-support = [\"promptforge-lua/test-support\"]\n",
     );
@@ -354,7 +354,7 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("capabilities") && v.contains("promptforge-lua/test-support")),
+            .any(|v| v.contains("plugins") && v.contains("promptforge-lua/test-support")),
         "a harness crate forwarding a promptforge crate's test-support is reported: {violations:?}"
     );
     assert!(

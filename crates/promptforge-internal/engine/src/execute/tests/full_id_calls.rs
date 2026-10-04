@@ -32,7 +32,7 @@ fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
     let tools = if slots.is_empty() {
         String::new()
     } else {
-        format!("capabilities:\n  - tests/tools\ntools:\n{slots}")
+        format!("plugins:\n  - tests/tools\ntools:\n{slots}")
     };
     parse(&format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n{tools}---\n\n# FullId\n\n## Only\n\n```lua\n{lua}\n```\n"

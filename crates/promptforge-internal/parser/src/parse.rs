@@ -85,12 +85,9 @@ impl Prompt {
             }
         })?;
         crate::contract::check_distinct_aliases(frontmatter.tools(), frontmatter.models())
-            .and_then(|()| crate::contract::check_distinct_capabilities(frontmatter.capabilities()))
+            .and_then(|()| crate::contract::check_distinct_plugins(frontmatter.plugins()))
             .and_then(|()| {
-                crate::contract::check_slot_capabilities(
-                    frontmatter.tools(),
-                    frontmatter.capabilities(),
-                )
+                crate::contract::check_slot_plugins(frontmatter.tools(), frontmatter.plugins())
             })
             .map_err(|message| Error::parse(ParseErrorKind::Frontmatter, message))?;
         // Everything past the frontmatter postdates the prompt's name, so a

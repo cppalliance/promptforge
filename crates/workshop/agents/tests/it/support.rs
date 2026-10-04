@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use harness::capability::{CapabilityRegistry, HostServices, UserInput};
+use harness::plugin::{HostServices, PluginRegistry, UserInput};
 use harness::record::MemoryRecorder;
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -48,7 +48,7 @@ impl InferenceBroker for Offline {
 pub(crate) fn prompt(lua: &str) -> String {
     format!(
         "---\nname: fixture\ndescription: a conversation fixture\npromptforge: 0\n\
-         capabilities:\n  - promptforge/user-input\n---\n\n\
+         plugins:\n  - promptforge/user-input\n---\n\n\
          # Fixture\n\n## Conversation\n\n```lua\n{lua}\n```\n"
     )
 }
@@ -60,15 +60,15 @@ pub(crate) fn harness_for(
     recorder: Arc<MemoryRecorder>,
     source: String,
 ) -> (Harness, RunRequest) {
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities
+    let mut plugins = PluginRegistry::new();
+    plugins
         .register(Arc::new(UserInput::new()))
-        .expect("an empty registry takes the capability");
+        .expect("an empty registry takes the Plugin");
     let harness = Harness::new(
         conversation.recorder(recorder),
         Arc::new(Offline),
         Arc::new(TokioTimer),
-        capabilities,
+        plugins,
         conversation.services(&HostServices::new()),
     );
     let request = RunRequest {

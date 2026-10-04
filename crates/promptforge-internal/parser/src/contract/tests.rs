@@ -1,4 +1,4 @@
-//! Tests for the frontmatter contract keys: `capabilities`, `tools`,
+//! Tests for the frontmatter contract keys: `plugins`, `tools`,
 //! `args`, and `models` (the frontmatter matrix from the plan's Testing
 //! Plan; structured error locations are a later step).
 
@@ -7,8 +7,8 @@ use std::num::NonZeroU32;
 use super::{ArgType, ModelKeyword, ToolSlot};
 use crate::{ParseError, ParseErrorKind, Prompt};
 
-#[path = "tests-capabilities.rs"]
-mod capabilities;
+#[path = "tests-plugins.rs"]
+mod plugins;
 
 fn parse(yaml: &str) -> Result<Prompt, ParseError> {
     let src = format!("---\n{yaml}---\n\n# T\n\n## S\n\np\n");
@@ -20,7 +20,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     let prompt = parse(concat!(
         "name: x\n",
         "description: d\n",
-        "capabilities:\n",
+        "plugins:\n",
         "  - promptforge/web\n",
         "  - ref: io.github.corp/mcp\n",
         "    optional: true\n",
@@ -47,7 +47,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
 
     let fm = prompt.frontmatter();
 
-    let caps = fm.capabilities();
+    let caps = fm.plugins();
     assert_eq!(caps.len(), 2);
     assert_eq!(caps[0].id().to_string(), "promptforge/web");
     assert!(!caps[0].is_optional());
@@ -99,7 +99,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
 fn a_prompt_without_contract_keys_behaves_exactly_as_today() {
     let prompt = parse("name: x\ndescription: d\n").expect("a plain prompt must parse");
     let fm = prompt.frontmatter();
-    assert!(fm.capabilities().is_empty());
+    assert!(fm.plugins().is_empty());
     assert!(fm.tools().is_empty());
     assert!(fm.models().is_empty());
 }
@@ -125,7 +125,7 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     // `deny_unknown_fields` must hold inside each new key's entries too: a
     // typo'd field is an authoring error, not silently ignored.
     for yaml in [
-        "name: x\ndescription: d\ncapabilities:\n  - ref: promptforge/web\n    optionl: true\n",
+        "name: x\ndescription: d\nplugins:\n  - ref: promptforge/web\n    optionl: true\n",
         "name: x\ndescription: d\ntools:\n  wiki:\n    wants: prose\n",
         "name: x\ndescription: d\nargs:\n  flag:\n    tipe: boolean\n",
         "name: x\ndescription: d\nmodels:\n  analyst:\n    keyword: [fast]\n",
@@ -420,17 +420,17 @@ fn contract_errors_report_their_frontmatter_line_and_column() {
     // error, so a rejection inside a contract key points at its own line
     // and column instead of being a bare message.
     let src = concat!(
-        "---\n",                     // line 1
-        "name: x\n",                 // line 2
-        "description: d\n",          // line 3
-        "capabilities:\n",           // line 4
-        "  - not a capability id\n", // line 5: the offending scalar
+        "---\n",                 // line 1
+        "name: x\n",             // line 2
+        "description: d\n",      // line 3
+        "plugins:\n",            // line 4
+        "  - not a Plugin id\n", // line 5: the offending scalar
         "---\n",
         "\n# T\n\n## S\n\np\n",
     );
     let error = Prompt::parse(src, "test")
         .0
-        .expect_err("a capability id with spaces must be rejected");
+        .expect_err("a Plugin id with spaces must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(
         error.line(),

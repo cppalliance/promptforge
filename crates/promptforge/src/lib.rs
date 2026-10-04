@@ -10,9 +10,9 @@
 //!
 //! The crate's `greeter` example is that whole loop in one program.
 
-pub use promptforge_engine::CapabilityConflict;
 pub use promptforge_engine::Environment;
 pub use promptforge_engine::MissingService;
+pub use promptforge_engine::PluginConflict;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;
 pub use promptforge_engine::Run;
@@ -110,17 +110,17 @@ pub mod tools {
     pub use promptforge_types::tools::ToolOutput;
 }
 
-pub mod capabilities {
+pub mod plugins {
     //! Capability ids, the Lua preludes capabilities add to a run, and the
     //! global names those preludes may define.
 
-    pub use promptforge_types::capabilities::CapabilityId;
-    pub use promptforge_types::capabilities::CapabilityIdError;
-    pub use promptforge_types::capabilities::CapabilityIdErrorKind;
-    pub use promptforge_types::capabilities::Prelude;
     pub use promptforge_types::names::GlobalName;
     pub use promptforge_types::names::GlobalNameError;
     pub use promptforge_types::names::GlobalNameErrorKind;
+    pub use promptforge_types::plugins::PluginId;
+    pub use promptforge_types::plugins::PluginIdError;
+    pub use promptforge_types::plugins::PluginIdErrorKind;
+    pub use promptforge_types::plugins::Prelude;
 }
 
 pub mod prompt {
@@ -130,12 +130,12 @@ pub mod prompt {
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
     pub use promptforge_parser::ArgsDecl;
-    pub use promptforge_parser::CapabilityDecl;
     pub use promptforge_parser::FileDecl;
     pub use promptforge_parser::Frontmatter;
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
+    pub use promptforge_parser::PluginDecl;
     pub use promptforge_parser::ToolSlot;
     pub use promptforge_parser::ToolSlots;
 }

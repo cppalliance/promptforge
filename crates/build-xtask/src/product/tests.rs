@@ -361,15 +361,15 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\ngateway-routing = { path = \"../../gateway-routing\" }\n",
     );
     write_crate(root.path(), "gateway-routing", "gateway-routing", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-capabilities depends on gateway-routing:")
+        violations[0].starts_with("harness-plugins depends on gateway-routing:")
             && violations[0].contains("harness crates must not depend on gateway crates"),
         "the violation names the harness crate and the gateway ban: {violations:?}"
     );

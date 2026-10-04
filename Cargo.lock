@@ -2621,23 +2621,10 @@ name = "harness"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "harness-capabilities",
+ "harness-plugins",
  "harness-runner",
  "promptforge",
  "tokio",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-capabilities"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "promptforge",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -2661,12 +2648,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-plugins"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "promptforge",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "workspace-hack",
+]
+
+[[package]]
 name = "harness-runner"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
- "harness-capabilities",
+ "harness-plugins",
  "promptforge",
  "rand 0.9.5",
  "serde_json",

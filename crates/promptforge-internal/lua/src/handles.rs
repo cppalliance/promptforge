@@ -1,6 +1,6 @@
 //! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua.
 
-use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
 use super::{Error, Json, Mutex, Result, ToolId, Value};
@@ -50,7 +50,7 @@ pub struct ToolBinding {
     pub output_kind: ToolOutputKind,
     /// The co-activation conflicts of the capability that contributed the
     /// tool, kept for the record.
-    pub conflicts: Vec<CapabilityId>,
+    pub conflicts: Vec<PluginId>,
 }
 
 impl ToolBinding {

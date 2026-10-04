@@ -11,7 +11,6 @@
 
 mod auto_traits;
 mod cancel;
-mod capabilities;
 mod effect;
 mod event;
 mod greeter;
@@ -19,6 +18,7 @@ mod ids;
 mod metrics;
 mod model;
 mod parsing;
+mod plugins;
 mod prepare;
 mod prompt;
 mod replay;

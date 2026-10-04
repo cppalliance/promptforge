@@ -74,18 +74,18 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
 }
 
 #[tokio::test]
-async fn default_environment_runs_a_capability_free_prompt() {
+async fn default_environment_runs_a_plugin_free_prompt() {
     // A prompt with no capability binds runs under the default
     // `Environment`: no registry, no client, no real roots.
     let md = flow_prompt!(
         "# Test prompt\n\n\
-        ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
+        ## Only\n\n```lua\nreturn 'no Plugins'\n```\n"
     );
     let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
         .await
         .result
-        .expect("a capability-free prompt runs under the default environment");
-    assert_eq!(out, "no capabilities");
+        .expect("a Plugin-free prompt runs under the default environment");
+    assert_eq!(out, "no Plugins");
 }
 
 #[tokio::test]
@@ -112,7 +112,7 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     // not refused); advertising the alias in a section is the run-time error
     // prepare promised.
     let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
         "# Test prompt\n\n\
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );

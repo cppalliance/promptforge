@@ -130,14 +130,14 @@ export function renderContractRows(
     }
   }
 
-  for (const capability of contract.capabilities) {
+  for (const plugin of contract.plugins) {
     const field = document.createElement("input");
     field.type = "checkbox";
     field.className = "ws-run-panel__checkbox";
     field.checked = true;
     // A required capability cannot be switched off.
-    field.disabled = !capability.optional;
-    rows.appendChild(row(capability.id, field));
+    field.disabled = !plugin.optional;
+    rows.appendChild(row(plugin.id, field));
   }
 
   for (const tool of contract.tools) {

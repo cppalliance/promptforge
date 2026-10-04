@@ -48,7 +48,7 @@ impl GlobalName {
         if !(2..=3).contains(&segments.len()) {
             return Err(GlobalNameError {
                 kind: GlobalNameErrorKind::SegmentCount,
-                reason: "must have exactly 2 segments (namespace/pack) or 3 (namespace/pack/name)",
+                reason: "must have exactly 2 segments (namespace/plugin) or 3 (namespace/plugin/name)",
             });
         }
         for segment in &segments {
@@ -71,7 +71,7 @@ impl GlobalName {
 
     /// Returns the pack, which is the second segment.
     #[must_use]
-    pub fn pack(&self) -> &str {
+    pub fn plugin(&self) -> &str {
         &self.segments[1]
     }
 
@@ -84,8 +84,8 @@ impl GlobalName {
 
     /// Returns the 2-segment capability prefix of a 3-segment (tool) name.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::capability`].
-    pub(crate) fn capability_prefix(&self) -> GlobalName {
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
+    pub(crate) fn plugin_prefix(&self) -> GlobalName {
         GlobalName {
             segments: self.segments[..2].to_vec(),
         }

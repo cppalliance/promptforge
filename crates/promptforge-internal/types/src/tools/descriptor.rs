@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ids::ToolId;
-use crate::capabilities::CapabilityId;
+use crate::plugins::PluginId;
 
 /// A tool described as data.
 ///
@@ -40,7 +40,7 @@ pub struct ToolDescriptor {
     /// of them and the contributing capability exclude each other in a run.
     /// The descriptor only records them. The caller checks them before
     /// activation.
-    pub conflicts: Vec<CapabilityId>,
+    pub conflicts: Vec<PluginId>,
 }
 
 impl ToolDescriptor {
@@ -74,7 +74,7 @@ impl ToolDescriptor {
     /// Each of them and the contributing capability exclude each other in a
     /// run.
     #[must_use]
-    pub fn with_conflicts(mut self, conflicts: Vec<CapabilityId>) -> ToolDescriptor {
+    pub fn with_conflicts(mut self, conflicts: Vec<PluginId>) -> ToolDescriptor {
         self.conflicts = conflicts;
         self
     }

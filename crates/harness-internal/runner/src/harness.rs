@@ -14,7 +14,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use futures_util::future::{Either, select};
-use harness_capabilities::{CapabilityRegistry, HostServices};
+use harness_plugins::{HostServices, PluginRegistry};
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::VfsRef;
 
@@ -40,7 +40,7 @@ pub struct Harness {
     recorder: Arc<dyn RunRecorder>,
     broker: Arc<dyn InferenceBroker>,
     timer: Arc<dyn Timer>,
-    capabilities: CapabilityRegistry,
+    plugins: PluginRegistry,
     services: HostServices,
     control: RunControl,
 }
@@ -48,7 +48,7 @@ pub struct Harness {
 impl std::fmt::Debug for Harness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Harness")
-            .field("capabilities", &self.capabilities)
+            .field("plugins", &self.plugins)
             .field("services", &self.services)
             .field("control", &self.control)
             .finish_non_exhaustive()
@@ -127,21 +127,21 @@ impl Harness {
     /// The Harness records the run through `recorder`. It resolves the
     /// run's model and gets the model's replies through `broker`. It sleeps
     /// through `timer`. It activates the capabilities the prompt declares
-    /// from `capabilities` and hands them `services`. All of this work
+    /// from `plugins` and hands them `services`. All of this work
     /// happens in [`Harness::run`].
     #[must_use]
     pub fn new(
         recorder: Arc<dyn RunRecorder>,
         broker: Arc<dyn InferenceBroker>,
         timer: Arc<dyn Timer>,
-        capabilities: CapabilityRegistry,
+        plugins: PluginRegistry,
         services: HostServices,
     ) -> Harness {
         Harness {
             recorder,
             broker,
             timer,
-            capabilities,
+            plugins,
             services,
             control: RunControl::new(CancelHandle::new()),
         }
@@ -185,7 +185,7 @@ impl Harness {
             recorder,
             broker,
             timer,
-            capabilities,
+            plugins,
             services,
             control,
         } = self;
@@ -215,7 +215,7 @@ impl Harness {
         };
 
         let services = Services {
-            registry: Some(Arc::new(capabilities)),
+            registry: Some(Arc::new(plugins)),
             services,
             vfs: vfs.clone(),
             input_text,

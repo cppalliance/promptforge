@@ -16,9 +16,9 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_capabilities::{
-    Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
-    RunServices, Tool, ToolContext, ToolTable,
+use harness_plugins::{
+    Contribution, HostServices, Plugin, PluginError, PluginId, PluginRegistry, RunServices, Tool,
+    ToolContext, ToolTable,
 };
 use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
@@ -46,7 +46,7 @@ mod prelude;
 /// A prompt declaring `promptforge/web` as a required capability that no
 /// registry here provides.
 const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - promptforge/web\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - promptforge/web\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A prompt with unclosed frontmatter, so it does not parse.
 const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
@@ -57,7 +57,7 @@ const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
 
 /// A prompt binding `echo` to the fixture tool and calling it once.
 const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n---\n\n\
+    plugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
 
 /// An empty in-memory recorder.
@@ -91,7 +91,7 @@ fn recorded_parse_events(recorder: &MemoryRecorder, run_id: RunId) -> Vec<Event>
 /// services and the performers no test here reaches.
 pub(crate) fn services(
     recorder: &Arc<MemoryRecorder>,
-    registry: Option<Arc<CapabilityRegistry>>,
+    registry: Option<Arc<PluginRegistry>>,
 ) -> Services {
     Services {
         registry,
@@ -150,23 +150,23 @@ impl Tool for Echo {
 
 /// A fixture capability contributing the echo tool.
 struct Tools {
-    id: CapabilityId,
+    id: PluginId,
 }
 
-impl Capability for Tools {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Tools {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "The test tools."
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Echo {
                 id: ToolId::parse("tests/tools/echo").unwrap(),
@@ -177,11 +177,11 @@ impl Capability for Tools {
 }
 
 /// A registry holding the fixture capability.
-fn fixture_registry() -> Arc<CapabilityRegistry> {
-    let mut registry = CapabilityRegistry::new();
+fn fixture_registry() -> Arc<PluginRegistry> {
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Tools {
-            id: CapabilityId::parse("tests/tools").unwrap(),
+            id: PluginId::parse("tests/tools").unwrap(),
         }))
         .unwrap();
     Arc::new(registry)
@@ -207,14 +207,14 @@ async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_end
     let recorder = recorder();
     let error = prepare(NEEDS_WEB, "", services(&recorder, None))
         .await
-        .expect_err("a missing required capability refuses the run");
+        .expect_err("a missing required Plugin refuses the run");
 
     let PrepareError::Refused { run_id, error, .. } = error else {
         panic!("the refusal is a requirements refusal: {error}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = "the environment cannot satisfy this prompt:\n\
-        - missing required capability: promptforge/web";
+        - missing required Plugin: promptforge/web";
     assert_eq!(
         error.to_string(),
         notice,

@@ -40,7 +40,7 @@ input:
 output:
   path: out.md
   description: the result
-capabilities:
+plugins:
   - web/search
   - ref: fs/local
     optional: true
@@ -85,10 +85,10 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
         json["output"],
         serde_json::json!({ "path": "out.md", "description": "the result" })
     );
-    // Capabilities keep declaration order; the map-backed sections are
+    // Plugins keep declaration order; the map-backed sections are
     // sorted by alias, name, or label.
     assert_eq!(
-        json["capabilities"],
+        json["plugins"],
         serde_json::json!([
             { "id": "web/search", "optional": false },
             { "id": "fs/local", "optional": true },

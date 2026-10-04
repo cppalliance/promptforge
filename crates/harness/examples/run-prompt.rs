@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use harness::capability::{CapabilityRegistry, HostServices};
+use harness::plugin::{HostServices, PluginRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest, Timer};
@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         recorder.clone(),
         Arc::new(Offline),
         Arc::new(Clock),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     );
 

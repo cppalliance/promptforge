@@ -1,7 +1,7 @@
 //! Stable tool identity and its validation errors.
 
-use crate::capabilities::CapabilityId;
 use crate::names::{GlobalName, GlobalNameErrorKind};
+use crate::plugins::PluginId;
 
 /// The stable identity of a tool.
 ///
@@ -37,7 +37,7 @@ impl ToolId {
             return Err(ToolIdError {
                 field: "id",
                 kind: ToolIdErrorKind::SegmentCount,
-                reason: "a tool id must have exactly 3 segments (namespace/pack/name)",
+                reason: "a tool id must have exactly 3 segments (namespace/plugin/name)",
             });
         }
         Ok(ToolId(name))
@@ -54,10 +54,10 @@ impl ToolId {
     ///
     /// Every tool id has this prefix, and it was validated when the tool id
     /// was parsed. This method reuses that validation and builds the
-    /// [`CapabilityId`] directly.
+    /// [`PluginId`] directly.
     #[must_use]
-    pub fn capability(&self) -> CapabilityId {
-        CapabilityId::from_prefix(self.0.capability_prefix())
+    pub fn plugin(&self) -> PluginId {
+        PluginId::from_prefix(self.0.plugin_prefix())
     }
 }
 
@@ -141,7 +141,7 @@ impl ToolIdError {
         let (kind, reason) = match global_kind {
             GlobalNameErrorKind::SegmentCount => (
                 ToolIdErrorKind::SegmentCount,
-                "a tool id must have exactly 3 segments (namespace/pack/name)",
+                "a tool id must have exactly 3 segments (namespace/plugin/name)",
             ),
             GlobalNameErrorKind::Empty => (ToolIdErrorKind::Empty, "segments must not be empty"),
             GlobalNameErrorKind::Control => (

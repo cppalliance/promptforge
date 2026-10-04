@@ -4,13 +4,12 @@
 use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
-use promptforge::capabilities::CapabilityId;
 use promptforge::tools::{OutputTrust, ToolErrorKind, ToolId};
 use serde_json::json;
 
 use super::{FALLBACK, INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 use crate::test_support::TestContext;
-use crate::{Capability, HostServices, InputBroker, InputError, RunServices, Tool};
+use crate::{HostServices, InputBroker, InputError, Plugin, RunServices, Tool};
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
@@ -65,7 +64,7 @@ fn with_broker(broker: impl InputBroker + 'static) -> RunServices {
 fn ask_tool(services: &RunServices) -> Arc<dyn Tool> {
     let contribution = UserInput::new()
         .create(services)
-        .expect("the capability activates");
+        .expect("the Plugin activates");
     assert_eq!(contribution.tools.len(), 1, "one tool is contributed");
     Arc::clone(&contribution.tools[0])
 }
@@ -74,28 +73,26 @@ fn ask_tool(services: &RunServices) -> Arc<dyn Tool> {
 fn prelude(services: &RunServices) -> String {
     UserInput::new()
         .create(services)
-        .expect("the capability activates")
+        .expect("the Plugin activates")
         .prelude
-        .expect("the capability contributes a prelude")
+        .expect("the Plugin contributes a prelude")
 }
 
 #[test]
-fn the_capability_is_promptforge_user_input_and_needs_the_input_broker() {
-    let capability = UserInput::new();
-    assert_eq!(capability.id().to_string(), "promptforge/user-input");
-    assert_eq!(capability.needs(), [INPUT_BROKER.id()]);
-    assert_eq!(
-        capability.needs()[0].to_string(),
-        "promptforge/input-broker"
-    );
-    assert!(capability.conflicts().is_empty());
+fn the_plugin_is_promptforge_user_input_and_needs_the_input_broker() {
+    let plugin = UserInput::new();
+    assert_eq!(plugin.id().to_string(), "promptforge/user-input");
+    assert_eq!(plugin.needs(), [INPUT_BROKER.id()]);
+    assert_eq!(plugin.needs()[0].to_string(), "promptforge/input-broker");
+    assert!(plugin.conflicts().is_empty());
 }
 
 #[test]
-fn the_input_broker_literal_parses_as_a_capability_id() {
-    let literal = INPUT_BROKER.id().to_string();
-    assert_eq!(literal, "promptforge/input-broker");
-    CapabilityId::parse(&literal).expect("the input broker's literal is a namespace/name id");
+fn the_input_broker_literal_is_a_namespace_name_id() {
+    let broker: Arc<dyn InputBroker> = Arc::new(Scripted("unused"));
+    HostServices::new()
+        .provide(&INPUT_BROKER, broker)
+        .expect("provide accepts the input broker's literal");
 }
 
 #[test]

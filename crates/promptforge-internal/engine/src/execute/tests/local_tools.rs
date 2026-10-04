@@ -381,7 +381,7 @@ async fn local_tool_alias_cannot_shadow_a_declared_tool() {
         "Concrete description.",
     ));
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  grab: tests/tools/concrete\nmodels:\n  writer: {}\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  grab: tests/tools/concrete\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua\n\
 models.default('writer')\n```\n\n\
 ## Only\n\n\

@@ -6,7 +6,7 @@
 //! functions:
 //!
 //! ````text
-//! capabilities:
+//! plugins:
 //!   - promptforge/user-input
 //! ````
 //!
@@ -54,9 +54,9 @@
 //! prompt declared the capability.
 //!
 //! - A required declaration is refused before the run starts. The
-//!   capability's [`needs`](Capability::needs) names
+//!   capability's [`needs`](Plugin::needs) names
 //!   [`INPUT_BROKER`], so activation never calls
-//!   [`create`](Capability::create) and the refusal notice holds the line
+//!   [`create`](Plugin::create) and the refusal notice holds the line
 //!   "- promptforge/user-input needs promptforge/input-broker, and this
 //!   host provides none".
 //! - An optional declaration activates anyway, and the activation
@@ -104,11 +104,11 @@
 
 use std::sync::Arc;
 
-use promptforge::capabilities::CapabilityId;
+use promptforge::plugins::PluginId;
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
-use crate::capability::{Capability, CapabilityError, Contribution, RunServices};
 use crate::input::{InputBroker, InputError};
+use crate::plugin::{Contribution, Plugin, PluginError, RunServices};
 use crate::service::{ServiceId, ServiceKey};
 use crate::tool::{Tool, ToolContext};
 
@@ -146,7 +146,7 @@ const FALLBACK: &str = "User input is unavailable in this host; continue without
 #[derive(Debug, Clone)]
 pub struct UserInput {
     /// The stable identity, `promptforge/user-input`.
-    id: CapabilityId,
+    id: PluginId,
     /// The ask tool's identity, [`USER_INPUT_ASK_TOOL`].
     ask: ToolId,
 }
@@ -163,10 +163,10 @@ impl UserInput {
     pub fn new() -> UserInput {
         #[expect(
             clippy::expect_used,
-            reason = "the id is a literal of the capability id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
+            reason = "the id is a literal of the Plugin id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
         )]
-        let id = CapabilityId::parse("promptforge/user-input")
-            .expect("the literal user-input capability id parses");
+        let id = PluginId::parse("promptforge/user-input")
+            .expect("the literal user-input Plugin id parses");
         #[expect(
             clippy::expect_used,
             reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
@@ -182,14 +182,14 @@ impl Default for UserInput {
     }
 }
 
-impl Capability for UserInput {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for UserInput {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the Plugin trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Ask the operator for their next message."
@@ -200,7 +200,7 @@ impl Capability for UserInput {
         NEEDS
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         let broker = services.get(&INPUT_BROKER);
         let prelude = prelude(broker.is_some());
         Ok(Contribution {

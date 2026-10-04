@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
 
-use harness_capabilities::{CapabilityRegistry, HostServices};
+use harness_plugins::{HostServices, PluginRegistry};
 use harness_runner::display_chain;
 use harness_runner::environment::CurrentModelError;
 use harness_runner::recorder::MemoryRecorder;
@@ -46,7 +46,7 @@ fn harness_over(recorder: &Arc<FailingRecorder>, broker: ScriptedBroker) -> Harn
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     )
 }

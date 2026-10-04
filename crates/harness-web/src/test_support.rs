@@ -1,6 +1,6 @@
 //! The context a unit test lends a web tool it calls directly.
 
-use harness::capability::{ToolCallOrigin, ToolCaller, ToolContext};
+use harness::plugin::{ToolCallOrigin, ToolCaller, ToolContext};
 use harness::vfs::{Access, Origin, VfsRef};
 
 /// An access over a fresh in-memory filesystem and a script origin, which

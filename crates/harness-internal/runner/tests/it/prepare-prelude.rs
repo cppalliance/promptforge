@@ -18,7 +18,7 @@ const SPEAKER_PRELUDE: &str = "speaker = {}\n\
 /// its prelude from two sections; the second also tries to replace the
 /// prelude's function and reports whether the table refused.
 const SPEAKS: &str = "---\nname: speaks\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/speaker\n---\n\n# Title\n\n\
+    plugins:\n  - tests/speaker\n---\n\n# Title\n\n\
     ## First\n\n```lua\nspeaker.say('one')\n```\n\n\
     ## Second\n\n```lua\n\
     local sealed = not pcall(function() speaker.say = nil end)\n\
@@ -27,23 +27,23 @@ const SPEAKS: &str = "---\nname: speaks\ndescription: d\npromptforge: 0\n\
 /// A fixture capability contributing the echo tool under its own id and
 /// a prelude that calls it.
 struct Speaker {
-    id: CapabilityId,
+    id: PluginId,
 }
 
-impl Capability for Speaker {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Speaker {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "Speaks through its echo tool from a prelude."
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Echo {
                 id: ToolId::parse("tests/speaker/echo").unwrap(),
@@ -69,10 +69,10 @@ fn script_call(value: &str, section: &str) -> serde_json::Value {
 #[tokio::test]
 async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_that_made_each() {
     let recorder = recorder();
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Speaker {
-            id: CapabilityId::parse("tests/speaker").unwrap(),
+            id: PluginId::parse("tests/speaker").unwrap(),
         }))
         .unwrap();
     let prepared = prepare(SPEAKS, "", services(&recorder, Some(Arc::new(registry))))

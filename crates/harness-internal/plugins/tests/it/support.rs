@@ -5,9 +5,9 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use harness_capabilities::{
-    Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    RunServices, Tool, ToolContext, activate,
+use harness_plugins::{
+    Activation, Contribution, Plugin, PluginError, PluginId, PluginRegistry, RunServices, Tool,
+    ToolContext, activate,
 };
 use promptforge::Prompt;
 use promptforge::Run;
@@ -41,7 +41,7 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
 /// implementation table).
 pub(super) fn prepare_activated(
     env: Environment,
-    registry: Option<&CapabilityRegistry>,
+    registry: Option<&PluginRegistry>,
     prompt: &Prompt,
     ctx: RunContext,
 ) -> (RunContext, Requirements, Activation) {
@@ -59,7 +59,7 @@ pub(super) fn prepare_activated(
 /// on the store-only loop below (no fixture here performs a chat, tool,
 /// or input effect).
 pub(super) fn run_activated(
-    registry: &CapabilityRegistry,
+    registry: &PluginRegistry,
     prompt: &Prompt,
     ctx: RunContext,
 ) -> RunResult {
@@ -98,9 +98,9 @@ pub(super) struct Observed {
 }
 
 /// A fixture capability recording each activation's services. `fail`
-/// turns every activation into a [`CapabilityError`].
+/// turns every activation into a [`PluginError`].
 pub(super) struct Fixture {
-    id: CapabilityId,
+    id: PluginId,
     description: String,
     fail: bool,
     activations: Arc<Mutex<Vec<Observed>>>,
@@ -111,8 +111,8 @@ impl Fixture {
     pub(super) fn new(id: &str, fail: bool) -> (Arc<Fixture>, Arc<Mutex<Vec<Observed>>>) {
         let activations = Arc::new(Mutex::new(Vec::new()));
         let fixture = Arc::new(Fixture {
-            id: CapabilityId::parse(id).expect("the fixture id is valid"),
-            description: format!("The {id} fixture capability."),
+            id: PluginId::parse(id).expect("the fixture id is valid"),
+            description: format!("The {id} fixture Plugin."),
             fail,
             activations: Arc::clone(&activations),
         });
@@ -120,16 +120,16 @@ impl Fixture {
     }
 }
 
-impl Capability for Fixture {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Fixture {
+    fn id(&self) -> &PluginId {
         &self.id
     }
     fn description(&self) -> &str {
         &self.description
     }
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         if self.fail {
-            return Err(CapabilityError::message("the fixture cannot activate"));
+            return Err(PluginError::message("the fixture cannot activate"));
         }
         self.activations
             .lock()
@@ -216,8 +216,8 @@ impl Tool for BadWireTool {
 /// A fixture capability contributing tools and declaring co-activation
 /// conflicts.
 pub(super) struct ToolFixture {
-    id: CapabilityId,
-    conflicts: Vec<CapabilityId>,
+    id: PluginId,
+    conflicts: Vec<PluginId>,
     tools: Vec<Arc<dyn Tool>>,
 }
 
@@ -226,34 +226,34 @@ impl ToolFixture {
     /// conflicting with each id in `conflicts`.
     pub(super) fn new(id: &str, conflicts: &[&str], tools: Vec<Arc<dyn Tool>>) -> ToolFixture {
         ToolFixture {
-            id: CapabilityId::parse(id).expect("the fixture id is valid"),
+            id: PluginId::parse(id).expect("the fixture id is valid"),
             conflicts: conflicts
                 .iter()
-                .map(|id| CapabilityId::parse(id).expect("the conflict id is valid"))
+                .map(|id| PluginId::parse(id).expect("the conflict id is valid"))
                 .collect(),
             tools,
         }
     }
 }
 
-impl Capability for ToolFixture {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for ToolFixture {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
-        "A tool-contributing fixture capability."
+        "A tool-contributing fixture Plugin."
     }
 
-    fn conflicts(&self) -> &[CapabilityId] {
+    fn conflicts(&self) -> &[PluginId] {
         &self.conflicts
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         let _ = services;
         Ok(Contribution {
             tools: self.tools.clone(),

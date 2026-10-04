@@ -40,7 +40,7 @@ pub use build::{
     FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
 };
 pub use contract::{
-    ArgDecl, ArgType, ArgsDecl, CapabilityDecl, ModelKeyword, ModelRole, ModelRoles, ToolSlot,
+    ArgDecl, ArgType, ArgsDecl, ModelKeyword, ModelRole, ModelRoles, PluginDecl, ToolSlot,
     ToolSlots,
 };
 use error::Result;

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use promptforge_types::capabilities::Prelude;
+use promptforge_types::plugins::Prelude;
 
 use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
@@ -139,7 +139,7 @@ impl fmt::Debug for Environment {
                 &self
                     .preludes
                     .iter()
-                    .map(Prelude::capability)
+                    .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
             .finish()

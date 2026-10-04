@@ -72,7 +72,7 @@ pub(super) fn prepare_run(
     let (ctx, requirements) = env.prepare(prompt, context(execution));
     assert!(
         requirements.is_satisfied(),
-        "fixture prompts declare no capabilities or model roles: {requirements:?}"
+        "fixture prompts declare no Plugins or model roles: {requirements:?}"
     );
     let vfs = ctx.vfs_handle().clone();
     (ctx, opts.harness(), vfs)

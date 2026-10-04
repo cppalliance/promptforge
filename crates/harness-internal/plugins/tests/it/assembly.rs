@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use harness_capabilities::CapabilityRegistry;
+use harness_plugins::PluginRegistry;
 use promptforge::tools::ToolId;
 use promptforge::{Environment, RunErrorKind, RunResult};
 
@@ -23,7 +23,7 @@ const DECLARES_CONFLICTING: &str = concat!(
     "name: declares-conflicting\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - promptforge/bashkit\n",
     "  - promptforge/terminal\n",
     "---\n\n",
@@ -39,7 +39,7 @@ const DECLARES_TWO: &str = concat!(
     "name: declares-two\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - promptforge/web\n",
     "  - promptforge/fs\n",
     "---\n\n",
@@ -54,7 +54,7 @@ const DECLARES_EXACT_SLOT: &str = concat!(
     "name: declares-exact-slot\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - promptforge/web\n",
     "tools:\n",
     "  fetch: promptforge/web/fetch\n",
@@ -65,8 +65,8 @@ const DECLARES_EXACT_SLOT: &str = concat!(
 );
 
 /// Registers `promptforge/web` contributing one described fetch tool.
-fn web_registry() -> CapabilityRegistry {
-    let mut registry = CapabilityRegistry::new();
+fn web_registry() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(ToolFixture::new(
             "promptforge/web",
@@ -89,7 +89,7 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
         (vec!["promptforge/terminal"], vec![]),
         (vec![], vec!["promptforge/bashkit"]),
     ] {
-        let mut registry = CapabilityRegistry::new();
+        let mut registry = PluginRegistry::new();
         registry
             .register(Arc::new(ToolFixture::new(
                 "promptforge/bashkit",
@@ -131,7 +131,7 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
 #[test]
 fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
     let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(ToolFixture::new(
             "promptforge/bashkit",
@@ -154,12 +154,12 @@ fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
     let notice = error.to_string();
     assert!(
         notice.contains("promptforge/bashkit") && notice.contains("promptforge/terminal"),
-        "the notice names both conflicting capabilities: {notice}"
+        "the notice names both conflicting Plugins: {notice}"
     );
 }
 
 #[test]
-fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
+fn a_contributed_tool_outside_the_plugins_id_is_rejected_at_assembly() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     let good = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let stray = ToolId::parse("promptforge/other/fetch").expect("the id is valid");
@@ -171,7 +171,7 @@ fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
             fixture_tool("promptforge/other/fetch"),
         ],
     );
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
@@ -201,7 +201,7 @@ fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
     });
     assert!(
         logs.contains("promptforge/other/fetch") && logs.contains("promptforge/web"),
-        "the rejection log names the capability and the tool: {logs}"
+        "the rejection log names the Plugin and the tool: {logs}"
     );
 }
 
@@ -221,7 +221,7 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
         &[],
         vec![fixture_tool("promptforge/fs/read")],
     );
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry.register(Arc::new(web)).expect("web registers");
     registry.register(Arc::new(fs)).expect("fs registers");
     let (ctx, requirements, _) = prepare_activated(
@@ -244,7 +244,7 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
             "promptforge/web/search",
             "promptforge/fs/read"
         ],
-        "declaration order, then contribution order within each capability"
+        "declaration order, then contribution order within each Plugin"
     );
 }
 
@@ -262,7 +262,7 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
             fixture_tool("promptforge/web/fetch"),
         ],
     );
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
@@ -286,7 +286,7 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
     });
     assert!(
         logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
-        "the rejection log names the capability and the repeated tool: {logs}"
+        "the rejection log names the Plugin and the repeated tool: {logs}"
     );
 }
 
@@ -305,7 +305,7 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
             fixture_tool("promptforge/web/search"),
         ],
     );
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
@@ -328,25 +328,25 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     });
     assert!(
         logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
-        "the rejection log names the capability and the rejected tool: {logs}"
+        "the rejection log names the Plugin and the rejected tool: {logs}"
     );
 }
 
 #[test]
-fn a_capability_both_activation_and_prepare_report_missing_is_named_once() {
+fn a_plugin_both_activation_and_prepare_report_missing_is_named_once() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     // The declared capability is absent from an empty registry (activation
     // reports it) and its exact slot finds nothing in the catalog (prepare
     // reports it): the merged refusal names it once.
-    let result = run_activated(&CapabilityRegistry::new(), &prompt, context("refuse-once"));
+    let result = run_activated(&PluginRegistry::new(), &prompt, context("refuse-once"));
     let RunResult::Failure(error) = result else {
-        panic!("an absent required capability is refused: {result:?}");
+        panic!("an absent required Plugin is refused: {result:?}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required capability: promptforge/web"
+         - missing required Plugin: promptforge/web"
     );
 }
 

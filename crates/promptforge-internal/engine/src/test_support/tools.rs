@@ -4,7 +4,7 @@
 //!
 //! The Engine holds no implementation and names no implementation trait;
 //! the production trait (`Tool`) is the Harness's, in
-//! `harness-capabilities`, and a `promptforge-*` crate never depends on a
+//! `harness-plugins`, and a `promptforge-*` crate never depends on a
 //! Harness crate. The suites still need something to perform a `ToolCall`
 //! effect with, so these are the test doubles: the same method shapes as
 //! the Harness's trait (so a fixture reads like a production tool), built

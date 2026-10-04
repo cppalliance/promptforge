@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use harness_capabilities::{
-    Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    HostServices, INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, activate,
+use harness_plugins::{
+    Activation, Contribution, HostServices, INPUT_BROKER, InputBroker, InputError, Plugin,
+    PluginError, PluginId, PluginRegistry, RunServices, ServiceId, activate,
 };
 use promptforge::cancel::CancelHandle;
 use promptforge::{MissingService, RunErrorKind, RunResult};
@@ -20,7 +20,7 @@ const REQUIRES_ASKER: &str = concat!(
     "name: requires-asker\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - acme/asker\n",
     "---\n\n",
     "# Title\n\n",
@@ -34,7 +34,7 @@ const OPTIONAL_ASKER: &str = concat!(
     "name: optional-asker\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - ref: acme/asker\n",
     "    optional: true\n",
     "---\n\n",
@@ -43,28 +43,28 @@ const OPTIONAL_ASKER: &str = concat!(
     "Done.\n",
 );
 
-fn asker_id() -> CapabilityId {
-    CapabilityId::parse("acme/asker").expect("the fixture id is valid")
+fn asker_id() -> PluginId {
+    PluginId::parse("acme/asker").expect("the fixture id is valid")
 }
 
 /// A fixture capability that needs the input service and counts how
 /// often its `create` runs.
 struct Asker {
-    id: CapabilityId,
+    id: PluginId,
     creates: Arc<AtomicUsize>,
 }
 
-impl Capability for Asker {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Asker {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
-        "A fixture capability that needs an input broker."
+        "A fixture Plugin that needs an input broker."
     }
 
     fn needs(&self) -> &[ServiceId] {
@@ -72,7 +72,7 @@ impl Capability for Asker {
         NEEDS
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         let _ = services;
         self.creates.fetch_add(1, Ordering::SeqCst);
         Ok(Contribution::default())
@@ -90,9 +90,9 @@ impl InputBroker for Silent {
     }
 }
 
-fn registry_with_asker() -> (CapabilityRegistry, Arc<AtomicUsize>) {
+fn registry_with_asker() -> (PluginRegistry, Arc<AtomicUsize>) {
     let creates = Arc::new(AtomicUsize::new(0));
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Asker {
             id: asker_id(),
@@ -120,7 +120,7 @@ fn activate_asker(source: &str, with_broker: bool) -> (Activation, usize) {
 }
 
 #[test]
-fn a_required_capability_whose_service_is_present_activates_normally() {
+fn a_required_plugin_whose_service_is_present_activates_normally() {
     let (activation, creates) = activate_asker(REQUIRES_ASKER, true);
     assert_eq!(creates, 1, "create ran exactly once");
     assert!(activation.requirements.is_satisfied());
@@ -128,7 +128,7 @@ fn a_required_capability_whose_service_is_present_activates_normally() {
 }
 
 #[test]
-fn an_optional_capability_whose_service_is_present_activates_normally() {
+fn an_optional_plugin_whose_service_is_present_activates_normally() {
     let (activation, creates) = activate_asker(OPTIONAL_ASKER, true);
     assert_eq!(creates, 1, "create ran exactly once");
     assert!(activation.requirements.is_satisfied());
@@ -136,35 +136,32 @@ fn an_optional_capability_whose_service_is_present_activates_normally() {
 }
 
 #[test]
-fn a_required_capability_whose_service_is_missing_is_reported_without_calling_create() {
+fn a_required_plugin_whose_service_is_missing_is_reported_without_calling_create() {
     let (activation, creates) = activate_asker(REQUIRES_ASKER, false);
-    assert_eq!(
-        creates, 0,
-        "activation refuses before any capability code runs"
-    );
+    assert_eq!(creates, 0, "activation refuses before any Plugin code runs");
     assert_eq!(
         activation.requirements.missing_services,
         [MissingService::new(asker_id(), "promptforge/input-broker")]
     );
     assert!(
         activation.requirements.missing_required.is_empty(),
-        "the capability is present, so it is not reported missing"
+        "the Plugin is present, so it is not reported missing"
     );
     assert!(!activation.requirements.is_satisfied());
     assert!(activation.service_gaps.is_empty());
 }
 
 #[test]
-fn an_optional_capability_whose_service_is_missing_activates_degraded_with_a_warning() {
+fn an_optional_plugin_whose_service_is_missing_activates_degraded_with_a_warning() {
     let logs = captured_logs(|| {
         let (activation, creates) = activate_asker(OPTIONAL_ASKER, false);
-        assert_eq!(creates, 1, "an optional capability still activates");
+        assert_eq!(creates, 1, "an optional Plugin still activates");
         assert!(
             activation.requirements.is_satisfied(),
-            "an optional capability's missing service does not refuse the run"
+            "an optional Plugin's missing service does not refuse the run"
         );
         assert_eq!(activation.service_gaps.len(), 1);
-        assert_eq!(activation.service_gaps[0].capability, asker_id());
+        assert_eq!(activation.service_gaps[0].plugin, asker_id());
         assert_eq!(activation.service_gaps[0].service, INPUT_BROKER.id());
     });
     assert!(
@@ -173,18 +170,18 @@ fn an_optional_capability_whose_service_is_missing_activates_degraded_with_a_war
     );
     assert!(
         logs.contains("acme/asker") && logs.contains("promptforge/input-broker"),
-        "the warning names the capability and the service: {logs}"
+        "the warning names the Plugin and the service: {logs}"
     );
 }
 
 #[test]
-fn the_run_path_refuses_a_required_capability_whose_service_is_missing() {
+fn the_run_path_refuses_a_required_plugin_whose_service_is_missing() {
     let (registry, creates) = registry_with_asker();
     let prompt = parse(REQUIRES_ASKER, "requires-asker");
     // The suite's run path supplies no broker.
     let result = run_activated(&registry, &prompt, context("refuse-missing-service"));
     let RunResult::Failure(error) = result else {
-        panic!("a required capability without its service is refused: {result:?}");
+        panic!("a required Plugin without its service is refused: {result:?}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert_eq!(

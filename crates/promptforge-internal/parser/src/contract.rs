@@ -1,4 +1,4 @@
-//! The frontmatter contract keys: `capabilities`, `tools`, `args`, `models`.
+//! The frontmatter contract keys: `plugins`, `tools`, `args`, `models`.
 //!
 //! The YAML is the whole contract: capabilities install, tools bind, models
 //! declare, args type. Parsing validates the static shape - capability id
@@ -20,8 +20,8 @@ use std::marker::PhantomData;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use promptforge_types::capabilities::CapabilityId;
 use promptforge_types::names::GlobalName;
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolId;
 
 mod args;
@@ -149,18 +149,18 @@ where
 /// The grammar accepts two or three segments, so the arity check counts
 /// separators: exactly one `/` is two segments. A `@` version pin never
 /// gets that far - the charset rejects it (v1 is unversioned).
-fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
-    let name = GlobalName::parse(text)
-        .map_err(|error| format!("invalid capability id `{text}`: {error}"))?;
+fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
+    let name =
+        GlobalName::parse(text).map_err(|error| format!("invalid Plugin id `{text}`: {error}"))?;
     if text.matches('/').count() != 1 {
         return Err(format!(
-            "invalid capability id `{text}`: a capability id has exactly 2 segments (namespace/pack)"
+            "invalid Plugin id `{text}`: a Plugin id has exactly 2 segments (namespace/plugin)"
         ));
     }
     Ok(name)
 }
 
-/// One capability declared in a prompt's `capabilities` frontmatter list.
+/// One capability declared in a prompt's `plugins` frontmatter list.
 ///
 /// A declaration takes one of two forms. A plain id string declares a
 /// required capability. A map names the id under `ref` and may also set
@@ -171,7 +171,7 @@ fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
 /// prompt. The caller supplies it through the run services.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct CapabilityDecl {
+pub struct PluginDecl {
     /// The capability's global id (`namespace/pack`, exactly 2 segments).
     id: GlobalName,
     /// Whether an absent capability skips with a log line instead of
@@ -181,7 +181,7 @@ pub struct CapabilityDecl {
     config: Option<serde_yaml_ng::Value>,
 }
 
-impl CapabilityDecl {
+impl PluginDecl {
     /// Returns the capability's global id (`namespace/pack`).
     #[must_use]
     pub fn id(&self) -> &GlobalName {
@@ -204,33 +204,33 @@ impl CapabilityDecl {
     }
 }
 
-impl<'de> Deserialize<'de> for CapabilityDecl {
+impl<'de> Deserialize<'de> for PluginDecl {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(CapabilityDeclVisitor)
+        deserializer.deserialize_any(PluginDeclVisitor)
     }
 }
 
 /// Deserializes a capability declaration from either frontmatter form: a
 /// bare id string or a `ref` map. A streaming visitor (not an untagged
 /// buffer) so rejections keep their source position.
-struct CapabilityDeclVisitor;
+struct PluginDeclVisitor;
 
-impl<'de> Visitor<'de> for CapabilityDeclVisitor {
-    type Value = CapabilityDecl;
+impl<'de> Visitor<'de> for PluginDeclVisitor {
+    type Value = PluginDecl;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a capability id string or a map with `ref`, `optional`, and `config`")
+        formatter.write_str("a Plugin id string or a map with `ref`, `optional`, and `config`")
     }
 
     fn visit_str<E>(self, text: &str) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        Ok(CapabilityDecl {
-            id: parse_capability_id(text).map_err(E::custom)?,
+        Ok(PluginDecl {
+            id: parse_plugin_id(text).map_err(E::custom)?,
             optional: false,
             config: None,
         })
@@ -272,8 +272,8 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
             }
         }
         let reference = reference.ok_or_else(|| de::Error::missing_field("ref"))?;
-        Ok(CapabilityDecl {
-            id: parse_capability_id(&reference).map_err(de::Error::custom)?,
+        Ok(PluginDecl {
+            id: parse_plugin_id(&reference).map_err(de::Error::custom)?,
             optional: optional.unwrap_or(false),
             config,
         })
@@ -401,14 +401,14 @@ pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> 
     }
 }
 
-/// Refuses a `capabilities:` list that names one capability id twice,
+/// Refuses a `plugins:` list that names one capability id twice,
 /// whatever each entry's form, `optional` flag, and `config`. Returns the
 /// refusal's message, naming the first id declared again.
-pub(crate) fn check_distinct_capabilities(capabilities: &[CapabilityDecl]) -> Result<(), String> {
+pub(crate) fn check_distinct_plugins(plugins: &[PluginDecl]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
-    match capabilities.iter().find(|decl| !seen.insert(decl.id())) {
+    match plugins.iter().find(|decl| !seen.insert(decl.id())) {
         Some(decl) => Err(format!(
-            "invalid frontmatter: capability {} is declared more than once under capabilities",
+            "invalid frontmatter: Plugin {} is declared more than once under plugins",
             decl.id()
         )),
         None => Ok(()),
@@ -419,28 +419,25 @@ pub(crate) fn check_distinct_capabilities(capabilities: &[CapabilityDecl]) -> Re
 /// requires its capability, so an absent optional one would fail the run
 /// anyway. Returns the refusal's message, naming the first offending alias
 /// in sorted order.
-pub(crate) fn check_slot_capabilities(
-    tools: &ToolSlots,
-    capabilities: &[CapabilityDecl],
-) -> Result<(), String> {
+pub(crate) fn check_slot_plugins(tools: &ToolSlots, plugins: &[PluginDecl]) -> Result<(), String> {
     for (alias, slot) in tools.iter() {
         let ToolSlot::Exact(tool) = slot;
-        let capability = tool.capability();
-        if capabilities
+        let plugin = tool.plugin();
+        if plugins
             .iter()
-            .any(|decl| decl.is_optional() && declares(decl, &capability))
+            .any(|decl| decl.is_optional() && declares(decl, &plugin))
         {
             return Err(format!(
-                "invalid frontmatter: tool alias '{alias}' names {tool}, whose capability \
-                 {capability} is declared optional; a tool slot requires its capability"
+                "invalid frontmatter: tool alias '{alias}' names {tool}, whose Plugin \
+                 {plugin} is declared optional; a tool slot requires its Plugin"
             ));
         }
     }
     Ok(())
 }
 
-/// Whether `decl` declares `capability`. Both ids have exactly two
+/// Whether `decl` declares `plugin`. Both ids have exactly two
 /// segments, so equal namespace and pack segments are equal ids.
-fn declares(decl: &CapabilityDecl, capability: &CapabilityId) -> bool {
-    decl.id().namespace() == capability.namespace() && decl.id().pack() == capability.pack()
+fn declares(decl: &PluginDecl, plugin: &PluginId) -> bool {
+    decl.id().namespace() == plugin.namespace() && decl.id().plugin() == plugin.name()
 }

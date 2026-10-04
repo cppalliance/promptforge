@@ -25,7 +25,7 @@ const CONTRACT: &str = concat!(
     "promptforge: 0\n",
     "input: { path: names.md, description: The names to greet }\n",
     "output: { path: note.md, description: The note the greeter leaves }\n",
-    "capabilities: [example/text]\n",
+    "plugins: [example/text]\n",
     "tools: { shout: example/text/shout }\n",
     "args:\n",
     "  times: { type: integer, optional: true, default: 1 }\n",
@@ -83,12 +83,12 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
             ),
         ]
     );
-    let capabilities: Vec<_> = frontmatter
-        .capabilities()
+    let plugins: Vec<_> = frontmatter
+        .plugins()
         .iter()
-        .map(|capability| (capability.id().to_string(), capability.is_optional()))
+        .map(|plugin| (plugin.id().to_string(), plugin.is_optional()))
         .collect();
-    assert_eq!(capabilities, [("example/text".to_owned(), false)]);
+    assert_eq!(plugins, [("example/text".to_owned(), false)]);
     let slots: Vec<_> = frontmatter
         .tools()
         .iter()
@@ -116,7 +116,7 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
             .eq(["name", "times"])
     );
 
-    let misspelled = CONTRACT.replace("capabilities:", "capabilites:");
+    let misspelled = CONTRACT.replace("plugins:", "plugns:");
     let parsed = Prompt::parse(&misspelled, "greeter").0;
     assert_eq!(
         parsed.err().map(|error| error.kind()),

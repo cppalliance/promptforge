@@ -12,7 +12,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use harness_capabilities::{ToolContext, ToolTable};
+use harness_plugins::{ToolContext, ToolTable};
 use promptforge::effect::ToolCallOrigin;
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use promptforge::vfs::Access;
@@ -61,7 +61,7 @@ impl ToolPerformer for ActivatedTools {
                     "a ToolCall names an id outside the run's activated table"
                 );
                 return Err(ToolError::message(format!(
-                    "tool `{alias}` ({tool}) is not among the run's activated capabilities"
+                    "tool `{alias}` ({tool}) is not among the run's activated Plugins"
                 ))
                 .with_kind(ToolErrorKind::Other));
             };

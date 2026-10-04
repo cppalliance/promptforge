@@ -16,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 use url::Url;
 
-use harness::capability::{Tool, ToolContext};
+use harness::plugin::{Tool, ToolContext};
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::config::{ConfigError, FetchConfig};

@@ -4,7 +4,7 @@ use super::*;
 
 use std::sync::Arc;
 
-use harness::capability::{CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, UserInput};
+use harness::plugin::{HostServices, INPUT_BROKER, InputBroker, PluginRegistry, UserInput};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -259,12 +259,12 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     // conversation's broker, the registry completes the wait with the
     // operator's text, and the answer resumes the run to its result.
     let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\
-                  capabilities:\n  - promptforge/user-input\n---\n\n\
+                  plugins:\n  - promptforge/user-input\n---\n\n\
                   # Ask\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities
+    let mut plugins = PluginRegistry::new();
+    plugins
         .register(Arc::new(UserInput::new()))
-        .expect("an empty registry takes the capability");
+        .expect("an empty registry takes the Plugin");
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
     let recorder = Arc::new(MemoryRecorder::new());
@@ -277,7 +277,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
         recorder.clone(),
         Arc::new(NoChat),
         Arc::new(TokioTimer),
-        capabilities,
+        plugins,
         services,
     );
     let request = RunRequest {

@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use harness::capability::{
-    Capability, CapabilityError, CapabilityErrorKind, CapabilityId, Contribution, RunServices,
-    ServiceId, ServiceKey,
+use harness::plugin::{
+    Contribution, Plugin, PluginError, PluginErrorKind, PluginId, RunServices, ServiceId,
+    ServiceKey,
 };
 use tokio::runtime::Handle;
 
@@ -49,7 +49,7 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 #[derive(Debug, Clone)]
 pub struct Web {
     /// The stable identity, `promptforge/web`.
-    id: CapabilityId,
+    id: PluginId,
     /// The fetch client, built over its validated policy.
     fetch: FetchClient,
 }
@@ -69,10 +69,9 @@ impl Web {
     pub fn new() -> Web {
         #[expect(
             clippy::expect_used,
-            reason = "the id is a literal of the capability id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
+            reason = "the id is a literal of the Plugin id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
         )]
-        let id =
-            CapabilityId::parse("promptforge/web").expect("the literal web capability id parses");
+        let id = PluginId::parse("promptforge/web").expect("the literal web Plugin id parses");
         Web {
             id,
             fetch: FetchClient::new(),
@@ -96,14 +95,14 @@ impl Default for Web {
     }
 }
 
-impl Capability for Web {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Web {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the Plugin trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Fetch a web page as markdown and search the web through the Host's search provider."
@@ -114,11 +113,11 @@ impl Capability for Web {
         NEEDS
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         if services.cancel.is_cancelled() {
             return Err(
-                CapabilityError::message("promptforge/web: the run was cancelled")
-                    .with_kind(CapabilityErrorKind::Cancelled),
+                PluginError::message("promptforge/web: the run was cancelled")
+                    .with_kind(PluginErrorKind::Cancelled),
             );
         }
         let (Some(provider), Some(runtime)) =

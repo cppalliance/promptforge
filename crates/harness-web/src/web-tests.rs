@@ -4,9 +4,7 @@
 
 use std::sync::Arc;
 
-use harness::capability::{
-    Capability, CapabilityErrorKind, CapabilityId, HostServices, RunServices, ServiceId,
-};
+use harness::plugin::{HostServices, Plugin, PluginErrorKind, PluginId, RunServices};
 use promptforge::cancel::CancelHandle;
 use promptforge::tools::ToolId;
 use tokio::runtime::Handle;
@@ -49,14 +47,14 @@ fn services() -> RunServices {
 }
 
 #[tokio::test]
-async fn activating_the_capability_contributes_both_tools_under_its_full_id() {
-    let capability = Web::new();
+async fn activating_the_plugin_contributes_both_tools_under_its_full_id() {
+    let plugin = Web::new();
     assert_eq!(
-        capability.id(),
-        &CapabilityId::parse("promptforge/web").expect("valid capability id")
+        plugin.id(),
+        &PluginId::parse("promptforge/web").expect("valid Plugin id")
     );
 
-    let contribution = capability.create(&services()).expect("activation succeeds");
+    let contribution = plugin.create(&services()).expect("activation succeeds");
 
     let mut ids: Vec<ToolId> = contribution.tools.iter().map(|tool| tool.id()).collect();
     ids.sort();
@@ -69,8 +67,8 @@ async fn activating_the_capability_contributes_both_tools_under_its_full_id() {
     );
     for tool in &contribution.tools {
         assert!(
-            capability.id().contains(&tool.id()),
-            "every contributed tool lives under the capability's id: {}",
+            plugin.id().contains(&tool.id()),
+            "every contributed tool lives under the Plugin's id: {}",
             tool.id()
         );
     }
@@ -85,7 +83,7 @@ async fn activating_the_capability_contributes_both_tools_under_its_full_id() {
 }
 
 #[test]
-fn the_capability_needs_the_search_provider_and_the_runtime() {
+fn the_plugin_needs_the_search_provider_and_the_runtime() {
     let needs: Vec<String> = Web::new().needs().iter().map(ToString::to_string).collect();
     assert_eq!(
         needs,
@@ -95,9 +93,9 @@ fn the_capability_needs_the_search_provider_and_the_runtime() {
 
 #[tokio::test]
 async fn a_run_missing_either_service_gets_no_web_tools() {
-    let capability = Web::new();
+    let plugin = Web::new();
     for (provider, runtime) in [(false, true), (true, false), (false, false)] {
-        let contribution = capability
+        let contribution = plugin
             .create(&services_with(provider, runtime, CancelHandle::new()))
             .expect("activation without a service still succeeds");
         assert!(
@@ -109,14 +107,14 @@ async fn a_run_missing_either_service_gets_no_web_tools() {
 
 #[tokio::test]
 async fn activation_on_a_cancelled_run_fails_as_cancelled() {
-    let capability = Web::new();
+    let plugin = Web::new();
     let cancel = CancelHandle::new();
     cancel.cancel();
 
-    let err = capability
+    let err = plugin
         .create(&services_with(true, true, cancel))
         .expect_err("a cancelled run must not activate");
-    assert_eq!(err.kind(), CapabilityErrorKind::Cancelled);
+    assert_eq!(err.kind(), PluginErrorKind::Cancelled);
     assert!(err.is_cancelled());
 }
 
@@ -126,11 +124,11 @@ async fn a_custom_fetch_policy_is_accepted() {
         .max_chars(10_000)
         .build()
         .expect("valid policy");
-    let capability = Web::new()
+    let plugin = Web::new()
         .with_fetch_config(policy)
         .expect("the custom policy builds a fetch client");
 
-    let contribution = capability.create(&services()).expect("activation succeeds");
+    let contribution = plugin.create(&services()).expect("activation succeeds");
     assert_eq!(contribution.tools.len(), 2);
     let fetch = contribution
         .tools
@@ -144,13 +142,11 @@ async fn a_custom_fetch_policy_is_accepted() {
     );
 }
 
-#[test]
-fn each_service_key_literal_parses_as_a_capability_id() {
-    let keys: [ServiceId; 2] = [SEARCH_PROVIDER.id(), TOKIO_RUNTIME.id()];
-    for key in keys {
-        assert!(
-            CapabilityId::parse(&key.to_string()).is_ok(),
-            "{key} is a namespace/name id"
-        );
-    }
+#[tokio::test]
+async fn each_service_key_literal_is_a_namespace_name_id() {
+    let mut host = HostServices::new();
+    host.provide(&SEARCH_PROVIDER, Arc::new(NoResults))
+        .expect("provide accepts the search provider's literal");
+    host.provide(&TOKIO_RUNTIME, Arc::new(Handle::current()))
+        .expect("provide accepts the runtime's literal");
 }

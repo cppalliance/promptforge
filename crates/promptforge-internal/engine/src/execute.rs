@@ -14,7 +14,7 @@
 //! - `context` - the ambient `RunState` run state.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
 //!   against the Harness-supplied catalog; capability activation itself is the
-//!   Harness's, in `harness-capabilities`.
+//!   Harness's, in `harness-plugins`.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's tool- and model-slot fill functions.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
@@ -59,7 +59,7 @@ pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{
-    CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement,
+    MissingService, PluginConflict, RequirementCheck, Requirements, UnmetRequirement,
 };
 pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,

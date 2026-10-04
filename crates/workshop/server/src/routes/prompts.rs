@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use promptforge::Prompt;
 use promptforge::prompt::{
-    ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
+    ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, PluginDecl, ToolSlot,
 };
 
 use crate::error::AppError;
@@ -53,7 +53,7 @@ struct ContractResponse {
     /// The declared output file; `null` when absent.
     output: Option<FileDto>,
     /// The declared capabilities, in declaration order.
-    capabilities: Vec<CapabilityDto>,
+    plugins: Vec<PluginDto>,
     /// The declared tool slots, sorted by alias.
     tools: Vec<ToolDto>,
     /// The typed args declaration.
@@ -82,15 +82,15 @@ impl From<&FileDecl> for FileDto {
 
 /// A declared capability: its global id and optionality.
 #[derive(Debug, Serialize)]
-struct CapabilityDto {
+struct PluginDto {
     /// The capability's global id (`namespace/pack`).
     id: String,
     /// Whether an absent capability skips instead of failing.
     optional: bool,
 }
 
-impl From<&CapabilityDecl> for CapabilityDto {
-    fn from(decl: &CapabilityDecl) -> Self {
+impl From<&PluginDecl> for PluginDto {
+    fn from(decl: &PluginDecl) -> Self {
         Self {
             id: decl.id().to_string(),
             optional: decl.is_optional(),
@@ -231,11 +231,7 @@ impl From<&Frontmatter> for ContractResponse {
                 .map(std::num::NonZeroU32::get),
             input: frontmatter.input().map(FileDto::from),
             output: frontmatter.output().map(FileDto::from),
-            capabilities: frontmatter
-                .capabilities()
-                .iter()
-                .map(CapabilityDto::from)
-                .collect(),
+            plugins: frontmatter.plugins().iter().map(PluginDto::from).collect(),
             tools: frontmatter
                 .tools()
                 .iter()

@@ -2,7 +2,7 @@
 //! that fetches a page and one that searches the web.
 //!
 //! A Host registers [`Web`] in its capability registry. A prompt turns it
-//! on with one frontmatter line, `capabilities: [promptforge/web]`. The
+//! on with one frontmatter line, `plugins: [promptforge/web]`. The
 //! run then gets both tools: `promptforge/web/fetch`, which fetches a URL
 //! and returns its content as text, and `promptforge/web/search`, which
 //! runs a search through the Host's [`SearchProvider`]. The two tools

@@ -118,11 +118,11 @@ end";
     for (key, refusal) in [
         (
             "'mode'",
-            "var is read-only inside a capability prelude; cannot set 'mode'",
+            "var is read-only inside a Plugin prelude; cannot set 'mode'",
         ),
         (
             "1",
-            "var is read-only inside a capability prelude; cannot set 'Integer(1)'",
+            "var is read-only inside a Plugin prelude; cannot set 'Integer(1)'",
         ),
     ] {
         let message: String = eval(&vm, &format!("return probe_set({key})"));

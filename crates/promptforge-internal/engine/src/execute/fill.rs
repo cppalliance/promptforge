@@ -39,18 +39,15 @@ pub(super) fn fill_tool_bindings(
             bindings.bind(alias, tool.clone());
             continue;
         }
-        let capability = id.capability();
-        let capability_present = catalog
-            .tools()
-            .iter()
-            .any(|tool| capability.contains(&tool.id));
+        let plugin = id.plugin();
+        let plugin_present = catalog.tools().iter().any(|tool| plugin.contains(&tool.id));
         // A capability that contributed to the catalog but not this tool
         // (the contribution was rejected at assembly or never made) is not
         // missing: reporting it would fail the run unsatisfiably, since
         // installing it changes nothing. The alias stays unbound instead,
         // and advertising it fails at run time with the alias named.
-        if !capability_present && !requirements.missing_required.contains(&capability) {
-            requirements.missing_required.push(capability);
+        if !plugin_present && !requirements.missing_required.contains(&plugin) {
+            requirements.missing_required.push(plugin);
         }
     }
     bindings

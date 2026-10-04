@@ -18,7 +18,7 @@ export interface RunContractFile {
 }
 
 /** A declared capability: its global id and optionality. */
-export interface RunContractCapability {
+export interface RunContractPlugin {
   readonly id: string;
   readonly optional: boolean;
 }
@@ -69,7 +69,7 @@ export interface RunContract {
   readonly maxToolIterations: number | null;
   readonly input: RunContractFile | null;
   readonly output: RunContractFile | null;
-  readonly capabilities: readonly RunContractCapability[];
+  readonly plugins: readonly RunContractPlugin[];
   readonly tools: readonly RunContractTool[];
   readonly args: RunContractArgs;
   readonly models: readonly RunContractModel[];
@@ -86,7 +86,7 @@ function parseFile(value: unknown): RunContractFile | null {
   return { path, description };
 }
 
-function parseCapability(value: unknown): RunContractCapability | null {
+function parsePlugin(value: unknown): RunContractPlugin | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -192,7 +192,7 @@ function parseContract(body: unknown): RunContract | null {
   if (!isRecord(body)) {
     return null;
   }
-  const { name, description, promptforge, max_tool_iterations, capabilities, tools, models } = body;
+  const { name, description, promptforge, max_tool_iterations, plugins, tools, models } = body;
   if (typeof name !== "string" || typeof description !== "string") {
     return null;
   }
@@ -210,16 +210,16 @@ function parseContract(body: unknown): RunContract | null {
   if (body.output !== null && output === null) {
     return null;
   }
-  if (!Array.isArray(capabilities) || !Array.isArray(tools) || !Array.isArray(models)) {
+  if (!Array.isArray(plugins) || !Array.isArray(tools) || !Array.isArray(models)) {
     return null;
   }
-  const parsedCapabilities: RunContractCapability[] = [];
-  for (const capability of capabilities) {
-    const parsed = parseCapability(capability);
+  const parsedPlugins: RunContractPlugin[] = [];
+  for (const plugin of plugins) {
+    const parsed = parsePlugin(plugin);
     if (parsed === null) {
       return null;
     }
-    parsedCapabilities.push(parsed);
+    parsedPlugins.push(parsed);
   }
   const parsedTools: RunContractTool[] = [];
   for (const tool of tools) {
@@ -248,7 +248,7 @@ function parseContract(body: unknown): RunContract | null {
     maxToolIterations: max_tool_iterations ?? null,
     input,
     output,
-    capabilities: parsedCapabilities,
+    plugins: parsedPlugins,
     tools: parsedTools,
     args,
     models: parsedModels,

@@ -21,7 +21,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use harness::capability::Tool;
+use harness::plugin::Tool;
 use promptforge::tools::ToolId;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::runtime::Handle;
@@ -114,15 +114,14 @@ async fn descriptor_is_stable_and_faithful() {
 }
 
 #[tokio::test]
-async fn the_migrated_id_names_its_contributing_capability() {
+async fn the_migrated_id_names_its_contributing_plugin() {
     // promptforge/web_fetch migrated to promptforge/web/fetch: dropping the
     // last segment must yield the contributing capability's id.
     let id = on_this_runtime(&FetchClient::new()).id();
     assert_eq!(id.name(), "fetch");
     assert_eq!(
-        id.capability(),
-        promptforge::capabilities::CapabilityId::parse("promptforge/web")
-            .expect("a valid capability id")
+        id.plugin(),
+        promptforge::plugins::PluginId::parse("promptforge/web").expect("a valid Plugin id")
     );
 }
 

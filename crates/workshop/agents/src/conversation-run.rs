@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use harness::capability::{HostServices, INPUT_BROKER, InputBroker};
+use harness::plugin::{HostServices, INPUT_BROKER, InputBroker};
 use harness::record::{RunOutcome, RunRecorder};
 use harness::{Harness, HarnessError, RunReport, RunRequest, display_chain};
 use promptforge::ids::RoundId;

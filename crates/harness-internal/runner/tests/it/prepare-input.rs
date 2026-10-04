@@ -11,12 +11,12 @@ use super::*;
 
 use std::sync::Mutex;
 
-use harness_capabilities::{INPUT_BROKER, InputBroker, InputError, UserInput, activate};
+use harness_plugins::{INPUT_BROKER, InputBroker, InputError, UserInput, activate};
 use promptforge::Prompt;
 
 /// A prompt declaring the probe capability, with nothing to run.
 const DECLARES_PROBE: &str = "---\nname: declares-probe\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - tests/probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - tests/probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
@@ -45,24 +45,24 @@ impl InputBroker for Failing {
 /// A fixture capability contributing nothing, which records whether each
 /// activation's services carried a broker.
 struct Probe {
-    id: CapabilityId,
+    id: PluginId,
     saw_broker: Arc<Mutex<Vec<bool>>>,
 }
 
-impl Capability for Probe {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for Probe {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "Records whether a broker reached activation."
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         self.saw_broker
             .lock()
             .unwrap()
@@ -85,10 +85,10 @@ fn with_input(input: Option<Arc<dyn InputBroker>>) -> HostServices {
 /// and returns what each activation of the probe saw.
 async fn probe_activations(input: Option<Arc<dyn InputBroker>>) -> Vec<bool> {
     let saw_broker = Arc::new(Mutex::new(Vec::new()));
-    let mut registry = CapabilityRegistry::new();
+    let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Probe {
-            id: CapabilityId::parse("tests/probe").unwrap(),
+            id: PluginId::parse("tests/probe").unwrap(),
             saw_broker: Arc::clone(&saw_broker),
         }))
         .unwrap();
@@ -119,7 +119,7 @@ async fn drive_prompt(source: &str, services: Services) -> RunOutcome {
 }
 
 #[tokio::test]
-async fn activation_hands_the_hosts_broker_to_each_declared_capability() {
+async fn activation_hands_the_hosts_broker_to_each_declared_plugin() {
     let seen = probe_activations(Some(Arc::new(Scripted("unused")))).await;
     assert_eq!(
         seen,
@@ -129,7 +129,7 @@ async fn activation_hands_the_hosts_broker_to_each_declared_capability() {
 }
 
 #[tokio::test]
-async fn activation_hands_no_broker_to_a_capability_when_the_host_has_none() {
+async fn activation_hands_no_broker_to_a_plugin_when_the_host_has_none() {
     let seen = probe_activations(None).await;
     assert_eq!(
         seen,
@@ -153,20 +153,20 @@ const ASKS_ONCE: &str = "local text, available = input.ask()\n\
 /// A one-section prompt that declares the user-input capability with
 /// `declaration` (none when empty) and runs `lua`.
 fn user_input_prompt(declaration: &str, lua: &str) -> String {
-    let capabilities = if declaration.is_empty() {
+    let plugins = if declaration.is_empty() {
         String::new()
     } else {
-        format!("capabilities:\n{declaration}")
+        format!("plugins:\n{declaration}")
     };
     format!(
-        "---\nname: asks-input\ndescription: d\npromptforge: 0\n{capabilities}---\n\n\
+        "---\nname: asks-input\ndescription: d\npromptforge: 0\n{plugins}---\n\n\
          # Title\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
 }
 
 /// A registry holding the first-party user-input capability.
-fn user_input_registry() -> Arc<CapabilityRegistry> {
-    let mut registry = CapabilityRegistry::new();
+fn user_input_registry() -> Arc<PluginRegistry> {
+    let mut registry = PluginRegistry::new();
     registry.register(Arc::new(UserInput::new())).unwrap();
     Arc::new(registry)
 }
@@ -191,7 +191,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
         user_input_services(&recorder, None),
     )
     .await
-    .expect_err("a required capability without its service refuses the run");
+    .expect_err("a required Plugin without its service refuses the run");
     let PrepareError::Refused { error, .. } = error else {
         panic!("the refusal is a requirements refusal: {error}");
     };
@@ -200,7 +200,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
         error.to_string().contains(
             "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
         ),
-        "the notice names the capability and the missing service: {error}"
+        "the notice names the Plugin and the missing service: {error}"
     );
 }
 
@@ -214,7 +214,7 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
         user_input_services(&recorder, None),
     )
     .await
-    .expect_err("a required capability without its service refuses the run");
+    .expect_err("a required Plugin without its service refuses the run");
     let PrepareError::Refused { error, .. } = error else {
         panic!("the refusal is a requirements refusal: {error}");
     };
@@ -224,11 +224,11 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
         notice.contains(
             "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
         ),
-        "the notice names the capability and the missing service: {notice}"
+        "the notice names the Plugin and the missing service: {notice}"
     );
     assert!(
-        !notice.contains("missing required capability: promptforge/user-input"),
-        "the notice does not call the registered capability missing: {notice}"
+        !notice.contains("missing required Plugin: promptforge/user-input"),
+        "the notice does not call the registered Plugin missing: {notice}"
     );
 }
 
@@ -256,7 +256,7 @@ fn an_optional_user_input_declaration_without_a_broker_records_the_service_gap()
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
     let gap = &activation.service_gaps[0];
-    assert_eq!(gap.capability.to_string(), "promptforge/user-input");
+    assert_eq!(gap.plugin.to_string(), "promptforge/user-input");
     assert_eq!(gap.service, INPUT_BROKER.id());
 }
 
@@ -361,10 +361,10 @@ async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_
     assert_eq!(kind, "Lua");
     assert!(
         message.contains(
-            "capability `promptforge/user-input`: its prelude defines the global `input`, \
+            "Plugin `promptforge/user-input`: its prelude defines the global `input`, \
              which the prompt's frontmatter binds as a tool or model alias"
         ),
-        "the failure names the capability, the global, and the alias: {message}"
+        "the failure names the Plugin, the global, and the alias: {message}"
     );
     let effects = recorder
         .records(run_id)

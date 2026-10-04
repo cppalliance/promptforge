@@ -8,9 +8,9 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use harness_capabilities::{
-    Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
-    INPUT_BROKER, InputBroker, InputError, RunServices, Tool, ToolContext,
+use harness_plugins::{
+    Contribution, HostServices, INPUT_BROKER, InputBroker, InputError, Plugin, PluginError,
+    PluginId, PluginRegistry, RunServices, Tool, ToolContext,
 };
 use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
 use promptforge::effect::Round;
@@ -194,25 +194,25 @@ pub(crate) fn held_broker(held: &Arc<Held>) -> ScriptedBroker {
 
 /// The fixture capability `tests/harness`, contributing the one tool
 /// `tests/harness/hold`, whose every call is held.
-struct HoldCapability {
-    id: CapabilityId,
+struct HoldPlugin {
+    id: PluginId,
     held: Arc<Held>,
 }
 
-impl Capability for HoldCapability {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for HoldPlugin {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
+        reason = "the Plugin trait fixes this return type to &str"
     )]
     fn description(&self) -> &str {
         "Holds every call."
     }
 
-    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(HoldTool {
                 id: ToolId::parse("tests/harness/hold").unwrap(),
@@ -257,11 +257,11 @@ impl Tool for HoldTool {
 }
 
 /// A registry holding the hold capability over `held`.
-pub(crate) fn hold_registry(held: &Arc<Held>) -> CapabilityRegistry {
-    let mut registry = CapabilityRegistry::new();
+pub(crate) fn hold_registry(held: &Arc<Held>) -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
     registry
-        .register(Arc::new(HoldCapability {
-            id: CapabilityId::parse("tests/harness").unwrap(),
+        .register(Arc::new(HoldPlugin {
+            id: PluginId::parse("tests/harness").unwrap(),
             held: Arc::clone(held),
         }))
         .unwrap();

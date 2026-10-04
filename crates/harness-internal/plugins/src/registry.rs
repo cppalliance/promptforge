@@ -1,4 +1,4 @@
-//! The explicit Host-built capability registry: [`CapabilityRegistry`].
+//! The explicit Host-built capability registry: [`PluginRegistry`].
 //!
 //! Linking a capability crate alone registers nothing: the Host builds one
 //! registry, registers each installed capability by hand, and hands it to
@@ -10,7 +10,7 @@
 //! rejected as a normalization collision: punctuation twins would be
 //! indistinguishable to a model reading a catalog.
 //!
-//! Tools exist only after [`Capability::create`], so tool
+//! Tools exist only after [`Plugin::create`], so tool
 //! prefix-containment is checked when a run's catalog is assembled, not
 //! at registration.
 
@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge::capabilities::CapabilityId;
+use promptforge::plugins::PluginId;
 
-use crate::capability::Capability;
+use crate::plugin::Plugin;
 
 #[cfg(test)]
 #[path = "registry-tests.rs"]
@@ -41,17 +41,17 @@ mod tests;
 /// A clone shares the capabilities registered so far. After that, each
 /// copy takes its own registrations.
 #[derive(Clone)]
-pub struct CapabilityRegistry {
+pub struct PluginRegistry {
     /// The installed capabilities, keyed by their stable ids.
-    capabilities: BTreeMap<CapabilityId, Arc<dyn Capability>>,
+    plugins: BTreeMap<PluginId, Arc<dyn Plugin>>,
 }
 
-impl CapabilityRegistry {
+impl PluginRegistry {
     /// Builds an empty registry.
     #[must_use]
-    pub fn new() -> CapabilityRegistry {
-        CapabilityRegistry {
-            capabilities: BTreeMap::new(),
+    pub fn new() -> PluginRegistry {
+        PluginRegistry {
+            plugins: BTreeMap::new(),
         }
     }
 
@@ -64,9 +64,9 @@ impl CapabilityRegistry {
     /// with [`RegistryErrorKind::NormalizationCollision`] when the id
     /// differs from a registered id only by `-`, `_`, or `.`
     /// punctuation.
-    pub fn register(&mut self, capability: Arc<dyn Capability>) -> Result<(), RegistryError> {
-        let id = capability.id().clone();
-        if self.capabilities.contains_key(&id) {
+    pub fn register(&mut self, plugin: Arc<dyn Plugin>) -> Result<(), RegistryError> {
+        let id = plugin.id().clone();
+        if self.plugins.contains_key(&id) {
             return Err(RegistryError {
                 kind: RegistryErrorKind::DuplicateId,
                 id,
@@ -75,7 +75,7 @@ impl CapabilityRegistry {
         }
         let normalized = normalize_id(&id);
         if let Some(existing) = self
-            .capabilities
+            .plugins
             .keys()
             .find(|existing| normalize_id(existing) == normalized)
         {
@@ -85,32 +85,29 @@ impl CapabilityRegistry {
                 collides_with: Some(existing.clone()),
             });
         }
-        self.capabilities.insert(id, capability);
+        self.plugins.insert(id, plugin);
         Ok(())
     }
 
     /// Returns the capability registered under `id`, when present.
     #[must_use]
-    pub fn get(&self, id: &CapabilityId) -> Option<&Arc<dyn Capability>> {
-        self.capabilities.get(id)
+    pub fn get(&self, id: &PluginId) -> Option<&Arc<dyn Plugin>> {
+        self.plugins.get(id)
     }
 }
 
-impl Default for CapabilityRegistry {
-    fn default() -> CapabilityRegistry {
-        CapabilityRegistry::new()
+impl Default for PluginRegistry {
+    fn default() -> PluginRegistry {
+        PluginRegistry::new()
     }
 }
 
-impl fmt::Debug for CapabilityRegistry {
+impl fmt::Debug for PluginRegistry {
     /// Reports only the registered ids.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("CapabilityRegistry")
-            .field(
-                "capabilities",
-                &self.capabilities.keys().collect::<Vec<_>>(),
-            )
+            .debug_struct("PluginRegistry")
+            .field("plugins", &self.plugins.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -134,9 +131,9 @@ pub struct RegistryError {
     /// A stable classification of the rejection.
     kind: RegistryErrorKind,
     /// The id whose registration was rejected.
-    id: CapabilityId,
+    id: PluginId,
     /// The registered id a punctuation twin collides with.
-    collides_with: Option<CapabilityId>,
+    collides_with: Option<PluginId>,
 }
 
 impl RegistryError {
@@ -148,14 +145,14 @@ impl RegistryError {
 
     /// Returns the id whose registration was rejected.
     #[must_use]
-    pub fn id(&self) -> &CapabilityId {
+    pub fn id(&self) -> &PluginId {
         &self.id
     }
 
     /// Returns the registered id the rejected id collides with, when the
     /// rejection is a [`RegistryErrorKind::NormalizationCollision`].
     #[must_use]
-    pub fn collides_with(&self) -> Option<&CapabilityId> {
+    pub fn collides_with(&self) -> Option<&PluginId> {
         self.collides_with.as_ref()
     }
 }
@@ -166,19 +163,19 @@ impl fmt::Display for RegistryError {
             RegistryErrorKind::DuplicateId => {
                 write!(
                     formatter,
-                    "a capability with id {} is already registered",
+                    "a Plugin with id {} is already registered",
                     self.id
                 )
             }
             RegistryErrorKind::NormalizationCollision => match &self.collides_with {
                 Some(existing) => write!(
                     formatter,
-                    "capability id {} was rejected: it differs from the registered id {existing} only by '-', '_' or '.' punctuation",
+                    "Plugin id {} was rejected: it differs from the registered id {existing} only by '-', '_' or '.' punctuation",
                     self.id
                 ),
                 None => write!(
                     formatter,
-                    "capability id {} was rejected: it differs from a registered id only by '-', '_' or '.' punctuation",
+                    "Plugin id {} was rejected: it differs from a registered id only by '-', '_' or '.' punctuation",
                     self.id
                 ),
             },
@@ -192,10 +189,10 @@ impl std::error::Error for RegistryError {}
 /// separator byte (`-`, `_`, `.`) maps to one canonical byte, so two ids
 /// differing only in separator choice compare equal. The global-name
 /// charset is lowercase-only, so case needs no handling.
-fn normalize_id(id: &CapabilityId) -> (String, String) {
+fn normalize_id(id: &PluginId) -> (String, String) {
     (
         normalize_segment(id.namespace()),
-        normalize_segment(id.pack()),
+        normalize_segment(id.name()),
     )
 }
 

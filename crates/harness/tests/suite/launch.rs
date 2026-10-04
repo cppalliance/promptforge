@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use harness::capability::{CapabilityRegistry, HostServices};
+use harness::plugin::{HostServices, PluginRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::{Origin, VfsError, VfsRef};
 use harness::{Harness, HostSnapshot, OutputError, RunRequest};
@@ -26,7 +26,7 @@ fn harness() -> Harness {
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
         Arc::new(Clock),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     )
 }

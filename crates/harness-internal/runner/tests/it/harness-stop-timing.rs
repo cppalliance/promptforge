@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use harness_capabilities::{CapabilityRegistry, HostServices, USER_INPUT_ASK_TOOL, UserInput};
+use harness_plugins::{HostServices, PluginRegistry, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::recorder::MemoryRecorder;
 use harness_runner::{Harness, RunRequest};
 use promptforge::vfs::VfsRef;
@@ -25,7 +25,7 @@ use crate::scripted::{Held, HeldTimer, Operator, ScriptedBroker, held_broker};
 /// ends, the main infers once, joins the child for the operator's answer,
 /// and returns how the wait ended, the reply, and the answer.
 const STOPS_TIMED_JOIN: &str = "---\nname: timed\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - promptforge/user-input\nmodels:\n  writer: {}\n---\n\n\
+    plugins:\n  - promptforge/user-input\nmodels:\n  writer: {}\n---\n\n\
     # Timed\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\
     local asker = tasks.spawn('## Asker')\n\
@@ -52,7 +52,7 @@ const STOPS_BEFORE_A_STEP: &str = "---\nname: before-step\ndescription: d\npromp
 
 /// A prompt that hands the operator's answer to one model round.
 const ASKS_THEN_INFERS: &str = "---\nname: asks-infers\ndescription: d\npromptforge: 0\n\
-    capabilities:\n  - promptforge/user-input\nmodels:\n  writer: {}\n---\n\n\
+    plugins:\n  - promptforge/user-input\nmodels:\n  writer: {}\n---\n\n\
     # AsksInfers\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\nreturn models.infer((input.ask()))\n```\n";
 
@@ -63,10 +63,10 @@ const WRITES_THEN_INFERS: &str = "---\nname: writes-infers\ndescription: d\nprom
     ## Only\n\n```lua\nstore.write('note.md', 'kept')\nreturn models.infer('after')\n```\n";
 
 /// A registry holding only the user-input capability.
-fn user_input_registry() -> CapabilityRegistry {
-    let mut capabilities = CapabilityRegistry::new();
-    capabilities.register(Arc::new(UserInput::new())).unwrap();
-    capabilities
+fn user_input_registry() -> PluginRegistry {
+    let mut plugins = PluginRegistry::new();
+    plugins.register(Arc::new(UserInput::new())).unwrap();
+    plugins
 }
 
 /// A store whose every write raises a stop through `harness`'s control.
@@ -140,7 +140,7 @@ async fn a_stop_seen_before_a_steps_effects_start_drops_the_round_in_flight_and_
         recorder.clone(),
         Arc::new(held_broker(&chat)),
         Arc::new(PendingTimer::default()),
-        CapabilityRegistry::new(),
+        PluginRegistry::new(),
         HostServices::new(),
     );
     let vfs = stopping_store(&harness);

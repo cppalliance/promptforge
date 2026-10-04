@@ -290,7 +290,7 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // different nonces, so an envelope's tag stays unguessable from one run
     // to the next as long as the Harness draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\

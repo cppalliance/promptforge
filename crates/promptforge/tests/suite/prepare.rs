@@ -8,13 +8,13 @@
 //!
 //! Capability activation - resolving a prompt's declarations against a
 //! registry, conflict checking, and catalog assembly - is the Harness's,
-//! and its suite lives with it in `harness-capabilities`; the Engine's
+//! and its suite lives with it in `harness-plugins`; the Engine's
 //! prepare only ever sees the catalog the Harness hands it.
 
 use std::num::NonZeroU32;
 
-use promptforge::capabilities::CapabilityId;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::plugins::PluginId;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RequirementCheck};
@@ -269,7 +269,7 @@ const DECLARES_EXACT_SLOT: &str = concat!(
     "name: declares-exact-slot\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - promptforge/web\n",
     "tools:\n",
     "  fetch: promptforge/web/fetch\n",
@@ -341,7 +341,7 @@ fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
 }
 
 #[test]
-fn an_exact_slot_whose_capability_is_inactive_is_reported() {
+fn an_exact_slot_whose_plugin_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // An empty catalog and no declaration: the slot's capability
     // contributed nothing the Engine can fill against.
@@ -349,14 +349,14 @@ fn an_exact_slot_whose_capability_is_inactive_is_reported() {
     // The exact path's first two segments name its capability.
     assert_eq!(
         requirements.missing_required,
-        [CapabilityId::parse("promptforge/web").expect("the id is valid")]
+        [PluginId::parse("promptforge/web").expect("the id is valid")]
     );
     assert!(!requirements.is_satisfied());
     assert!(ctx.tool_bindings().is_empty());
 }
 
 #[test]
-fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
+fn an_exact_slot_absent_from_an_active_plugin_is_not_reported_missing() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     // The capability is present in the catalog but contributed a different
     // tool: the slot's capability is not missing, so the run must not fail
@@ -367,7 +367,7 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
     let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
     assert!(
         requirements.missing_required.is_empty(),
-        "an active capability is never reported missing: {:?}",
+        "an active Plugin is never reported missing: {:?}",
         requirements.missing_required
     );
     assert!(requirements.is_satisfied());

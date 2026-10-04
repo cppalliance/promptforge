@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use harness::capability::{InputBroker, InputError};
+use harness::plugin::{InputBroker, InputError};
 use tokio::sync::broadcast;
 
 use super::{WaitFrame, WaitRegistry};

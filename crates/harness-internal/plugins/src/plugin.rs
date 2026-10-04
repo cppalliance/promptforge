@@ -3,48 +3,48 @@
 //! A capability is the activation unit: code that runs at run setup and
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
-//! [`CapabilityId`] - kind is encoded by arity, so a capability id is
+//! [`PluginId`] - kind is encoded by arity, so a capability id is
 //! `namespace/pack` and every tool it contributes sits under
 //! `namespace/pack/name`. Before a run is prepared, the Harness activates
-//! each declared capability by calling [`Capability::create`] with the
+//! each declared capability by calling [`Plugin::create`] with the
 //! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
 //! optional Lua prelude, and grows without redesign. An activation failure
-//! is a [`CapabilityError`]: a stable kind for code plus a message written
+//! is a [`PluginError`]: a stable kind for code plus a message written
 //! to be read by a model, mirroring
 //! [`ToolError`](promptforge::tools::ToolError).
 
 use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
-use promptforge::capabilities::CapabilityId;
+use promptforge::plugins::PluginId;
 
 use crate::service::{HostServices, ServiceId, ServiceKey};
 use crate::tool::Tool;
 
 #[cfg(test)]
-#[path = "capability-tests.rs"]
+#[path = "plugin-tests.rs"]
 mod tests;
 
 /// Code that runs when a run is set up and makes services available to it.
 ///
 /// A capability is delivered in a pack and declared in a prompt's
-/// frontmatter by its [`id`](Capability::id). Before a run is prepared, the
-/// Harness calls [`create`](Capability::create) at most once per declared
+/// frontmatter by its [`id`](Plugin::id). Before a run is prepared, the
+/// Harness calls [`create`](Plugin::create) at most once per declared
 /// capability, in declaration order. It assembles each returned
 /// [`Contribution`] into the run's tool catalog and its preludes.
 ///
 /// # Invariants
 ///
-/// - [`id`](Capability::id) returns the same value on every call; it is the
+/// - [`id`](Plugin::id) returns the same value on every call; it is the
 ///   registry key and must be unique within a registry.
 /// - Every contributed tool's id sits under the capability's own id:
 ///   `namespace/pack/name` for a `namespace/pack` capability. Containment is
 ///   total and is checked when the run's catalog is assembled.
-/// - [`create`](Capability::create) must not panic and should return
+/// - [`create`](Plugin::create) must not panic and should return
 ///   promptly when the run is cancelled.
-pub trait Capability: Send + Sync {
+pub trait Plugin: Send + Sync {
     /// Returns the capability's stable identity (`namespace/pack`).
-    fn id(&self) -> &CapabilityId;
+    fn id(&self) -> &PluginId;
 
     /// Returns a one-sentence description of the capability, shown to
     /// Hosts.
@@ -59,7 +59,7 @@ pub trait Capability: Send + Sync {
     /// symmetric, so only one member of a pair needs to name the other. A
     /// conflicting pair fails preparation, and the failure names both
     /// members. The default returns an empty list.
-    fn conflicts(&self) -> &[CapabilityId] {
+    fn conflicts(&self) -> &[PluginId] {
         &[]
     }
 
@@ -67,7 +67,7 @@ pub trait Capability: Send + Sync {
     /// [`RunServices`].
     ///
     /// Activation checks each id with [`RunServices::provides`] before it
-    /// calls this capability's [`create`](Capability::create). A provider
+    /// calls this capability's [`create`](Plugin::create). A provider
     /// registered under the id but supplied as a different type than the
     /// id names counts as missing. When a required capability needs a
     /// missing service, activation skips its `create` and refuses the run,
@@ -86,10 +86,10 @@ pub trait Capability: Send + Sync {
     /// capability's tools and prelude only when this call succeeds.
     ///
     /// # Errors
-    /// Returns a [`CapabilityError`] whose message is safe to show to a
+    /// Returns a [`PluginError`] whose message is safe to show to a
     /// model when the capability fails to activate, for example when a
     /// backend handshake fails or the run is cancelled.
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError>;
 }
 
 /// The cancellation flag and services a capability receives when it
@@ -111,14 +111,14 @@ pub struct RunServices {
 }
 
 impl RunServices {
-    /// Builds the services handed to [`Capability::create`] for one run,
+    /// Builds the services handed to [`Plugin::create`] for one run,
     /// with an empty set of Host services.
     #[must_use]
     pub fn new(cancel: CancelHandle) -> RunServices {
         RunServices::with_host(cancel, HostServices::new())
     }
 
-    /// Builds the services handed to [`Capability::create`] for one run,
+    /// Builds the services handed to [`Plugin::create`] for one run,
     /// with `host` as the services the run has.
     #[must_use]
     pub fn with_host(cancel: CancelHandle, host: HostServices) -> RunServices {
@@ -159,7 +159,7 @@ pub struct Contribution {
     /// `namespace/pack` capability.
     pub tools: Vec<Arc<dyn Tool>>,
     /// Lua source that every section VM of the run installs.
-    /// [`Capability::create`] builds it for this run, so it can embed facts
+    /// [`Plugin::create`] builds it for this run, so it can embed facts
     /// fixed at activation. A prelude defines tables and functions that
     /// call the capability's tools through `tools.call` by full id. It may
     /// call a tool or the store only after it has loaded.
@@ -179,11 +179,11 @@ impl std::fmt::Debug for Contribution {
     }
 }
 
-/// A stable, matchable classification of a [`CapabilityError`].
+/// A stable, matchable classification of a [`PluginError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum CapabilityErrorKind {
-    /// The capability failed to activate in [`Capability::create`].
+pub enum PluginErrorKind {
+    /// The capability failed to activate in [`Plugin::create`].
     Activation,
     /// The run was cancelled before or during activation.
     Cancelled,
@@ -191,31 +191,31 @@ pub enum CapabilityErrorKind {
     Other,
 }
 
-/// An error from [`Capability::create`], with a message that is safe to
+/// An error from [`Plugin::create`], with a message that is safe to
 /// show to a model.
 ///
 /// The `Display` message is written for the caller. Any underlying cause
 /// stays out of the message and is available through
-/// [`std::error::Error::source`]. Match on [`CapabilityError::kind`] to
+/// [`std::error::Error::source`]. Match on [`PluginError::kind`] to
 /// tell failures apart. Like [`ToolError`](promptforge::tools::ToolError),
 /// it pairs a stable kind for code with a message written to be read by a
 /// model.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct CapabilityError {
-    kind: CapabilityErrorKind,
+pub struct PluginError {
+    kind: PluginErrorKind,
     message: String,
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
-impl CapabilityError {
+impl PluginError {
     /// Builds an error with the kind `Other` and the message `text`. Its
     /// `source` returns `None`. The message must be safe to show to a
     /// model.
     #[must_use]
-    pub fn message(text: impl Into<String>) -> CapabilityError {
-        CapabilityError {
-            kind: CapabilityErrorKind::Other,
+    pub fn message(text: impl Into<String>) -> PluginError {
+        PluginError {
+            kind: PluginErrorKind::Other,
             message: text.into(),
             source: None,
         }
@@ -226,16 +226,16 @@ impl CapabilityError {
     ///
     /// The message must be safe to show to a model. `src` stays out of the
     /// message and is returned by `source`. The kind starts as
-    /// [`CapabilityErrorKind::Activation`]. Call
-    /// [`CapabilityError::with_kind`] when `src` is a different kind of
+    /// [`PluginErrorKind::Activation`]. Call
+    /// [`PluginError::with_kind`] when `src` is a different kind of
     /// failure.
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,
         src: impl std::error::Error + Send + Sync + 'static,
-    ) -> CapabilityError {
-        CapabilityError {
-            kind: CapabilityErrorKind::Activation,
+    ) -> PluginError {
+        PluginError {
+            kind: PluginErrorKind::Activation,
             message: text.into(),
             source: Some(Box::new(src)),
         }
@@ -243,31 +243,31 @@ impl CapabilityError {
 
     /// Returns this error with its kind set to `kind`.
     #[must_use]
-    pub fn with_kind(mut self, kind: CapabilityErrorKind) -> CapabilityError {
+    pub fn with_kind(mut self, kind: PluginErrorKind) -> PluginError {
         self.kind = kind;
         self
     }
 
     /// Returns the kind of this error.
     #[must_use]
-    pub fn kind(&self) -> CapabilityErrorKind {
+    pub fn kind(&self) -> PluginErrorKind {
         self.kind
     }
 
     /// Returns whether the failure was a cancellation.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        matches!(self.kind, CapabilityErrorKind::Cancelled)
+        matches!(self.kind, PluginErrorKind::Cancelled)
     }
 }
 
-impl std::fmt::Display for CapabilityError {
+impl std::fmt::Display for PluginError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message)
     }
 }
 
-impl std::error::Error for CapabilityError {
+impl std::error::Error for PluginError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source
             .as_ref()

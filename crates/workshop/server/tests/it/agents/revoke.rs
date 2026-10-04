@@ -15,7 +15,7 @@ const ROOTS_MD: &str = r"---
 name: roots
 description: The roots test agent on the unified runtime.
 promptforge: 0
-capabilities:
+plugins:
   - promptforge/user-input
 ---
 

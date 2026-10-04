@@ -1,6 +1,6 @@
 //! The preflight report: [`Requirements`].
 
-use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::plugins::PluginId;
 
 #[cfg(test)]
 #[path = "requirements-tests.rs"]
@@ -28,7 +28,7 @@ pub struct Requirements {
     /// registry or that fails to activate. `Environment::prepare` adds the
     /// capability of an exact tool slot when that capability is absent
     /// from the tool catalog. The run fails until every one is satisfied.
-    pub missing_required: Vec<CapabilityId>,
+    pub missing_required: Vec<PluginId>,
     /// The required capabilities that are registered but need a service
     /// the application lacks.
     ///
@@ -44,7 +44,7 @@ pub struct Requirements {
     /// view of the filesystem, so a run gets one or the other. Only
     /// capability activation adds these, and it skips both members of each
     /// pair. The run fails until the prompt declares only one of them.
-    pub conflicts: Vec<CapabilityConflict>,
+    pub conflicts: Vec<PluginConflict>,
 }
 
 impl Requirements {
@@ -89,7 +89,7 @@ impl Requirements {
             !self
                 .missing_services
                 .iter()
-                .any(|missing| missing.capability == *id)
+                .any(|missing| missing.plugin == *id)
         });
         self.conflicts.extend(other.conflicts);
         self.unmet_requirements.extend(other.unmet_requirements);
@@ -124,19 +124,19 @@ impl Requirements {
         use std::fmt::Write as _;
         let mut notice = String::from("the environment cannot satisfy this prompt:");
         for id in &self.missing_required {
-            let _ = write!(notice, "\n- missing required capability: {id}");
+            let _ = write!(notice, "\n- missing required Plugin: {id}");
         }
         for missing in &self.missing_services {
             let _ = write!(
                 notice,
                 "\n- {} needs {}, and this host provides none",
-                missing.capability, missing.service
+                missing.plugin, missing.service
             );
         }
         for conflict in &self.conflicts {
             let _ = write!(
                 notice,
-                "\n- conflicting capabilities: {} and {} cannot be activated \
+                "\n- conflicting Plugins: {} and {} cannot be activated \
                  together; declare one or the other",
                 conflict.first, conflict.second
             );
@@ -166,21 +166,21 @@ impl Requirements {
 /// The pair is named in the order the prompt declares them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct CapabilityConflict {
+pub struct PluginConflict {
     /// The earlier-declared capability.
-    pub first: CapabilityId,
+    pub first: PluginId,
     /// The later-declared capability.
-    pub second: CapabilityId,
+    pub second: PluginId,
 }
 
-impl CapabilityConflict {
+impl PluginConflict {
     /// Creates a conflict between `first` and `second`, where the prompt
     /// declares `first` before `second`.
     ///
     /// Only capability activation reports these.
     #[must_use]
-    pub fn new(first: CapabilityId, second: CapabilityId) -> CapabilityConflict {
-        CapabilityConflict { first, second }
+    pub fn new(first: PluginId, second: PluginId) -> PluginConflict {
+        PluginConflict { first, second }
     }
 }
 
@@ -193,7 +193,7 @@ impl CapabilityConflict {
 #[non_exhaustive]
 pub struct MissingService {
     /// The registered, required capability that needs the service.
-    pub capability: CapabilityId,
+    pub plugin: PluginId,
     /// The name of the missing service.
     ///
     /// The caller defines its own service names, so the report carries
@@ -202,14 +202,14 @@ pub struct MissingService {
 }
 
 impl MissingService {
-    /// Creates an entry stating that `capability` needs the service named
+    /// Creates an entry stating that `plugin` needs the service named
     /// `service`, which the application lacks.
     ///
     /// Only capability activation reports these.
     #[must_use]
-    pub fn new(capability: CapabilityId, service: impl Into<String>) -> MissingService {
+    pub fn new(plugin: PluginId, service: impl Into<String>) -> MissingService {
         MissingService {
-            capability,
+            plugin,
             service: service.into(),
         }
     }

@@ -2,7 +2,7 @@
 //! installs, each under a named id.
 //!
 //! A capability names the services it needs as [`ServiceId`]s in
-//! [`Capability::needs`](crate::Capability::needs), and reads them at
+//! [`Plugin::needs`](crate::Plugin::needs), and reads them at
 //! activation through a [`ServiceKey`], which binds an id literal to the
 //! provider's Rust type. The Host fills a [`HostServices`] map, and the
 //! Harness hands it to each run in [`RunServices`](crate::RunServices).
@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use promptforge::capabilities::{CapabilityId, CapabilityIdError};
+use promptforge::plugins::GlobalName;
 
 #[cfg(test)]
 #[path = "service-tests.rs"]
@@ -158,11 +158,8 @@ impl HostServices {
         provider: Arc<T>,
     ) -> Result<(), ServiceError> {
         let literal = key.id.literal;
-        if let Err(source) = CapabilityId::parse(literal) {
-            return Err(ServiceError::InvalidId {
-                id: literal,
-                source,
-            });
+        if GlobalName::parse(literal).is_err() || literal.matches('/').count() != 1 {
+            return Err(ServiceError::InvalidId { id: literal });
         }
         if self.entries.contains_key(literal) {
             return Err(ServiceError::DuplicateId { id: literal });
@@ -223,8 +220,6 @@ pub enum ServiceError {
     InvalidId {
         /// The id literal that was refused.
         id: &'static str,
-        /// Why the literal fails to parse as an id.
-        source: CapabilityIdError,
     },
     /// The map already holds a provider under the id.
     DuplicateId {
@@ -236,7 +231,7 @@ pub enum ServiceError {
 impl fmt::Display for ServiceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ServiceError::InvalidId { id, .. } => {
+            ServiceError::InvalidId { id } => {
                 write!(f, "service id {id} is not a namespace/name id")
             }
             ServiceError::DuplicateId { id } => {
@@ -246,11 +241,4 @@ impl fmt::Display for ServiceError {
     }
 }
 
-impl std::error::Error for ServiceError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ServiceError::InvalidId { source, .. } => Some(source),
-            ServiceError::DuplicateId { .. } => None,
-        }
-    }
-}
+impl std::error::Error for ServiceError {}

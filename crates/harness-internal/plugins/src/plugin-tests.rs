@@ -3,30 +3,30 @@
 use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
-use promptforge::capabilities::CapabilityId;
+use promptforge::plugins::PluginId;
 
-use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+use super::{Contribution, Plugin, PluginError, PluginErrorKind, RunServices};
 use crate::{HostServices, INPUT_BROKER, InputBroker, InputError, ServiceError, ServiceKey};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
 /// services it was handed.
-struct StubCapability {
-    id: CapabilityId,
+struct StubPlugin {
+    id: PluginId,
     description: String,
 }
 
-impl StubCapability {
-    fn web() -> StubCapability {
-        StubCapability {
-            id: CapabilityId::parse("promptforge/web").expect("a static valid id"),
-            description: "A stub capability that contributes nothing.".to_owned(),
+impl StubPlugin {
+    fn web() -> StubPlugin {
+        StubPlugin {
+            id: PluginId::parse("promptforge/web").expect("a static valid id"),
+            description: "A stub Plugin that contributes nothing.".to_owned(),
         }
     }
 }
 
-impl Capability for StubCapability {
-    fn id(&self) -> &CapabilityId {
+impl Plugin for StubPlugin {
+    fn id(&self) -> &PluginId {
         &self.id
     }
 
@@ -34,41 +34,39 @@ impl Capability for StubCapability {
         &self.description
     }
 
-    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         if services.cancel.is_cancelled() {
-            return Err(
-                CapabilityError::message("activation cancelled before create")
-                    .with_kind(CapabilityErrorKind::Cancelled),
-            );
+            return Err(PluginError::message("activation cancelled before create")
+                .with_kind(PluginErrorKind::Cancelled));
         }
         Ok(Contribution::default())
     }
 }
 
 /// Compile-time proof that a capability can be shared across tasks and
-/// threads behind a trait object: the registry stores `Arc<dyn Capability>`.
-const fn _assert_capability_trait_object_is_shareable() {
+/// threads behind a trait object: the registry stores `Arc<dyn Plugin>`.
+const fn _assert_plugin_trait_object_is_shareable() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
-    assert_send_sync_static::<Arc<dyn Capability>>();
+    assert_send_sync_static::<Arc<dyn Plugin>>();
 }
 
 #[test]
-fn a_capability_declares_no_conflicts_by_default() {
-    let capability = StubCapability::web();
-    assert!(capability.conflicts().is_empty());
+fn a_plugin_declares_no_conflicts_by_default() {
+    let plugin = StubPlugin::web();
+    assert!(plugin.conflicts().is_empty());
 }
 
 #[test]
-fn a_capability_needs_no_host_service_by_default() {
-    let capability = StubCapability::web();
-    assert!(capability.needs().is_empty());
+fn a_plugin_needs_no_host_service_by_default() {
+    let plugin = StubPlugin::web();
+    assert!(plugin.needs().is_empty());
 }
 
 #[test]
-fn a_capability_is_object_safe_and_exposes_its_identity() {
-    let capability: Arc<dyn Capability> = Arc::new(StubCapability::web());
-    assert_eq!(capability.id().to_string(), "promptforge/web");
-    assert!(!capability.description().is_empty());
+fn a_plugin_is_object_safe_and_exposes_its_identity() {
+    let plugin: Arc<dyn Plugin> = Arc::new(StubPlugin::web());
+    assert_eq!(plugin.id().to_string(), "promptforge/web");
+    assert!(!plugin.description().is_empty());
 }
 
 #[test]
@@ -102,9 +100,9 @@ fn contribution_debug_says_whether_a_prelude_is_present_without_showing_it() {
 
 #[test]
 fn create_receives_the_run_services() {
-    let capability = StubCapability::web();
+    let plugin = StubPlugin::web();
     let services = RunServices::new(CancelHandle::new());
-    let contribution = capability
+    let contribution = plugin
         .create(&services)
         .expect("activation succeeds on a live run");
     assert!(contribution.tools.is_empty());
@@ -112,7 +110,7 @@ fn create_receives_the_run_services() {
     let cancel = CancelHandle::new();
     cancel.cancel();
     let services = RunServices::new(cancel);
-    let error = capability
+    let error = plugin
         .create(&services)
         .expect_err("a cancelled run fails activation");
     assert!(error.is_cancelled());
@@ -199,28 +197,25 @@ async fn a_second_input_broker_is_refused_and_the_first_stays() {
 }
 
 #[test]
-fn capability_error_display_is_the_model_readable_message() {
-    let error = CapabilityError::message("the fs capability needs a writable store");
-    assert_eq!(
-        error.to_string(),
-        "the fs capability needs a writable store"
-    );
-    assert_eq!(error.kind(), CapabilityErrorKind::Other);
+fn plugin_error_display_is_the_model_readable_message() {
+    let error = PluginError::message("the fs Plugin needs a writable store");
+    assert_eq!(error.to_string(), "the fs Plugin needs a writable store");
+    assert_eq!(error.kind(), PluginErrorKind::Other);
     assert!(std::error::Error::source(&error).is_none());
 }
 
 #[test]
-fn capability_error_classifies_and_hides_its_cause() {
+fn plugin_error_classifies_and_hides_its_cause() {
     let io = std::io::Error::other("disk full");
-    let error = CapabilityError::with_source("activation failed", io);
-    assert_eq!(error.kind(), CapabilityErrorKind::Activation);
+    let error = PluginError::with_source("activation failed", io);
+    assert_eq!(error.kind(), PluginErrorKind::Activation);
     assert_eq!(error.to_string(), "activation failed");
     assert!(
         std::error::Error::source(&error).is_some(),
         "the cause stays behind Error::source, out of the model-readable message"
     );
 
-    let cancelled = CapabilityError::message("stopped").with_kind(CapabilityErrorKind::Cancelled);
+    let cancelled = PluginError::message("stopped").with_kind(PluginErrorKind::Cancelled);
     assert!(cancelled.is_cancelled());
-    assert!(!CapabilityError::message("x").is_cancelled());
+    assert!(!PluginError::message("x").is_cancelled());
 }
