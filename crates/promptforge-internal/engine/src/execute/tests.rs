@@ -417,6 +417,7 @@ mod serial_driver;
 mod suite;
 mod tasks;
 mod timeouts;
+mod tool_call_access;
 mod tool_call_arm;
 mod tool_loop;
 mod tool_scoping;

@@ -11,11 +11,13 @@
 //! operation's outcome. A timer's firing completes its
 //! slot and wakes the waiter instead of resuming a chain. A `Dropped`
 //! answer resumes the chain with the cancelled error, whatever it was
-//! parked on.
+//! parked on. A tool call's answer, of either kind, also joins the call's
+//! identity back into the chain.
 
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{ToolError, ToolOutput};
 use promptforge_vfs::VfsError;
+use promptforge_vfs::detail::access_join;
 
 use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
 use crate::execute::tools::accept_infer;
@@ -50,7 +52,11 @@ impl Scheduler {
     /// under the effect's continuation (emitting the round's events), and
     /// re-queues the chain. A timer's firing completes its slot and wakes
     /// its waiter instead. A `Dropped` answer is the Harness giving the
-    /// effect up: the chain resumes with the cancelled error.
+    /// effect up: the chain resumes with the cancelled error. Every answer
+    /// to a tool call, `Dropped` included, first joins the call's identity
+    /// into the parked chain's access, so whatever the tool did happens
+    /// before the chain's next step; a chain that no longer holds an
+    /// access needs no join.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when no pending entry explains the id
@@ -67,6 +73,11 @@ impl Scheduler {
                 "an answer arrived for an effect the run did not issue or already answered",
             ));
         };
+        if let Continuation::ToolCall(call) = &resume
+            && let Ok(access) = self.chains[chain.index()].access()
+        {
+            access_join(access, call.exec);
+        }
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
                 self.drop_timer(id);

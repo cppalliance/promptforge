@@ -120,12 +120,18 @@ fn model_origin() -> ToolCallOrigin {
 }
 
 #[test]
-fn a_tool_call_effect_records_its_identity_alias_args_and_origin() {
+fn a_tool_call_effect_records_its_identity_alias_args_and_origin_and_drops_the_access() {
+    let access = Arc::new(
+        promptforge_vfs::VfsRef::default()
+            .acquire(promptforge_vfs::Origin::new("run test fixture"))
+            .expect("the stock backend acquires"),
+    );
     let effect = Effect::ToolCall {
         tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({ "value": "hi" }),
         origin: model_origin(),
+        access,
     };
     let record = effect.record();
     assert_eq!(
@@ -136,6 +142,11 @@ fn a_tool_call_effect_records_its_identity_alias_args_and_origin() {
             args: json!({ "value": "hi" }),
             origin: model_origin(),
         }
+    );
+    let text = serde_json::to_string(&record).expect("a record serializes");
+    assert!(
+        !text.contains("access"),
+        "the tool call record holds no access: {text}"
     );
     assert_eq!(round_trip(&record), record);
 }

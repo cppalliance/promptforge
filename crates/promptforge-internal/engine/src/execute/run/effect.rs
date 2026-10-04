@@ -10,8 +10,8 @@
 //! emitting the round's events there. The Engine thus decides *what* to do
 //! and *what it means*; the Harness performs it.
 //!
-//! An [`Effect`] may hold a live handle (the store access capability) and
-//! so does not serialize itself. [`Effect::record`] projects it onto an
+//! An [`Effect`] may hold a live handle (a filesystem access) and so does
+//! not serialize itself. [`Effect::record`] projects it onto an
 //! [`EffectRecord`], the effect minus its handles, which round-trips
 //! through serde: a run log stores records, and a later replay compares a
 //! re-executed run's records against them. An [`EffectAnswer`] likewise
@@ -101,7 +101,7 @@ pub enum Effect {
     /// One call to a bound tool. The caller resolves `tool`, the tool's
     /// stable identity, to an implementation. `alias` is the prompt-local
     /// name the call used, and `origin` says who made the call and where.
-    /// The effect's record keeps both.
+    /// The effect's record keeps both and leaves out `access`.
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
@@ -112,6 +112,12 @@ pub enum Effect {
         /// Who made the call: the run, the section, and whether the
         /// section's script or a model round asked for it.
         origin: ToolCallOrigin,
+        /// The call's own identity, forked from the calling chain's
+        /// access when the call is issued and joined back into it when the
+        /// answer is applied, so the chain's earlier work happens before
+        /// the tool's and the tool's before the chain's next step. It is
+        /// rooted at `/`. The caller must not use it after answering.
+        access: Arc<Access>,
     },
     /// One operation on the run's store view, issued for one of the eight
     /// `store.*` calls a prompt can make.
@@ -119,8 +125,8 @@ pub enum Effect {
     /// `access` is an ordinary access that the Engine derives from the
     /// chain's capability at dispatch. It is rooted at the store declared
     /// by the handle that the chain's access came from. Only the `store.*`
-    /// calls produce this effect. A tool or the application reading files
-    /// reaches the VFS by its own route.
+    /// calls produce this effect. A tool reaches files through the access
+    /// its [`ToolCall`](Effect::ToolCall) effect carries.
     ///
     /// The caller must use the access exactly as given and within the
     /// scope it carries. Correctness holds whenever the caller drops the
@@ -182,6 +188,7 @@ impl Effect {
                 alias,
                 args,
                 origin,
+                ..
             } => EffectRecord::ToolCall {
                 tool: tool.clone(),
                 alias: alias.clone(),

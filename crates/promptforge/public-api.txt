@@ -795,6 +795,7 @@ pub promptforge::effect::Effect::Chat::tools: alloc::vec::Vec<promptforge::model
 pub promptforge::effect::Effect::Timer { .. }
 pub promptforge::effect::Effect::Timer::seconds: f64
 pub promptforge::effect::Effect::ToolCall { .. }
+pub promptforge::effect::Effect::ToolCall::access: alloc::sync::Arc<promptforge::vfs::Access>
 pub promptforge::effect::Effect::ToolCall::alias: alloc::string::String
 pub promptforge::effect::Effect::ToolCall::args: serde_json::value::Value
 pub promptforge::effect::Effect::ToolCall::origin: promptforge::effect::ToolCallOrigin

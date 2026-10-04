@@ -11,6 +11,7 @@ use crate::execute::protocol::VfsOp;
 use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
 use promptforge_types::ids::RoundId;
+use promptforge_vfs::ExecId;
 
 use super::ChainIndex;
 
@@ -53,8 +54,8 @@ pub(super) struct VfsContinuation {
 
 /// What a bound `tool_call`'s answer is applied with: the binding the call
 /// resolved to (its alias, output kind, and trust rules), the coordinates
-/// the `ToolResult` reports under, and the model's call id when the model
-/// issued the call.
+/// the `ToolResult` reports under, the model's call id when the model
+/// issued the call, and the call's identity the answer joins.
 pub(super) struct ToolCallContinuation {
     /// The binding the alias resolved to at dispatch.
     pub(super) binding: ToolBinding,
@@ -62,6 +63,9 @@ pub(super) struct ToolCallContinuation {
     pub(super) report: ScriptReport,
     /// The model-issued call id, or `None` for a script call.
     pub(super) call_id: Option<String>,
+    /// The call's own identity, forked from the chain's access at
+    /// dispatch. The answer joins it back into the chain.
+    pub(super) exec: ExecId,
 }
 
 /// One in-flight leaf effect's pending entry: the chain parked on it and

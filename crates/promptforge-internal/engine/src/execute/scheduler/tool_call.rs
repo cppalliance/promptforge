@@ -12,7 +12,8 @@
 //! unbound; a local Lua tool is answered with its handler; a bound tool resolves against the
 //! run's full bound catalog (a script call may also name any catalog tool
 //! by its full id), its attempt is counted, and the call is
-//! issued as a `ToolCall` effect whose answer the driver applies through
+//! issued as a `ToolCall` effect, carrying an identity forked from the
+//! chain's access, whose answer the driver applies through
 //! the shared dispatch body. `call_id: Some` always resumes a bound tool
 //! with content - a tool's own failure becomes untrusted failure text -
 //! and `ToolResult` fires under the id and the turn of the round that
@@ -40,10 +41,11 @@ use crate::lua::{ScriptReport, current_tool_bindings};
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::tools::OutputTrust;
+use promptforge_vfs::detail::{access_id, access_spawn};
 
 use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
-use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation};
+use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation, prompt_origin};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
@@ -108,9 +110,10 @@ impl Scheduler {
     /// model, so the scope does not gate it; the model-advertised set stays
     /// section-scoped) or, for a script call that names no frontmatter
     /// alias, against the catalog by full id, the full id then standing as
-    /// the alias; then the attempt counted, and the issued effect, whose
-    /// origin names the model as caller when a `call_id` is present and
-    /// the script otherwise. The
+    /// the alias; then the attempt counted, the call's identity forked
+    /// from the chain's access, and the issued effect, whose origin names
+    /// the model as caller when a `call_id` is present and the script
+    /// otherwise. The
     /// answer's rules - the model-issued body under a `call_id`, else the
     /// script body classified by the binding's declared output kind - are
     /// the continuation's, applied when the answer lands.
@@ -183,9 +186,21 @@ impl Scheduler {
         // before the tool runs, so a cancelled dispatch still counts.
         counts.ensure(binding.alias())?;
         counts.increment(binding.alias())?;
+        // The call runs under an identity of its own, forked from the
+        // chain's, so two calls in flight at once never share one sequence
+        // of claims. A refused fork fails the call at its caller, and the
+        // counts already taken stay taken.
+        let prompt = self.prompt();
+        let chain = &self.chains[id.index()];
+        let access = access_spawn(
+            chain.access()?,
+            prompt_origin(&prompt, &binding.id().to_string(), chain.blocks(&prompt)),
+        )
+        .map_err(Error::store)?;
+        let exec = access_id(&access);
         let origin = ToolCallOrigin {
             execution: ctx.execution().to_owned(),
-            section: self.chains[id.index()].section_name().to_owned(),
+            section: chain.section_name().to_owned(),
             caller: if call_id.is_some() {
                 ToolCaller::Model
             } else {
@@ -197,11 +212,13 @@ impl Scheduler {
             alias: binding.alias().to_owned(),
             args,
             origin,
+            access: Arc::new(access),
         };
         let resume = Continuation::ToolCall(ToolCallContinuation {
             binding,
             report,
             call_id,
+            exec,
         });
         self.issue(id, effect, resume);
         Ok(ToolCallDispatch::Issued)
