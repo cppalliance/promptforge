@@ -1,11 +1,14 @@
 //! HTTP blob download with connect timeout, size cap, scoped HF auth, and
 //! resume of interrupted transfers.
 
+#[path = "download-idle-reader.rs"]
+mod idle_reader;
+#[path = "download-progress.rs"]
+mod progress;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
 use std::time::Duration;
 
 use gateway_progress::Activity;
@@ -18,106 +21,9 @@ use super::Result;
 use super::confine::source_marker_path;
 use super::digest::hex_digest;
 use crate::error::LocalError;
-
-/// Progress updates for a single HTTP blob download.
-pub trait DownloadProgress: Send {
-    /// Records the total length in bytes, when the server sent one.
-    fn set_len(&self, total: Option<u64>);
-    /// Adds `n` downloaded bytes to the running total.
-    fn inc(&self, n: u64);
-}
-
-/// A [`DownloadProgress`] that discards every callback, for callers with no
-/// activity to report into.
-pub(super) struct NoopProgress;
-
-impl DownloadProgress for NoopProgress {
-    fn set_len(&self, _total: Option<u64>) {}
-
-    fn inc(&self, _n: u64) {}
-}
-
-/// A `"{verb} {name} {pct}%"` line republished into an activity on each
-/// whole-percent change only, so a byte-granular loop never floods the
-/// hub's subscribers.
-#[derive(Debug)]
-pub struct PercentText {
-    verb: &'static str,
-    name: String,
-    /// The last percent published, or `u64::MAX` before the first.
-    percent: AtomicU64,
-}
-
-impl PercentText {
-    /// A reporter for `"{verb} {name} ..."`, e.g. `("Downloading", "qwen.gguf")`.
-    #[must_use]
-    pub fn new(verb: &'static str, name: impl Into<String>) -> Self {
-        Self {
-            verb,
-            name: name.into(),
-            percent: AtomicU64::new(u64::MAX),
-        }
-    }
-
-    /// The bare `"{verb} {name}"` line, for a phase whose length is unknown.
-    #[must_use]
-    pub fn label(&self) -> String {
-        format!("{} {}", self.verb, self.name)
-    }
-
-    /// Publishes `done` of `total` as a whole percent when it changed. A
-    /// zero total publishes the bare label once.
-    pub fn report(&self, activity: &Activity, done: u64, total: u64) {
-        if total == 0 {
-            if self.percent.swap(0, Ordering::Relaxed) != 0 {
-                activity.set_text(self.label());
-            }
-            return;
-        }
-        let percent = done.saturating_mul(100) / total;
-        let percent = percent.min(100);
-        if self.percent.swap(percent, Ordering::Relaxed) != percent {
-            activity.set_text(format!("{} {} {percent}%", self.verb, self.name));
-        }
-    }
-}
-
-/// A [`DownloadProgress`] that formats `"Downloading {name} {pct}%"` into an
-/// activity's text on each whole-percent change. Without a Content-Length
-/// the text stays at the bare `"Downloading {name}"`.
-pub(super) struct ActivityProgress<'a> {
-    activity: &'a Activity,
-    text: PercentText,
-    total: AtomicU64,
-    downloaded: AtomicU64,
-}
-
-impl<'a> ActivityProgress<'a> {
-    pub(super) fn new(activity: &'a Activity, name: &str) -> Self {
-        let text = PercentText::new("Downloading", name);
-        activity.set_text(text.label());
-        Self {
-            activity,
-            text,
-            total: AtomicU64::new(0),
-            downloaded: AtomicU64::new(0),
-        }
-    }
-}
-
-impl DownloadProgress for ActivityProgress<'_> {
-    fn set_len(&self, total: Option<u64>) {
-        self.total.store(total.unwrap_or(0), Ordering::Relaxed);
-    }
-
-    fn inc(&self, n: u64) {
-        let downloaded = self.downloaded.fetch_add(n, Ordering::Relaxed) + n;
-        let total = self.total.load(Ordering::Relaxed);
-        if total > 0 {
-            self.text.report(self.activity, downloaded, total);
-        }
-    }
-}
+use idle_reader::IdleReader;
+pub(super) use progress::{ActivityProgress, NoopProgress};
+pub use progress::{DownloadProgress, PercentText};
 
 /// Hard ceiling on a single artifact, guarding the cache volume against a
 /// malicious or mistaken endpoint. Generous enough for large GGUF weights.
@@ -339,71 +245,6 @@ fn open_transfer(
             path: destination.to_owned(),
             source,
         })
-}
-
-/// Streams a blocking response body through a channel so the download loop
-/// receives each chunk under an idle deadline. The blocking reqwest client
-/// exposes no per-read timeout, so the reader thread owns the
-/// response and forwards every read; a peer that goes silent past the
-/// deadline surfaces as [`std::io::ErrorKind::TimedOut`] at the chunk
-/// boundary where the cancellation token is already checked, and the staged
-/// partial stays resumable. A read parked past the deadline stays parked
-/// until the client's whole-request ceiling drops the body, which ends the
-/// thread - the wait is bounded and the thread always reaps.
-struct IdleReader {
-    chunks: mpsc::Receiver<std::io::Result<Vec<u8>>>,
-    idle: Duration,
-}
-
-impl IdleReader {
-    /// Spawns the reader thread draining `response`.
-    ///
-    /// # Errors
-    /// Returns the thread-spawn failure.
-    fn new(mut response: Response, idle: Duration) -> std::io::Result<IdleReader> {
-        let (sender, chunks) = mpsc::sync_channel(1);
-        std::thread::Builder::new()
-            .name("artifact-download-reader".to_owned())
-            .spawn(move || {
-                let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-                loop {
-                    let chunk = response
-                        .read(&mut buffer)
-                        .map(|count| buffer[..count].to_vec());
-                    // An empty chunk is the end of the stream; after an error
-                    // or EOF there is nothing more to send.
-                    let terminal =
-                        chunk.is_err() || matches!(&chunk, Ok(bytes) if bytes.is_empty());
-                    if sender.send(chunk).is_err() || terminal {
-                        break;
-                    }
-                }
-            })?;
-        Ok(IdleReader { chunks, idle })
-    }
-
-    /// The next body chunk; an empty chunk is the end of the stream.
-    ///
-    /// # Errors
-    /// Returns the read error the thread forwarded, or
-    /// [`std::io::ErrorKind::TimedOut`] when no chunk arrived inside the
-    /// idle window.
-    fn read_chunk(&self) -> std::io::Result<Vec<u8>> {
-        match self.chunks.recv_timeout(self.idle) {
-            Ok(chunk) => chunk,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!(
-                    "the peer sent nothing for {:?}; the transfer stalled",
-                    self.idle
-                ),
-            )),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "the download reader thread stopped without reporting",
-            )),
-        }
-    }
 }
 
 /// Streams `url` to `destination`, reporting to `progress`, enforcing the

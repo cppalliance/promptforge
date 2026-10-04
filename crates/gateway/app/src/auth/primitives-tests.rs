@@ -1,4 +1,6 @@
-﻿use axum::http::HeaderMap;
+﻿//! Tests for the auth primitives: the one-time handoff URL, the session cookie, and the fetch-metadata gate.
+
+use axum::http::HeaderMap;
 use axum::http::header::{AUTHORIZATION, COOKIE};
 use gateway_config::Config;
 

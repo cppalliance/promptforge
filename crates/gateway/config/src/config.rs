@@ -1,7 +1,6 @@
 //! Gateway configuration: `gateway.toml` parsing, `${VAR}` interpolation, and
 //! semantic validation.
 
-use std::fmt;
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +9,10 @@ mod accessors;
 mod companion;
 mod imp;
 mod interpolate;
+mod secret;
 mod stt;
 mod validate;
+mod vocab;
 mod workshop;
 
 pub use companion::{
@@ -23,10 +24,14 @@ pub(crate) use interpolate::interpolate_value;
 // The canonical home of the model-metadata types is `gateway-api-types`;
 // these re-exports keep the old paths compiling unchanged.
 pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
+pub use secret::Secret;
+use secret::de_secret;
+pub(crate) use secret::ser_redacted;
 use stt::RawSttPipelineConfig;
 pub use stt::{
     RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,
 };
+pub use vocab::{DominionKind, LlamaBackend, Protocol, QueuePolicy, SearchProvider, ToolDialect};
 pub use workshop::WorkshopConfig;
 
 use crate::error::ConfigError;
@@ -60,82 +65,6 @@ fn default_parallel() -> u32 {
 
 fn default_max_queue() -> usize {
     100
-}
-
-/// A secret string (an API key or the shared token) that never serializes and
-/// redacts in both `Debug` and `Display`.
-///
-/// The type has no public `Deserialize` or `From<String>` impl: configuration
-/// deserialization constructs it through a private field deserializer, so a
-/// redacting secret can never be round-tripped from a downstream consumer.
-/// `expose` is the single read accessor.
-#[derive(Clone)]
-#[non_exhaustive]
-pub struct Secret(String);
-
-impl Secret {
-    /// Wraps a plaintext secret.
-    ///
-    /// Used by config deserialization and by the gateway's adapters that mint
-    /// an ephemeral loopback credential.
-    #[must_use]
-    pub fn new(value: String) -> Secret {
-        Secret(value)
-    }
-
-    /// The secret's bytes. The one place a secret is read, when building auth.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-
-    /// Whether the secret is empty (an intentionally credential-free endpoint).
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-/// Deserializes a [`Secret`] field from a bare TOML string without exposing a
-/// public `Deserialize` impl on the redacting type.
-fn de_secret<'de, D>(deserializer: D) -> Result<Secret, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = String::deserialize(deserializer)?;
-    Ok(Secret::new(raw))
-}
-
-/// Serializes a [`Secret`] field as `"***"`: a serialized configuration never
-/// contains credential material, and a reader treats the marker as "keep the
-/// existing value" on write.
-pub(crate) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str("***")
-}
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Secret(redacted)")
-    }
-}
-
-impl fmt::Display for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("redacted")
-    }
-}
-
-/// The wire protocol an endpoint speaks. v0 supports only the OpenAI shape;
-/// the Anthropic translation shim is deferred.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum Protocol {
-    /// The OpenAI `/chat/completions` shape.
-    Openai,
 }
 
 /// The whole gateway configuration.
@@ -265,30 +194,6 @@ pub struct ProfileConfig {
     models: Vec<String>,
 }
 
-/// Whether a dominion pools remote providers or local GPUs managed by the
-/// gateway.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum DominionKind {
-    /// A pool of remote HTTP providers, bindable by `[[endpoint]]` entries.
-    Remote,
-    /// A local GPU, bindable by `[[local_model]]` entries.
-    Local,
-}
-
-/// What a dominion's admission queue does when it is full.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum QueuePolicy {
-    /// Waits for a slot up to `max_queue` waiting requests, then rejects.
-    #[default]
-    Queue,
-    /// Rejects immediately when no concurrency slot is free (fail-fast).
-    Reject,
-}
-
 /// One named pool of compute declared as `[[dominion]]`.
 ///
 /// A dominion sets a concurrency limit and a bounded waiting queue that
@@ -319,34 +224,6 @@ pub struct DominionConfig {
     /// VRAM budget in gibibytes for co-residency checks. Local kind only.
     #[serde(default)]
     vram_gb: Option<u32>,
-}
-
-/// The `llama-server` build the gateway downloads for local inference on
-/// Windows x86-64. Every other platform has exactly one build, so this
-/// setting is consulted there only.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub enum LlamaBackend {
-    /// Picks from the machine's GPUs: a Blackwell (compute capability 12.x) gets
-    /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream
-    /// CUDA build, and anything else gets Vulkan.
-    #[default]
-    Auto,
-    /// The PromptForge Blackwell build (`llama-cuda-blackwell` release).
-    CudaBlackwell,
-    /// The upstream llama.cpp CUDA 13 build.
-    Cuda,
-    /// The upstream llama.cpp Vulkan build.
-    Vulkan,
-}
-
-impl LlamaBackend {
-    /// True for the default (`auto`), so serialization can omit it.
-    #[must_use]
-    pub fn is_auto(&self) -> bool {
-        *self == LlamaBackend::Auto
-    }
 }
 
 /// Settings under `[local]` for artifact cache paths and the `llama-server`
@@ -478,34 +355,6 @@ pub struct EndpointConfig {
     dominion: Option<String>,
 }
 
-/// The tool-calling dialect a chat model speaks.
-///
-/// `openai` (the default) forwards tool definitions verbatim and expects
-/// native wire `tool_calls`. `gemma3_tool_code` emulates tool calling for
-/// backends without a native tool array: the gateway injects a tool guide
-/// into the system prompt, strips `tools`/`tool_choice` from the outgoing
-/// request, and parses `tool_code` content fences from the reply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ToolDialect {
-    /// Native OpenAI tool calling. The default.
-    #[default]
-    Openai,
-    /// Emulated Gemma3 `tool_code` content-fence protocol.
-    Gemma3ToolCode,
-}
-
-impl fmt::Display for ToolDialect {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let spelling = match self {
-            ToolDialect::Openai => "openai",
-            ToolDialect::Gemma3ToolCode => "gemma3_tool_code",
-        };
-        f.write_str(spelling)
-    }
-}
-
 /// One model name and the backend it resolves to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -598,15 +447,6 @@ fn default_web_search_max_count() -> u8 {
 
 fn default_web_search_max_per_host() -> u8 {
     2
-}
-
-/// A web-search provider. v0 supports only Brave.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum SearchProvider {
-    /// The Brave Search API.
-    Brave,
 }
 
 fn is_sha256_hex(value: &str) -> bool {

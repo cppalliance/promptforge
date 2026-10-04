@@ -650,7 +650,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-7>
 
-### Step 7: Split every file over 500 lines
+### Step 7: Split every file over 500 lines [completed]
 
 - Component: Compiler-enforced 500-line limit
 - Work item: 13, splits. This step wires no crate to the compile-time check.

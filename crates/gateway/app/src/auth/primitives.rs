@@ -127,5 +127,5 @@ fn hex_digit(byte: u8) -> Option<u8> {
 }
 
 #[cfg(test)]
-#[path = "auth-primitives-tests.rs"]
+#[path = "primitives-tests.rs"]
 mod tests;
