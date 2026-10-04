@@ -6,38 +6,38 @@ type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// The kind of failure a model round ended with.
 ///
-/// The kinds form a closed set, so a caller can branch on the kind without
-/// reading status codes or response text. The caller that performs a round
-/// maps every failure into one of these kinds. Each kind is either always
-/// retryable or never retryable (see [`CompletionError::is_retryable`]).
-/// The enum is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
+/// The kinds form a closed set, so a caller can branch on the kind alone.
+/// The caller that performs a round maps every failure into one of these
+/// kinds. Each kind is either retryable or permanent (see
+/// [`CompletionError::is_retryable`]). The enum is `#[non_exhaustive]`, so
+/// a `match` on it needs a wildcard arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionErrorKind {
-    /// The request exceeds the model's context window. Not retryable.
+    /// The request exceeds the model's context window. Permanent.
     ContextOverflow,
     /// The backend is limiting the request rate. Retryable.
     RateLimited,
-    /// The billing or usage quota is spent. Not retryable.
+    /// The billing or usage quota is spent. Permanent.
     QuotaExhausted,
     /// The backend is temporarily at capacity. Retryable.
     Overloaded,
-    /// The provider declined the content on policy grounds. Not retryable.
+    /// The provider declined the content on policy grounds. Permanent.
     Refused,
-    /// No reply or next chunk arrived in time. Retryable.
+    /// The wait for a reply or the next chunk timed out. Retryable.
     Timeout,
     /// The connection failed or the stream broke. Retryable.
     Transport,
     /// The backend reported a fault of its own. Retryable.
     ServerError,
-    /// The backend refused the request for any other reason. Not retryable.
+    /// The backend refused the request for any other reason. Permanent.
     Rejected,
-    /// The reply could not be understood, or it was larger than the size
-    /// limit for a reply. Retryable.
+    /// The reply was malformed, or it was larger than the size limit for a
+    /// reply. Retryable.
     MalformedResponse,
-    /// The model returned neither text nor tool calls. Not retryable.
+    /// The model's reply was empty of text and tool calls. Permanent.
     EmptyReply,
-    /// Model access is turned off or not configured. Not retryable.
+    /// Model access is turned off or lacks a configuration. Permanent.
     Unavailable,
 }
 
@@ -47,12 +47,12 @@ impl CompletionErrorKind {
     ///
     /// The caller builds a [`CompletionError`] message from this phrase. For
     /// a failure that came from an HTTP status, it appends ` (status N)`. A
-    /// 401 or 403 is `Unavailable`, and its message uses
-    /// `the model backend did not accept the credentials` in place of this
-    /// phrase. Only `MalformedResponse`, `EmptyReply`, and `Unavailable` may
-    /// extend the phrase with `: ` and specific text that the caller's own
-    /// code wrote. Provider text never enters the message. It goes in the
-    /// [`detail`](CompletionError::detail) instead.
+    /// 401 or 403 is `Unavailable`, and its message uses the phrase
+    /// `the model backend did not accept the credentials`. Only
+    /// `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the
+    /// phrase with `: ` and specific text that the caller's own code wrote.
+    /// Provider text never enters the message. It goes in the
+    /// [`detail`](CompletionError::detail).
     #[must_use]
     pub fn phrase(self) -> &'static str {
         match self {
@@ -112,12 +112,12 @@ impl CompletionErrorKind {
 ///
 /// The message is the kind's fixed phrase. For a failure that came from an
 /// HTTP status, the caller appends ` (status N)`. A 401 or 403 is
-/// `Unavailable`, and its message uses
-/// `the model backend did not accept the credentials` in place of the
-/// phrase. `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend
-/// the message with `: ` and specific text that the caller's own code
-/// wrote, such as the byte limit that was hit. Provider text never enters
-/// the message. It goes in the [`detail`](CompletionError::detail) instead.
+/// `Unavailable`, and its message uses the phrase
+/// `the model backend did not accept the credentials`. `MalformedResponse`,
+/// `EmptyReply`, and `Unavailable` may extend the message with `: ` and
+/// specific text that the caller's own code wrote, such as the byte limit
+/// that was hit. Provider text never enters the message. It goes in the
+/// [`detail`](CompletionError::detail).
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionError {
@@ -136,12 +136,12 @@ impl CompletionError {
     /// The caller uses the kind's fixed
     /// [`phrase`](CompletionErrorKind::phrase) as the message. For a failure
     /// that came from an HTTP status, it appends ` (status N)`. A 401 or 403
-    /// is `Unavailable`, and its message uses
-    /// `the model backend did not accept the credentials` in place of the
-    /// phrase. For `MalformedResponse`, `EmptyReply`, and `Unavailable`, the
-    /// caller may extend the phrase with `: ` and specific text that its own
-    /// code wrote. Provider text never enters the message. The caller passes
-    /// it to [`with_detail`](CompletionError::with_detail) instead.
+    /// is `Unavailable`, and its message uses the phrase
+    /// `the model backend did not accept the credentials`. For
+    /// `MalformedResponse`, `EmptyReply`, and `Unavailable`, the caller may
+    /// extend the phrase with `: ` and specific text that its own code wrote.
+    /// Provider text never enters the message. The caller passes it to
+    /// [`with_detail`](CompletionError::with_detail).
     #[must_use]
     pub fn new(kind: CompletionErrorKind, message: impl Into<String>) -> CompletionError {
         CompletionError {
@@ -157,7 +157,7 @@ impl CompletionError {
 
     /// Builds a [`ContextOverflow`](CompletionErrorKind::ContextOverflow)
     /// failure with the token counts the provider stated. Pass `None` for a
-    /// count the provider did not give.
+    /// count the provider omitted.
     #[must_use]
     pub fn context_overflow(
         prompt_tokens: Option<u32>,
@@ -225,15 +225,15 @@ impl CompletionError {
     /// Returns `true` when retrying may succeed. The answer depends only on
     /// the kind. `RateLimited`, `Overloaded`, `Timeout`, `Transport`,
     /// `ServerError`, and `MalformedResponse` are retryable, and the rest
-    /// are not.
+    /// are permanent.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         self.kind.is_retryable()
     }
 
     /// Returns the token counts that a context overflow reported, as
-    /// `(prompt_tokens, window)`. A count is `None` when the provider did
-    /// not give it, and both are `None` for every kind other than
+    /// `(prompt_tokens, window)`. A count is `None` when the provider
+    /// omitted it, and both are `None` for every kind other than
     /// `ContextOverflow`.
     #[must_use]
     pub fn overflow(&self) -> (Option<u32>, Option<u32>) {

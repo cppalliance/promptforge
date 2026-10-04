@@ -351,9 +351,8 @@ impl Drop for RoutingAccess {
 /// A builder that mounts backends at path prefixes and then builds a
 /// [`VfsRef`] over them.
 ///
-/// The mounts are fixed when [`VfsRefBuilder::build`] runs. After that
-/// the mount table never changes, so it is cheap to share through an
-/// `Arc`.
+/// The mount table is fixed for good when [`VfsRefBuilder::build`]
+/// runs, so it is cheap to share through an `Arc`.
 pub struct VfsRefBuilder {
     mounts: Mounts,
     policy: Option<Arc<dyn Policy + Sync>>,
@@ -458,12 +457,13 @@ impl VfsRefBuilder {
     /// Installs a callback that observes operations, consuming and
     /// returning the builder.
     ///
-    /// The built handle calls this operation sink for every operation
-    /// that passes the policy and claims checks, just before the backend
-    /// runs it. Each call receives an `OpEvent` with the operation kind,
-    /// the canonical path, and the `Origin` of the access that made the
-    /// call. The sink returns nothing and never learns the operation's
-    /// result. An operation that the policy denies never reaches it.
+    /// The built handle calls this operation sink just before the
+    /// backend runs each operation that passes the policy and claims
+    /// checks. Only those operations reach the sink. Each call receives
+    /// an `OpEvent` with the operation kind, the canonical path, and the
+    /// `Origin` of the access that made the call. The sink only
+    /// observes: it returns `()`, and the operation's result stays
+    /// hidden from it.
     ///
     /// The sink runs inline on the thread that performs the operation,
     /// so it must be cheap.
@@ -477,7 +477,7 @@ impl VfsRefBuilder {
     /// operation sink.
     ///
     /// The mount table is fixed from this point on. The policy defaults
-    /// to [`AllowAll`], and the handle has no operation sink unless
+    /// to [`AllowAll`], and the handle has an operation sink only when
     /// `on_op` installed one.
     ///
     /// [`AllowAll`]: crate::AllowAll

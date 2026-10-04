@@ -1,10 +1,10 @@
 //! Parses PromptForge prompt files and runs them, leaving their outside work
 //! to the caller.
 //!
-//! A [`Prompt`] is a parsed prompt file. A [`Run`] executes one prompt and
-//! performs no I/O. [`Run::step`] returns [`Step::Pending`] with the effects
-//! the run waits on. The caller performs each effect and hands its answer to
-//! [`Run::resume`]. The run ends at [`Step::Done`] with its [`RunResult`].
+//! A [`Prompt`] is a parsed prompt file. A [`Run`] executes one prompt.
+//! [`Run::step`] returns [`Step::Pending`] with the effects the run waits on.
+//! The caller performs each effect and hands its answer to [`Run::resume`].
+//! The run ends at [`Step::Done`] with its [`RunResult`].
 //! Before the run starts, [`Environment::prepare`] binds the prompt's model
 //! roles and tool slots into the run's [`RunContext`].
 //!
@@ -201,7 +201,7 @@ pub mod metrics {
 }
 
 pub mod replay {
-    //! The behavior flags a run's record keeps and hands back unchanged.
+    //! The behavior flags a run's record keeps and hands back bit for bit.
 
     pub use promptforge_types::replay::Flags;
 }

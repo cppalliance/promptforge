@@ -16,7 +16,7 @@ use crate::error::{PathReason, VfsError};
 /// The virtual file system canonicalizes each path as soon as its API
 /// receives it, and this type holds the result. Clones share one `Arc`
 /// string allocation, and the string frees when its last owner drops.
-/// There is no global table and no lock.
+/// A path shares state only with its own clones.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VfsPath {
     text: Arc<str>,

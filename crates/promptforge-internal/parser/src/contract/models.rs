@@ -18,15 +18,15 @@ use super::{ContractKeys, deserialize_contract_map};
 /// are checked against the descriptor of the model that fills the role.
 /// Soft keywords document the author's intent.
 ///
-/// The set of keywords is fixed, and an unknown keyword is a parse error.
-/// Adding a keyword is a change to the prompt language.
+/// The set of keywords is fixed, and a keyword outside the set is a parse
+/// error. Adding a keyword is a change to the prompt language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum ModelKeyword {
     /// The model supports extended thinking. This keyword is hard.
     Thinking,
-    /// The model never thinks. This keyword is hard.
+    /// The model runs with thinking turned off. This keyword is hard.
     NoThinking,
     /// A frontier-capability model. This keyword is soft.
     Frontier,
@@ -43,8 +43,8 @@ pub enum ModelKeyword {
 /// One model role a prompt declares: its keywords, minimum context window,
 /// and description.
 ///
-/// A role stands for a model the prompt needs without naming a concrete
-/// model. When the run is prepared, a concrete model fills each role.
+/// A role is a slot for a model the prompt needs. When the run is
+/// prepared, a concrete model fills the slot.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -84,8 +84,7 @@ impl ModelRole {
 /// keyed by label.
 ///
 /// A label is a name local to the prompt. It follows the same grammar as
-/// a tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`. The declaration names
-/// each role by its label and never by a concrete model id.
+/// a tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
 /// Each label becomes a global variable of the same name in the Lua VM
 /// that runs a prompt section. The parser therefore rejects a label that
@@ -118,7 +117,7 @@ impl ModelRoles {
         self.roles.len()
     }
 
-    /// Returns whether no roles are declared.
+    /// Returns whether the set of declared roles is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty()

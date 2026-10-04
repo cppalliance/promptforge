@@ -18,12 +18,11 @@ use crate::normalize::{
 };
 
 impl Completion {
-    /// Builds a completion from a result alone, with no metadata about the
-    /// model call.
+    /// Builds a completion from a result alone.
     ///
     /// `model` is the model name the completion reports. Every optional
     /// field is absent, so `metrics` and `raw` are `None`. A text result is
-    /// not validated. [`with_metrics`](Completion::with_metrics),
+    /// accepted as given. [`with_metrics`](Completion::with_metrics),
     /// [`with_raw`](Completion::with_raw),
     /// [`with_finish_reason`](Completion::with_finish_reason),
     /// [`with_reasoning_content`](Completion::with_reasoning_content),
@@ -61,7 +60,8 @@ impl Completion {
     }
 
     /// Returns the completion with `metrics` set to what the model call
-    /// measured. A caller with nothing to report leaves the completion as
+    /// measured. Only a caller with measurements to report calls it.
+    /// Otherwise the completion stays as
     /// [`from_result`](Completion::from_result) built it.
     #[must_use]
     pub fn with_metrics(mut self, metrics: CallMetrics) -> Completion {
@@ -73,7 +73,7 @@ impl Completion {
     /// that debug capture records.
     ///
     /// Only a caller that has the request and response attaches them.
-    /// Debug capture is off unless the application turns it on.
+    /// Debug capture runs only when the application turns it on.
     #[must_use]
     pub fn with_raw(mut self, raw: RawExchange) -> Completion {
         self.raw = Some(raw);
@@ -89,7 +89,7 @@ impl Completion {
     }
 
     /// Returns the completion with `reasoning_content` as the reasoning side
-    /// channel the backend supplied. It is never promoted into the answer.
+    /// channel the backend supplied. It stays separate from the answer.
     #[must_use]
     pub fn with_reasoning_content(mut self, reasoning_content: impl Into<String>) -> Completion {
         self.reasoning_content = Some(reasoning_content.into());

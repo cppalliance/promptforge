@@ -10,52 +10,49 @@ mod tests;
 ///
 /// [`Environment::prepare`](super::Environment::prepare) returns one
 /// together with the prepared context. The report lists only what needs a
-/// person's attention. An optional capability that is skipped is logged,
-/// not reported.
+/// person's attention. A skipped optional capability is logged.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
-    /// The model requirements that the bound models do not meet.
+    /// The model requirements that the bound models fall short of.
     ///
     /// Each entry names the role, the check that failed, and what was
     /// required versus what the model provides. Examples are a
     /// `min_context` of 200000 against a model with a 32k context, and
     /// `thinking` against a model whose thinking mode is `Never`. Only
-    /// model binding in `Environment::prepare` adds these. Capability
-    /// activation adds none.
+    /// model binding in `Environment::prepare` adds these.
     pub unmet_requirements: Vec<UnmetRequirement>,
-    /// The required capabilities that the run cannot have.
+    /// The required capabilities that the run lacks.
     ///
-    /// Capability activation adds a capability that is not registered or
-    /// that fails to activate. `Environment::prepare` adds the capability
-    /// of an exact tool slot when that capability contributed nothing to
-    /// the tool catalog. The run fails until every one is satisfied.
+    /// Capability activation adds a capability that is missing from the
+    /// registry or that fails to activate. `Environment::prepare` adds the
+    /// capability of an exact tool slot when that capability is absent
+    /// from the tool catalog. The run fails until every one is satisfied.
     pub missing_required: Vec<CapabilityId>,
     /// The required capabilities that are registered but need a service
-    /// the application does not provide.
+    /// the application lacks.
     ///
     /// There is one entry for each capability and missing service.
-    /// Capability activation adds these, and it does not activate such a
-    /// capability. The run fails until the application provides the
-    /// service or the prompt declares the capability optional.
+    /// Capability activation adds these and skips each such capability.
+    /// The run fails until the application provides the service or the
+    /// prompt declares the capability optional.
     pub missing_services: Vec<MissingService>,
     /// The declared conflicts: pairs of registered capabilities that
-    /// cannot activate in the same run.
+    /// exclude each other in a run.
     ///
     /// For example, `bashkit` and `terminal` each give the run its own
-    /// view of the filesystem, so a run gets one or the other, never both.
-    /// Neither member of a conflicting pair activates. The run fails until
-    /// the prompt declares only one of them. Capability activation adds
-    /// these, and `Environment::prepare` never does.
+    /// view of the filesystem, so a run gets one or the other. Only
+    /// capability activation adds these, and it skips both members of each
+    /// pair. The run fails until the prompt declares only one of them.
     pub conflicts: Vec<CapabilityConflict>,
 }
 
 impl Requirements {
-    /// Returns whether nothing in the report blocks the run.
+    /// Returns whether the report lets the run proceed.
     ///
     /// That holds when every model requirement is met, every required
-    /// capability is present and has the services it needs, and no pair of
-    /// capabilities conflicts.
+    /// capability is present and has the services it needs, and every
+    /// pair of capabilities is compatible.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
@@ -67,14 +64,14 @@ impl Requirements {
     /// Adds the entries of `other` to this report.
     ///
     /// Use it to combine the capability activation report with the report
-    /// from `Environment::prepare`, so that one refusal names every gap. A
-    /// capability already reported missing, or a service already reported
-    /// missing for the same capability, is not added again.
+    /// from `Environment::prepare`, so that one refusal names every gap.
+    /// The merge skips a capability already reported missing and a service
+    /// already reported missing for the same capability.
     ///
-    /// A capability that lacks a service is not also reported as missing.
-    /// Such a `missing_required` entry can come only from the tool slot
-    /// check in `Environment::prepare`. That check finds an exact slot
-    /// whose capability contributed nothing, because activation skipped
+    /// The merge drops the `missing_required` entry of a capability that
+    /// lacks a service. That entry can come only from the tool slot check
+    /// in `Environment::prepare`. That check finds an exact slot whose
+    /// capability is absent from the catalog, because activation skipped
     /// the capability for the missing service. The service entry already
     /// names the real cause.
     pub fn merge(&mut self, other: Requirements) {
@@ -98,8 +95,8 @@ impl Requirements {
         self.unmet_requirements.extend(other.unmet_requirements);
     }
 
-    /// Returns the error to fail the run with, or `None` when nothing
-    /// blocks the run.
+    /// Returns the error to fail the run with, or `None` when the report
+    /// is satisfied.
     ///
     /// The error is a [`RunError`](super::RunError) of kind
     /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet) that
@@ -116,7 +113,7 @@ impl Requirements {
 
     /// Returns the refusal notice, which explains what blocks the run.
     ///
-    /// Each line names what is missing or unmet, with required versus
+    /// Each line names what is missing or falls short, with required versus
     /// actual. The notice can arrive as tool output when the prompt runs as
     /// a tool of another run, so it is written for a model to read:
     /// concise, factual, and self-contained.
@@ -163,8 +160,8 @@ impl Requirements {
     }
 }
 
-/// A declared conflict between two registered capabilities that cannot
-/// activate in the same run.
+/// A declared conflict between two registered capabilities that exclude
+/// each other in a run.
 ///
 /// The pair is named in the order the prompt declares them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,27 +184,26 @@ impl CapabilityConflict {
     }
 }
 
-/// A service that a required capability needs and the application does
-/// not provide.
+/// A service that a required capability needs and the application lacks.
 ///
 /// For example, a capability that asks the operator a question needs a
-/// service that reaches the operator, and a batch application has nobody
-/// to ask.
+/// service that reaches the operator, and a batch application runs on its
+/// own, so it lacks that service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MissingService {
     /// The registered, required capability that needs the service.
     pub capability: CapabilityId,
-    /// The name of the missing service, as the caller gave it.
+    /// The name of the missing service.
     ///
     /// The caller defines its own service names, so the report carries
-    /// the name unchanged.
+    /// the name verbatim.
     pub service: String,
 }
 
 impl MissingService {
     /// Creates an entry stating that `capability` needs the service named
-    /// `service`, which the application does not provide.
+    /// `service`, which the application lacks.
     ///
     /// Only capability activation reports these.
     #[must_use]
@@ -219,7 +215,7 @@ impl MissingService {
     }
 }
 
-/// A model requirement that the model bound to a role does not meet.
+/// A model requirement that the model bound to a role falls short of.
 ///
 /// It names the role, the check that failed, and what the prompt required
 /// versus what the bound model provides.
@@ -246,6 +242,6 @@ pub enum RequirementCheck {
     /// to the role.
     ContextMinimum,
     /// The role declares a hard keyword, `thinking` or `no-thinking`, that
-    /// the bound model's descriptor does not satisfy.
+    /// the bound model's descriptor fails to satisfy.
     HardKeyword,
 }

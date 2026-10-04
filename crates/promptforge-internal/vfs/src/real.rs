@@ -79,7 +79,7 @@ fn map_io(path: &str, err: &std::io::Error) -> VfsError {
 /// path. Writes, copies, and renames are failure-atomic.
 ///
 /// The backend accepts an `ExecId` for attribution and ignores it,
-/// because the real filesystem keeps no per-identity state.
+/// because every identity sees the same real filesystem.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RealBackend {

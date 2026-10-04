@@ -28,7 +28,7 @@ use crate::{Error, Result, ToolOutputKind};
 /// `{"Bool": true}`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VfsOutcome {
-    /// The operation succeeded with no return value.
+    /// The operation succeeded, and the program receives nil.
     Unit,
     /// The text that `read` or `read_numbered` returns: the whole file, or
     /// only the requested line range.

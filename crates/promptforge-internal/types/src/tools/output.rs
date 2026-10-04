@@ -18,8 +18,8 @@ pub enum OutputTrust {
 /// level.
 ///
 /// Build one with [`ToolOutput::trusted`] or [`ToolOutput::untrusted`]. The
-/// trust level travels with the text, so code that handles the output never
-/// has to track it as a separate flag.
+/// trust level travels with the text, so code that handles the output reads
+/// the level from the output itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolOutput {
@@ -63,7 +63,7 @@ impl ToolOutput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolErrorKind {
-    /// The model supplied arguments the tool could not accept.
+    /// The model supplied arguments that the tool rejected.
     InvalidArguments,
     /// The tool's backend refused or failed the request.
     Backend,

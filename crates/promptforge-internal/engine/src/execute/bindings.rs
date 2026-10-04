@@ -59,7 +59,7 @@ impl ModelBindings {
         self.roles.len()
     }
 
-    /// Returns whether no roles are bound.
+    /// Returns whether the set of bound roles is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty()
@@ -75,10 +75,9 @@ impl ModelBindings {
 /// caller and any evaluation of the run can see what each alias resolved
 /// to.
 ///
-/// The bindings hold tool descriptors, not implementations. The Engine
-/// advertises and calls a tool through its descriptor. The caller resolves
-/// the tool identity that a `ToolCall` effect names. The model sees only the
-/// prompt-local alias, never the tool's global path.
+/// The bindings hold tool descriptors. The Engine advertises and calls a
+/// tool through its descriptor. The caller resolves the tool identity that
+/// a `ToolCall` effect names. The model sees only the prompt-local alias.
 ///
 /// A lookup goes from an alias to a tool identity, and from that identity
 /// to the tool's descriptor.
@@ -130,7 +129,7 @@ impl ToolBindings {
         self.aliases.len()
     }
 
-    /// Returns whether no aliases are bound.
+    /// Returns whether the set of bound aliases is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.aliases.is_empty()

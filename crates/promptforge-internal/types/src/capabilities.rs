@@ -27,10 +27,10 @@ mod tests;
 /// A capability id is a [`GlobalName`] with exactly 2 segments
 /// (`namespace/pack`). The segment count tells what a name refers to: 2
 /// segments name a capability and 3 name a tool. A capability's id is the
-/// prefix of every tool id it contributes, with no exceptions:
-/// `promptforge/web` contributes `promptforge/web/fetch`. Ids carry no
-/// version. A name resolves to the only installed capability of that name,
-/// and a `@` in the id is a parse error.
+/// prefix of every tool id it contributes: `promptforge/web` contributes
+/// `promptforge/web/fetch`. An id is the name alone, and a name resolves to
+/// the only installed capability of that name. A `@` version marker in the
+/// id is a parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct CapabilityId(GlobalName);
@@ -40,8 +40,8 @@ impl CapabilityId {
     /// (`namespace/pack`).
     ///
     /// # Errors
-    /// Returns [`CapabilityIdError`] when the segment count is not exactly 2
-    /// ([`CapabilityIdErrorKind::SegmentCount`]), a segment is empty
+    /// Returns [`CapabilityIdError`] when the id has fewer or more than 2
+    /// segments ([`CapabilityIdErrorKind::SegmentCount`]), a segment is empty
     /// ([`CapabilityIdErrorKind::Empty`]), or a segment contains a character
     /// other than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
     /// ([`CapabilityIdErrorKind::Control`]).
@@ -75,7 +75,7 @@ impl CapabilityId {
     ///
     /// A namespace is meant to be a reverse-DNS name such as
     /// `org.rustalliance`, or `promptforge` for first-party capabilities.
-    /// `CapabilityId::parse` does not check this.
+    /// `CapabilityId::parse` accepts any valid segment as the namespace.
     #[must_use]
     pub fn namespace(&self) -> &str {
         self.0.namespace()
@@ -92,8 +92,8 @@ impl CapabilityId {
     /// A tool belongs to a capability when dropping the last segment of the
     /// tool's id leaves exactly the capability's id, so `namespace/pack/name`
     /// belongs to `namespace/pack`. Every tool a capability contributes
-    /// belongs to it, with no exceptions. The caller must check this when it
-    /// assembles the run's catalog.
+    /// belongs to it. The caller must check this when it assembles the run's
+    /// catalog.
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
         tool.capability() == *self
@@ -117,7 +117,7 @@ impl serde::Serialize for CapabilityId {
 impl<'de> serde::Deserialize<'de> for CapabilityId {
     /// Deserializes the id from its `namespace/pack` string and validates it
     /// the same way `CapabilityId::parse` does. An invalid string fails
-    /// deserialization and is never accepted as an id.
+    /// deserialization.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
         CapabilityId::parse(&text).map_err(serde::de::Error::custom)
@@ -129,7 +129,7 @@ impl<'de> serde::Deserialize<'de> for CapabilityId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CapabilityIdErrorKind {
-    /// The id did not have exactly 2 segments (`namespace/pack`).
+    /// The id had fewer or more than 2 segments (`namespace/pack`).
     SegmentCount,
     /// A segment was empty.
     Empty,
@@ -138,7 +138,7 @@ pub enum CapabilityIdErrorKind {
     Control,
 }
 
-/// The reason a [`CapabilityId`] could not be parsed.
+/// The reason a [`CapabilityId`] failed to parse.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid capability id: {reason}")]
 #[non_exhaustive]
@@ -180,9 +180,8 @@ impl CapabilityIdError {
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
 /// call the capability's own tools through `tools.call`. The Engine runs
-/// the source without knowing what the capability is. It knows only the
-/// capability's id, which names the prelude in tracebacks and error
-/// messages.
+/// the source knowing only the capability's id, which names the prelude in
+/// tracebacks and error messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prelude {
     /// The capability that contributed the source.

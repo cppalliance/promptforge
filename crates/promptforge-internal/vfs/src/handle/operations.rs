@@ -38,10 +38,12 @@ impl Access {
     /// Reads a range of lines from the file at `path` as text.
     ///
     /// Lines are numbered from 1, and the range runs from `start` to
-    /// `end` with both ends included. The lines are joined by `"\n"` with
-    /// no trailing newline. When `end` is `None`, the range runs to the
-    /// last line. An `end` past the last line is lowered to the last
-    /// line. A `start` past the last line returns the empty string.
+    /// `end` with both ends included. Each line drops its `"\n"` or
+    /// `"\r\n"` ending, and the lines are joined by `"\n"`, so the text
+    /// ends with the last line's own content. When `end` is `None`, the
+    /// range runs to the last line. An `end` past the last line is
+    /// lowered to the last line. A `start` past the last line returns the
+    /// empty string.
     ///
     /// # Errors
     /// Returns an error when `start` is below 1 or `end` is before
@@ -115,14 +117,11 @@ impl Access {
     /// Replaces the single occurrence of `old` with `new` in the file at
     /// `path`.
     ///
-    /// An empty `old` is refused. It is an error when `old` occurs zero
-    /// times or more than once.
-    ///
     /// # Errors
     /// Returns an error when `old` is empty, when the policy denies the
     /// write, when another access holds a conflicting claim on `path`
-    /// that is not ordered before this operation, when `old` does not
-    /// occur exactly once, or when the backend fails.
+    /// that is not ordered before this operation, when `old` occurs zero
+    /// times or more than once, or when the backend fails.
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), VfsError> {
         // The store view validates the path before the anchor, in the
         // store contract's order.
@@ -144,10 +143,10 @@ impl Access {
 
     /// Removes the file, link, or directory at `path`.
     ///
-    /// Set `recursive` to also remove a directory that is not empty,
+    /// Set `recursive` to also remove a directory that holds entries,
     /// along with everything under it. Returns `Ok(true)` when the
-    /// removal succeeds and `Ok(false)` when nothing exists at `path`, so
-    /// removing the same path twice is not an error.
+    /// removal succeeds and `Ok(false)` when `path` is absent, so
+    /// removing the same path twice succeeds.
     ///
     /// # Errors
     /// Returns an error when the policy denies the delete, when another
@@ -173,8 +172,7 @@ impl Access {
 
     /// Reports whether anything exists at `path`.
     ///
-    /// Returns `Ok(false)` only when the path is confirmed absent. A
-    /// backend failure is an error, never `Ok(false)`.
+    /// Returns `Ok(false)` only when the path is confirmed absent.
     ///
     /// # Errors
     /// Returns an error when the policy denies the check, when another
@@ -191,14 +189,13 @@ impl Access {
     /// match `pattern`.
     ///
     /// A pattern that ends in `/` matches only directories. Any other
-    /// pattern matches only files. A pattern without a leading `/` is
-    /// joined onto the access's root, and its results come back relative
-    /// to that root.
+    /// pattern matches only files. A pattern that starts with `/` is
+    /// absolute. Any other pattern is joined onto the access's root, and
+    /// its results come back relative to that root.
     ///
     /// The raw pattern is validated before it is canonicalized. Because
-    /// of this, a backslash or a control character is refused rather than
-    /// treated as part of the pattern, and a backslash never becomes a
-    /// path separator.
+    /// of this, a backslash or a control character is refused, and a
+    /// backslash never becomes a path separator.
     ///
     /// # Errors
     /// Returns an error when the pattern is malformed: empty, too long,
@@ -210,8 +207,7 @@ impl Access {
     /// [`VfsError::InvalidPath`]. It also returns an error when the
     /// policy denies the glob, when another access holds a conflicting
     /// claim that is not ordered before this operation, or when the
-    /// backend fails. The claim covers the pattern itself, not each
-    /// match.
+    /// backend fails. One claim covers the pattern as a whole.
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
         if pattern.is_empty() {
             return Err(VfsError::InvalidPath {

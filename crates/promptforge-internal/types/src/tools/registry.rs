@@ -9,12 +9,11 @@ use super::ids::{ToolId, validate_identifier};
 /// A catalog of the tools a run may bind, given as tool descriptors.
 ///
 /// The caller builds the catalog and keeps the tool implementations itself.
-/// The Engine fills a prompt's tool slots from these descriptors and never
-/// holds an implementation.
+/// The Engine fills a prompt's tool slots from these descriptors.
 ///
-/// Every tool in a catalog has a unique [`ToolId`] and a wire name that is
-/// not empty and contains no `/` and no control character. Construction
-/// checks both, so the [`get`](Self::get) lookup does not check them again.
+/// Every tool in a catalog has a unique [`ToolId`] and a wire name of one or
+/// more characters, free of `/` and control characters. Construction checks
+/// both, and the [`get`](Self::get) lookup relies on that check.
 ///
 /// Cloning is cheap, because all clones share one reference-counted list of
 /// descriptors.
@@ -72,8 +71,8 @@ impl ToolCatalog {
 
     /// Returns the descriptor for `id`, if one is in the catalog.
     ///
-    /// The lookup scans the descriptors one by one and keeps no index. It
-    /// runs only while a run binds its tools, once per declared tool slot.
+    /// The lookup scans the descriptors one by one. It runs only while a run
+    /// binds its tools, once per declared tool slot.
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.iter().find(|tool| tool.id == *id)
@@ -97,8 +96,8 @@ pub enum ToolCatalogErrorKind {
     InvalidWireName,
 }
 
-/// The error returned when a [`ToolCatalog`] cannot be built from the
-/// supplied tools.
+/// The error returned when building a [`ToolCatalog`] from the supplied
+/// tools fails.
 ///
 /// Building fails when two tools share an identity, or when a descriptor's
 /// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a `/`

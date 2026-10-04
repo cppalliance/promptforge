@@ -121,7 +121,7 @@ macro_rules! events {
 /// user-facing chat turn ([`Chat`](Self::Chat)) or a programmatic
 /// inference round ([`Infer`](Self::Infer)).
 ///
-/// The default is `chat`, so a serialized reply that carries no `origin`
+/// The default is `chat`, so a serialized reply that omits `origin`
 /// reads back as a chat reply. A `Chat` effect's round carries the same
 /// value in its `origin` field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,8 +143,8 @@ events! {
     /// Variants fall into four groups:
     ///
     /// - Lifecycle variants, from the first through [`Lua`](Self::Lua),
-    ///   mark operational boundaries. The payload-free ones carry nothing
-    ///   beyond the coordinates. The `Vfs` variants report the run's
+    ///   mark operational boundaries. The payload-free ones carry only
+    ///   the coordinates. The `Vfs` variants report the run's
     ///   `store.*` calls, which go through the caller.
     /// - Task variants report a task chain's start and end.
     /// - Content variants hold what a model, a tool, or a user produced.
@@ -181,14 +181,14 @@ events! {
         /// length limit.
         ModelTurnTruncated {},
         /// One metadata section of a completed model turn's response was
-        /// present but malformed and degraded to nothing, or the response
-        /// named no model. The turn itself succeeded; each degraded
+        /// present but malformed and degraded to `None`, or the response
+        /// omitted the model name. The turn itself succeeded; each degraded
         /// section reports once, after the turn's `model_turn_completed`.
         ModelMetadataDegraded {
             /// The model-turn counter the response was served under.
             turn: u32,
-            /// The Engine's sentence naming the section and why it did not
-            /// parse; it may quote backend-supplied values.
+            /// The Engine's sentence naming the section and why it failed
+            /// to parse; it may quote backend-supplied values.
             message: String,
         },
         /// A tool dispatch completed successfully.
@@ -318,24 +318,21 @@ events! {
             task: TaskId,
         },
         /// A task ended because its owner cancelled it on purpose. The event
-        /// is reported once, under the task's target section. A repeated
-        /// cancel reports nothing.
+        /// is reported once per task, under the task's target section.
         TaskCancelled {
             /// The task's id.
             task: TaskId,
         },
-        /// A task ended because its owner chain ended while the task was
-        /// live. The Engine ended the task. This differs from a
-        /// cancellation: the task lost its owner rather than being stopped
-        /// on purpose.
+        /// A task ended because it lost its owner: its owner chain ended
+        /// while the task was live, and the Engine ended the task.
         TaskAbandoned {
             /// The task's id.
             task: TaskId,
             /// How the owner ended.
             reason: AbandonReason,
         },
-        /// Reserved for an existing task revived from its record rather
-        /// than started anew. The Engine does not emit it.
+        /// Reserved for later use, to report an existing task revived
+        /// from its record.
         TaskResumed {
             /// The task's id.
             task: TaskId,
@@ -369,12 +366,13 @@ events! {
             metrics: Option<CallMetrics>,
             /// The kind of round that produced the reply: a programmatic
             /// inference round (`infer`) or a user-facing chat turn
-            /// (`chat`). Defaults to `chat` when a serialized reply carries
-            /// no `origin`.
+            /// (`chat`). Defaults to `chat` when a serialized reply omits
+            /// `origin`.
             #[serde(default)]
             origin: ReplyOrigin,
         },
-        /// One batch of tool calls the model requested, unexecuted.
+        /// One batch of tool calls the model requested, reported before
+        /// dispatch.
         AssistantToolCalls {
             /// The model-turn counter the batch was requested under.
             turn: u32,
@@ -413,10 +411,10 @@ events! {
             /// The sentence the model reads.
             text: String,
         },
-        /// Reserved for a task's own progress note, set through
-        /// `tasks.note`. The note is the text the task's owner reads
-        /// through `task_status`. The Engine does not emit this variant: it
-        /// stores the note on the task's chain without reporting it.
+        /// Reserved for later use, to report a task's own progress note,
+        /// set through `tasks.note`. The Engine stores the note on the
+        /// task's chain, and the task's owner reads it through
+        /// `task_status`.
         TaskNote {
             /// The task that set the note.
             task: TaskId,

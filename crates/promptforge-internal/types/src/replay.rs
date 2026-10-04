@@ -28,22 +28,22 @@ mod tests;
 /// in the run record.
 ///
 /// Each flag is an associated constant `Flags(1 << n)`. Its bit `n` is
-/// assigned once and never reused or renumbered, even after the behavior
-/// the flag gates becomes the only behavior. [`from_bits`](Self::from_bits)
-/// and [`bits`](Self::bits) preserve bits this build does not name, so a
-/// record written by a newer Engine keeps its flags when an older reader
-/// loads it.
+/// assigned once and belongs to that flag permanently, even after the
+/// behavior the flag gates becomes the only behavior.
+/// [`from_bits`](Self::from_bits) and [`bits`](Self::bits) preserve all 32
+/// bits. A record written by a newer Engine keeps every flag when an older
+/// reader loads it, including flags added after that reader was built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 #[serde(transparent)]
 pub struct Flags(u32);
 
 impl Flags {
-    /// The empty set, with no flag set.
+    /// The empty set, with every bit clear.
     pub const EMPTY: Flags = Flags(0);
 
-    /// Returns the set whose bits are exactly `bits`, including bits this
-    /// build does not name.
+    /// Returns the set whose bits are exactly `bits`, including bits for
+    /// flags added in a newer build.
     #[must_use]
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)
@@ -55,7 +55,7 @@ impl Flags {
         self.0
     }
 
-    /// True when no flag is set.
+    /// True when every bit is clear.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0

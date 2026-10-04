@@ -60,7 +60,8 @@ impl ArgDecl {
 
     /// Returns whether a call may omit this arg entirely.
     ///
-    /// An omitted arg is absent, which is not the same as an empty string.
+    /// An omitted arg is absent from the call. An empty string is a supplied
+    /// value.
     #[must_use]
     pub fn is_optional(&self) -> bool {
         self.optional
@@ -133,9 +134,9 @@ impl<'de> Deserialize<'de> for ArgDecl {
 
 /// The args a prompt declares: a map from each arg name to its declaration.
 ///
-/// Every prompt has an args declaration. A prompt whose frontmatter has no
-/// `args` key gets the default declaration: one optional string arg named
-/// `prose`. The input text of such a prompt arrives wrapped as
+/// Every prompt has an args declaration. A prompt whose frontmatter omits
+/// the `args` key gets the default declaration: one optional string arg
+/// named `prose`. The input text of such a prompt arrives wrapped as
 /// `argv = { prose = "<text>" }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -150,11 +151,11 @@ pub struct ArgsDecl {
 
 impl ArgsDecl {
     /// Returns whether this is the default declaration, which a prompt gets
-    /// when its frontmatter has no `args` key.
+    /// when its frontmatter omits the `args` key.
     ///
-    /// The input text of such a prompt arrives wrapped as `argv.prose`. An
-    /// explicit `args` key never yields the default declaration, even when it
-    /// declares the same single `prose` arg.
+    /// The input text of such a prompt arrives wrapped as `argv.prose`. This
+    /// returns `false` for every explicit `args` key, even one that declares
+    /// the same single `prose` arg.
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.implicit
@@ -177,7 +178,7 @@ impl ArgsDecl {
         self.fields.len()
     }
 
-    /// Returns whether no args are declared.
+    /// Returns whether zero args are declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()

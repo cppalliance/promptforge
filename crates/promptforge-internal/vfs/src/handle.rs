@@ -123,8 +123,8 @@ impl VfsRef {
 
     /// Returns a builder for installing mounts.
     ///
-    /// The mounts are fixed when [`VfsRefBuilder::build`] runs. After
-    /// that the mount table never changes, so clones share it cheaply.
+    /// The mount table is fixed when [`VfsRefBuilder::build`] runs, so
+    /// clones share it cheaply.
     #[must_use]
     pub fn builder() -> VfsRefBuilder {
         VfsRefBuilder::new()
@@ -176,10 +176,10 @@ impl VfsRef {
     ///
     /// Every acquire creates a fresh [`ExecId`] and starts a new *scope*.
     /// A scope is the acquired identity together with every identity
-    /// later forked from it. Nothing orders two scopes, so while both
-    /// live, a write in one conflicts with any overlapping read or write
-    /// in the other. A scope's claims are ignored once its last identity
-    /// ends.
+    /// later forked from it. Accesses are ordered only within one scope,
+    /// so while two scopes live, a write in one conflicts with any
+    /// overlapping read or write in the other. A scope's claims are
+    /// ignored once its last identity ends.
     ///
     /// `origin` only labels the operation events this capability fires.
     /// It never decides whether an operation may proceed.
@@ -198,16 +198,15 @@ impl VfsRef {
     /// The store view is an [`Access`] rooted at the declared store root.
     /// Its operations reach only the store's own mount. It is
     /// [`VfsRef::acquire`] followed by switching to the store view, so it
-    /// starts a new scope of its own and never joins a run's scope.
+    /// starts a new scope of its own.
     ///
     /// Paths are relative to the store root and follow strict rules. A
-    /// path must be non-empty, at most 1024 bytes long, and free of
-    /// control characters and backslashes. No segment may be empty, `.`,
-    /// or `..`, end in a dot or a space, or be a reserved device name
-    /// such as `CON`. Error paths come back relative to the store root,
-    /// in the form the caller supplied. So the caller can seed and
-    /// extract store files by the names the prompt uses, without knowing
-    /// where the store is mounted.
+    /// path must be 1 to 1024 bytes long and free of control characters
+    /// and backslashes. No segment may be empty, `.`, or `..`, end in a
+    /// dot or a space, or be a reserved device name such as `CON`. Error
+    /// paths come back relative to the store root, in the form the caller
+    /// supplied. So the caller can seed and extract store files by the
+    /// names the prompt uses, wherever the store is mounted.
     ///
     /// # Errors
     /// Returns [`VfsError::Unsupported`] when the handle declares no

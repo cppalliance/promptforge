@@ -43,8 +43,7 @@ pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
 pub use traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
-/// The default handle is an in-memory store mounted at `/`, with nothing
-/// else mounted.
+/// The default handle has one mount: an in-memory store at `/`.
 ///
 /// The handle is built with [`VfsRefBuilder::store`], which mounts the
 /// memory backend at `/` and declares it the store. Relative paths
@@ -58,8 +57,7 @@ impl Default for VfsRef {
 /// A permission mode that sets which changes the model may make to
 /// storage.
 ///
-/// Reads are allowed in every mode. A mode limits only the operations
-/// that change storage.
+/// Reads are allowed in every mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Every change is refused pending user approval. Reads are allowed.
@@ -80,14 +78,13 @@ pub enum Mode {
 /// A `VfsRef` holds one policy and consults it on every operation,
 /// before it checks for conflicting claims. The mode limits only operations
 /// that change storage: writes, appends, deletes, renames, directory
-/// creation, copies, symbolic links, and permission changes. Reads
-/// always pass.
+/// creation, copies, symbolic links, and permission changes.
 ///
 /// The policy shares its current mode with every [`ModeHandle`] it
 /// returns. The caller keeps a handle and can change the mode mid-run.
-/// The next operation sees the new mode, and nothing else has to be
-/// notified. Whether a mode change can be undone depends only on
-/// whether anyone still holds a handle.
+/// The change reaches the next operation through the shared mode alone.
+/// Whether a mode change can be undone depends only on whether anyone
+/// still holds a handle.
 #[derive(Debug)]
 pub struct ModePolicy {
     mode: Arc<Mutex<Mode>>,

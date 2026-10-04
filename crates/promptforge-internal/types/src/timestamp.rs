@@ -49,8 +49,8 @@ impl Timestamp {
     /// The fractional second is omitted when the instant falls on a whole
     /// second. Otherwise it drops its trailing zeros (`.78`, `.7`). This
     /// matches the `time` crate's rendering. Years outside `0000..=9999`
-    /// render with more digits or a sign, so the result is not valid
-    /// RFC 3339 for them.
+    /// render with more digits or a sign, so the result is valid RFC 3339
+    /// only within that range.
     #[must_use]
     pub fn to_rfc3339(self) -> String {
         const MILLIS_PER_DAY: i64 = 86_400_000;

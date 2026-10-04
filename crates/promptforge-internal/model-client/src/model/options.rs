@@ -11,17 +11,17 @@ const TEMPERATURE_MAX: f64 = 2.0;
 
 /// A validated sampling temperature: finite and within `[0.0, 2.0]`.
 ///
-/// A temperature enters a request only as a `Temperature`. A `NaN`, an
-/// infinity, or an out-of-range value therefore never reaches the backend.
+/// A temperature enters a request only as a `Temperature`, so the backend
+/// receives only valid temperatures.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Temperature(f64);
 
 impl Temperature {
-    /// Builds a temperature, rejecting non-finite and out-of-range values.
+    /// Builds a temperature from a finite `value` within `[0.0, 2.0]`.
     ///
     /// # Errors
-    /// Returns [`TemperatureError`] when `value` is not finite or falls outside
-    /// `[0.0, 2.0]`.
+    /// Returns [`TemperatureError`] when `value` is `NaN` or an infinity, or
+    /// falls outside `[0.0, 2.0]`.
     pub fn new(value: f64) -> std::result::Result<Temperature, TemperatureError> {
         if !value.is_finite() {
             return Err(TemperatureError::NotFinite);
@@ -69,13 +69,13 @@ pub struct ModelInvocation {
     /// The sampling temperature, when the binding's builder or a `models.use`
     /// option set one.
     ///
-    /// It is a validated [`Temperature`], so a non-finite or out-of-range
-    /// value can never reach the binding or the request.
+    /// It is a validated [`Temperature`], so the binding and the request carry
+    /// only finite values within `[0.0, 2.0]`.
     pub temperature: Option<Temperature>,
     /// The maximum number of tokens to generate, when the binding's builder or
     /// a `models.use` option set a cap.
     ///
-    /// The cap is never zero, because a zero cap would forbid all output.
+    /// The cap is at least one, so it always allows some output.
     /// `models.use` rejects a zero cap when it is called.
     pub max_tokens: Option<NonZeroU32>,
     /// The thinking switch, sent as `chat_template_kwargs.enable_thinking`,
@@ -101,8 +101,8 @@ pub struct ModelBinding {
 impl ModelBinding {
     /// Builds a binding from every part a resolved model requires.
     ///
-    /// The non-zero `context` window is a required argument, so a binding is
-    /// always complete once built.
+    /// The `context` window is a required argument of at least one token, so a
+    /// binding is always complete once built.
     #[must_use]
     pub fn new(
         alias: impl Into<String>,
@@ -166,7 +166,7 @@ impl ModelBinding {
         &self.invocation
     }
 
-    /// Returns the catalog context window size in tokens (always non-zero).
+    /// Returns the catalog context window size in tokens (always at least one).
     #[must_use]
     pub fn context(&self) -> NonZeroU32 {
         self.context
@@ -206,8 +206,8 @@ pub struct CompletionOptions {
 // honor, breaking every `Eq`/`Hash` consumer's contract.
 
 impl CompletionOptions {
-    /// Builds options for `model` with no temperature, token cap, or thinking
-    /// switch.
+    /// Builds options for `model`, with the temperature, token cap, and
+    /// thinking switch set to `None`.
     #[must_use]
     pub fn new(model: impl Into<String>) -> CompletionOptions {
         CompletionOptions {
@@ -222,8 +222,8 @@ impl CompletionOptions {
     /// the backend-supported range `[0.0, 2.0]`.
     ///
     /// # Errors
-    /// Returns [`TemperatureError`] when `temperature` is not finite or falls
-    /// outside `[0.0, 2.0]`, so an invalid temperature is never sent.
+    /// Returns [`TemperatureError`] when `temperature` is `NaN` or an infinity,
+    /// or falls outside `[0.0, 2.0]`, so only a valid temperature is sent.
     pub fn with_temperature(
         mut self,
         temperature: f64,
@@ -234,8 +234,7 @@ impl CompletionOptions {
 
     /// Sets the maximum number of tokens to generate.
     ///
-    /// The cap is a [`NonZeroU32`] because a zero cap would forbid all
-    /// output.
+    /// The cap is a [`NonZeroU32`], so it always allows some output.
     #[must_use]
     pub fn with_max_tokens(mut self, max_tokens: NonZeroU32) -> CompletionOptions {
         self.max_tokens = Some(max_tokens);
@@ -252,8 +251,8 @@ impl CompletionOptions {
     /// Replaces the model name sent in the request and keeps every other
     /// setting.
     ///
-    /// When the caller serves a request with a model other than the bound
-    /// one, it sets the substitute's name here so the request names it.
+    /// When the caller serves a request with a substitute for the bound model,
+    /// it sets the substitute's name here so the request names it.
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> CompletionOptions {
         self.model = model.into();

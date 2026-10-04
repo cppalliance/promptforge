@@ -5,9 +5,8 @@ use std::time::SystemTime;
 
 /// The kind of node at a path, one of the seven POSIX file kinds.
 ///
-/// Every kind has its own variant. There is no catch-all variant, so a
-/// backend that serves a special node, such as a virtual `/dev/null`, can
-/// report it as a `CharDevice`.
+/// Every kind has its own variant, so a backend that serves a special
+/// node, such as a virtual `/dev/null`, can report it as a `CharDevice`.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileType {
@@ -29,10 +28,9 @@ pub enum FileType {
 
 /// Metadata for one path.
 ///
-/// A backend that does not track an optional field leaves it `None`
-/// instead of inventing a value. An invented modification time would be
-/// nondeterministic, and a constant one would make a sort by time, such
-/// as `ls -t`, meaningless.
+/// A backend fills an optional field only with a value it tracks, and
+/// leaves it `None` otherwise, so that a reported time stays
+/// deterministic and a sort by time, such as `ls -t`, stays meaningful.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Stat {

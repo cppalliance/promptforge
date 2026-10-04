@@ -28,10 +28,9 @@ nz!(nz_usize, NonZeroUsize, usize);
 /// response size, Lua memory, Lua log volume, and how long a model request
 /// waits for its response.
 ///
-/// The defaults are safe to use as they are and do not come from
-/// environment variables. A prompt's frontmatter `max_tool_iterations`
-/// field, when present, overrides [`RunLimits::max_tool_iterations`] for
-/// that prompt.
+/// The defaults are built-in constants and are safe to use as they are. A
+/// prompt's frontmatter `max_tool_iterations` field, when present, overrides
+/// [`RunLimits::max_tool_iterations`] for that prompt.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct RunLimits {
@@ -109,8 +108,8 @@ impl RunLimits {
     /// response.
     ///
     /// The request waits first for the response headers, then for each body
-    /// chunk. Each arrival restarts the wait, so a long stream that keeps
-    /// arriving is never cut off.
+    /// chunk. Each arrival restarts the wait, so a long stream runs for as
+    /// long as its parts keep arriving.
     #[must_use]
     pub fn request_timeout(mut self, value: Duration) -> RunLimits {
         self.request_timeout = value;

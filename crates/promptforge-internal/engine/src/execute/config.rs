@@ -24,13 +24,13 @@ use super::bindings::{ModelBindings, ToolBindings};
 /// The caller builds a context with `new` and the builder methods. The
 /// prepare step of an [`Environment`](super::Environment) then adds the
 /// tool catalog, the capability preludes, and the model and tool
-/// bindings. The Engine owns the context for the run. A context is never
-/// shared between runs.
+/// bindings. The Engine owns the context for the run. Each context
+/// belongs to exactly one run.
 ///
-/// The context holds only the Engine's input. It holds no observer,
-/// client, tool implementation, broker, or capture. Those belong to the
-/// caller. The Engine reports events and issues effects as values, and
-/// returns each one to the caller from `step`.
+/// The context holds only the Engine's input. The observer, client, tool
+/// implementations, broker, and capture belong to the caller. The Engine
+/// reports events and issues effects as values, and returns each one to
+/// the caller from `step`.
 ///
 /// The caller supplies the run's clock and randomness: it passes the
 /// run's `seed` and `started_at` to [`new`](RunContext::new), and both
@@ -117,9 +117,10 @@ impl RunContext {
     /// Builds a context for a run named `name`, with the given `seed` and
     /// `started_at`.
     ///
-    /// The new context has a fresh cancel flag, no `ui` snapshot, no debug
-    /// reporting, default [`RunLimits`], empty [`Flags`], and the default
-    /// filesystem, which is a fresh memory store at `/`.
+    /// The new context has a fresh cancel flag, a `ui` snapshot of `None`,
+    /// debug reporting set to `DebugMode::Off`, default [`RunLimits`], empty
+    /// [`Flags`], and the default filesystem, which is a fresh memory store
+    /// at `/`.
     ///
     /// `seed` is the source of the untrusted-envelope nonce. For a live
     /// run, the caller must draw it from a CSPRNG, because a predictable
@@ -151,9 +152,9 @@ impl RunContext {
     /// Sets whether the run reports each model round's raw request and
     /// response bodies as `Request` and `Response` events.
     ///
-    /// The default, [`DebugMode::Off`], reports neither. A caller that wants
-    /// the pair in the event stream, such as for a debug capture, passes
-    /// [`DebugMode::On`].
+    /// The default, [`DebugMode::Off`], turns both events off. A caller that
+    /// wants the pair in the event stream, such as for a debug capture,
+    /// passes [`DebugMode::On`].
     #[must_use]
     pub fn report_debug(mut self, mode: DebugMode) -> RunContext {
         self.report_debug = mode;
@@ -187,11 +188,11 @@ impl RunContext {
     /// With a snapshot set, every section VM gets a `ui()` global that
     /// returns it. The caller takes the snapshot at run start, so a change
     /// to application state takes effect on the next run. A snapshot also
-    /// makes `models.get` resolve an undeclared alias as a raw model id, so
-    /// a prompt can run
-    /// `models.loop(models.get(ui().selected_model), ...)` without
-    /// declaring its model. The default, `None`, installs no `ui` global
-    /// and keeps strict declared-alias resolution.
+    /// makes `models.get` resolve an alias outside the prompt's declarations
+    /// as a raw model id. So a prompt can run
+    /// `models.loop(models.get(ui().selected_model), ...)` and skip
+    /// declaring its model. The default is `None`, which leaves the `ui`
+    /// global absent and limits `models.get` to declared aliases.
     #[must_use]
     pub fn ui(mut self, snapshot: serde_json::Value) -> RunContext {
         self.ui = Some(snapshot);
@@ -215,7 +216,7 @@ impl RunContext {
     /// passes their count. `Prompt::parse` stamps those events under task
     /// `0`, counting from zero, so this start moves the run's root counter
     /// past them and every `(task, seq)` in the stream stays unique.
-    /// Spawned tasks are unaffected and count from zero.
+    /// Spawned tasks count from zero.
     #[must_use]
     pub fn provenance_start(mut self, start: u32) -> RunContext {
         self.provenance_start = start;
@@ -227,8 +228,8 @@ impl RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function binds every declared role to this model. It also checks
     /// each role's hard keywords and context minimum against the model's
-    /// descriptor. With the default, `None`, declared roles stay unbound
-    /// and selecting one at run time fails.
+    /// descriptor. With the default, `None`, the model bindings stay empty,
+    /// and selecting a declared role at run time fails.
     #[must_use]
     pub fn model(mut self, model: ModelDescriptor) -> RunContext {
         self.model = Some(model);
@@ -241,11 +242,11 @@ impl RunContext {
     /// that every section's `store` table operates on. The default is a
     /// fresh memory store at `/`.
     ///
-    /// [`Environment::prepare`](super::Environment::prepare) uses a handle
-    /// set here as given and never replaces it. So a caller that activates
-    /// capabilities builds the run's handle first, then passes it both to
-    /// the services that capability activation receives and to this
-    /// builder. The capabilities and the run then share one filesystem.
+    /// [`Environment::prepare`](super::Environment::prepare) keeps a handle
+    /// set here as given. So a caller that activates capabilities builds
+    /// the run's handle first, then passes it both to the services that
+    /// capability activation receives and to this builder. The
+    /// capabilities and the run then share one filesystem.
     /// The caller seeds files before the run and extracts output after it
     /// through the prepared handle, returned by
     /// [`vfs_handle`](RunContext::vfs_handle).
@@ -266,7 +267,7 @@ impl RunContext {
         &self.vfs
     }
 
-    /// Returns the run's current model, or `None` when none was set.
+    /// Returns the run's current model, or `None` by default.
     #[must_use]
     pub fn current_model(&self) -> Option<&ModelDescriptor> {
         self.model.as_ref()
@@ -298,8 +299,8 @@ impl RunContext {
     ///
     /// [`Environment::prepare`](super::Environment::prepare) writes the
     /// catalog from the activated capabilities' contributions, in
-    /// declaration order. The catalog is empty on a caller-built context
-    /// that was never prepared.
+    /// declaration order. On a caller-built context, the catalog is empty
+    /// until prepare runs.
     #[must_use]
     pub fn tools(&self) -> &ToolCatalog {
         &self.tools
@@ -310,8 +311,8 @@ impl RunContext {
     ///
     /// [`Environment::prepare`](super::Environment::prepare)'s slot fill
     /// writes the bindings and records every fill. A lookup goes from an
-    /// alias to a tool id, and from the id to the tool's descriptor. The
-    /// bindings are empty on a caller-built context that was never prepared.
+    /// alias to a tool id, and from the id to the tool's descriptor. On a
+    /// caller-built context, the bindings are empty until prepare runs.
     #[must_use]
     pub fn tool_bindings(&self) -> &ToolBindings {
         &self.tool_bindings

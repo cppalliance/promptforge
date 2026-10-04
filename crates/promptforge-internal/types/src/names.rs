@@ -19,9 +19,8 @@ mod tests;
 /// capability (`namespace/pack`). Three segments name a tool
 /// (`namespace/pack/name`).
 ///
-/// Every value comes from [`GlobalName::parse`], so it always has 2 or 3
-/// non-empty segments made of lowercase ASCII letters, digits, `-`, `_`, and
-/// `.`.
+/// Every value comes from [`GlobalName::parse`], so each segment always
+/// consists of one or more lowercase ASCII letters, digits, `-`, `_`, and `.`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalName {
     /// The `/`-separated segments: exactly 2 (capability) or 3 (tool).
@@ -32,14 +31,14 @@ impl GlobalName {
     /// Parses a string into a global name.
     ///
     /// The string must have 2 or 3 segments separated by `/`. Each segment must
-    /// be non-empty and use only lowercase ASCII letters, digits, `-`, `_`, and
+    /// consist of one or more lowercase ASCII letters, digits, `-`, `_`, and
     /// `.`.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalNameError`] when:
     ///
-    /// - the name does not have exactly 2 or 3 segments
+    /// - the name has fewer than 2 or more than 3 segments
     ///   ([`GlobalNameErrorKind::SegmentCount`]);
     /// - a segment is empty ([`GlobalNameErrorKind::Empty`]);
     /// - a segment contains any other character
@@ -62,9 +61,9 @@ impl GlobalName {
 
     /// Returns the namespace, which is the first segment.
     ///
-    /// A namespace is meant to be a reverse-DNS name such as
+    /// By convention, a namespace is a reverse-DNS name such as
     /// `org.rustalliance`, or `promptforge` for first-party names.
-    /// `GlobalName::parse` does not check this.
+    /// `GlobalName::parse` accepts any valid segment as the namespace.
     #[must_use]
     pub fn namespace(&self) -> &str {
         &self.segments[0]
@@ -136,7 +135,7 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GlobalNameErrorKind {
-    /// The name did not have exactly 2 or 3 segments.
+    /// The name had fewer than 2 or more than 3 segments.
     SegmentCount,
     /// A segment was empty.
     Empty,
@@ -148,7 +147,7 @@ pub enum GlobalNameErrorKind {
     Control,
 }
 
-/// The reason a [`GlobalName`] could not be parsed.
+/// The error returned when a [`GlobalName`] fails to parse.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid global name: {reason}")]
 #[non_exhaustive]

@@ -51,7 +51,7 @@ pub enum Step {
     /// Carries the run's result and its last events. A step returns `Done`
     /// only after every issued effect has been answered. The event that
     /// marks the run's end comes with `Done`, or with an earlier `Pending`
-    /// step when effects were still unanswered as the run ended.
+    /// step when effects were still outstanding as the run ended.
     Done {
         /// The run's outcome.
         result: RunResult,
@@ -89,13 +89,13 @@ impl Run {
     /// Builds a run of `prompt` with the arguments `args` and the context
     /// `ctx`.
     ///
-    /// A context that never passed through
-    /// [`Environment::prepare`](super::Environment::prepare) runs with no
-    /// capabilities: its tool and model sets are empty.
+    /// A context that skipped
+    /// [`Environment::prepare`](super::Environment::prepare) runs with empty
+    /// tool and model sets.
     ///
-    /// A run that cannot start is still built, and its first `step`
-    /// returns `Done` with the failure. A run cannot start when the prompt
-    /// has no supported `promptforge:` version, when the context's
+    /// A run that fails to start is still built, and its first `step`
+    /// returns `Done` with the failure. A run fails to start when the
+    /// prompt has no supported `promptforge:` version, when the context's
     /// filesystem declares no store, or when the store's backend fails its
     /// probe.
     #[expect(
@@ -163,8 +163,8 @@ impl Run {
     ///
     /// The chain waiting on the effect resumes with the answer at the next
     /// `step`. For [`EffectAnswer::Dropped`], it resumes with a
-    /// cancellation error instead. Any events the answer produces are
-    /// reported by that next step.
+    /// cancellation error. Any events the answer produces are reported by
+    /// that next step.
     ///
     /// Each answer must match the kind of its effect: a chat answer for a
     /// `Chat` effect, a tool answer for a `ToolCall` effect, and so on. A
@@ -203,11 +203,11 @@ impl Run {
     /// Returns whether the run's outcome is decided.
     ///
     /// The outcome is decided once the run has reported its end event, or
-    /// when the run never started. Any effect still unanswered at that
-    /// point is an orphan: no chain waits on it, and only `Done` waits for
-    /// its answer. The caller can read this after a `Pending` step to learn
-    /// that it may drop what it holds for the run. This keeps control flow
-    /// independent of the events, which are a report and not a decision.
+    /// when the run failed to start. Any effect still outstanding at that
+    /// point is an orphan: only `Done` waits for its answer. The caller can
+    /// read this after a `Pending` step to learn that it may drop what it
+    /// holds for the run. This keeps control flow independent of the
+    /// events, which are only a report.
     #[must_use]
     pub fn decided(&self) -> bool {
         self.scheduler.as_ref().is_none_or(Scheduler::decided)

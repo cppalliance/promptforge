@@ -240,17 +240,17 @@ impl Request {
 ///
 /// The Engine checks the arguments once, when it parses the call.
 ///
-/// This type is not `vfs::Op`. That type names only the kind of file
-/// operation (`Read`, `Write`, `Rename`, and so on, with no path or
-/// contents), which a policy matches on and a watcher is told about. This
-/// type carries the full arguments of one of the eight `store.*` calls.
+/// This type carries the full arguments of one of the eight `store.*`
+/// calls. The separate `vfs::Op` names only the kind of file operation
+/// (`Read`, `Write`, `Rename`, and so on), which a policy matches on and a
+/// watcher is told about.
 ///
 /// The read bounds are `i64`. A negative bound converts to 0 when the
 /// operation runs, so the range check rejects it with the same error a
 /// zero bound produces.
 ///
 /// The type holds only plain data, so an effect record can carry an
-/// operation through serde unchanged.
+/// operation through serde intact.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum VfsOp {
@@ -272,8 +272,8 @@ pub enum VfsOp {
     },
     /// `store.read(path, start?, end?)`: reads the file at `path` as text.
     ///
-    /// With neither bound, it reads the whole file. With `start`, it reads
-    /// a 1-based inclusive line range. An `end` without a `start` is an
+    /// With both bounds omitted, it reads the whole file. With `start`, it
+    /// reads a 1-based inclusive line range. An `end` given alone is an
     /// error.
     Read {
         /// The author-supplied logical path.
@@ -305,7 +305,7 @@ pub enum VfsOp {
         new: String,
     },
     /// `store.delete(path)`: deletes the file at `path`. Deleting a missing
-    /// path is not an error.
+    /// path succeeds.
     Delete {
         /// The author-supplied logical path.
         path: String,

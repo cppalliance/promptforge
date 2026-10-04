@@ -190,8 +190,8 @@ impl CapabilityDecl {
 
     /// Returns whether the capability is optional.
     ///
-    /// When an optional capability is absent, preparation skips it and logs
-    /// a line instead of failing.
+    /// When an optional capability is absent, preparation logs a line, skips
+    /// it, and continues.
     #[must_use]
     pub fn is_optional(&self) -> bool {
         self.optional
@@ -327,8 +327,7 @@ impl Visitor<'_> for ToolSlotVisitor {
 /// alias.
 ///
 /// An alias is a prompt-local name: a letter followed by up to 63 letters,
-/// digits, underscores, or hyphens. The model only ever sees the alias,
-/// never the global tool path.
+/// digits, underscores, or hyphens. The model sees only the alias.
 ///
 /// Parsing rejects the key `open`, which is reserved. Each alias is
 /// installed as a global of the same name in the section's Lua VM. For that
@@ -362,7 +361,7 @@ impl ToolSlots {
         self.slots.len()
     }
 
-    /// Returns whether no slots are declared.
+    /// Returns whether the set of declared slots is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()

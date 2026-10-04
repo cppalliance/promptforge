@@ -9,23 +9,24 @@ use crate::Error;
 ///
 /// Each variant names the phase of the run that failed. The enum is
 /// `#[non_exhaustive]`, so a `match` on it needs a wildcard arm. That lets
-/// new kinds be added without breaking callers.
+/// new kinds be added while existing callers keep compiling.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RunErrorKind {
-    /// The prompt could not be parsed or a compiled Lua region was invalid.
+    /// Parsing the prompt failed, or a compiled Lua region was invalid.
     Parse,
-    /// The prompt declared a `promptforge:` major version that this build
-    /// does not support.
+    /// The prompt declared a `promptforge:` major version outside the set
+    /// this build supports.
     Version,
-    /// A tool or model capability could not be bound or was absent.
+    /// Binding a tool or model capability failed, or the capability was
+    /// absent.
     Binding,
     /// A model completion failed at the transport, backend, or decode layer.
     Completion,
-    /// A dispatched tool failed or was unknown, or the tool-call loop reached
-    /// its iteration cap without a final reply.
+    /// A tool call failed or named an alias outside its scope, or the
+    /// tool-call loop reached its iteration cap before a final reply.
     Tool,
-    /// A run-scoped store operation failed, or the run has no store to
+    /// A run-scoped store operation failed, or the run lacks a store to
     /// operate on.
     Vfs,
     /// Two live executions in the run claimed the same store path.
@@ -39,15 +40,15 @@ pub enum RunErrorKind {
     /// exhausted.
     Quota,
     /// The request overflowed the model's context window, and the selected
-    /// compactor did not make room.
+    /// compactor left it over the limit.
     ContextExhausted,
     /// A `{{ }}` prose substitution failed.
     Substitution,
     /// The caller cancelled the run.
     Cancelled,
-    /// An unexpected internal invariant failure.
+    /// An internal invariant failed.
     Internal,
-    /// The environment cannot satisfy a requirement the prompt states, such
+    /// The environment falls short of a requirement the prompt states, such
     /// as an H1 assertion or a model requirement.
     RequirementsUnmet,
 }
@@ -77,11 +78,11 @@ pub struct SourceLocation {
     /// The byte span of the offending region, when known.
     ///
     /// Only parse failures can have a span, and a frontmatter YAML failure
-    /// never has one. The offsets index the document body, which excludes
-    /// the frontmatter and any leading BOM and has CRLF line endings
-    /// normalized to LF. So they do not index the original source. Use
-    /// [`line`](SourceLocation::line) and [`column`](SourceLocation::column)
-    /// to locate the failure in the original file.
+    /// always has `None`. The offsets index the document body, which
+    /// excludes the frontmatter and any leading BOM and has CRLF line endings
+    /// normalized to LF. Use [`line`](SourceLocation::line) and
+    /// [`column`](SourceLocation::column) to locate the failure in the
+    /// original file.
     pub span: Option<Range<usize>>,
 }
 
@@ -162,8 +163,8 @@ impl RunError {
     /// and the placeholder `<prompt>` otherwise. The line and column come
     /// from the YAML error for a frontmatter failure, or from the span for
     /// any other parse failure. A failure of kind `Internal` returns the Rust
-    /// source file and line of the broken invariant. Failures of other kinds
-    /// have no source position and return `None`.
+    /// source file and line of the broken invariant. Failures of every other
+    /// kind return `None`.
     #[must_use]
     pub fn location(&self) -> Option<SourceLocation> {
         match &self.inner {

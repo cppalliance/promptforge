@@ -75,8 +75,8 @@ use promptforge_lua::{VfsOp, VfsOutcome};
 /// chain's capability when the effect is dispatched. Each [`VfsOp`] maps
 /// onto one `Access` call on that view, so the caller answers a `Vfs`
 /// effect exactly as the Engine's own test drivers do. Line bounds arrive
-/// as `i64` and convert to `usize`. A read with an `end` but no `start` is
-/// refused as an invalid range.
+/// as `i64` and convert to `usize`. A read that gives an `end` and omits
+/// `start` is refused as an invalid range.
 ///
 /// The function is synchronous because the store is synchronous by
 /// design. The caller can run it inline, on the thread that runs its
@@ -96,9 +96,9 @@ pub fn perform_vfs_op(
 
 /// The outcome of a run, which the caller reads out of [`Step::Done`].
 ///
-/// Every outcome is a value of this enum, not a thrown error. That
-/// includes a prompt that declines its task. The variant tells code what
-/// happened, and the payload explains it to people and models.
+/// Every outcome is a value of this enum. That includes a prompt that
+/// declines its task. The variant tells code what happened, and the
+/// payload explains it to people and models.
 ///
 /// # Outcomes
 /// - [`RunResult::Ok`] - the run completed with its final text.
@@ -111,12 +111,12 @@ pub fn perform_vfs_op(
 ///   Lua region was invalid.
 /// - [`RunErrorKind::Version`] - the prompt declared an unsupported
 ///   `promptforge:` major version.
-/// - [`RunErrorKind::Binding`] - a tool or model capability could not be
-///   bound or was absent.
+/// - [`RunErrorKind::Binding`] - a tool or model capability failed to bind
+///   or was missing.
 /// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
 ///   backend, or decode layer.
 /// - [`RunErrorKind::Tool`] - a dispatched tool failed, was out of scope, or the
-///   tool loop did not converge.
+///   tool loop failed to converge.
 /// - [`RunErrorKind::Lua`] - a section's Lua phase failed to run or return a
 ///   usable value.
 /// - [`RunErrorKind::Quota`] - a Lua resource quota (log events, log bytes,
@@ -125,7 +125,7 @@ pub fn perform_vfs_op(
 ///   model's context window.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Vfs`] - a run-scoped store operation failed, or the
-///   run's handle declares no store.
+///   run's handle lacks a store declaration.
 /// - [`RunErrorKind::Determinism`] - two live execution identities claimed
 ///   one store path. The run ended on the spot, and Lua code cannot catch
 ///   this failure.
@@ -134,9 +134,9 @@ pub fn perform_vfs_op(
 ///   itself ends in [`RunResult::Cancelled`].
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 /// - [`RunErrorKind::RequirementsUnmet`] - a missing required capability,
-///   a service the caller did not supply, a capability conflict, an unmet
-///   model requirement (a context minimum or a hard keyword), or an H1
-///   block that failed the prompt's hard gate.
+///   a service the caller left out, a capability conflict, a model
+///   requirement a bound model fails to meet (a context minimum or a hard
+///   keyword), or an H1 block that failed the prompt's hard gate.
 #[derive(Debug)]
 pub enum RunResult {
     /// The run completed with its final text. The name matches

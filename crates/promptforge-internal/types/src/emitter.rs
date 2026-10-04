@@ -45,8 +45,8 @@ mod tests;
 /// wants them in the event stream selects `On`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugMode {
-    /// The model rounds emit no `Request` or `Response` events and never
-    /// clone a body.
+    /// The model rounds skip the `Request` and `Response` events and
+    /// the body clones those events need.
     #[default]
     Off,
     /// Every model round emits its raw request and response bodies.

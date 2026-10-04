@@ -176,13 +176,12 @@ impl Prompt {
         self.sections.first()
     }
 
-    /// Removes the prose under the prompt's H1 heading, keeping only its Lua
-    /// blocks.
+    /// Removes every prose block under the prompt's H1 heading, keeping only
+    /// its compiled Lua blocks.
     ///
-    /// Every prose block under the H1 is dropped, and the description text
-    /// taken from that prose is cleared. The H1's compiled Lua blocks and the
-    /// rest of the prompt tree stay unchanged. Use this to run the H1's Lua
-    /// without sending any of its prose to a model.
+    /// The description text taken from that prose is cleared too. The rest of
+    /// the prompt tree stays as it is. Use this to run the H1's Lua while
+    /// withholding its prose from a model.
     pub fn strip_h1_prose(&mut self) {
         self.h1_blocks
             .retain(|block| matches!(block, Block::Lua(_)));

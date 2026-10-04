@@ -38,7 +38,7 @@ use crate::execute::protocol::{VfsOp, VfsOutcome};
 /// [`Effect`] with its [`EffectAnswer`].
 ///
 /// The id is opaque. The run allocates it from a run-wide counter, so the
-/// same effect need not get the same id in another run.
+/// same effect may get a different id in another run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EffectId(pub(crate) u64);
 
@@ -81,22 +81,21 @@ pub struct Round {
 pub enum Effect {
     /// One model round: send `messages` to the model with `tools`
     /// advertised, using the frozen `options` built from `binding`. A
-    /// nested `models.infer` round sends one user message, advertises no
-    /// tools, and has no live deltas.
+    /// nested `models.infer` round sends one user message with an empty
+    /// tool list, and the Engine consumes only its completed reply.
     Chat {
         /// The binding the round runs under.
         binding: ModelBinding,
         /// The conversation to send, in wire order.
         messages: Vec<Message>,
-        /// The tool schemas advertised to the model for this round. An
-        /// empty list advertises no tools.
+        /// The tool schemas advertised to the model for this round.
         tools: Vec<ToolSchema>,
         /// The per-request completion options, built from `binding`.
         options: CompletionOptions,
         /// The round's id and origin. The caller needs to forward live
         /// deltas only for a round whose origin is [`ReplyOrigin::Chat`].
-        /// The effect's record keeps the id but not the origin, because
-        /// the origin does not change the request sent to the model.
+        /// The effect's record keeps the id and drops the origin, because
+        /// the request sent to the model is the same for either origin.
         round: Round,
     },
     /// One call to a bound tool. The caller resolves `tool`, the tool's
@@ -119,13 +118,13 @@ pub enum Effect {
     ///
     /// `access` is an ordinary access that the Engine derives from the
     /// chain's capability at dispatch. It is rooted at the store declared
-    /// by the handle that the chain's access came from. Other code that
-    /// touches the VFS, such as a tool or the application reading files,
-    /// does not produce this effect.
+    /// by the handle that the chain's access came from. Only the `store.*`
+    /// calls produce this effect. A tool or the application reading files
+    /// reaches the VFS by its own route.
     ///
     /// The caller must use the access exactly as given and within the
-    /// scope it carries. When the caller drops the access never matters
-    /// for correctness. Store claims follow happens-before order within the
+    /// scope it carries. Correctness holds whenever the caller drops the
+    /// access. Store claims follow happens-before order within the
     /// run's scope. The run ends that scope at `Done` or when the run is
     /// dropped, and after that the view refuses every operation.
     Vfs {
@@ -138,7 +137,7 @@ pub enum Effect {
     /// One sleep of `seconds` seconds, which the Engine uses as the
     /// timeout behind a timed wait.
     Timer {
-        /// The duration in seconds, non-negative and finite.
+        /// The duration in seconds, finite and zero or greater.
         seconds: f64,
     },
 }
@@ -152,8 +151,8 @@ fn wire_value<T: Serialize>(value: &T) -> Value {
 }
 
 impl Effect {
-    /// Returns the effect's record: the same request without its live
-    /// handles, in a form that a run log stores and a replay compares.
+    /// Returns the effect's record: the same request with its live handles
+    /// removed, in a form that a run log stores and a replay compares.
     #[must_use]
     pub fn record(&self) -> EffectRecord {
         match self {
@@ -195,16 +194,15 @@ impl Effect {
     }
 }
 
-/// An [`Effect`] without its live handles, as a run log stores it. A
+/// An [`Effect`] with its live handles removed, as a run log stores it. A
 /// replay compares each re-issued effect against its record.
 ///
 /// The `Chat` record keeps only what identifies the round: its id, the
 /// alias of the model slot it ran under, and the frozen invocation
 /// settings (temperature, generation cap, and thinking switch). It stores
-/// the messages in their wire form. It names the slot by alias rather than
-/// by the bound model, because the caller may serve the slot with another
-/// model. The answer's [`ChatAnswerRecord`] names the model that served
-/// the round.
+/// the messages in their wire form. It names the slot by alias, because the
+/// caller may serve the slot with a different model from the bound one.
+/// The answer's [`ChatAnswerRecord`] names the model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectRecord {
     /// One model round.
@@ -291,7 +289,7 @@ pub enum EffectAnswer {
     Vfs(std::result::Result<VfsOutcome, VfsError>),
     /// The timer fired.
     Timer,
-    /// The caller dropped the effect without performing it, for example
+    /// The caller gave up on the effect and dropped it, for example
     /// because the run was cancelled or the effect's task ended first. If
     /// the chain still waits on the effect, it resumes with a cancelled
     /// error. A drop is an answer like any other, so it counts as the
@@ -300,11 +298,11 @@ pub enum EffectAnswer {
 }
 
 impl EffectAnswer {
-    /// Returns the answer's record: its outcome without the parts a log
-    /// cannot hold whole. A failure is recorded as its display text. A
-    /// completion is recorded as its reply or its requested tool names.
-    /// The round's request and response bodies travel as debug events
-    /// instead, and its metrics travel in the turn's event.
+    /// Returns the answer's record: the parts of its outcome that a log can
+    /// hold whole. A failure is recorded as its display text. A completion
+    /// is recorded as its reply or its requested tool names. The round's
+    /// request and response bodies travel as debug events, and its metrics
+    /// travel in the turn's event.
     #[must_use]
     pub fn record(&self) -> AnswerRecord {
         match self {
@@ -343,12 +341,13 @@ pub enum AnswerRecord {
     Vfs(std::result::Result<VfsOutcome, String>),
     /// The timer fired.
     Timer,
-    /// The caller dropped the effect without performing it.
+    /// The caller gave up on the effect and dropped it.
     Dropped,
 }
 
 /// A completed model round as the log records it: what identifies the
-/// answer without the request and response bodies.
+/// answer. The round's request and response bodies travel separately, as
+/// debug events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatAnswerRecord {
     /// The model that served the round, as the completion names it.

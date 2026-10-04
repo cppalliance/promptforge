@@ -35,7 +35,7 @@ impl ModelId {
     ///
     /// # Errors
     /// Returns [`ModelIdError`] if `server` or `name` is empty or contains a
-    /// control character, so an unusable identity is unrepresentable.
+    /// control character, so every `ModelId` is usable.
     pub fn new(
         server: impl Into<String>,
         name: impl Into<String>,
@@ -101,7 +101,7 @@ impl ModelId {
     }
 }
 
-/// The reason a [`ModelId`] could not be built from its components.
+/// The reason building a [`ModelId`] from its components failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid model id: {field} {reason}")]
 #[non_exhaustive]
@@ -112,7 +112,7 @@ pub struct ModelIdError {
     reason: &'static str,
 }
 
-/// The reason a [`ModelCatalog`] could not be built from its descriptors.
+/// The reason building a [`ModelCatalog`] from its descriptors failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ModelCatalogError {
@@ -133,7 +133,7 @@ pub enum ModelCatalogError {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum ThinkingMode {
-    /// The backend never emits thinking tokens.
+    /// The backend always runs with thinking off.
     Never,
     /// The backend always emits thinking tokens.
     Always,
@@ -155,8 +155,8 @@ pub struct ModelDescriptor {
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
     ///
-    /// The context window is a [`NonZeroU32`], so a zero-token window is
-    /// unrepresentable.
+    /// The context window is a [`NonZeroU32`], so it always holds at least
+    /// one token.
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -199,9 +199,8 @@ impl ModelDescriptor {
 
 /// A list of available models, each with a distinct identity.
 ///
-/// No two descriptors in a catalog share a `ModelId`.
-/// [`ModelCatalog::new`] rejects duplicates, and [`ModelCatalog::empty`]
-/// holds no models.
+/// [`ModelCatalog::new`] rejects a repeated `ModelId`, and
+/// [`ModelCatalog::empty`] returns an empty catalog.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelCatalog {
@@ -214,7 +213,8 @@ impl ModelCatalog {
     ///
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
-    /// stable [`ModelId`], so an ambiguous catalog is unrepresentable.
+    /// stable [`ModelId`], so each identity in the catalog names exactly one
+    /// descriptor.
     pub fn new(
         models: impl IntoIterator<Item = ModelDescriptor>,
     ) -> std::result::Result<ModelCatalog, ModelCatalogError> {
@@ -230,7 +230,7 @@ impl ModelCatalog {
         Ok(Self { models })
     }
 
-    /// Returns a catalog with no models.
+    /// Returns an empty catalog.
     #[must_use]
     pub fn empty() -> Self {
         Self { models: Vec::new() }

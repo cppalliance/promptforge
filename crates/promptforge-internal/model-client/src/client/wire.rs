@@ -63,7 +63,8 @@ impl Message {
         }
     }
 
-    /// Constructs a plain `assistant` text turn (no `tool_calls` field).
+    /// Constructs a plain `assistant` text turn that serializes to just
+    /// `role` and `content`.
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Message {
         Message {
@@ -81,7 +82,7 @@ impl Message {
     }
 
     /// Returns the message text, or `""` when the content is a multimodal
-    /// content-parts array instead of text.
+    /// content-parts array.
     ///
     /// Only the Engine builds multimodal messages. The `user`, `tool`, and
     /// `assistant` constructors always produce text.
@@ -112,8 +113,8 @@ pub struct ToolSchema {
 }
 
 impl ToolSchema {
-    /// Returns the tool's name as sent to the model. It is never empty and
-    /// uses only the characters `[A-Za-z0-9_.-]`.
+    /// Returns the tool's name as sent to the model. It holds one or more
+    /// characters, all from `[A-Za-z0-9_.-]`.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -219,7 +220,7 @@ impl ToolArguments<'_> {
         self.value.to_string()
     }
 
-    /// Returns whether the arguments object has no keys.
+    /// Returns whether the arguments object is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.value {
@@ -265,10 +266,11 @@ pub enum CompletionResult {
 ///
 /// The caller that sends a request in a JSON wire format can attach the
 /// pair to the [`Completion`] it returns, so the application's debug
-/// capture shows exactly what was sent and received. The Engine never
-/// looks inside either value. It only passes them to the debug capture.
-/// Build one with [`RawExchange::new`]. A completion built without sending
-/// a request carries none.
+/// capture shows exactly what was sent and received. The Engine treats
+/// both values as opaque and passes them only to the debug capture.
+/// Build one with [`RawExchange::new`]. `Completion::from_result` builds a
+/// completion with `raw` set to `None`, and the caller attaches one with
+/// `Completion::with_raw`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RawExchange {
@@ -281,7 +283,8 @@ pub struct RawExchange {
 
 impl RawExchange {
     /// Creates a raw exchange from the request that was sent and the
-    /// response that was read. Neither value is checked.
+    /// response that was read. It accepts any two JSON values and stores
+    /// them as given.
     #[must_use]
     pub fn new(request: Value, response: Value) -> RawExchange {
         RawExchange { request, response }
@@ -304,7 +307,7 @@ impl RawExchange {
 ///
 /// The [`CompletionResult`] is what the tool loop matches on. Beside it, a
 /// completion carries the backend's `finish_reason` and reasoning text, so
-/// observers can report them without reading the raw bodies. It also
+/// observers can report them straight from the completion. It also
 /// carries the name of the model that served the call and the
 /// [`CallMetrics`] the call measured, for attribution and accounting. The
 /// caller may also attach the call's [`RawExchange`] for debug capture.
@@ -345,7 +348,7 @@ impl Completion {
     }
 
     /// Returns the reasoning text the backend sent beside the reply, when it
-    /// sent any. It is never used as the answer.
+    /// sent any. It stays separate from the answer.
     #[must_use]
     pub fn reasoning_content(&self) -> Option<&str> {
         self.reasoning_content.as_deref()
@@ -366,7 +369,7 @@ impl Completion {
     /// [`with_model`](Completion::with_model), or else the name the
     /// completion was built with. A completion decoded from a response is
     /// built with the model the response body named, or an empty name when
-    /// it named none.
+    /// the body omits one.
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model
@@ -374,8 +377,8 @@ impl Completion {
 
     /// Returns what the call measured, or `None` when nothing reported. It
     /// covers token usage, llama.cpp's `timings`, vLLM's `metrics`, and the
-    /// timing the client measured on its own clock. Each section is absent
-    /// when its source did not report it.
+    /// timing the client measured on its own clock. Each section is present
+    /// only when its source reported it.
     #[must_use]
     pub fn metrics(&self) -> Option<&CallMetrics> {
         self.metrics.as_ref()

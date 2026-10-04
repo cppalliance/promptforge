@@ -36,14 +36,16 @@ static NEXT_WAITER: AtomicU64 = AtomicU64::new(0);
 ///   flag. Cancelling any clone cancels every clone.
 /// - **Downward propagation.** [`child`](Self::child) mints a handle that
 ///   reports cancelled when its own flag is set *or* any ancestor's is. A
-///   child's cancel never reaches its parent or its siblings. Children nest
-///   to any depth. A child minted after its parent is cancelled starts
+///   child's cancel reaches only that child and its descendants. Children
+///   nest to any depth. A child minted after its parent is cancelled starts
 ///   cancelled.
-/// - **Idempotent and irreversible.** [`cancel`](Self::cancel) is a no-op
-///   after the first call, and [`is_cancelled`](Self::is_cancelled) never
-///   returns to `false`.
-/// - **No registry.** A child holds its parent, never the reverse, so there
-///   are no reference cycles and nothing to unregister when a handle drops.
+/// - **Idempotent and permanent.** Repeated calls to
+///   [`cancel`](Self::cancel) have the effect of one, and once
+///   [`is_cancelled`](Self::is_cancelled) returns `true`, it always returns
+///   `true`.
+/// - **Upward links.** A child holds its parent, and every link points
+///   upward. The links form a tree, and dropping a handle just releases its
+///   reference.
 /// - **Awaitable.** [`cancelled`](Self::cancelled) returns a future that
 ///   the cancel wakes, for a caller that waits on the flag alongside other
 ///   event sources. Checking the flag stays a plain read. Each waiter
@@ -123,8 +125,8 @@ impl Node {
 ///
 /// Returned by [`CancelHandle::cancelled`]. The future is `Unpin` and owns
 /// its handle, so the caller can hold it across awaits or select over it
-/// alongside other event sources. It never times out and never spins. The
-/// cancel that sets the flag wakes it.
+/// alongside other event sources. It waits for as long as the cancel takes,
+/// and the cancel that sets the flag is its one wake-up.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct Cancelled {
@@ -169,7 +171,7 @@ impl Future for Cancelled {
 }
 
 impl CancelHandle {
-    /// Creates a root handle, uncancelled to start.
+    /// Creates a root handle with its flag clear.
     ///
     /// The returned handle is independent of any other until it is cloned
     /// or given children.
@@ -179,12 +181,11 @@ impl CancelHandle {
     }
 
     /// Returns a new child handle that reports cancelled when this handle or
-    /// any ancestor is cancelled. Cancelling the child never affects the
-    /// parent or its siblings.
+    /// any ancestor is cancelled. A cancel on the child reaches only the
+    /// child and its descendants.
     ///
     /// The usual pattern gives a run the root handle and each task a child
-    /// from `root.child()`. Cancelling the run then cancels every task, and
-    /// one task can be cancelled without touching the rest.
+    /// from `root.child()`, so cancelling the run cancels every task.
     #[must_use]
     pub fn child(&self) -> CancelHandle {
         CancelHandle {
@@ -200,7 +201,7 @@ impl CancelHandle {
     /// wakes every [`cancelled`](Self::cancelled) future waiting on it or
     /// on a descendant.
     ///
-    /// Idempotent and irreversible.
+    /// Idempotent and permanent.
     pub fn cancel(&self) {
         self.inner.cancelled.store(true, Ordering::Release);
         let wakers = std::mem::take(
@@ -219,8 +220,7 @@ impl CancelHandle {
     ///
     /// The future is ready on its first poll if the handle is already
     /// cancelled. Otherwise it completes when a cancel lands on this handle
-    /// or on an ancestor. Use it to wait on the flag without checking it on
-    /// a timer.
+    /// or on an ancestor, and that cancel wakes it.
     pub fn cancelled(&self) -> Cancelled {
         Cancelled {
             waiter: Waiter {
@@ -233,7 +233,8 @@ impl CancelHandle {
     /// Returns whether [`cancel`](Self::cancel) has been called on this
     /// handle, any clone, or any ancestor.
     ///
-    /// Monotonic: once it returns `true` it never again returns `false`.
+    /// Monotonic: once it returns `true`, it returns `true` on every later
+    /// call.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.inner.is_cancelled()

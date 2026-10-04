@@ -35,9 +35,8 @@ impl FileDecl {
 
 /// The parsed frontmatter of a prompt file.
 ///
-/// Parsing rejects unknown keys. A misspelled or unsupported field is a
-/// prompt authoring error, so it fails the parse instead of being silently
-/// ignored.
+/// Parsing accepts only the keys this schema defines. Any other key, such as
+/// a misspelled or extra one, is a prompt authoring error and fails the parse.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -163,7 +162,7 @@ impl Frontmatter {
     }
 
     /// Returns the declared cap on model round trips in each section's
-    /// tool-call loop. Returns `None` when the prompt declares no cap, so the
+    /// tool-call loop. Returns `None` when the prompt omits the cap, so the
     /// caller's default applies.
     #[must_use]
     pub fn max_tool_iterations(&self) -> Option<std::num::NonZeroU32> {
@@ -197,7 +196,7 @@ impl Frontmatter {
         &self.tools
     }
 
-    /// Returns the typed args declaration. A prompt with no `args:` key
+    /// Returns the typed args declaration. A prompt that omits the `args:` key
     /// yields the default declaration (one optional string field named
     /// `prose`).
     #[must_use]

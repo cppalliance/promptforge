@@ -19,8 +19,7 @@ use super::requirements::Requirements;
 /// It is safe to share across concurrent runs (it is `Sync`). Everything
 /// that can change per run sits on the [`RunContext`]. The catalog holds
 /// tool descriptors only. The tool implementations stay with the caller,
-/// which activates them. The environment holds no model: the run's model
-/// arrives on the context.
+/// which activates them. The run's model arrives on the context.
 ///
 /// [`prepare`](Environment::prepare) fills a prompt's tool slots by
 /// identity against the catalog and binds its model roles to the
@@ -39,7 +38,8 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Builds the default environment: an empty catalog and no preludes.
+    /// Builds the default environment: an empty catalog and an empty
+    /// prelude list.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
@@ -94,23 +94,24 @@ impl Environment {
     ///
     /// Tool slots fill against the catalog. An exact slot fills by
     /// identity, and the first two segments of its path name its
-    /// capability. If that capability contributed nothing to the catalog,
-    /// the capability is listed in [`Requirements::missing_required`]. If
-    /// the capability is in the catalog but did not contribute the named
-    /// tool, the slot is left unfilled and not reported. Advertising an
-    /// unfilled alias fails at run time. Every fill is recorded in the
-    /// context's tool bindings. Capability resolution, co-activation
-    /// conflicts, and activation happen in the caller before `prepare`, and
-    /// the caller merges that report into the one `prepare` returns.
+    /// capability. If that capability is absent from the catalog, the
+    /// capability is listed in [`Requirements::missing_required`]. If the
+    /// capability is in the catalog but the named tool is absent, the slot
+    /// stays empty and the report omits it. Advertising the slot's alias
+    /// fails at run time. Every fill is recorded in the context's tool
+    /// bindings. Capability resolution, co-activation conflicts, and
+    /// activation happen in the caller before `prepare`, and the caller
+    /// merges that report into the one `prepare` returns.
     ///
     /// Every declared model role binds to the context's current model.
     /// `prepare` then checks each role's hard keywords (`thinking`,
     /// `no-thinking`) and context minimum against the model's descriptor.
     /// Each failed check is listed in [`Requirements::unmet_requirements`]
-    /// with the required and actual values. `prepare` never searches for
-    /// another model that would pass. Soft keywords record the author's
-    /// intent and are not checked. With no current model there is nothing
-    /// to fill or check, and the declared roles stay unbound.
+    /// with the required and actual values, and the role stays bound to
+    /// the current model. Soft keywords record the author's intent only,
+    /// so `prepare` skips them. When the context's current model is
+    /// `None`, `prepare` skips the fill and the checks, and the model
+    /// bindings stay empty.
     #[must_use]
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;

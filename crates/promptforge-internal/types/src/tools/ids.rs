@@ -8,15 +8,14 @@ use crate::names::{GlobalName, GlobalNameErrorKind};
 /// A tool id is a three-segment [`GlobalName`] of the form
 /// `namespace/pack/name`. In global names, the segment count tells what a name
 /// refers to: two segments name a capability and three name a tool. The first
-/// two segments of a tool id are the id of the capability that contributed the
-/// tool. So dropping the last segment of any tool id always gives that
-/// capability's id. For example, `promptforge/web/fetch` comes from
+/// two segments of any tool id are the id of the capability that contributed
+/// the tool. For example, `promptforge/web/fetch` comes from
 /// `promptforge/web`.
 ///
-/// A tool's wire name, the name a model request uses for it, is not its
-/// identity. When a capability is bound to a prompt, a selected tool can be
-/// offered under a prompt-local alias. Calls under that alias still reach the
-/// same tool.
+/// A tool's wire name is the name a model request uses for it. The tool id
+/// stays its identity under any wire name. When a capability is bound to a
+/// prompt, a selected tool can be offered under a prompt-local alias. Calls
+/// under that alias still reach the same tool.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct ToolId(GlobalName);
@@ -26,10 +25,10 @@ impl ToolId {
     /// (`namespace/pack/name`).
     ///
     /// # Errors
-    /// Returns [`ToolIdError`] when the segment count is not exactly 3
+    /// Returns [`ToolIdError`] when the segment count differs from 3
     /// ([`ToolIdErrorKind::SegmentCount`]), a segment is empty
-    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character other
-    /// than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
+    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character outside
+    /// the set of lowercase ASCII letters, digits, `-`, `_`, and `.`
     /// ([`ToolIdErrorKind::Control`]).
     pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
         let name =
@@ -53,10 +52,9 @@ impl ToolId {
     /// Returns the id of the capability that contributed this tool, which is
     /// the tool id's first two segments.
     ///
-    /// Every tool id has this prefix: dropping the last segment always gives
-    /// the contributing capability's id. The prefix was validated when the
-    /// tool id was parsed, so this method builds the [`CapabilityId`] directly
-    /// without parsing it again.
+    /// Every tool id has this prefix, and it was validated when the tool id
+    /// was parsed. This method reuses that validation and builds the
+    /// [`CapabilityId`] directly.
     #[must_use]
     pub fn capability(&self) -> CapabilityId {
         CapabilityId::from_prefix(self.0.capability_prefix())
@@ -81,8 +79,7 @@ impl<'de> serde::Deserialize<'de> for ToolId {
     /// Deserializes the id from its `namespace/pack/name` string.
     ///
     /// The string is validated with the same rules as `ToolId::parse`. An
-    /// invalid string is a deserialization error and is never accepted as an
-    /// id.
+    /// invalid string is a deserialization error.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
         ToolId::parse(&text).map_err(serde::de::Error::custom)
@@ -96,7 +93,7 @@ impl<'de> serde::Deserialize<'de> for ToolId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolIdErrorKind {
-    /// The id did not have exactly 3 segments (`namespace/pack/name`).
+    /// The id had fewer or more than 3 segments (`namespace/pack/name`).
     SegmentCount,
     /// A segment (or a wire name) was empty.
     Empty,
@@ -107,7 +104,7 @@ pub enum ToolIdErrorKind {
     Control,
 }
 
-/// The reason a [`ToolId`] (or a validated wire name) could not be built.
+/// The reason a [`ToolId`] (or a validated wire name) failed to build.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid tool {field}: {reason}")]
 #[non_exhaustive]

@@ -162,22 +162,22 @@ fn body_line_column(
 
 /// A stable, matchable classification of a [`ParseError`].
 ///
-/// New kinds can be added without a breaking change, so a `match` on this
-/// type needs a wildcard arm.
+/// Adding a new kind is a compatible change, so a `match` on this type
+/// needs a wildcard arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParseErrorKind {
-    /// The YAML frontmatter block was missing, unclosed, or invalid.
+    /// The YAML frontmatter block was missing, left open, or invalid.
     Frontmatter,
     /// The document structure was invalid, for example a missing or duplicate
     /// H1 title, or two sibling sections with the same name.
     Structure,
-    /// A reserved `lua` or `lua shared` code fence was misplaced or not
-    /// closed.
+    /// A reserved `lua` or `lua shared` code fence was misplaced or left
+    /// open.
     Fence,
-    /// A list-only section contained non-list or empty items.
+    /// A list-only section contained prose lines or empty items.
     List,
-    /// A Lua region failed to compile because it was not syntactically valid.
+    /// A Lua region failed to compile because of a syntax error.
     Lua,
 }
 
@@ -260,9 +260,9 @@ impl ParseError {
     /// A failure that can locate the offending region, such as a duplicate
     /// sibling section, has a byte span. Other failures return `None`. The
     /// offsets are relative to the document body after the frontmatter and a
-    /// leading BOM, with CRLF normalized to LF. They do not index the
-    /// original source. To locate the failure in the original file, use
-    /// [`line`](ParseError::line) and [`column`](ParseError::column).
+    /// leading BOM, with CRLF normalized to LF. To locate the failure in the
+    /// original file, use [`line`](ParseError::line) and
+    /// [`column`](ParseError::column).
     #[must_use]
     pub fn span(&self) -> Option<(usize, usize)> {
         self.span
@@ -273,7 +273,7 @@ impl ParseError {
     ///
     /// A frontmatter failure happens before the parser learns the name, which
     /// comes from the frontmatter itself. It returns `None`, and the caller
-    /// can use its own label for the source instead. A Lua compile failure
+    /// can use its own label for the source. A Lua compile failure
     /// also returns `None`.
     #[must_use]
     pub fn name(&self) -> Option<&str> {

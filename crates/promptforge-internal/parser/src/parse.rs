@@ -15,21 +15,21 @@ impl Prompt {
     /// returns the events reported during parsing alongside the result.
     ///
     /// The caller supplies `execution`, an identifier that every event
-    /// carries. Every event is reported under task `0` because no run exists
-    /// yet.
+    /// carries. Every event is reported under task `0` because parsing happens
+    /// before any run starts.
     ///
     /// The events come in this order: `ParseStarted`, then a
     /// `LuaCompilationStarted` event and a `LuaCompilationSucceeded` or
     /// `LuaCompilationFailed` event for each Lua block the parser compiles,
-    /// then `ParseSucceeded` or `ParseFailed`. They exist for the caller to
-    /// log. The parser does not read them back.
+    /// then `ParseSucceeded` or `ParseFailed`. They exist only for the caller
+    /// to log.
     ///
     /// # Errors
     /// On failure, the first element of the pair is a [`ParseError`] whose
     /// kind is:
     ///
     /// - `Frontmatter` when the `---` delimiters are missing, the frontmatter
-    ///   is not valid, a tool alias or model role label is a reserved name,
+    ///   fails to decode, a tool alias or model role label is a reserved name,
     ///   one name is both a tool alias and a model role label, a capability is
     ///   declared twice, or a tool slot names a capability declared optional.
     /// - `Structure` when the H1 is missing, there is more than one H1, the H1
@@ -37,11 +37,11 @@ impl Prompt {
     ///   directly under an H2), a section heading is empty, or two sibling
     ///   sections have the same name.
     /// - `Fence` when the H1 opens with a `lua prompt` fence, a `lua` or
-    ///   `lua shared` fence is not closed, more than one `lua shared` fence
+    ///   `lua shared` fence is left open, more than one `lua shared` fence
     ///   exists, or a `lua shared` fence is outside the H1.
     /// - `List` when a section made up only of list items has an empty item.
     /// - `Lua` when the `lua shared` library or a Lua block in the H1 or in a
-    ///   section is not valid Lua.
+    ///   section fails to compile as Lua.
     pub fn parse(
         input: &str,
         execution: &str,

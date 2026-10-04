@@ -41,10 +41,9 @@ impl Origin {
     /// site.
     ///
     /// The file and line come from [`Location::caller`], so callers and
-    /// tests get their position without passing it. Use the most specific
+    /// tests get their position automatically. Use the most specific
     /// label available, such as a section name for a chain, a tool id for
-    /// a tool, or a fixture name for a test. Never use a generic label when
-    /// a specific one exists.
+    /// a tool, or a fixture name for a test.
     #[must_use]
     #[track_caller]
     pub fn new(label: impl Into<String>) -> Origin {
@@ -77,7 +76,7 @@ impl Origin {
 ///
 /// The event fires before the backend runs the operation. It borrows its
 /// values from the `Access` capability that admitted the operation, so
-/// firing allocates nothing. A sink that keeps events must clone the
+/// firing is allocation-free. A sink that keeps events must clone the
 /// values it needs.
 #[derive(Debug)]
 pub struct OpEvent<'a> {

@@ -64,8 +64,8 @@ impl ChainId {
     }
 
     /// The id of this chain's `index`-th section entry, rendered as a
-    /// path: the value a section reads as `sys.id`. A section id is not a
-    /// chain id, so it is returned as text rather than as `ChainId`.
+    /// path: the value a section reads as `sys.id`. A section id names an
+    /// entry inside a chain, so it is returned as text.
     #[must_use]
     pub fn entry(&self, index: u32) -> String {
         format!("{self}.{index}")
@@ -84,8 +84,8 @@ impl fmt::Display for ChainId {
     }
 }
 
-/// The error returned when text is not a valid [`ChainId`] or [`TaskId`]
-/// path.
+/// The error returned when text fails to parse as a [`ChainId`] or
+/// [`TaskId`] path.
 ///
 /// A valid path is one or more components joined by dots, such as `0.2.0`.
 /// Each component is plain decimal digits that fit in a `u32`.
@@ -146,8 +146,9 @@ impl<'de> Deserialize<'de> for ChainId {
 /// The id of one task, which is the id of the chain that runs it.
 ///
 /// A task and its chain are one thing named from two sides, so both ids are
-/// the same path. The separate type keeps a table keyed by task from
-/// accepting an arbitrary chain id by mistake. Orders as its chain id does.
+/// the same path. The separate type makes a table keyed by task accept
+/// only task ids, so a chain id enters it by explicit conversion. Orders
+/// as its chain id does.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskId(ChainId);
 
@@ -187,17 +188,17 @@ impl<'de> Deserialize<'de> for TaskId {
 /// position within that task.
 ///
 /// `task` is the task whose chain emitted the item. The main walk is task
-/// `0`. A `call` child reports its parent's task. This is unambiguous
-/// because a `call` blocks its parent, so the two never interleave. `seq`
+/// `0`. A `call` child reports its parent's task. This is well defined
+/// because a `call` blocks its parent, so the two run one at a time. `seq`
 /// is a counter local to that task. The task's effects and events share
 /// it, so the two kinds order against each other within one task.
 ///
 /// Two runs of the same prompt with the same inputs and answers stamp the
-/// same provenance on the same items, regardless of how their chains
-/// interleave. That lets a log slice by task, order items within a task,
-/// and later replay a run against its record. The `EffectId` of an
-/// in-flight effect is a separate, opaque handle counted across the whole
-/// run, and it can differ between runs.
+/// same provenance on the same items, however their chains interleave.
+/// That lets a log slice by task, order items within a task, and later
+/// replay a run against its record. The `EffectId` of an in-flight effect
+/// is a separate, opaque handle counted across the whole run, and it can
+/// differ between runs.
 ///
 /// Orders by task path, then by sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -216,10 +217,9 @@ pub struct Provenance {
 /// holds its id, and so do the thinking, reply, and tool-call events
 /// reported from the round's answer. The caller can use the id to pair the
 /// partial output it shows while a round runs with the events that report
-/// the round's answer. Like an effect id, it counts across the whole run.
-/// When tasks run concurrently, the order in which the caller answers
-/// effects can change which round gets which number. Serializes as a bare
-/// number.
+/// the round's answer. When tasks run concurrently, the order in which
+/// the caller answers effects can change which round gets which number.
+/// Serializes as a bare number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RoundId(u64);
@@ -267,8 +267,8 @@ impl TaskOrigin {
         }
     }
 
-    /// Parses a tag. Returns `None` for anything other than exactly
-    /// `author` or `model`.
+    /// Parses a tag that is exactly `author` or `model`. Returns `None` for
+    /// any other text.
     #[must_use]
     pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
@@ -292,9 +292,9 @@ impl TaskOrigin {
 #[non_exhaustive]
 pub enum AbandonReason {
     /// The owner ended normally, by returning a scalar or finishing its
-    /// walk, without waiting on or cancelling the task. For an author task,
-    /// the owner's outcome becomes the `tasks_live` error. A model task is
-    /// abandoned without an error.
+    /// walk, and left the task running. For an author task, the owner's
+    /// outcome becomes the `tasks_live` error. A model task is abandoned,
+    /// and the owner's outcome stands.
     OwnerReturned,
     /// The owner failed.
     OwnerFailed,

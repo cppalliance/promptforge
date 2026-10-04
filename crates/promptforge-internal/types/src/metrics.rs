@@ -89,7 +89,7 @@ pub struct LlamaTimings {
 
 /// vLLM per-request metrics for one call.
 ///
-/// Every field is optional because vLLM omits what it did not measure.
+/// Every field is optional because vLLM reports only what it measured.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VllmMetrics {
     /// Milliseconds from request start to the first generated token.
