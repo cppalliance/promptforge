@@ -1,6 +1,8 @@
 //! Boot planning and detached Gateway spawn.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context as _;
 use gateway_api_discovery::{
@@ -172,8 +174,10 @@ fn detached_command(exe: &Path) -> std::process::Command {
     command
 }
 
-/// Spawns the Gateway detached from the desktop app's lifetime.
-pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
+/// Spawns the Gateway detached from the desktop app's lifetime. The reaper
+/// thread records the child's exit status in `exit`, so a launch wait can
+/// stop as soon as the child dies instead of running out its budget.
+pub(super) fn spawn_detached(exe: &Path, exit: Arc<OnceLock<ExitStatus>>) -> std::io::Result<u32> {
     #[cfg(windows)]
     let mut child = spawn_detached_windows_with(|flags| {
         use std::os::windows::process::CommandExt as _;
@@ -190,7 +194,9 @@ pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
     let mut child = detached_command(exe).spawn()?;
     let child_pid = child.id();
     if let Err(error) = std::thread::Builder::new().spawn(move || {
-        let _ = child.wait();
+        if let Ok(status) = child.wait() {
+            let _ = exit.set(status);
+        }
     }) {
         eprintln!("could not spawn the gateway reaper thread; the child goes unreaped: {error}");
     }

@@ -29,9 +29,10 @@ pub(super) fn open_log_file_with_limits(
 ) -> io::Result<(PathBuf, SegmentedFile)> {
     limits.validate()?;
     let config = LogConfig::new(state_dir);
-    let logs = state_dir.join("logs");
-    std::fs::create_dir_all(&logs)?;
     let current = config.log_path();
+    if let Some(logs) = current.parent() {
+        std::fs::create_dir_all(logs)?;
+    }
     let retained = config.retained_log_paths();
     recover_rotation(&current, &retained)?;
 

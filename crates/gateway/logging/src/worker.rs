@@ -166,9 +166,10 @@ fn existing_file_len(path: &Path) -> io::Result<Option<u64>> {
 }
 
 fn artifact_path(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map_or_else(|| "gateway.log".into(), std::ffi::OsStr::to_os_string);
+    let mut name = path.file_name().map_or_else(
+        || gateway_api_discovery::GATEWAY_LOG_FILE_NAME.into(),
+        std::ffi::OsStr::to_os_string,
+    );
     name.push(suffix);
     path.with_file_name(name)
 }

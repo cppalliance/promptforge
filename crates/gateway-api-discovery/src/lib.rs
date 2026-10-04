@@ -55,8 +55,9 @@ pub use crate::lock::{
     launch_or_attach_cancellable,
 };
 pub use crate::paths::{
-    GATEWAY_DISCOVERY_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME, default_run_dir,
-    gateway_discovery_file_path, instance_lock_file_path, lock_file_path, run_dir,
+    GATEWAY_DISCOVERY_FILE_NAME, GATEWAY_LOG_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME,
+    default_run_dir, gateway_discovery_file_path, gateway_log_path, instance_lock_file_path,
+    lock_file_path, run_dir,
 };
 pub use crate::shutdown::{ShutdownError, request_shutdown, request_shutdown_before};
 pub use crate::stale::resolve_cancellable;

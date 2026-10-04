@@ -1,6 +1,8 @@
 //! Cancellable launch and readiness wait, shared by boot and recovery.
 
 use std::path::Path;
+use std::process::ExitStatus;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
@@ -49,13 +51,18 @@ pub(in crate::gateway) fn launch_and_attach_cancellable(
     exe: &Path,
     cancellation: &CancellationToken,
 ) -> anyhow::Result<boot::RecoveryLaunch> {
+    let exit = Arc::new(OnceLock::new());
     launch_and_attach_cancellable_with(
         run_dir,
         exe,
         cancellation,
         gateway_api_discovery::launch_or_attach_cancellable,
-        |exe, _| boot::spawn_detached(exe),
-        wait_for_launched_file_cancellable,
+        |exe, _| boot::spawn_detached(exe, Arc::clone(&exit)),
+        |run_dir, timeout, cancellation| {
+            wait_for_launched_file_cancellable(run_dir, timeout, cancellation, || {
+                exit.get().copied()
+            })
+        },
     )
 }
 
@@ -114,6 +121,7 @@ fn wait_for_launched_file_cancellable(
     run_dir: &Path,
     timeout: Duration,
     cancellation: &CancellationToken,
+    exited: impl FnMut() -> Option<ExitStatus>,
 ) -> anyhow::Result<GatewayDiscoveryFile> {
     wait_for_launched_file_cancellable_with(
         run_dir,
@@ -122,25 +130,29 @@ fn wait_for_launched_file_cancellable(
         &SystemClock,
         gateway_api_discovery::wait_for_health_cancellable,
         gateway_api_discovery::resolve_cancellable,
+        exited,
     )
 }
 
-/// Readiness wait with time, health, and validation injected. A failed
-/// probe does not end the wait; the budget does, reporting the last probe
-/// error.
-pub(in crate::gateway) fn wait_for_launched_file_cancellable_with<Clock, Health, Resolve>(
+/// Readiness wait with time, health, validation, and the launched child's
+/// exit status injected. A failed probe does not end the wait; the budget
+/// does, reporting the last probe error. A child that has exited ends the
+/// wait at once when no discovery file exists, naming the gateway log.
+pub(in crate::gateway) fn wait_for_launched_file_cancellable_with<Clock, Health, Resolve, Exited>(
     run_dir: &Path,
     timeout: Duration,
     cancellation: &CancellationToken,
     clock: &Clock,
     mut health: Health,
     mut resolve: Resolve,
+    mut exited: Exited,
 ) -> anyhow::Result<GatewayDiscoveryFile>
 where
     Clock: WaitClock,
     Health:
         FnMut(&str, Duration, &CancellationToken) -> Result<(), gateway_api_discovery::HealthError>,
     Resolve: FnMut(&Path, &CancellationToken) -> Result<Resolution, SidecarError>,
+    Exited: FnMut() -> Option<ExitStatus>,
 {
     let deadline = clock.now() + timeout;
     let mut last_probe_error = None;
@@ -148,6 +160,10 @@ where
         if cancellation.is_cancelled() {
             anyhow::bail!("the launched gateway wait was cancelled");
         }
+        // Sampled before the read: a launched gateway that hands off to a
+        // running owner exits only after the owner publishes, so the read
+        // below sees the owner's file.
+        let exit = exited();
         if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
             let remaining = deadline.saturating_duration_since(clock.now());
             let url = format!("http://127.0.0.1:{}", file.port);
@@ -191,6 +207,13 @@ where
                     );
                 }
             }
+        } else if let Some(status) = exit {
+            let state_dir = run_dir.parent().unwrap_or(run_dir);
+            anyhow::bail!(
+                "the launched gateway exited ({status}) without writing a gateway discovery \
+                 file; see the gateway log at {}",
+                gateway_api_discovery::gateway_log_path(state_dir).display()
+            );
         }
         if cancellation.is_cancelled() {
             anyhow::bail!("the launched gateway wait was cancelled");

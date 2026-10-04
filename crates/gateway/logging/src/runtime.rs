@@ -44,8 +44,9 @@ impl LogRuntime {
     /// [`LogError::is_io`].
     pub fn start(config: LogConfig) -> Result<Self, LogError> {
         let state_dir = config.into_state_dir();
-        let (path, file) = open_log_file(&state_dir)
-            .map_err(|error| LogError::open(state_dir.join("logs/gateway.log"), error))?;
+        let (path, file) = open_log_file(&state_dir).map_err(|error| {
+            LogError::open(gateway_api_discovery::gateway_log_path(&state_dir), error)
+        })?;
         let queue = Arc::new(LogQueue::new());
         let worker = LogWorker::spawn(Arc::clone(&queue), file).map_err(LogError::spawn)?;
         Ok(Self {
