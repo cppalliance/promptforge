@@ -12,6 +12,7 @@ version = 2
 # choices without failing CI on unmaintained deep-transitive crates we cannot
 # control.
 unmaintained = "workspace"
+yanked = "deny"
 # Reviewed advisories consciously accepted go here, each with a rationale.
 ignore = []
 
