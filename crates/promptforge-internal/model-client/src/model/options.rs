@@ -11,9 +11,8 @@ const TEMPERATURE_MAX: f64 = 2.0;
 
 /// A validated sampling temperature: finite and within `[0.0, 2.0]`.
 ///
-/// Building a [`Temperature`] is the only way to place a temperature
-/// into a request, so a `NaN`, an infinity, or an out-of-range value is
-/// unrepresentable rather than serialized into a backend-invalid request.
+/// A temperature enters a request only as a `Temperature`. A `NaN`, an
+/// infinity, or an out-of-range value therefore never reaches the backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Temperature(f64);
 
@@ -64,25 +63,27 @@ pub enum TemperatureError {
     },
 }
 
-/// Frozen per-request fields held by a resolved model binding.
+/// The fixed request settings that a model binding applies to every completion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelInvocation {
-    /// Sampling temperature, when the bind declared one.
+    /// The sampling temperature, when the binding's builder or a `models.use`
+    /// option set one.
     ///
-    /// A validated [`Temperature`]: a non-finite or out-of-range value is
-    /// unrepresentable, so an invalid temperature can never reach the binding
-    /// or the wire.
+    /// It is a validated [`Temperature`], so a non-finite or out-of-range
+    /// value can never reach the binding or the request.
     pub temperature: Option<Temperature>,
-    /// Maximum generation tokens, when the bind declared one (always non-zero).
+    /// The maximum number of tokens to generate, when the binding's builder or
+    /// a `models.use` option set a cap.
     ///
-    /// A [`NonZeroU32`]: a zero-token generation cap would forbid all output,
-    /// so it is unrepresentable and rejected at the parse boundary.
+    /// The cap is never zero, because a zero cap would forbid all output.
+    /// `models.use` rejects a zero cap when it is called.
     pub max_tokens: Option<NonZeroU32>,
-    /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
+    /// The thinking switch, sent as `chat_template_kwargs.enable_thinking`,
+    /// when set.
     pub thinking: Option<bool>,
 }
 
-/// One prompt-local alias bound to a model identity and frozen invocation.
+/// A prompt-local alias bound to one model and its fixed request settings.
 // No `Eq`: the frozen invocation holds an `f64` temperature.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelBinding {
@@ -98,11 +99,10 @@ pub struct ModelBinding {
 }
 
 impl ModelBinding {
-    /// Builds a binding atomically from every part a resolved model requires.
+    /// Builds a binding from every part a resolved model requires.
     ///
-    /// The non-zero `context` window is a required argument: there is no
-    /// zero-context sentinel patched in by a later setter, so a binding
-    /// cannot exist in a half-initialized state.
+    /// The non-zero `context` window is a required argument, so a binding is
+    /// always complete once built.
     #[must_use]
     pub fn new(
         alias: impl Into<String>,
@@ -121,21 +121,22 @@ impl ModelBinding {
         }
     }
 
-    /// Records the bound role's keyword set, exposed on the Lua handle.
+    /// Sets the bound role's capability keywords, which Lua code reads as the
+    /// `capabilities` field of the model handle.
     #[must_use]
     pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
         self.capabilities = capabilities;
         self
     }
 
-    /// Replaces the frozen per-request fields.
+    /// Replaces the binding's request settings.
     #[must_use]
     pub fn with_invocation(mut self, invocation: ModelInvocation) -> Self {
         self.invocation = invocation;
         self
     }
 
-    /// Returns the bound role's keyword set.
+    /// Returns the bound role's capability keywords.
     #[must_use]
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
@@ -153,13 +154,13 @@ impl ModelBinding {
         &self.description
     }
 
-    /// Returns the selected stable identity.
+    /// Returns the stable identity of the bound model.
     #[must_use]
     pub fn id(&self) -> &ModelId {
         &self.id
     }
 
-    /// Returns the frozen per-request fields.
+    /// Returns the binding's request settings.
     #[must_use]
     pub fn invocation(&self) -> &ModelInvocation {
         &self.invocation
@@ -171,7 +172,8 @@ impl ModelBinding {
         self.context
     }
 
-    /// Builds [`CompletionOptions`] for every complete under this binding.
+    /// Builds the [`CompletionOptions`] for a completion made under this
+    /// binding, from the model's name and the binding's request settings.
     #[must_use]
     pub fn completion_options(&self) -> CompletionOptions {
         CompletionOptions {
@@ -183,10 +185,9 @@ impl ModelBinding {
     }
 }
 
-/// Per-call fields merged into a chat-completions request body.
+/// Per-call settings merged into a chat-completions request body.
 ///
-/// Built through [`CompletionOptions::new`] and its `with_*` setters; the fields
-/// are private so a caller cannot assemble an inconsistent request by hand.
+/// Build one with [`CompletionOptions::new`] and its `with_*` setters.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct CompletionOptions {
@@ -222,7 +223,7 @@ impl CompletionOptions {
     ///
     /// # Errors
     /// Returns [`TemperatureError`] when `temperature` is not finite or falls
-    /// outside `[0.0, 2.0]`, so an invalid temperature never reaches the wire.
+    /// outside `[0.0, 2.0]`, so an invalid temperature is never sent.
     pub fn with_temperature(
         mut self,
         temperature: f64,
@@ -231,33 +232,35 @@ impl CompletionOptions {
         Ok(self)
     }
 
-    /// Sets the maximum generation tokens.
+    /// Sets the maximum number of tokens to generate.
     ///
-    /// Takes a [`NonZeroU32`] so a zero generation cap, which would
-    /// forbid all output, cannot be placed into a request.
+    /// The cap is a [`NonZeroU32`] because a zero cap would forbid all
+    /// output.
     #[must_use]
     pub fn with_max_tokens(mut self, max_tokens: NonZeroU32) -> CompletionOptions {
         self.max_tokens = Some(max_tokens);
         self
     }
 
-    /// Sets the `enable_thinking` switch.
+    /// Sets the thinking switch, sent as `chat_template_kwargs.enable_thinking`.
     #[must_use]
     pub fn with_thinking(mut self, thinking: bool) -> CompletionOptions {
         self.thinking = Some(thinking);
         self
     }
 
-    /// Replaces the model name sent on the wire, keeping every other
-    /// field. A broker that serves a round with a model other than the
-    /// bound one sets the substitute here, so the request names it.
+    /// Replaces the model name sent in the request and keeps every other
+    /// setting.
+    ///
+    /// When the caller serves a request with a model other than the bound
+    /// one, it sets the substitute's name here so the request names it.
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> CompletionOptions {
         self.model = model.into();
         self
     }
 
-    /// Returns the caller-facing model name sent on the wire.
+    /// Returns the caller-facing model name sent in the request.
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model
@@ -269,7 +272,7 @@ impl CompletionOptions {
         self.temperature
     }
 
-    /// Returns the maximum generation tokens, when a cap was set.
+    /// Returns the maximum number of tokens to generate, when a cap was set.
     #[must_use]
     pub fn max_tokens(&self) -> Option<NonZeroU32> {
         self.max_tokens

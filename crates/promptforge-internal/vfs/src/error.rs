@@ -6,12 +6,12 @@ use std::fmt;
 
 /// Why a path or glob pattern was rejected before any backend saw it.
 ///
-/// Every [`VfsError::InvalidPath`] carries one. The store view's
-/// logical-path validation reports the first nine reasons; the last two
-/// are reported by the glob and rename sites alone:
-/// [`PathReason::Wildcard`] for a glob pattern whose wildcard grammar is
-/// invalid, and [`PathReason::IntoDescendant`] for a rename into the
-/// source's own descendant.
+/// Every [`VfsError::InvalidPath`] carries one. Store operations validate
+/// each path and report the first nine reasons. Only glob and rename
+/// operations report the last two: [`PathReason::Wildcard`] for a glob
+/// pattern whose wildcard grammar is invalid, and
+/// [`PathReason::IntoDescendant`] for a rename into the source's own
+/// descendant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PathReason {
@@ -19,7 +19,8 @@ pub enum PathReason {
     Empty,
     /// The path began with `/`, so it addressed outside the run's namespace.
     Absolute,
-    /// The path contained a `.` or `..` segment (parent or current traversal).
+    /// The path contained a `.` (current directory) or `..` (parent
+    /// directory) segment.
     Traversal,
     /// The path contained a control character (below `0x20`, or `0x7f`).
     Control,
@@ -44,8 +45,11 @@ pub enum PathReason {
 }
 
 impl PathReason {
-    /// The short tag a store error value's `rule` field holds: the same
-    /// word [`PathReason::from_tag`] parses back, so the two round-trip.
+    /// Returns the short tag for this reason, such as `empty` or `too_long`.
+    ///
+    /// A store error value holds this tag in its `rule` field.
+    /// [`PathReason::from_tag`] parses the same word back, so the two
+    /// round-trip.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -63,8 +67,9 @@ impl PathReason {
         }
     }
 
-    /// Parses a [`PathReason::tag`]; `None` for a tag outside the
-    /// vocabulary.
+    /// Parses a tag from [`PathReason::tag`] back into its reason.
+    ///
+    /// Returns `None` for a tag that names no reason.
     #[must_use]
     pub fn from_tag(tag: &str) -> Option<PathReason> {
         match tag {
@@ -105,18 +110,19 @@ impl fmt::Display for PathReason {
     }
 }
 
-/// The one error type returned by every virtual filesystem operation.
+/// The single error type returned by every virtual filesystem operation.
 ///
-/// Every variant is a plain struct with public fields: the variants are
-/// the kinds, so a caller matches on the variant and reads the fields
-/// directly - there are no helper methods. A custom backend builds
-/// variants directly, as literals. `#[non_exhaustive]` so new variants
-/// can ship without breaking match arms in downstream crates; the public
-/// surface of this crate is load-bearing.
+/// Each variant is one kind of failure and carries its details in public
+/// fields. A caller matches on the variant and reads the fields directly.
+/// A custom backend builds the variants directly as struct literals.
+///
+/// The enum is `#[non_exhaustive]` so that new variants can be added
+/// without breaking downstream crates. A `match` on it outside this crate
+/// needs a wildcard arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VfsError {
-    /// The path does not exist in the serving backend.
+    /// The path does not exist in the backend that serves it.
     NotFound {
         /// The canonical path that did not resolve.
         path: String,
@@ -160,8 +166,8 @@ pub enum VfsError {
         /// A short human-readable reason the range was rejected.
         reason: &'static str,
     },
-    /// A `str_replace` anchor did not occur exactly once: it was empty,
-    /// missing, or ambiguous.
+    /// A `str_replace` edit failed because its anchor text was empty, not
+    /// found, or found more than once.
     Anchor {
         /// The path the edit targeted.
         path: String,
@@ -172,7 +178,8 @@ pub enum VfsError {
         /// found, and `2` or more when the edit would be ambiguous.
         count: usize,
     },
-    /// The operation is not permitted: a read-only mount or a policy denial.
+    /// The operation is not permitted because a mount is read-only or a
+    /// policy denied it.
     PermissionDenied {
         /// The canonical path the operation targeted.
         path: String,
@@ -180,24 +187,29 @@ pub enum VfsError {
         /// mount's refusal, naming the rule that fired.
         reason: String,
     },
-    /// The serving backend does not implement the operation.
+    /// The backend that serves the path does not implement the operation.
     Unsupported {
         /// The canonical path the operation targeted.
         path: String,
         /// What is unsupported and why.
         detail: String,
     },
-    /// The operation conflicts with a claim unordered with its own: a
-    /// claim by another live scope's identity, or one in the same scope
-    /// whose epoch the operation's clock has not seen.
+    /// The operation conflicts with another access's claim on the same
+    /// path or pattern.
+    ///
+    /// Two overlapping claims conflict when at least one of them is a write
+    /// and neither is ordered before the other. Two claims are unordered
+    /// when the other claim was made by an identity in another
+    /// live scope, or in the same scope at an epoch the operation's clock
+    /// has not seen.
     Conflict {
         /// The canonical path or pattern both accesses claimed.
         path: String,
-        /// The happens-before diagnosis, naming both identities and both
-        /// claim kinds.
+        /// A description of the conflict that names both identities and
+        /// both claim kinds.
         detail: String,
     },
-    /// The serving backend failed for any other reason.
+    /// The backend failed for a reason no other variant covers.
     Backend {
         /// The backend's own diagnosis.
         message: String,

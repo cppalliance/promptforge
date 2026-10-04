@@ -3,29 +3,34 @@
 use crate::capabilities::CapabilityId;
 use crate::names::{GlobalName, GlobalNameErrorKind};
 
-/// The stable identity of a live tool.
+/// The stable identity of a tool.
 ///
-/// Identity is a 3-segment [`GlobalName`] (`namespace/pack/name`): the global
-/// naming grammar encodes kind by arity, and a tool's first two segments name
-/// the capability that contributed it, so dropping the last segment of any
-/// tool id always yields the contributing capability's id
-/// (`promptforge/web/fetch` comes from `promptforge/web`, no exceptions). The
-/// wire name used in a model request is deliberately not identity: capability
-/// binding can advertise a selected tool under a prompt-local alias without
-/// changing the live tool it dispatches.
+/// A tool id is a three-segment [`GlobalName`] of the form
+/// `namespace/pack/name`. In global names, the segment count tells what a name
+/// refers to: two segments name a capability and three name a tool. The first
+/// two segments of a tool id are the id of the capability that contributed the
+/// tool. So dropping the last segment of any tool id always gives that
+/// capability's id. For example, `promptforge/web/fetch` comes from
+/// `promptforge/web`.
+///
+/// A tool's wire name, the name a model request uses for it, is not its
+/// identity. When a capability is bound to a prompt, a selected tool can be
+/// offered under a prompt-local alias. Calls under that alias still reach the
+/// same tool.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct ToolId(GlobalName);
 
 impl ToolId {
-    /// Parses a tool identity, requiring exactly 3 segments
+    /// Parses a tool id, which must have exactly 3 segments
     /// (`namespace/pack/name`).
     ///
     /// # Errors
     /// Returns [`ToolIdError`] when the segment count is not exactly 3
     /// ([`ToolIdErrorKind::SegmentCount`]), a segment is empty
-    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character outside
-    /// the global-name charset ([`ToolIdErrorKind::Control`]).
+    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character other
+    /// than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
+    /// ([`ToolIdErrorKind::Control`]).
     pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
         let name =
             GlobalName::parse(id).map_err(|e| ToolIdError::from_global_name_kind(e.kind()))?;
@@ -45,12 +50,13 @@ impl ToolId {
         &self.0.segments()[2]
     }
 
-    /// Returns the contributing capability's id: the first two segments.
+    /// Returns the id of the capability that contributed this tool, which is
+    /// the tool id's first two segments.
     ///
-    /// Containment is total - dropping the last segment of any tool id always
-    /// yields the id of the capability that contributed it. The prefix was
-    /// validated when the tool id was parsed, so it builds the
-    /// [`CapabilityId`] directly, with no re-parse.
+    /// Every tool id has this prefix: dropping the last segment always gives
+    /// the contributing capability's id. The prefix was validated when the
+    /// tool id was parsed, so this method builds the [`CapabilityId`] directly
+    /// without parsing it again.
     #[must_use]
     pub fn capability(&self) -> CapabilityId {
         CapabilityId::from_prefix(self.0.capability_prefix())
@@ -58,33 +64,35 @@ impl ToolId {
 }
 
 impl std::fmt::Display for ToolId {
-    /// The canonical `namespace/pack/name` string form.
+    /// Formats the id in its canonical `namespace/pack/name` string form.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl serde::Serialize for ToolId {
-    /// Serializes the identity as its one `namespace/pack/name` string.
+    /// Serializes the id as a single `namespace/pack/name` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for ToolId {
-    /// Deserializes the identity from its string form, validating it as a
-    /// 3-segment global name: an invalid string is a data error, never a
-    /// silently accepted identity.
+    /// Deserializes the id from its `namespace/pack/name` string.
+    ///
+    /// The string is validated with the same rules as `ToolId::parse`. An
+    /// invalid string is a deserialization error and is never accepted as an
+    /// id.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
         ToolId::parse(&text).map_err(serde::de::Error::custom)
     }
 }
 
-/// A stable, matchable classification of a [`ToolIdError`].
+/// The stable category of a [`ToolIdError`], which callers can match on.
 ///
-/// Every public error exposes a `kind()` classifier so callers can branch on the
-/// failure without matching a private representation.
+/// Get it from `ToolIdError::kind` to handle each kind of rejection
+/// differently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolIdErrorKind {
@@ -94,8 +102,8 @@ pub enum ToolIdErrorKind {
     Empty,
     /// A wire name contained the `/` namespace separator.
     Separator,
-    /// A segment (or a wire name) contained a character outside the allowed
-    /// set.
+    /// A segment contained a character outside the allowed set, or a wire name
+    /// contained a control character.
     Control,
 }
 

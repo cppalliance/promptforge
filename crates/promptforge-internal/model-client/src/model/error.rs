@@ -4,12 +4,13 @@
 /// A type-erased owned error cause.
 type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// What went wrong with a model round, as a closed set a caller can branch
-/// on without reading status codes or response text.
+/// The kind of failure a model round ended with.
 ///
-/// Every broker maps its failures into these kinds, and retryability is
-/// fixed per kind (see [`CompletionError::is_retryable`]).
-/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+/// The kinds form a closed set, so a caller can branch on the kind without
+/// reading status codes or response text. The caller that performs a round
+/// maps every failure into one of these kinds. Each kind is either always
+/// retryable or never retryable (see [`CompletionError::is_retryable`]).
+/// The enum is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionErrorKind {
@@ -31,8 +32,8 @@ pub enum CompletionErrorKind {
     ServerError,
     /// The backend refused the request for any other reason. Not retryable.
     Rejected,
-    /// The reply could not be understood, or it exceeded the byte cap.
-    /// Retryable.
+    /// The reply could not be understood, or it was larger than the size
+    /// limit for a reply. Retryable.
     MalformedResponse,
     /// The model returned neither text nor tool calls. Not retryable.
     EmptyReply,
@@ -41,15 +42,17 @@ pub enum CompletionErrorKind {
 }
 
 impl CompletionErrorKind {
-    /// Returns the fixed message for this kind: one lowercase phrase written
-    /// for a model reader. A broker builds a [`CompletionError`] message
-    /// from it, and a failure built from an HTTP status appends
-    /// ` (status N)`. A 401 or 403 is `Unavailable` with the message
+    /// Returns the fixed phrase for this kind: one lowercase phrase written
+    /// for a model to read.
+    ///
+    /// The caller builds a [`CompletionError`] message from this phrase. For
+    /// a failure that came from an HTTP status, it appends ` (status N)`. A
+    /// 401 or 403 is `Unavailable`, and its message uses
     /// `the model backend did not accept the credentials` in place of this
-    /// phrase. Only `MalformedResponse`, `EmptyReply`, and `Unavailable`
-    /// may extend it with `: ` and a specific the broker's own code wrote.
-    /// Provider text never enters the message; it goes in the
-    /// [`detail`](CompletionError::detail) (see [`CompletionError`]).
+    /// phrase. Only `MalformedResponse`, `EmptyReply`, and `Unavailable` may
+    /// extend the phrase with `: ` and specific text that the caller's own
+    /// code wrote. Provider text never enters the message. It goes in the
+    /// [`detail`](CompletionError::detail) instead.
     #[must_use]
     pub fn phrase(self) -> &'static str {
         match self {
@@ -89,32 +92,32 @@ impl CompletionErrorKind {
     }
 }
 
-/// The error a model round or a catalog fetch fails with: what the broker
-/// that performed it reports, and what comes back into the Engine in a
-/// `Chat` effect's answer.
+/// The error a model round or a catalog fetch fails with.
 ///
-/// Holds a closed [`kind`](CompletionError::kind), a
+/// The caller that performs the round or fetch reports this error. For a
+/// model round, it comes back into the Engine in a `Chat` effect's answer.
+///
+/// It holds a [`kind`](CompletionError::kind) from a closed set, a
 /// [`message`](CompletionError::message) written for the operator and the
 /// model, and optional extras: the token counts of a context overflow, the
-/// choice's `finish_reason` for an empty reply, a provider
+/// backend's `finish_reason` for an empty reply, a provider
 /// [`detail`](CompletionError::detail), and the underlying cause behind
-/// [`std::error::Error::source`]. `Display` shows the message only. The
-/// detail is provider text that the broker bounded and control-escaped; it
+/// [`std::error::Error::source`]. `Display` shows only the message. The
+/// detail is provider text that the caller bounded and control-escaped. It
 /// is an opt-in channel and never appears in `Display`.
 ///
-/// A broker builds one with [`new`](CompletionError::new) or
+/// The caller builds one with [`new`](CompletionError::new) or
 /// [`context_overflow`](CompletionError::context_overflow) and adds the
-/// extras with the `with_` methods. For an HTTP failure, the
-/// `harness-gateway-client` crate's `classify_http_failure` builds it.
-/// `#[non_exhaustive]`.
+/// extras with the `with_` methods.
 ///
-/// The message is the kind's fixed phrase, and a failure built from an HTTP
-/// status appends ` (status N)`. A 401 or 403 is `Unavailable` with the
-/// message `the model backend did not accept the credentials`.
-/// `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the
-/// message with `: ` and a specific the broker's own code wrote, such as
-/// the byte limit that was hit. Provider text never enters the message; it
-/// goes in the [`detail`](CompletionError::detail).
+/// The message is the kind's fixed phrase. For a failure that came from an
+/// HTTP status, the caller appends ` (status N)`. A 401 or 403 is
+/// `Unavailable`, and its message uses
+/// `the model backend did not accept the credentials` in place of the
+/// phrase. `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend
+/// the message with `: ` and specific text that the caller's own code
+/// wrote, such as the byte limit that was hit. Provider text never enters
+/// the message. It goes in the [`detail`](CompletionError::detail) instead.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionError {
@@ -130,15 +133,15 @@ pub struct CompletionError {
 impl CompletionError {
     /// Builds a failure of `kind` with `message` as its display text.
     ///
-    /// A broker uses the kind's fixed
-    /// [`phrase`](CompletionErrorKind::phrase), and for a failure built
-    /// from an HTTP status it appends ` (status N)`. A 401 or 403 is
-    /// `Unavailable` with the message
-    /// `the model backend did not accept the credentials`. For
-    /// `MalformedResponse`, `EmptyReply`, and `Unavailable` the broker may
-    /// extend the phrase with `: ` and a specific its own code wrote.
-    /// Provider text never enters the message; it goes in
-    /// [`with_detail`](CompletionError::with_detail).
+    /// The caller uses the kind's fixed
+    /// [`phrase`](CompletionErrorKind::phrase) as the message. For a failure
+    /// that came from an HTTP status, it appends ` (status N)`. A 401 or 403
+    /// is `Unavailable`, and its message uses
+    /// `the model backend did not accept the credentials` in place of the
+    /// phrase. For `MalformedResponse`, `EmptyReply`, and `Unavailable`, the
+    /// caller may extend the phrase with `: ` and specific text that its own
+    /// code wrote. Provider text never enters the message. The caller passes
+    /// it to [`with_detail`](CompletionError::with_detail) instead.
     #[must_use]
     pub fn new(kind: CompletionErrorKind, message: impl Into<String>) -> CompletionError {
         CompletionError {
@@ -153,8 +156,8 @@ impl CompletionError {
     }
 
     /// Builds a [`ContextOverflow`](CompletionErrorKind::ContextOverflow)
-    /// failure with the token counts the provider stated, `None` for a count
-    /// it did not give.
+    /// failure with the token counts the provider stated. Pass `None` for a
+    /// count the provider did not give.
     #[must_use]
     pub fn context_overflow(
         prompt_tokens: Option<u32>,
@@ -179,7 +182,7 @@ impl CompletionError {
         self
     }
 
-    /// Records the choice's `finish_reason`, for an
+    /// Records the `finish_reason` the backend gave, for an
     /// [`EmptyReply`](CompletionErrorKind::EmptyReply) failure.
     #[must_use]
     pub fn with_finish_reason(mut self, reason: impl Into<String>) -> CompletionError {
@@ -187,8 +190,9 @@ impl CompletionError {
         self
     }
 
-    /// Records provider text that explains the failure. The broker bounds
-    /// and control-escapes it first; it never appears in `Display`.
+    /// Records provider text that explains the failure. The caller bounds
+    /// and control-escapes the text before passing it. The text never
+    /// appears in `Display`.
     #[must_use]
     pub fn with_detail(mut self, text: impl Into<String>) -> CompletionError {
         self.detail = Some(text.into());
@@ -212,35 +216,37 @@ impl CompletionError {
         CompletionError::specific(CompletionErrorKind::MalformedResponse, specific)
     }
 
-    /// Returns the closed classification of this failure.
+    /// Returns the kind of this failure.
     #[must_use]
     pub fn kind(&self) -> CompletionErrorKind {
         self.kind
     }
 
-    /// Returns `true` when retrying may succeed. The answer is fixed per
-    /// kind: `RateLimited`, `Overloaded`, `Timeout`, `Transport`,
-    /// `ServerError`, and `MalformedResponse` are retryable; the rest are
-    /// not.
+    /// Returns `true` when retrying may succeed. The answer depends only on
+    /// the kind. `RateLimited`, `Overloaded`, `Timeout`, `Transport`,
+    /// `ServerError`, and `MalformedResponse` are retryable, and the rest
+    /// are not.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         self.kind.is_retryable()
     }
 
-    /// Returns the token counts a context overflow stated, as
-    /// `(prompt_tokens, window)`. A count the provider did not give, and
-    /// every kind other than `ContextOverflow`, reads `None`.
+    /// Returns the token counts that a context overflow reported, as
+    /// `(prompt_tokens, window)`. A count is `None` when the provider did
+    /// not give it, and both are `None` for every kind other than
+    /// `ContextOverflow`.
     #[must_use]
     pub fn overflow(&self) -> (Option<u32>, Option<u32>) {
         (self.prompt_tokens, self.window)
     }
 
-    /// Returns the choice's `finish_reason`, when the failure was an empty
+    /// Returns the backend's `finish_reason` when the failure was an empty
     /// model reply and the backend supplied one.
     ///
-    /// The tool loop gates on this: an empty turn with `Some("stop")` after
-    /// successful tool calls is a clean exit, while a missing or `"length"`
-    /// reason stays a hard failure.
+    /// The Engine's tool loop reads this value. An empty reply with
+    /// `Some("stop")` after at least one answered tool call, including a
+    /// call whose tool failed, is the model's clean exit. An empty reply
+    /// with a missing or `"length"` reason stays a hard failure.
     #[must_use]
     pub fn finish_reason(&self) -> Option<&str> {
         self.finish_reason.as_deref()
@@ -252,10 +258,10 @@ impl CompletionError {
         &self.message
     }
 
-    /// Returns the provider text behind the failure, bounded and
-    /// control-escaped by the broker.
+    /// Returns the provider text behind the failure, which the caller
+    /// bounded and control-escaped.
     ///
-    /// This is an explicit opt-in diagnostic channel: the text never
+    /// The detail is an explicit opt-in diagnostic channel. The text never
     /// appears in [`Display`](std::fmt::Display), so a hostile or sensitive
     /// payload cannot forge log lines or leak into an error message.
     #[must_use]

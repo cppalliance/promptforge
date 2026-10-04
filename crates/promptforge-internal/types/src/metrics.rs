@@ -25,12 +25,12 @@ pub struct ToolCallEvent {
     pub arguments: serde_json::Value,
 }
 
-/// Everything measured about one model call, from every source that
-/// reported.
+/// Everything measured about one model call, grouped by the source that
+/// measured it.
 ///
-/// Each section is present when its source reported it: `usage` and the
-/// backend sections come from the serving backend, `client` from the calling
-/// client's own clock.
+/// Each section is present when its source reported it. The serving backend
+/// supplies `usage`, `llama`, and `vllm`. The calling client's own clock
+/// supplies `client`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CallMetrics {
     /// Token accounting, when the backend reported usage.
@@ -65,7 +65,8 @@ pub struct Usage {
     pub reasoning_tokens: Option<u32>,
 }
 
-/// llama.cpp `timings` for one call, as the server reported them.
+/// Timings a llama.cpp server reported for one call in the `timings` field
+/// of its response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlamaTimings {
     /// Prompt tokens processed.
@@ -108,7 +109,7 @@ pub struct VllmMetrics {
     pub tokens_per_second: Option<f64>,
 }
 
-/// Timing one call end to end, measured by the calling client's own clock.
+/// End-to-end timing for one call, measured by the calling client's own clock.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClientTiming {
     /// Milliseconds from sending the request to the first streamed token,

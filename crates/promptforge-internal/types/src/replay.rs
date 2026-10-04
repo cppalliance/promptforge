@@ -22,26 +22,28 @@ use serde::{Deserialize, Serialize};
 #[path = "replay-tests.rs"]
 mod tests;
 
-/// The behavior flags recorded with a run: a bitset that is one `u32` on
-/// the wire and in the run record.
+/// The set of behavior flags recorded with a run.
 ///
-/// Numbering is reserve-forever: each flag a future change introduces is an
-/// associated constant `Flags(1 << n)` whose bit `n` is assigned once and
-/// never reused or renumbered, even after the behavior it gated becomes
-/// the only behavior. No flag is defined yet. Bits this build does not name
-/// are preserved through [`from_bits`](Self::from_bits) and
-/// [`bits`](Self::bits), so a record written by a newer Engine keeps its
-/// flags through an older reader.
+/// The set is a bitset stored as a single `u32`, both when serialized and
+/// in the run record.
+///
+/// Each flag is an associated constant `Flags(1 << n)`. Its bit `n` is
+/// assigned once and never reused or renumbered, even after the behavior
+/// the flag gates becomes the only behavior. [`from_bits`](Self::from_bits)
+/// and [`bits`](Self::bits) preserve bits this build does not name, so a
+/// record written by a newer Engine keeps its flags when an older reader
+/// loads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 #[serde(transparent)]
 pub struct Flags(u32);
 
 impl Flags {
-    /// No flag set: every run this plan produces records this value.
+    /// The empty set, with no flag set.
     pub const EMPTY: Flags = Flags(0);
 
-    /// The set whose bits are exactly `bits`, unknown bits included.
+    /// Returns the set whose bits are exactly `bits`, including bits this
+    /// build does not name.
     #[must_use]
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)

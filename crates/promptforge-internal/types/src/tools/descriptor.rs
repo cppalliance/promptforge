@@ -7,39 +7,44 @@ use serde_json::Value;
 use super::ids::ToolId;
 use crate::capabilities::CapabilityId;
 
-/// One tool as data: its stable identity, transport wire name, model-facing
-/// description, parameter schema, output kind, and the co-activation
-/// conflicts of the capability that contributed it. Never an
-/// implementation.
+/// A tool described as data, without its implementation.
 ///
-/// The Harness assembles descriptors from its activated capabilities into a
-/// [`ToolCatalog`](super::ToolCatalog) and keeps the implementations in a
-/// table of its own keyed by [`ToolId`]; the Engine fills its tool slots
-/// against the descriptors, advertises them, and issues each call as an
-/// effect naming the id, so the Harness resolves the implementation and the
-/// Engine never holds one.
+/// A descriptor holds the tool's stable id, its wire name, the description
+/// the model reads, its parameter schema, whether its output is structured,
+/// and the capabilities that the contributing capability cannot be
+/// activated with.
+///
+/// The caller collects the descriptors of its activated capabilities into a
+/// [`ToolCatalog`](super::ToolCatalog). It keeps the implementations in its
+/// own table, keyed by [`ToolId`]. The Engine binds its tool slots to the
+/// descriptors and advertises them to the model. It issues each tool call as
+/// an effect that names the tool's id. The caller resolves that id to the
+/// implementation, so the Engine never holds one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {
-    /// The stable live identity, the catalog key.
+    /// The tool's stable identity. The catalog uses it as the key.
     pub id: ToolId,
-    /// The transport wire name: a non-empty token without `/` or control
-    /// characters, aliased when the tool is advertised to a model.
+    /// The name the tool is sent under on the wire. It must be non-empty and
+    /// contain no `/` and no control characters. When the tool is advertised
+    /// to a model, it appears under its prompt-local alias instead.
     pub wire_name: String,
     /// The one-sentence description the model reads.
     pub description: String,
     /// The JSON-Schema `object` the tool's arguments must match.
     pub parameters_schema: Value,
-    /// Whether the tool's output text is one JSON value an executor resumes
-    /// into the script as data rather than as a string.
+    /// Whether the tool's output text is a single JSON value. When it is, a
+    /// script that calls the tool receives the output as data instead of as
+    /// a string.
     pub structured_output: bool,
-    /// The capabilities the contributing capability cannot be activated
-    /// with; stored for the record, checked by the Harness before activation.
+    /// The capabilities that the contributing capability cannot be activated
+    /// with. The descriptor only records them. The caller checks them before
+    /// activation.
     pub conflicts: Vec<CapabilityId>,
 }
 
 impl ToolDescriptor {
-    /// Builds a plain-output descriptor with no conflicts.
+    /// Builds a descriptor with plain-text output and no conflicts.
     #[must_use]
     pub fn new(
         id: ToolId,
@@ -57,14 +62,16 @@ impl ToolDescriptor {
         }
     }
 
-    /// Marks the descriptor's output as structured JSON (or plain text).
+    /// Sets whether the tool's output is structured JSON (`true`) or plain
+    /// text (`false`).
     #[must_use]
     pub fn structured(mut self, structured: bool) -> ToolDescriptor {
         self.structured_output = structured;
         self
     }
 
-    /// Records the contributing capability's co-activation conflicts.
+    /// Sets the capabilities that the contributing capability cannot be
+    /// activated with.
     #[must_use]
     pub fn with_conflicts(mut self, conflicts: Vec<CapabilityId>) -> ToolDescriptor {
         self.conflicts = conflicts;

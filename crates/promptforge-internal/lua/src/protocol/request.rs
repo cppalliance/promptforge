@@ -235,40 +235,46 @@ impl Request {
     }
 }
 
-/// One validated operation on the run's store view: the `store.*` call's
-/// name and its author-supplied arguments, checked once here at the
-/// protocol boundary.
+/// One `store.*` call from a prompt script: which operation it is and the
+/// arguments the script passed.
 ///
-/// Not the same as `vfs::Op`: that is the plain kind of file operation a
-/// policy matches on and a watcher is told about (`Read`, `Write`,
-/// `Rename`, and so on, with no path or contents), while this carries the
-/// full arguments of one of the eight `store.*` calls.
+/// The Engine checks the arguments once, when it parses the call.
 ///
-/// The read bounds are `i64`: a negative bound converts to 0 at execution,
-/// which the facade's range validation rejects with the same error a zero
-/// bound produces.
+/// This type is not `vfs::Op`. That type names only the kind of file
+/// operation (`Read`, `Write`, `Rename`, and so on, with no path or
+/// contents), which a policy matches on and a watcher is told about. This
+/// type carries the full arguments of one of the eight `store.*` calls.
 ///
-/// Plain data, so the executor's effect record can move an operation
-/// through serde as the shim yielded it.
+/// The read bounds are `i64`. A negative bound converts to 0 when the
+/// operation runs, so the range check rejects it with the same error a
+/// zero bound produces.
+///
+/// The type holds only plain data, so an effect record can carry an
+/// operation through serde unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum VfsOp {
-    /// `store.write(path, contents)`.
+    /// `store.write(path, contents)`: creates or overwrites the file at
+    /// `path` with `contents`.
     Write {
         /// The author-supplied logical path.
         path: String,
         /// The author-supplied file contents.
         contents: String,
     },
-    /// `store.append(path, contents)`.
+    /// `store.append(path, contents)`: appends `contents` to the file at
+    /// `path`, creating the file if it is absent.
     Append {
         /// The author-supplied logical path.
         path: String,
         /// The author-supplied text to append.
         contents: String,
     },
-    /// `store.read(path, start?, end?)`: no `start` reads the whole file;
-    /// a present `start` slices a 1-based inclusive line range.
+    /// `store.read(path, start?, end?)`: reads the file at `path` as text.
+    ///
+    /// With neither bound, it reads the whole file. With `start`, it reads
+    /// a 1-based inclusive line range. An `end` without a `start` is an
+    /// error.
     Read {
         /// The author-supplied logical path.
         path: String,
@@ -277,8 +283,9 @@ pub enum VfsOp {
         /// The optional 1-based last line.
         end: Option<i64>,
     },
-    /// `store.read_numbered(path, start?, end?)`: the read with absolute
-    /// line numbers under the same optional bounds.
+    /// `store.read_numbered(path, start?, end?)`: reads like `store.read`
+    /// and prefixes each line with its absolute line number. The bounds
+    /// work the same way.
     ReadNumbered {
         /// The author-supplied logical path.
         path: String,
@@ -287,7 +294,8 @@ pub enum VfsOp {
         /// The optional 1-based last line.
         end: Option<i64>,
     },
-    /// `store.str_replace(path, old, new)`.
+    /// `store.str_replace(path, old, new)`: replaces `old` with `new` in the
+    /// file at `path`.
     StrReplace {
         /// The author-supplied logical path.
         path: String,
@@ -296,17 +304,18 @@ pub enum VfsOp {
         /// The replacement text.
         new: String,
     },
-    /// `store.delete(path)` (idempotent).
+    /// `store.delete(path)`: deletes the file at `path`. Deleting a missing
+    /// path is not an error.
     Delete {
         /// The author-supplied logical path.
         path: String,
     },
-    /// `store.glob(pattern)`.
+    /// `store.glob(pattern)`: lists the paths that match `pattern`.
     Glob {
         /// The author-supplied glob pattern.
         pattern: String,
     },
-    /// `store.exists(path)`.
+    /// `store.exists(path)`: reports whether `path` exists.
     Exists {
         /// The author-supplied logical path.
         path: String,

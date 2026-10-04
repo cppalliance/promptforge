@@ -69,22 +69,24 @@ pub use run::{
 // the Engine's own store handling; other crates name it from `promptforge_lua`.
 use promptforge_lua::{VfsOp, VfsOutcome};
 
-/// Performs one operation on the run's store view through `access`: the
-/// work behind an [`Effect::Vfs`], for the Harness's effect loop.
-/// `access` is the store view the effect carries - derived from the
-/// chain's capability at dispatch - and each [`VfsOp`] maps onto one
-/// `Access` call over it, so the Harness answers a `Vfs` effect exactly as
-/// the Engine's test drivers do. The `i64` line bounds convert to `usize` here, and an
-/// `end` without a `start` is refused as an invalid range.
+/// Performs the store operation of an [`Effect::Vfs`] and returns its answer.
 ///
-/// Synchronous, because the VFS is synchronous by design; the Harness's
-/// effect loop calls it inline, on the thread that runs the loop.
+/// `access` is the store view the effect carries. It is derived from the
+/// chain's capability when the effect is dispatched. Each [`VfsOp`] maps
+/// onto one `Access` call on that view, so the caller answers a `Vfs`
+/// effect exactly as the Engine's own test drivers do. Line bounds arrive
+/// as `i64` and convert to `usize`. A read with an `end` but no `start` is
+/// refused as an invalid range.
+///
+/// The function is synchronous because the store is synchronous by
+/// design. The caller can run it inline, on the thread that runs its
+/// effect loop.
 ///
 /// # Errors
 /// Returns the store's own structured failure for the operation (path
-/// validation, not-found, anchor, range, conflict, or backend failure),
-/// which the Engine raises at the author's call site when the answer is
-/// resumed.
+/// validation, not-found, anchor, range, conflict, or backend failure).
+/// When the caller resumes the run with that answer, the Engine raises
+/// the failure at the prompt author's call site.
 pub fn perform_vfs_op(
     access: &promptforge_vfs::Access,
     op: VfsOp,
@@ -92,22 +94,25 @@ pub fn perform_vfs_op(
     crate::lua::run_store_op(access, op)
 }
 
-/// What the run produced. Domain outcomes (including "the prompt
-/// declined") are values, not thrown errors: the variant is for code, the
-/// payload is for humans and models. The Harness reads it out of
-/// [`Step::Done`].
+/// The outcome of a run, which the caller reads out of [`Step::Done`].
+///
+/// Every outcome is a value of this enum, not a thrown error. That
+/// includes a prompt that declines its task. The variant tells code what
+/// happened, and the payload explains it to people and models.
 ///
 /// # Outcomes
 /// - [`RunResult::Ok`] - the run completed with its final text.
-/// - [`RunResult::Cancelled`] - the Host cancelled the run.
-/// - [`RunResult::Failure`] - the run failed; the [`RunError`]'s
-///   [`kind`](RunError::kind) classifies the failure by condition:
-/// - [`RunErrorKind::Parse`] - a prompt/frontmatter or compiled Lua region was
-///   invalid.
+/// - [`RunResult::Cancelled`] - the caller cancelled the run.
+/// - [`RunResult::Failure`] - the run failed.
+///
+/// A failure's [`RunError`] has a [`kind`](RunError::kind) that classifies
+/// the failure by condition:
+/// - [`RunErrorKind::Parse`] - the prompt, its frontmatter, or a compiled
+///   Lua region was invalid.
 /// - [`RunErrorKind::Version`] - the prompt declared an unsupported
-///   `promptforge:` major.
-/// - [`RunErrorKind::Binding`] - a `tools.bind`/`models.bind` capability could
-///   not be bound, was absent, or clashed.
+///   `promptforge:` major version.
+/// - [`RunErrorKind::Binding`] - a tool or model capability could not be
+///   bound or was absent.
 /// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
 ///   backend, or decode layer.
 /// - [`RunErrorKind::Tool`] - a dispatched tool failed, was out of scope, or the
@@ -122,23 +127,25 @@ pub fn perform_vfs_op(
 /// - [`RunErrorKind::Vfs`] - a run-scoped store operation failed, or the
 ///   run's handle declares no store.
 /// - [`RunErrorKind::Determinism`] - two live execution identities claimed
-///   one store path; the run terminated on the spot, uncatchably from Lua.
-/// - [`RunErrorKind::Cancelled`] - the Host cancelled the run (mid-run
-///   classification only; the interface reports [`RunResult::Cancelled`]).
+///   one store path. The run ended on the spot, and Lua code cannot catch
+///   this failure.
+/// - [`RunErrorKind::Cancelled`] - the caller cancelled the run. This kind
+///   only classifies errors raised while the run is still going. The run
+///   itself ends in [`RunResult::Cancelled`].
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 /// - [`RunErrorKind::RequirementsUnmet`] - a missing required capability,
-///   a missing Host service, a capability conflict, an unmet model
-///   requirement (a context minimum or a hard keyword), or a failed H1
-///   hard gate.
+///   a service the caller did not supply, a capability conflict, an unmet
+///   model requirement (a context minimum or a hard keyword), or an H1
+///   block that failed the prompt's hard gate.
 #[derive(Debug)]
 pub enum RunResult {
-    /// The run completed with its final text. Mirrors `Result` vocabulary,
-    /// so patterns need `RunResult::Ok` qualification wherever `Result` is
-    /// also in scope.
+    /// The run completed with its final text. The name matches
+    /// `Result::Ok`, so patterns must write `RunResult::Ok` wherever
+    /// `Result` is also in scope.
     Ok(String),
-    /// The Host cancelled the run.
+    /// The caller cancelled the run.
     Cancelled,
-    /// The run failed; the typed error classifies the failure.
+    /// The run failed. The error's kind classifies the failure.
     Failure(RunError),
 }
 

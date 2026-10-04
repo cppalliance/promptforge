@@ -348,9 +348,12 @@ impl Drop for RoutingAccess {
     }
 }
 
-/// Mount installation for [`VfsRef`]. Mounts are fixed at
-/// [`VfsRefBuilder::build`], so the table is immutable and cheap to
-/// `Arc`-share thereafter.
+/// A builder that mounts backends at path prefixes and then builds a
+/// [`VfsRef`] over them.
+///
+/// The mounts are fixed when [`VfsRefBuilder::build`] runs. After that
+/// the mount table never changes, so it is cheap to share through an
+/// `Arc`.
 pub struct VfsRefBuilder {
     mounts: Mounts,
     policy: Option<Arc<dyn Policy + Sync>>,
@@ -387,8 +390,11 @@ impl VfsRefBuilder {
         }
     }
     /// Mounts `backend` at `prefix`, consuming and returning the
-    /// builder. The root prefix `/` serves the whole namespace; a
-    /// longer prefix shadows a shorter one (longest prefix wins).
+    /// builder.
+    ///
+    /// The root prefix `/` serves the whole namespace. A longer prefix
+    /// shadows a shorter one, so the longest matching prefix serves
+    /// each path.
     ///
     /// # Panics
     /// Panics when `prefix` is not an absolute virtual path or a mount
@@ -408,11 +414,15 @@ impl VfsRefBuilder {
     }
 
     /// Mounts `backend` at `root` and declares that mount the handle's
-    /// store, consuming and returning the builder. The store is the
-    /// mount every store call is scoped to. Only the outermost built
-    /// handle's declaration counts: an overlay inherits its base's,
-    /// and a handle mounted as a backend keeps its declaration to
-    /// itself.
+    /// store, consuming and returning the builder.
+    ///
+    /// A store view, such as the access that `VfsRef::acquire_store`
+    /// returns, reaches only this mount, and its paths are relative to
+    /// `root`.
+    ///
+    /// Only the outermost handle's declaration counts. A handle made
+    /// with `VfsRef::overlay` inherits the declaration of its base. A
+    /// handle mounted as a backend keeps its declaration to itself.
     ///
     /// # Panics
     /// Panics when `root` is not an absolute virtual path or a mount
@@ -445,21 +455,30 @@ impl VfsRefBuilder {
         self
     }
 
-    /// Installs the operation sink, consuming and returning the builder.
-    /// The sink fires on every admitted operation - after policy and
-    /// claims pass, before the backend executes - with the op kind, the
-    /// canonical path, and the caller's origin. Fire-and-forget: no
-    /// outcome flows back, and a policy-denied operation never fires.
-    /// The sink must be cheap: store operations fire it from the
-    /// blocking pool.
+    /// Installs a callback that observes operations, consuming and
+    /// returning the builder.
+    ///
+    /// The built handle calls this operation sink for every operation
+    /// that passes the policy and claims checks, just before the backend
+    /// runs it. Each call receives an `OpEvent` with the operation kind,
+    /// the canonical path, and the `Origin` of the access that made the
+    /// call. The sink returns nothing and never learns the operation's
+    /// result. An operation that the policy denies never reaches it.
+    ///
+    /// The sink runs inline on the thread that performs the operation,
+    /// so it must be cheap.
     #[must_use]
     pub fn on_op(mut self, sink: impl Fn(OpEvent<'_>) + Send + Sync + 'static) -> VfsRefBuilder {
         self.sink = Some(Arc::new(sink));
         self
     }
 
-    /// Freezes the mount table into a handle with the installed policy
-    /// and op sink (the [`AllowAll`] policy and no sink by default).
+    /// Builds the handle with the installed mounts, policy, and
+    /// operation sink.
+    ///
+    /// The mount table is fixed from this point on. The policy defaults
+    /// to [`AllowAll`], and the handle has no operation sink unless
+    /// `on_op` installed one.
     ///
     /// [`AllowAll`]: crate::AllowAll
     #[must_use]

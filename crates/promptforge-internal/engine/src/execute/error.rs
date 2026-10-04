@@ -5,81 +5,92 @@ use std::ops::Range;
 
 use crate::Error;
 
-/// A stable, matchable classification of a [`RunError`].
+/// The stable category of a [`RunError`], for matching in code.
 ///
-/// The variant identifies the phase of the run that failed without exposing the
-/// internal error type. It is `#[non_exhaustive]`, so new kinds can be
-/// added without breaking a caller's `match`.
+/// Each variant names the phase of the run that failed. The enum is
+/// `#[non_exhaustive]`, so a `match` on it needs a wildcard arm. That lets
+/// new kinds be added without breaking callers.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RunErrorKind {
     /// The prompt could not be parsed or a compiled Lua region was invalid.
     Parse,
-    /// The prompt declared a `promptforge:` major this build does not support.
+    /// The prompt declared a `promptforge:` major version that this build
+    /// does not support.
     Version,
-    /// A tool or model capability could not be bound, was absent, or clashed.
+    /// A tool or model capability could not be bound or was absent.
     Binding,
     /// A model completion failed at the transport, backend, or decode layer.
     Completion,
-    /// A dispatched tool failed, was unknown, or the tool loop did not converge.
+    /// A dispatched tool failed or was unknown, or the tool-call loop reached
+    /// its iteration cap without a final reply.
     Tool,
-    /// A run-scoped store operation failed, or the run's handle declares no
-    /// store.
+    /// A run-scoped store operation failed, or the run has no store to
+    /// operate on.
     Vfs,
-    /// Two live execution identities claimed one store path: the claims
-    /// model terminated the run to keep interleaving deterministic.
+    /// Two live executions in the run claimed the same store path.
+    ///
+    /// The run stops at once to keep the interleaving of their store access
+    /// deterministic.
     Determinism,
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
     /// A Lua resource quota (log events, log bytes, or instructions) was
     /// exhausted.
     Quota,
-    /// The selected compactor exhausted the model's context window.
+    /// The request overflowed the model's context window, and the selected
+    /// compactor did not make room.
     ContextExhausted,
     /// A `{{ }}` prose substitution failed.
     Substitution,
-    /// The Host cancelled the run.
+    /// The caller cancelled the run.
     Cancelled,
     /// An unexpected internal invariant failure.
     Internal,
-    /// An H1 assertion or model requirement the environment cannot satisfy.
+    /// The environment cannot satisfy a requirement the prompt states, such
+    /// as an H1 assertion or a model requirement.
     RequirementsUnmet,
 }
 
-/// Where a failure occurred: a prompt source position or a Rust code
-/// position.
+/// Where a run failed: a position in the prompt source or in the Rust
+/// source.
 ///
-/// One generic shape - the [`RunErrorKind`] says which world the fault is in,
-/// and the path's extension says it again. Kinds are for code, messages for
-/// reading, locations for navigation.
+/// The error's [`RunErrorKind`] says which of the two it is, and the
+/// extension of `path` says so too. Use the kind to branch in code, the
+/// error message to show a reader, and the location to navigate to the
+/// fault.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceLocation {
-    /// The prompt's frontmatter name when parse got that far, or the Rust
-    /// source file (from `file!()`) for an internal fault. A frontmatter
-    /// YAML failure predates the name, so its path is a placeholder the
-    /// Host replaces with its own label for the source.
+    /// The prompt name or Rust source file where the failure occurred.
+    ///
+    /// For a prompt failure this is the prompt's frontmatter name when
+    /// parsing got that far. Otherwise it is the placeholder `<prompt>`,
+    /// which the caller should replace with its own label for the source. A
+    /// frontmatter YAML failure always gets the placeholder, because it
+    /// happens before the name is read. For an internal fault this is the
+    /// Rust source file, as given by `file!()`.
     pub path: String,
     /// The 1-based line, when known.
     pub line: Option<u32>,
     /// The 1-based column, when known.
     pub column: Option<u32>,
-    /// The byte span of the offending region, when known. Only structured
-    /// parse failures have one. The offsets are relative to the document
-    /// body after the frontmatter and a leading BOM, with CRLF normalized to
-    /// LF, so they do not index the original source;
+    /// The byte span of the offending region, when known.
+    ///
+    /// Only parse failures can have a span, and a frontmatter YAML failure
+    /// never has one. The offsets index the document body, which excludes
+    /// the frontmatter and any leading BOM and has CRLF line endings
+    /// normalized to LF. So they do not index the original source. Use
     /// [`line`](SourceLocation::line) and [`column`](SourceLocation::column)
-    /// locate the failure in the original file.
+    /// to locate the failure in the original file.
     pub span: Option<Range<usize>>,
 }
 
-/// The error a prompt run fails with, reported through
-/// [`RunResult::Failure`](super::RunResult::Failure) out of
-/// [`Step::Done`](super::Step::Done).
+/// The error a failed prompt run reports.
 ///
-/// A `RunError` has a stable [`kind`](RunError::kind) classifier plus the
-/// `is_cancelled`/`is_retryable` predicates, and preserves the underlying
-/// cause through [`std::error::Error::source`]. It is `#[non_exhaustive]`
-/// and cannot be constructed outside the crate.
+/// A run that fails ends with [`Step::Done`](super::Step::Done), whose
+/// result is [`RunResult::Failure`](super::RunResult::Failure) holding this
+/// error. Use [`kind`](RunError::kind) to classify the failure in code. The
+/// underlying cause stays available through [`std::error::Error::source`].
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RunError {
@@ -121,7 +132,7 @@ impl RunError {
         }
     }
 
-    /// Returns `true` when the run failed because the Host cancelled it.
+    /// Returns `true` when the run failed because the caller cancelled it.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self.inner, Error::Interrupted)
@@ -144,13 +155,15 @@ impl RunError {
         }
     }
 
-    /// Returns where the failure occurred, when it has a location.
+    /// Returns where the failure occurred, or `None` when it has no location.
     ///
-    /// Parse-kind failures report the prompt source position (the frontmatter
-    /// name as the path when parse got that far, plus the surfaced YAML
-    /// line/column or the span-derived position); internal faults report the
-    /// Rust source file and line of the broken invariant. Other kinds have
-    /// no source position to navigate to and return `None`.
+    /// A failure of kind `Parse` returns its position in the prompt source.
+    /// The path is the prompt's frontmatter name when parsing got that far,
+    /// and the placeholder `<prompt>` otherwise. The line and column come
+    /// from the YAML error for a frontmatter failure, or from the span for
+    /// any other parse failure. A failure of kind `Internal` returns the Rust
+    /// source file and line of the broken invariant. Failures of other kinds
+    /// have no source position and return `None`.
     #[must_use]
     pub fn location(&self) -> Option<SourceLocation> {
         match &self.inner {

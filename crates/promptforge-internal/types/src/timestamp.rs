@@ -27,7 +27,7 @@ mod tests;
 pub struct Timestamp(i64);
 
 impl Timestamp {
-    /// `1970-01-01T00:00:00Z`.
+    /// The Unix epoch, `1970-01-01T00:00:00Z`.
     pub const UNIX_EPOCH: Timestamp = Timestamp(0);
 
     /// The instant `millis` milliseconds after the Unix epoch (before it
@@ -43,12 +43,14 @@ impl Timestamp {
         self.0
     }
 
-    /// The instant as an RFC 3339 UTC string: `2024-02-29T12:34:56.789Z`.
+    /// Renders the instant as an RFC 3339 UTC string, such as
+    /// `2024-02-29T12:34:56.789Z`.
     ///
-    /// The fraction is omitted when the millisecond count is zero and
-    /// otherwise drops its trailing zeros (`.78`, `.7`), which is the
-    /// `time` crate's rendering. Years outside `0000..=9999` render with
-    /// more digits or a sign and are not RFC 3339; no run is stamped there.
+    /// The fractional second is omitted when the instant falls on a whole
+    /// second. Otherwise it drops its trailing zeros (`.78`, `.7`). This
+    /// matches the `time` crate's rendering. Years outside `0000..=9999`
+    /// render with more digits or a sign, so the result is not valid
+    /// RFC 3339 for them.
     #[must_use]
     pub fn to_rfc3339(self) -> String {
         const MILLIS_PER_DAY: i64 = 86_400_000;

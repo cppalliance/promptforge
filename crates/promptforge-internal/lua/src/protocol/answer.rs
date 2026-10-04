@@ -14,22 +14,28 @@ use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};
 
-/// The outcome of one dispatched [`VfsOp`](super::VfsOp) on the run's store
-/// view: the value the shim returns to its caller. Mutating ops produce `Unit` (the shim returns
-/// nil).
+/// The result of one [`VfsOp`](super::VfsOp) run against the run's store
+/// view.
 ///
-/// Serde's externally tagged form makes the outcome itself the log's
-/// success payload, so an answer record built from it serializes to the
-/// run log's fixed store-answer JSON.
+/// The Lua program receives it as the return value of its `store.*` call.
+/// Operations that change the store, such as writes and deletes, produce
+/// `Unit`, which the program receives as nil.
+///
+/// The run log records a successful store answer as this value, so its
+/// JSON form is part of the log format. In serde's externally tagged form,
+/// `Unit` is the bare string `"Unit"` and every other variant is a one-key
+/// object, such as `{"Text": "..."}`, `{"Paths": ["a.txt"]}`, or
+/// `{"Bool": true}`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VfsOutcome {
     /// The operation succeeded with no return value.
     Unit,
-    /// `read`/`read_numbered`: the (possibly bounded) file text.
+    /// The text that `read` or `read_numbered` returns: the whole file, or
+    /// only the requested line range.
     Text(String),
-    /// `glob`: the matching paths, sorted.
+    /// The paths that match a `glob` pattern, in sorted order.
     Paths(Vec<String>),
-    /// `exists`: the presence flag.
+    /// Whether the path exists, for `exists`.
     Bool(bool),
 }
 

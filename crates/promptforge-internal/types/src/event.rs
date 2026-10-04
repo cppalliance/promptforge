@@ -117,14 +117,13 @@ macro_rules! events {
     };
 }
 
-/// Which path produced one [`Event::AssistantReply`]: a user-facing chat
-/// turn ([`Chat`](Self::Chat)) or a programmatic inference round
-/// ([`Infer`](Self::Infer)).
+/// The kind of model round that produced an [`Event::AssistantReply`]: a
+/// user-facing chat turn ([`Chat`](Self::Chat)) or a programmatic
+/// inference round ([`Infer`](Self::Infer)).
 ///
-/// The default is `chat`, so a reply that carries no `origin` reads back
-/// as a chat reply. The same value is the origin of the round on a `Chat`
-/// effect. The enum is `#[non_exhaustive]`, so a Host matches the two known
-/// origins and keeps a wildcard for a future one.
+/// The default is `chat`, so a serialized reply that carries no `origin`
+/// reads back as a chat reply. A `Chat` effect's round carries the same
+/// value in its `origin` field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -132,21 +131,29 @@ pub enum ReplyOrigin {
     /// A user-facing chat turn: the reply belongs in the conversation.
     #[default]
     Chat,
-    /// A programmatic inference round (`models.infer`): the reply is a
-    /// model result the Host may treat apart from the conversation.
+    /// A programmatic inference round started by `models.infer`. The reply
+    /// is a model result that the application may handle apart from the
+    /// conversation.
     Infer,
 }
 
 events! {
     /// One thing that happened during a run.
     ///
-    /// Variants fall into four groups. Lifecycle variants (the first group,
-    /// through [`Lua`](Self::Lua)) mark operational boundaries; the
-    /// payload-free ones carry nothing beyond the coordinates. Task
-    /// variants report a task chain's start and end. Content variants
-    /// hold what a model, tool, or user produced. Debug variants hold the
-    /// raw model-turn bodies. Every variant has `execution`, `section`,
-    /// and `provenance` ahead of its payload; see the module docs.
+    /// Variants fall into four groups:
+    ///
+    /// - Lifecycle variants, from the first through [`Lua`](Self::Lua),
+    ///   mark operational boundaries. The payload-free ones carry nothing
+    ///   beyond the coordinates. The `Vfs` variants report the run's
+    ///   `store.*` calls, which go through the caller.
+    /// - Task variants report a task chain's start and end.
+    /// - Content variants hold what a model, a tool, or a user produced.
+    /// - Debug variants hold the raw model-turn bodies.
+    ///
+    /// Every variant has three coordinates ahead of its payload:
+    /// `execution`, `section`, and `provenance`. An event serializes to one
+    /// JSON object tagged by `kind`, the variant name in `snake_case`, with
+    /// the coordinates and the payload fields beside it.
     pub enum Event {
         // Lifecycle: parse and run.
         /// Prompt parsing began.
@@ -170,7 +177,8 @@ events! {
         ModelTurnCompleted {},
         /// A model round trip returned an error.
         ModelTurnFailed {},
-        /// A successful parse ended because the model hit its length limit.
+        /// A model turn returned a text reply that stopped at the model's
+        /// length limit.
         ModelTurnTruncated {},
         /// One metadata section of a completed model turn's response was
         /// present but malformed and degraded to nothing, or the response
@@ -223,44 +231,47 @@ events! {
         ToolScopeValidationSucceeded {},
         /// A model-visible tool scope failed semantic validation.
         ToolScopeValidationFailed {},
-        /// Live-catalog model binding validation began.
+        /// Validation of model bindings against the live model catalog
+        /// began.
         ModelCatalogValidationStarted {},
-        /// Live-catalog model binding validation succeeded.
+        /// Validation of model bindings against the live model catalog
+        /// succeeded.
         ModelCatalogValidationSucceeded {},
-        /// Live-catalog model binding validation failed.
+        /// Validation of model bindings against the live model catalog
+        /// failed.
         ModelCatalogValidationFailed {},
         // Lifecycle: operations on the run's store view (the `store.*` calls).
-        /// A harness-mediated store write succeeded.
+        /// A `store.write` call succeeded.
         VfsWriteSucceeded {},
-        /// A harness-mediated store write failed.
+        /// A `store.write` call failed.
         VfsWriteFailed {},
-        /// A harness-mediated store append succeeded.
+        /// A `store.append` call succeeded.
         VfsAppendSucceeded {},
-        /// A harness-mediated store append failed.
+        /// A `store.append` call failed.
         VfsAppendFailed {},
-        /// A harness-mediated store read (verbatim) succeeded.
+        /// A `store.read` call, which reads verbatim, succeeded.
         VfsReadSucceeded {},
-        /// A harness-mediated store read (verbatim) failed.
+        /// A `store.read` call, which reads verbatim, failed.
         VfsReadFailed {},
-        /// A harness-mediated store read_numbered succeeded.
+        /// A `store.read_numbered` call succeeded.
         VfsReadNumberedSucceeded {},
-        /// A harness-mediated store read_numbered failed.
+        /// A `store.read_numbered` call failed.
         VfsReadNumberedFailed {},
-        /// A harness-mediated store replacement succeeded.
+        /// A `store.str_replace` call succeeded.
         VfsReplaceSucceeded {},
-        /// A harness-mediated store replacement failed.
+        /// A `store.str_replace` call failed.
         VfsReplaceFailed {},
-        /// A harness-mediated store deletion succeeded.
+        /// A `store.delete` call succeeded.
         VfsDeleteSucceeded {},
-        /// A harness-mediated store deletion failed.
+        /// A `store.delete` call failed.
         VfsDeleteFailed {},
-        /// A harness-mediated store glob succeeded.
+        /// A `store.glob` call succeeded.
         VfsGlobSucceeded {},
-        /// A harness-mediated store glob failed.
+        /// A `store.glob` call failed.
         VfsGlobFailed {},
-        /// A harness-mediated store existence check succeeded.
+        /// A `store.exists` existence check succeeded.
         VfsExistsSucceeded {},
-        /// A harness-mediated store existence check failed.
+        /// A `store.exists` existence check failed.
         VfsExistsFailed {},
         // Lifecycle: the author's checkpoints.
         /// The one author-controlled checkpoint: a validated Lua
@@ -273,9 +284,9 @@ events! {
         // Tasks.
         /// A task chain was started by `tasks.spawn`, by the `fanout` shim
         /// for each of its arms, or by the model's `task` tool. The payload
-        /// is the task's spawn seeds: everything the Harness needs to start the
-        /// same chain again under the same id. Reported under the spawning
-        /// section.
+        /// is the task's spawn seeds: everything the caller needs to start
+        /// the same chain again under the same id. The event is reported
+        /// under the spawning section.
         TaskStarted {
             /// The task's id: its chain's hierarchical id.
             task: TaskId,
@@ -294,38 +305,37 @@ events! {
             /// The spawner's `var` snapshot the chain seeds from.
             var: serde_json::Value,
         },
-        /// Terminal: a task's chain ended with a result. Reported under the
-        /// task's target section.
+        /// A task's chain ended with a result, which ends the task. The
+        /// event is reported under the task's target section.
         TaskSucceeded {
             /// The task's id.
             task: TaskId,
         },
-        /// Terminal: a task's chain ended with an error. Reported under the
-        /// task's target section.
+        /// A task's chain ended with an error, which ends the task. The
+        /// event is reported under the task's target section.
         TaskFailed {
             /// The task's id.
             task: TaskId,
         },
-        /// Terminal: the task was cancelled on purpose by its owner. Reported
-        /// once under the task's target section; a repeated cancel reports
-        /// nothing.
+        /// A task ended because its owner cancelled it on purpose. The event
+        /// is reported once, under the task's target section. A repeated
+        /// cancel reports nothing.
         TaskCancelled {
             /// The task's id.
             task: TaskId,
         },
-        /// Terminal: the task's owner chain ended while the task was live,
-        /// so the Engine ended the task. Distinct from a cancellation: the
-        /// task lost its owner rather than being stopped on purpose.
+        /// A task ended because its owner chain ended while the task was
+        /// live. The Engine ended the task. This differs from a
+        /// cancellation: the task lost its owner rather than being stopped
+        /// on purpose.
         TaskAbandoned {
             /// The task's id.
             task: TaskId,
             /// How the owner ended.
             reason: AbandonReason,
         },
-        /// Reserved: an existing task was revived from its record rather
-        /// than started anew. No producer emits it until resume lands; it
-        /// is declared now so the log schema has the kind from its first
-        /// version.
+        /// Reserved for an existing task revived from its record rather
+        /// than started anew. The Engine does not emit it.
         TaskResumed {
             /// The task's id.
             task: TaskId,
@@ -355,11 +365,12 @@ events! {
             finish_reason: Option<String>,
             /// The model that produced the reply.
             model: String,
-            /// Everything the call measured, when anything reported.
+            /// The call's measurements, when any were reported.
             metrics: Option<CallMetrics>,
-            /// The provenance a Host inspects to distinguish an inference
-            /// round (`infer`) from a user-facing chat turn (`chat`).
-            /// Defaults to `chat` when a reply carries no `origin`.
+            /// The kind of round that produced the reply: a programmatic
+            /// inference round (`infer`) or a user-facing chat turn
+            /// (`chat`). Defaults to `chat` when a serialized reply carries
+            /// no `origin`.
             #[serde(default)]
             origin: ReplyOrigin,
         },
@@ -389,11 +400,11 @@ events! {
             /// not nonce-wrapped).
             trusted: bool,
         },
-        /// One model-task notice as it is queued for the task's owner: the
-        /// Engine's own sentence telling the model how a task it started
-        /// ended. A completed task's final text is embedded nonce-wrapped
-        /// as untrusted; the rest of the sentence is the Engine's.
-        /// Reported under the owner's section.
+        /// A notice queued for a task's owner: the Engine's sentence telling
+        /// the model how a task it started ended. A completed task's final
+        /// text is embedded nonce-wrapped as untrusted; the rest of the
+        /// sentence is the Engine's. The event is reported under the
+        /// owner's section.
         TaskNotice {
             /// The owner's model-turn counter when the notice was queued.
             turn: u32,
@@ -402,10 +413,10 @@ events! {
             /// The sentence the model reads.
             text: String,
         },
-        /// Reserved for a task setting its own progress note through
-        /// `tasks.note`, the text its owner reads through `task_status`,
-        /// under the task's target section. Not yet produced: the Engine
-        /// stores the note on the chain without reporting it.
+        /// Reserved for a task's own progress note, set through
+        /// `tasks.note`. The note is the text the task's owner reads
+        /// through `task_status`. The Engine does not emit this variant: it
+        /// stores the note on the task's chain without reporting it.
         TaskNote {
             /// The task that set the note.
             task: TaskId,

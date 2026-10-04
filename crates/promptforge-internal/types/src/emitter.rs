@@ -40,9 +40,9 @@ mod tests;
 /// Whether a run captures each model round's raw request and response
 /// bodies as `Request` and `Response` events.
 ///
-/// Off by default: the bodies already travel in the `Chat` effect and its
-/// answer, so a Harness that logs effects has them; a Harness that wants the
-/// pair in the event stream too turns it on.
+/// Off by default. The `Chat` effect and its answer already carry the
+/// bodies, so a caller that logs effects has them. A caller that also
+/// wants them in the event stream selects `On`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugMode {
     /// The model rounds emit no `Request` or `Response` events and never

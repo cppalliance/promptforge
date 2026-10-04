@@ -162,28 +162,30 @@ fn body_line_column(
 
 /// A stable, matchable classification of a [`ParseError`].
 ///
-/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+/// New kinds can be added without a breaking change, so a `match` on this
+/// type needs a wildcard arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParseErrorKind {
     /// The YAML frontmatter block was missing, unclosed, or invalid.
     Frontmatter,
-    /// The document structure was invalid (missing/duplicate H1, no sections).
+    /// The document structure was invalid, for example a missing or duplicate
+    /// H1 title, or two sibling sections with the same name.
     Structure,
-    /// A reserved `lua`/`lua shared` fence was misplaced, or an exact fence
-    /// was not closed.
+    /// A reserved `lua` or `lua shared` code fence was misplaced or not
+    /// closed.
     Fence,
     /// A list-only section contained non-list or empty items.
     List,
-    /// A compiled Lua region was not syntactically valid.
+    /// A Lua region failed to compile because it was not syntactically valid.
     Lua,
 }
 
 /// The error returned by [`Prompt::parse`](crate::Prompt::parse).
 ///
-/// Holds a stable [`kind`](ParseError::kind) classifier and preserves the
-/// underlying cause through [`std::error::Error::source`]. `#[non_exhaustive]`
-/// and not constructible outside the crate.
+/// It holds a stable [`kind`](ParseError::kind) and, when known, where the
+/// failure happened. It keeps the underlying cause, which
+/// [`std::error::Error::source`] returns.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ParseError {
@@ -255,23 +257,24 @@ impl ParseError {
 
     /// Returns the byte span of the offending region, when one is available.
     ///
-    /// Structural failures that can locate the offending region (for example a
-    /// duplicate sibling section) have a byte span; others return `None`. The
+    /// A failure that can locate the offending region, such as a duplicate
+    /// sibling section, has a byte span. Other failures return `None`. The
     /// offsets are relative to the document body after the frontmatter and a
-    /// leading BOM, with CRLF normalized to LF, so they do not index the
-    /// original source; [`line`](ParseError::line) and
-    /// [`column`](ParseError::column) locate the failure in the original file.
+    /// leading BOM, with CRLF normalized to LF. They do not index the
+    /// original source. To locate the failure in the original file, use
+    /// [`line`](ParseError::line) and [`column`](ParseError::column).
     #[must_use]
     pub fn span(&self) -> Option<(usize, usize)> {
         self.span
     }
 
-    /// Returns the prompt's frontmatter name when the failure postdates the
-    /// frontmatter.
+    /// Returns the prompt's frontmatter name, when the failure came after the
+    /// frontmatter was read.
     ///
-    /// A frontmatter YAML failure predates the name (the parser learns the
-    /// name from the frontmatter itself), so it reports `None` and the
-    /// Host's own label for the source takes its place.
+    /// A frontmatter failure happens before the parser learns the name, which
+    /// comes from the frontmatter itself. It returns `None`, and the caller
+    /// can use its own label for the source instead. A Lua compile failure
+    /// also returns `None`.
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
@@ -279,8 +282,9 @@ impl ParseError {
 
     /// Returns the 1-based file line of the failure, when known.
     ///
-    /// Frontmatter failures surface the retained YAML error's position;
-    /// structured failures with a source span report the span's start line.
+    /// For a frontmatter YAML failure, this is the line the YAML parser
+    /// reported. For a failure with a byte span, it is the line where the
+    /// span starts.
     #[must_use]
     pub fn line(&self) -> Option<u32> {
         self.line

@@ -1,12 +1,12 @@
-//! Parses PromptForge prompt files and runs them for a Harness that does
-//! their outside work.
+//! Parses PromptForge prompt files and runs them, leaving their outside work
+//! to the caller.
 //!
 //! A [`Prompt`] is a parsed prompt file. A [`Run`] executes one prompt and
-//! performs no I/O: [`Run::step`] returns [`Step::Pending`] with the effects
-//! the run waits on, the Harness performs each one and hands its answer to
-//! [`Run::resume`], and the run ends at [`Step::Done`] with its
-//! [`RunResult`]. Before the run starts, [`Environment::prepare`] binds the
-//! prompt's model roles and tool slots into its [`RunContext`].
+//! performs no I/O. [`Run::step`] returns [`Step::Pending`] with the effects
+//! the run waits on. The caller performs each effect and hands its answer to
+//! [`Run::resume`]. The run ends at [`Step::Done`] with its [`RunResult`].
+//! Before the run starts, [`Environment::prepare`] binds the prompt's model
+//! roles and tool slots into the run's [`RunContext`].
 //!
 //! The crate's `greeter` example is that whole loop in one program.
 
@@ -30,7 +30,7 @@ pub use promptforge_parser::Prompt;
 
 pub mod effect {
     //! The outside work a run asks for, the answers it takes back, and the
-    //! records a Harness logs for both.
+    //! records a run log stores for both.
 
     pub use promptforge_engine::AnswerRecord;
     pub use promptforge_engine::ChatAnswerRecord;
@@ -45,7 +45,7 @@ pub mod effect {
 }
 
 pub mod event {
-    //! The events a run reports for the Harness to log.
+    //! The events a run reports for the caller to log.
 
     pub use promptforge_types::emitter::DebugMode;
     pub use promptforge_types::event::Event;
@@ -183,7 +183,7 @@ pub mod cancel {
 }
 
 pub mod timestamp {
-    //! The start time a run's context carries and its Lua reads as
+    //! The start time a run's context carries, which a prompt reads as
     //! `sys.when`.
 
     pub use promptforge_types::timestamp::Timestamp;

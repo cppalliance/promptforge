@@ -11,10 +11,13 @@ use crate::path::{VfsPath, VfsPathBuf};
 use crate::stat::{Entry, Stat};
 use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
-/// A handle is itself a backend: mounting a base handle under a child
-/// router - which is how [`VfsRef::overlay`] shares one claims table
-/// across two views of the same storage - routes operations through the
-/// base's policy and claims under the caller's identity.
+/// Makes a handle usable as a backend, so it can be mounted inside
+/// another handle.
+///
+/// Operations routed to the mounted handle pass through its own policy
+/// and claims, under the caller's identity. [`VfsRef::overlay`] relies
+/// on this. It mounts the base handle at the root of the overlay's
+/// router. Both views of the same storage share one claims table.
 impl Vfs for VfsRef {
     fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         // The mount forward leaves the origin unset: the outer handle already

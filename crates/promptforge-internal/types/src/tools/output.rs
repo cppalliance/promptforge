@@ -2,24 +2,24 @@
 
 /// Whether a tool's output is trusted or must be treated as untrusted data.
 ///
-/// Trust is mandatory and stored in [`ToolOutput`] so it cannot be forgotten:
-/// an [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
+/// Every [`ToolOutput`] carries a trust level, so it cannot be forgotten. An
+/// [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
 /// model input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutputTrust {
     /// The output was produced by trusted, first-party code.
     Trusted,
-    /// The output contains attacker-influenceable external data.
+    /// The output contains external data that an attacker could influence.
     Untrusted,
 }
 
-/// The result of a successful tool call (the Harness's `Tool::call`),
-/// with its text and trust.
+/// The text a tool returns from a successful call, together with its trust
+/// level.
 ///
-/// Trust travels with the value so the executor never has to remember a
-/// separate flag; construct with [`ToolOutput::trusted`] or
-/// [`ToolOutput::untrusted`].
+/// Build one with [`ToolOutput::trusted`] or [`ToolOutput::untrusted`]. The
+/// trust level travels with the text, so code that handles the output never
+/// has to track it as a separate flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolOutput {
@@ -28,7 +28,7 @@ pub struct ToolOutput {
 }
 
 impl ToolOutput {
-    /// Builds a trusted output whose text is appended to the model verbatim.
+    /// Builds a trusted output whose text is added to model input verbatim.
     #[must_use]
     pub fn trusted(text: impl Into<String>) -> ToolOutput {
         ToolOutput {
@@ -59,7 +59,7 @@ impl ToolOutput {
     }
 }
 
-/// A stable, matchable classification of a [`ToolError`].
+/// A stable classification of a [`ToolError`] that code can match on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolErrorKind {
@@ -67,7 +67,8 @@ pub enum ToolErrorKind {
     InvalidArguments,
     /// The tool's backend refused or failed the request.
     Backend,
-    /// The request failed at the transport layer (network, timeout).
+    /// The request failed at the transport layer, such as a network error or a
+    /// timeout.
     Transport,
     /// The run was cancelled before or during the call.
     Cancelled,
@@ -75,11 +76,12 @@ pub enum ToolErrorKind {
     Other,
 }
 
-/// A narrow, model-safe error from a tool call (the Harness's `Tool::call`).
+/// An error from a tool call, with a message that is safe to show the model.
 ///
-/// The `Display` message is caller-facing and safe to hand back to the model;
-/// any underlying cause is hidden behind [`std::error::Error::source`]. Match on
-/// [`ToolError::kind`] rather than a private representation.
+/// The `Display` message is meant for the caller and is safe to hand back to
+/// the model. Any underlying cause stays out of that message and is available
+/// only through [`std::error::Error::source`]. Match on [`ToolError::kind`] to
+/// tell failures apart.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ToolError {
@@ -89,7 +91,7 @@ pub struct ToolError {
 }
 
 impl ToolError {
-    /// Builds a model-safe error with only a message (kind `Other`).
+    /// Builds an error from a message alone, with the kind `Other`.
     #[must_use]
     pub fn message(text: impl Into<String>) -> ToolError {
         ToolError {
@@ -99,10 +101,11 @@ impl ToolError {
         }
     }
 
-    /// Builds a model-safe backend error with `src` as a hidden `#[source]`.
+    /// Builds a backend error that records `src` as its underlying cause.
     ///
-    /// The initial kind is [`ToolErrorKind::Backend`]; use
-    /// [`ToolError::with_kind`] when the source represents another class.
+    /// The cause is not part of the message. It is available only through
+    /// `Error::source`. The kind starts as [`ToolErrorKind::Backend`]. Call
+    /// [`ToolError::with_kind`] when the cause belongs to another kind.
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,

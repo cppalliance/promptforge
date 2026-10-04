@@ -6,15 +6,18 @@ use std::sync::Arc;
 use super::descriptor::ToolDescriptor;
 use super::ids::{ToolId, validate_identifier};
 
-/// The Harness-supplied catalog of the tools a run may bind, as descriptors.
+/// A catalog of the tools a run may bind, given as tool descriptors.
 ///
-/// The Harness assembles the catalog from its activated capabilities and
-/// keeps the implementations in a table of its own: the Engine fills its tool
-/// slots against the descriptors and never holds an implementation.
-/// Construction rejects a repeated [`ToolId`] or a transport-illegal wire
-/// name, so the bind-phase [`get`](Self::get) lookup trusts the invariant
-/// without rescanning. Cloning is cheap: the descriptors live behind one
-/// refcounted slice.
+/// The caller builds the catalog and keeps the tool implementations itself.
+/// The Engine fills a prompt's tool slots from these descriptors and never
+/// holds an implementation.
+///
+/// Every tool in a catalog has a unique [`ToolId`] and a wire name that is
+/// not empty and contains no `/` and no control character. Construction
+/// checks both, so the [`get`](Self::get) lookup does not check them again.
+///
+/// Cloning is cheap, because all clones share one reference-counted list of
+/// descriptors.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct ToolCatalog {
@@ -36,8 +39,7 @@ impl std::fmt::Debug for ToolCatalog {
 impl ToolCatalog {
     /// Builds a catalog from tool descriptors.
     ///
-    /// Validates identity uniqueness and wire-name legality once, here, so
-    /// [`Self::get`] can trust the invariant without rescanning.
+    /// This is the only place the catalog checks identities and wire names.
     ///
     /// # Errors
     /// Returns [`ToolCatalogError::DuplicateId`] if two descriptors share a
@@ -70,9 +72,8 @@ impl ToolCatalog {
 
     /// Returns the descriptor for `id`, if one is in the catalog.
     ///
-    /// This is the bind-time lookup, a cold path run once per declared
-    /// slot, so it scans linearly rather than keeping a cached-identity
-    /// index.
+    /// The lookup scans the descriptors one by one and keeps no index. It
+    /// runs only while a run binds its tools, once per declared tool slot.
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.iter().find(|tool| tool.id == *id)
@@ -92,17 +93,17 @@ pub enum ToolCatalogErrorKind {
     /// Two supplied tools shared a stable [`ToolId`].
     DuplicateId,
     /// A supplied descriptor's [`wire_name`](ToolDescriptor::wire_name) was
-    /// not transport-legal.
+    /// empty or contained a `/` separator or a control character.
     InvalidWireName,
 }
 
-/// A [`ToolCatalog`] could not be built from the supplied tools.
+/// The error returned when a [`ToolCatalog`] cannot be built from the
+/// supplied tools.
 ///
-/// The catalog is the schema/transport boundary, so besides rejecting a
-/// repeated identity it also rejects a descriptor whose
-/// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a
-/// separator or control character. It exposes a stable
-/// [`kind`](Self::kind) classifier.
+/// Building fails when two tools share an identity, or when a descriptor's
+/// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a `/`
+/// separator or a control character. Call [`kind`](Self::kind) to get a
+/// stable classification you can match on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolCatalogError {
@@ -113,7 +114,8 @@ pub enum ToolCatalogError {
         /// The stable identity supplied more than once.
         id: ToolId,
     },
-    /// A tool's transport wire name was not a legal identifier.
+    /// A tool's wire name was empty or contained a `/` separator or a
+    /// control character.
     #[error("invalid tool wire name {wire_name:?}: {reason}")]
     #[non_exhaustive]
     InvalidWireName {

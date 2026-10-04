@@ -6,8 +6,9 @@ use crate::{Error, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
 ///
-/// The `path` is the store-internal filename the prompt reads or writes;
-/// `description` is documentation that also feeds MCP schema generation.
+/// The `path` is the file's name in the store, which the prompt reads or
+/// writes. The `description` documents the file's purpose and also feeds MCP
+/// schema generation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -19,7 +20,7 @@ pub struct FileDecl {
 }
 
 impl FileDecl {
-    /// Returns the store-internal path.
+    /// Returns the file's path in the store, such as `paper.md`.
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
@@ -34,9 +35,9 @@ impl FileDecl {
 
 /// The parsed frontmatter of a prompt file.
 ///
-/// Unknown keys are rejected (`deny_unknown_fields`): a misspelled or
-/// unsupported frontmatter field is a prompt authoring error, so it fails at
-/// parse rather than being silently ignored.
+/// Parsing rejects unknown keys. A misspelled or unsupported field is a
+/// prompt authoring error, so it fails the parse instead of being silently
+/// ignored.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -142,7 +143,7 @@ impl<'de> serde::Deserialize<'de> for MaxToolIterations {
 }
 
 impl Frontmatter {
-    /// Returns the prompt's caller-supplied identifier.
+    /// Returns the prompt's identifier, read from the `name:` key.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -154,26 +155,30 @@ impl Frontmatter {
         &self.description
     }
 
-    /// Returns the Engine major the `promptforge:` key declares, when present.
+    /// Returns the Engine major version that the `promptforge:` key declares,
+    /// when present.
     #[must_use]
     pub fn promptforge(&self) -> Option<u32> {
         self.promptforge
     }
 
-    /// Returns the per-section tool-loop cap declared in frontmatter, or
-    /// `None` when the prompt leaves the runtime's default in force.
+    /// Returns the declared cap on model round trips in each section's
+    /// tool-call loop. Returns `None` when the prompt declares no cap, so the
+    /// caller's default applies.
     #[must_use]
     pub fn max_tool_iterations(&self) -> Option<std::num::NonZeroU32> {
         self.max_tool_iterations.limit()
     }
 
-    /// Returns the declared input file, when present.
+    /// Returns the declared input file, when present. The prompt expects to
+    /// find this file in the store when it starts.
     #[must_use]
     pub fn input(&self) -> Option<&FileDecl> {
         self.input.as_ref()
     }
 
-    /// Returns the declared output file, when present.
+    /// Returns the declared output file, when present. The prompt leaves this
+    /// file in the store when it finishes.
     #[must_use]
     pub fn output(&self) -> Option<&FileDecl> {
         self.output.as_ref()
@@ -185,7 +190,8 @@ impl Frontmatter {
         &self.capabilities
     }
 
-    /// Returns the declared tool slots (alias to exact path).
+    /// Returns the declared tool slots, which map each alias to an exact tool
+    /// path.
     #[must_use]
     pub fn tools(&self) -> &ToolSlots {
         &self.tools
@@ -199,7 +205,7 @@ impl Frontmatter {
         &self.args
     }
 
-    /// Returns the declared model roles (label to role).
+    /// Returns the declared model roles, which map each label to a role.
     #[must_use]
     pub fn models(&self) -> &ModelRoles {
         &self.models

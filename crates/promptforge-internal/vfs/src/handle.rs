@@ -73,10 +73,13 @@ struct Volume {
     store: Option<StoreDecl>,
 }
 
-/// The cloneable handle over one backend and its claims ledger.
+/// A cloneable handle to a virtual filesystem: one backend plus a claims
+/// ledger that records which parts of the filesystem each access has
+/// read or written.
 ///
-/// Clones share the backend, the claims tables, and the policy: claims
-/// registered through one clone conflict with operations through another.
+/// Clones share the backend, the claims ledger, and the policy. Claims
+/// registered through one clone are checked against operations through
+/// every other clone.
 #[derive(Clone)]
 pub struct VfsRef {
     volume: Arc<Volume>,
@@ -96,10 +99,12 @@ impl VfsRef {
         Self::with_policy(backend, AllowAll)
     }
 
-    /// Returns a handle over `backend` consulting `policy` on every
-    /// operation. The policy is dynamic through shared state: the Host
-    /// holds the same `Arc` and changes behavior mid-run, and the next
-    /// operation sees it.
+    /// Returns a handle over `backend` that consults `policy` on every
+    /// operation.
+    ///
+    /// The policy can share its state with the caller, for example
+    /// through an `Arc`. When the caller changes that state during a run,
+    /// the next operation sees the change.
     #[must_use]
     pub fn with_policy(
         backend: impl Vfs + 'static,
@@ -116,18 +121,21 @@ impl VfsRef {
         }
     }
 
-    /// Returns a builder for installing mounts. Mounts are fixed at
-    /// [`VfsRefBuilder::build`], so the table is immutable and cheap to
-    /// `Arc`-share thereafter.
+    /// Returns a builder for installing mounts.
+    ///
+    /// The mounts are fixed when [`VfsRefBuilder::build`] runs. After
+    /// that the mount table never changes, so clones share it cheaply.
     #[must_use]
     pub fn builder() -> VfsRefBuilder {
         VfsRefBuilder::new()
     }
 
-    /// Returns a handle with `backend` mounted at `prefix` over this
-    /// handle's namespace. The claims table is shared: conflicts are
-    /// detected across both views of the same storage. The overlay
-    /// inherits this handle's store declaration, when it has one.
+    /// Returns a new handle that mounts `backend` at `prefix` on top of
+    /// this handle's namespace.
+    ///
+    /// The new handle shares this handle's claims table, so conflicts are
+    /// detected across both views of the same storage. It also inherits
+    /// this handle's store declaration, when it has one.
     ///
     /// # Panics
     /// Panics when `prefix` is not an absolute virtual path or is the
@@ -163,14 +171,18 @@ impl VfsRef {
         }
     }
 
-    /// Acquires the capability for a new serial thread of execution.
-    /// This is the only way in: every acquire vends a fresh [`ExecId`]
-    /// and starts a new *scope* - the root identity together with every
-    /// identity later forked from it. Two acquires are two scopes, and
-    /// nothing orders two scopes, so their claims always conflict while
-    /// both live; a scope's claims are ignored once its last identity
-    /// ends. `origin` is pure observability: it labels every operation
-    /// event this capability fires and never gates anything.
+    /// Acquires an `Access` capability for a new serial thread of
+    /// execution.
+    ///
+    /// Every acquire creates a fresh [`ExecId`] and starts a new *scope*.
+    /// A scope is the acquired identity together with every identity
+    /// later forked from it. Nothing orders two scopes, so while both
+    /// live, a write in one conflicts with any overlapping read or write
+    /// in the other. A scope's claims are ignored once its last identity
+    /// ends.
+    ///
+    /// `origin` only labels the operation events this capability fires.
+    /// It never decides whether an operation may proceed.
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity.
@@ -181,20 +193,26 @@ impl VfsRef {
         )
     }
 
-    /// Acquires the store view for a new serial thread of execution: an
-    /// [`Access`] rooted at the declared store root whose operations
-    /// reach the store's own mount alone. It is [`VfsRef::acquire`]
-    /// followed by the store view, so it starts a new scope of its own
-    /// and never joins a run's. Logical paths join onto the store root
-    /// under the store's strict path rules, and errors come back in the
-    /// caller's logical form, so the Harness seeds and extracts store files
-    /// by the names the prompt uses without knowing where the store is
-    /// mounted.
+    /// Acquires a store view for a new serial thread of execution.
+    ///
+    /// The store view is an [`Access`] rooted at the declared store root.
+    /// Its operations reach only the store's own mount. It is
+    /// [`VfsRef::acquire`] followed by switching to the store view, so it
+    /// starts a new scope of its own and never joins a run's scope.
+    ///
+    /// Paths are relative to the store root and follow strict rules. A
+    /// path must be non-empty, at most 1024 bytes long, and free of
+    /// control characters and backslashes. No segment may be empty, `.`,
+    /// or `..`, end in a dot or a space, or be a reserved device name
+    /// such as `CON`. Error paths come back relative to the store root,
+    /// in the form the caller supplied. So the caller can seed and
+    /// extract store files by the names the prompt uses, without knowing
+    /// where the store is mounted.
     ///
     /// # Errors
     /// Returns [`VfsError::Unsupported`] when the handle declares no
-    /// store, and the backend's error when it refuses to acquire the
-    /// identity.
+    /// store. Returns the backend's error when the backend refuses to
+    /// acquire the identity.
     pub fn acquire_store(&self, origin: Origin) -> Result<Access, VfsError> {
         self.acquire(origin)?.store_view()
     }
@@ -277,12 +295,18 @@ impl VfsRef {
     }
 }
 
-/// The public capability. Holds an [`ExecId`] and the backend's access
-/// object; every operation canonicalizes the path, checks the policy,
-/// checks the claims tables, fires the op sink, then locks the backend
-/// per call. Dropping the capability drops one reference to its identity;
-/// the identity - and with it, the scope - ends when its last access
-/// drops.
+/// A capability that performs filesystem operations through a `VfsRef`
+/// as one identity.
+///
+/// It holds an [`ExecId`] and the backend's access object. Every
+/// operation canonicalizes the path, checks the policy, checks the
+/// claims tables, and reports the operation to the observer installed
+/// with `VfsRefBuilder::on_op`, if any. It then locks the backend for
+/// that one call.
+///
+/// Dropping an `Access` drops one reference to its identity. The
+/// identity ends when its last access drops, and the scope ends when
+/// its last identity ends.
 #[must_use = "an acquire dropped immediately is a bug: the capability holds its identity's claims"]
 pub struct Access {
     id: ExecId,

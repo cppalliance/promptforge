@@ -11,26 +11,37 @@ use crate::fence::{exact_shared_openings, split_h1};
 use crate::{Error, ParseError, ParseErrorKind, Prompt, Result};
 
 impl Prompt {
-    /// Parses a prompt file's full source text into a [`Prompt`], returning
-    /// the parse-time events beside the outcome.
+    /// Parses the full source text of a prompt file into a [`Prompt`] and
+    /// returns the events reported during parsing alongside the result.
     ///
-    /// The events are the parse lifecycle (`ParseStarted`, then
-    /// `ParseSucceeded` or `ParseFailed`) and each Lua block's compilation
-    /// boundaries, every one stamped with the caller-provided `execution`
-    /// identifier and reported under task `0`, since no run exists yet.
-    /// They are values for the caller to log; nothing is read back.
+    /// The caller supplies `execution`, an identifier that every event
+    /// carries. Every event is reported under task `0` because no run exists
+    /// yet.
+    ///
+    /// The events come in this order: `ParseStarted`, then a
+    /// `LuaCompilationStarted` event and a `LuaCompilationSucceeded` or
+    /// `LuaCompilationFailed` event for each Lua block the parser compiles,
+    /// then `ParseSucceeded` or `ParseFailed`. They exist for the caller to
+    /// log. The parser does not read them back.
     ///
     /// # Errors
-    /// The first half of the pair is a [`ParseError`] classified `Frontmatter` when the frontmatter
-    /// delimiters are missing or the frontmatter is invalid, a tool alias or
-    /// model role label is a reserved name, one name is both, a capability
-    /// is declared twice, or a tool slot names a capability declared
-    /// optional; `Structure` when
-    /// the required H1 is missing or the body has no `##` sections; `Fence` when
-    /// the H1 opens with the removed `lua prompt` fence form, an exact fence
-    /// is not closed, more than one `lua shared` fence exists, or a
-    /// `lua shared` fence is outside H1; and `Lua` when the shared library or an
-    /// H1 or section Lua block is not valid Lua.
+    /// On failure, the first element of the pair is a [`ParseError`] whose
+    /// kind is:
+    ///
+    /// - `Frontmatter` when the `---` delimiters are missing, the frontmatter
+    ///   is not valid, a tool alias or model role label is a reserved name,
+    ///   one name is both a tool alias and a model role label, a capability is
+    ///   declared twice, or a tool slot names a capability declared optional.
+    /// - `Structure` when the H1 is missing, there is more than one H1, the H1
+    ///   title is empty, a section heading skips a level (such as an H4
+    ///   directly under an H2), a section heading is empty, or two sibling
+    ///   sections have the same name.
+    /// - `Fence` when the H1 opens with a `lua prompt` fence, a `lua` or
+    ///   `lua shared` fence is not closed, more than one `lua shared` fence
+    ///   exists, or a `lua shared` fence is outside the H1.
+    /// - `List` when a section made up only of list items has an empty item.
+    /// - `Lua` when the `lua shared` library or a Lua block in the H1 or in a
+    ///   section is not valid Lua.
     pub fn parse(
         input: &str,
         execution: &str,

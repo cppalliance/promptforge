@@ -160,12 +160,15 @@ fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
     Ok(name)
 }
 
-/// A capability declaration: a plain id string (a required capability) or a
-/// `ref` map holding the `optional` flag and prompt-side `config` data.
+/// One capability declared in a prompt's `capabilities` frontmatter list.
 ///
-/// User-specific configuration (credentials, server lists) is Host-supplied
-/// through the run services and never named in the prompt; `config` is
-/// prompt-side data only.
+/// A declaration takes one of two forms. A plain id string declares a
+/// required capability. A map names the id under `ref` and may also set
+/// `optional` (default `false`) and `config`.
+///
+/// `config` holds only data written in the prompt. User-specific
+/// configuration, such as credentials or server lists, never appears in the
+/// prompt. The caller supplies it through the run services.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CapabilityDecl {
@@ -185,14 +188,16 @@ impl CapabilityDecl {
         &self.id
     }
 
-    /// Returns whether the capability is optional (skip-and-log when
-    /// absent).
+    /// Returns whether the capability is optional.
+    ///
+    /// When an optional capability is absent, preparation skips it and logs
+    /// a line instead of failing.
     #[must_use]
     pub fn is_optional(&self) -> bool {
         self.optional
     }
 
-    /// Returns the prompt-side configuration data, when declared.
+    /// Returns the `config` data written in the prompt, when declared.
     #[must_use]
     pub fn config(&self) -> Option<&serde_yaml_ng::Value> {
         self.config.as_ref()
@@ -275,15 +280,16 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
     }
 }
 
-/// One tool slot's filling posture: an exact global path filled by identity
-/// against the assembled catalog (every fill is journaled).
+/// The tool that fills one alias in a prompt's `tools` frontmatter map.
 ///
-/// `#[non_exhaustive]`: the open Harness-offered posture is deferred and joins
-/// this enum when it lands.
+/// The slot is written as a plain string holding an exact global tool path.
+/// It is filled by the tool in the assembled catalog whose id is exactly
+/// that path, and every fill is journaled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolSlot {
-    /// An exact global tool path, filled by identity against the catalog.
+    /// An exact global tool path, filled by the catalog tool with that same
+    /// id.
     Exact(ToolId),
 }
 
@@ -317,15 +323,18 @@ impl Visitor<'_> for ToolSlotVisitor {
     }
 }
 
-/// The prompt's declared tool slots: alias to slot.
+/// The tool slots a prompt declares in its `tools` frontmatter map, keyed by
+/// alias.
 ///
-/// Aliases are prompt-local (the alias grammar); the model only ever sees
-/// the alias, never the global path. The reserved `open` key (the deferred
-/// open toolset posture) is rejected at parse, so a prompt cannot silently
-/// half-declare the posture. Each alias installs as a section VM global,
-/// so an alias that names an Engine global, a Lua standard-library global the
-/// sandbox keeps, or a Lua keyword is rejected too, as is an alias that is
-/// also a model role label.
+/// An alias is a prompt-local name: a letter followed by up to 63 letters,
+/// digits, underscores, or hyphens. The model only ever sees the alias,
+/// never the global tool path.
+///
+/// Parsing rejects the key `open`, which is reserved. Each alias is
+/// installed as a global of the same name in the section's Lua VM. For that
+/// reason, parsing also rejects an alias that names an Engine global, a Lua
+/// standard-library global the sandbox keeps, or a Lua keyword. It rejects
+/// an alias that matches a model role label for the same reason.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolSlots {

@@ -142,7 +142,7 @@ impl Prompt {
         &self.frontmatter
     }
 
-    /// Returns the required H1 title.
+    /// Returns the prompt's title, the text of its required H1 heading.
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
@@ -176,14 +176,13 @@ impl Prompt {
         self.sections.first()
     }
 
-    /// Removes the human-readable prose from the H1, keeping only its live Lua
+    /// Removes the prose under the prompt's H1 heading, keeping only its Lua
     /// blocks.
     ///
-    /// This is the invariant-preserving replacement for mutating the H1 blocks
-    /// directly: it drops every prose block from the H1 and clears the
-    /// derived description text, leaving the compiled H1 Lua blocks and the rest
-    /// of the prompt tree untouched. Callers use it to run a prompt's live H1
-    /// resolution without sending any H1 prose to a model.
+    /// Every prose block under the H1 is dropped, and the description text
+    /// taken from that prose is cleared. The H1's compiled Lua blocks and the
+    /// rest of the prompt tree stay unchanged. Use this to run the H1's Lua
+    /// without sending any of its prose to a model.
     pub fn strip_h1_prose(&mut self) {
         self.h1_blocks
             .retain(|block| matches!(block, Block::Lua(_)));

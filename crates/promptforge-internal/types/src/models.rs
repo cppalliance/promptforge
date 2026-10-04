@@ -10,13 +10,16 @@ use std::num::NonZeroU32;
 
 use serde::Deserialize;
 
-/// Stable identity of one catalogued model.
+/// The stable identity of one catalogued model.
 ///
-/// v0 uses the `"gateway"` namespace plus the caller-facing model name (the
-/// gateway `[[model]].name` / OpenAI `id`).
+/// An identity pairs a server namespace with a model name. A model the
+/// gateway serves uses the namespace `"gateway"` and the name the gateway
+/// lists it under. That name is the `name` key of the model's entry in the
+/// gateway configuration and the `id` field in the OpenAI-compatible model
+/// list.
 ///
-/// `#[non_exhaustive]` so the invariant-bearing identity is only ever built
-/// through [`ModelId::new`]/[`ModelId::gateway`], never by a struct literal.
+/// Both parts are always non-empty and free of control characters.
+/// [`ModelId::new`] and [`ModelId::gateway`] reject any other value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct ModelId {
@@ -25,7 +28,7 @@ pub struct ModelId {
 }
 
 impl ModelId {
-    /// The v0 gateway identity namespace.
+    /// The namespace for models the gateway serves.
     pub const GATEWAY: &'static str = "gateway";
 
     /// Builds an identity from its server namespace and model name.
@@ -44,7 +47,8 @@ impl ModelId {
         Ok(Self { server, name })
     }
 
-    /// Builds a gateway-namespaced identity from a caller-facing model name.
+    /// Builds an identity in the `"gateway"` namespace from the name the
+    /// gateway lists the model under.
     ///
     /// # Errors
     /// Returns [`ModelIdError`] if `name` is empty or contains a control
@@ -84,13 +88,13 @@ impl ModelId {
         Ok(())
     }
 
-    /// Returns the identity namespace.
+    /// Returns the server namespace.
     #[must_use]
     pub fn server(&self) -> &str {
         &self.server
     }
 
-    /// Returns the caller-facing model name.
+    /// Returns the model name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -137,10 +141,8 @@ pub enum ThinkingMode {
     Switchable,
 }
 
-/// One catalogued model with live-resolution metadata.
-///
-/// `#[non_exhaustive]` so the descriptor is only ever built through
-/// [`ModelDescriptor::new`] and its validated context window is preserved.
+/// One catalogued model: its identity, description, context window, and
+/// thinking mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelDescriptor {
@@ -176,7 +178,7 @@ impl ModelDescriptor {
         &self.id
     }
 
-    /// Returns the prose used for semantic resolve.
+    /// Returns the prose that describes the model.
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
@@ -195,10 +197,11 @@ impl ModelDescriptor {
     }
 }
 
-/// Complete live model set for one bind pass.
+/// A list of available models, each with a distinct identity.
 ///
-/// `#[non_exhaustive]` so the collision-free catalog invariant is only ever
-/// established through [`ModelCatalog::new`]/[`ModelCatalog::empty`].
+/// No two descriptors in a catalog share a `ModelId`.
+/// [`ModelCatalog::new`] rejects duplicates, and [`ModelCatalog::empty`]
+/// holds no models.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelCatalog {
@@ -206,7 +209,8 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Builds a catalog from descriptors in the Harness's order.
+    /// Builds a catalog from descriptors, keeping the order they are given
+    /// in.
     ///
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
@@ -226,7 +230,7 @@ impl ModelCatalog {
         Ok(Self { models })
     }
 
-    /// An empty catalog; every `models.bind` resolves as absent.
+    /// Returns a catalog with no models.
     #[must_use]
     pub fn empty() -> Self {
         Self { models: Vec::new() }

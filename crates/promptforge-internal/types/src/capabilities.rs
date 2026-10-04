@@ -24,11 +24,13 @@ mod tests;
 
 /// The stable identity of an installed capability.
 ///
-/// Identity is a 2-segment [`GlobalName`] (`namespace/pack`): the global
-/// naming grammar encodes kind by arity, and a capability's id is the
-/// prefix of every tool id it contributes (`promptforge/web` contributes
-/// `promptforge/web/fetch`, no exceptions). v1 is unversioned: a name
-/// resolves to the only installed capability and a `@` is a parse error.
+/// A capability id is a [`GlobalName`] with exactly 2 segments
+/// (`namespace/pack`). The segment count tells what a name refers to: 2
+/// segments name a capability and 3 name a tool. A capability's id is the
+/// prefix of every tool id it contributes, with no exceptions:
+/// `promptforge/web` contributes `promptforge/web/fetch`. Ids carry no
+/// version. A name resolves to the only installed capability of that name,
+/// and a `@` in the id is a parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct CapabilityId(GlobalName);
@@ -41,7 +43,8 @@ impl CapabilityId {
     /// Returns [`CapabilityIdError`] when the segment count is not exactly 2
     /// ([`CapabilityIdErrorKind::SegmentCount`]), a segment is empty
     /// ([`CapabilityIdErrorKind::Empty`]), or a segment contains a character
-    /// outside the global-name charset ([`CapabilityIdErrorKind::Control`]).
+    /// other than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
+    /// ([`CapabilityIdErrorKind::Control`]).
     pub fn parse(id: &str) -> Result<CapabilityId, CapabilityIdError> {
         let name = GlobalName::parse(id)
             .map_err(|e| CapabilityIdError::from_global_name_kind(e.kind()))?;
@@ -68,7 +71,11 @@ impl CapabilityId {
         CapabilityId(prefix)
     }
 
-    /// Returns the namespace segment (reverse-DNS or `promptforge`).
+    /// Returns the namespace segment.
+    ///
+    /// A namespace is meant to be a reverse-DNS name such as
+    /// `org.rustalliance`, or `promptforge` for first-party capabilities.
+    /// `CapabilityId::parse` does not check this.
     #[must_use]
     pub fn namespace(&self) -> &str {
         self.0.namespace()
@@ -80,13 +87,13 @@ impl CapabilityId {
         self.0.pack()
     }
 
-    /// Returns whether `tool` sits under this capability's id.
+    /// Returns whether `tool` belongs to this capability.
     ///
-    /// Containment is total: a contributed tool's id is always its
-    /// contributing capability's id plus one name segment
-    /// (`namespace/pack/name` for a `namespace/pack` capability), so
-    /// dropping the tool's last segment must yield exactly this id.
-    /// The Harness enforces containment when the run's catalog is assembled.
+    /// A tool belongs to a capability when dropping the last segment of the
+    /// tool's id leaves exactly the capability's id, so `namespace/pack/name`
+    /// belongs to `namespace/pack`. Every tool a capability contributes
+    /// belongs to it, with no exceptions. The caller must check this when it
+    /// assembles the run's catalog.
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
         tool.capability() == *self
@@ -101,26 +108,24 @@ impl std::fmt::Display for CapabilityId {
 }
 
 impl serde::Serialize for CapabilityId {
-    /// Serializes the identity as its one `namespace/pack` string.
+    /// Serializes the id as a single `namespace/pack` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for CapabilityId {
-    /// Deserializes the identity from its string form, validating it as a
-    /// 2-segment global name: an invalid string is a data error, never a
-    /// silently accepted identity.
+    /// Deserializes the id from its `namespace/pack` string and validates it
+    /// the same way `CapabilityId::parse` does. An invalid string fails
+    /// deserialization and is never accepted as an id.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
         CapabilityId::parse(&text).map_err(serde::de::Error::custom)
     }
 }
 
-/// A stable, matchable classification of a [`CapabilityIdError`].
-///
-/// Every public error exposes a `kind()` classifier so callers can branch on
-/// the failure without matching a private representation.
+/// A stable classification of a [`CapabilityIdError`] that callers can match
+/// on to handle each kind of failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CapabilityIdErrorKind {
@@ -128,7 +133,8 @@ pub enum CapabilityIdErrorKind {
     SegmentCount,
     /// A segment was empty.
     Empty,
-    /// A segment contained a character outside the allowed set.
+    /// A segment contained a character other than a lowercase ASCII letter,
+    /// a digit, `-`, `_`, or `.`.
     Control,
 }
 
@@ -169,13 +175,14 @@ impl CapabilityIdError {
     }
 }
 
-/// The Lua source one activated capability contributes to every section VM
-/// of a run.
+/// Lua source that an activated capability adds to the Lua VM of every
+/// section in a run.
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
-/// reach the capability's own tools through `tools.call`. The Engine runs
-/// it as data: it never learns what the capability is, only its id, which
-/// names the prelude in tracebacks and error messages.
+/// call the capability's own tools through `tools.call`. The Engine runs
+/// the source without knowing what the capability is. It knows only the
+/// capability's id, which names the prelude in tracebacks and error
+/// messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prelude {
     /// The capability that contributed the source.
