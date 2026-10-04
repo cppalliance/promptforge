@@ -78,6 +78,10 @@ fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
 /// [`persist_profile_state`], exposed so a caller holding a file's intended
 /// contents can commit them without staging a shadow first.
 ///
+/// Replacement is atomic on platforms that let rename overwrite a file. The
+/// fallback first preserves the old file under a private backup name and
+/// restores it if the second rename fails.
+///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when writing or renaming fails.
 pub fn write_atomic(target: &Path, contents: &str) -> Result<(), crate::ConfigError> {
@@ -152,27 +156,6 @@ fn replace_file(source_path: &Path, destination: &Path) -> Result<(), Repr> {
         });
     }
     let _ = fs::remove_file(backup);
-    Ok(())
-}
-
-/// Promotes one shadow to its real file.
-///
-/// Replacement is atomic on platforms that let rename overwrite a file. The
-/// fallback first preserves the old file under a private backup name and
-/// restores it if the second rename fails.
-///
-/// # Errors
-/// Returns [`ConfigError`](crate::ConfigError) when the shadow is absent or
-/// the rename fails.
-pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
-    let shadow = shadow_path(target);
-    if !shadow.is_file() {
-        return Err(crate::ConfigError::from(Repr::Write {
-            path: shadow,
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no shadow to promote"),
-        }));
-    }
-    replace_file(&shadow, target).map_err(crate::ConfigError::from)?;
     Ok(())
 }
 

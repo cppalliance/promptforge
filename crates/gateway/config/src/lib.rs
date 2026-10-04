@@ -24,12 +24,10 @@
 //! stages arbitrary sibling content, and [`shadow_path`] names a shadow.
 //! [`load_pending_config`] reads the shadow with the same selection rules as
 //! [`Config::load`], and [`pending_report`] summarizes changed sections.
-//! [`promote_shadow`] is the explicit apply step. It uses atomic replacement
-//! where the platform supports it and a failure-safe backup fallback
-//! elsewhere. [`persist_profile_state`] atomically updates the real active
-//! profile, [`clear_profile_state`] deletes it (the persisted form of "no
-//! profile"), and [`write_atomic`] is the bare replace-through-rename
-//! primitive both build on.
+//! [`persist_profile_state`] atomically updates the real active profile,
+//! [`clear_profile_state`] deletes it (the persisted form of "no profile"),
+//! and [`write_atomic`] is the bare replace-through-rename primitive that
+//! shadow writes, profile state, and the gateway's apply step build on.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -54,6 +52,6 @@ pub use crate::profile::{
 };
 pub use crate::shadow::{
     PendingReport, PendingShadows, clear_profile_state, load_pending_config, pending_report,
-    pending_var_references, persist_profile_state, promote_shadow, save_config_shadow, shadow_path,
-    write_atomic, write_shadow,
+    pending_var_references, persist_profile_state, save_config_shadow, shadow_path, write_atomic,
+    write_shadow,
 };
