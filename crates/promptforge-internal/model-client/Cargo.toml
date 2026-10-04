@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge model vocabulary: the chat-completions wire types a Chat effect exchanges and the model catalog/binding vocabulary; no transport and no wire parsing"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "wire-types"]
-categories = ["data-structures"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 # The canonical metrics vocabulary a Completion holds and the model catalog
 # types the `model` module re-exports.

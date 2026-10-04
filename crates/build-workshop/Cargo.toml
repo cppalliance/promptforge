@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Builds the PromptForge Gateway and Workshop desktop app together"
-
 [[bin]]
 name = "build-workshop"
 path = "src/main.rs"

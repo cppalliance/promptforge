@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway discovery seam: the gateway.json gateway discovery file, its launch lock, stale detection, and the health probe shared by the gateway and the workshop readers"
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

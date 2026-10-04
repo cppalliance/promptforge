@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Backend-neutral PromptForge speech decoding workers and audio policy"
-
 [dependencies]
 thiserror.workspace = true
 tokio.workspace = true

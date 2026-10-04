@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge prompt document parser: frontmatter, section tree, and exact lua fence splitting"
-readme = "README.md"
-keywords = ["prompt", "llm", "parser", "markdown", "frontmatter"]
-categories = ["text-processing", "parsing"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 promptforge-lua.workspace = true
 promptforge-types.workspace = true

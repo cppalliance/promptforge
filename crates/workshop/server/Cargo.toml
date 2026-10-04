@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop app"
-
 [dependencies]
 # `SearchProvider`, which the agent sessions' Gateway search implements,
 # is an `async_trait` trait.

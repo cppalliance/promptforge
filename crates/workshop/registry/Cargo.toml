@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop subsystem registry: collections subsystems self-register into (routes and tasks as ordered vectors, state handles and push sinks keyed by type), reached through sealed subsystem-named traits for push sinks and shared views, while the composition root requires the concrete handle types"
-
 [dependencies]
 axum.workspace = true
 serde_json.workspace = true

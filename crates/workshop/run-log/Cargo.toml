@@ -6,12 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop run log: the append-only Turso record of every run the Harness hands the Host's recorder, and the recorder that writes it"
-readme = "README.md"
-keywords = ["promptforge", "llm", "agent", "workshop", "log"]
-categories = ["development-tools", "database"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 # The recorder trait and the record values the log stores and returns,
 # through the Harness's public API.

@@ -501,7 +501,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-3>
 
-### Step 3: Rewrite every README and remove crates.io metadata
+### Step 3: Rewrite every README and remove crates.io metadata [completed]
 
 - Component: READMEs, manifests, and docs site
 - Work item: 3 (READMEs) and 5 (crates.io metadata).

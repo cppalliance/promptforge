@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Harness runner: the per-run Harness, the effect loop that drives an Engine Run as one future, the performer traits, and run preparation"
-readme = "README.md"
-keywords = ["promptforge", "llm", "agent", "harness"]
-categories = ["development-tools", "asynchronous"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 # Runtime-agnostic async: the effect loop's in-flight set
 # (`FuturesUnordered` of `Abortable` futures under `catch_unwind`), the

@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway live-activity hub: a busy flag and producer-owned text published over a watch channel"
-
 [dependencies]
 gateway-api-types.workspace = true
 # `sync` supplies the hub's watch channel; nothing else of tokio is used.

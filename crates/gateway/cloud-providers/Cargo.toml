@@ -6,11 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge shared cloud provider descriptors: the tiered provider registry, per-provider fetch and normalization behind an injected reqwest client, and the sheet-building binary"
-keywords = ["prompt", "llm", "gateway", "providers"]
-categories = ["rust-patterns"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [lib]
 name = "gateway_cloud_providers"
 path = "src/lib.rs"

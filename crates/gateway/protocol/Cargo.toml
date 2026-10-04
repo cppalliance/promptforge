@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Gateway protocol: OpenAI wire types, validation, and the upstream abstraction"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "proxy"]
-categories = ["web-programming::http-client"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 async-trait.workspace = true
 bytes.workspace = true

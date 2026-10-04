@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge shared error-source wrappers: one crate-owned newtype per third-party error a public error surface would otherwise name"
-
 [dependencies]
 reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

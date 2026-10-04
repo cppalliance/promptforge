@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway configuration: single-file TOML, profile selection, and validation"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "toml", "profiles"]
-categories = ["config", "parser-implementations"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 serde.workspace = true
 # JSON rendering of the resolved config for `Config::to_json`.

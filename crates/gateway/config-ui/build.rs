@@ -2,7 +2,7 @@
 //! `ui/src/main.ts` plus copies of the static assets, all written to
 //! `$OUT_DIR/ui-dist/` (never into the repository). The crate version is
 //! baked into the bundle as `__APP_VERSION__`. Requires Node.js 22 and one
-//! `npm ci` in `ui/` per checkout; see the crate README.
+//! `npm ci` in `ui/` per checkout.
 
 fn main() -> std::process::ExitCode {
     match build_ui::build(build_ui::UiBuild {

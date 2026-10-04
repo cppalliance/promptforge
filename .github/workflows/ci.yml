@@ -232,7 +232,7 @@ jobs:
           fi
 
   # First Linux build of the desktop app: compile-only, against the Tauri
-  # system packages a Linux developer installs per the README. Catches the
+  # system packages a Linux developer installs. Catches the
   # missing-system-package class of failure the Windows-only job cannot see.
   check-workshop-linux:
     runs-on: ubuntu-22.04

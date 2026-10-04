@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Gateway client: the inference broker a Host hands the Harness, the HTTP client and the OpenAI chat-completions wire code that turn a Chat effect into a streamed round against the Gateway, and the search provider over the Gateway's web search relay"
-readme = "README.md"
-keywords = ["promptforge", "llm", "gateway", "openai", "sse"]
-categories = ["web-programming::http-client"]
-documentation = "https://cppalliance.github.io/promptforge/harness-gateway-client/harness_gateway_client/index.html"
-
 [dependencies]
 # The Harness public API: the `InferenceBroker` trait the Gateway broker
 # implements, with its boxed future.

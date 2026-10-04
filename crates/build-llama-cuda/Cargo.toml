@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Builds the CUDA llama-server release zip from a llama.cpp checkout (Windows x64)"
-
 [[bin]]
 name = "build-llama-cuda"
 path = "src/main.rs"

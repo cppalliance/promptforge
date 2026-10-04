@@ -1,11 +1,3 @@
-# gateway-protocol
+# Gateway wire protocol
 
-The OpenAI wire protocol and upstream abstraction for the PromptForge
-inference gateway: request/response wire types with trust-boundary
-validation, the `Upstream` trait and its `OpenAiUpstream` passthrough
-(chat, embeddings, rerank, and streaming speech), bounded HTTP client
-helpers, and the protocol-level error types.
-
-This crate is the shared protocol contract between the gateway, its local
-inference subsystem, and external clients. It contains no local inference,
-no routing, and no HTTP server handlers.
+This crate defines the OpenAI-shaped wire types the gateway exchanges with clients and backends, and it validates them at the trust boundary. It also provides the upstream abstraction and the shared HTTP client policy that every backend call goes through. It holds no routing, no local inference, and no server handlers.

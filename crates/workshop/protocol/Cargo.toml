@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop wire protocol: the /ws frames and the /agents/ws input-wait frames, typed with zero I/O"
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

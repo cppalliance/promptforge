@@ -27,50 +27,50 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
-promptforge = { path = "crates/promptforge", version = "0.3.0" }
-promptforge-engine = { path = "crates/promptforge-internal/engine", version = "0.3.0" }
-promptforge-types = { path = "crates/promptforge-internal/types", version = "0.3.0" }
-gateway-api-types = { path = "crates/gateway-api-types", version = "0.3.0" }
-gateway-cloud-providers = { path = "crates/gateway/cloud-providers", version = "0.3.0" }
-gateway = { path = "crates/gateway/app", version = "0.3.0" }
-gateway-config = { path = "crates/gateway/config", version = "0.3.0" }
-gateway-config-ui = { path = "crates/gateway/config-ui", version = "0.3.0" }
-gateway-local = { path = "crates/gateway/local", version = "0.3.0" }
-gateway-logging = { path = "crates/gateway/logging", version = "0.3.0" }
-shared-error-source = { path = "crates/shared-error-source", version = "0.3.0" }
-shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
-gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
-gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }
-harness = { path = "crates/harness", version = "0.3.0" }
-harness-gateway-client = { path = "crates/harness-gateway-client", version = "0.3.0" }
-harness-runner = { path = "crates/harness-internal/runner", version = "0.3.0" }
-harness-capabilities = { path = "crates/harness-internal/capabilities", version = "0.3.0" }
-harness-web = { path = "crates/harness-web", version = "0.3.0" }
-gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
-promptforge-lua = { path = "crates/promptforge-internal/lua", version = "0.3.0" }
-promptforge-model-client = { path = "crates/promptforge-internal/model-client", version = "0.3.0" }
-promptforge-parser = { path = "crates/promptforge-internal/parser", version = "0.3.0" }
-gateway-progress = { path = "crates/gateway/progress", version = "0.3.0" }
-gateway-stt = { path = "crates/gateway/stt/api", version = "0.3.0" }
-promptforge-vfs = { path = "crates/promptforge-internal/vfs", version = "0.3.0" }
-gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
-gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
-gateway-web-search = { path = "crates/gateway/web-search", version = "0.3.0" }
-workshop-server = { path = "crates/workshop/server", version = "0.3.0" }
-workshop-server-api = { path = "crates/workshop/server-api", version = "0.0.0" }
-workshop-gateway = { path = "crates/workshop/gateway", version = "0.0.0" }
-workshop-menu = { path = "crates/workshop/menu", version = "0.0.0" }
-workshop-protocol = { path = "crates/workshop/protocol", version = "0.0.0" }
-workshop-status = { path = "crates/workshop/status", version = "0.0.0" }
-workshop-support = { path = "crates/workshop/support", version = "0.0.0" }
-workshop-registry = { path = "crates/workshop/registry", version = "0.0.0" }
-workshop-workspace = { path = "crates/workshop/workspace", version = "0.0.0" }
-workshop-run-log = { path = "crates/workshop/run-log", version = "0.0.0" }
-workshop-agents = { path = "crates/workshop/agents", version = "0.0.0" }
-workshop-user-state = { path = "crates/workshop/user-state", version = "0.0.0" }
-gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi", version = "0.3.0" }
+promptforge = { path = "crates/promptforge" }
+promptforge-engine = { path = "crates/promptforge-internal/engine" }
+promptforge-types = { path = "crates/promptforge-internal/types" }
+gateway-api-types = { path = "crates/gateway-api-types" }
+gateway-cloud-providers = { path = "crates/gateway/cloud-providers" }
+gateway = { path = "crates/gateway/app" }
+gateway-config = { path = "crates/gateway/config" }
+gateway-config-ui = { path = "crates/gateway/config-ui" }
+gateway-local = { path = "crates/gateway/local" }
+gateway-logging = { path = "crates/gateway/logging" }
+shared-error-source = { path = "crates/shared-error-source" }
+shared-loopback = { path = "crates/shared-loopback" }
+gateway-protocol = { path = "crates/gateway/protocol" }
+gateway-api-discovery = { path = "crates/gateway-api-discovery" }
+harness = { path = "crates/harness" }
+harness-gateway-client = { path = "crates/harness-gateway-client" }
+harness-runner = { path = "crates/harness-internal/runner" }
+harness-capabilities = { path = "crates/harness-internal/capabilities" }
+harness-web = { path = "crates/harness-web" }
+gateway-routing = { path = "crates/gateway/routing" }
+promptforge-lua = { path = "crates/promptforge-internal/lua" }
+promptforge-model-client = { path = "crates/promptforge-internal/model-client" }
+promptforge-parser = { path = "crates/promptforge-internal/parser" }
+gateway-progress = { path = "crates/gateway/progress" }
+gateway-stt = { path = "crates/gateway/stt/api" }
+promptforge-vfs = { path = "crates/promptforge-internal/vfs" }
+gateway-stt-engine = { path = "crates/gateway/stt/engine" }
+gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper" }
+gateway-web-search = { path = "crates/gateway/web-search" }
+workshop-server = { path = "crates/workshop/server" }
+workshop-server-api = { path = "crates/workshop/server-api" }
+workshop-gateway = { path = "crates/workshop/gateway" }
+workshop-menu = { path = "crates/workshop/menu" }
+workshop-protocol = { path = "crates/workshop/protocol" }
+workshop-status = { path = "crates/workshop/status" }
+workshop-support = { path = "crates/workshop/support" }
+workshop-registry = { path = "crates/workshop/registry" }
+workshop-workspace = { path = "crates/workshop/workspace" }
+workshop-run-log = { path = "crates/workshop/run-log" }
+workshop-agents = { path = "crates/workshop/agents" }
+workshop-user-state = { path = "crates/workshop/user-state" }
+gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi" }
 # cargo-hakari's feature-unification crate; every member inherits it.
-workspace-hack = { path = "crates/workspace-hack", version = "0.1" }
+workspace-hack = { path = "crates/workspace-hack" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"

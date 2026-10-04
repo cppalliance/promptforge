@@ -1,3 +1,3 @@
-# workshop-run-log
+# Workshop run log
 
-The Workshop run log: an append-only Turso record of every run and, per run, every effect, answer, and event in loop order. `TursoRecorder` holds it, and the `AgentRecorder` each launch gets from `TursoRecorder::for_agent` implements the Harness's `RunRecorder` over it, so Workshop, as the Host, keeps each run the Harness records in `runs.db` under the server's state directory, with the run's name in the row's `name` column and the launched agent in its `agent` column. The database opens on the first run and a failed open is tried again by the next call. Nothing reads a record back into the Engine, and the Harness holds no database of its own. A feature-tier crate in `crates/workshop/`: it names the Harness only through `harness::record`.
+This crate keeps Workshop's append-only record of every run: each effect, answer, and event the Harness records, in order, stored in a local database. Workshop, as the Host, supplies it to the Harness as each run's recorder, and nothing reads a record back into the Engine.

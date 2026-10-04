@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Runtime-loaded safe bindings for PromptForge's pinned whisper.cpp C API"
-
 [dependencies]
 libloading.workspace = true
 thiserror.workspace = true

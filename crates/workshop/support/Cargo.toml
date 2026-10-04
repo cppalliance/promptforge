@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop support vocabulary: atomic writes, reconnect backoff, route deadlines, workshop.toml configuration, the retained broadcast bus, error-message rendering, and the JSON state-bucket validator"
-
 [features]
 default = []
 # Exposes test seams (`ReconnectBackoff::is_escalated_for_test` and the

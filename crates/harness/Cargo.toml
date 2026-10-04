@@ -6,9 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Harness public API: the surface through which Workshop and other Hosts build one Harness per run, supply its recorder, inference broker, timer, and capabilities, and steer the run"
-documentation = "https://cppalliance.github.io/promptforge/harness/harness/index.html"
-
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path. The Engine's types a Harness signature names are
 # re-exported through the `promptforge` facade, their one public path.

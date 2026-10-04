@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop user-state subsystem: the account-scoped UI state bucket persisted as one JSON file in the state directory"
-
 [features]
 default = []
 

@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop status subsystem: the status-bar broadcast bus every /ws session forwards from"
-
 [dependencies]
 tokio.workspace = true
 workshop-protocol.workspace = true

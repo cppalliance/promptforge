@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge promptforge/web capability: the web fetch tool and a search tool over the Host's search provider, in one pack a Host registers"
-readme = "README.md"
-keywords = ["promptforge", "llm", "tools", "web", "ssrf"]
-categories = ["web-programming::http-client", "api-bindings"]
-documentation = "https://cppalliance.github.io/promptforge/harness-web/harness_web/index.html"
-
 [dependencies]
 # The Harness public API: the capability, tool, and service vocabulary.
 harness.workspace = true

@@ -6,11 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop agent conversations: the conversation table, transcripts, operator input waits, agent discovery, and the recorder tee each conversation's run writes through"
-keywords = ["promptforge", "llm", "agent", "workshop", "conversation"]
-categories = ["development-tools"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 # The `InputBroker` trait the conversation's input broker implements is an
 # `async_trait` trait.
