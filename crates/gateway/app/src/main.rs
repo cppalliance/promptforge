@@ -242,6 +242,10 @@ fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
                 .fmt_fields(file_writer.clone())
                 .with_writer(file_writer)
                 .with_filter(filter());
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the gateway binary's entry point installs the process subscriber"
+            )]
             tracing_subscriber::registry()
                 .with(stdout)
                 .with(file_layer)
@@ -251,11 +255,19 @@ fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
             Some(runtime)
         }
         Some(Err(error)) => {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the gateway binary's entry point installs the process subscriber"
+            )]
             tracing_subscriber::registry().with(stdout).init();
             tracing::warn!("could not start file logging: {error}; logging to stdout only");
             None
         }
         None => {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the gateway binary's entry point installs the process subscriber"
+            )]
             tracing_subscriber::registry().with(stdout).init();
             tracing::warn!("no user profile directory found; logging to stdout only");
             None

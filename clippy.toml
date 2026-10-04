@@ -1,2 +1,16 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# Process-global installers. Only a binary entry point may call one, under
+# `#[expect(clippy::disallowed_methods, reason = ...)]`. No entry names a
+# `replacement`, because no alternative takes the same arguments and returns
+# the same value.
+disallowed-methods = [
+    { path = "std::panic::set_hook", reason = "use a returned error instead, because the panic hook is process-global state that only a binary entry point may install" },
+    { path = "log::set_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
+    { path = "log::set_boxed_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
+    { path = "tracing::subscriber::set_global_default", reason = "use `tracing::subscriber::with_default` instead, because the global default subscriber is process-global state that only a binary entry point may install" },
+    { path = "tracing_subscriber::util::SubscriberInitExt::init", reason = "use `tracing::subscriber::with_default` instead, because `init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
+    { path = "tracing_subscriber::util::SubscriberInitExt::try_init", reason = "use `tracing::subscriber::with_default` instead, because `try_init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
+    { path = "rustls::crypto::CryptoProvider::install_default", reason = "use `ClientConfig::builder_with_provider` or `ServerConfig::builder_with_provider` instead, because the default crypto provider is process-global state that only a binary entry point may install" },
+]

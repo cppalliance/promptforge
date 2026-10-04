@@ -48,6 +48,13 @@ confidence-threshold = 0.8
 multiple-versions = "warn"
 wildcards = "warn"
 
+# JSON that reaches a recorder or a replay comparison must round-trip with
+# canonical (sorted) object keys, which `preserve_order` would replace with
+# insertion order for every crate in the graph.
+[[bans.features]]
+crate = "serde_json"
+deny = ["preserve_order"]
+
 [sources]
 # Only crates.io is an allowed registry; no git sources are expected.
 unknown-registry = "deny"

@@ -602,7 +602,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-6>
 
-### Step 6: Ban process-global installers, tighten the gate, and shrink AGENTS.md
+### Step 6: Ban process-global installers, tighten the gate, and shrink AGENTS.md [completed]
 
 - Component: Structural enforcement
 - Work item: 9 (installer bans), 10 (serde_json `preserve_order`), 11 (gate settings), and 12 (`AGENTS.md`). Edit `AGENTS.md` last, because it deletes the prose that the lint table, the strict lints, the bans, and the gate settings replace.

@@ -36,20 +36,19 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 
 ## Engineering
 
-- Prefer types and compiler checks, then behavior tests and deterministic fault injection. Add a structural check only with explicit user approval for a stable product or security boundary that has no ordinary equivalent.
-- A plan cannot introduce a source parser, snapshot, allowlist, count, ceiling, topology check, import walker, or other structural enforcement unless the user explicitly approves that exception.
-- Behavior changes ship with tests in the same change. Preserve product and behavior tests during refactors. Structural tests that an approved plan identifies as unsupported may be removed without replacement by another structural proxy.
+- Prefer types and compiler checks, then behavior tests and deterministic fault injection. Gate on yes/no properties, never on a score threshold that ordinary work edits.
+- Behavior changes ship with tests in the same change. Preserve product and behavior tests during refactors.
 - A Cargo feature gates a real constraint such as a toolchain requirement or heavy native build. It does not describe product shape. Feature-disabled builds must not leak optional types into core paths.
-- Runtime and serve paths never compile native dependencies or invoke build tools. Library and serve paths return failures instead of exiting the process or installing process-global state.
+- Runtime and serve paths never compile native dependencies or invoke build tools.
 - Long-running gateway work reports through `gateway-progress`, a private gateway family crate: a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done. Consumers outside the family read only the `Progress` wire type from `gateway-api-types`.
-- Unsafe code stays in its explicitly owned boundary. Every unsafe block documents its safety invariants immediately before the block.
+- Unsafe code stays in its explicitly owned boundary.
 - Comments explain a non-obvious constraint, ordering requirement, or workaround. Every platform or external-bug workaround cites its upstream issue URL in the explanatory comment.
-- JSON that reaches a recorder or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite, and serde_json `preserve_order` is never enabled. Exact parsing (`float_roundtrip`) carries that guarantee; a value derived and then logged is additionally rounded to its meaningful precision at the source.
+- JSON that reaches a recorder or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite. Exact parsing (`float_roundtrip`) carries that guarantee; a value derived and then logged is additionally rounded to its meaningful precision at the source.
 
 ## Verification
 
 - Full suite: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`; workshop crates separately: `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
-- Linter: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` (workshop: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`). Clippy is a superset of `cargo check` and shares no artifacts with it, so never run a standalone `cargo check --workspace` beside the clippy runs; the one exception is the headless feature-combination gate `cargo check -p gateway --no-default-features`, which checks a build shape clippy --all-features does not cover.
+- Linter: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` (workshop: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`); the gate runs both with `CARGO_BUILD_WARNINGS=deny`. Clippy reports everything `cargo check` does, so never run a standalone `cargo check --workspace` beside the clippy runs; the one exception is the headless feature-combination gate `cargo check -p gateway --no-default-features`, which checks a build shape clippy --all-features does not cover.
 - Formatter: `cargo fmt --all --check`.
 - Docs: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`. Rustdoc lints are not covered by clippy; never skip the docs gate.
 - Facade docs: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`, without `--all-features`, so the facade's docs build with default features.
@@ -63,5 +62,5 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 
 ## SPA and CSS Rules
 
-- No raw color, size, or spacing values in Workshop UI component CSS. Use --ws-* tokens. The sizes and semantic tiers live in `@workshop/look`: primitives in look/sizes.css, intent aliases in look/semantic.css. Per-component overrides live in ui/src/tokens/component.css. Sizes and elevation are themed in look/semantic.css, and colors in look/tokens.css, which `look`'s own component sheets read directly.
-- No `localStorage`. The SPA never reads or writes browser storage; every persisted value goes through the `ui-storage` adapter to the server. UI state has two homes by scope: account state (preferences and ephemera alike, such as editor toggles, zoom, recent files, and command history) goes to `ui-state.json` in the state directory (the `workshop-user-state` crate, `/user/state`), and workspace-scoped state (anything that should travel with the `.pfwork` document) goes to the workspace file through the server (`/workspace/file/state`). A new persisted value is a new allow-listed key in one of those two buckets, added on the server first.
+- No raw color, size, or spacing values in Workshop UI component CSS; use the custom properties defined in `@workshop/look` and `ui/src/tokens/component.css`.
+- Every persisted value goes through the `ui-storage` adapter to the server. UI state has two homes by scope: account state (preferences and ephemera alike, such as editor toggles, zoom, recent files, and command history) goes to `ui-state.json` in the state directory (the `workshop-user-state` crate, `/user/state`), and workspace-scoped state (anything that should travel with the `.pfwork` document) goes to the workspace file through the server (`/workspace/file/state`). A new persisted value is a new allow-listed key in one of those two buckets, added on the server first.

@@ -51,7 +51,9 @@ jobs:
         run: cargo build --locked -p gateway
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features
 
   test:
     runs-on: ubuntu-latest
@@ -173,7 +175,9 @@ jobs:
       # so it runs in this partition with the crates it fronts and stays
       # out of the workspace-wide jobs like them.
       - name: Clippy (workshop)
-        run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets
 
       - name: Test (workshop, concurrent via nextest)
         run: cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api
@@ -335,13 +339,16 @@ jobs:
 
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
-          tool: cargo-deny, cargo-audit
+          tool: cargo-deny, cargo-audit, cargo-hakari
 
       - name: cargo deny
         run: cargo deny check
 
       - name: cargo audit
         run: cargo audit
+
+      - name: cargo hakari verify
+        run: cargo hakari verify
 
       # The gateway holds vendor credentials, so it links exactly one rustls
       # crypto backend, aws-lc-rs. This fails when `ring` re-enters its
