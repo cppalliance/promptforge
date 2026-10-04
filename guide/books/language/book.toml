@@ -1,10 +1,11 @@
 [book]
 title = "PromptForge Language Guide"
+description = "Writing prompts in Markdown and Lua"
 authors = ["Vinnie Falco"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/cppalliance/promptforge"
+git-repository-url = "https://github.com/cppalliance/promptforge-docs"
 site-url = "/promptforge/language/"
 additional-js = ["back-link.js"]

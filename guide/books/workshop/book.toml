@@ -1,10 +1,11 @@
 [book]
 title = "PromptForge Workshop Guide"
+description = "The desktop app for writing and running prompts"
 authors = ["Vinnie Falco"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/cppalliance/promptforge"
+git-repository-url = "https://github.com/cppalliance/promptforge-docs"
 site-url = "/promptforge/workshop/"
 additional-js = ["back-link.js"]

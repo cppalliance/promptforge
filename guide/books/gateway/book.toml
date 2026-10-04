@@ -1,10 +1,11 @@
 [book]
 title = "PromptForge Gateway Guide"
+description = "Installing, configuring, and running the Gateway"
 authors = ["Vinnie Falco"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/cppalliance/promptforge"
+git-repository-url = "https://github.com/cppalliance/promptforge-docs"
 site-url = "/promptforge/gateway/"
 additional-js = ["back-link.js"]

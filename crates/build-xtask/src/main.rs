@@ -49,7 +49,11 @@ fn main() -> ExitCode {
             None => usage(),
         },
         Some("api") => api::run(root, &args[2..]),
-        Some("site") => site::run(root, &args[2..]),
+        Some("site") => site::run(
+            root,
+            std::env::var_os(site::DOCS_VAR).as_deref(),
+            &args[2..],
+        ),
         Some("tidy") => {
             let violations = tidy::all_violations(root);
             if violations.is_empty() {

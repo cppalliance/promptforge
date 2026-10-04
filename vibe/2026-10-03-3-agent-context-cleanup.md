@@ -528,7 +528,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-4>
 
-### Step 4: Generate the landing page and move the guides to promptforge-docs
+### Step 4: Generate the landing page and move the guides to promptforge-docs [completed]
 
 - Component: READMEs, manifests, and docs site
 - Work item: 4 (landing page) and 6 (guide move). Build the landing page first, then move the guides, because both edit the site build and the move builds on the generated page. Follow the `promptforge-docs` layout rule in Technical Design.
