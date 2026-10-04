@@ -6,8 +6,8 @@ Multi-crate Rust workspace for the Engine, the Harness that runs it, the Gateway
 
 Three words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
 
-- **Engine**: the `promptforge` and `promptforge-*` crates. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for the Harness to answer it.
-- **Harness**: the `harness` and `harness-*` crates. The Harness steps the Engine, performs every effect, returns each answer, and records every run through the recorder the Host supplies. Production code runs prompts only through the Harness. In Engine tests and examples, the code that steps the Engine plays the Harness's part and is called the Harness too.
+- **Engine**: the `promptforge` and `promptforge-*` crates. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for its caller to answer it. In production the caller is the Harness.
+- **Harness**: the `harness` and `harness-*` crates. The Harness steps the Engine, performs every effect, returns each answer, and records every run through the recorder the Host supplies. Production code runs prompts only through the Harness.
 - **Host**: an application that runs prompts through the Harness, such as Workshop or Papergate. The Host makes every policy decision. It runs prompts only through the Harness; it may also use the Engine's parser and types to read prompts and show events.
 
 ### Using the terms
@@ -19,6 +19,7 @@ Three words have exactly one meaning each, everywhere in this repository: code c
   - the part's own name for a program or UI part that embeds another, such as "the desktop app" or "the container element"
   - "run", "serve", "embed", or "hold" for the verb
 - "Engine" and "Harness" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
+- Engine docs call the code that steps a run and answers its effects "the caller", and never name the Harness or the `harness` crates.
 - Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host and target vocabulary and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
 - Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Code names follow the same terms.
 - Quotations of people stay verbatim.

@@ -32,13 +32,6 @@
 //!
 //! ## Invariants
 //!
-//! - Family: Harness, at the `crates/` root beside `harness`; may depend
-//!   on: `harness`, `promptforge`, and third-party crates only. Never on
-//!   a `crates/harness-internal` crate, `harness-gateway-client`, or a
-//!   `workshop-*`, `gateway-*`, or `shared-*` crate, and no
-//!   `crates/harness-internal` crate depends on it.
-//!   `cargo test -p build-xtask` enforces the product and container
-//!   boundaries.
 //! - Every model- or tool-selected URL and every resolved address is
 //!   revalidated on each redirect hop; a non-global address is denied
 //!   unless the fetch policy grants an exact host-and-address exception.

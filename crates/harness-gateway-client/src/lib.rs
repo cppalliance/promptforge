@@ -43,11 +43,6 @@
 //!
 //! ## Invariants
 //!
-//! - Family: Harness, at the `crates/` root beside `harness`; may depend
-//!   on: `promptforge`, `harness`, `harness-web`, and third-party crates
-//!   only. Never on
-//!   any `crates/harness-internal` crate. `cargo test -p build-xtask`
-//!   enforces the product and container boundaries.
 //! - Every `Completion` and `ToolCall` is built through the public
 //!   validating constructors, so the Engine's neutral reply checks run on
 //!   every decoded turn.

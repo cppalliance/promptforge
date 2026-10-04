@@ -11,11 +11,6 @@
 //!
 //! ## Invariants
 //!
-//! - Family: Harness, private to `crates/harness-internal/`; may depend
-//!   on: `promptforge` and container siblings only.
-//!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
-//!   private `promptforge-*` crate. `cargo test -p build-xtask` enforces the
-//!   product and container boundaries.
 //! - The Harness polls every effect inside the run's own future and starts
 //!   no task, so any executor can drive a run. Performers must not block
 //!   while polled: one that blocks stalls every other effect of the run,
