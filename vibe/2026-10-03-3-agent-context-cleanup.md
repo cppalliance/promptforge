@@ -568,7 +568,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-5>
 
-### Step 5: Remove stale enforcement and make every crate inherit one strict lint table
+### Step 5: Remove stale enforcement and make every crate inherit one strict lint table [completed]
 
 - Component: Structural enforcement
 - Work item: 7 (stale enforcement) and 8 (one strict lint table). Do the parts in order: stale config, then the lint table, then the strict lints, because the strict lints need every crate on the workspace table.

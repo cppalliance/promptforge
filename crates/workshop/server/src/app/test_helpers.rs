@@ -4,14 +4,6 @@
 //! [`spawn_gateway`] is additionally re-exported to the
 //! integration-test binary through the `test-fixtures` feature the
 //! crate's own dev-dependency enables.
-// An `allow` rather than an `expect`: whether the lint fires here depends
-// on the build's cfg permutation (clippy suppresses expect_used inside
-// test-cfg'd code on its own), so an expectation would be unfulfilled in
-// some builds and fail the -D warnings gate.
-#![allow(
-    clippy::expect_used,
-    reason = "test fixtures fail by panicking with the invariant named"
-)]
 
 #[cfg(test)]
 use std::path::Path;

@@ -217,6 +217,11 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         }
         Err(error) => {
             eprintln!("{error:?}");
+            #[expect(
+                clippy::exit,
+                reason = "an Err from the setup hook becomes Tauri's \"Failed to setup app\" panic, \
+                          which loses the error chain and the failure exit code"
+            )]
             std::process::exit(1);
         }
     }

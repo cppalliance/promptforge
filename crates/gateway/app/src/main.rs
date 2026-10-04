@@ -68,8 +68,8 @@ fn main() -> ExitCode {
     // pixels, and a DPI-unaware process would have Windows scale the menu
     // away from the icon on a high-DPI display.
     #[cfg(target_os = "windows")]
+    // SAFETY: called once at process start, before any window exists.
     unsafe {
-        // SAFETY: called once at process start, before any window exists.
         windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
             windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
         );

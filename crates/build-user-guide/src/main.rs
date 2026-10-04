@@ -55,17 +55,19 @@ impl fmt::Display for AssembleError {
 impl std::error::Error for AssembleError {}
 
 fn main() {
-    let guide = workspace_root().join("guide");
     let docs = env::var_os(DOCS_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let args: Vec<OsString> = env::args_os().skip(1).collect();
-    let result = match args.as_slice() {
-        [mode, out] if mode == "stage" => stage::stage(&guide, docs.as_deref(), Path::new(out)),
-        _ => Err(AssembleError(format!(
-            "usage: build-user-guide stage <absolute-out>, got {args:?}"
-        ))),
-    };
+    let result = workspace_root().and_then(|root| {
+        let guide = root.join("guide");
+        match args.as_slice() {
+            [mode, out] if mode == "stage" => stage::stage(&guide, docs.as_deref(), Path::new(out)),
+            _ => Err(AssembleError(format!(
+                "usage: build-user-guide stage <absolute-out>, got {args:?}"
+            ))),
+        }
+    });
     if let Err(error) = result {
         eprintln!("error: {error}");
         process::exit(1);
@@ -210,7 +212,7 @@ fn write_file(path: &Path, content: &str) -> Result<(), AssembleError> {
 }
 
 /// Walks up from this crate's manifest dir to find the workspace root.
-fn workspace_root() -> PathBuf {
+fn workspace_root() -> Result<PathBuf, AssembleError> {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
         let candidate = dir.join("Cargo.toml");
@@ -218,11 +220,10 @@ fn workspace_root() -> PathBuf {
             && let Ok(contents) = fs::read_to_string(&candidate)
             && contents.contains("[workspace]")
         {
-            return dir;
+            return Ok(dir);
         }
         if !dir.pop() {
-            eprintln!("error: could not find workspace root");
-            process::exit(1);
+            return Err(AssembleError("could not find workspace root".to_owned()));
         }
     }
 }

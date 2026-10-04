@@ -1,4 +1,0 @@
-# A per-crate clippy.toml replaces the workspace root's rather than merging
-# with it, so the root's test allowances are restated here.
-allow-unwrap-in-tests = true
-allow-expect-in-tests = true

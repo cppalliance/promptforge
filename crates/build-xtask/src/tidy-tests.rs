@@ -29,7 +29,7 @@ fn participating_crates_respect_the_file_line_ceiling() {
 }
 
 #[test]
-fn participating_crates_inherit_workspace_lints() {
+fn every_workspace_crate_inherits_workspace_lints() {
     let violations = lint_inheritance_violations(&workspace_root());
     assert!(
         violations.is_empty(),
@@ -269,6 +269,77 @@ fn an_unmarked_crate_outside_the_families_is_left_alone() {
     );
     assert!(marker_violations(root.path()).is_empty());
     assert!(file_ceiling_violations(root.path()).is_empty());
+}
+
+/// Writes a workspace root manifest that sets `unreachable_pub`, the one
+/// workspace lint the inheritance check requires of the root.
+fn write_root_manifest(root: &Path) {
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace.lints.rust]\nunreachable_pub = \"warn\"\n",
+    )
+    .expect("the root manifest writes");
+}
+
+#[test]
+fn crates_that_inherit_the_workspace_lints_pass_with_or_without_the_marker() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED, 1);
+    write_crate(root.path(), "harness/runner", "harness-runner", MARKED, 1);
+    let violations = lint_inheritance_violations(root.path());
+    assert!(violations.is_empty(), "{violations:?}");
+}
+
+#[test]
+fn an_unmarked_crate_with_its_own_lint_table_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED, 1);
+    std::fs::write(
+        root.path()
+            .join("crates")
+            .join("gateway")
+            .join("local")
+            .join("Cargo.toml"),
+        "[package]\nname = \"gateway-local\"\n[lints.clippy]\npedantic = \"warn\"\n",
+    )
+    .expect("the manifest rewrites");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("local") && violations[0].contains("[lints] workspace = true"),
+        "every crate, not only a marked one, must inherit: {violations:?}"
+    );
+}
+
+#[test]
+fn a_lint_inheritance_scan_that_finds_no_crate_fails() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    std::fs::create_dir_all(root.path().join("crates")).expect("the crates directory creates");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("scanned nothing"),
+        "a check that read no crate cannot show any inherits: {violations:?}"
+    );
+}
+
+#[test]
+fn a_crate_whose_manifest_does_not_parse_is_held_to_lint_inheritance_not_skipped() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED, 1);
+    let dir = root.path().join("crates").join("broken");
+    std::fs::create_dir_all(&dir).expect("the crate directory creates");
+    std::fs::write(dir.join("Cargo.toml"), "not [valid toml").expect("the manifest writes");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("broken") && violations[0].contains("[lints] workspace = true"),
+        "a crate that was never read cannot be shown to inherit: {violations:?}"
+    );
 }
 
 /// Writes `text` into `crates/gateway/app/src/<relative>`, creating the

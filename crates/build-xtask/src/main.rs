@@ -24,6 +24,7 @@ mod retired_symbols;
 mod site;
 mod test_support_leak;
 mod tidy;
+mod unsafe_allowlist;
 
 use std::path::Path;
 use std::process::ExitCode;

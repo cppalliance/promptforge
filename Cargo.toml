@@ -256,7 +256,7 @@ minijinja = { version = "2.24", default-features = false, features = [
 minijinja-contrib = { version = "2.24", default-features = false, features = ["pycompat"] }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
@@ -273,6 +273,14 @@ pedantic = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 dbg_macro = "warn"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+exit = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"

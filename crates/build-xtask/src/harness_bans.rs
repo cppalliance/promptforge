@@ -9,8 +9,8 @@
 //! examples drive runs on tokio, as a real Host does.
 //!
 //! The check reads declared dependencies, not the resolved graph, so
-//! `workspace-hack` unification is irrelevant to it. It is vacuously true
-//! while the container is empty or absent and the facade is absent.
+//! `workspace-hack` unification is irrelevant to it. It binds the facade
+//! and both crates in the container, the set its workspace test pins.
 
 use std::fs;
 use std::path::{Path, PathBuf};
