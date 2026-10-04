@@ -266,7 +266,7 @@ impl Conversation {
     /// Reports one operator-facing failure of `kind` with its display
     /// `message`. No receiver means no client is attached; reports are
     /// ephemeral by design.
-    pub(crate) fn report(&self, kind: FailureKind, message: String) {
+    fn report(&self, kind: FailureKind, message: String) {
         if let Some(channels) = self.channels() {
             let _ = channels.errors.send(SessionFailure { kind, message });
         }
@@ -301,7 +301,7 @@ impl Conversation {
 
     /// Ends the conversation once its run has: the state is `Closed`, the
     /// channels close, and the conversation leaves its table.
-    pub(crate) fn end(&self) {
+    fn end(&self) {
         self.core.state.send_modify(|state| *state = state.done());
         lock(&self.core.channels).take();
         if let Some(table) = self.core.table.upgrade() {

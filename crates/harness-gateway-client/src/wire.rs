@@ -10,7 +10,7 @@
 
 pub(crate) mod classify;
 pub(crate) mod delta;
-pub(crate) mod parse;
+mod parse;
 pub(crate) mod read;
 pub(crate) mod request;
 pub(crate) mod stream;

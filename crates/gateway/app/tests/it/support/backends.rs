@@ -60,7 +60,7 @@ pub(crate) fn canned_reply(model: &str) -> Value {
 
 /// The streamed form of [`canned_reply`]: two content chunks, the finish
 /// chunk, and the `[DONE]` sentinel.
-pub(crate) fn canned_sse_reply(model: &str) -> String {
+fn canned_sse_reply(model: &str) -> String {
     let chunk = |delta: Value, finish: Value| {
         serde_json::json!({
             "id": "cmpl-test",

@@ -47,7 +47,7 @@ pub(crate) struct Caller {
 impl Caller {
     /// The peer address the server recorded for this connection, when it
     /// recorded one.
-    pub(crate) fn peer(&self) -> Option<SocketAddr> {
+    fn peer(&self) -> Option<SocketAddr> {
         self.peer
     }
 
@@ -183,7 +183,7 @@ mod loopback_caller_tests;
 /// gateway-discovery-file liveness probe relies on that to detect a stale key.
 /// And a request with no recorded peer address receives no trust: it
 /// needs a credential, the same fail-closed posture as the loopback wall.
-pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), GatewayError> {
+async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), GatewayError> {
     let authorization = caller.get(AUTHORIZATION);
     let presented = authorization
         .and_then(|value| value.to_str().ok())

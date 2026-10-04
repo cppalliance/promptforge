@@ -22,7 +22,7 @@ pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 /// terminology rename replaced. Live Engine source (outside
 /// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
 /// of them again.
-pub(crate) const RETIRED_SEEDS: [&str; 17] = [
+const RETIRED_SEEDS: [&str; 17] = [
     "install_agent_chat_shim",
     "EventsSnapshot",
     "install_runtime_events",
@@ -78,7 +78,7 @@ pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
 
 /// Runs the manifest guard over every Engine crate.
 #[must_use]
-pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
+fn engine_manifest_violations(root: &Path) -> Vec<String> {
     engine_crates(root)
         .iter()
         .flat_map(|dir| crate::engine_deps::forbidden_engine_dependencies(&dir.join("Cargo.toml")))
@@ -90,7 +90,7 @@ pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
 /// scan takes the whole crate directory, so `build.rs`, `benches/`, and
 /// `examples/` are covered too; it skips `tests/` and test support itself.
 #[must_use]
-pub(crate) fn retired_symbol_violations(root: &Path) -> Vec<String> {
+fn retired_symbol_violations(root: &Path) -> Vec<String> {
     engine_crates(root)
         .iter()
         .flat_map(|dir| crate::retired_symbols::retired_symbols(dir, &RETIRED_SEEDS))

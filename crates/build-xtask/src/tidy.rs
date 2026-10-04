@@ -110,7 +110,7 @@ fn packages(tiers: &[&[Tiered]]) -> Vec<&'static str> {
 /// Every tiered crate has landed, so a missing manifest is a violation,
 /// not a crate to skip.
 #[must_use]
-pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
+fn tier_dependency_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
     for (name, dir) in [VOCABULARY, SERVICES, FEATURES, SERVER].concat() {
         let Some(allowed) = allowed_dependencies(name) else {
@@ -181,7 +181,7 @@ fn collect_workshop_deps(table: &toml::map::Map<String, toml::Value>, names: &mu
 /// the workspace root sets it. A walk that found no crate fails: a crate
 /// that was never read cannot be shown to inherit.
 #[must_use]
-pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
+fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
     let root_manifest = root.join("Cargo.toml");
     match fs::read_to_string(&root_manifest)
@@ -247,7 +247,7 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
 /// walk's read failures; the product-boundary check shares the walk and
 /// leaves them here.
 #[must_use]
-pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
+fn marker_violations(root: &Path) -> Vec<String> {
     let walk = crate::product::workspace_crates(root);
     let mut violations = walk.violations;
     for krate in &walk.crates {
@@ -307,7 +307,7 @@ const WALLED_ALLOWLIST: [&str; 3] = [
 /// A source file the check cannot read is reported rather than skipped: a
 /// file that was never scanned cannot be shown clean.
 #[must_use]
-pub(crate) fn walled_tier_violations(root: &Path) -> Vec<String> {
+fn walled_tier_violations(root: &Path) -> Vec<String> {
     let app_src = root.join("crates").join("gateway").join("app").join("src");
     let tier = app_src.join("admin").join("walled");
     let mut violations = Vec::new();

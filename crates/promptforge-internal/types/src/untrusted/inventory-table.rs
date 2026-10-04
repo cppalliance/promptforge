@@ -29,7 +29,7 @@ pub(crate) struct DelimiterGroup {
             reason = "read by the table sanity tests; live matching keys on shape and names"
         )
     )]
-    pub(crate) family: &'static str,
+    pub(super) family: &'static str,
     /// How each entry in `names` spells its opener.
     pub(crate) shape: Shape,
     /// Delimiter names or literal openers, interpreted per `shape`.

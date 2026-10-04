@@ -142,7 +142,7 @@ impl Session {
         }
     }
 
-    pub(crate) fn interim_finished(&self) -> bool {
+    pub(super) fn interim_finished(&self) -> bool {
         self.interim_task
             .as_ref()
             .is_some_and(tokio::task::JoinHandle::is_finished)
@@ -192,7 +192,7 @@ impl Session {
         self.take_canceled_failure()
     }
 
-    pub(crate) async fn reap_canceled(&mut self) -> Result<(), SessionError> {
+    pub(super) async fn reap_canceled(&mut self) -> Result<(), SessionError> {
         while self
             .canceled_tasks
             .first()

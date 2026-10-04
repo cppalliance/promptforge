@@ -52,7 +52,7 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 #[non_exhaustive]
 pub struct LuaProgram {
     source: String,
-    pub(crate) bytecode: Vec<u8>,
+    bytecode: Vec<u8>,
     /// Parser location string used as the Lua chunk name (for example
     /// `section \`Web Search\` epilog`).
     location: String,
@@ -217,7 +217,7 @@ impl LuaProgram {
 ///
 /// Recognizes the stable quota messages our Engine functions emit so a refusal
 /// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
-pub(crate) fn quota_resource(raw: &str) -> Option<&'static str> {
+fn quota_resource(raw: &str) -> Option<&'static str> {
     use crate::error::lua_quota;
     if raw.contains(lua_quota::LOG_EVENT) {
         Some("log event")

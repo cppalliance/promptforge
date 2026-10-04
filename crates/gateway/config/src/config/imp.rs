@@ -102,7 +102,7 @@ impl Config {
     }
 
     /// Reconstructs the global TOML shape, independent of active selection.
-    pub(crate) fn to_raw(&self) -> RawConfig {
+    fn to_raw(&self) -> RawConfig {
         RawConfig {
             config_version: self.version,
             server: self.server.clone(),
@@ -170,7 +170,7 @@ impl Config {
     }
 
     /// Parses, interpolates, and validates, returning the internal error type.
-    pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
+    pub(super) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
         Self::parse_toml_at(raw, None)
     }
 
@@ -189,7 +189,7 @@ impl Config {
 
     /// Interpolates string leaves, deserializes, and validates an already
     /// parsed TOML document.
-    pub(crate) fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
+    fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
         interpolate_value(&mut document)?;
         let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
             path: None,

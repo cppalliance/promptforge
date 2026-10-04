@@ -34,31 +34,31 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Only `query` is required. An absent option or an empty domain list is
 /// left out of the body, and the Gateway applies its own default.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct GatewaySearchRequest {
+struct GatewaySearchRequest {
     /// The search query.
-    pub(crate) query: String,
+    query: String,
     /// The number of results wanted; the Gateway clamps it to its maximum.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) count: Option<u8>,
+    count: Option<u8>,
     /// The freshness filter: `pd`, `pw`, `pm`, `py`, or a
     /// `YYYY-MM-DDtoYYYY-MM-DD` range.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) freshness: Option<String>,
+    freshness: Option<String>,
     /// The country code for the search.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) country: Option<String>,
+    country: Option<String>,
     /// The search language code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) search_lang: Option<String>,
+    search_lang: Option<String>,
     /// The SafeSearch level: `off`, `moderate`, or `strict`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) safesearch: Option<String>,
+    safesearch: Option<String>,
     /// Keep only results from these hostnames.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) include_domains: Vec<String>,
+    include_domains: Vec<String>,
     /// Drop results from these hostnames.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) exclude_domains: Vec<String>,
+    exclude_domains: Vec<String>,
 }
 
 /// The reply to a Gateway web search, mirroring the Gateway's
@@ -68,12 +68,12 @@ pub(crate) struct GatewaySearchRequest {
 /// is a malformed response. Every other field defaults when absent, and
 /// unknown fields are ignored so the Gateway can grow its reply.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub(crate) struct GatewaySearchResponse {
+struct GatewaySearchResponse {
     /// The query the Gateway ran, after its trimming.
     #[serde(default)]
-    pub(crate) query: String,
+    query: String,
     /// The result rows, in the Gateway's order.
-    pub(crate) results: Vec<GatewaySearchResult>,
+    results: Vec<GatewaySearchResult>,
 }
 
 /// One row of a [`GatewaySearchResponse`].
@@ -81,22 +81,22 @@ pub(crate) struct GatewaySearchResponse {
 /// The `url` is required but may be empty; judging an empty `url` is left
 /// to the caller.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub(crate) struct GatewaySearchResult {
+struct GatewaySearchResult {
     /// The result's title.
     #[serde(default)]
-    pub(crate) title: String,
+    title: String,
     /// The result's URL.
-    pub(crate) url: String,
+    url: String,
     /// A short description or snippet.
     #[serde(default)]
-    pub(crate) description: String,
+    description: String,
     /// The result's age, when the provider reports one.
-    pub(crate) age: Option<String>,
+    age: Option<String>,
     /// The hostname of `url`, when the Gateway could derive one.
-    pub(crate) site_name: Option<String>,
+    site_name: Option<String>,
     /// Extra snippets from the provider.
     #[serde(default)]
-    pub(crate) extra_snippets: Vec<String>,
+    extra_snippets: Vec<String>,
 }
 
 /// Which side of a Gateway web search failed.
@@ -201,7 +201,7 @@ impl GatewaySearch {
 
     /// Runs one web search and returns the Gateway's parsed reply, failing
     /// as the [`SearchProvider`] impl documents.
-    pub(crate) async fn search(
+    async fn search(
         &self,
         request: &GatewaySearchRequest,
     ) -> Result<GatewaySearchResponse, GatewaySearchError> {

@@ -34,7 +34,7 @@ use crate::config::FetchConfig;
 /// reserved ranges. The config's denied ranges add deployment ranges on top of
 /// it, and an exact host-plus-address exception carves a single address back
 /// out.
-pub(crate) const BLOCKED_CIDRS: &[&str] = &[
+const BLOCKED_CIDRS: &[&str] = &[
     // IPv4
     "0.0.0.0/8",          // this network and the unspecified address
     "10.0.0.0/8",         // RFC1918 private
@@ -145,7 +145,7 @@ pub(crate) fn blocked_range(ip: IpAddr, config: &FetchConfig) -> Option<String> 
 /// exceptions: an address with no host context gets no exception. Use
 /// [`addr_allowed_for_host`] to apply the host-keyed escape hatch.
 #[must_use]
-pub(crate) fn addr_allowed(ip: IpAddr, config: &FetchConfig) -> bool {
+fn addr_allowed(ip: IpAddr, config: &FetchConfig) -> bool {
     blocked_range(ip, config).is_none()
 }
 

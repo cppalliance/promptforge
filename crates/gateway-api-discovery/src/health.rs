@@ -16,7 +16,7 @@ use crate::CancellationToken;
 mod connection;
 
 #[cfg(test)]
-pub(crate) use connection::probe_connection;
+use connection::probe_connection;
 pub(crate) use connection::{probe_connection_cancellable, probe_connection_until};
 
 /// Delay between probes while the server comes up.
@@ -86,7 +86,7 @@ pub enum ProbeError {
 /// The outcome of one bearer-key probe.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KeyProbe {
+enum KeyProbe {
     /// A 2xx answer: the key is accepted.
     Accepted,
     /// A non-2xx answer: the key is rejected (or the route is gone).
@@ -256,7 +256,7 @@ fn probe_health_until(address: &str, deadline: Instant) -> Result<(), ProbeError
 /// Issues one `GET {path}` presenting `api_key` as the bearer token and
 /// classifies the answer.
 #[cfg(test)]
-pub(crate) fn probe_bearer(address: &str, path: &str, api_key: &str) -> KeyProbe {
+fn probe_bearer(address: &str, path: &str, api_key: &str) -> KeyProbe {
     match request_head(address, "GET", path, Some(api_key)) {
         Ok(head) => {
             let accepted = head

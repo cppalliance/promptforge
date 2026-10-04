@@ -166,7 +166,7 @@ impl HourSimulationProbe {
 }
 
 #[derive(Debug)]
-pub(super) struct HourSimulationFactory {
+struct HourSimulationFactory {
     probe: HourSimulationProbe,
 }
 

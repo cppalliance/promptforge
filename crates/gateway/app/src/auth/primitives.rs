@@ -44,7 +44,7 @@ pub(crate) fn auth_url(base_url: &str, key: &str) -> String {
 
 /// Reads the handoff cookie's presented session proof, when the request
 /// includes a well-formed one.
-pub(crate) fn presented_cookie_proof(headers: &HeaderMap) -> Option<Vec<u8>> {
+pub(super) fn presented_cookie_proof(headers: &HeaderMap) -> Option<Vec<u8>> {
     let header = headers.get(COOKIE)?.to_str().ok()?;
     header.split(';').map(str::trim).find_map(|pair| {
         let (name, value) = pair.split_once('=')?;
@@ -76,7 +76,7 @@ pub(crate) fn session_token(salt: &[u8; 32], key: &[u8]) -> [u8; 32] {
 /// attaches `Sec-Fetch-Site` to page-initiated requests, and a page
 /// cannot strip or forge it; bearer clients (the shell, the tray,
 /// scripts) never take the cookie path.
-pub(crate) fn fetch_metadata_allows_cookie(headers: &HeaderMap) -> bool {
+pub(super) fn fetch_metadata_allows_cookie(headers: &HeaderMap) -> bool {
     matches!(
         headers
             .get(SEC_FETCH_SITE)
@@ -94,7 +94,7 @@ pub(crate) fn fetch_metadata_allows_cookie(headers: &HeaderMap) -> bool {
 /// `POST /admin/shutdown` - are refused, as is any value the header
 /// grammar does not name. `same-origin` (the config SPA) and `none` (a
 /// typed URL) pass.
-pub(crate) fn fetch_metadata_allows_ambient(headers: &HeaderMap) -> bool {
+pub(super) fn fetch_metadata_allows_ambient(headers: &HeaderMap) -> bool {
     match headers.get(SEC_FETCH_SITE) {
         None => true,
         Some(value) => matches!(value.to_str(), Ok("same-origin" | "none")),

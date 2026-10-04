@@ -168,11 +168,7 @@ impl HostServices {
 
     /// Puts `provider` under `key`'s id, replacing any provider already
     /// there. The caller owns the literal's validity.
-    pub(crate) fn insert<T: ?Sized + Send + Sync + 'static>(
-        &mut self,
-        key: &ServiceKey<T>,
-        provider: Arc<T>,
-    ) {
+    fn insert<T: ?Sized + Send + Sync + 'static>(&mut self, key: &ServiceKey<T>, provider: Arc<T>) {
         self.entries.insert(
             key.id.literal,
             Entry {

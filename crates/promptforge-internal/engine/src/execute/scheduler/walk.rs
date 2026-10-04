@@ -31,7 +31,7 @@ pub(super) struct ChainTarget {
     /// The target's index in `slice`.
     pub(super) index: usize,
     /// True when the target is a direct child of the current section.
-    pub(super) child: bool,
+    child: bool,
 }
 
 impl Scheduler {

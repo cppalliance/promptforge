@@ -750,7 +750,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-9>
 
-### Step 9: Narrow visibility, verify the whole plan, push, and watch CI and the site
+### Step 9: Narrow visibility, verify the whole plan, push, and watch CI and the site [completed]
 
 - Component: Compiler-enforced 500-line limit
 - Work item: 13, visibility, then the final verification of all 13 items, the promptforge push, and the CI and site workflow runs.

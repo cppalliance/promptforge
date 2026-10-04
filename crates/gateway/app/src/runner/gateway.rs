@@ -37,7 +37,7 @@ impl Gateway {
 
     /// [`new`](Self::new) over a caller-provided progress hub, so the
     /// serving lifecycle's status consumers see the boot command's progress.
-    pub(crate) fn new_with_hub(
+    pub(super) fn new_with_hub(
         config: &Config,
         profiles: ProfilesContext,
         hub: Arc<gateway_progress::ProgressHub>,
@@ -74,7 +74,7 @@ impl Gateway {
     /// selected: the local runtime then stays empty for the process
     /// lifetime and the remote table published at assembly is the whole
     /// catalog. Returns whether a command was enqueued.
-    pub(crate) fn enqueue_boot_load(&self, profile: Option<ProfileName>) -> bool {
+    pub(super) fn enqueue_boot_load(&self, profile: Option<ProfileName>) -> bool {
         let Some(name) = profile else {
             return false;
         };
@@ -110,7 +110,7 @@ impl Gateway {
     /// [`from_config`](Self::from_config) over a caller-provided progress
     /// hub, so the serving lifecycle's status consumers can watch startup
     /// provisioning.
-    pub(crate) fn from_config_with_hub(
+    fn from_config_with_hub(
         config: &Config,
         profiles: ProfilesContext,
         hub: Arc<gateway_progress::ProgressHub>,

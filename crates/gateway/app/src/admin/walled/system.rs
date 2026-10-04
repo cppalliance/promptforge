@@ -29,16 +29,16 @@ use crate::registry::RouteInfo;
 const SYSTEM: RouteInfo = RouteInfo::walled("/admin/system", &[Method::GET]);
 
 /// The machine-metrics route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[SYSTEM];
+pub(super) const ROUTES: &[RouteInfo] = &[SYSTEM];
 
 /// The machine-metrics route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(SYSTEM.path, get(admin_system))
 }
 
 /// One `GET /admin/system` snapshot.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct SystemSnapshot {
+struct SystemSnapshot {
     /// Processor identity and load.
     cpu: CpuMetrics,
     /// Physical memory usage.
@@ -154,7 +154,7 @@ impl fmt::Debug for SystemSampler {
 /// The route is compiled into every build: machine metrics do not depend on the
 /// `local` feature, and the NVML dependency probes its driver at runtime
 /// rather than link time.
-pub(crate) async fn admin_system(
+async fn admin_system(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<SystemSnapshot>, GatewayError> {

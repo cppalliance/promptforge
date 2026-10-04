@@ -45,7 +45,7 @@ impl LuaToolHandle {
 
     /// Returns the prompt-local alias.
     #[must_use]
-    pub(crate) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &str {
         &self.name
     }
 }

@@ -71,9 +71,9 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
 /// runs first as it does after `tasks.spawn`. The text is the Engine's
 /// own, so it always resumes trusted.
 pub(super) struct BuiltinAnswer {
-    pub(super) text: String,
-    pub(super) ok: bool,
-    pub(super) started: Option<ChainIndex>,
+    text: String,
+    ok: bool,
+    started: Option<ChainIndex>,
 }
 
 impl BuiltinAnswer {
@@ -284,7 +284,7 @@ impl Scheduler {
 
     /// The task named by `args` if the model may see it: a model-origin
     /// task the caller owns, or the refusal text.
-    pub(super) fn model_task(
+    fn model_task(
         &self,
         caller: ChainIndex,
         name: &str,

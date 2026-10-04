@@ -38,13 +38,13 @@ use crate::execute::{
 };
 use crate::parser::Prompt;
 
-pub(crate) mod harness;
+mod harness;
 pub mod recording;
 #[cfg(test)]
 #[path = "test_support/scripted-chat.rs"]
 pub(crate) mod scripted_chat;
 pub(crate) mod tokio_driver;
-pub(crate) mod tools;
+mod tools;
 
 pub use harness::{ChatClient, RunHarness};
 pub use recording::forward;

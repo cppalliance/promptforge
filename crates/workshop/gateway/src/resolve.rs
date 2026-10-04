@@ -100,20 +100,20 @@ impl ResolvedGateway {
     /// Which source won the resolution.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn source(&self) -> GatewaySource {
+    fn source(&self) -> GatewaySource {
         self.source
     }
 
     /// Why a gateway discovery file was removed on the way to the config
     /// fallback, when one was.
     #[must_use]
-    pub(crate) fn stale(&self) -> Option<StaleReason> {
+    fn stale(&self) -> Option<StaleReason> {
         self.stale
     }
 
     /// The winning source rendered for the status bar and the log.
     #[must_use]
-    pub(crate) fn source_label(&self) -> &'static str {
+    fn source_label(&self) -> &'static str {
         match self.source {
             GatewaySource::GatewayDiscoveryFile => "gateway discovery file",
             GatewaySource::Config => "workshop.toml",

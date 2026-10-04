@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::take::TakeFailure;
 
-pub(crate) const SESSION_RESULT_CAPACITY: usize = 16;
+pub(super) const SESSION_RESULT_CAPACITY: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ItemFailure {
@@ -14,7 +14,7 @@ pub(crate) enum ItemFailure {
 }
 
 impl ItemFailure {
-    pub(crate) fn from_precommit(failure: &TakeFailure) -> Self {
+    pub(super) fn from_precommit(failure: &TakeFailure) -> Self {
         if matches!(failure, TakeFailure::SegmentCapacity) {
             Self::FinalSegmentOverload(failure.to_string())
         } else {
@@ -54,7 +54,7 @@ pub(crate) enum ItemResult {
 }
 
 impl ItemResult {
-    pub(crate) fn item_id(&self) -> &str {
+    pub(super) fn item_id(&self) -> &str {
         match self {
             #[cfg(any(test, feature = "test-fixtures"))]
             Self::Delta { item_id, .. } | Self::Hypothesis { item_id, .. } => item_id,
@@ -62,7 +62,7 @@ impl ItemResult {
         }
     }
 
-    pub(crate) const fn is_terminal(&self) -> bool {
+    pub(super) const fn is_terminal(&self) -> bool {
         matches!(self, Self::Completed { .. } | Self::Failed { .. })
     }
 }
@@ -86,7 +86,7 @@ pub(crate) enum MailboxError {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct ResultMailbox {
+pub(super) struct ResultMailbox {
     #[cfg(any(test, feature = "test-fixtures"))]
     results: VecDeque<ItemResult>,
     slots: HashMap<String, ItemSlots>,
@@ -96,18 +96,18 @@ pub(crate) struct ResultMailbox {
 }
 
 impl ResultMailbox {
-    pub(crate) fn reserve_item(&mut self, item_id: &str) {
+    pub(super) fn reserve_item(&mut self, item_id: &str) {
         let replaced = self.slots.insert(item_id.to_owned(), ItemSlots::default());
         debug_assert!(replaced.is_none(), "opaque item IDs must be unique");
     }
 
     #[cfg(test)]
-    pub(crate) fn reserved_items(&self) -> usize {
+    pub(super) fn reserved_items(&self) -> usize {
         self.slots.len()
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn push_delta(
+    pub(super) fn push_delta(
         &mut self,
         item_id: &str,
         transcript: String,
@@ -127,7 +127,7 @@ impl ResultMailbox {
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn replace_hypothesis(
+    pub(super) fn replace_hypothesis(
         &mut self,
         item_id: &str,
         revision: u64,
@@ -151,7 +151,7 @@ impl ResultMailbox {
         Ok(())
     }
 
-    pub(crate) fn set_terminal(
+    pub(super) fn set_terminal(
         &mut self,
         item_id: &str,
         result: ItemResult,
@@ -170,7 +170,7 @@ impl ResultMailbox {
         Ok(())
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<ItemResult> {
+    pub(super) fn drain(&mut self) -> Vec<ItemResult> {
         #[cfg(any(test, feature = "test-fixtures"))]
         let mut drained = self.results.drain(..).collect::<Vec<_>>();
         #[cfg(not(any(test, feature = "test-fixtures")))]

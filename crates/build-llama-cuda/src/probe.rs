@@ -128,7 +128,7 @@ impl Probe for SystemProbe {
 }
 
 /// Lossy-decodes `bytes` and truncates at [`OUTPUT_LIMIT`] with a marker.
-pub(crate) fn bounded(bytes: &[u8]) -> String {
+fn bounded(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     if text.len() <= OUTPUT_LIMIT {
         return text.into_owned();

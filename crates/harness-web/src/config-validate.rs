@@ -175,7 +175,7 @@ pub(super) fn validate_deny_cidrs(cidrs: Vec<String>) -> Result<Vec<IpNet>, Conf
 /// DNS domain. Every other form - empty, whitespace-, slash-, colon-, at-, or
 /// query-bearing - is rejected by the URL host parser, which enforces the URL
 /// forbidden-host-code-point set. Returns the canonical host to store.
-pub(super) fn validate_host(raw: &str) -> Result<String, ConfigErrorRepr> {
+fn validate_host(raw: &str) -> Result<String, ConfigErrorRepr> {
     let host = canonical_host(raw);
     if host.is_empty() {
         return Err(ConfigErrorRepr::Host {

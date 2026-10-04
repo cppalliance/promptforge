@@ -16,7 +16,7 @@ use super::state::SessionsState;
 /// While the heartbeat reports the gateway down, the route
 /// short-circuits: it answers 502 with a user-visible message instead of
 /// fetching the catalog.
-pub(crate) async fn models(State(state): State<SessionsState>) -> Response {
+pub(super) async fn models(State(state): State<SessionsState>) -> Response {
     // An unregistered gateway subsystem reads as the health flag's
     // optimistic default; a registered one short-circuits while down.
     if state.health().is_some_and(|health| !health.is_reachable()) {
@@ -58,7 +58,7 @@ fn report_gateway_outcome(
 ///
 /// Success (any status) is relayed byte-for-byte; a transport failure
 /// becomes `502 Bad Gateway` in the `gateway_unreachable` wire envelope.
-pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
+fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
     match result {
         Ok(upstream) => (
             upstream.status,

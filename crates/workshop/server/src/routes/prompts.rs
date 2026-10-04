@@ -29,7 +29,7 @@ pub(crate) fn routes() -> axum::Router {
 
 /// The JSON body of `POST /prompts/contract`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct ContractRequest {
+struct ContractRequest {
     /// The prompt's display name (the file's, when it came from one).
     name: String,
     /// The prompt markdown to parse.
@@ -39,7 +39,7 @@ pub(crate) struct ContractRequest {
 /// The Run-window contract: everything the panel renders, built from
 /// the parsed frontmatter.
 #[derive(Debug, Serialize)]
-pub(crate) struct ContractResponse {
+struct ContractResponse {
     /// The prompt's identifier.
     name: String,
     /// The one-line description shown in listings.
@@ -64,7 +64,7 @@ pub(crate) struct ContractResponse {
 
 /// A declared input or output file.
 #[derive(Debug, Serialize)]
-pub(crate) struct FileDto {
+struct FileDto {
     /// The store-internal path.
     path: String,
     /// The human-readable purpose.
@@ -82,7 +82,7 @@ impl From<&FileDecl> for FileDto {
 
 /// A declared capability: its global id and optionality.
 #[derive(Debug, Serialize)]
-pub(crate) struct CapabilityDto {
+struct CapabilityDto {
     /// The capability's global id (`namespace/pack`).
     id: String,
     /// Whether an absent capability skips instead of failing.
@@ -101,7 +101,7 @@ impl From<&CapabilityDecl> for CapabilityDto {
 /// One tool slot, tagged by filling posture.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-pub(crate) enum ToolDto {
+enum ToolDto {
     /// An exact global tool path.
     Exact {
         /// The prompt-local alias.
@@ -128,7 +128,7 @@ impl ToolDto {
 
 /// The typed args declaration.
 #[derive(Debug, Serialize)]
-pub(crate) struct ArgsDto {
+struct ArgsDto {
     /// True when the declaration is the implicit default (no `args:` key).
     implicit: bool,
     /// The declared fields, sorted by name.
@@ -149,7 +149,7 @@ impl From<&ArgsDecl> for ArgsDto {
 
 /// One declared arg.
 #[derive(Debug, Serialize)]
-pub(crate) struct ArgDto {
+struct ArgDto {
     /// The arg name.
     name: String,
     /// The declared type (`string`, `boolean`, `integer`, `number`).
@@ -182,7 +182,7 @@ impl ArgDto {
 
 /// One declared model role.
 #[derive(Debug, Serialize)]
-pub(crate) struct ModelDto {
+struct ModelDto {
     /// The prompt-local role label.
     label: String,
     /// The declared keywords (kebab-case wire vocabulary).
@@ -253,7 +253,7 @@ impl From<&Frontmatter> for ContractResponse {
 
 /// Parses the posted prompt text and answers the contract DTO, or a
 /// `422` envelope when the text is not a valid prompt.
-pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
+async fn contract(Json(body): Json<ContractRequest>) -> Response {
     // The contract needs the tree alone; the parse-time events are not
     // this route's to log.
     match Prompt::parse(&body.text, &body.name).0 {

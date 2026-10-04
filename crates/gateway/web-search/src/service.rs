@@ -17,7 +17,7 @@ use crate::process::post_process_results;
 
 /// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
 #[derive(Debug, Clone)]
-pub(crate) struct WebSearchSettings {
+struct WebSearchSettings {
     /// Used when the request omits `count`.
     pub default_count: u8,
     /// Clamp and over-fetch ceiling for result counts.
@@ -35,7 +35,7 @@ pub(crate) struct WebSearchSettings {
 impl WebSearchSettings {
     /// Builds settings from the tool configuration.
     #[must_use]
-    pub(crate) fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
+    fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
         WebSearchSettings {
             default_count: cfg.default_count(),
             max_count: cfg.max_count(),

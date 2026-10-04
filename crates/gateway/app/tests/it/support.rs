@@ -178,7 +178,7 @@ pub(crate) fn wait_for_connection(
     }
 }
 
-pub(crate) fn gateway_config(backend: SocketAddr) -> Config {
+fn gateway_config(backend: SocketAddr) -> Config {
     let toml = format!(
         r#"
 config-version = 0

@@ -167,7 +167,7 @@ pub(crate) async fn answer(socket: &mut JsonSocket, token: &str, text: &str) {
 pub(crate) struct Turn {
     pub(crate) deltas: Vec<serde_json::Value>,
     pub(crate) events: Vec<serde_json::Value>,
-    pub(crate) waits: Vec<String>,
+    waits: Vec<String>,
 }
 
 /// Collects frames until the turn's `agent_message` event arrives,

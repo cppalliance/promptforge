@@ -29,11 +29,11 @@
 mod bindings;
 mod broker;
 mod gateway;
-pub(crate) mod relay;
+mod relay;
 mod search;
-pub(crate) mod socket;
-pub(crate) mod socket_frames;
-pub(crate) mod state;
+mod socket;
+mod socket_frames;
+mod state;
 mod status;
 mod wire;
 
@@ -183,7 +183,7 @@ impl AgentSessions {
     /// registered or its URL or key cannot build, and the conversation's
     /// own [`LaunchError`] otherwise: an unknown agent or an unreadable
     /// agent source.
-    pub(crate) async fn launch(&self, name: &str) -> Result<Conversation, LaunchRefusal> {
+    async fn launch(&self, name: &str) -> Result<Conversation, LaunchRefusal> {
         if usable_gateway(&self.inner.registry).is_none() {
             return Err(LaunchRefusal::GatewayUnusable);
         }
@@ -249,7 +249,7 @@ impl AgentSessions {
 
     /// The running conversation with this id, when one exists: how a
     /// socket reattaches after a disconnect.
-    pub(crate) fn get(&self, id: &str) -> Option<Conversation> {
+    fn get(&self, id: &str) -> Option<Conversation> {
         self.inner.conversations.get(&ConversationId::new(id))
     }
 
@@ -293,7 +293,7 @@ impl AgentSessions {
 
 /// A refused agent launch, relayed to the client as an error frame.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum LaunchRefusal {
+enum LaunchRefusal {
     /// No gateway is registered, or the registered gateway's URL or key
     /// cannot build, so no agent could complete a model round.
     #[error("agent sessions need a usable gateway binding; check the gateway base URL and key")]

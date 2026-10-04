@@ -30,7 +30,7 @@ impl OpenAiUpstream {
     /// Builds an upstream with a caller-supplied HTTP client (test seam for
     /// exercising request deadlines against a stalled server).
     #[cfg(test)]
-    pub(crate) fn with_client(
+    pub(super) fn with_client(
         base_url: &str,
         api_key: Secret,
         http: reqwest::Client,

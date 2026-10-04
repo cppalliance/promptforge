@@ -38,7 +38,7 @@ pub(super) fn routes() -> axum::Router<Workspace> {
 /// Reports every ui-state value the open workspace file holds, keyed by
 /// its allow-listed name, `null` where nothing has been put. An
 /// ephemeral workspace answers every key as `null`.
-pub(crate) async fn get_state(State(workspace): State<Workspace>) -> Response {
+async fn get_state(State(workspace): State<Workspace>) -> Response {
     respond(Ok::<_, WorkspaceError>(workspace.ui_state()))
 }
 
@@ -46,7 +46,7 @@ pub(crate) async fn get_state(State(workspace): State<Workspace>) -> Response {
 /// ephemeral workspace answers success with `saved: false` and writes
 /// nothing; a refused key or body answers the envelope and changes
 /// nothing, ephemeral or not.
-pub(crate) async fn put_state(
+async fn put_state(
     State(workspace): State<Workspace>,
     Path(key): Path<String>,
     body: Bytes,

@@ -35,17 +35,17 @@ impl InputSnapshot {
     }
 
     #[cfg(test)]
-    pub(crate) const fn format(&self) -> &str {
+    const fn format(&self) -> &str {
         self.format
     }
 
     #[cfg(test)]
-    pub(crate) const fn rate(&self) -> u32 {
+    const fn rate(&self) -> u32 {
         self.rate
     }
 
     #[cfg(test)]
-    pub(crate) const fn model(&self) -> &str {
+    const fn model(&self) -> &str {
         self.model
     }
 
@@ -63,12 +63,12 @@ pub(crate) struct UncommittedInput {
 }
 
 #[derive(Debug)]
-pub(crate) struct SealedInput {
-    pub(crate) item_id: String,
+pub(super) struct SealedInput {
+    pub(super) item_id: String,
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) snapshot: InputSnapshot,
-    pub(crate) take: Take,
-    pub(crate) duration_seconds: f64,
+    pub(super) snapshot: InputSnapshot,
+    pub(super) take: Take,
+    pub(super) duration_seconds: f64,
 }
 impl UncommittedInput {
     #[cfg(test)]
@@ -81,7 +81,7 @@ impl UncommittedInput {
             .unwrap_or_else(|_| unreachable!("an empty audio buffer owns no retained PCM"))
     }
 
-    pub(crate) fn first_append(
+    pub(super) fn first_append(
         item_id: String,
         snapshot: InputSnapshot,
         engine: Option<GenerationLease>,
@@ -93,7 +93,7 @@ impl UncommittedInput {
     }
 
     #[cfg(test)]
-    pub(crate) fn first_append_with_pcm_limit(
+    pub(super) fn first_append_with_pcm_limit(
         item_id: String,
         snapshot: InputSnapshot,
         engine: Option<GenerationLease>,
@@ -141,7 +141,7 @@ impl UncommittedInput {
         })
     }
 
-    pub(crate) fn append_base64(&mut self, payload: &str) -> Result<(), AudioError> {
+    pub(super) fn append_base64(&mut self, payload: &str) -> Result<(), AudioError> {
         let mut audio = self.audio.clone();
         audio.append_base64(payload)?;
         self.take.append(audio.take_resampled())?;
@@ -168,23 +168,23 @@ impl UncommittedInput {
     }
 
     #[cfg(test)]
-    pub(crate) fn buffered_duration_seconds(&self) -> f64 {
+    fn buffered_duration_seconds(&self) -> f64 {
         self.audio.buffered_duration_seconds()
     }
 
-    pub(crate) fn pending_failure(&self) -> Option<Arc<TakeFailure>> {
+    pub(super) fn pending_failure(&self) -> Option<Arc<TakeFailure>> {
         self.take.pending_failure()
     }
 
-    pub(crate) fn record_pending_failure(&mut self, failure: TakeFailure) {
+    pub(super) fn record_pending_failure(&mut self, failure: TakeFailure) {
         self.take.record_failure(failure);
     }
 
-    pub(crate) fn validate_commit(&self) -> Result<(), AudioError> {
+    pub(super) fn validate_commit(&self) -> Result<(), AudioError> {
         self.audio.validate_commit()
     }
 
-    pub(crate) fn seal(self) -> Result<SealedInput, Box<(Self, AudioError)>> {
+    pub(super) fn seal(self) -> Result<SealedInput, Box<(Self, AudioError)>> {
         let mut audio = self.audio.clone();
         let committed = audio.commit_validated();
         let duration_seconds = committed.duration_seconds();

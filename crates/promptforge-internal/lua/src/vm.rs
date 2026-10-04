@@ -28,10 +28,7 @@ pub(crate) use run::{LuaOutcome, run_chunk};
 pub use state::{current_tool_bindings, resolve_model_binding};
 
 /// Packs owned values into a 1-based Lua sequence table.
-pub(crate) fn pack_sequence<T: mlua::IntoLua>(
-    lua: &Lua,
-    values: Vec<T>,
-) -> mlua::Result<mlua::Table> {
+fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<mlua::Table> {
     let table = lua.create_table_with_capacity(values.len(), 0)?;
     for (index, value) in values.into_iter().enumerate() {
         table.raw_set(index + 1, value)?;

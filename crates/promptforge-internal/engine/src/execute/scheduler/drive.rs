@@ -168,7 +168,7 @@ impl Scheduler {
     /// the run's end boundary after every task terminal, and holds
     /// `result` until the orphans are answered. A second decision keeps
     /// the first: the outcome that ended the run is the record.
-    pub(super) fn end(&mut self, result: Result<String>) {
+    fn end(&mut self, result: Result<String>) {
         if matches!(self.phase, Phase::Ending(_) | Phase::Done) {
             return;
         }

@@ -23,7 +23,7 @@ use crate::registry::RouteInfo;
 
 /// The `GET /admin/orphans` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct OrphansReply {
+struct OrphansReply {
     /// Every cache file no catalog entry references.
     orphans: Vec<OrphanEntry>,
 }
@@ -31,10 +31,10 @@ pub(crate) struct OrphansReply {
 const ORPHANS: RouteInfo = RouteInfo::walled("/admin/orphans", &[Method::GET]);
 
 /// The orphan-scan route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[ORPHANS];
+pub(super) const ROUTES: &[RouteInfo] = &[ORPHANS];
 
 /// The orphan-scan route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(ORPHANS.path, get(admin_orphans))
 }
 
@@ -47,7 +47,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// files the cache API never downloaded: blobs are multi-gigabyte, so their
 /// bytes are never re-hashed here. A missing cache or `models/` directory
 /// reports an empty list.
-pub(crate) async fn admin_orphans(
+async fn admin_orphans(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<OrphansReply>, GatewayError> {

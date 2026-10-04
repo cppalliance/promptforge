@@ -29,11 +29,7 @@ use crate::url_policy::check_url;
 /// # Errors
 /// Returns [`FetchError::RedirectRefused`] naming the from-URL, the to-URL, and
 /// the reason for any refused hop.
-pub(crate) fn check_redirect(
-    previous: &[Url],
-    next: &Url,
-    config: &FetchConfig,
-) -> Result<(), FetchError> {
+fn check_redirect(previous: &[Url], next: &Url, config: &FetchConfig) -> Result<(), FetchError> {
     let from = previous.last();
     let from_str = from.map_or_else(|| "(origin)".to_string(), ToString::to_string);
     let from_safe = SafeUrl::new(&from_str);

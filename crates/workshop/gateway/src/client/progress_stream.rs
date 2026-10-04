@@ -21,7 +21,7 @@ use super::GatewayError;
 /// it, in bytes. A peer that never sends a blank-line terminator would
 /// otherwise grow the reassembly buffer unbounded; sized well above any
 /// realistic progress event.
-pub(crate) const MAX_EVENT_BLOCK: usize = 1024 * 1024;
+pub(super) const MAX_EVENT_BLOCK: usize = 1024 * 1024;
 
 /// The largest error body kept for a subscription diagnostic, in bytes.
 const MAX_ERROR_BODY: usize = 2000;

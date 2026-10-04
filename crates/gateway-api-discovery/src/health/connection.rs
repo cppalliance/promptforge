@@ -14,7 +14,7 @@ use crate::CancellationToken;
 /// Both requests use one TCP connection, so authority cannot come from a
 /// listener that replaced the endpoint after the health response.
 #[cfg(test)]
-pub(crate) fn probe_connection(
+pub(super) fn probe_connection(
     address: &str,
     bearer_path: &str,
     bearer: &str,

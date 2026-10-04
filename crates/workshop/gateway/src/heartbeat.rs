@@ -41,11 +41,11 @@ use crate::progress::{Ended, Signals, until};
 use crate::refresh::{refresh_catalog, refresh_profiles};
 
 /// The status line announcing that the gateway answers its health probe.
-pub(crate) const CONNECTED_LABEL: &str = "Connected to gateway";
+const CONNECTED_LABEL: &str = "Connected to gateway";
 /// The status line announcing that the gateway does not answer.
-pub(crate) const UNREACHABLE_LABEL: &str = "Gateway unreachable";
+const UNREACHABLE_LABEL: &str = "Gateway unreachable";
 /// The description sent with the unreachable announcement.
-pub(crate) const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
+const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
 
 /// The status frame a joining session hears first: the bus's retained
 /// frame, unless that frame is one of the heartbeat's transition

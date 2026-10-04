@@ -202,10 +202,7 @@ impl CompletionError {
 
     /// Builds a failure whose message is the kind's fixed phrase extended
     /// with `: ` and a specific this crate wrote.
-    pub(crate) fn specific(
-        kind: CompletionErrorKind,
-        specific: impl std::fmt::Display,
-    ) -> CompletionError {
+    fn specific(kind: CompletionErrorKind, specific: impl std::fmt::Display) -> CompletionError {
         CompletionError::new(kind, format!("{}: {specific}", kind.phrase()))
     }
 

@@ -56,9 +56,9 @@ pub(crate) struct Heading {
     /// 1-based line number within `body` where `content` begins.
     pub(crate) content_start_line: u32,
     /// 1-based line number within `body` of the heading line itself.
-    pub(crate) source_line: u32,
+    source_line: u32,
     /// Byte range of the heading within `body`, kept for span diagnostics.
-    pub(crate) span: Range<usize>,
+    span: Range<usize>,
 }
 
 /// Counts the number of `\n` characters in `text[..byte_offset]`.

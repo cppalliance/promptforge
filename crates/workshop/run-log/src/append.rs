@@ -211,7 +211,7 @@ async fn connect(path: &str) -> Result<turso::Connection, LogError> {
 /// A `u64` as the `i64` SQLite stores: the same bits, so the round trip
 /// through [`unsigned`] is lossless. Values past `i64::MAX` read as
 /// negative in raw SQL, which nothing here does.
-pub(crate) const fn signed(value: u64) -> i64 {
+const fn signed(value: u64) -> i64 {
     i64::from_le_bytes(value.to_le_bytes())
 }
 

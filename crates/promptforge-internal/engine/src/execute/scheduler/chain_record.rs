@@ -260,7 +260,7 @@ impl Chain {
     /// The chain's current section within `prompt`: the section at its
     /// walk position. Resolved against the caller's handle on the tree so
     /// the result outlives a mutable borrow of the chain.
-    pub(super) fn section<'p>(&self, prompt: &'p Prompt) -> &'p Section {
+    fn section<'p>(&self, prompt: &'p Prompt) -> &'p Section {
         &self.slice.resolve(prompt)[self.index]
     }
 

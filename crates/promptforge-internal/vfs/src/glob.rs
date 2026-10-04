@@ -11,7 +11,7 @@ use crate::error::PathReason;
 /// The recursion-free matcher is linear, but an unbounded pattern is still
 /// a cheap denial-of-service lever, so an over-long pattern is refused
 /// outright.
-pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
+const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 
 /// Validates a raw glob pattern as written, before canonicalization: the
 /// length, control characters, backslashes, and then the wildcard
@@ -127,7 +127,7 @@ fn tokenize_glob(pattern: &[u8]) -> Vec<GlobToken> {
 /// matches in one shot; retained as the parity reference for
 /// [`matches_tokens`] and only needed in tests.
 #[cfg(test)]
-pub(crate) fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
+fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
     matches_tokens(&tokenize_glob(pattern), text)
 }
 

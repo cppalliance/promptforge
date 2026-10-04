@@ -205,7 +205,7 @@ pub fn is_running(run_dir: &Path) -> bool {
 
 /// [`is_running`] against a caller-named process image, so a test binary -
 /// never named `promptforge-gateway` - can run the full liveness gauntlet.
-pub(crate) fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
+fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
     match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => is_live(&file, image_name),
         // A missing, unreadable, or invalid file reads as not-running.

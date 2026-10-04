@@ -22,7 +22,7 @@ pub(super) use launch::{
 #[cfg(test)]
 pub(super) use lifecycle::SUPERVISOR_SHUTDOWN_BUDGET;
 pub(crate) use lifecycle::{GatewaySupervisor, SupervisorShutdown};
-pub(super) use recovery::RecoveryIdentity;
+use recovery::RecoveryIdentity;
 pub(in crate::gateway) use recovery::{RecoveryCandidate, RecoveryOwnership};
 
 pub(super) use launch::launch_and_attach_cancellable;

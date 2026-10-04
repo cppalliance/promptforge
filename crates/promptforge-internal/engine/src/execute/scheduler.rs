@@ -288,7 +288,7 @@ impl Drop for Scheduler {
 impl Scheduler {
     /// Builds the scheduler for one run over `ctx`'s prompt and reports
     /// the run's start, so the first step's events open with it.
-    pub(crate) fn new(ctx: RunState) -> Self {
+    pub(super) fn new(ctx: RunState) -> Self {
         // The run's boundaries are events like every other report: pushed
         // into the buffer under the root task, so the Harness sees them in
         // order with the sections between them.
@@ -328,7 +328,7 @@ impl Scheduler {
 
     /// Whether the run's outcome is decided: the end boundary is reported
     /// and only the orphans' answers stand between the run and `Done`.
-    pub(crate) fn decided(&self) -> bool {
+    pub(super) fn decided(&self) -> bool {
         matches!(self.phase, Phase::Ending(_) | Phase::Done)
     }
 

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 pub(super) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
 pub(super) const MAX_COMMITTED_ITEMS_PER_SESSION: usize = 4;
-pub(super) type InterimTask = JoinHandle<InterimTaskOutput>;
+type InterimTask = JoinHandle<InterimTaskOutput>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InterimEpoch(pub(super) u64);
 #[derive(Debug)]

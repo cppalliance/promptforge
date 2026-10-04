@@ -38,7 +38,7 @@ impl SessionsState {
 
     /// The agent-session opener behind `/agents/ws`, or `None` while
     /// the sessions subsystem has not registered.
-    pub(crate) fn agents(&self) -> Option<AgentSessions> {
+    pub(super) fn agents(&self) -> Option<AgentSessions> {
         self.registry()
             .state::<AgentSessions>()
             .map(|agents| (*agents).clone())
@@ -56,7 +56,7 @@ impl Deref for SessionsState {
 /// The sessions subsystem's routes: the `/v1/models` catalog relay on the
 /// relay deadline, and the `/agents/ws` WebSocket upgrade, which answers
 /// immediately and then outlives any deadline.
-pub(crate) fn routes(state: SessionsState) -> Router {
+pub(super) fn routes(state: SessionsState) -> Router {
     with_deadline(
         Router::new().route("/v1/models", get(relay::models)),
         RELAY_DEADLINE,

@@ -28,7 +28,7 @@ pub struct ModelBindings {
 impl ModelBindings {
     /// Binds the role `label` to `model`, recording the descriptor under
     /// its identity. The fill function's only writer.
-    pub(crate) fn bind(&mut self, label: &str, model: ModelDescriptor) {
+    pub(super) fn bind(&mut self, label: &str, model: ModelDescriptor) {
         self.roles.insert(label.to_owned(), model.id().clone());
         self.models.entry(model.id().clone()).or_insert(model);
     }
@@ -89,7 +89,7 @@ impl ToolBindings {
     /// Binds the prompt-local `alias` to the tool `descriptor` describes,
     /// recording the descriptor under its identity. The slot fill's only
     /// writer.
-    pub(crate) fn bind(&mut self, alias: &str, descriptor: ToolDescriptor) {
+    pub(super) fn bind(&mut self, alias: &str, descriptor: ToolDescriptor) {
         self.aliases.insert(alias.to_owned(), descriptor.id.clone());
         self.tools
             .entry(descriptor.id.clone())

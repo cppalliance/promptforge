@@ -14,20 +14,20 @@
 //!   `promptforge-model-client`. `cargo test -p build-xtask` enforces the
 //!   product and container boundaries.
 
-pub(crate) mod cancel;
+mod cancel;
 mod error;
 mod execute;
-pub(crate) mod heading_address;
-pub(crate) mod lua;
-pub(crate) mod model;
-pub(crate) mod parser;
-pub(crate) mod subst;
+mod heading_address;
+mod lua;
+mod model;
+mod parser;
+mod subst;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
-pub(crate) mod tools;
-pub(crate) mod untrusted;
+mod tools;
+mod untrusted;
 
-pub(crate) use crate::error::{Error, Result};
+use crate::error::{Error, Result};
 
 // The crate root is the one path to this crate's items; the
 // `execute` module stays private and every item that remains public inside it

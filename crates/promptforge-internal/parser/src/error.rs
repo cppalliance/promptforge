@@ -7,7 +7,7 @@
 //! location fields.
 
 /// A type-erased owned error cause used by the internal error type.
-pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// The parser's internal error type, classified into [`ParseError`] at
 /// the public boundary.

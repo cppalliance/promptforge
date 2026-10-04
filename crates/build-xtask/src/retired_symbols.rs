@@ -30,11 +30,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Hit {
     /// The source file holding the identifier.
-    pub(crate) file: PathBuf,
+    file: PathBuf,
     /// The one-based line the identifier sits on.
-    pub(crate) line: usize,
+    line: usize,
     /// The retired symbol that matched.
-    pub(crate) symbol: String,
+    symbol: String,
 }
 
 impl fmt::Display for Hit {

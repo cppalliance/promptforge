@@ -25,7 +25,7 @@ pub struct SttPipelineConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct RawSttPipelineConfig {
+pub(super) struct RawSttPipelineConfig {
     window_seconds: u64,
     interval_ms: u64,
     vocabulary: Vec<String>,

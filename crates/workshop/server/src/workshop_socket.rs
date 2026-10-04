@@ -68,7 +68,7 @@ use self::menu::{select_model, start_switch};
 /// switch fails. Model downloads never run inside this window (the boot
 /// load publishes its listener first), so it covers process exit, the
 /// supervisor's relaunch, and the bind.
-pub(crate) const DEFAULT_RESTART_BOUND: Duration = Duration::from_secs(90);
+const DEFAULT_RESTART_BOUND: Duration = Duration::from_secs(90);
 
 /// The `/ws` route state: the socket state every socket route shares
 /// (registry, origin policy, and the gateway and push accessors, reached
@@ -101,13 +101,13 @@ impl WorkshopSocketState {
     }
 
     /// The bound a profile switch waits for a relaunched sidecar.
-    pub(crate) fn restart_bound(&self) -> Duration {
+    fn restart_bound(&self) -> Duration {
         self.restart_bound
     }
 
     /// The catalog bus every `/ws` session forwards from, or `None`
     /// while the menu subsystem has not registered.
-    pub(crate) fn catalog(&self) -> Option<CatalogBus> {
+    fn catalog(&self) -> Option<CatalogBus> {
         self.registry()
             .state::<MenuHandles>()
             .map(|handles| handles.catalog().clone())
@@ -115,7 +115,7 @@ impl WorkshopSocketState {
 
     /// The menu bus every `/ws` session forwards and drives, or `None`
     /// while the menu subsystem has not registered.
-    pub(crate) fn menu(&self) -> Option<MenuBus> {
+    fn menu(&self) -> Option<MenuBus> {
         self.registry()
             .state::<MenuHandles>()
             .map(|handles| handles.menu().clone())
@@ -132,7 +132,7 @@ impl Deref for WorkshopSocketState {
 
 /// The `/ws` route. The upgrade answers immediately and then outlives
 /// any deadline, so none applies.
-pub(crate) fn routes(state: WorkshopSocketState) -> Router {
+fn routes(state: WorkshopSocketState) -> Router {
     Router::new().route("/ws", get(upgrade)).with_state(state)
 }
 

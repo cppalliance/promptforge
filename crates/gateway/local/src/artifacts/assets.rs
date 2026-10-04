@@ -53,7 +53,7 @@ pub(super) struct ServerAsset<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
-    pub(super) arch: &'a str,
+    arch: &'a str,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,

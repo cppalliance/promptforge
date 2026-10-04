@@ -62,7 +62,7 @@ impl GatewayProcess {
     /// Starts the default binary with rendezvous-looking environment that
     /// must be inert when the test fixture feature is absent.
     #[cfg(not(feature = "test-fixtures"))]
-    pub(crate) fn spawn_with_inert_rendezvous(
+    fn spawn_with_inert_rendezvous(
         config: &Path,
         home: &Path,
         ready: &Path,

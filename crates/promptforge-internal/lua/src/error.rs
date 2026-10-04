@@ -12,7 +12,7 @@
 use promptforge_model_client::model::ModelSetError;
 
 /// A type-erased owned error cause used by the internal error type.
-pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// A cloneable, shareable error cause.
 ///

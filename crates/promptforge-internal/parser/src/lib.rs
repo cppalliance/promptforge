@@ -43,7 +43,7 @@ pub use contract::{
     ArgDecl, ArgType, ArgsDecl, CapabilityDecl, ModelKeyword, ModelRole, ModelRoles, ToolSlot,
     ToolSlots,
 };
-pub(crate) use error::Result;
+use error::Result;
 pub use error::{Error, ParseError, ParseErrorKind};
 pub use prompt::{Block, Prompt, Section};
 

@@ -370,7 +370,7 @@ fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
 /// dotenvy never overrides variables that are already set. A malformed or
 /// unreadable file is ignored: any variable it failed to set surfaces at
 /// interpolation as an unresolved-`${VAR}` error naming the variable.
-pub(crate) fn load_env_file(env_path: &Path) {
+fn load_env_file(env_path: &Path) {
     if env_path.exists() {
         let _ = dotenvy::from_path(env_path);
     }

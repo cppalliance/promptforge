@@ -43,7 +43,7 @@ pub struct GatewayChat {
 
 /// Default longest wait for the next receive, matching the executor's run
 /// limits.
-pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default response-body ceiling, matching the executor's run limits.
 const DEFAULT_MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -138,7 +138,7 @@ impl GatewayChat {
     /// Whether this client presents a bearer key; a test seam for the
     /// environment constructor, which never exposes the key itself.
     #[cfg(test)]
-    pub(crate) fn has_key(&self) -> bool {
+    fn has_key(&self) -> bool {
         self.key.is_some()
     }
 
@@ -299,7 +299,7 @@ impl GatewayChat {
 /// The key is optional exactly when the URL's host is loopback; an empty key
 /// counts as unset ([`SecretString::new`] refuses only an empty secret, and
 /// `Result::ok` folds that refusal into `None`).
-pub(crate) fn from_env_with(
+fn from_env_with(
     lookup: impl Fn(&str) -> Result<Option<String>, GatewayConfigError>,
 ) -> Result<GatewayChat, GatewayConfigError> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?

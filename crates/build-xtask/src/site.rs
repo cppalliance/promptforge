@@ -77,9 +77,9 @@ const IGNORED_PREFIXES: [&str; 4] = ["http:", "https:", "mailto:", "#"];
 
 /// What `cargo xtask site` was asked to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Options {
+struct Options {
     /// Skip the rustdoc stage, for PR runs and chapter previews.
-    pub(crate) books_only: bool,
+    books_only: bool,
 }
 
 /// Runs `cargo xtask site` with the arguments after `site`, reading the

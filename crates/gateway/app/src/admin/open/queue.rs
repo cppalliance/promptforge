@@ -14,7 +14,7 @@ use crate::registry::RouteInfo;
 
 /// The reply of both cancellation routes.
 #[derive(Debug, Serialize)]
-pub(crate) struct CancelReply {
+struct CancelReply {
     /// Whether there was a command to cancel.
     cancelled: bool,
 }
@@ -23,10 +23,10 @@ const CANCEL: RouteInfo = RouteInfo::open("/admin/queue/cancel", &[Method::POST]
 const CANCEL_PENDING: RouteInfo = RouteInfo::open("/admin/queue/cancel-pending", &[Method::POST]);
 
 /// The queue cancellation routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[CANCEL, CANCEL_PENDING];
+pub(super) const ROUTES: &[RouteInfo] = &[CANCEL, CANCEL_PENDING];
 
 /// The queue cancellation routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(CANCEL.path, post(admin_queue_cancel))
         .route(CANCEL_PENDING.path, post(admin_queue_cancel_pending))
@@ -36,7 +36,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// command's cancellation token. The reply reports whether a command was
 /// active to cancel; the command settles as cancelled at its next chunk
 /// or phase boundary.
-pub(crate) async fn admin_queue_cancel(
+async fn admin_queue_cancel(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<CancelReply>, GatewayError> {
@@ -46,14 +46,14 @@ pub(crate) async fn admin_queue_cancel(
 
 /// The `POST /admin/queue/cancel-pending` request body.
 #[derive(Debug, Deserialize)]
-pub(crate) struct CancelPendingRequest {
+struct CancelPendingRequest {
     index: usize,
 }
 
 /// The `POST /admin/queue/cancel-pending` route: bearer-authed, removes
 /// the waiting command at `index`, settling its waiters as cancelled. The
 /// reply reports whether an entry was removed.
-pub(crate) async fn admin_queue_cancel_pending(
+async fn admin_queue_cancel_pending(
     State(state): State<AppState>,
     _caller: AuthedCaller,
     WireJson(request): WireJson<CancelPendingRequest>,

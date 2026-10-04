@@ -22,16 +22,16 @@ use crate::speech::SpeechSnapshot;
 const STATUS: RouteInfo = RouteInfo::open("/admin/status", &[Method::GET]);
 
 /// The status route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[STATUS];
+pub(super) const ROUTES: &[RouteInfo] = &[STATUS];
 
 /// The status route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(STATUS.path, get(admin_status))
 }
 
 /// The `GET /admin/status` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct StatusReply {
+struct StatusReply {
     /// The running profile's name, `null` when none is selected.
     profile: Option<String>,
     /// Every model in the live routing table, in catalog order.
@@ -60,7 +60,7 @@ pub(crate) struct StatusReply {
 
 /// The command queue as the status readout reports it.
 #[derive(Debug, Serialize)]
-pub(crate) struct QueueReply {
+struct QueueReply {
     /// The command the worker is running, if any.
     active: Option<ActiveCommandReply>,
     /// The commands waiting behind it, in queue order.
@@ -70,7 +70,7 @@ pub(crate) struct QueueReply {
 /// The active command: its display name and when it started, as Unix
 /// epoch seconds.
 #[derive(Debug, Serialize)]
-pub(crate) struct ActiveCommandReply {
+struct ActiveCommandReply {
     name: String,
     started_at: u64,
 }
@@ -78,7 +78,7 @@ pub(crate) struct ActiveCommandReply {
 /// One waiting command: its display name and when it was queued, as Unix
 /// epoch seconds.
 #[derive(Debug, Serialize)]
-pub(crate) struct PendingCommandReply {
+struct PendingCommandReply {
     name: String,
     queued_at: u64,
 }
@@ -101,7 +101,7 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
 /// total, the hub's current [`Progress`](gateway_api_types::Progress)
 /// snapshot, the command queue's active and pending commands, and one
 /// readiness entry per capability endpoint the gateway can serve.
-pub(crate) async fn admin_status(
+async fn admin_status(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<StatusReply>, GatewayError> {

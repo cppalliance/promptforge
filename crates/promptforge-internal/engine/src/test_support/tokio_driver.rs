@@ -71,7 +71,7 @@ pub use performers::{BoxFuture, Performer, Performers};
 use test_hooks::shuffle_batch;
 
 /// The sink every drained event is handed to, in step order.
-pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
+pub(super) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 
 /// Drives `run` to its end on the current tokio runtime, performing its
 /// `Chat` and `ToolCall` effects through `performers`,
@@ -158,12 +158,7 @@ impl<'a> TokioDriver<'a> {
     }
 
     /// Builds the driver over an assembled run.
-    pub(crate) fn over(
-        run: Run,
-        performers: Performers,
-        sink: EventSink<'a>,
-        cancel: CancelHandle,
-    ) -> Self {
+    fn over(run: Run, performers: Performers, sink: EventSink<'a>, cancel: CancelHandle) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
             run,

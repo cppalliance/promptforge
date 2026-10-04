@@ -34,14 +34,14 @@ const CONFIG_REDIRECT: RouteInfo = RouteInfo::walled("/config", &[Method::GET]);
 const AUTH: RouteInfo = RouteInfo::walled("/auth", &[Method::GET]);
 
 /// The browser-entry routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[CONFIG_REDIRECT, AUTH];
+pub(super) const ROUTES: &[RouteInfo] = &[CONFIG_REDIRECT, AUTH];
 
 /// The browser entry onto the config SPA: the `/auth` handoff and the
 /// `/config` redirect onto the SPA mount. Neither takes an auth extractor:
 /// the handoff is how the browser obtains its credential, and the
 /// redirect sets nothing but a location. Both sit in the walled tier because
 /// they exist only for the surface the wall protects.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(CONFIG_REDIRECT.path, get(config_ui_redirect))
         .route(AUTH.path, get(auth_handoff))
@@ -65,7 +65,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// The `GET /auth?key=` query: the presented bearer key.
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct AuthQuery {
+struct AuthQuery {
     key: Option<String>,
 }
 
@@ -77,7 +77,7 @@ pub(crate) struct AuthQuery {
 /// URL - with the key's session proof set as an HttpOnly,
 /// `SameSite=Lax` session cookie and `Cache-Control: no-store` so the
 /// handoff response itself is never reused from cache.
-pub(crate) async fn auth_handoff(
+async fn auth_handoff(
     State(state): State<AppState>,
     Query(query): Query<AuthQuery>,
 ) -> Result<Response, GatewayError> {

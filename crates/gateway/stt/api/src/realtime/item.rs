@@ -47,7 +47,7 @@ impl CommitReceipt {
 }
 
 #[derive(Debug)]
-pub(crate) struct CommittedItem {
+pub(super) struct CommittedItem {
     id: String,
     previous_item_id: Option<String>,
     #[cfg(any(test, feature = "test-fixtures"))]
@@ -63,7 +63,7 @@ pub(crate) struct CommittedItem {
 }
 
 impl CommittedItem {
-    pub(crate) fn from_sealed(
+    pub(super) fn from_sealed(
         sealed: SealedInput,
         previous_item_id: Option<String>,
     ) -> (Self, Option<Arc<TakeFailure>>) {
@@ -89,36 +89,36 @@ impl CommittedItem {
         )
     }
 
-    pub(crate) fn receipt(&self) -> CommitReceipt {
+    pub(super) fn receipt(&self) -> CommitReceipt {
         CommitReceipt::new(self.id.clone(), self.previous_item_id.clone())
     }
 
-    pub(crate) fn id(&self) -> &str {
+    pub(super) fn id(&self) -> &str {
         &self.id
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) const fn snapshot(&self) -> &InputSnapshot {
+    pub(super) const fn snapshot(&self) -> &InputSnapshot {
         &self.snapshot
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn take(&self) -> &Take {
+    pub(super) fn take(&self) -> &Take {
         &self.take
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) const fn is_finalizing(&self) -> bool {
+    pub(super) const fn is_finalizing(&self) -> bool {
         self.finalization.is_some()
     }
 
-    pub(crate) fn finalization_finished(&self) -> bool {
+    pub(super) fn finalization_finished(&self) -> bool {
         self.finalization
             .as_ref()
             .is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
-    pub(crate) async fn finish_finalization(&mut self) -> Result<ItemResult, FinalizationError> {
+    pub(super) async fn finish_finalization(&mut self) -> Result<ItemResult, FinalizationError> {
         let Some(task) = self.finalization.as_mut() else {
             return Err(FinalizationError::NotFinalizing);
         };
@@ -134,18 +134,18 @@ impl CommittedItem {
         }
     }
 
-    pub(crate) fn take_finalization(&mut self) -> Option<FinalizationTask> {
+    pub(super) fn take_finalization(&mut self) -> Option<FinalizationTask> {
         self.finalization.take()
     }
 
     #[cfg(feature = "test-fixtures")]
-    pub(crate) fn replace_finalization(&mut self, task: FinalizationTask) {
+    pub(super) fn replace_finalization(&mut self, task: FinalizationTask) {
         if let Some(previous) = self.finalization.replace(task) {
             previous.abort();
         }
     }
 
-    pub(crate) fn completed(&mut self, transcript: String) -> Option<ItemResult> {
+    pub(super) fn completed(&mut self, transcript: String) -> Option<ItemResult> {
         if std::mem::replace(&mut self.terminal, true) {
             return None;
         }
@@ -156,7 +156,7 @@ impl CommittedItem {
         })
     }
 
-    pub(crate) fn failed(&mut self, failure: ItemFailure) -> Option<ItemResult> {
+    pub(super) fn failed(&mut self, failure: ItemFailure) -> Option<ItemResult> {
         if std::mem::replace(&mut self.terminal, true) {
             return None;
         }

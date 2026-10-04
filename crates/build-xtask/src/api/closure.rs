@@ -18,7 +18,7 @@ use super::render::Renderer;
 use super::walk::Visit;
 
 /// The closure findings for one build's visits and the facade's modules.
-pub(crate) fn findings(loaded: &Loaded, surface: &Surface, visits: &[Visit<'_>]) -> Vec<Finding> {
+pub(super) fn findings(loaded: &Loaded, surface: &Surface, visits: &[Visit<'_>]) -> Vec<Finding> {
     let visited: HashSet<(&str, Id)> = visits
         .iter()
         .map(|visit| (visit.crate_name, visit.item.id))

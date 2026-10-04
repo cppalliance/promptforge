@@ -18,10 +18,10 @@ const PROFILES: RouteInfo = RouteInfo::open("/admin/profiles", &[Method::GET]);
 const SWITCH_PROFILE: RouteInfo = RouteInfo::open("/admin/switch-profile", &[Method::POST]);
 
 /// The profile routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[PROFILES, SWITCH_PROFILE];
+pub(super) const ROUTES: &[RouteInfo] = &[PROFILES, SWITCH_PROFILE];
 
 /// The profile routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(PROFILES.path, get(admin_list_profiles))
         .route(SWITCH_PROFILE.path, post(admin_switch_profile))
@@ -30,20 +30,20 @@ pub(crate) fn routes() -> Router<AppState> {
 /// The `POST /admin/switch-profile` body: a profile name, or `null` (or
 /// absent) to select no profile.
 #[derive(Debug, Deserialize)]
-pub(crate) struct SwitchProfileRequest {
+struct SwitchProfileRequest {
     name: Option<String>,
 }
 
 /// The `GET /admin/profiles` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct ProfilesReply {
+struct ProfilesReply {
     /// Every profile name the loaded catalog defines, in catalog order.
     profiles: Vec<String>,
 }
 
 /// The `POST /admin/switch-profile` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct SwitchProfileReply {
+struct SwitchProfileReply {
     /// The persisted selection, `null` when no profile is selected.
     profile: Option<String>,
     /// Whether the selection differs from the running profile, so it
@@ -52,7 +52,7 @@ pub(crate) struct SwitchProfileReply {
 }
 
 /// Lists profile names from the loaded global catalog.
-pub(crate) async fn admin_list_profiles(
+async fn admin_list_profiles(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<ProfilesReply>, GatewayError> {
@@ -79,7 +79,7 @@ pub(crate) async fn admin_list_profiles(
 /// A malformed name fails at the `parse-name` stage; an undefined one is
 /// [`GatewayError::ProfileNotFound`] naming the defined profiles; a failed
 /// state write is the config-write error. Every refusal changes nothing.
-pub(crate) async fn admin_switch_profile(
+async fn admin_switch_profile(
     State(state): State<AppState>,
     _caller: AuthedCaller,
     WireJson(request): WireJson<SwitchProfileRequest>,

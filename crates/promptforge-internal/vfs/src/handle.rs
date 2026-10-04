@@ -213,7 +213,7 @@ impl VfsRef {
     /// see [`VfsRef::acquire`]. Returns [`VfsError::PermissionDenied`],
     /// before any backend call, when the scope in `cx` belongs to a run
     /// that has ended.
-    pub(crate) fn acquire_with(
+    fn acquire_with(
         &self,
         cx: &AcquireContext,
         origin: Option<Origin>,

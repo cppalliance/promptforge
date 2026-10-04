@@ -371,7 +371,7 @@ pub(crate) fn expand_tilde(source: &str) -> Result<PathBuf> {
 
 /// The pure core of [`expand_tilde`]: a leading `~`, `~/`, or `~\` resolves
 /// against `home`; every other spelling passes through untouched.
-pub(crate) fn expand_tilde_against(source: &str, home: &Path) -> PathBuf {
+fn expand_tilde_against(source: &str, home: &Path) -> PathBuf {
     if let Some(rest) = source.strip_prefix("~/") {
         return home.join(rest);
     }
@@ -388,7 +388,7 @@ pub(crate) fn expand_tilde_against(source: &str, home: &Path) -> PathBuf {
 ///
 /// Returns [`LocalError::MissingHome`] rather than silently using the working
 /// directory when the home variable is unset or empty (ART-009).
-pub(crate) fn default_home_checked() -> Result<PathBuf> {
+fn default_home_checked() -> Result<PathBuf> {
     #[cfg(windows)]
     let (var, value) = ("USERPROFILE", std::env::var_os("USERPROFILE"));
     #[cfg(not(windows))]

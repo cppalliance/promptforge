@@ -107,7 +107,7 @@ pub(super) async fn run(
 /// Harness-supplied handle contract, for tests of custom store backends (a
 /// gated store mount or one on a real directory, which the prepare pass
 /// would replace with the run's own fresh store).
-pub(super) async fn run_unprepared(
+async fn run_unprepared(
     prompt: &Prompt,
     args: &str,
     vfs: VfsRef,

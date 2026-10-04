@@ -254,7 +254,7 @@ impl RollingPcm {
     }
 
     #[cfg(test)]
-    pub(super) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.samples.len()
     }
 

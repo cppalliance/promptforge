@@ -191,13 +191,13 @@ impl ModelBinding {
 #[non_exhaustive]
 pub struct CompletionOptions {
     /// The caller-facing model name sent on the wire.
-    pub(crate) model: String,
+    pub(super) model: String,
     /// Sampling temperature (a validated [`Temperature`]).
-    pub(crate) temperature: Option<Temperature>,
+    temperature: Option<Temperature>,
     /// Maximum generation tokens (always non-zero).
-    pub(crate) max_tokens: Option<NonZeroU32>,
+    max_tokens: Option<NonZeroU32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
-    pub(crate) thinking: Option<bool>,
+    thinking: Option<bool>,
 }
 
 // No `Eq`: `temperature` is an `Option<f64>`, so equality is not reflexive for

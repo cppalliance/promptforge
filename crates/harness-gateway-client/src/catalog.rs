@@ -34,13 +34,13 @@ struct ModelsListResponse {
 }
 
 /// The largest gateway error body kept for a catalog-fetch diagnostic, in bytes.
-pub(crate) const MAX_CATALOG_ERROR_BODY: usize = 2000;
+const MAX_CATALOG_ERROR_BODY: usize = 2000;
 
 /// The largest success-path model-catalog body accepted before decoding, in
 /// bytes. A gateway that returns more than this is refused rather than buffered
 /// unbounded, mirroring the bound the error path already applies. Sized well
 /// above any realistic model list (16 MiB) so legitimate catalogs are unaffected.
-pub(crate) const MAX_CATALOG_BODY: u64 = 16 * 1024 * 1024;
+const MAX_CATALOG_BODY: u64 = 16 * 1024 * 1024;
 
 /// Reads a success-path response body, refusing it once it would exceed `cap`
 /// bytes so a decode cannot buffer an unbounded body first.

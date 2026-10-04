@@ -30,7 +30,7 @@ use crate::registry::RouteInfo;
 
 /// The `GET /admin/config-pending` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct PendingReply {
+struct PendingReply {
     /// The shadow-preferred global config document plus `active_profile`,
     /// the persisted selection.
     profile: serde_json::Value,
@@ -40,7 +40,7 @@ pub(crate) struct PendingReply {
 
 /// The `GET /admin/config-dirty` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct DirtyReply {
+struct DirtyReply {
     /// Whether any shadow exists.
     dirty: bool,
     /// The real files whose shadows exist, relative to the config root,
@@ -54,10 +54,10 @@ const PENDING: RouteInfo = RouteInfo::walled("/admin/config-pending", &[Method::
 const DIRTY: RouteInfo = RouteInfo::walled("/admin/config-dirty", &[Method::GET]);
 
 /// The pending-state read routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[PENDING, DIRTY];
+pub(super) const ROUTES: &[RouteInfo] = &[PENDING, DIRTY];
 
 /// The pending-state read routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(PENDING.path, get(admin_config_pending))
         .route(DIRTY.path, get(admin_config_dirty))
@@ -73,7 +73,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// when the config no longer defines it, so the UI can show a selection
 /// that differs from the running profile or has gone stale. Secrets remain
 /// redacted.
-pub(crate) async fn admin_config_pending(
+async fn admin_config_pending(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<PendingReply>, GatewayError> {
@@ -103,7 +103,7 @@ pub(crate) async fn admin_config_pending(
 /// Loads the shadow-preferred config under the running selection, which
 /// may have come from a command-line or environment override and
 /// therefore differ from persisted state.
-pub(crate) fn load_pending_for_running(
+pub(super) fn load_pending_for_running(
     config_path: &Path,
     running_profile: Option<&str>,
 ) -> Result<Config, GatewayError> {
@@ -140,7 +140,7 @@ fn persisted_selection(config_path: &Path) -> Result<Option<String>, GatewayErro
 /// `.env` shadows count toward `dirty` and `pending_files` only. Profile
 /// selection is never pending, so neither list ever names the state file
 /// or `active_profile`.
-pub(crate) async fn admin_config_dirty(
+async fn admin_config_dirty(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<DirtyReply>, GatewayError> {

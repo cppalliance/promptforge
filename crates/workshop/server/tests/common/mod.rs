@@ -276,7 +276,7 @@ impl JsonSocket {
 
     /// Receives the next text frame and parses it as JSON, failing after
     /// `deadline`.
-    pub(crate) async fn recv_json_within(&mut self, deadline: Duration) -> serde_json::Value {
+    async fn recv_json_within(&mut self, deadline: Duration) -> serde_json::Value {
         let message = tokio::time::timeout(deadline, self.socket.next())
             .await
             .expect("a frame arrives within the deadline")

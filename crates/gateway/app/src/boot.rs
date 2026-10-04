@@ -18,7 +18,7 @@ use crate::ProfileName;
 const CONFIG_FILE_NAME: &str = "gateway.toml";
 
 /// The profile the generated default contains and selects.
-pub(crate) const DEFAULT_PROFILE: &str = "default";
+const DEFAULT_PROFILE: &str = "default";
 
 /// The release artifact the cloud provider model sheet downloads from.
 pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
@@ -260,7 +260,7 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
 /// # Errors
 /// Returns [`BootError`] when the parent directory, the config file, or
 /// the state file cannot be created or written.
-pub(crate) fn generate_default(path: &Path, stt: InstallerStt) -> Result<PathBuf, BootError> {
+fn generate_default(path: &Path, stt: InstallerStt) -> Result<PathBuf, BootError> {
     let dir = path.parent().ok_or_else(|| BootError::NoParent {
         path: path.to_path_buf(),
     })?;

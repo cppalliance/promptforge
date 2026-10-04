@@ -35,24 +35,24 @@ const REASONING_IGNORED: &str = "reasoning content was present but ignored";
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NormalizedTurn {
+pub(super) struct NormalizedTurn {
     /// The text or tool-call product the tool loop consumes.
-    pub(crate) outcome: CompletionResult,
+    pub(super) outcome: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub(crate) finish_reason: Option<String>,
+    pub(super) finish_reason: Option<String>,
     /// Reasoning text from the wire, never used as the answer.
-    pub(crate) reasoning_content: Option<String>,
+    pub(super) reasoning_content: Option<String>,
 }
 
 /// The shared per-turn context extracted from a chat-completions body: the
 /// first choice's `message`, `finish_reason`, and reasoning side channel.
-pub(crate) struct TurnContext<'a> {
+struct TurnContext<'a> {
     /// The first choice's `message` object.
-    pub(crate) message: &'a Value,
+    message: &'a Value,
     /// The choice's `finish_reason`, when the backend supplied a string one.
-    pub(crate) finish_reason: Option<String>,
+    finish_reason: Option<String>,
     /// Reasoning side-channel text, never promoted into the answer.
-    pub(crate) reasoning_content: Option<String>,
+    reasoning_content: Option<String>,
 }
 
 /// Extracts and shape-validates the first choice's per-turn context.
@@ -62,7 +62,7 @@ pub(crate) struct TurnContext<'a> {
 /// non-empty array of objects, `finish_reason` is a present non-string,
 /// `message` is missing or not an object, or a reasoning field has the wrong
 /// type.
-pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>, CompletionError> {
+fn turn_context(body: &Value) -> Result<TurnContext<'_>, CompletionError> {
     let choices = match body.get("choices") {
         None => return Err(malformed("no choices in response")),
         Some(Value::Array(choices)) => choices,
@@ -116,7 +116,7 @@ fn empty_reply(reasoning_present: bool, finish_reason: Option<String>) -> Comple
 /// Returns a `MalformedResponse`-kind failure when the body has no usable
 /// choice shape, and an `EmptyReply`-kind one when the choice has neither
 /// non-empty tool calls nor non-empty text.
-pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn, CompletionError> {
+pub(super) fn normalize(body: &Value) -> Result<NormalizedTurn, CompletionError> {
     let TurnContext {
         message,
         finish_reason,
@@ -167,9 +167,7 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn, CompletionError>
 /// null arguments are rejected rather than coerced. [`ToolCall::from_parts`]
 /// then refuses a blank id, a blank name, and arguments that do not decode
 /// to an object.
-pub(crate) fn parse_openai_tool_calls(
-    raw_calls: &[Value],
-) -> Result<Vec<ToolCall>, CompletionError> {
+fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>, CompletionError> {
     let mut calls = Vec::with_capacity(raw_calls.len());
     for raw in raw_calls {
         if !raw.is_object() {
@@ -229,7 +227,7 @@ pub(crate) fn parse_openai_tool_calls(
 /// # Errors
 /// Returns a `MalformedResponse`-kind failure when a present reasoning field is not a
 /// string or null.
-pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>, CompletionError> {
+fn extract_reasoning(message: &Value) -> Result<Option<String>, CompletionError> {
     for key in ["reasoning_content", "reasoning", "thinking"] {
         match message.get(key) {
             None | Some(Value::Null) => {}
@@ -255,18 +253,18 @@ pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>, Compl
 /// parser ([`normalize`]); metadata must never fail a completion whose turn
 /// was usable, so each family degrades to `None` independently.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ResponseMetadata {
+pub(super) struct ResponseMetadata {
     /// The model that served the call, or empty when the body named none.
-    pub(crate) model: String,
+    pub(super) model: String,
     /// What the backend reported: `usage`, llama.cpp's `timings`, and vLLM's
     /// `metrics`. The `client` section is always `None` here; only the
     /// transport's own clock fills it.
-    pub(crate) metrics: CallMetrics,
+    pub(super) metrics: CallMetrics,
     /// One line per section that was present but malformed and so
     /// degraded to `None`, and one for a body naming no string `model`:
     /// the Engine reports each as a `model_metadata_degraded` event, since
     /// this crate reaches no logger.
-    pub(crate) diagnostics: Vec<String>,
+    pub(super) diagnostics: Vec<String>,
 }
 
 /// Parses the serving model and every metrics family from a response body.
@@ -275,7 +273,7 @@ pub(crate) struct ResponseMetadata {
 /// section that does not parse degrades to `None` with a diagnostic naming
 /// the section, so a backend with a broken metrics extension still
 /// completes the call.
-pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
+pub(super) fn response_metadata(body: &Value) -> ResponseMetadata {
     let mut diagnostics = Vec::new();
     ResponseMetadata {
         model: parse_model(body, &mut diagnostics),

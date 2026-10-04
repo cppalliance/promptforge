@@ -15,7 +15,7 @@ mod tests;
 mod value;
 
 /// A type-erased owned error cause used by the internal error type.
-pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
 /// message and its `tasks` field.

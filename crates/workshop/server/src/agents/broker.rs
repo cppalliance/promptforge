@@ -34,7 +34,7 @@ use super::gateway::usable_gateway;
 /// Serves rounds and model lists through the Gateway the server's registry
 /// currently holds.
 #[derive(Clone)]
-pub(crate) struct WorkshopBroker {
+pub(super) struct WorkshopBroker {
     /// The subsystem registry the gateway and menu handles are read
     /// through.
     registry: Registry,
@@ -45,7 +45,7 @@ pub(crate) struct WorkshopBroker {
 
 impl WorkshopBroker {
     /// Builds the broker over the server's subsystem registry.
-    pub(crate) fn new(registry: Registry) -> Self {
+    pub(super) fn new(registry: Registry) -> Self {
         Self {
             registry,
             cached: Arc::new(Mutex::new(None)),
@@ -73,7 +73,7 @@ impl WorkshopBroker {
 
     /// Resolves once the menu's catalog holds a chat-capable model, at
     /// once when no menu is registered.
-    pub(crate) async fn chat_model_ready(&self) {
+    pub(super) async fn chat_model_ready(&self) {
         if let Some(menu) = self.registry.state::<MenuHandles>() {
             chat_model_published(menu.catalog()).await;
         }
@@ -117,7 +117,7 @@ impl WorkshopBroker {
     /// Runs one round through the current generation's Gateway broker,
     /// sent to the dropdown's current pick, handing `on_piece` each live
     /// piece of the reply as it arrives.
-    pub(crate) fn chat_streaming(
+    fn chat_streaming(
         &self,
         binding: ModelBinding,
         messages: Vec<Message>,
@@ -182,14 +182,14 @@ fn narrower_pick_window(
 /// One run's broker over the Workshop broker: a section's own round
 /// streams its live pieces into the run's conversation, stamped with the
 /// round's id, and every other call goes through as it came.
-pub(crate) struct RunBroker {
+pub(super) struct RunBroker {
     inner: WorkshopBroker,
     conversation: Conversation,
 }
 
 impl RunBroker {
     /// The broker for `conversation`'s run over `inner`.
-    pub(crate) fn new(inner: WorkshopBroker, conversation: Conversation) -> Self {
+    pub(super) fn new(inner: WorkshopBroker, conversation: Conversation) -> Self {
         Self {
             inner,
             conversation,

@@ -44,7 +44,7 @@ mod error;
 mod fill;
 pub(crate) mod protocol;
 mod requirements;
-pub(crate) mod run;
+mod run;
 pub(crate) mod scheduler;
 mod scope;
 mod section_context;
@@ -67,7 +67,7 @@ pub use run::{
 };
 // The store vocabulary a `Vfs` effect holds and its answer returns, for
 // the Engine's own store handling; other crates name it from `promptforge_lua`.
-pub(crate) use promptforge_lua::{VfsOp, VfsOutcome};
+use promptforge_lua::{VfsOp, VfsOutcome};
 
 /// Performs one operation on the run's store view through `access`: the
 /// work behind an [`Effect::Vfs`], for the Harness's effect loop.

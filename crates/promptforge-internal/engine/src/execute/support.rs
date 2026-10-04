@@ -13,11 +13,11 @@ use promptforge_types::metrics::CallMetrics;
 use crate::model::{Completion, CompletionResult};
 
 /// Maximum nested `call()` depth (inclusive of the first call).
-pub(crate) const MAX_CALL_DEPTH: usize = 8;
+pub(super) const MAX_CALL_DEPTH: usize = 8;
 
 /// The run's final result when no section produced a reply: the generic
 /// completion text both fallback sites (an empty walk, an H1-only run) share.
-pub(crate) const GENERIC_COMPLETION: &str = "done";
+pub(super) const GENERIC_COMPLETION: &str = "done";
 
 /// Advances the shared turn counter with saturation, returning the 1-based
 /// index of the turn just started.
@@ -26,7 +26,7 @@ pub(crate) const GENERIC_COMPLETION: &str = "done";
 /// than wrapping through `fetch_add`. A wrapped counter would reuse a turn index
 /// and desynchronize debug capture; saturation makes that unrepresentable. The
 /// closure never returns `None`, so the update never fails.
-pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
+pub(super) fn advance_turn(turns: &AtomicU32) -> u32 {
     turns
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_add(1))
@@ -44,7 +44,7 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
 /// as a dot-separated path; `taskid` is the id of the nearest enclosing
 /// task (the main walk is task `0`; a `call` child reports its caller's
 /// task), the handle a chain passes to `tasks.*` to speak about itself.
-pub(crate) fn sys_json(
+pub(super) fn sys_json(
     when: &str,
     id: &str,
     task_id: &str,
@@ -65,10 +65,10 @@ pub(crate) fn sys_json(
 /// What a served completion reports once the turn has advanced and the
 /// round-level events have fired: the pieces the chat arm's answer arms
 /// carry alongside the outcome. The nested-inference arm ignores it.
-pub(crate) struct Served {
-    pub(crate) finish_reason: Option<String>,
-    pub(crate) model: String,
-    pub(crate) metrics: Option<CallMetrics>,
+pub(super) struct Served {
+    pub(super) finish_reason: Option<String>,
+    pub(super) model: String,
+    pub(super) metrics: Option<CallMetrics>,
 }
 
 /// Reports one served completion's round-level events and returns its
@@ -85,7 +85,7 @@ pub(crate) struct Served {
 /// no content report. The thinking and the reply carry `round`, the id
 /// the round's `Chat` effect held, and name the model the completion
 /// names.
-pub(crate) fn report_model_turn(
+pub(super) fn report_model_turn(
     emitter: &Emitter,
     section: &str,
     turn: u32,

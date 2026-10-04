@@ -16,29 +16,29 @@ pub(crate) struct State {
 
 /// One alignment head in `whisper_context_params`.
 #[repr(C)]
-pub(crate) struct Ahead {
-    pub(crate) n_text_layer: c_int,
-    pub(crate) n_head: c_int,
+struct Ahead {
+    n_text_layer: c_int,
+    n_head: c_int,
 }
 
 /// Alignment-head slice in `whisper_context_params`.
 #[repr(C)]
-pub(crate) struct Aheads {
-    pub(crate) n_heads: usize,
-    pub(crate) heads: *const Ahead,
+struct Aheads {
+    n_heads: usize,
+    heads: *const Ahead,
 }
 
 /// Parameters passed by value to `whisper_init_from_file_with_params`.
 #[repr(C)]
 pub(crate) struct ContextParams {
-    pub(crate) use_gpu: bool,
-    pub(crate) flash_attn: bool,
-    pub(crate) gpu_device: c_int,
-    pub(crate) dtw_token_timestamps: bool,
-    pub(crate) dtw_aheads_preset: c_int,
-    pub(crate) dtw_n_top: c_int,
-    pub(crate) dtw_aheads: Aheads,
-    pub(crate) dtw_mem_size: usize,
+    use_gpu: bool,
+    flash_attn: bool,
+    gpu_device: c_int,
+    dtw_token_timestamps: bool,
+    dtw_aheads_preset: c_int,
+    dtw_n_top: c_int,
+    dtw_aheads: Aheads,
+    dtw_mem_size: usize,
 }
 
 /// Greedy-decoder members embedded in `whisper_full_params`.
@@ -49,20 +49,20 @@ pub(crate) struct GreedyParams {
 
 /// Beam-search members embedded in `whisper_full_params`.
 #[repr(C)]
-pub(crate) struct BeamSearchParams {
-    pub(crate) beam_size: c_int,
-    pub(crate) patience: f32,
+struct BeamSearchParams {
+    beam_size: c_int,
+    patience: f32,
 }
 
 /// Whisper's built-in voice-activity detector settings.
 #[repr(C)]
-pub(crate) struct VadParams {
-    pub(crate) threshold: f32,
-    pub(crate) min_speech_duration_ms: c_int,
-    pub(crate) min_silence_duration_ms: c_int,
-    pub(crate) max_speech_duration_s: f32,
-    pub(crate) speech_pad_ms: c_int,
-    pub(crate) samples_overlap: f32,
+struct VadParams {
+    threshold: f32,
+    min_speech_duration_ms: c_int,
+    min_silence_duration_ms: c_int,
+    max_speech_duration_s: f32,
+    speech_pad_ms: c_int,
+    samples_overlap: f32,
 }
 
 /// Parameters passed by value to `whisper_full_with_state`.
@@ -70,11 +70,11 @@ pub(crate) struct VadParams {
 /// Field order matches `struct whisper_full_params` in whisper.cpp b4938.
 #[repr(C)]
 pub(crate) struct FullParams {
-    pub(crate) strategy: c_int,
-    pub(crate) n_threads: c_int,
-    pub(crate) n_max_text_ctx: c_int,
-    pub(crate) offset_ms: c_int,
-    pub(crate) duration_ms: c_int,
+    strategy: c_int,
+    n_threads: c_int,
+    n_max_text_ctx: c_int,
+    offset_ms: c_int,
+    duration_ms: c_int,
     pub(crate) translate: bool,
     pub(crate) no_context: bool,
     pub(crate) no_timestamps: bool,
@@ -83,50 +83,50 @@ pub(crate) struct FullParams {
     pub(crate) print_progress: bool,
     pub(crate) print_realtime: bool,
     pub(crate) print_timestamps: bool,
-    pub(crate) token_timestamps: bool,
-    pub(crate) thold_pt: f32,
-    pub(crate) thold_ptsum: f32,
-    pub(crate) max_len: c_int,
-    pub(crate) split_on_word: bool,
-    pub(crate) max_tokens: c_int,
-    pub(crate) debug_mode: bool,
-    pub(crate) audio_ctx: c_int,
-    pub(crate) tdrz_enable: bool,
-    pub(crate) suppress_regex: *const c_char,
+    token_timestamps: bool,
+    thold_pt: f32,
+    thold_ptsum: f32,
+    max_len: c_int,
+    split_on_word: bool,
+    max_tokens: c_int,
+    debug_mode: bool,
+    audio_ctx: c_int,
+    tdrz_enable: bool,
+    suppress_regex: *const c_char,
     pub(crate) initial_prompt: *const c_char,
-    pub(crate) carry_initial_prompt: bool,
-    pub(crate) prompt_tokens: *const c_int,
-    pub(crate) prompt_n_tokens: c_int,
+    carry_initial_prompt: bool,
+    prompt_tokens: *const c_int,
+    prompt_n_tokens: c_int,
     pub(crate) language: *const c_char,
     pub(crate) detect_language: bool,
     pub(crate) suppress_blank: bool,
     pub(crate) suppress_nst: bool,
-    pub(crate) temperature: f32,
-    pub(crate) max_initial_ts: f32,
-    pub(crate) length_penalty: f32,
-    pub(crate) temperature_inc: f32,
-    pub(crate) entropy_thold: f32,
-    pub(crate) logprob_thold: f32,
-    pub(crate) no_speech_thold: f32,
+    temperature: f32,
+    max_initial_ts: f32,
+    length_penalty: f32,
+    temperature_inc: f32,
+    entropy_thold: f32,
+    logprob_thold: f32,
+    no_speech_thold: f32,
     pub(crate) greedy: GreedyParams,
-    pub(crate) beam_search: BeamSearchParams,
-    pub(crate) new_segment_callback: *mut c_void,
-    pub(crate) new_segment_callback_user_data: *mut c_void,
-    pub(crate) progress_callback: *mut c_void,
-    pub(crate) progress_callback_user_data: *mut c_void,
-    pub(crate) encoder_begin_callback: *mut c_void,
-    pub(crate) encoder_begin_callback_user_data: *mut c_void,
-    pub(crate) abort_callback: *mut c_void,
-    pub(crate) abort_callback_user_data: *mut c_void,
-    pub(crate) logits_filter_callback: *mut c_void,
-    pub(crate) logits_filter_callback_user_data: *mut c_void,
-    pub(crate) grammar_rules: *const *const c_void,
-    pub(crate) n_grammar_rules: usize,
-    pub(crate) i_start_rule: usize,
-    pub(crate) grammar_penalty: f32,
-    pub(crate) vad: bool,
-    pub(crate) vad_model_path: *const c_char,
-    pub(crate) vad_params: VadParams,
+    beam_search: BeamSearchParams,
+    new_segment_callback: *mut c_void,
+    new_segment_callback_user_data: *mut c_void,
+    progress_callback: *mut c_void,
+    progress_callback_user_data: *mut c_void,
+    encoder_begin_callback: *mut c_void,
+    encoder_begin_callback_user_data: *mut c_void,
+    abort_callback: *mut c_void,
+    abort_callback_user_data: *mut c_void,
+    logits_filter_callback: *mut c_void,
+    logits_filter_callback_user_data: *mut c_void,
+    grammar_rules: *const *const c_void,
+    n_grammar_rules: usize,
+    i_start_rule: usize,
+    grammar_penalty: f32,
+    vad: bool,
+    vad_model_path: *const c_char,
+    vad_params: VadParams,
 }
 
 pub(crate) type ContextDefaultParams = unsafe extern "C" fn() -> ContextParams;

@@ -35,7 +35,7 @@ struct Fragment {
 }
 
 /// What one file's token tree holds: each item's doc fragments, and the
-/// line of every `doc = include_str!`.
+/// line of every doc attribute whose value is an `include_str!`.
 #[derive(Default)]
 struct Found {
     docs: Vec<Vec<Fragment>>,
@@ -168,7 +168,7 @@ fn flush(docs: &mut Vec<Fragment>, found: &mut Found) {
 }
 
 /// Reads one attribute at `line`: `doc = "..."` adds its text to `docs`,
-/// `doc = include_str!(...)` is recorded, and `cfg_attr(predicate, ...)`
+/// a doc value that is an `include_str!(...)` is recorded, and `cfg_attr(predicate, ...)`
 /// reads each attribute it applies. Any other `doc` value, such as a
 /// `concat!` or a macro metavariable, holds no block the scan can see.
 fn read_meta(meta: &Meta, line: usize, sugared: bool, docs: &mut Vec<Fragment>, found: &mut Found) {

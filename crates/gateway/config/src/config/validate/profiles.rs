@@ -195,7 +195,7 @@ impl Config {
         Ok(())
     }
 
-    pub(crate) fn defined_profile_names(&self) -> String {
+    fn defined_profile_names(&self) -> String {
         if self.profiles.is_empty() {
             return "<none>".to_owned();
         }

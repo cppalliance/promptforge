@@ -39,7 +39,7 @@ pub(super) fn test_context(name: impl Into<String>) -> RunContext {
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
 /// boundaries; the typed error/limit/result surfaces and the environment must
 /// be too.
-pub(super) const fn _public_execution_types_are_send_sync_static() {
+const fn _public_execution_types_are_send_sync_static() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync_static::<Environment>();
@@ -57,14 +57,14 @@ pub(super) const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 /// The `writer` role declaration every model-facing fixture prompt includes:
 /// the frontmatter slot, filled by prepare's trivial fill from the
 /// context's current model.
-pub(super) const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
+const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
 
 /// The H1 block parking the declared role as the prompt-wide default.
-pub(super) const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
+const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
 
 /// Declares the `writer` role in the prompt's frontmatter, unless the
 /// frontmatter already declares roles.
-pub(super) fn declare_writer(source: &str) -> String {
+fn declare_writer(source: &str) -> String {
     let frontmatter_end = source.find("\n---\n").expect("frontmatter closes");
     let frontmatter = &source[..frontmatter_end];
     if frontmatter.contains("\nmodels:") {
@@ -120,7 +120,7 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
 /// Prompts with their own `models.default` call (or the `models.bind`
 /// call the removal tests expect to fail) keep their shape and get only
 /// the role declaration.
-pub(super) fn ensure_model_h1(md: &str) -> String {
+fn ensure_model_h1(md: &str) -> String {
     let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
         return declare_writer(&source);

@@ -16,7 +16,7 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunStat
 }
 
 /// The prompt in each gateway request, in arrival order.
-pub(super) fn request_prompts(gateway: &ScriptedChat) -> Vec<String> {
+fn request_prompts(gateway: &ScriptedChat) -> Vec<String> {
     gateway
         .requests()
         .iter()

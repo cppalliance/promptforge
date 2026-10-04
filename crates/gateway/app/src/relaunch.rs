@@ -17,7 +17,7 @@ const OWNER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// What a launch does about an existing gateway discovery file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Relaunch {
+enum Relaunch {
     /// A live gateway owns the file: hand off with its Settings URL.
     OpenSettings(String),
     /// Nothing live owns the file: boot normally.
@@ -58,7 +58,7 @@ pub enum GatewayStartupError {
 
 /// Maps a gateway discovery file resolution to the relaunch decision. Only a
 /// fully live file hands off; `Absent` and every stale reason boot.
-pub(crate) fn decide(resolution: &gateway_api_discovery::Resolution) -> Relaunch {
+fn decide(resolution: &gateway_api_discovery::Resolution) -> Relaunch {
     match resolution {
         gateway_api_discovery::Resolution::Attach(file) => {
             // The file records the real port of the loopback bind; URLs

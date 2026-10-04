@@ -50,24 +50,24 @@ fn is_valid_alias(alias: &str) -> bool {
 
 /// How one contract map's keys are checked beyond the alias grammar.
 #[derive(Clone, Copy)]
-pub(crate) struct ContractKeys {
+struct ContractKeys {
     /// The frontmatter key the map sits under (`tools`), for error
     /// messages.
-    pub(crate) map: &'static str,
+    map: &'static str,
     /// The key kind (`tool alias`), for error messages.
-    pub(crate) what: &'static str,
+    what: &'static str,
     /// A key that satisfies the grammar but is rejected because its
     /// posture is deferred (the open toolset's `open`).
-    pub(crate) deferred: Option<&'static str>,
+    deferred: Option<&'static str>,
     /// Whether each key installs as a section VM global of its own name,
     /// so a reserved name ([`promptforge_lua::RESERVED_NAMES`]) is refused.
-    pub(crate) installs_global: bool,
+    installs_global: bool,
 }
 
 /// Deserializes a contract map (`tools`, `models`, `args`): string keys
 /// validated against the alias grammar and `keys`, values deserialized as
 /// `T`, duplicates rejected.
-pub(crate) fn deserialize_contract_map<'de, D, T>(
+fn deserialize_contract_map<'de, D, T>(
     deserializer: D,
     keys: ContractKeys,
 ) -> Result<BTreeMap<String, T>, D::Error>

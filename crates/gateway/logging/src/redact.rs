@@ -186,7 +186,7 @@ pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> RedactedLine {
 /// Tests use this convenience path; production supplies its strict record
 /// capacity through [`redact_line_bounded`].
 #[cfg(test)]
-pub(crate) fn redact_line(text: &str) -> String {
+fn redact_line(text: &str) -> String {
     let capacity = text.len().saturating_mul(REDACTED.len());
     redact_line_bounded(text, capacity)
         .finish("", false)

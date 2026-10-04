@@ -39,75 +39,75 @@ use super::bindings::{ModelBindings, ToolBindings};
 #[non_exhaustive]
 pub struct RunContext {
     /// Run identity, stamped on every report and event.
-    pub(crate) name: String,
+    pub(super) name: String,
     /// The run's seed: Harness-drawn, the source of the untrusted-envelope
     /// nonce (and of every future in-run random choice).
-    pub(crate) seed: u64,
+    pub(super) seed: u64,
     /// The behavior flags the run records; empty until an Engine change
     /// gates itself behind one.
-    pub(crate) flags: Flags,
+    flags: Flags,
     /// When the run began, as the Harness stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
-    pub(crate) started_at: Timestamp,
+    pub(super) started_at: Timestamp,
     /// Where the root task's provenance sequence starts: 0 by default. When
     /// the Harness logged the prompt's parse events (stamped under task `0`
     /// from zero) ahead of the run, it passes their count, so the run's root
     /// task continues the sequence and `(task, seq)` is unique across the
     /// parse/run boundary.
-    pub(crate) provenance_start: u32,
+    pub(super) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
     /// Always 0 today - the sub-run adapter that increments it lands with
     /// the deferred prompt-pack.
-    pub(crate) depth: u32,
+    depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
     /// bodies already travel in the `Chat` effect and its answer, so the
     /// Harness's effect log has them, and the events serve a Harness that
     /// wants the pair in the event stream too.
-    pub(crate) report_debug: DebugMode,
+    pub(super) report_debug: DebugMode,
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
     /// flag reaches them all; the Harness hands the same flag to the
     /// capabilities it activates.
-    pub(crate) cancel: CancelHandle,
+    pub(super) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     /// The Host-state snapshot the `ui()` global serves, taken by the Host
     /// at run start; its presence also turns on the raw-model-id
     /// `models.get` fallback.
-    pub(crate) ui: Option<serde_json::Value>,
+    pub(super) ui: Option<serde_json::Value>,
     /// The run's whole filesystem: real directories and the declared
     /// store. The default is a fresh memory store at `/`; the Harness
     /// mounts the run's real directories and declared store and sets the
     /// handle with [`vfs`](RunContext::vfs).
-    pub(crate) vfs: VfsRef,
+    pub(super) vfs: VfsRef,
     /// The run's current model: the Host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
     /// which binds every declared role to it. Grows into a catalog or
     /// policy in the deferred multi-model future - a field change, never
     /// a signature change.
-    pub(crate) model: Option<ModelDescriptor>,
+    pub(super) model: Option<ModelDescriptor>,
     /// The run's model satisfaction, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function: which concrete model each declared role is bound to.
-    pub(crate) model_bindings: ModelBindings,
+    pub(super) model_bindings: ModelBindings,
     /// The run's assembled tool catalog: the activated capabilities'
     /// contributed tools in declaration order, with tool
     /// prefix-containment enforced at assembly. Written by
     /// [`Environment::prepare`](super::Environment::prepare); the
     /// slot-filling step fills the prompt's tool slots against it.
-    pub(crate) tools: ToolCatalog,
+    pub(super) tools: ToolCatalog,
     /// The run's tool bindings, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s slot
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
-    pub(crate) tool_bindings: ToolBindings,
+    pub(super) tool_bindings: ToolBindings,
     /// The run's capability preludes, in install order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before the
     /// shared library replays. Empty on a caller-built context that was
     /// never prepared.
-    pub(crate) preludes: Vec<Prelude>,
+    pub(super) preludes: Vec<Prelude>,
 }
 
 impl RunContext {

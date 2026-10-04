@@ -59,7 +59,7 @@ pub(crate) enum EntryKind {
 
 /// One entry in a directory listing.
 #[derive(Debug, Serialize)]
-pub(crate) struct TreeEntry {
+struct TreeEntry {
     /// The entry's file name (lossy for non-Unicode names).
     name: String,
     /// The entry's full path, ready to pass back to the API.
@@ -107,7 +107,7 @@ pub(crate) struct GrantEntry {
     pub(crate) path: PathBuf,
     /// Whether the root is on disk right now. A vanished root stays
     /// granted and listed so the user can see it and revoke it.
-    pub(crate) exists: bool,
+    exists: bool,
 }
 
 /// The workspace as a whole: its file, if any, and what it holds; built
@@ -148,12 +148,12 @@ fn lossy_path<S: serde::Serializer>(
 /// which sends a new grant's row to the open file, and the save-as row
 /// builder, which writes every grant into a new file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GrantMeta {
+struct GrantMeta {
     /// Stable tree order: the file's `position` when the grant was loaded
     /// from one, one past the current maximum when granted in session.
-    pub(crate) position: u32,
+    position: u32,
     /// RFC 3339 grant time.
-    pub(crate) added_at: String,
+    added_at: String,
 }
 
 /// The workspace: the granted roots and the optional backing file.
@@ -199,7 +199,7 @@ pub struct Workspace {
     /// The grant-set generation behind [`Workspace::subscribe_roots`].
     roots_generation: watch::Sender<u64>,
     #[cfg(feature = "test-fixtures")]
-    pub(crate) stall: Arc<stall::WriteStall>,
+    stall: Arc<stall::WriteStall>,
 }
 
 impl Default for Workspace {
@@ -298,7 +298,7 @@ impl Workspace {
     /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
     /// a `..` or stream name, and [`WorkspaceError::ResolveGrant`] when
     /// canonicalization fails for a reason other than absence.
-    pub(crate) fn revoke_key(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    fn revoke_key(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
         let stored = self
             .grants
@@ -325,7 +325,7 @@ impl Workspace {
     /// # Errors
     /// Returns [`WorkspaceError::NotGranted`] when `key` is not a granted
     /// root.
-    pub(crate) fn remove_root(&self, key: &Path) -> Result<(), WorkspaceError> {
+    fn remove_root(&self, key: &Path) -> Result<(), WorkspaceError> {
         let removed = self
             .grants
             .write()

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 /// Numbered segments retained beside `gateway.log`: `.1` is newest and
 /// `.5` is oldest. Admitting a sixth retained segment prunes `.5`.
-pub(crate) const RETAINED_SEGMENTS: usize = 5;
+const RETAINED_SEGMENTS: usize = 5;
 
 /// Marks a segment boundary or a retained tail whose earlier bytes were
 /// discarded to restore the fixed-size invariant.

@@ -64,7 +64,7 @@ pub enum UserStateError {
 
 impl UserStateError {
     /// The one HTTP status this failure answers with.
-    pub(crate) fn status(&self) -> StatusCode {
+    fn status(&self) -> StatusCode {
         match self {
             Self::Key(_) | Self::NotJson { .. } => StatusCode::BAD_REQUEST,
             Self::TooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
@@ -73,7 +73,7 @@ impl UserStateError {
     }
 
     /// The machine-readable code of the JSON error envelope.
-    pub(crate) fn code(&self) -> &'static str {
+    fn code(&self) -> &'static str {
         match self {
             Self::Key(_) => "user_state_key",
             Self::TooLarge { .. } => "user_state_too_large",

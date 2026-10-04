@@ -155,7 +155,7 @@ impl SpeculativeConfig {
     }
 
     /// Checks the companion source rules for the model named `model_name`.
-    pub(crate) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
+    pub(super) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
         validate_artifact_source(
             &format!("local_model {model_name}"),
             "speculative.source",
@@ -197,7 +197,7 @@ impl MultimodalProjectorConfig {
     }
 
     /// Checks the companion source rules for the model named `model_name`.
-    pub(crate) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
+    pub(super) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
         validate_artifact_source(
             &format!("local_model {model_name}"),
             "multimodal_projector.source",
@@ -231,7 +231,7 @@ impl LocalModelConfig {
 /// `speculative.source`). A local filesystem source is operator-controlled
 /// and may be unpinned; a remote artifact must be pinned by digest
 /// (ART-002).
-pub(crate) fn validate_artifact_source(
+pub(super) fn validate_artifact_source(
     label: &str,
     field: &str,
     source: &str,

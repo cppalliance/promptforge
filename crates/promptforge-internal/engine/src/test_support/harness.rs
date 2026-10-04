@@ -49,14 +49,14 @@ pub trait ChatClient: Send + Sync {
 #[non_exhaustive]
 pub struct RunHarness {
     /// The progress observer every drained event is replayed onto.
-    pub(crate) observer: Arc<dyn Observer>,
+    observer: Arc<dyn Observer>,
     /// The opt-in raw request/response capture.
-    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
+    debug: Option<Arc<dyn DebugCapture>>,
     /// The chat client `Chat` effects are performed with; `None` answers
     /// every round with the disabled-gateway failure.
-    pub(crate) client: Option<Arc<dyn ChatClient>>,
+    client: Option<Arc<dyn ChatClient>>,
     /// The implementations `ToolCall` effects resolve their ids in.
-    pub(crate) tools: TestToolTable,
+    tools: TestToolTable,
 }
 
 impl RunHarness {
@@ -167,7 +167,7 @@ impl RunHarness {
 
     /// The sink, boxed for the driver.
     #[cfg(test)]
-    pub(crate) fn boxed_sink(&self) -> EventSink<'static> {
+    pub(super) fn boxed_sink(&self) -> EventSink<'static> {
         Box::new(self.sink())
     }
 }

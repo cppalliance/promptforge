@@ -72,7 +72,7 @@ fn accept_infer_completion(
 /// # Errors
 /// Returns the completion's failure, or [`Error::Lua`] when the round
 /// produced tool calls (none were advertised) or an unrecognized outcome.
-pub(crate) fn accept_infer(
+pub(super) fn accept_infer(
     result: std::result::Result<Box<Completion>, CompletionError>,
     round: RoundId,
     emitter: &Emitter,

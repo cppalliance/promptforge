@@ -24,10 +24,10 @@ use crate::registry::RouteInfo;
 const CHAT_TEMPLATES: RouteInfo = RouteInfo::walled("/admin/chat-templates", &[Method::GET]);
 
 /// The chat-template catalog route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[CHAT_TEMPLATES];
+pub(super) const ROUTES: &[RouteInfo] = &[CHAT_TEMPLATES];
 
 /// The chat-template catalog route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(CHAT_TEMPLATES.path, get(admin_chat_templates))
 }
 
@@ -60,7 +60,7 @@ struct CatalogReply {
 }
 
 /// Serves bundled families, exact model mappings, and pending-model decisions.
-pub(crate) async fn admin_chat_templates(
+async fn admin_chat_templates(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {

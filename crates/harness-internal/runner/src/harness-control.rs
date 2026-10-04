@@ -25,7 +25,7 @@ pub struct RunControl {
 
 impl RunControl {
     /// The control over a run whose Engine cancel flag is `cancel`.
-    pub(crate) fn new(cancel: CancelHandle) -> Self {
+    pub(super) fn new(cancel: CancelHandle) -> Self {
         Self {
             cancel,
             stop: Arc::default(),
@@ -54,12 +54,12 @@ impl RunControl {
     }
 
     /// The run's Engine cancel flag.
-    pub(crate) fn cancel_handle(&self) -> &CancelHandle {
+    pub(super) fn cancel_handle(&self) -> &CancelHandle {
         &self.cancel
     }
 
     /// The run's stop signal.
-    pub(crate) fn stop_signal(&self) -> &Arc<StopSignal> {
+    pub(super) fn stop_signal(&self) -> &Arc<StopSignal> {
         &self.stop
     }
 }

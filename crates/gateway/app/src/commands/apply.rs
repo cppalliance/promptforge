@@ -41,11 +41,11 @@ const RESTART_SECTIONS: [&str; 6] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShadowCapture {
     /// The real file the shadow stands in for, in canonical form.
-    pub(crate) real_path: PathBuf,
+    real_path: PathBuf,
     /// The real file rendered for the wire, relative to the config root.
-    pub(crate) relative_name: String,
+    relative_name: String,
     /// The shadow's contents at capture time.
-    pub(crate) contents: String,
+    contents: String,
 }
 
 /// What one reloading apply puts onto the command queue: the parsed
@@ -57,10 +57,10 @@ pub(crate) struct ApplySnapshot {
     /// speech-to-text subsets are empty): the apply swaps the remote
     /// catalog and never the local runtime. Boxed so the `Command` enum
     /// stays the size of its other variants.
-    pub(crate) config: Box<Config>,
+    pub(super) config: Box<Config>,
     /// Every shadow the census found, with its contents at capture time:
     /// the config shadow and any env shadow.
-    pub(crate) files: Vec<ShadowCapture>,
+    pub(super) files: Vec<ShadowCapture>,
     /// Whether an env or boot-read setting changed.
     pub(crate) restart_required: bool,
 }
@@ -182,7 +182,7 @@ pub(crate) fn promote_captures(captures: &[ShadowCapture]) -> Result<Vec<String>
 ///
 /// Any failure under a fired token reports as the cancellation it is, so
 /// the route's reply can promise the shadows are still staged.
-pub(crate) async fn apply_config(
+pub(super) async fn apply_config(
     state: &AppState,
     snapshot: ApplySnapshot,
     token: CancellationToken,

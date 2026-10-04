@@ -33,8 +33,8 @@ use crate::client::ProgressStream;
 use crate::heartbeat::GatewayHealth;
 
 #[cfg(test)]
-pub(crate) use presenter::{MIN_VISIBLE, SHOW_DELAY};
-pub(crate) use presenter::{Policy, Presenter};
+use presenter::{MIN_VISIBLE, SHOW_DELAY};
+use presenter::{Policy, Presenter};
 
 /// How long a resubscribe waits when the stream ended while the gateway
 /// still reads reachable, so an endpoint that accepts and immediately
@@ -44,16 +44,16 @@ const RESUBSCRIBE_DELAY: Duration = Duration::from_secs(5);
 
 /// The subscriber's durations, injectable so tests can shorten them.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Timing {
+struct Timing {
     /// Wait before resubscribing to a stream that ended while reachable.
-    pub(crate) resubscribe_delay: Duration,
+    resubscribe_delay: Duration,
     /// The anti-flicker policy the presenter runs.
-    pub(crate) policy: Policy,
+    policy: Policy,
 }
 
 impl Timing {
     /// The production timing.
-    pub(crate) const DEFAULT: Self = Self {
+    const DEFAULT: Self = Self {
         resubscribe_delay: RESUBSCRIBE_DELAY,
         policy: Policy::DEFAULT,
     };
@@ -91,7 +91,7 @@ pub(crate) fn spawn(gateway: GatewayBinding, push: Push, health: GatewayHealth) 
 }
 
 /// [`spawn`] with every duration injected, so tests can shorten them.
-pub(crate) fn spawn_with_timing(
+fn spawn_with_timing(
     gateway: GatewayBinding,
     push: Push,
     health: GatewayHealth,

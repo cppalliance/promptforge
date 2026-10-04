@@ -63,7 +63,7 @@ async fn live_cache_dir(state: &AppState) -> Option<String> {
 /// Reads `<file>.meta.json` sidecars only, so listing never re-hashes a blob
 /// (Amendment C); blobs without sidecars are not cache entries and do not
 /// appear.
-pub(crate) async fn list_cache(
+async fn list_cache(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<Vec<CacheEntry>>, GatewayError> {
@@ -76,7 +76,7 @@ pub(crate) async fn list_cache(
 
 /// The `POST /v1/cache` request body.
 #[derive(Debug, Deserialize)]
-pub(crate) struct CacheRequest {
+struct CacheRequest {
     /// The http(s) URL to download.
     source: String,
     /// Optional SHA-256 pin, verified against the downloaded bytes.
@@ -108,7 +108,7 @@ fn validate_source(source: &str) -> Result<String, GatewayError> {
 /// progress events (`total` is null when the server sent no Content-Length),
 /// terminated by `{"status": "ready", "path"}` or, on failure,
 /// `{"status": "error", "message"}`.
-pub(crate) async fn post_cache(
+async fn post_cache(
     State(state): State<AppState>,
     _caller: AuthedCaller,
     WireJson(request): WireJson<CacheRequest>,
@@ -165,7 +165,7 @@ pub(crate) async fn post_cache(
 /// Answers 200 with `{"status": "deleted", "sha256"}` when an entry was
 /// removed, 404 `cache_entry_not_found` when no sidecar records the digest,
 /// and 400 when the path parameter is not a 64-character hex digest.
-pub(crate) async fn delete_cache(
+async fn delete_cache(
     State(state): State<AppState>,
     _caller: AuthedCaller,
     Path(sha256): Path<String>,

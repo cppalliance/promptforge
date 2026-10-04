@@ -40,4 +40,4 @@ pub mod model;
 mod normalize;
 
 /// Crate-internal result alias over the failure a model round reports.
-pub(crate) type Result<T> = std::result::Result<T, model::CompletionError>;
+type Result<T> = std::result::Result<T, model::CompletionError>;

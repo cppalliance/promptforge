@@ -22,10 +22,10 @@ use crate::registry::RouteInfo;
 const SHUTDOWN: RouteInfo = RouteInfo::walled("/shutdown", &[Method::POST]);
 
 /// The shutdown route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[SHUTDOWN];
+pub(super) const ROUTES: &[RouteInfo] = &[SHUTDOWN];
 
 /// The shutdown route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(SHUTDOWN.path, post(admin_shutdown))
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn routes() -> Router<AppState> {
 ///
 /// Like every bearer route it inherits the configured key, including the
 /// deliberately credential-free empty-key configuration.
-pub(crate) async fn admin_shutdown(
+async fn admin_shutdown(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<StatusCode, GatewayError> {

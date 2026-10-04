@@ -127,7 +127,7 @@ impl ToolIdError {
 
     /// The crate-internal human-readable reason, reused when a wire-name
     /// rejection is re-reported as a [`crate::tools::ToolCatalogError`].
-    pub(crate) fn reason(&self) -> &'static str {
+    pub(super) fn reason(&self) -> &'static str {
         self.reason
     }
 
@@ -158,7 +158,7 @@ impl ToolIdError {
 /// control character. Tool identity itself is the 3-segment global grammar
 /// ([`ToolId`]); this rule set remains for tool wire names, which are
 /// single-segment transport tokens.
-pub(crate) fn validate_identifier(field: &'static str, value: &str) -> Result<(), ToolIdError> {
+pub(super) fn validate_identifier(field: &'static str, value: &str) -> Result<(), ToolIdError> {
     if value.is_empty() {
         return Err(ToolIdError {
             field,

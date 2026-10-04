@@ -14,22 +14,22 @@
 //! only redirects.
 
 #[cfg(feature = "local")]
-pub(crate) mod chat_templates;
+mod chat_templates;
 pub(crate) mod cloud_models;
-pub(crate) mod config;
-pub(crate) mod config_apply;
-pub(crate) mod config_pending;
-pub(crate) mod env_file;
+mod config;
+mod config_apply;
+mod config_pending;
+mod env_file;
 // The browser handoff mints the config SPA's cookie, so the module
 // exists only where that surface does; its build-independent auth
 // primitives live in `crate::auth::primitives`.
 #[cfg(feature = "config-ui")]
-pub(crate) mod handoff;
+mod handoff;
 pub(crate) mod hf;
 #[cfg(feature = "local")]
-pub(crate) mod model_info;
+mod model_info;
 #[cfg(feature = "local")]
-pub(crate) mod orphans;
+mod orphans;
 pub(crate) mod reveal;
 pub(crate) mod shutdown;
 pub(crate) mod system;

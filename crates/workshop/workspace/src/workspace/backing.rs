@@ -25,7 +25,7 @@ use super::{GrantEntry, GrantMeta, Workspace, WorkspaceSummary};
 mod ui_state_memory;
 
 /// The display name of a workspace that has no file yet.
-pub(crate) const EPHEMERAL_NAME: &str = "Untitled";
+pub(super) const EPHEMERAL_NAME: &str = "Untitled";
 
 /// The open file behind a file-backed workspace.
 #[derive(Debug)]
@@ -330,7 +330,7 @@ impl Workspace {
     /// the file holds canonical paths, and a root that has vanished from
     /// disk still loads (it lists as `exists: false`) so the user can see
     /// it and revoke it.
-    pub(crate) fn replace_all(&self, grants: Vec<GrantRow>) {
+    fn replace_all(&self, grants: Vec<GrantRow>) {
         let mut map = self.grants.write().unwrap_or_else(PoisonError::into_inner);
         map.clear();
         for row in grants {

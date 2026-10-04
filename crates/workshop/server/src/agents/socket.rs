@@ -44,7 +44,7 @@ use crate::websocket::{cross_site_refusal, send_error, send_frame};
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
 /// foreign `Origin` is refused with 403, as the workshop socket's
 /// upgrade is.
-pub(crate) async fn upgrade(
+pub(super) async fn upgrade(
     State(state): State<SessionsState>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
@@ -57,16 +57,16 @@ pub(crate) async fn upgrade(
 
 /// The attachment state of one socket: the conversation it serves and
 /// the per-client cursors deriving durable-frame indices.
-pub(crate) struct Attached {
+pub(super) struct Attached {
     /// The conversation this socket serves.
-    pub(crate) conversation: Conversation,
+    pub(super) conversation: Conversation,
     /// The next transcript index to consider; everything below it has
     /// been read (framed or skipped) for this client already.
-    pub(crate) cursor: u64,
+    pub(super) cursor: u64,
     /// The wire index the next framed entry takes: the count of
     /// transcript entries with a wire shape sent so far, so the durable
     /// frames number the transcript the client renders, gap-free.
-    pub(crate) framed: u64,
+    pub(super) framed: u64,
 }
 
 /// Runs one agent-session socket until it closes or fails.

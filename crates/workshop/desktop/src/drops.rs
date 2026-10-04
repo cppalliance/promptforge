@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// (`\\server\share`). Separators stay native - the workspace server runs
 /// on this same machine and canonicalizes whatever it receives.
 #[must_use]
-pub(crate) fn normalize_dropped_path(path: &Path) -> String {
+fn normalize_dropped_path(path: &Path) -> String {
     let text = path.to_string_lossy().into_owned();
     if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{unc}");

@@ -27,7 +27,7 @@ use crate::registry::RouteInfo;
 
 /// The `GET /admin/env` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct EnvReply {
+struct EnvReply {
     /// The config-sibling `.env` file the gateway boots with.
     boot: Option<EnvSection>,
     /// Always `null`: profiles have no env file of their own.
@@ -40,7 +40,7 @@ pub(crate) struct EnvReply {
 /// One side of the `GET /admin/env` reply: an env file's path and its
 /// parsed variables.
 #[derive(Debug, Serialize)]
-pub(crate) struct EnvSection {
+struct EnvSection {
     path: String,
     vars: serde_json::Map<String, serde_json::Value>,
 }
@@ -48,10 +48,10 @@ pub(crate) struct EnvSection {
 const ENV: RouteInfo = RouteInfo::walled("/admin/env", &[Method::GET, Method::PUT]);
 
 /// The `/admin/env` routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[ENV];
+pub(super) const ROUTES: &[RouteInfo] = &[ENV];
 
 /// The `/admin/env` routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(ENV.path, get(admin_get_env).put(admin_put_env))
 }
 
@@ -65,7 +65,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// interpolates every reference away and redacts secrets - the UI's
 /// "used by" annotations are computable only server-side. A missing file
 /// is an empty `vars` map.
-pub(crate) async fn admin_get_env(
+async fn admin_get_env(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<EnvReply>, GatewayError> {
@@ -89,7 +89,7 @@ pub(crate) async fn admin_get_env(
 
 /// The `PUT /admin/env` query: which env file's shadow the body targets.
 #[derive(serde::Deserialize)]
-pub(crate) struct EnvPutQuery {
+struct EnvPutQuery {
     /// `"global"` when present; absent targets the same global file.
     scope: Option<String>,
 }
@@ -102,7 +102,7 @@ pub(crate) struct EnvPutQuery {
 /// gateway boots with, and a value no quoting can represent (an embedded
 /// newline, or a single quote mixed with `$`, `"`, or `\`) is refused.
 /// The real `.env` file is never touched.
-pub(crate) async fn admin_put_env(
+async fn admin_put_env(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WireQuery(scope): WireQuery<EnvPutQuery>,

@@ -20,13 +20,13 @@ pub use companion::{
     SpeculativeConfig,
 };
 pub(crate) use imp::reject_profiles_directory;
-pub(crate) use interpolate::interpolate_value;
+use interpolate::interpolate_value;
 // The canonical home of the model-metadata types is `gateway-api-types`;
 // these re-exports keep the old paths compiling unchanged.
 pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
 pub use secret::Secret;
 use secret::de_secret;
-pub(crate) use secret::ser_redacted;
+use secret::ser_redacted;
 use stt::RawSttPipelineConfig;
 pub use stt::{
     RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,
@@ -120,7 +120,7 @@ pub struct Config {
 /// with `Secret` fields redacted.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawConfig {
+struct RawConfig {
     #[serde(rename = "config-version")]
     config_version: u32,
     server: ServerConfig,

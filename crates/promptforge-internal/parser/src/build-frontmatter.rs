@@ -58,23 +58,23 @@ pub struct Frontmatter {
     pub(crate) max_tool_iterations: MaxToolIterations,
     /// A file the prompt expects to find in the store when it starts.
     #[serde(default)]
-    pub(crate) input: Option<FileDecl>,
+    input: Option<FileDecl>,
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
-    pub(crate) output: Option<FileDecl>,
+    output: Option<FileDecl>,
     /// Capabilities the prompt activates at prepare, in declaration order.
     #[serde(default)]
-    pub(crate) capabilities: Vec<CapabilityDecl>,
+    capabilities: Vec<CapabilityDecl>,
     /// Declared tool slots: alias to exact path.
     #[serde(default)]
-    pub(crate) tools: ToolSlots,
+    tools: ToolSlots,
     /// The typed args declaration; an absent `args:` key yields the default
     /// declaration (one optional string field named `prose`).
     #[serde(default)]
-    pub(crate) args: ArgsDecl,
+    args: ArgsDecl,
     /// Declared model roles: label to keywords, minimum, and description.
     #[serde(default)]
-    pub(crate) models: ModelRoles,
+    models: ModelRoles,
 }
 
 /// The largest explicit `max_tool_iterations` a prompt may declare.

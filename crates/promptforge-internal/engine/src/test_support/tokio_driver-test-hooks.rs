@@ -98,7 +98,7 @@ impl TokioDriver<'_> {
     /// The scheduler behind the run, for the suites that inspect its
     /// arena.
     #[cfg(test)]
-    pub(crate) fn scheduler_for_test(&mut self) -> &mut Scheduler {
+    fn scheduler_for_test(&mut self) -> &mut Scheduler {
         self.run.scheduler_for_test()
     }
 

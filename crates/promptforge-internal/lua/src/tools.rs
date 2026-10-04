@@ -72,11 +72,7 @@ fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, To
 /// # Errors
 /// Returns [`Error::Lua`] if the Lua table or callbacks cannot be created or
 /// installed.
-pub(crate) fn install_lua_tool_calls(
-    lua: &Lua,
-    counts: &ToolCallCounts,
-    declared: &[String],
-) -> Result<()> {
+fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String]) -> Result<()> {
     let globals = lua.globals();
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
 

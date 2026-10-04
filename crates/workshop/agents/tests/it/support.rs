@@ -23,7 +23,7 @@ use promptforge::model::{
 use workshop_agents::{Conversation, TokioTimer};
 
 /// Lists no model and refuses every round as `Unavailable`.
-pub(crate) struct Offline;
+struct Offline;
 
 impl InferenceBroker for Offline {
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {

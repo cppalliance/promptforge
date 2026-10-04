@@ -37,7 +37,7 @@ pub(super) fn routes() -> axum::Router<Workspace> {
 
 /// The JSON body of `POST /workspace/file/{open,save-as,duplicate}`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct FilePathRequest {
+struct FilePathRequest {
     /// The workspace file to open, or the path to create the new file at.
     path: String,
 }
@@ -45,7 +45,7 @@ pub(crate) struct FilePathRequest {
 /// The JSON body of a `PUT /workspace/file/window-state` or
 /// `PUT /workspace/file/state/{key}` answer.
 #[derive(Debug, Serialize)]
-pub(crate) struct SavedResponse {
+pub(super) struct SavedResponse {
     /// Whether the value was written; `false` when the workspace is
     /// ephemeral and has nowhere to keep it.
     pub(super) saved: bool,
@@ -53,14 +53,14 @@ pub(crate) struct SavedResponse {
 
 /// Reports the workspace as it stands: its file, name, grants, and
 /// saved window geometry.
-pub(crate) async fn current_file(State(workspace): State<Workspace>) -> Response {
+async fn current_file(State(workspace): State<Workspace>) -> Response {
     respond(Ok::<_, WorkspaceError>(workspace.current().await))
 }
 
 /// Opens a workspace file, replacing every grant with its contents, and
 /// answers with the workspace as opened. A refused or missing file
 /// changes nothing.
-pub(crate) async fn open_file(
+async fn open_file(
     State(workspace): State<Workspace>,
     Json(body): Json<FilePathRequest>,
 ) -> Response {
@@ -70,7 +70,7 @@ pub(crate) async fn open_file(
 
 /// Creates a new workspace file holding the current grants and switches
 /// to it; the previous file, if any, stays where it is.
-pub(crate) async fn save_as_file(
+async fn save_as_file(
     State(workspace): State<Workspace>,
     Json(body): Json<FilePathRequest>,
 ) -> Response {
@@ -80,7 +80,7 @@ pub(crate) async fn save_as_file(
 
 /// Copies the current workspace file and its siblings to a new path and
 /// switches to the copy.
-pub(crate) async fn duplicate_file(
+async fn duplicate_file(
     State(workspace): State<Workspace>,
     Json(body): Json<FilePathRequest>,
 ) -> Response {
@@ -91,7 +91,7 @@ pub(crate) async fn duplicate_file(
 /// Saves the desktop app's window geometry into the open workspace file. An
 /// ephemeral workspace answers success with `saved: false` and writes
 /// nothing.
-pub(crate) async fn put_window_state(
+async fn put_window_state(
     State(workspace): State<Workspace>,
     Json(state): Json<WindowState>,
 ) -> Response {

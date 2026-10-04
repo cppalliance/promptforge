@@ -227,7 +227,7 @@ pub fn resolve_model_binding(
 }
 
 /// Clones a frozen binding and applies any author model-description override.
-pub(crate) fn binding_for_scope(
+fn binding_for_scope(
     bindings: &ToolSet,
     runtime: &ToolRuntime,
     alias: &str,

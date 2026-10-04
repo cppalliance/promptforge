@@ -102,10 +102,7 @@ impl FetchClient {
     ///
     /// [`Lookup`]: crate::resolver::Lookup
     #[cfg(test)]
-    pub(crate) fn with_lookup<L: crate::resolver::Lookup>(
-        config: FetchConfig,
-        lookup: L,
-    ) -> FetchClient {
+    fn with_lookup<L: crate::resolver::Lookup>(config: FetchConfig, lookup: L) -> FetchClient {
         let config = Arc::new(config);
         let resolver = Arc::new(GuardedResolver::new(lookup, Arc::clone(&config)));
         let http = reqwest::Client::builder()

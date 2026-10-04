@@ -164,9 +164,9 @@ pub enum ToolSchemaError {
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
-    pub(crate) id: String,
+    pub(super) id: String,
     /// The name of the tool to invoke.
-    pub(crate) name: String,
+    pub(super) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
     /// crate-private: the Harness inspects arguments through
     /// [`ToolCall::arguments`].
@@ -275,10 +275,10 @@ pub enum CompletionResult {
 #[non_exhaustive]
 pub struct RawExchange {
     /// The request as it left for the backend.
-    pub(crate) request: Value,
+    request: Value,
     /// The response as the backend returned it, reassembled into the
     /// buffered chat-completion shape when it streamed.
-    pub(crate) response: Value,
+    response: Value,
 }
 
 impl RawExchange {
@@ -317,20 +317,20 @@ pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
     pub(crate) result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub(crate) finish_reason: Option<String>,
+    finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
-    pub(crate) reasoning_content: Option<String>,
+    reasoning_content: Option<String>,
     /// The model that served the call, empty when the body named none.
-    pub(crate) model: String,
+    model: String,
     /// Everything the call measured, when anything reported: the backend's
     /// `usage` and timing extensions, and the client's own clock.
-    pub(crate) metrics: Option<CallMetrics>,
+    metrics: Option<CallMetrics>,
     /// One line per response metadata section that was present but
     /// malformed and degraded to `None`; empty for a well-formed body. The
     /// Engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
     /// The request and response the broker attached for debug capture.
-    pub(crate) raw: Option<RawExchange>,
+    raw: Option<RawExchange>,
 }
 
 impl Completion {

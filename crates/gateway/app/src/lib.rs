@@ -98,22 +98,22 @@ mod tray;
 mod web_search;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
-// these re-exports keep every `crate::wire::*` and `crate::upstream::*`
+// these crate-root imports keep every `crate::wire::*` and `crate::upstream::*`
 // path resolving unchanged.
-pub(crate) use gateway_protocol::{upstream, wire};
-// The dominion admission queues live in the routing crate; this re-export
-// keeps every `crate::queue::*` path resolving unchanged.
-pub(crate) use gateway_routing::queue;
+use gateway_protocol::{upstream, wire};
+// The dominion admission queues live in the routing crate; this crate-root
+// import keeps every `crate::queue::*` path resolving unchanged.
+use gateway_routing::queue;
 // Local inference lives in its own crate behind the `local` feature; this
-// re-export keeps every `crate::local::*` path resolving unchanged.
+// crate-root import keeps every `crate::local::*` path resolving unchanged.
 #[cfg(feature = "local")]
-pub(crate) use gateway_local as local;
+use gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 #[cfg(not(feature = "local"))]
-pub(crate) use crate::boot_load::LOCAL_MODELS_UNSUPPORTED;
+use crate::boot_load::LOCAL_MODELS_UNSUPPORTED;
 #[cfg(not(feature = "stt"))]
-pub(crate) use crate::boot_load::STT_RUNTIME_UNAVAILABLE;
+use crate::boot_load::STT_RUNTIME_UNAVAILABLE;
 pub use crate::diagnostics::diagnostics_json;
 pub use crate::relaunch::{GatewayStartup, GatewayStartupError, settle_gateway_startup};
 pub use crate::runner::{
@@ -213,17 +213,17 @@ impl LiveState {
 /// Both are reported by `GET /admin/status` and fixed at assembly for the
 /// process lifetime.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProfileSelection {
+struct ProfileSelection {
     /// The active profile name.
-    pub(crate) name: Option<String>,
+    name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
-    pub(crate) model_allowlist: Option<Vec<String>>,
+    model_allowlist: Option<Vec<String>>,
 }
 
 /// Shared handler state: live routing/key/local runtime, configuration path,
 /// and command coordination.
 #[derive(Debug, Clone)]
-pub(crate) struct AppState {
+struct AppState {
     live: Arc<RwLock<LiveState>>,
     config: Option<Arc<AdminConfig>>,
     /// Process-lifetime identifier used by the config UI to detect a restart.
@@ -278,7 +278,7 @@ pub(crate) struct AppState {
 
 #[cfg(test)]
 #[path = "lib-park.rs"]
-pub(crate) mod park;
+mod park;
 
 impl AppState {
     /// Awaits the installed test rendezvous at `phase`; a no-op in
@@ -296,7 +296,7 @@ impl AppState {
         clippy::too_many_arguments,
         reason = "the single caller assembles process state; a parameter struct would invent a grouping with no domain meaning"
     )]
-    pub(crate) fn from_parts(
+    fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
         config: Arc<Config>,
@@ -357,28 +357,28 @@ impl AppState {
 
     /// The web-search capability, when configured.
     #[cfg(feature = "web-search")]
-    pub(crate) async fn web_search(&self) -> Option<Arc<WebSearchState>> {
+    async fn web_search(&self) -> Option<Arc<WebSearchState>> {
         self.live.read().await.web_search.clone()
     }
 
     /// The live routing table, shared by reference.
-    pub(crate) async fn routing(&self) -> Arc<Routing> {
+    async fn routing(&self) -> Arc<Routing> {
         Arc::clone(&self.live.read().await.routing)
     }
 
     /// The running configuration, shared by reference.
-    pub(crate) async fn config(&self) -> Arc<Config> {
+    async fn config(&self) -> Arc<Config> {
         Arc::clone(&self.live.read().await.config)
     }
 
     /// The running profile's name, when one is selected.
-    pub(crate) async fn profile_name(&self) -> Option<String> {
+    async fn profile_name(&self) -> Option<String> {
         self.live.read().await.profile_name.clone()
     }
 
     /// The active profile's `[local].cache_dir` setting, for the cache routes.
     #[cfg(feature = "local")]
-    pub(crate) async fn cache_dir(&self) -> Option<String> {
+    async fn cache_dir(&self) -> Option<String> {
         self.live.read().await.local.cache_dir().map(str::to_owned)
     }
 
@@ -412,7 +412,7 @@ impl AppState {
 /// no loopback allowlist to enforce. The [`Gateway::router`] seam passes
 /// `None` and installs no host wall: with no bound socket there is no
 /// authority to allowlist.
-pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>) -> Router {
+fn build_router(state: AppState, bound: Option<std::net::SocketAddr>) -> Router {
     // The open tier: every area any admitted peer may reach, each mounted
     // by its own module. Feature-gated areas merge under the same gate
     // that compiles them, so a build with a feature off serves exactly

@@ -25,7 +25,7 @@ const WAL_HEADER_SIZE: u64 = 32;
 /// the migration counter; `meta` stores the format stamp and display
 /// name; `grants` mirrors the in-memory grant set in tree order; `kv`
 /// holds JSON values keyed by name (`window` and the ui-state keys).
-pub(crate) const SCHEMA_V1: &str = "\
+pub(super) const SCHEMA_V1: &str = "\
 PRAGMA user_version = 1;
 
 CREATE TABLE meta (
@@ -48,13 +48,13 @@ CREATE TABLE kv (
 /// How many commands may wait in the channel before senders back off.
 /// Grants arrive at user-gesture rate and geometry saves are debounced,
 /// so a small bound is ample; a full channel is a symptom.
-pub(crate) const COMMAND_QUEUE_DEPTH: usize = 32;
+pub(super) const COMMAND_QUEUE_DEPTH: usize = 32;
 
 /// One unit of work for the actor. Each variant that answers holds a
 /// `oneshot` reply; a dropped reply means the caller gave up, which the
 /// actor ignores.
 #[derive(Debug)]
-pub(crate) enum Command {
+pub(super) enum Command {
     /// Reads everything the file holds.
     Contents {
         /// Where the contents go.
@@ -112,7 +112,7 @@ pub(crate) enum Command {
 /// order. Ends when the last sender drops or a `Shutdown` arrives; either
 /// way the connection closes through [`close_database`], so the file is
 /// left alone at `path` with no sidecar beside it.
-pub(crate) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection, path: PathBuf) {
+pub(super) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection, path: PathBuf) {
     let default_name = super::stem_of(&path);
     while let Some(command) = rx.recv().await {
         match command {
@@ -158,7 +158,7 @@ pub(crate) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection
 /// database replays it on the next open. The sidecar check is filesystem
 /// work and runs on the blocking pool, awaited, so the close is complete
 /// when this returns.
-pub(crate) async fn close_database(conn: turso::Connection, path: &Path) {
+async fn close_database(conn: turso::Connection, path: &Path) {
     if let Err(error) = checkpoint(&conn).await {
         tracing::warn!(%error, path = %path.display(), "workspace file checkpoint failed on close");
     }
@@ -202,7 +202,7 @@ async fn snapshot(
 
 /// Writes the stamp, the grants, the window state, and any ui-state
 /// values into a freshly schema'd database, all in one transaction.
-pub(crate) async fn write_contents(
+pub(super) async fn write_contents(
     conn: &turso::Connection,
     contents: &WorkspaceContents,
 ) -> Result<(), WorkspaceFileError> {
@@ -353,7 +353,7 @@ fn remove_empty_wal_sidecar(path: &Path) {
 }
 
 /// The path of the WAL sidecar the database keeps beside `path`.
-pub(crate) fn wal_sidecar_of(path: &Path) -> PathBuf {
+pub(super) fn wal_sidecar_of(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push("-wal");
     PathBuf::from(name)
@@ -361,7 +361,7 @@ pub(crate) fn wal_sidecar_of(path: &Path) -> PathBuf {
 
 /// Reads the display name, the grants in position order, the saved
 /// window, and the ui-state values from an already validated connection.
-pub(crate) async fn read_contents(
+async fn read_contents(
     conn: &turso::Connection,
     default_name: &str,
 ) -> Result<WorkspaceContents, WorkspaceFileError> {
@@ -380,7 +380,7 @@ pub(crate) async fn read_contents(
 }
 
 /// Reads one `meta` value; `None` when the key is absent.
-pub(crate) async fn read_meta(
+pub(super) async fn read_meta(
     conn: &turso::Connection,
     key: &str,
 ) -> Result<Option<String>, WorkspaceFileError> {

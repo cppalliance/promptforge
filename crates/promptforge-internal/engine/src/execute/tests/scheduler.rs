@@ -13,7 +13,7 @@ use promptforge_types::detail::model_id_from_validated;
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
 /// pre-fill the run's shared set directly.
-pub(super) fn writer_models() -> ModelSet {
+fn writer_models() -> ModelSet {
     ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",

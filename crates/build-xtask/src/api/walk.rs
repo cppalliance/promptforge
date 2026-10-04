@@ -21,7 +21,7 @@ use super::render::Renderer;
 
 /// Where a visited item sits on the surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
+pub(super) enum Role {
     /// A re-exported item.
     Item,
     /// A struct, union, or variant field.
@@ -40,24 +40,24 @@ pub(crate) enum Role {
 
 /// One visited item.
 #[derive(Debug)]
-pub(crate) struct Visit<'a> {
+pub(super) struct Visit<'a> {
     /// The label of what holds it: the owning type's facade path, or for
     /// a trait impl's associated item, the impl's header.
-    pub(crate) parent: String,
+    pub(super) parent: String,
     /// How findings and the listing name it.
-    pub(crate) label: String,
-    pub(crate) role: Role,
-    pub(crate) item: &'a Item,
+    pub(super) label: String,
+    pub(super) role: Role,
+    pub(super) item: &'a Item,
     /// The JSON the item's ids resolve in, and that crate's name.
-    pub(crate) krate: &'a Crate,
-    pub(crate) crate_name: &'a str,
+    pub(super) krate: &'a Crate,
+    pub(super) crate_name: &'a str,
 }
 
 type Key = (String, Vec<String>);
 type Located<'a> = (&'a str, &'a Crate, Id);
 
 /// Every item the surface exposes, each impl once.
-pub(crate) fn visits<'a>(loaded: &'a Loaded, surface: &'a Surface) -> Vec<Visit<'a>> {
+pub(super) fn visits<'a>(loaded: &'a Loaded, surface: &'a Surface) -> Vec<Visit<'a>> {
     let mut walker = Walker {
         loaded,
         surface,

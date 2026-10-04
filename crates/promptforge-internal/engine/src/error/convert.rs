@@ -72,7 +72,7 @@ impl Error {
     /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
     /// `#[source]` cause rather than flattening it to a string.
     #[cfg(test)]
-    pub(crate) fn lua(source: mlua::Error) -> Error {
+    pub(super) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
             message: source.to_string(),
             source: Box::new(source),

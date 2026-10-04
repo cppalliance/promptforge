@@ -38,7 +38,7 @@ use crate::failure::malformed;
 /// Crate-private: a transport reaches it only through
 /// [`read_completion_stream`](crate::read_completion_stream).
 #[derive(Debug, Default)]
-pub(crate) struct SseScanner {
+pub(super) struct SseScanner {
     buffer: Vec<u8>,
     /// How much of `buffer` is already known to hold no `\n`.
     scanned: usize,
@@ -47,7 +47,7 @@ pub(crate) struct SseScanner {
 impl SseScanner {
     /// A scanner with an empty buffer.
     #[must_use]
-    pub(crate) fn new() -> SseScanner {
+    pub(super) fn new() -> SseScanner {
         SseScanner {
             buffer: Vec::new(),
             scanned: 0,
@@ -55,13 +55,13 @@ impl SseScanner {
     }
 
     /// Buffers freshly received bytes for line extraction.
-    pub(crate) fn extend(&mut self, bytes: &[u8]) {
+    pub(super) fn extend(&mut self, bytes: &[u8]) {
         self.buffer.extend_from_slice(bytes);
     }
 
     /// Returns the next complete `data:` payload, or `None` until one is
     /// fully buffered.
-    pub(crate) fn next_data(&mut self) -> Option<String> {
+    pub(super) fn next_data(&mut self) -> Option<String> {
         loop {
             let Some(offset) = self.buffer[self.scanned..]
                 .iter()
@@ -88,7 +88,7 @@ impl SseScanner {
 
 /// The outcome of applying one `data:` payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Applied {
+pub(super) enum Applied {
     /// The payload advanced the accumulation; `delta` is true when it
     /// included answer text, reasoning, or a tool-call fragment (the
     /// TTFT/ITL clock ticks on those, never on role or summary chunks).
@@ -122,7 +122,7 @@ struct ToolCallParts {
 /// Crate-private: a transport reaches it only through
 /// [`read_completion_stream`](crate::read_completion_stream).
 #[derive(Debug, Default)]
-pub(crate) struct StreamAccumulator {
+pub(super) struct StreamAccumulator {
     /// Answer text; `None` until the first `content` fragment arrives.
     content: Option<String>,
     /// Reasoning side-channel text; `None` until the first fragment.
@@ -137,7 +137,7 @@ pub(crate) struct StreamAccumulator {
 impl StreamAccumulator {
     /// An empty accumulator.
     #[must_use]
-    pub(crate) fn new() -> StreamAccumulator {
+    pub(super) fn new() -> StreamAccumulator {
         StreamAccumulator::default()
     }
 
@@ -150,7 +150,7 @@ impl StreamAccumulator {
     /// shape, and the [`classify_stream_error`] result when the payload is
     /// a mid-stream error envelope (`Transport` unless its text names a
     /// known cause).
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         data: &str,
         on_delta: &impl Fn(StreamDelta),
@@ -326,7 +326,7 @@ impl StreamAccumulator {
     /// errors (`EmptyReply` for a turn with neither non-empty tool calls nor
     /// non-empty text), and the validating constructor's (a
     /// `MalformedResponse` for two calls sharing an id).
-    pub(crate) fn finish(
+    pub(super) fn finish(
         self,
         request_body: Value,
         client_timing: Option<ClientTiming>,

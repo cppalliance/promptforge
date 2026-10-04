@@ -50,7 +50,7 @@ impl WorkspaceFile {
     /// Returns [`WorkspaceError::WorkspaceFileFailed`] when the file
     /// cannot be read.
     #[cfg(test)]
-    pub(crate) async fn read_ui_state(
+    pub(super) async fn read_ui_state(
         &self,
     ) -> Result<BTreeMap<&'static str, Option<Value>>, WorkspaceError> {
         Ok(self.contents().await?.ui_state)

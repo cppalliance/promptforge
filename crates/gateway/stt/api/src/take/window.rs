@@ -7,7 +7,7 @@ use super::interim::InterimSnapshot;
 use super::live_prefix::LivePrefixSnapshot;
 use super::text::append_transcript;
 
-pub(super) const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
+const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
 const MIN_LEADING_REPLACEMENT_TOKENS: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,7 +45,7 @@ pub(super) struct WholeWindowState {
 
 impl WholeWindowState {
     #[cfg(test)]
-    pub(super) fn next(
+    fn next(
         &mut self,
         finalized: &str,
         finalized_samples: u64,

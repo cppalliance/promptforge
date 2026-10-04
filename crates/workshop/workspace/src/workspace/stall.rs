@@ -13,12 +13,12 @@ use super::Workspace;
 
 /// The armed rendezvous for one stalled write: `release` blocks the
 /// writer, `done` reports once the write has landed.
-pub(crate) struct WriteStall {
+pub(super) struct WriteStall {
     armed: Mutex<Option<WriteRendezvous>>,
 }
 
 impl WriteStall {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             armed: Mutex::new(None),
         }
@@ -41,7 +41,7 @@ struct WriteRendezvous {
 
 /// Signals that a released write has landed when dropped at the end of
 /// [`Workspace::write_file`].
-pub(crate) struct WriteDone(mpsc::Sender<()>);
+pub(super) struct WriteDone(mpsc::Sender<()>);
 
 impl Drop for WriteDone {
     fn drop(&mut self) {
@@ -103,7 +103,7 @@ impl Workspace {
     /// Blocks on the armed stall, if any, and returns a guard that reports
     /// completion on drop. Runs on the blocking pool inside
     /// [`Workspace::write_file`], where a blocking wait is expected.
-    pub(crate) fn stall_wait(&self) -> Option<WriteDone> {
+    pub(super) fn stall_wait(&self) -> Option<WriteDone> {
         let rendezvous = self
             .stall
             .armed

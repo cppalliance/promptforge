@@ -9,22 +9,22 @@ use std::collections::HashMap;
 use crate::service::SearchResult;
 
 /// Max characters kept for a result title after sanitisation.
-pub(crate) const TITLE_MAX_CHARS: usize = 512;
+const TITLE_MAX_CHARS: usize = 512;
 /// Max characters kept for a result description after sanitisation.
-pub(crate) const DESCRIPTION_MAX_CHARS: usize = 4096;
+const DESCRIPTION_MAX_CHARS: usize = 4096;
 /// Max characters kept for a result URL after tracking strip.
-pub(crate) const URL_MAX_CHARS: usize = 2048;
+const URL_MAX_CHARS: usize = 2048;
 /// Max characters kept for a single extra snippet after sanitisation (WSP-001).
-pub(crate) const SNIPPET_MAX_CHARS: usize = 1024;
+const SNIPPET_MAX_CHARS: usize = 1024;
 /// Max number of extra snippets kept per result (WSP-001).
-pub(crate) const MAX_EXTRA_SNIPPETS: usize = 8;
+const MAX_EXTRA_SNIPPETS: usize = 8;
 /// Max characters kept for a result `age` after sanitisation (WSP-001).
-pub(crate) const AGE_MAX_CHARS: usize = 64;
+const AGE_MAX_CHARS: usize = 64;
 
 /// Sanitizes free text: drops most controls, collapses whitespace, trims, decodes a
 /// fixed entity set, then caps by Unicode scalar count.
 #[must_use]
-pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
+fn sanitize_text(text: &str, max_chars: usize) -> String {
     // Bound the work up front (WSP-002): entity decoding and the final cap can
     // only shrink text, so processing more than a small multiple of `max_chars`
     // scalars is wasted effort on a hostile oversized input.
@@ -50,7 +50,7 @@ pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
 /// or starts with `utm_`. Does not truncate: an over-length URL is dropped by
 /// the pipeline (WSP-004), never cut mid-component into a broken link.
 #[must_use]
-pub(crate) fn strip_tracking_params(url: &str) -> String {
+fn strip_tracking_params(url: &str) -> String {
     let Some((base, query)) = url.split_once('?') else {
         return url.to_string();
     };
@@ -86,7 +86,7 @@ pub(crate) fn strip_tracking_params(url: &str) -> String {
 /// Handles optional scheme, `userinfo@`, and strips a trailing port. Returns
 /// lowercase host text, or `None` when no host can be parsed.
 #[must_use]
-pub(crate) fn host_from_url(url: &str) -> Option<String> {
+fn host_from_url(url: &str) -> Option<String> {
     // Prefer a standards-compliant parse for well-formed URLs (TOOLS-014), then
     // fall back to the lenient extractor for scheme-less or non-URL inputs
     // (used by domain-filter canonicalization).
@@ -106,7 +106,7 @@ pub(crate) fn host_from_url(url: &str) -> Option<String> {
 /// not a real URL (for example the lenient `not-a-url` case accepted for
 /// domain-filter canonicalization) must never be emitted as a result.
 #[must_use]
-pub(crate) fn is_navigable_url(url: &str) -> bool {
+fn is_navigable_url(url: &str) -> bool {
     match url::Url::parse(url) {
         Ok(parsed) => {
             matches!(parsed.scheme(), "http" | "https")
@@ -147,7 +147,7 @@ fn host_from_url_lenient(url: &str) -> Option<String> {
 
 /// Hostname group / display name: lowercase host with one leading `www.` removed.
 #[must_use]
-pub(crate) fn site_name_from_host(host: &str) -> String {
+fn site_name_from_host(host: &str) -> String {
     let lower = host.to_ascii_lowercase();
     lower
         .strip_prefix("www.")
@@ -161,7 +161,7 @@ pub(crate) fn site_name_from_host(host: &str) -> String {
 /// means no exclude filter. A hostname matches a listed domain when they are
 /// equal (ASCII lowercase) or the hostname ends with `.` + domain.
 #[must_use]
-pub(crate) fn filter_domains(
+fn filter_domains(
     results: Vec<SearchResult>,
     include_domains: &[String],
     exclude_domains: &[String],
@@ -197,11 +197,7 @@ pub(crate) fn filter_domains(
 ///
 /// Host groups use full hostname, lowercase, with one leading `www.` stripped.
 #[must_use]
-pub(crate) fn diversify_hosts(
-    results: Vec<SearchResult>,
-    max_per_host: u8,
-    count: u8,
-) -> Vec<SearchResult> {
+fn diversify_hosts(results: Vec<SearchResult>, max_per_host: u8, count: u8) -> Vec<SearchResult> {
     let mut kept = Vec::new();
     let mut per_host: HashMap<String, u8> = HashMap::new();
     let max_per_host = max_per_host.max(1);

@@ -49,10 +49,7 @@ impl TestTool for EchoTool {
 /// missing or non-string value is a malformed call, not something to paper over
 /// with an empty string. Returning a concrete [`ToolError`] makes a malformed
 /// fixture call fail loudly instead of silently succeeding on `""`.
-pub(super) fn require_string_arg<'a>(
-    args: &'a Value,
-    key: &str,
-) -> std::result::Result<&'a str, ToolError> {
+fn require_string_arg<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a str, ToolError> {
     args.get(key).and_then(Value::as_str).ok_or_else(|| {
         ToolError::message(format!("fixture tool requires a string `{key}` argument"))
             .with_kind(ToolErrorKind::InvalidArguments)

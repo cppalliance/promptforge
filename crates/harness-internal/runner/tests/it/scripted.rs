@@ -158,7 +158,7 @@ impl Held {
 
     /// A future that counts itself started on its first poll and dropped
     /// when torn down, and never resolves.
-    pub(crate) fn hold<T: Send + 'static>(self: &Arc<Self>) -> BoxFuture<T> {
+    fn hold<T: Send + 'static>(self: &Arc<Self>) -> BoxFuture<T> {
         let held = Arc::clone(self);
         Box::pin(async move {
             held.started.fetch_add(1, Ordering::SeqCst);

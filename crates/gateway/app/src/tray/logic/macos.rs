@@ -28,7 +28,7 @@ pub(crate) fn app_bundle(exe: &Path) -> Option<PathBuf> {
 /// `Contents/Info.plist`. The plist is NeXTSTEP/XML; the only fact the
 /// login gate needs is the `CFBundleExecutable` string, extracted
 /// directly rather than pulling a plist parser for one key.
-pub(crate) fn bundle_principal(bundle: &Path) -> Option<String> {
+pub(super) fn bundle_principal(bundle: &Path) -> Option<String> {
     let plist = std::fs::read_to_string(bundle.join("Contents/Info.plist")).ok()?;
     let key = plist.find("<key>CFBundleExecutable</key>")?;
     let after = &plist[key + "<key>CFBundleExecutable</key>".len()..];

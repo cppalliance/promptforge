@@ -182,7 +182,7 @@ pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<InstructionBudget>
 
 /// Renders a returned Lua scalar as the section's result string. Tables and other
 /// non-scalar returns are deferred to a later commit.
-pub(crate) fn value_to_string(value: &Value) -> Result<String> {
+fn value_to_string(value: &Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s.to_string_lossy()),
         Value::Integer(i) => Ok(i.to_string()),

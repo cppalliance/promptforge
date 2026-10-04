@@ -108,7 +108,7 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
 
 /// Builds state with deterministic speech workers for Gateway route tests.
 #[cfg(feature = "stt")]
-pub(crate) fn app_state_with_scripted_stt(
+fn app_state_with_scripted_stt(
     config: Config,
     factory: gateway_stt::test_fixtures::ScriptedModelFactory,
 ) -> anyhow::Result<AppState> {

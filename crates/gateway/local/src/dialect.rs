@@ -231,7 +231,7 @@ fn supplement_evidence(
 }
 
 /// Reads the sidecar metadata next to a GGUF, logging and swallowing errors.
-pub(crate) fn read_sidecar_quietly(model_path: &Path) -> Option<sidecar::SidecarMeta> {
+fn read_sidecar_quietly(model_path: &Path) -> Option<sidecar::SidecarMeta> {
     match sidecar::read_sidecar(model_path) {
         Ok(meta) => meta,
         Err(e) => {

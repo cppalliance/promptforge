@@ -8,11 +8,10 @@ const BYTES_PER_SAMPLE: usize = size_of::<i16>();
 const MAX_BUFFERED_SECONDS: usize = 30;
 const MIN_COMMIT_MILLISECONDS: usize = 100;
 
-pub(super) const MAX_APPEND_AUDIO_BYTES: usize = 15 * 1024 * 1024;
-pub(super) const MAX_BUFFERED_AUDIO_BYTES: usize =
+const MAX_APPEND_AUDIO_BYTES: usize = 15 * 1024 * 1024;
+const MAX_BUFFERED_AUDIO_BYTES: usize =
     INPUT_SAMPLE_RATE_USIZE * BYTES_PER_SAMPLE * MAX_BUFFERED_SECONDS;
-pub(super) const MIN_COMMIT_SAMPLES: usize =
-    INPUT_SAMPLE_RATE_USIZE * MIN_COMMIT_MILLISECONDS / 1_000;
+const MIN_COMMIT_SAMPLES: usize = INPUT_SAMPLE_RATE_USIZE * MIN_COMMIT_MILLISECONDS / 1_000;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(super) enum AudioError {
@@ -37,12 +36,12 @@ pub(super) struct CommittedAudio {
 
 impl CommittedAudio {
     #[cfg(test)]
-    pub(super) fn samples(&self) -> &[f32] {
+    fn samples(&self) -> &[f32] {
         &self.samples
     }
 
     #[cfg(test)]
-    pub(super) const fn input_samples(&self) -> u64 {
+    const fn input_samples(&self) -> u64 {
         self.input_samples
     }
 
@@ -116,7 +115,7 @@ impl AudioBuffer {
     }
 
     #[cfg(test)]
-    pub(super) fn commit(&mut self) -> Result<CommittedAudio, AudioError> {
+    fn commit(&mut self) -> Result<CommittedAudio, AudioError> {
         self.validate_commit()?;
         Ok(self.commit_validated())
     }
@@ -144,7 +143,7 @@ impl AudioBuffer {
         Ok(())
     }
 
-    pub(super) fn clear(&mut self) {
+    fn clear(&mut self) {
         *self = Self::default();
     }
 
@@ -170,7 +169,7 @@ impl AudioBuffer {
     }
 }
 
-pub(super) fn decode_base64(payload: &str) -> Result<Vec<u8>, AudioError> {
+fn decode_base64(payload: &str) -> Result<Vec<u8>, AudioError> {
     const MAX_BASE64_CHARS: usize = MAX_APPEND_AUDIO_BYTES.div_ceil(3) * 4;
     if payload.len() > MAX_BASE64_CHARS {
         return Err(AudioError::AppendTooLarge {

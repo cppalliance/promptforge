@@ -51,7 +51,7 @@ where
 /// Serializes a [`Secret`] field as `"***"`: a serialized configuration never
 /// contains credential material, and a reader treats the marker as "keep the
 /// existing value" on write.
-pub(crate) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
+pub(super) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {

@@ -21,7 +21,7 @@ pub(crate) struct AdminConfig {
     pub(crate) path: std::path::PathBuf,
 }
 
-pub(crate) fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
+fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
     state
         .config
         .as_ref()

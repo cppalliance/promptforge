@@ -145,7 +145,7 @@ pub(super) enum Batching {
 pub(super) struct Outcome {
     pub(super) result: RunResult,
     pub(super) events: Vec<Event>,
-    pub(super) effects: Vec<(Provenance, EffectRecord)>,
+    effects: Vec<(Provenance, EffectRecord)>,
 }
 
 impl Outcome {

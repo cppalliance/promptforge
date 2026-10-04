@@ -43,7 +43,7 @@ fn catalog() -> ToolCatalog {
 }
 
 /// A prompt whose one section runs `lua` as its only block.
-pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
+fn prompt(lua: &str) -> Arc<Prompt> {
     let source = format!(
         "---\nname: runner-test\ndescription: a runner fixture\npromptforge: 0\n---\n\n\
          # Fixture\n\n## Only\n\n```lua\n{lua}\n```\n"

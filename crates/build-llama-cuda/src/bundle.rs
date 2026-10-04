@@ -18,10 +18,10 @@ use closure::{bundle_cuda_runtimes, inspect_closure};
 
 /// The only target triple the tool produces: it compiles on and for a
 /// Windows x86-64 machine.
-pub(crate) const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 
 /// Upstream repository a `--source` checkout comes from.
-pub(crate) const SOURCE_URL: &str = "https://github.com/ggml-org/llama.cpp.git";
+const SOURCE_URL: &str = "https://github.com/ggml-org/llama.cpp.git";
 
 /// What one build run needs, resolved from the command line.
 #[derive(Debug)]
@@ -273,7 +273,7 @@ fn pack(
 
 /// Full pipeline, with the command seam, environment, and machine identity
 /// injected for tests.
-pub(crate) fn build_with(
+fn build_with(
     probe: &impl Probe,
     env: &impl Fn(&str) -> Option<String>,
     host_os: &str,

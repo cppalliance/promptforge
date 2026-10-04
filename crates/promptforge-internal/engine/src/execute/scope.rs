@@ -19,7 +19,7 @@ use promptforge_types::emitter::Emitter;
 /// tool catalog, a local alias against the section VM's handlers - so the
 /// map holds only the kind.
 #[derive(Debug, Clone)]
-pub(crate) enum DispatchTarget {
+pub(super) enum DispatchTarget {
     /// A bound live tool, resolved against the run's tool catalog.
     Bound,
     /// A Lua-local tool, answered by the section VM's handler.
@@ -35,7 +35,7 @@ pub(crate) enum DispatchTarget {
 ///
 /// # Errors
 /// Returns the schema-construction error of [`prepare_scoped_tools`].
-pub(crate) fn prepare_effective_scope(
+pub(super) fn prepare_effective_scope(
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
     emitter: &Emitter,
@@ -54,7 +54,7 @@ pub(crate) fn prepare_effective_scope(
     result
 }
 
-pub(crate) fn prepare_scoped_tools(
+pub(super) fn prepare_scoped_tools(
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {

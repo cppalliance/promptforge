@@ -25,7 +25,7 @@ const UNDELIVERED_RECORDS: u64 = (1 << 32) - 1;
 pub(crate) const CAPACITY: usize = 8192;
 
 /// Records the worker moves to local storage per drain.
-pub(crate) const BATCH: usize = 256;
+const BATCH: usize = 256;
 
 /// The shared queue state producers and the single worker synchronize on.
 #[derive(Debug)]
@@ -426,7 +426,7 @@ impl LogQueue {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_for_test(max_records: usize, max_bytes: usize) -> Self {
+    fn new_for_test(max_records: usize, max_bytes: usize) -> Self {
         Self::with_limits(max_records, max_bytes, LOG_LIMITS.producer_wait)
     }
 

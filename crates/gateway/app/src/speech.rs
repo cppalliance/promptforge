@@ -53,7 +53,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// under the bounded background relay [`relay_audio`] documents, so every
 /// early end - a tripped bound or an upstream failure - fails the client's
 /// body read rather than truncating it.
-pub(crate) async fn audio_speech(
+async fn audio_speech(
     State(state): State<AppState>,
     caller: AuthedCaller,
     request: Request,
@@ -322,7 +322,7 @@ fn speech_fallback_mime(
 /// compatibility surface pinned by the integration suite. `name` mirrors
 /// `id`: the catalog configures voices as bare strings with no separate
 /// display name.
-pub(crate) async fn audio_voices(
+async fn audio_voices(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {

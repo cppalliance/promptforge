@@ -43,10 +43,10 @@ const CLOUD_MODELS: RouteInfo = RouteInfo::walled("/admin/cloud-models", &[Metho
 const REFRESH: RouteInfo = RouteInfo::walled("/admin/cloud-models/refresh", &[Method::POST]);
 
 /// The cloud provider model sheet routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[CLOUD_MODELS, REFRESH];
+pub(super) const ROUTES: &[RouteInfo] = &[CLOUD_MODELS, REFRESH];
 
 /// The cloud provider model sheet routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(CLOUD_MODELS.path, get(admin_cloud_models))
         .route(REFRESH.path, post(admin_cloud_models_refresh))
@@ -106,7 +106,7 @@ impl Default for Inner {
 
 /// The outcome of asking for a background download.
 #[derive(Debug)]
-pub(crate) enum Download {
+enum Download {
     /// A new download task; the handle is the test rendezvous.
     Started(tokio::task::JoinHandle<()>),
     /// A download is already running; it is never duplicated.
@@ -209,7 +209,7 @@ impl CloudModels {
     /// outcome: the fresh sheet on success, the download's error on
     /// failure. A refresh asked during an in-flight download joins it
     /// and awaits the same result instead of starting a second one.
-    pub(crate) async fn refresh(&self) -> Result<Arc<Sheet>, GatewayError> {
+    async fn refresh(&self) -> Result<Arc<Sheet>, GatewayError> {
         let (generation, mut completion) = {
             let mut inner = self.lock();
             match self.spawn_download_locked(&mut inner) {
@@ -238,13 +238,13 @@ impl CloudModels {
     }
 
     /// The in-memory sheet, when one has loaded or downloaded.
-    pub(crate) fn sheet(&self) -> Option<Arc<Sheet>> {
+    fn sheet(&self) -> Option<Arc<Sheet>> {
         self.lock().sheet.clone()
     }
 
     /// The last download or cache-write error, cleared by the next
     /// success.
-    pub(crate) fn last_error(&self) -> Option<String> {
+    fn last_error(&self) -> Option<String> {
         self.lock().last_error.clone()
     }
 
@@ -383,7 +383,7 @@ fn write_cache_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// The `GET /admin/cloud-models` route: bearer-authed and loopback-walled,
 /// serves the in-memory sheet, a 503 loading indication while none has
 /// arrived, or the last download error.
-pub(crate) async fn admin_cloud_models(
+async fn admin_cloud_models(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Response, GatewayError> {
@@ -401,7 +401,7 @@ pub(crate) async fn admin_cloud_models(
 /// answers 200 with the fresh sheet once the download it started or
 /// joined lands, or the download's 502 error; a concurrent refresh
 /// awaits the same download rather than starting a second one.
-pub(crate) async fn admin_cloud_models_refresh(
+async fn admin_cloud_models_refresh(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<Sheet>, GatewayError> {

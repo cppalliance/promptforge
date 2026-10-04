@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 /// no Rust recompile; release builds embed them into the binary.
 #[derive(rust_embed::Embed)]
 #[folder = "$OUT_DIR/ui-dist/"]
-pub(crate) struct UiAssets;
+struct UiAssets;
 
 /// Serves one UI asset from [`UiAssets`] with the given content type.
 /// A missing asset answers 404 with the build command that produces it.

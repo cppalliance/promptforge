@@ -70,23 +70,23 @@ const MAX_CHARS_CEILING: usize = 10_000_000;
 
 /// A `User-Agent` string validated to be a legal HTTP header value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UserAgent(String);
+struct UserAgent(String);
 
 /// A response-body byte cap, guaranteed in `1..=MAX_BYTES_CEILING`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MaxBytes(usize);
+struct MaxBytes(usize);
 
 /// A returned-text character cap, guaranteed in `1..=MAX_CHARS_CEILING`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MaxChars(usize);
+struct MaxChars(usize);
 
 /// A redirect-hop cap, guaranteed in `0..=MAX_REDIRECTS_CEILING`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MaxRedirects(usize);
+struct MaxRedirects(usize);
 
 /// A [`Duration`] guaranteed greater than `Duration::ZERO`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PositiveDuration(Duration);
+struct PositiveDuration(Duration);
 
 /// An exact host-plus-address exception, with the host canonicalized.
 ///

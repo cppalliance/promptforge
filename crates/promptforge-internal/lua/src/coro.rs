@@ -322,7 +322,7 @@ pub(crate) struct StashedFailure {
     pub(crate) raised: Option<Raised>,
     /// The coroutine's traceback at the raise point, `stack traceback:`
     /// heading included, when the handler recorded one.
-    pub(crate) traceback: Option<String>,
+    traceback: Option<String>,
 }
 
 impl StashedFailure {

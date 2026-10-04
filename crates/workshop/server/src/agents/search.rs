@@ -20,7 +20,7 @@ use super::gateway::UsableGateway;
 const NO_GATEWAY: &str = "request failed";
 
 /// Searches through the Gateway the server's registry currently holds.
-pub(crate) struct GatewaySearchProvider {
+pub(super) struct GatewaySearchProvider {
     /// The subsystem registry the gateway handles are read through.
     registry: Registry,
     /// The client built for the last generation searched under.
@@ -29,7 +29,7 @@ pub(crate) struct GatewaySearchProvider {
 
 impl GatewaySearchProvider {
     /// Builds the provider over the server's subsystem registry.
-    pub(crate) fn new(registry: Registry) -> Self {
+    pub(super) fn new(registry: Registry) -> Self {
         Self {
             registry,
             cached: Mutex::new(None),

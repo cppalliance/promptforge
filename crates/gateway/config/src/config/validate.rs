@@ -30,7 +30,7 @@ impl Config {
     /// capability verbatim. The flag is a plain `bool`, so an explicit
     /// `images = false` cannot be told apart from an absent one; the
     /// projector wins either way because the model does accept images.
-    pub(crate) fn imply_projector_images(&mut self) {
+    pub(super) fn imply_projector_images(&mut self) {
         for models in [&mut self.local_models, &mut self.catalog_local_models] {
             for local_model in models {
                 if local_model.multimodal_projector.is_some() {
@@ -55,7 +55,7 @@ impl Config {
     /// wrong-kind dominion, or a VRAM co-residency failure: a local
     /// dominion's `vram_gb` budget exceeded by the bound models' estimates,
     /// or a bound model with no estimate).
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub(super) fn validate(&self) -> Result<(), ConfigError> {
         if self.version != 0 {
             return Err(ConfigError::Validation(format!(
                 "config-version must be 0, got {}",

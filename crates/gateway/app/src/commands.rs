@@ -36,7 +36,7 @@ use self::apply::ApplySnapshot;
 
 /// The `ApplyConfig` command's display name: the status bar and tray show
 /// it, and the apply's cancellation error names it.
-pub(crate) const APPLY_CONFIG_LABEL: &str = "apply-config";
+const APPLY_CONFIG_LABEL: &str = "apply-config";
 
 /// What a settled command produced: the profile name for `LoadProfile`, a
 /// summary line for the rest.
@@ -257,7 +257,7 @@ pub(crate) struct Enqueued {
             reason = "read only by tests, which pin the debounce attaching a duplicate to the entry it duplicated"
         )
     )]
-    pub(crate) entry: u64,
+    entry: u64,
     /// Resolves when the command settles.
     pub(crate) outcome: oneshot::Receiver<SharedOutcome>,
 }
