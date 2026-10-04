@@ -7,6 +7,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+gateway-api-discovery.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 workspace-hack.workspace = true

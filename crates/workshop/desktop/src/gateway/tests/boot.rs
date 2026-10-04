@@ -1,6 +1,8 @@
 //! Boot planning and one-shot launch coverage.
 
-use std::time::Duration;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use gateway_api_discovery::GatewayDiscoveryFile;
 
@@ -11,9 +13,10 @@ use super::{
 #[cfg(windows)]
 use crate::gateway::boot::spawn_detached_windows_with;
 use crate::gateway::boot::{
-    GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway,
+    GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway, spawn_detached,
 };
 use crate::gateway::identity::GatewayAttachment;
+use crate::gateway::supervisor::RECOVERY_POLL_INTERVAL;
 
 #[path = "boot-launch-wait.rs"]
 mod launch_wait;
@@ -81,6 +84,32 @@ fn windows_detached_spawn_does_not_retry_other_errors() {
 
     assert_eq!(error.raw_os_error(), Some(123));
     assert_eq!(attempts, 1);
+}
+
+/// A program that exits by itself once it reads end of input from a null
+/// stdin.
+fn self_exiting_program() -> PathBuf {
+    if cfg!(windows) {
+        std::env::var_os("ComSpec").map_or_else(|| PathBuf::from("cmd.exe"), PathBuf::from)
+    } else {
+        PathBuf::from("/bin/sh")
+    }
+}
+
+#[test]
+fn the_reaper_records_the_exit_status_of_a_detached_child() {
+    let exit = Arc::new(OnceLock::new());
+    spawn_detached(&self_exiting_program(), Arc::clone(&exit))
+        .expect("spawn a child that exits by itself");
+
+    let deadline = Instant::now() + FIXTURE_PHASE_TIMEOUT;
+    while exit.get().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "the reaper records the child's exit within {FIXTURE_PHASE_TIMEOUT:?}"
+        );
+        std::thread::sleep(RECOVERY_POLL_INTERVAL);
+    }
 }
 
 fn workshop_server(

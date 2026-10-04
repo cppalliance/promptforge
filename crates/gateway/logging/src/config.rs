@@ -78,10 +78,12 @@ impl LogConfig {
         &self.state_dir
     }
 
-    /// The log file this run writes: `<state dir>/logs/gateway.log`.
+    /// The log file this run writes:
+    /// [`gateway_api_discovery::gateway_log_path`] under the state
+    /// directory, `<state dir>/logs/gateway.log`.
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
-        self.state_dir.join("logs").join("gateway.log")
+        gateway_api_discovery::gateway_log_path(&self.state_dir)
     }
 
     /// The retained log segment paths, `gateway.log.1` (newest) through
@@ -89,11 +91,12 @@ impl LogConfig {
     /// starting a runtime, so the log layout has exactly one owner.
     #[must_use]
     pub fn retained_log_paths(&self) -> Vec<PathBuf> {
+        let current = self.log_path();
         (1..=RETAINED_SEGMENTS)
             .map(|segment| {
-                self.state_dir
-                    .join("logs")
-                    .join(format!("gateway.log.{segment}"))
+                let mut path = current.as_os_str().to_owned();
+                path.push(format!(".{segment}"));
+                PathBuf::from(path)
             })
             .collect()
     }

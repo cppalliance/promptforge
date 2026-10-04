@@ -2131,6 +2131,7 @@ name = "gateway-logging"
 version = "0.3.0"
 dependencies = [
  "build-ceiling",
+ "gateway-api-discovery",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",

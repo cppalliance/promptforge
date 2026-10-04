@@ -1,12 +1,15 @@
-//! Run-directory and gateway-discovery-file paths: the one place that knows
-//! the
-//! `<home>/.promptforge/run` layout, matching the profile convention in the
+//! Run-directory, gateway-discovery-file, and gateway-log paths: the one
+//! place that knows the `<home>/.promptforge/run` and
+//! `<home>/.promptforge/logs` layout, matching the profile convention in the
 //! workshop's `discover.rs`.
 
 use std::path::{Path, PathBuf};
 
 /// The gateway discovery file's name inside the run directory.
 pub const GATEWAY_DISCOVERY_FILE_NAME: &str = "gateway.json";
+
+/// The gateway log's name inside the state directory's `logs` directory.
+pub const GATEWAY_LOG_FILE_NAME: &str = "gateway.log";
 
 /// The launch lock's name, beside the gateway discovery file.
 pub const LOCK_FILE_NAME: &str = "gateway.json.lock";
@@ -47,6 +50,15 @@ pub fn instance_lock_file_path(run_dir: &Path) -> PathBuf {
     run_dir.join(INSTANCE_LOCK_FILE_NAME)
 }
 
+/// The gateway log under `state_dir`, the directory that holds the run
+/// directory: `<home>/.promptforge/logs/gateway.log`. The gateway starts
+/// logging there before it loads its configuration, so a gateway that exits
+/// on its configuration still records why.
+#[must_use]
+pub fn gateway_log_path(state_dir: &Path) -> PathBuf {
+    state_dir.join("logs").join(GATEWAY_LOG_FILE_NAME)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +85,19 @@ mod tests {
         assert_eq!(
             instance_lock_file_path(dir),
             Path::new("run").join("gateway.instance.lock")
+        );
+    }
+
+    #[test]
+    fn the_gateway_log_sits_in_a_logs_directory_beside_the_run_directory() {
+        let run = run_dir(Path::new("home"));
+        let state_dir = run.parent().expect("the run directory has a parent");
+        assert_eq!(
+            gateway_log_path(state_dir),
+            Path::new("home")
+                .join(".promptforge")
+                .join("logs")
+                .join("gateway.log")
         );
     }
 }
