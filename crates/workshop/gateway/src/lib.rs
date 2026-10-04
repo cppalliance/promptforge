@@ -16,6 +16,9 @@
 //!   speaks `reqwest` statuses and raw bodies, and the server maps them
 //!   to HTTP responses.
 //! - A bearer key is never written to logs or `Debug` output.
+//! - Workshop reaches model providers only through the gateway, so no
+//!   vendor credential passes through this crate or reaches the page or
+//!   Lua.
 //! - User-visible reporting flows through the registry's push facade, and
 //!   the gateway drives the menu through its
 //!   [`MenuPush`](workshop_registry::MenuPush) face, so this crate never

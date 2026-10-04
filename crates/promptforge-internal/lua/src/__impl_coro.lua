@@ -103,7 +103,7 @@ end
 
 -- models.infer(handle?, prompt): an optional leading model handle runs the
 -- round on the handle's frozen binding; without one the driver resolves the
--- section's current model. Invocation is namespace-only (A9): handles are
+-- section's current model. Invocation is namespace-only: handles are
 -- plain inspectable userdata with no colon methods.
 local function infer(...)
   local handle, prompt

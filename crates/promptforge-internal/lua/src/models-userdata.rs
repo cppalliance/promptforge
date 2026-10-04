@@ -2,7 +2,7 @@
 //! `models.get`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
-//! to Lua. Invocation is namespace-only (A9), so
+//! to Lua. Invocation is namespace-only, so
 //! `models.infer(handle?, prompt)` takes the handle as an optional leading
 //! argument.
 

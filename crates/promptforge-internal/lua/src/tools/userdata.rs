@@ -3,7 +3,7 @@
 //! Presentation only: the userdata exposes a bound tool's fields to Lua and
 //! serves as the leading handle argument to `tools.call`. Authors read
 //! `.name`, `.description`, `.parameters`, `.wire_name`, and `.untrusted`.
-//! The object is frozen and methodless (A9): model-facing description
+//! The object is frozen and methodless: model-facing description
 //! overrides are positional arguments to `tools.always` / `tools.add`,
 //! never assignments on this handle, and invocation is namespace-only
 //! through `tools.call(alias_or_tool, arguments)`. Existing

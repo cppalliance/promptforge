@@ -40,7 +40,7 @@ pub(super) fn provision_artifacts_impl(
     if token.is_cancelled() {
         return Err(LocalError::Cancelled);
     }
-    // Kind preflight (A6): every model's kind is checked before the shared
+    // Kind preflight: every model's kind is checked before the shared
     // server or any model provisions, so a profile with no launchable model
     // fails without a single side effect.
     let mut failures = Vec::new();
@@ -150,7 +150,7 @@ pub(super) fn start_impl(
         return Err(LocalError::Cancelled);
     }
 
-    // Kind preflight (A6): every model's kind is checked before the shared
+    // Kind preflight: every model's kind is checked before the shared
     // server provisions, so a profile with no launchable model fails without
     // a single provisioning side effect.
     let mut launchable = Vec::new();

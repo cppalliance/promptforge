@@ -39,7 +39,7 @@
 //! Metadata marks a cross-origin page; `trust_loopback = false` requires
 //! the bearer key from every caller. When the listener is bound to
 //! loopback, every route additionally sits behind the shared
-//! host-authority wall, which refuses requests whose `Host` is not the
+//! `Host`-authority wall, which refuses requests whose `Host` is not the
 //! bound socket (the DNS-rebinding defense). In-process llama.cpp FFI and
 //! endpoint pinning are deferred.
 //!
@@ -69,6 +69,19 @@
 //! lock. A handler that needs several fields atomically takes one
 //! scoped `state.live.read().await`; only commands and writers take the
 //! write guard.
+//!
+//! ## Invariants
+//!
+//! - The listener binds and reports readiness before any model download
+//!   or model process starts; slow provisioning runs afterward as a
+//!   command on the gateway's queue.
+//! - Vendor credentials never leave this process. Clients reach
+//!   credentialed providers only through the relays here, and no route
+//!   hands a vendor key to a browser or to Lua.
+//! - The local model set is fixed for the process lifetime. Profile and
+//!   local-model changes persist and report `restart_required`, and a
+//!   remote routing change swaps the routing table atomically without
+//!   draining.
 
 mod admin;
 mod api_error;

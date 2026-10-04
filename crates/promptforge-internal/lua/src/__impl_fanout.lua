@@ -23,7 +23,7 @@ local raise, fail = helpers.raise, helpers.fail
 -- when author code rebinds the base globals.
 local setmetatable = setmetatable
 
--- One fanout arm's result: a frozen, methodless object (A9) whose fields
+-- One fanout arm's result: a frozen, methodless object whose fields
 -- are `text`, `ok`, `item`, and `exhausted`, with `tostring` giving the
 -- text so a `table.concat` over the results keeps working. Writes raise:
 -- the result is the arm's record, not the author's scratch space. The

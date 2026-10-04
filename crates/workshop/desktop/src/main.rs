@@ -11,6 +11,13 @@
 //! stops the in-process server only: the gateway is a separate process
 //! and keeps running; the window menu's quit item is the one gesture
 //! that also stops a local gateway.
+//!
+//! ## Invariants
+//!
+//! - The webview loads only the in-process server's exact origin; every
+//!   other http(s) target opens in the system browser.
+//! - The `main` window's Tauri capability is granted to that exact bound
+//!   origin, built at setup, and never to a wildcard port.
 
 // Release builds are a GUI app: no console window when launched from the
 // installer. Debug builds keep the console so the eprintln diagnostics show.

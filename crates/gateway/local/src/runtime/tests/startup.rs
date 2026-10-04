@@ -124,7 +124,7 @@ context = 512
 fn start_with_an_all_speech_profile_has_no_side_effects() {
     use crate::testsupport::hex_sha256;
 
-    // The kind preflight (A6) runs before the shared server provisions:
+    // The kind preflight runs before the shared server provisions:
     // an all-speech profile collects one refusal per model and does
     // nothing else - the server provisioner never runs and the cache
     // directory is never even created.

@@ -44,6 +44,9 @@
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
+//! - Every API route sits behind `cross_site::guard`, which refuses
+//!   cross-site requests and any `Host` that names a non-loopback
+//!   authority; `/health` and the UI assets stay outside it.
 //! - Every WebSocket upgrade checks its `Origin`: `/ws` and `/agents/ws`
 //!   admit any loopback origin through `cross_site::origin_allowed`, and
 //!   `/v1/realtime` applies a stricter same-origin check that requires a

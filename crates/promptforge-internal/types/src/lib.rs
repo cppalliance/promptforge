@@ -31,6 +31,9 @@
 //! - May depend on: no workspace crate beyond `workspace-hack`.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
+//! - [`untrusted`] neutralizes chat-template control delimiters in
+//!   untrusted tool and Lua text, and is never applied to assistant
+//!   replay or tool-call wire payloads.
 
 pub mod cancel;
 pub mod capabilities;

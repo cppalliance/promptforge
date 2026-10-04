@@ -247,7 +247,7 @@ fn serve_thread(
         }
     };
     // The shell assembles instantly: the remote routing table over every
-    // `[[model]]` and no local runtime (invariant A1: the bind and the
+    // `[[model]]` and no local runtime (the bind and the
     // publication precede any local work). Local provisioning is the boot
     // command's work, not startup's.
     let boot_profile = profiles.active.clone();

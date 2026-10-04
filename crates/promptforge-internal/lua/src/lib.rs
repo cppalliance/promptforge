@@ -42,6 +42,14 @@
 //! - May depend on: `promptforge-types`, `promptforge-model-client`, and
 //!   `promptforge-vfs`. `cargo test -p build-xtask` enforces the product and
 //!   container boundaries.
+//! - Scheduler state changes only through a typed `Request` yielded by the
+//!   installed shim; a direct or malformed yield fails the block without
+//!   changing scheduler state.
+//! - Engine globals are namespace functions over plain values (`models.*`,
+//!   `tools.*`, `store.*`). Handles are frozen, inspectable, and
+//!   methodless, and an optional leading handle argument selects an
+//!   explicit binding. The chainable `messages.new()` builders are the one
+//!   deliberate exception.
 
 // The shared surface that child modules pull with a single `use super::*;`.
 use std::collections::BTreeMap;
