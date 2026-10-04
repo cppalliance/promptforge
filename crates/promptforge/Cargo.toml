@@ -23,5 +23,8 @@ workspace-hack.workspace = true
 # as JSON.
 serde_json.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

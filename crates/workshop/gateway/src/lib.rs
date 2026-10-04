@@ -12,8 +12,6 @@
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
 //!   `workshop-support`. `cargo test -p build-xtask` enforces the product
 //!   and container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - No axum type appears in this crate's public API: the domain code
 //!   speaks `reqwest` statuses and raw bodies, and the server maps them
 //!   to HTTP responses.

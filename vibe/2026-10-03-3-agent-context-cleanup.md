@@ -692,7 +692,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-8>
 
-### Step 8: Add the build-ceiling crate, wire every crate, and retire the tidy ceiling
+### Step 8: Add the build-ceiling crate, wire every crate, and retire the tidy ceiling [completed]
 
 - Component: Compiler-enforced 500-line limit
 - Work item: 13, the compile-time check, its wiring into every crate with the wiring tidy check, the new-crate template, and the removal of what the check replaces.

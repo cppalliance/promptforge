@@ -53,7 +53,7 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 - Docs: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`. Rustdoc lints are not covered by clippy; never skip the docs gate.
 - Facade docs: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`, without `--all-features`, so the facade's docs build with default features.
 - Facade surface: `cargo +<pinned nightly> xtask api --check`, where the pinned nightly is the one named in `crates/build-xtask/src/api/toolchain.rs`; on any other toolchain it fails at once, naming the nightly it needs. It checks that every path a surface item's signature, fields, bounds, impls, or doc links name is a facade re-export (or std, core, alloc, or an allowlisted crate), that no surface doc text names an internal crate, and that the surface listing matches the committed `crates/promptforge/public-api.txt`.
-- Boundary and structural checks: `cargo test -p build-xtask`. It enforces the product and container boundaries, the Workshop tier graph, the `## Invariants` marker, lint inheritance, and the 500-line file ceiling.
+- Boundary and structural checks: `cargo test -p build-xtask`. It enforces the product and container boundaries, the Workshop tier graph, the `## Invariants` marker, and lint inheritance.
 
 ## Structural Rules
 

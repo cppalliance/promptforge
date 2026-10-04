@@ -47,5 +47,8 @@ name = "models_loop"
 harness = false
 required-features = ["test-support"]
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

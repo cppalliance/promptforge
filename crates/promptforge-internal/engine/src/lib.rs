@@ -13,8 +13,6 @@
 //!   `promptforge-parser`, `promptforge-vfs`, and
 //!   `promptforge-model-client`. `cargo test -p build-xtask` enforces the
 //!   product and container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 pub(crate) mod cancel;
 mod error;

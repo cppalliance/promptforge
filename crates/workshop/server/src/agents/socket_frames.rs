@@ -2,7 +2,7 @@
 //! map the conversation's wait and delta vocabulary onto Workshop's wire
 //! shapes, and the durable-event framing that drains a conversation's
 //! transcript past the per-client cursor. Split out of the `socket`
-//! module so each stays under the 500-line ceiling.
+//! module.
 
 use axum::extract::ws::WebSocket;
 use promptforge::event::Event;

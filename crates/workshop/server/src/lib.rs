@@ -35,8 +35,6 @@
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries. Read `crates/workshop/server/AGENTS.md` before adding an
 //!   import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - One task owns each socket: a single `select!` loop reads inbound
 //!   frames and writes every outbound frame itself - no outbox channel,
 //!   no writer task. Agent conversations are the documented carve-out:

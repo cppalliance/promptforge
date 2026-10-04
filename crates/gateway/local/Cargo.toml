@@ -39,6 +39,9 @@ minijinja-contrib.workspace = true
 gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true
 

@@ -11,8 +11,6 @@
 //!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
 //!   `promptforge-*` crate. `cargo test -p build-xtask` enforces the product
 //!   and container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - The server stores each value verbatim and never interprets it
 //!   beyond the allow-listed key and the size cap; the SPA owns every
 //!   value's schema.

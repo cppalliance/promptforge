@@ -21,6 +21,7 @@ embed-resource.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
+build-ceiling.workspace = true
 
 [dependencies]
 # Optional: anyhow error payloads for the test-fixture rendezvous in

@@ -29,5 +29,8 @@ time = { workspace = true, features = ["parsing"] }
 tokio.workspace = true
 workspace-hack.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

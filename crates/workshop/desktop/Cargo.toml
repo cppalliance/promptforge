@@ -53,6 +53,7 @@ version = "0.61"
 version = "2.0.2"
 
 [build-dependencies]
+build-ceiling.workspace = true
 tauri-build.workspace = true
 
 [features]

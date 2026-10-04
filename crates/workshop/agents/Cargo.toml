@@ -33,5 +33,8 @@ workspace-hack.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

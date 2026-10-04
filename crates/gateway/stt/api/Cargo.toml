@@ -42,5 +42,8 @@ test-fixtures = [
     "gateway-stt-engine/test-fixtures",
 ]
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

@@ -19,8 +19,6 @@
 //! - Tier: vocabulary; may depend on: no internal `workshop-*` crates.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - Zero I/O: no sockets, tasks, or clocks, so every wire shape is
 //!   pinned by a plain test.
 //!

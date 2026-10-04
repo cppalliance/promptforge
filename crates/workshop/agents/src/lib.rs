@@ -33,8 +33,6 @@
 //!   frame.
 //! - A conversation's channels close when it ends, so whatever holds only
 //!   its receivers ends with it.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 mod conversation;
 mod discovery;

@@ -31,8 +31,6 @@
 //! - May depend on: no workspace crate beyond `workspace-hack`.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 pub mod cancel;
 pub mod capabilities;

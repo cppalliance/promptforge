@@ -25,8 +25,6 @@
 //!   depend on it for the traits, never the reverse. The one capability
 //!   it holds itself, `promptforge/user-input`, needs nothing beyond this
 //!   crate's traits and the broker it receives through [`RunServices`].
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - This crate names no async runtime: `tokio` and `tokio-util` appear
 //!   only under `[dev-dependencies]` (enforced by the Harness tokio ban in
 //!   `cargo test -p build-xtask`). The Harness polls every tool call and

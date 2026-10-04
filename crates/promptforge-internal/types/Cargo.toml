@@ -22,5 +22,8 @@ rand.workspace = true
 # against; the Engine itself never depends on `time`.
 time.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

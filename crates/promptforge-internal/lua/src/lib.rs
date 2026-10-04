@@ -42,8 +42,6 @@
 //! - May depend on: `promptforge-types`, `promptforge-model-client`, and
 //!   `promptforge-vfs`. `cargo test -p build-xtask` enforces the product and
 //!   container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 // These imports are re-exported `pub(crate)` so the child modules can pull
 // the full shared surface with a single `use super::*;`.

@@ -21,8 +21,6 @@
 //! - May depend on: `promptforge-types` and `promptforge-lua`.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 pub use promptforge_lua::LuaProgram;
 

@@ -33,8 +33,6 @@
 //!
 //! - May depend on: `promptforge-types`. `cargo test -p build-xtask`
 //!   enforces the product and container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 pub mod client;
 pub mod detail;

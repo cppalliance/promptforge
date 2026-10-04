@@ -28,5 +28,8 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

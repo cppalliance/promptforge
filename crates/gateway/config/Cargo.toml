@@ -21,6 +21,9 @@ reqwest = { workspace = true, features = ["blocking"] }
 sha2.workspace = true
 tempfile.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true
 

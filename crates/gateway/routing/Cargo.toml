@@ -21,5 +21,8 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # to downstream crates' test suites.
 test-helpers = []
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

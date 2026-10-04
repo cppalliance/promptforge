@@ -22,5 +22,7 @@ platforms = [
 
 # promptforge-vfs keeps its zero-dependency rule (its manifest test enforces
 # it); with no third-party dependencies it has nothing for hakari to unify.
+# build-ceiling has no dependencies either, because six crates include its
+# source from their build scripts and it must compile on std alone.
 [final-excludes]
-workspace-members = ["promptforge-vfs"]
+workspace-members = ["promptforge-vfs", "build-ceiling"]

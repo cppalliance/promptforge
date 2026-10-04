@@ -15,5 +15,8 @@ workspace-hack.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

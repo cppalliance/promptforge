@@ -9,8 +9,6 @@
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
 //!   `workshop-support`. `cargo test -p build-xtask` enforces the product
 //!   and container boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - The server owns all Model-menu state and the UI only renders it;
 //!   `chat_ready` is computed here and never derived client-side.
 //! - Publishing never blocks: a publish with no sessions is a no-op, and

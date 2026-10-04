@@ -39,8 +39,6 @@
 //!   `crates/harness-internal` crate depends on it.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - Every model- or tool-selected URL and every resolved address is
 //!   revalidated on each redirect hop; a non-global address is denied
 //!   unless the fetch policy grants an exact host-and-address exception.

@@ -27,6 +27,7 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
+build-ceiling = { path = "crates/build-ceiling" }
 promptforge = { path = "crates/promptforge" }
 promptforge-engine = { path = "crates/promptforge-internal/engine" }
 promptforge-types = { path = "crates/promptforge-internal/types" }

@@ -5,6 +5,10 @@
 //! `npm ci` in `ui/` per checkout.
 
 fn main() -> std::process::ExitCode {
+    if let Err(error) = build_ceiling::check() {
+        eprintln!("{error}");
+        return std::process::ExitCode::FAILURE;
+    }
     match build_ui::build(build_ui::UiBuild {
         static_files: build_ui::CONFIG_UI_STATIC_FILES,
         define_app_version: true,

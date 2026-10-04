@@ -23,5 +23,8 @@ workspace-hack.workspace = true
 [dev-dependencies]
 tracing-subscriber.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

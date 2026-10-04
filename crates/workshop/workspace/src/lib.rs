@@ -12,8 +12,6 @@
 //!   `workshop-registry`, `workshop-support`, and the service crates.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 //! - Every request path is checked lexically (no `..`, and on Windows no
 //!   NTFS alternate data stream names) and then canonicalized and
 //!   prefix-matched against the canonical grants before any filesystem

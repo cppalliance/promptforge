@@ -1,8 +1,8 @@
 //! Embeds the program icon and an application manifest into
 //! `promptforge-gateway.exe` on Windows, so Explorer, Task Manager, and
 //! the taskbar show the orange-P shield instead of the generic executable
-//! glyph. On every other platform this script only declares its input and
-//! exits.
+//! glyph. On every other platform this script only runs the file-size
+//! check, declares its input, and exits.
 //!
 //! The icon is a copy kept in `assets/icon.ico`, byte-identical to the
 //! workshop's master icon set. The gateway app embeds its own copy instead
@@ -44,6 +44,7 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 "#;
 
 fn main() -> anyhow::Result<()> {
+    build_ceiling::check()?;
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
             .ok_or_else(|| anyhow::anyhow!("CARGO_MANIFEST_DIR is not set; run through cargo"))?,

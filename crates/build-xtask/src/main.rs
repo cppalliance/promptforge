@@ -8,7 +8,6 @@
 //! - `cargo xtask api` reads rustdoc JSON, so it runs only on the nightly
 //!   pinned in `api/toolchain.rs`; its fixtures that build rustdoc JSON are
 //!   `#[ignore]`d on stable.
-//! - Every file in this crate stays under 500 lines; split first, then edit.
 
 mod api;
 mod doc_hidden;

@@ -34,5 +34,8 @@ test-fixtures = []
 [dev-dependencies]
 tempfile.workspace = true
 
+[build-dependencies]
+build-ceiling.workspace = true
+
 [lints]
 workspace = true

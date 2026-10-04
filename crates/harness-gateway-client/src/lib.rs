@@ -59,8 +59,6 @@
 //!   `GatewaySearchError` message.
 //! - A keyless client is an explicit choice; nothing here checks the
 //!   endpoint's address on the caller's behalf.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
 
 mod broker;
 mod catalog;
