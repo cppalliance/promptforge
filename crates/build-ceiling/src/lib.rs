@@ -37,6 +37,11 @@ const STOP: &str = "If no cohesive group splits out without widening visibility,
 /// found from `CARGO_MANIFEST_DIR`, and asks Cargo to rerun the build
 /// script when any of those files changes or a file is added beside them.
 ///
+/// A tree that does not exist yet is not watched, so the first file in a
+/// new `tests/`, `benches/`, or `examples/` directory is counted only at the
+/// next rerun: an edit to a watched path, or a build from a fresh checkout,
+/// which is every CI build.
+///
 /// # Errors
 ///
 /// Returns every file over 500 lines and every file or directory the scan
