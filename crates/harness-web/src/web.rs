@@ -36,17 +36,16 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 /// A capability that gives a run web access: one tool that fetches a page
 /// and one that searches the web.
 ///
-/// Its id is `promptforge/web`. It gives each run two tools.
-/// `promptforge/web/fetch` fetches a URL through a hardened HTTP client
-/// and returns its content as text, with an HTML page rendered as
-/// markdown. `promptforge/web/search` runs a search through the Host's
-/// [`SearchProvider`].
+/// Its id is `promptforge/web`. `promptforge/web/fetch` fetches a URL
+/// through a hardened HTTP client and returns its content as text, with
+/// an HTML page rendered as markdown. `promptforge/web/search` runs a
+/// search through the Host's [`SearchProvider`].
 ///
 /// It needs two services: the search provider registered under the key
 /// [`SEARCH_PROVIDER`] and the tokio runtime handle registered under the
 /// key [`TOKIO_RUNTIME`]. A run that requires the capability is refused
 /// when either service is missing. A run that declares it optional gets
-/// no web tools.
+/// the web tools only when both services are present.
 #[derive(Debug, Clone)]
 pub struct Web {
     /// The stable identity, `promptforge/web`.
@@ -63,9 +62,9 @@ impl Web {
     ///
     /// # Panics
     /// Panics only if the built-in capability id `promptforge/web` fails to
-    /// parse, or if the HTTP client cannot be built for the default policy
+    /// parse, or if the HTTP client fails to build for the default policy
     /// because the TLS backend failed to initialize. Either would be a
-    /// defect, not a caller error.
+    /// defect outside the caller's control.
     #[must_use]
     pub fn new() -> Web {
         #[expect(
@@ -83,7 +82,7 @@ impl Web {
     /// Replaces the default fetch policy with a validated custom one.
     ///
     /// # Errors
-    /// Returns [`ConfigError`] if the HTTP client cannot be built for
+    /// Returns [`ConfigError`] if the HTTP client fails to build for
     /// `config` (for example a TLS backend that fails to initialize).
     pub fn with_fetch_config(mut self, config: FetchConfig) -> Result<Web, ConfigError> {
         self.fetch = FetchClient::try_with_config(config)?;

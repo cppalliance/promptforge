@@ -5,14 +5,14 @@
 //! on with one frontmatter line, `capabilities: [promptforge/web]`. The
 //! run then gets both tools: `promptforge/web/fetch`, which fetches a URL
 //! and returns its content as text, and `promptforge/web/search`, which
-//! runs a search through the Host's [`SearchProvider`]. A prompt gets both
-//! tools or neither.
+//! runs a search through the Host's [`SearchProvider`]. The two tools
+//! always come together.
 //!
 //! The Host also provides two services beside the capability. Its
 //! [`SearchProvider`] is registered under the key [`SEARCH_PROVIDER`]. The
 //! tokio runtime handle that every fetch is spawned onto is registered
-//! under the key [`TOKIO_RUNTIME`]. A run missing either service gets no
-//! web tools.
+//! under the key [`TOKIO_RUNTIME`]. A run gets the web tools only when
+//! both services are registered.
 //!
 //! The fetch tool is security-critical. The model supplies the URL, so the
 //! tool is the server-side request forgery (SSRF) boundary between an
@@ -21,11 +21,11 @@
 //! A configuration problem is reported as a [`ConfigError`].
 //!
 //! The fetch tool sends a GET request and chooses how to render the
-//! response from its `Content-Type`. It refuses a type it cannot render.
-//! For an HTML page, it extracts the main article with `readabilityrs` and
-//! renders it to markdown. A page with no article to extract is converted
-//! whole to markdown with `htmd` instead. Any other text body, such as
-//! JSON, XML, or plain text, is decoded and returned with no extraction.
+//! response from its `Content-Type`. For an HTML page, it extracts the
+//! main article with `readabilityrs` and renders it to markdown. When a
+//! page yields too little article text, `htmd` converts the whole page to
+//! markdown. Any other text body, such as JSON, XML, or plain text, is
+//! decoded and returned verbatim. The tool refuses every other type.
 //!
 //! The search tool validates the model's arguments into a [`SearchQuery`]
 //! and hands it to the provider. It returns the provider's

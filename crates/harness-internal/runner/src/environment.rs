@@ -41,14 +41,14 @@ impl HostSnapshot {
     }
 }
 
-/// The reason a run could not resolve its model at launch.
+/// The reason a run failed to resolve its model at launch.
 ///
-/// Each variant becomes the run's error and is reported to the operator.
-/// The run never binds a fabricated fallback descriptor in its place.
+/// Each variant becomes the run's error, ends the launch, and is reported
+/// to the operator.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CurrentModelError {
-    /// The inference broker could not fetch its model list. The broker's
+    /// The inference broker failed to fetch its model list. The broker's
     /// error is the source.
     #[error("the model catalog could not be fetched")]
     CatalogFetchFailed(#[source] CompletionError),

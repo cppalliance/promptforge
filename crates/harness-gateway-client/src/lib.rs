@@ -6,12 +6,12 @@
 //! [`GatewayChat`] under the Engine's default run limits, and it lists the
 //! Gateway's models through [`fetch_model_catalog`]. A Host that shows a
 //! reply as it forms runs the round through
-//! [`GatewayBroker::chat_streaming`] instead, which hands each
-//! [`StreamDelta`] to the Host's callback as it arrives.
+//! [`GatewayBroker::chat_streaming`], which hands each [`StreamDelta`] to
+//! the Host's callback as it arrives.
 //!
 //! [`GatewayChat`] is the HTTP client that sends a `Chat` effect's round
-//! to one Gateway URL. It presents the Gateway's shared bearer key, or no
-//! key when built keyless. Every request streams: the Gateway's
+//! to one Gateway URL. It presents the Gateway's shared bearer key when
+//! built with one. Every request streams: the Gateway's
 //! `/chat/completions` endpoint answers with server-sent events (SSE).
 //! [`GatewayChat::complete`] sends the request body and reads the stream
 //! within the client's byte cap and per-receive timeout. It calls the
@@ -46,8 +46,8 @@
 //!   `CompletionError` of the matching kind. [`classify_stream_error`] does
 //!   the same for an error envelope that arrives inside the stream.
 //!
-//! The wire code opens no connection and reads no clock. The client, or
-//! another broker, supplies the chunks and the clock.
+//! The client, or another broker, owns the connection and supplies the
+//! wire code's chunks and clock.
 //!
 //! ## Invariants
 //!

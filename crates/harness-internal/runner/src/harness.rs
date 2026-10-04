@@ -89,23 +89,23 @@ pub struct RunReport {
     /// same outcome.
     pub outcome: RunOutcome,
     /// The text a completed run left at its declared `output:` file, or
-    /// the reason there is no such text.
+    /// the reason the report omits that text.
     pub output: Result<String, OutputError>,
 }
 
-/// An error that stopped a run without an outcome.
+/// An error that stopped a run before `Harness::run` could report an
+/// outcome.
 ///
-/// `Harness::run` returns it in place of a `RunReport`.
+/// `Harness::run` returns it as its `Err` value.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HarnessError {
-    /// The Harness could not resolve the Host's current model through the
+    /// The Harness failed to resolve the Host's current model through the
     /// inference broker. The resolution failure is the error's source. The
-    /// run never began.
+    /// run failed to begin.
     #[error("the run's model could not be resolved")]
     Model(#[source] CurrentModelError),
-    /// The recorder refused a write, so the Harness drives the run no
-    /// further.
+    /// The recorder refused a write, so the Harness stops driving the run.
     #[error("the run could not be recorded")]
     Recorder {
         /// The id of the run the recorder issued before it refused. `None`
@@ -115,8 +115,8 @@ pub enum HarnessError {
         #[source]
         source: RecorderError,
     },
-    /// The run was still pending, but no effect was in flight. This means
-    /// the Harness lost track of an effect.
+    /// The run was still pending, but its set of effects in flight was
+    /// empty. This means the Harness lost track of an effect.
     #[error("the effect loop has nothing to await for a pending run")]
     Stalled,
 }
@@ -127,8 +127,8 @@ impl Harness {
     /// The Harness records the run through `recorder`. It resolves the
     /// run's model and gets the model's replies through `broker`. It sleeps
     /// through `timer`. It activates the capabilities the prompt declares
-    /// from `capabilities` and hands them `services`. Nothing runs until
-    /// [`Harness::run`].
+    /// from `capabilities` and hands them `services`. All of this work
+    /// happens in [`Harness::run`].
     #[must_use]
     pub fn new(
         recorder: Arc<dyn RunRecorder>,
@@ -160,22 +160,22 @@ impl Harness {
     ///
     /// It resolves the run's model through the inference broker, prepares
     /// the prompt from its source, drives the run, and reads the declared
-    /// output file if the run completed. The returned future is `Send` and
-    /// needs no runtime of its own.
+    /// output file if the run completed. The returned future is `Send`. Its
+    /// only runtime needs are those of the Host's performers.
     ///
     /// Three problems end the run as failed and still return a report with
-    /// that outcome: a source that does not parse, a declared input file
-    /// that cannot be put in place, and an environment that cannot satisfy
-    /// the prompt. A cancel raised before calling `run`, or while the
-    /// broker lists its models, returns a report with the outcome
-    /// `Cancelled` and `run_id` set to `None`.
+    /// that outcome: a source that fails to parse, a declared input file
+    /// the Harness fails to put in place, and an environment that falls
+    /// short of the prompt's requirements. A cancel raised before calling
+    /// `run`, or while the broker lists its models, returns a report with
+    /// the outcome `Cancelled` and `run_id` set to `None`.
     ///
     /// # Errors
-    /// Returns [`HarnessError::Model`] when the broker cannot list its
-    /// models or does not list the selected one. Returns
+    /// Returns [`HarnessError::Model`] when the broker fails to list its
+    /// models or its list omits the selected one. Returns
     /// [`HarnessError::Recorder`] when the recorder refuses a write.
-    /// Returns [`HarnessError::Stalled`] when the run is pending with no
-    /// effect in flight.
+    /// Returns [`HarnessError::Stalled`] when the run is pending and its
+    /// set of effects in flight is empty.
     pub async fn run(self, request: RunRequest) -> Result<RunReport, HarnessError> {
         Box::pin(self.run_to_end(request)).await
     }

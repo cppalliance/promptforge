@@ -39,8 +39,8 @@ use crate::wire::delta::StreamDelta;
 ///
 /// The broker's futures, [`models`](InferenceBroker::models) included, need
 /// a tokio runtime with its reactor and timer. A Host that uses this broker
-/// must therefore await `Harness::run` inside such a runtime. The Harness
-/// itself needs no runtime.
+/// must therefore await `Harness::run` inside such a runtime. The Harness's
+/// own futures run on any executor.
 #[derive(Clone)]
 pub struct GatewayBroker {
     client: GatewayChat,

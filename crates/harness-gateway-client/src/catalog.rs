@@ -162,7 +162,7 @@ async fn get_authed(
 ///
 /// - `Transport` or `Timeout` when the HTTP request or a response read fails;
 /// - the kind [`classify_http_failure`] picks for the response when the
-///   Gateway returns a non-success status;
+///   Gateway returns a status outside the 2xx range;
 /// - `MalformedResponse` when the body is not a valid model list.
 pub async fn fetch_model_catalog(
     base_url: &str,

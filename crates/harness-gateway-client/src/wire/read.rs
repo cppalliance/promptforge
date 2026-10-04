@@ -29,7 +29,7 @@ use crate::failure::malformed;
 ///    [`build_request_body`](crate::build_request_body). It reads its
 ///    clock and then sends the request.
 /// 2. It wraps the response body in a `ChunkSource`.
-/// 3. On a non-success status, it reads the error body whole with
+/// 3. On a status outside the 2xx range, it reads the error body whole with
 ///    [`read_body_capped`]. It bounds the body's length and escapes its
 ///    control characters with [`escape_controls`](crate::escape_controls).
 ///    It then fails the round with the error that
@@ -37,8 +37,9 @@ use crate::failure::malformed;
 /// 4. Otherwise, it passes the source to [`read_completion_stream`]. The
 ///    returned [`Completion`] answers the effect.
 ///
-/// `read_body_capped` and `read_completion_stream` never open a
-/// connection or read a clock. The source is the only I/O they touch.
+/// The transport opens the connection and supplies every clock reading.
+/// The source is the only I/O that `read_body_capped` and
+/// `read_completion_stream` touch.
 pub trait ChunkSource {
     /// One chunk of body bytes, in whatever buffer the transport yields.
     type Chunk: AsRef<[u8]>;
@@ -59,9 +60,9 @@ pub trait ChunkSource {
 /// Reads a whole response body from `source`, refusing it once it would
 /// exceed `cap` bytes.
 ///
-/// Use it for a body the transport decodes whole rather than as a stream,
-/// such as the error body of a non-success status or a JSON document like
-/// the gateway's model list.
+/// Use it for a body the transport decodes whole, such as the error body
+/// of a status outside the 2xx range or a JSON document like the
+/// gateway's model list.
 ///
 /// `content_length` is the length the response advertises, when the
 /// transport knows it. An advertised length over `cap` fails at once,
@@ -110,17 +111,17 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// [`build_request_body`](crate::build_request_body) returned it. The
 /// completion carries it back, so a run's debug capture records exactly
 /// what was sent. The completion is labeled with the model that
-/// `request_body` names, not the model name the response gave.
+/// `request_body` names.
 ///
 /// `started` is the transport's clock reading from just before it sent
 /// the request, and `now` reads that same clock. The completion's
 /// [`ClientTiming`] holds three figures measured against them: time to
-/// first token, mean inter-token latency, and end-to-end time. This
-/// function never reads a clock itself.
+/// first token, mean inter-token latency, and end-to-end time. It takes
+/// every clock reading from `started` and `now`.
 ///
 /// # Errors
 /// Returns a `MalformedResponse`-kind [`CompletionError`] when the stream
-/// exceeds `max_bytes` or ends without the sentinel, and the source's own
+/// exceeds `max_bytes` or ends before the sentinel, and the source's own
 /// error when a read fails. Also returns the error that reassembling the
 /// reply raises for a malformed chunk, a mid-stream error envelope, a
 /// truncated tool-call batch, or an empty turn.

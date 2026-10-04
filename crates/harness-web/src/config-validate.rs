@@ -15,7 +15,7 @@ use reqwest::header::HeaderValue;
 use super::{HostAddressException, MAX_REDIRECTS_CEILING, MaxRedirects, UserAgent, canonical_host};
 
 /// The error reported when a fetch configuration fails validation or its HTTP
-/// client cannot be built.
+/// client fails to build.
 ///
 /// When a field fails validation, the [`Display`] message names the field and
 /// the constraint it violated.

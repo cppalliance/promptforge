@@ -85,7 +85,7 @@ pub struct ServiceKey<T: ?Sized + Send + Sync + 'static> {
 impl<T: ?Sized + Send + Sync + 'static> ServiceKey<T> {
     /// Builds the key for the service named `literal`.
     ///
-    /// This does not check `literal`. `HostServices::provide` checks it
+    /// Any literal builds a key. `HostServices::provide` checks the literal
     /// when a provider is supplied under this key.
     #[must_use]
     pub const fn new(literal: &'static str) -> ServiceKey<T> {
@@ -131,7 +131,7 @@ struct Entry {
 /// The services a Host provides, as a map from service id to provider.
 ///
 /// The map records the type each provider was supplied as. Cloning the
-/// map shares the providers rather than copying them.
+/// map shares the providers.
 #[derive(Clone, Default)]
 pub struct HostServices {
     entries: BTreeMap<&'static str, Entry>,
@@ -147,11 +147,11 @@ impl HostServices {
     /// Adds `provider` to the map under the id of `key`.
     ///
     /// # Errors
-    /// Returns [`ServiceError::InvalidId`] when the id literal of `key` is
-    /// not a two-segment `namespace/name` id. Returns
+    /// Returns [`ServiceError::InvalidId`] when the id literal of `key`
+    /// fails to parse as a two-segment `namespace/name` id. Returns
     /// [`ServiceError::DuplicateId`] when the map already holds a provider
-    /// under that literal, whatever the provider's type. The map is
-    /// unchanged on either error.
+    /// under that literal, whatever the provider's type. The map stays as
+    /// it was on either error.
     pub fn provide<T: ?Sized + Send + Sync + 'static>(
         &mut self,
         key: &ServiceKey<T>,
@@ -198,8 +198,6 @@ impl HostServices {
 
     /// Returns whether the map holds a provider under `id` that was
     /// supplied as the type `id` names.
-    ///
-    /// A provider of another type does not count.
     #[must_use]
     pub fn provides(&self, id: &ServiceId) -> bool {
         self.entries
@@ -221,11 +219,11 @@ impl fmt::Debug for HostServices {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServiceError {
-    /// The id literal is not a two-segment `namespace/name` id.
+    /// The id literal fails to parse as a two-segment `namespace/name` id.
     InvalidId {
         /// The id literal that was refused.
         id: &'static str,
-        /// Why the literal does not parse as an id.
+        /// Why the literal fails to parse as an id.
         source: CapabilityIdError,
     },
     /// The map already holds a provider under the id.

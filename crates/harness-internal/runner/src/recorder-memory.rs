@@ -7,9 +7,10 @@ use super::{Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, R
 /// A recorder that keeps every run in memory, for tests and doc examples.
 ///
 /// It forgets everything when dropped. Run ids start at `1` and count up
-/// in the order runs begin. A write to an unknown run, a write to a run
-/// that has ended, and a second [`end_run`](RunRecorder::end_run) each
-/// fail, so a test notices a Harness that breaks the call order.
+/// in the order runs begin. A write to an id outside the runs this recorder
+/// began, a write to a run that has ended, and a second
+/// [`end_run`](RunRecorder::end_run) each fail, so a test notices a Harness
+/// that breaks the call order.
 #[derive(Debug, Default)]
 pub struct MemoryRecorder {
     runs: Mutex<Vec<MemoryRun>>,
@@ -39,7 +40,7 @@ impl MemoryRecorder {
 
     /// Returns the records of run `run` in the order they were appended.
     ///
-    /// The list is empty if this recorder never began that run.
+    /// The list is empty when `run` lies outside the runs this recorder began.
     #[must_use]
     pub fn records(&self, run: RunId) -> Vec<Record> {
         self.lock()
@@ -50,7 +51,7 @@ impl MemoryRecorder {
 
     /// Returns the `RunMeta` that run `run` began with.
     ///
-    /// Returns `None` if this recorder never began that run.
+    /// Returns `None` when `run` lies outside the runs this recorder began.
     #[must_use]
     pub fn meta(&self, run: RunId) -> Option<RunMeta> {
         self.lock().get(slot(run)).map(|found| found.meta.clone())
@@ -58,8 +59,8 @@ impl MemoryRecorder {
 
     /// Returns how run `run` ended.
     ///
-    /// Returns `None` while the run is still open, or if this recorder never
-    /// began that run.
+    /// Returns `None` while the run is still open, or when `run` lies outside
+    /// the runs this recorder began.
     #[must_use]
     pub fn outcome(&self, run: RunId) -> Option<RunOutcome> {
         self.lock()

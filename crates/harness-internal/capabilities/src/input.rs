@@ -16,11 +16,11 @@ use std::fmt;
 ///
 /// # Invariants
 ///
-/// - [`wait`](InputBroker::wait) returns the operator's text byte-exact:
-///   no trimming, no re-encoding, no wrapping.
+/// - [`wait`](InputBroker::wait) returns the operator's text byte-exact,
+///   as the operator sent it.
 /// - A wait whose future is dropped, as happens when the run is
-///   cancelled, must not leave a prompt open for the operator. It must
-///   not panic either.
+///   cancelled, must close any prompt it opened for the operator. It must
+///   not panic.
 /// - [`wait`](InputBroker::wait) must not block while it is polled. The
 ///   Harness polls it inside the run's own future, beside every other
 ///   effect of the run. A broker therefore hands any blocking work to the
@@ -30,8 +30,8 @@ pub trait InputBroker: Send + Sync {
     /// Waits for the operator's next message and returns it byte-exact.
     ///
     /// # Errors
-    /// Returns an [`InputError`] when the wait ends without an answer, for
-    /// example because the Host withdrew the wait.
+    /// Returns an [`InputError`] when the broker fails to produce the
+    /// operator's message, for example because the Host withdrew the wait.
     async fn wait(&self) -> Result<String, InputError>;
 }
 

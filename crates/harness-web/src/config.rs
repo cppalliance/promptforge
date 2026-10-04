@@ -124,7 +124,7 @@ fn canonical_host(host: &str) -> String {
 /// many redirects it may follow. It also sets the size caps on the response and
 /// the returned text, the timeouts, and the `User-Agent` header.
 ///
-/// A `FetchConfig` is always valid and never changes once built. Use
+/// A `FetchConfig` is always valid and immutable once built. Use
 /// [`FetchConfig::default`] for the built-in safe policy, or start from
 /// [`FetchConfig::builder`] to customize one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,7 +248,7 @@ impl Default for FetchConfig {
 /// A builder for a custom [`FetchConfig`].
 ///
 /// The builder starts from the built-in default policy. Each setter stores its
-/// value unchecked and returns the builder, so calls can be chained.
+/// value as given and returns the builder, so calls can be chained.
 /// [`FetchConfigBuilder::build`] checks every value at once and reports the
 /// first invalid one as a [`ConfigError`].
 #[derive(Debug, Clone)]
@@ -315,8 +315,7 @@ impl FetchConfigBuilder {
 
     /// Adds a CIDR range to block, on top of the built-in blocked ranges.
     ///
-    /// The text is parsed by [`build`], which reports a range that does not
-    /// parse.
+    /// [`build`] parses the text and reports a range that fails to parse.
     ///
     /// [`build`]: FetchConfigBuilder::build
     #[must_use]
@@ -405,7 +404,7 @@ impl FetchConfigBuilder {
     /// - a `connect_timeout` of zero or above 60 seconds;
     /// - a `timeout` of zero or above 300 seconds;
     /// - a `pool_idle_timeout` of zero or above 600 seconds;
-    /// - a denied CIDR range that does not parse;
+    /// - a denied CIDR range that fails to parse;
     /// - an exception host that is not a valid domain name or IP address.
     pub fn build(self) -> Result<FetchConfig, ConfigError> {
         let user_agent = validate_user_agent(self.user_agent)?;

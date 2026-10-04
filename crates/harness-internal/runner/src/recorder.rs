@@ -30,7 +30,7 @@ pub use memory::MemoryRecorder;
 pub type RecorderFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RecorderError>> + Send + 'a>>;
 
-/// The error a recorder returns when it cannot store a write.
+/// The error a recorder returns when it fails to store a write.
 ///
 /// It wraps the recorder's own error as its source. The Harness stops the
 /// run that received it. Its message says only that the run recorder
@@ -152,8 +152,8 @@ impl RecordKind {
         }
     }
 
-    /// Parses the stored text of a kind. Returns `None` for text that
-    /// matches no kind.
+    /// Parses the stored text of a kind. Returns `None` for any other
+    /// text.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         match text {

@@ -460,8 +460,8 @@ fn append_string_fragment(
 /// The escaping stops a backend body from forging log lines or slipping
 /// terminal control sequences into a diagnostic.
 ///
-/// A transport passes the error body of a non-success response through this
-/// function before it hands the body to
+/// A transport passes the error body of a response with a failure status
+/// through this function before it hands the body to
 /// [`classify_http_failure`](crate::classify_http_failure). Every transport
 /// therefore truncates and escapes a backend body by the same rule.
 #[must_use]

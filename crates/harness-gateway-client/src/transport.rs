@@ -25,9 +25,8 @@ use crate::wire::stream::escape_controls;
 ///
 /// The client usually presents the gateway's shared bearer key on every
 /// request. The key is optional: by default, a gateway on the same machine
-/// admits loopback callers that present no key. A client built without a
-/// key ([`GatewayChat::keyless`]) omits the `Authorization` header
-/// entirely.
+/// admits keyless loopback callers. A keyless client
+/// ([`GatewayChat::keyless`]) omits the `Authorization` header entirely.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewayChat {
@@ -102,16 +101,16 @@ impl GatewayChat {
         }
     }
 
-    /// Builds a client that presents no bearer key.
+    /// Builds a client whose requests omit the `Authorization` header that
+    /// carries the bearer key.
     ///
-    /// Every request goes out without an `Authorization` header. This suits
-    /// a gateway on the same machine, because such a gateway trusts loopback
-    /// callers that present no key, unless its operator set
+    /// This client suits a gateway on the same machine, because such a
+    /// gateway trusts keyless loopback callers, unless its operator set
     /// `trust_loopback = false`. On a shared machine, that trust also covers
     /// every other OS account there. Against any other gateway, the requests
     /// fail with an `Unavailable`-kind error when the gateway answers 401.
     ///
-    /// This constructor does not check the endpoint's host, so the caller
+    /// This constructor accepts an endpoint with any host, so the caller
     /// decides when a keyless client is appropriate.
     /// [`GatewayChat::from_env`] decides by [`GatewayEndpoint::is_loopback`].
     #[must_use]
@@ -125,8 +124,8 @@ impl GatewayChat {
         }
     }
 
-    /// Builds a client that never contacts a gateway, for execution paths
-    /// that must stay hermetic.
+    /// Builds an offline client, for execution paths that must stay
+    /// hermetic.
     ///
     /// Any attempted model call fails with an `Unavailable`-kind
     /// [`CompletionError`]. The client reads no gateway configuration and
@@ -174,10 +173,11 @@ impl GatewayChat {
     ///
     /// - `PROMPTFORGE_GATEWAY_URL` holds the gateway URL. It is required.
     /// - `PROMPTFORGE_GATEWAY_API_KEY` holds the gateway's shared bearer key.
-    ///   An empty value counts as unset. The key is required unless the
-    ///   URL's host is loopback (`127.0.0.1`, `::1`, `localhost`). By
-    ///   default, a loopback gateway trusts callers on the same machine that
-    ///   present no key, so without a key the client is built keyless.
+    ///   An empty value counts as missing. The key is optional when the
+    ///   URL's host is loopback (`127.0.0.1`, `::1`, `localhost`) and
+    ///   required for every other host. By default, a loopback gateway
+    ///   trusts keyless callers on the same machine, so for a loopback URL a
+    ///   missing key yields a keyless client.
     ///
     /// That trust also admits every other OS account on a shared machine, so
     /// the gateway's operator there sets `trust_loopback = false`. Then set
@@ -186,9 +186,9 @@ impl GatewayChat {
     ///
     /// # Errors
     /// Returns a [`GatewayConfigError`] when `PROMPTFORGE_GATEWAY_URL` is
-    /// unset or invalid, when either variable is set to a value that is not
+    /// missing or invalid, when either variable is set to a value that is not
     /// valid Unicode, or when the URL's host is not loopback (a LAN or
-    /// remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is unset or empty.
+    /// remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is missing or empty.
     pub fn from_env() -> Result<GatewayChat, GatewayConfigError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
@@ -206,11 +206,10 @@ impl GatewayChat {
     /// The request always streams. It asks for server-sent events (SSE) and
     /// sets `stream_options.include_usage`, so the stream ends with a
     /// summary chunk that reports token usage. The client reassembles the
-    /// streamed fragments into the body a non-streaming chat completion
-    /// response would carry. It calls `on_delta` with each text or reasoning
+    /// streamed fragments into the body a buffered chat completion response
+    /// would carry. It calls `on_delta` with each text or reasoning
     /// fragment, as a [`StreamDelta`], as soon as the fragment arrives. A
-    /// caller with no use for the fragments passes a closure that does
-    /// nothing.
+    /// caller that ignores the fragments passes an empty closure.
     ///
     /// The returned [`Completion`] holds the reassembled turn, the metadata
     /// parsed from the stream's summary chunk, and a
@@ -218,12 +217,12 @@ impl GatewayChat {
     /// client's own clock: time to first token, mean inter-token latency,
     /// and end-to-end time.
     ///
-    /// When `tools` is `Some` and non-empty, the request carries a `tools`
-    /// array with one `OpenAI` function tool per schema: an object whose
-    /// `type` is `function` and whose `function` holds the schema's name,
-    /// description, and parameters. The request also sets `tool_choice` to
-    /// `auto`. Passing `None` or an empty slice omits the `tools` field, so
-    /// the request is a plain chat completion.
+    /// When `tools` is `Some` and holds at least one schema, the request
+    /// carries a `tools` array with one `OpenAI` function tool per schema:
+    /// an object whose `type` is `function` and whose `function` holds the
+    /// schema's name, description, and parameters. The request also sets
+    /// `tool_choice` to `auto`. Passing `None` or an empty slice omits the
+    /// `tools` field, so the request is a plain chat completion.
     ///
     /// The request names the model that `options` names, and the returned
     /// completion is labeled with that name, whatever name the response
@@ -232,25 +231,25 @@ impl GatewayChat {
     ///
     /// # Errors
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
-    /// one of the following, and never any other kind:
+    /// always one of the following:
     /// - `Unavailable` when this client was built with [`GatewayChat::disabled`],
     ///   or when the gateway answers 401 or 403.
-    /// - `Timeout` when the response headers or the next body chunk do not
-    ///   arrive within the request timeout.
+    /// - `Timeout` when the request timeout elapses before the response
+    ///   headers or the next body chunk arrive.
     /// - `Transport` on any other transport failure, such as a failed
     ///   connection, or when the stream carries a mid-stream error envelope
     ///   that names no known cause.
     /// - `ContextOverflow`, `RateLimited`, `QuotaExhausted`, `Overloaded`,
     ///   `Refused`, `ServerError`, or `Rejected` when the gateway answers
-    ///   with a non-success status, as [`classify_http_failure`] reads it.
+    ///   with a status outside the 2xx range, as [`classify_http_failure`]
+    ///   reads it.
     /// - `MalformedResponse` when the stream exceeds the response size cap,
-    ///   a chunk is not usable JSON (a JSON decode error is kept as the
-    ///   error's source), or the stream ends without the `[DONE]` sentinel.
-    ///   It is also the kind when a `length` or `content_filter` finish
-    ///   reason cuts off a batch of tool calls, because partial arguments
-    ///   must not run.
-    /// - `EmptyReply` when the turn has neither non-empty tool calls nor
-    ///   non-empty text.
+    ///   a chunk fails to parse as usable JSON (a JSON decode error is kept
+    ///   as the error's source), or the stream ends before the `[DONE]`
+    ///   sentinel. It is also the kind when a `length` or `content_filter`
+    ///   finish reason cuts off a batch of tool calls, because partial
+    ///   arguments must not run.
+    /// - `EmptyReply` when the turn has zero tool calls and blank text.
     pub async fn complete(
         &self,
         messages: &[Message],

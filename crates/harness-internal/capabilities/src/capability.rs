@@ -51,15 +51,15 @@ pub trait Capability: Send + Sync {
     /// Hosts.
     fn description(&self) -> &str;
 
-    /// Returns the capabilities this one cannot be activated with in one
-    /// run.
+    /// Returns the capabilities that conflict with this one when declared
+    /// in the same run.
     ///
     /// For example, bashkit and a terminal each give the run its own
-    /// filesystem, so a run gets one or the other, never both. Activation
-    /// checks every pair of declared capabilities that are present. The
-    /// check is symmetric, so only one member of a pair needs to name the
-    /// other. A conflicting pair fails preparation, and the failure names
-    /// both members. The default is no conflicts.
+    /// filesystem, so a run uses at most one of the two. Activation checks
+    /// every pair of declared capabilities that are present. The check is
+    /// symmetric, so only one member of a pair needs to name the other. A
+    /// conflicting pair fails preparation, and the failure names both
+    /// members. The default returns an empty list.
     fn conflicts(&self) -> &[CapabilityId] {
         &[]
     }
@@ -71,11 +71,11 @@ pub trait Capability: Send + Sync {
     /// calls this capability's [`create`](Capability::create). A provider
     /// registered under the id but supplied as a different type than the
     /// id names counts as missing. When a required capability needs a
-    /// service the Host does not provide, activation does not call
-    /// `create` and refuses the run, naming the capability and the
-    /// service. When the capability is optional, activation calls `create`
-    /// anyway, and the capability decides how to work without the service.
-    /// The default is no needs.
+    /// missing service, activation skips its `create` and refuses the run,
+    /// naming the capability and the service. When the capability is
+    /// optional, activation calls `create` anyway, and the capability
+    /// decides how to handle the missing service. The default returns an
+    /// empty list.
     fn needs(&self) -> &[ServiceId] {
         &[]
     }
@@ -83,12 +83,12 @@ pub trait Capability: Send + Sync {
     /// Activates the capability for one run.
     ///
     /// The Harness calls this at most once per run, before the run is
-    /// prepared, and passes the run's services. On failure, the capability
-    /// contributes nothing to the run.
+    /// prepared, and passes the run's services. The run receives the
+    /// capability's tools and prelude only when this call succeeds.
     ///
     /// # Errors
     /// Returns a [`CapabilityError`] whose message is safe to show to a
-    /// model when the capability cannot activate, for example when a
+    /// model when the capability fails to activate, for example when a
     /// backend handshake fails or the run is cancelled.
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
 }
@@ -116,7 +116,7 @@ pub struct RunServices {
 
 impl RunServices {
     /// Builds the services handed to [`Capability::create`] for one run,
-    /// with no Host services.
+    /// with an empty set of Host services.
     #[must_use]
     pub fn new(vfs: VfsRef, cancel: CancelHandle) -> RunServices {
         RunServices::with_host(vfs, cancel, HostServices::new())
@@ -130,7 +130,8 @@ impl RunServices {
     }
 
     /// Returns the run's provider registered under the id of `key`, or
-    /// `None` when there is none or it was supplied as a different type.
+    /// `None` when that provider is missing or was supplied as a different
+    /// type.
     #[must_use]
     pub fn get<T: ?Sized + Send + Sync + 'static>(&self, key: &ServiceKey<T>) -> Option<Arc<T>> {
         self.host.get(key)
@@ -165,8 +166,8 @@ pub struct Contribution {
     /// Lua source that every section VM of the run installs.
     /// [`Capability::create`] builds it for this run, so it can embed facts
     /// fixed at activation. A prelude defines tables and functions that
-    /// call the capability's tools through `tools.call` by full id. It must
-    /// not call a tool or the store while it loads.
+    /// call the capability's tools through `tools.call` by full id. It may
+    /// call a tool or the store only after it has loaded.
     pub prelude: Option<String>,
 }
 
@@ -198,12 +199,12 @@ pub enum CapabilityErrorKind {
 /// An error from [`Capability::create`], with a message that is safe to
 /// show to a model.
 ///
-/// The `Display` message is written for the caller and safe to hand to a
-/// model. Any underlying cause stays out of the message and is available
-/// through [`std::error::Error::source`]. Match on
-/// [`CapabilityError::kind`] to tell failures apart. Like
-/// [`ToolError`](promptforge::tools::ToolError), it pairs a stable kind for
-/// code with a message written to be read by a model.
+/// The `Display` message is written for the caller. Any underlying cause
+/// stays out of the message and is available through
+/// [`std::error::Error::source`]. Match on [`CapabilityError::kind`] to
+/// tell failures apart. Like [`ToolError`](promptforge::tools::ToolError),
+/// it pairs a stable kind for code with a message written to be read by a
+/// model.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CapabilityError {
@@ -213,8 +214,9 @@ pub struct CapabilityError {
 }
 
 impl CapabilityError {
-    /// Builds an error with the kind `Other`, the message `text`, and no
-    /// underlying cause. The message must be safe to show to a model.
+    /// Builds an error with the kind `Other` and the message `text`. Its
+    /// `source` returns `None`. The message must be safe to show to a
+    /// model.
     #[must_use]
     pub fn message(text: impl Into<String>) -> CapabilityError {
         CapabilityError {

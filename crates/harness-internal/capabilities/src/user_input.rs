@@ -141,8 +141,8 @@ const FALLBACK: &str = "User input is unavailable in this host; continue without
 /// [`USER_INPUT_ASK_TOOL`], and a prelude that defines `input.ask()` and
 /// `input.connected()` in every section of the run.
 ///
-/// `input.ask()` returns the operator's text and `true`. When the run has
-/// no broker, it returns a fixed fallback sentence and `false`.
+/// When the run has a broker, `input.ask()` returns the operator's text
+/// and `true`. Otherwise it returns a fixed fallback sentence and `false`.
 #[derive(Debug, Clone)]
 pub struct UserInput {
     /// The stable identity, `promptforge/user-input`.
@@ -158,7 +158,7 @@ impl UserInput {
     ///
     /// # Panics
     /// Panics only if the built-in capability id or tool id fails to parse.
-    /// That would be a defect in the Harness, not a caller error.
+    /// That would be a defect in the Harness.
     #[must_use]
     pub fn new() -> UserInput {
         #[expect(

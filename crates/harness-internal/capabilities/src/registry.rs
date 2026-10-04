@@ -28,9 +28,9 @@ mod tests;
 
 /// A registry of the capabilities a Host has installed.
 ///
-/// Linking a capability crate does not register it. The Host registers
-/// each installed capability by hand and hands the registry to the
-/// Harness, which passes it to [`activate`](crate::activate) for each run.
+/// The Host registers each installed capability by hand and hands the
+/// registry to the Harness, which passes it to
+/// [`activate`](crate::activate) for each run.
 ///
 /// The registry holds one capability per id. Registering a second
 /// capability under an id that is already registered fails, and the first
@@ -103,7 +103,7 @@ impl Default for CapabilityRegistry {
 }
 
 impl fmt::Debug for CapabilityRegistry {
-    /// Reports the registered ids, never the capabilities themselves.
+    /// Reports only the registered ids.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CapabilityRegistry")
@@ -122,8 +122,8 @@ pub enum RegistryErrorKind {
     /// A capability with the same id was already registered.
     DuplicateId,
     /// The id differs from a registered id only by `-`, `_`, or `.`
-    /// punctuation. A model reading a run's tool catalog could not tell
-    /// such ids apart, so the registry rejects the second one.
+    /// punctuation. Such ids are indistinguishable to a model reading a
+    /// run's tool catalog, so the registry rejects the second one.
     NormalizationCollision,
 }
 

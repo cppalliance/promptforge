@@ -40,15 +40,14 @@ impl RunControl {
     ///
     /// A question to the operator is a call to the
     /// `promptforge/user-input/ask` tool. Every other effect in flight is
-    /// aborted and answered `Dropped`. The run's cancel flag stays clear,
-    /// so the run continues. A `pcall` around a dropped call catches its
-    /// cancelled error. An uncaught one ends the run cancelled.
+    /// aborted and answered `Dropped`. The run's cancel flag stays clear.
+    /// A `pcall` around a dropped call catches its cancelled error.
+    /// Otherwise, the error ends the run cancelled.
     ///
     /// A stop reaches only the effects in flight when the loop that drives
     /// the run sees it. The loop looks for a stop while it waits for an
-    /// answer and before it starts a step's effects. A stop raised while
-    /// nothing it can drop is in flight changes nothing. A stop never
-    /// reaches an effect that starts after the loop saw it.
+    /// answer and before it starts a step's effects. It drops the effects
+    /// the stop reaches, if any, then lowers the stop.
     pub fn stop_round(&self) {
         self.stop.raise();
     }
@@ -58,7 +57,7 @@ impl RunControl {
     /// Every effect in flight, questions to the operator included, is
     /// answered `Dropped`, and the run ends cancelled. A cancel raised
     /// before the run begins ends the run before it reaches the recorder.
-    /// Calling `cancel` again has no further effect.
+    /// Calling `cancel` more than once is the same as calling it once.
     pub fn cancel(&self) {
         self.cancel.cancel();
     }

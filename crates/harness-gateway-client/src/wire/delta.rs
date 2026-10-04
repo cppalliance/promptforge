@@ -6,15 +6,15 @@
 /// decodes the piece from the stream. Answer text and reasoning arrive as
 /// separate variants, so a caller can show them differently.
 ///
-/// Tool-call fragments never arrive as pieces. The client buffers them
-/// until the whole batch of tool calls is complete and validated. They
-/// appear only in the finished completion.
+/// The client buffers tool-call fragments until the whole batch of tool
+/// calls is complete and validated. They appear only in the finished
+/// completion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StreamDelta {
     /// A fragment of the assistant's answer text.
     Text(String),
-    /// A fragment of the model's reasoning text. It is never part of the
+    /// A fragment of the model's reasoning text. It stays separate from the
     /// answer.
     Reasoning(String),
 }

@@ -3,14 +3,15 @@
 
 use std::fmt;
 
-/// The error returned when the gateway client cannot be set up because an
+/// The error returned when setting up the gateway client fails because an
 /// environment variable, the bearer key, or the endpoint URL is missing or
 /// unusable.
 ///
-/// This is a setup error, not a model failure. It happens before the client
-/// sends any request, so it never reaches the Engine and has no
-/// [`CompletionErrorKind`](crate::CompletionErrorKind). The message names
-/// the environment variable or the rule that failed, and never contains a key.
+/// This is a setup error. It happens before the client sends its first
+/// request, so it stays within client setup, separate from the Engine and
+/// its [`CompletionErrorKind`](crate::CompletionErrorKind) values. The
+/// message names the environment variable or the rule that failed, and never
+/// contains a key.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GatewayConfigError {
@@ -18,7 +19,7 @@ pub enum GatewayConfigError {
     #[error("missing environment variable: {0}")]
     MissingEnv(String),
 
-    /// An environment variable was set but its value was not valid Unicode.
+    /// An environment variable was set, but its value was invalid Unicode.
     #[error("environment variable is set but not valid Unicode: {0}")]
     InvalidEnv(String),
 
@@ -27,15 +28,13 @@ pub enum GatewayConfigError {
     InvalidConfig(String),
 
     /// A configuration input was invalid, and the error keeps the concrete
-    /// cause.
+    /// cause as its `source`.
     ///
-    /// The cause, such as a URL parse failure or an unusable secret, is
-    /// available as the error's `source` instead of being copied into the
-    /// message.
+    /// The cause is, for example, a URL parse failure or an unusable secret.
     #[error("{message}")]
     Config {
-        /// A human-readable description of the problem. It does not repeat
-        /// the text of the source error.
+        /// A human-readable description of the problem. The text of the
+        /// source error appears only in `source`.
         message: String,
         /// The underlying error that caused this one.
         #[source]
@@ -55,7 +54,7 @@ pub enum GatewayConfigError {
 pub struct SecretString(String);
 
 impl SecretString {
-    /// Wraps a non-empty secret so it is redacted everywhere it is formatted.
+    /// Wraps a secret so it is redacted everywhere it is formatted.
     ///
     /// # Errors
     /// Returns [`SecretError::Empty`] when `secret` is empty, so a client can
@@ -75,7 +74,7 @@ impl SecretString {
     }
 }
 
-/// The reason a [`SecretString`] could not be constructed.
+/// The reason constructing a [`SecretString`] failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SecretError {
@@ -111,9 +110,9 @@ impl fmt::Display for SecretString {
 /// A validated base URL for the gateway's OpenAI-compatible API (its `/v1`
 /// root).
 ///
-/// Construction rejects a URL that has no `http` or `https` scheme or no
-/// host, so a client can never be pointed at an unusable endpoint. Any
-/// trailing slash is removed so request paths join cleanly.
+/// Construction requires an `http` or `https` scheme and a host, so a
+/// client always points at a usable endpoint. Any trailing slash is removed
+/// so request paths join cleanly.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayEndpoint {
@@ -129,9 +128,10 @@ impl GatewayEndpoint {
     /// The URL is checked with a strict URL parser.
     ///
     /// # Errors
-    /// Returns a [`GatewayConfigError`] when `url` is not a valid absolute
-    /// URL, does not use an `http` or `https` scheme, names no host, embeds
-    /// credentials (a `user:pass@` component), or has a query or fragment.
+    /// Returns a [`GatewayConfigError`] when `url` fails to parse as an
+    /// absolute URL, uses a scheme other than `http` or `https`, omits the
+    /// host, embeds credentials (a `user:pass@` component), or has a query or
+    /// fragment.
     /// A query or fragment is rejected because an API root is a bare path.
     /// No error includes `url`, because a URL can contain a credential.
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, GatewayConfigError> {
@@ -186,8 +186,8 @@ impl GatewayEndpoint {
     ///
     /// It returns `true` for `localhost`, for `127.0.0.1` and the rest of
     /// `127.0.0.0/8`, and for `::1`. It returns `false` for every other name
-    /// or address. A gateway on the local machine accepts callers that send
-    /// no key by default, so
+    /// or address. By default, a gateway on the local machine accepts callers
+    /// that omit the key, so
     /// [`GatewayChat::from_env`](crate::GatewayChat::from_env) makes the
     /// bearer key optional exactly when this returns `true`.
     #[must_use]

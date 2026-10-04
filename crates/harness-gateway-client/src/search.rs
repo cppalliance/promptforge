@@ -103,8 +103,8 @@ struct GatewaySearchResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GatewaySearchErrorKind {
-    /// The request could not be sent or a successful reply could not be
-    /// read, timeouts included.
+    /// Sending the request or reading a successful reply failed, timeouts
+    /// included.
     Transport,
     /// The Gateway answered with a failure status or an unusable body.
     Backend,
@@ -113,11 +113,10 @@ pub enum GatewaySearchErrorKind {
 /// An error from a failed Gateway web search, with its kind, a message, and
 /// the underlying cause when there is one.
 ///
-/// The message says what failed, such as `request failed` or
-/// `backend returned 502: ...`, and does not start with a tool name. When
-/// the message includes the Gateway's error body, that body is truncated to
-/// a size limit and its control characters are escaped. The message never
-/// contains the bearer key.
+/// The message starts with what failed, such as `request failed` or
+/// `backend returned 502: ...`. When the message includes the Gateway's
+/// error body, that body is truncated to a size limit and its control
+/// characters are escaped. The message never contains the bearer key.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct GatewaySearchError {
@@ -269,20 +268,20 @@ impl GatewaySearch {
 #[async_trait::async_trait]
 impl SearchProvider for GatewaySearch {
     /// Runs `query` as one Gateway web search and returns the Gateway's
-    /// results with every field copied unchanged.
+    /// results with every field copied as the Gateway sent it.
     ///
     /// # Errors
     /// Returns a [`SearchError`] with the message of the
     /// [`GatewaySearchError`] it keeps as its source. Its kind is:
-    /// - `Transport` when the request cannot be sent (`request failed`) or
-    ///   a successful reply cannot be read (`reading response failed`),
+    /// - `Transport` when sending the request fails (`request failed`) or
+    ///   reading a successful reply fails (`reading response failed`),
     ///   including when the deadline passes;
     /// - `Backend` when the Gateway answers a failure status
     ///   (`backend returned {code}: {body}`, or `backend returned {code},
     ///   and its error body could not be read`), or a success body that is
-    ///   over 256 KiB (`response body exceeded {limit} bytes`), not UTF-8
-    ///   (`response body was not valid UTF-8`), or not a search reply
-    ///   (`malformed search response`).
+    ///   over 256 KiB (`response body exceeded {limit} bytes`), is invalid
+    ///   UTF-8 (`response body was not valid UTF-8`), or fails to parse as a
+    ///   search reply (`malformed search response`).
     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError> {
         let request = gateway_request(query);
         let response = self.search(&request).await.map_err(search_error)?;

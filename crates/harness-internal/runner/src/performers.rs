@@ -94,7 +94,7 @@ pub trait ToolPerformer: Send + Sync {
 /// The Host's clock, which performs each `Timer` effect as one sleep.
 ///
 /// The Harness polls each sleep inside the run's own future, so a timer
-/// must not block while polled. It waits on the Host's own runtime instead.
+/// must not block while polled. It waits on the Host's own runtime.
 pub trait Timer: Send + Sync {
     /// Resolves once `seconds` have passed.
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;

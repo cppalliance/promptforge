@@ -27,18 +27,18 @@ mod tests;
 /// # Compatibility policy
 ///
 /// This trait is a stable extension point that downstream crates may
-/// implement. A **new required** method (one without a default body) would
-/// break those implementations, so every new method ships with a default
-/// implementation. Existing method signatures are stable.
+/// implement. A **new required** method (one each implementation must
+/// define) would break those implementations, so every new method ships with
+/// a default implementation. Existing method signatures are stable.
 ///
 /// # Invariants
 ///
 /// - [`id`](Tool::id) returns the same value on every call for a given tool.
 ///   It is the catalog key and must be unique within a catalog. A catalog's
 ///   entries are the tools' [`ToolDescriptor`] values.
-/// - [`wire_name`](Tool::wire_name) is the name on the model transport, not
-///   the tool's identity. It is distinct from [`id`](Tool::id), and an alias
-///   may replace it when the tool is advertised to a model.
+/// - [`wire_name`](Tool::wire_name) is the name on the model transport. It is
+///   distinct from [`id`](Tool::id), and an alias may replace it when the
+///   tool is advertised to a model.
 /// - [`parameters_schema`](Tool::parameters_schema) returns a JSON Schema
 ///   `object` that describes the arguments [`call`](Tool::call) accepts.
 /// - [`call`](Tool::call) is cancellation-aware and must not panic. If it
@@ -60,10 +60,10 @@ pub trait Tool: Send + Sync {
 
     /// Returns the name the current model transport uses for the tool.
     ///
-    /// This name is not the tool's identity. When the tool is advertised to a
-    /// model, a prompt-local alias may replace it. It should be a non-empty
-    /// token that is legal on the transport, with no `/` separator and no
-    /// control characters.
+    /// This name is separate from the tool's identity. When the tool is
+    /// advertised to a model, a prompt-local alias may replace it. It should
+    /// be a token of at least one character that is legal on the transport,
+    /// excluding the `/` separator and control characters.
     fn wire_name(&self) -> &str;
 
     /// Returns a one-sentence description of the tool for the model.
@@ -76,13 +76,12 @@ pub trait Tool: Send + Sync {
     /// accepts.
     fn parameters_schema(&self) -> serde_json::Value;
 
-    /// Returns whether [`call`](Tool::call) output is structured JSON rather
-    /// than plain text.
+    /// Returns whether [`call`](Tool::call) output is structured JSON.
     ///
     /// A structured tool's output text is one JSON value. An executor that
     /// supports structured results resumes the script with that value as
-    /// data (for example, a Lua table) instead of a string. The default is
-    /// `false`, meaning plain text.
+    /// data, for example a Lua table. The default is `false`, meaning plain
+    /// text.
     ///
     /// Structured output works only for trusted output. An untrusted result
     /// is nonce-wrapped before any parse, so the wrapped text no longer
@@ -95,7 +94,7 @@ pub trait Tool: Send + Sync {
     /// Returns the tool's descriptor, built from its other methods.
     ///
     /// The Harness calls this when it assembles a run's catalog. The returned
-    /// descriptor records no conflicts. The Harness adds the contributing
+    /// descriptor has an empty conflict list. The Harness adds the contributing
     /// capability's conflicts during assembly.
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor::new(
@@ -119,7 +118,7 @@ pub trait Tool: Send + Sync {
     /// is cancelled.
     ///
     /// # Errors
-    /// Returns a [`ToolError`] if the arguments are unacceptable, the backend
+    /// Returns a [`ToolError`] if the tool rejects the arguments, the backend
     /// refuses, the transport fails, or the run is cancelled.
     async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
 }

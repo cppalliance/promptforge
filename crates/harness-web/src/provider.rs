@@ -7,8 +7,8 @@
 ///
 /// The Host registers one under the key
 /// [`SEARCH_PROVIDER`](crate::SEARCH_PROVIDER). The tool validates the
-/// model's arguments before it calls the provider. The tool sets no
-/// deadline, so the provider must limit how long each search takes.
+/// model's arguments before it calls the provider. The tool leaves the
+/// deadline to the provider, which must limit how long each search takes.
 #[async_trait::async_trait]
 pub trait SearchProvider: Send + Sync {
     /// Runs `query` and returns its results.
@@ -24,12 +24,12 @@ pub trait SearchProvider: Send + Sync {
 ///
 /// The search tool builds one only from arguments that pass its checks:
 ///
-/// - `query` is not blank and has at most 400 characters.
+/// - `query` holds more than whitespace and has at most 400 characters.
 /// - `count`, when given, is in `1..=20`.
 /// - `country` and `search_lang`, when given, have 1 to 128 characters.
 /// - Each domain list holds at most 20 hostnames.
 ///
-/// An empty domain list filters nothing.
+/// An empty domain list keeps every result.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchQuery {
     /// The search query.
@@ -52,9 +52,9 @@ pub struct SearchQuery {
 
 /// How recent the results of a [`SearchQuery`] must be.
 ///
-/// The search tool reads it from the model's arguments. It refuses an
-/// unknown token as an invalid argument, so the token never reaches the
-/// provider.
+/// The search tool reads it from the model's arguments. It refuses any
+/// token other than `pd`, `pw`, `pm`, or `py` as an invalid argument, so
+/// that token never reaches the provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -84,14 +84,14 @@ impl Freshness {
 
 /// The SafeSearch filtering level of a [`SearchQuery`].
 ///
-/// The search tool reads it from the model's arguments. It refuses an
-/// unknown token as an invalid argument, so the token never reaches the
-/// provider.
+/// The search tool reads it from the model's arguments. It refuses any
+/// token other than `off`, `moderate`, or `strict` as an invalid argument,
+/// so that token never reaches the provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum SafeSearch {
-    /// No filtering.
+    /// Filtering turned off.
     Off,
     /// Moderate filtering.
     Moderate,
@@ -116,9 +116,9 @@ impl SafeSearch {
 ///
 /// The search tool returns it to the model as compact JSON: an object with
 /// `query` and a `results` array. The fields appear in the same order as
-/// in the Gateway's search output. Like the Gateway, the JSON leaves out a
-/// result's `age` and `site_name` when absent and its `extra_snippets` when
-/// empty.
+/// in the Gateway's search output. Like the Gateway, the JSON includes a
+/// result's `age` and `site_name` only when present, and its
+/// `extra_snippets` only when it holds at least one snippet.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SearchResults {
     /// The query the provider ran.
@@ -155,10 +155,11 @@ pub struct SearchResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SearchErrorKind {
-    /// The request could not be sent or its reply could not be read. A
-    /// timeout counts as this kind.
+    /// Sending the request or reading its reply failed. A timeout counts as
+    /// this kind.
     Transport,
-    /// The backend answered with a failure or an unusable reply.
+    /// The backend answered with a failure or with a reply the provider
+    /// rejects.
     Backend,
 }
 
@@ -166,7 +167,7 @@ pub enum SearchErrorKind {
 ///
 /// It holds a kind, a message, and an optional cause. The search tool
 /// keeps the whole error as the source of the tool error it returns, so
-/// the cause is not lost.
+/// the cause stays in the error chain.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SearchError {
@@ -177,7 +178,7 @@ pub struct SearchError {
 }
 
 impl SearchError {
-    /// Builds an error with no cause.
+    /// Builds an error from a kind and a message alone.
     #[must_use]
     pub fn new(kind: SearchErrorKind, message: impl Into<String>) -> SearchError {
         SearchError {
