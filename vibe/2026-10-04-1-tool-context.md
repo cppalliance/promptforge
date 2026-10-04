@@ -342,7 +342,7 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 
 <step-2>
 
-### Step 2: Lend each tool a `ToolContext`
+### Step 2: Lend each tool a `ToolContext` [completed]
 
 - Component: Harness tool context
 - Placement: second. It reads `Effect::ToolCall::access` from Step 1, and it gives tools the supported way into the run's files before Step 3 removes the unsupported one.

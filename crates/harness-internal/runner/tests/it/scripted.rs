@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use harness_capabilities::{
     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
-    INPUT_BROKER, InputBroker, InputError, RunServices, Tool,
+    INPUT_BROKER, InputBroker, InputError, RunServices, Tool, ToolContext,
 };
 use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
 use promptforge::effect::Round;
@@ -251,7 +251,7 @@ impl Tool for HoldTool {
         json!({ "type": "object", "properties": {} })
     }
 
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, _cx: ToolContext<'_>, _args: Value) -> Result<ToolOutput, ToolError> {
         self.held.hold().await
     }
 }

@@ -16,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 use url::Url;
 
-use harness::capability::Tool;
+use harness::capability::{Tool, ToolContext};
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::config::{ConfigError, FetchConfig};
@@ -347,7 +347,7 @@ impl Tool for WebFetch {
         })
     }
 
-    async fn call(&self, args: serde_json::Value) -> CallResult {
+    async fn call(&self, _cx: ToolContext<'_>, args: serde_json::Value) -> CallResult {
         let url = args
             .get("url")
             .and_then(serde_json::Value::as_str)

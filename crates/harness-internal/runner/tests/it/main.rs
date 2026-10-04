@@ -15,3 +15,4 @@ mod prepare;
 mod recorder;
 mod scripted;
 mod support;
+mod tool_context;

@@ -8,7 +8,8 @@ use promptforge::tools::{
 };
 use serde_json::{Value, json};
 
-use super::Tool;
+use super::{Tool, ToolContext};
+use crate::test_support::TestContext;
 
 /// Describes every fixture implementation in `tools`, in order, the way
 /// `activation::assemble` does per tool when it builds a run's catalog.
@@ -52,7 +53,7 @@ impl Tool for FixtureTool {
         })
     }
 
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, _cx: ToolContext<'_>, _args: Value) -> Result<ToolOutput, ToolError> {
         Ok(ToolOutput::trusted(String::new()))
     }
 }
@@ -80,7 +81,7 @@ impl Tool for CatalogFixtureTool {
         json!({"type": "object"})
     }
 
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, _cx: ToolContext<'_>, _args: Value) -> Result<ToolOutput, ToolError> {
         Ok(ToolOutput::trusted(String::new()))
     }
 }
@@ -187,7 +188,7 @@ fn catalog_rejects_duplicate_tool_ids() {
 async fn dynamic_dispatch_reaches_the_implementation() {
     let tool: Arc<dyn Tool> = Arc::new(FixtureTool);
     let output = tool
-        .call(json!({}))
+        .call(TestContext::new().lend(), json!({}))
         .await
         .expect("the fixture call succeeds");
     assert_eq!(output.text(), "");

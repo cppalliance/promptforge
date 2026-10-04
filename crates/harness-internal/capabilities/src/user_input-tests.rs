@@ -9,6 +9,7 @@ use promptforge::tools::{OutputTrust, ToolErrorKind, ToolId};
 use serde_json::json;
 
 use super::{FALLBACK, INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
+use crate::test_support::TestContext;
 use crate::{Capability, HostServices, InputBroker, InputError, RunServices, Tool};
 
 /// A broker whose operator always types the same text.
@@ -126,7 +127,10 @@ fn the_ask_tool_sits_under_its_full_id_with_an_empty_schema_and_plain_output() {
 async fn the_ask_tool_returns_the_brokers_text_trusted_and_byte_exact() {
     let typed = "  two lines\nwith\ttabs and trailing space  ";
     let tool = ask_tool(&with_broker(Scripted(typed)));
-    let output = tool.call(json!({})).await.expect("the broker answers");
+    let output = tool
+        .call(TestContext::new().lend(), json!({}))
+        .await
+        .expect("the broker answers");
     assert_eq!(output.text(), typed, "no trimming or re-encoding");
     assert_eq!(output.trust(), OutputTrust::Trusted);
 }
@@ -134,7 +138,10 @@ async fn the_ask_tool_returns_the_brokers_text_trusted_and_byte_exact() {
 #[tokio::test]
 async fn an_operator_who_types_the_fallback_sentence_gets_it_back_as_their_text() {
     let tool = ask_tool(&with_broker(Scripted(FALLBACK)));
-    let output = tool.call(json!({})).await.expect("the broker answers");
+    let output = tool
+        .call(TestContext::new().lend(), json!({}))
+        .await
+        .expect("the broker answers");
     assert_eq!(output.text(), FALLBACK);
     assert_eq!(output.trust(), OutputTrust::Trusted);
 }
@@ -143,7 +150,7 @@ async fn an_operator_who_types_the_fallback_sentence_gets_it_back_as_their_text(
 async fn a_broker_failure_becomes_a_tool_error_with_the_brokers_message_and_cause() {
     let tool = ask_tool(&with_broker(Failing));
     let error = tool
-        .call(json!({}))
+        .call(TestContext::new().lend(), json!({}))
         .await
         .expect_err("a failed wait fails the call");
     assert_eq!(error.to_string(), "the operator's window closed");
@@ -164,7 +171,7 @@ async fn a_broker_failure_becomes_a_tool_error_with_the_brokers_message_and_caus
 async fn a_message_only_broker_failure_stays_message_only() {
     let tool = ask_tool(&with_broker(Withdrawn));
     let error = tool
-        .call(json!({}))
+        .call(TestContext::new().lend(), json!({}))
         .await
         .expect_err("a failed wait fails the call");
     assert_eq!(error.to_string(), "the host withdrew the wait");
@@ -176,7 +183,7 @@ async fn a_message_only_broker_failure_stays_message_only() {
 async fn without_a_broker_the_ask_tool_returns_the_fallback_sentence_trusted() {
     let tool = ask_tool(&headless());
     let output = tool
-        .call(json!({}))
+        .call(TestContext::new().lend(), json!({}))
         .await
         .expect("a host with nobody to ask still answers");
     assert_eq!(

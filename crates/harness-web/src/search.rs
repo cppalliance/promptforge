@@ -5,7 +5,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use harness::capability::Tool;
+use harness::capability::{Tool, ToolContext};
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::provider::{SearchErrorKind, SearchProvider};
@@ -130,7 +130,11 @@ impl Tool for WebSearch {
         })
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
         // Validate and normalize arguments before the provider spends a
         // round; only the validated query reaches it.
         let query = SearchRequest::from_args(args)?.into_query();

@@ -4,13 +4,16 @@
 //! The Engine's catalog is descriptors
 //! ([`ToolCatalog`](promptforge::tools::ToolCatalog)), and a
 //! `ToolCall` effect names a [`ToolId`]; the Harness resolves the id in
-//! its [`ToolTable`](crate::ToolTable) and calls the implementation here.
+//! its [`ToolTable`](crate::ToolTable) and calls the implementation here,
+//! lending it the call's [`ToolContext`].
 //! Some tools run locally in the Harness process (fetching and rendering a
 //! web page), others proxy through the gateway so a shared credential never
 //! leaves the server; both share this trait so the tool performer dispatches
 //! them uniformly.
 
+use promptforge::effect::ToolCallOrigin;
 use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 
 #[cfg(test)]
 #[path = "tool-tests.rs"]
@@ -23,13 +26,6 @@ mod tests;
 /// An implementation supplies a stable identity, a wire name for the model
 /// transport, a description for the model, a JSON Schema for its parameters,
 /// and an async [`call`](Tool::call).
-///
-/// # Compatibility policy
-///
-/// This trait is a stable extension point that downstream crates may
-/// implement. A **new required** method (one each implementation must
-/// define) would break those implementations, so every new method ships with
-/// a default implementation. Existing method signatures are stable.
 ///
 /// # Invariants
 ///
@@ -47,9 +43,11 @@ mod tests;
 ///   output that embeds data an attacker can influence is
 ///   [`ToolOutput::untrusted`].
 /// - [`call`](Tool::call) must not block while polled. The Harness polls it
-///   inside the run's own future, beside every other effect of the run. A
-///   call that does blocking or CPU-heavy work hands that work to the Host's
-///   own runtime.
+///   inside the run's own future, beside every other effect of the run.
+///   Operations through [`ToolContext::access`] run inside the call. On
+///   real directories they block the poll briefly, as `store.*` does. A
+///   call hands any other blocking or CPU-heavy work to the Host's own
+///   runtime, without the access.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Returns the tool's stable identity.
@@ -108,6 +106,11 @@ pub trait Tool: Send + Sync {
 
     /// Executes the tool with the given JSON arguments and returns its output.
     ///
+    /// `cx` lends the call a filesystem access, ordered with the calling
+    /// chain's work and rooted at `/`, and the call's origin. The borrow
+    /// ends when `call` returns or its future is dropped, so the tool
+    /// cannot keep the access past the call.
+    ///
     /// The returned [`ToolOutput`] carries its own
     /// [`OutputTrust`](promptforge::tools::OutputTrust), so an implementation
     /// cannot forget to set trust. An
@@ -120,5 +123,44 @@ pub trait Tool: Send + Sync {
     /// # Errors
     /// Returns a [`ToolError`] if the tool rejects the arguments, the backend
     /// refuses, the transport fails, or the run is cancelled.
-    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
+    async fn call(
+        &self,
+        cx: ToolContext<'_>,
+        args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError>;
+}
+
+/// What one tool call lends its tool: the call's filesystem access and
+/// its origin.
+///
+/// The access is the call's own identity, forked from the calling
+/// chain's, so the chain's earlier work happens before the tool's
+/// operations and the tool's operations before the chain's next step. It
+/// is rooted at `/`. The context borrows both for the call alone, so a
+/// tool cannot store the access, move it into a spawned task or thread,
+/// or keep it past the call.
+#[derive(Debug)]
+pub struct ToolContext<'a> {
+    access: &'a Access,
+    origin: &'a ToolCallOrigin,
+}
+
+impl<'a> ToolContext<'a> {
+    /// A context lending `access` and `origin` for one call.
+    #[must_use]
+    pub fn new(access: &'a Access, origin: &'a ToolCallOrigin) -> Self {
+        Self { access, origin }
+    }
+
+    /// The call's filesystem access, rooted at `/`.
+    #[must_use]
+    pub fn access(&self) -> &'a Access {
+        self.access
+    }
+
+    /// Who made the call and where.
+    #[must_use]
+    pub fn origin(&self) -> &'a ToolCallOrigin {
+        self.origin
+    }
 }

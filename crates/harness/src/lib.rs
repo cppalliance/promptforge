@@ -23,8 +23,8 @@ pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
 pub mod capability {
-    //! Capabilities, the registry a Host installs them in, and the services
-    //! they read.
+    //! Capabilities, the registry a Host installs them in, the services
+    //! they read, and the context each tool call lends its tool.
 
     pub use harness_capabilities::Capability;
     pub use harness_capabilities::CapabilityError;
@@ -42,8 +42,11 @@ pub mod capability {
     pub use harness_capabilities::ServiceId;
     pub use harness_capabilities::ServiceKey;
     pub use harness_capabilities::Tool;
+    pub use harness_capabilities::ToolContext;
     pub use harness_capabilities::UserInput;
     pub use promptforge::capabilities::CapabilityId;
+    pub use promptforge::effect::ToolCallOrigin;
+    pub use promptforge::effect::ToolCaller;
 }
 
 pub mod record {
@@ -62,9 +65,11 @@ pub mod record {
 }
 
 pub mod vfs {
-    //! The handle to the virtual filesystem a Host gives each run, and the
-    //! origin each file operation carries to say who asked for it.
+    //! The handle to the virtual filesystem a Host gives each run, the
+    //! access each tool call receives through its context, and the origin
+    //! each file operation carries to say who asked for it.
 
+    pub use promptforge::vfs::Access;
     pub use promptforge::vfs::Origin;
     pub use promptforge::vfs::VfsError;
     pub use promptforge::vfs::VfsRef;

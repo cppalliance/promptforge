@@ -31,6 +31,8 @@ mod capability;
 mod input;
 mod registry;
 mod service;
+#[cfg(test)]
+mod test_support;
 mod tool;
 mod user_input;
 
@@ -39,7 +41,7 @@ pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribut
 pub use input::{InputBroker, InputError};
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
-pub use tool::Tool;
+pub use tool::{Tool, ToolContext};
 pub use user_input::{INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 
 /// The capability identity vocabulary, re-exported from the Engine's types

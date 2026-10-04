@@ -110,7 +110,7 @@ use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::capability::{Capability, CapabilityError, Contribution, RunServices};
 use crate::input::{InputBroker, InputError};
 use crate::service::{ServiceId, ServiceKey};
-use crate::tool::Tool;
+use crate::tool::{Tool, ToolContext};
 
 #[cfg(test)]
 #[path = "user_input-tests.rs"]
@@ -246,7 +246,11 @@ impl Tool for Ask {
         serde_json::json!({ "type": "object", "properties": {} })
     }
 
-    async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
         let Some(broker) = &self.broker else {
             return Ok(ToolOutput::trusted(FALLBACK));
         };

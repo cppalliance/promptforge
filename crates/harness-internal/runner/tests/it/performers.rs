@@ -13,7 +13,9 @@ use harness_runner::recorder::{
     MemoryRecorder, Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
 use promptforge::cancel::CancelHandle;
+use promptforge::effect::ToolCallOrigin;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 use serde_json::{Value, json};
 
 use crate::support::{PendingTool, RaiseOnDrop, TIMED_MAIN, WAITS, run, run_with_child, unused};
@@ -104,6 +106,8 @@ impl ToolPerformer for DelayedTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let delay = self.delay;

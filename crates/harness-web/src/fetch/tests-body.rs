@@ -18,7 +18,7 @@ async fn oversized_html_is_refused() {
 
     let url = format!("http://localhost:{port}/large");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an oversized HTML body is a soft return")
         .text()
@@ -41,7 +41,7 @@ async fn declared_content_length_over_cap_is_refused_before_read() {
 
     let url = format!("http://localhost:{port}/liar");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a declared Content-Length over the cap is a soft return")
         .text()
@@ -64,7 +64,7 @@ async fn gzip_bomb_refused_on_decompressed_count() {
 
     let url = format!("http://localhost:{port}/gzip");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a gzip body that decompresses past the cap is a soft return")
         .text()
@@ -81,7 +81,10 @@ async fn text_over_max_chars_is_truncated_on_char_boundary() {
     let max_chars = 25usize;
     let url = format!("http://localhost:{port}/unicode");
     let out = tool
-        .call(serde_json::json!({ "url": url, "max_chars": max_chars }))
+        .call(
+            TestContext::new().lend(),
+            serde_json::json!({ "url": url, "max_chars": max_chars }),
+        )
         .await
         .expect("a unicode fetch through allow_exact must succeed")
         .text()
@@ -106,7 +109,10 @@ async fn per_call_max_chars_is_clamped_to_the_configured_ceiling() {
 
     let url = format!("http://localhost:{port}/plainbig");
     let out = tool
-        .call(serde_json::json!({ "url": url, "max_chars": 1_000_000 }))
+        .call(
+            TestContext::new().lend(),
+            serde_json::json!({ "url": url, "max_chars": 1_000_000 }),
+        )
         .await
         .expect("a plain fetch must succeed")
         .text()
@@ -133,7 +139,7 @@ async fn body_one_byte_under_cap_succeeds_untruncated() {
 
     let url = format!("http://localhost:{port}/");
     let out = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a body one byte under the cap must be accepted")
         .text()
@@ -151,7 +157,7 @@ async fn html_is_extracted_and_reports_readability() {
 
     let url = format!("http://localhost:{port}/");
     let out = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a loopback html fetch must succeed")
         .text()
@@ -169,7 +175,10 @@ async fn raw_forces_whole_page_render_keeping_table() {
 
     let url = format!("http://localhost:{port}/table");
     let out = tool
-        .call(serde_json::json!({ "url": url, "raw": true }))
+        .call(
+            TestContext::new().lend(),
+            serde_json::json!({ "url": url, "raw": true }),
+        )
         .await
         .expect("a raw table fetch must succeed")
         .text()
@@ -190,7 +199,7 @@ async fn json_is_returned_verbatim_as_plain() {
 
     let url = format!("http://localhost:{port}/json");
     let out = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a json fetch must succeed")
         .text()
@@ -212,7 +221,7 @@ async fn oversized_json_is_hard_refused_not_truncated() {
 
     let url = format!("http://localhost:{port}/jsonbig");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an oversized json body is a soft return")
         .text()
@@ -234,7 +243,7 @@ async fn flat_text_body_read_failure_is_soft() {
     // hard error: identical to the HTML and structured routes. A `text()`
     // return proves the outcome was soft untrusted output.
     let outcome = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a mid-stream flat-text failure must be a soft return, not a hard error");
     assert_eq!(
@@ -256,7 +265,7 @@ async fn unrecognized_charset_is_refused_naming_the_label() {
 
     let url = format!("http://localhost:{port}/badcharset");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an unrecognized charset is a soft return")
         .text()
@@ -272,7 +281,7 @@ async fn pdf_is_refused_naming_the_type() {
 
     let url = format!("http://localhost:{port}/pdf");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a pdf response is a soft return")
         .text()
@@ -288,7 +297,7 @@ async fn octet_stream_is_refused() {
 
     let url = format!("http://localhost:{port}/octet");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an octet-stream response is a soft return")
         .text()
@@ -304,7 +313,7 @@ async fn absent_content_type_is_refused() {
 
     let url = format!("http://localhost:{port}/notype");
     let result = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an absent content type is a soft return")
         .text()
@@ -320,7 +329,7 @@ async fn latin1_page_decodes_with_declared_charset() {
 
     let url = format!("http://localhost:{port}/latin1");
     let out = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("a latin-1 fetch must succeed")
         .text()
@@ -343,7 +352,7 @@ async fn plain_text_over_cap_is_truncated_not_refused() {
 
     let url = format!("http://localhost:{port}/plainbig");
     let out = tool
-        .call(serde_json::json!({ "url": url }))
+        .call(TestContext::new().lend(), serde_json::json!({ "url": url }))
         .await
         .expect("an oversized flat-text body must be truncated, not refused")
         .text()

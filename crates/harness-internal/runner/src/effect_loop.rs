@@ -338,12 +338,17 @@ impl Driver {
                 (Box::pin(round), false)
             }
             Effect::ToolCall {
-                tool, alias, args, ..
+                tool,
+                alias,
+                args,
+                origin,
+                access,
             } => {
                 let question = tool.to_string() == USER_INPUT_ASK_TOOL;
                 let performer = Arc::clone(&self.performers.tool);
-                let call =
-                    async move { EffectAnswer::ToolCall(performer.call(tool, alias, args).await) };
+                let call = async move {
+                    EffectAnswer::ToolCall(performer.call(tool, alias, access, origin, args).await)
+                };
                 (Box::pin(call), question)
             }
             Effect::Vfs { access, op } => return Some((access, op)),

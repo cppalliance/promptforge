@@ -28,11 +28,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use promptforge::effect::Round;
+use promptforge::effect::{Round, ToolCallOrigin};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 use serde_json::Value;
 
 #[path = "performers-tools.rs"]
@@ -78,15 +79,19 @@ pub trait InferenceBroker: Send + Sync {
 }
 
 /// Performs a `ToolCall` effect: resolves `tool` to an implementation and
-/// calls it with `args`.
+/// calls it with `args`, lending it the call's `access` and `origin`.
 pub trait ToolPerformer: Send + Sync {
     /// Calls the tool. `alias` is the prompt-local name the call used,
     /// for the performer's own diagnostics; `tool` is the identity it
-    /// resolves.
+    /// resolves. `access` is the call's own filesystem access and
+    /// `origin` says who made the call. The returned future owns both
+    /// until it finishes, and drops them when it finishes or is dropped.
     fn call(
         &self,
         tool: ToolId,
         alias: String,
+        access: Arc<Access>,
+        origin: ToolCallOrigin,
         args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }

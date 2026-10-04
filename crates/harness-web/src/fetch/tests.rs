@@ -29,6 +29,7 @@ use tokio::runtime::Handle;
 use super::{FetchClient, WebFetch};
 use crate::config::{FetchConfig, FetchConfigBuilder};
 use crate::resolver::{Lookup, LookupFuture};
+use crate::test_support::TestContext;
 
 /// An article page long enough for readability extraction to fire.
 const ARTICLE_HTML: &str = r"
@@ -434,7 +435,8 @@ async fn a_fetch_whose_call_is_dropped_aborts_its_spawned_task() {
     let tool = loopback_tool(port);
     let url = format!("http://localhost:{port}/hold");
 
-    let call = tool.call(serde_json::json!({ "url": url }));
+    let context = TestContext::new();
+    let call = tool.call(context.lend(), serde_json::json!({ "url": url }));
     tokio::select! {
         result = call => panic!("the held fetch must not finish: {result:?}"),
         requested = requested_rx => requested.expect("the server saw the request"),

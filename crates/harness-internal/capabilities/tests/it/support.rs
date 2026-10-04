@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use harness_capabilities::{
     Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    RunServices, Tool, activate,
+    RunServices, Tool, ToolContext, activate,
 };
 use promptforge::Prompt;
 use promptforge::Run;
@@ -187,7 +187,11 @@ impl Tool for FixtureTool {
         serde_json::json!({"type": "object", "properties": {}})
     }
 
-    async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
         Ok(ToolOutput::trusted(String::new()))
     }
 }
@@ -221,7 +225,11 @@ impl Tool for BadWireTool {
         serde_json::json!({"type": "object", "properties": {}})
     }
 
-    async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
         Ok(ToolOutput::trusted(String::new()))
     }
 }

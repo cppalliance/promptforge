@@ -1,5 +1,6 @@
 //! The tool performer: resolves a `ToolCall` effect's id in the run's
-//! activated [`ToolTable`] and calls the implementation.
+//! activated [`ToolTable`] and calls the implementation, lending it the
+//! effect's access and origin through a [`ToolContext`].
 //!
 //! The Engine binds tool slots against descriptors and issues a call as a
 //! [`ToolId`]; the implementations sit on the Harness side, in the table
@@ -9,9 +10,12 @@
 //! reports it at the author's call site rather than stalling.
 
 use std::fmt;
+use std::sync::Arc;
 
-use harness_capabilities::ToolTable;
+use harness_capabilities::{ToolContext, ToolTable};
+use promptforge::effect::ToolCallOrigin;
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 use serde_json::Value;
 
 use super::{BoxFuture, ToolPerformer};
@@ -44,6 +48,8 @@ impl ToolPerformer for ActivatedTools {
         &self,
         tool: ToolId,
         alias: String,
+        access: Arc<Access>,
+        origin: ToolCallOrigin,
         args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let resolved = self.table.get(&tool);
@@ -59,7 +65,9 @@ impl ToolPerformer for ActivatedTools {
                 ))
                 .with_kind(ToolErrorKind::Other));
             };
-            implementation.call(args).await
+            implementation
+                .call(ToolContext::new(&access, &origin), args)
+                .await
         })
     }
 }

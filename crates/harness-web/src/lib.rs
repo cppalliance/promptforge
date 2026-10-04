@@ -57,6 +57,8 @@ mod redirect;
 mod resolver;
 mod response;
 mod search;
+#[cfg(test)]
+mod test_support;
 mod url_policy;
 mod web;
 

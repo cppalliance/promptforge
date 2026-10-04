@@ -9,14 +9,15 @@ use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, 
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
-use promptforge::effect::Round;
+use promptforge::effect::{Round, ToolCallOrigin};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
 use promptforge::vfs::{
-    AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+    Access, AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
+    VfsRef,
 };
 use promptforge::{Environment, Prompt, Run, RunContext};
 use serde_json::{Value, json};
@@ -122,6 +123,8 @@ impl ToolPerformer for Unused {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         unreachable!("this test issues no ToolCall effect")
@@ -153,6 +156,8 @@ impl ToolPerformer for TextTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let text = self.0;
@@ -168,6 +173,8 @@ impl ToolPerformer for PendingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::pending())
@@ -183,6 +190,8 @@ impl ToolPerformer for PanickingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::poll_fn(
@@ -205,6 +214,8 @@ impl ToolPerformer for ClosingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let recorder = Arc::clone(&self.recorder);
@@ -338,6 +349,8 @@ impl ToolPerformer for GatedTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let gate = Arc::clone(&self.gate);

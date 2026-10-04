@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_capabilities::{
     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
-    RunServices, Tool, ToolTable,
+    RunServices, Tool, ToolContext, ToolTable,
 };
 use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
@@ -27,8 +27,10 @@ use harness_runner::prepare::{PrepareError, Prepared, Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
 use promptforge::RunErrorKind;
 use promptforge::cancel::CancelHandle;
+use promptforge::effect::{ToolCallOrigin, ToolCaller};
 use promptforge::event::Event;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::{Origin, VfsRef};
 
 use crate::support::Unused;
 
@@ -87,7 +89,10 @@ fn recorded_parse_events(recorder: &MemoryRecorder, run_id: RunId) -> Vec<Event>
 
 /// The preparation services over `recorder` and `registry`, with no Host
 /// services and the performers no test here reaches.
-fn services(recorder: &Arc<MemoryRecorder>, registry: Option<Arc<CapabilityRegistry>>) -> Services {
+pub(crate) fn services(
+    recorder: &Arc<MemoryRecorder>,
+    registry: Option<Arc<CapabilityRegistry>>,
+) -> Services {
     Services {
         registry,
         services: HostServices::new(),
@@ -130,7 +135,11 @@ impl Tool for Echo {
         serde_json::json!({"type": "object", "properties": {"value": {"type": "string"}}})
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
         let value = args
             .get("value")
             .and_then(serde_json::Value::as_str)
@@ -361,10 +370,20 @@ async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
 #[tokio::test]
 async fn the_tool_performer_refuses_an_id_the_table_does_not_hold() {
     let performer = ActivatedTools::new(ToolTable::new());
+    let access = VfsRef::default()
+        .acquire(Origin::new("prepare test"))
+        .unwrap();
+    let origin = ToolCallOrigin {
+        execution: "prepare-test".to_owned(),
+        section: "Only".to_owned(),
+        caller: ToolCaller::Script,
+    };
     let error = performer
         .call(
             ToolId::parse("tests/tools/echo").unwrap(),
             "echo".to_owned(),
+            Arc::new(access),
+            origin,
             serde_json::json!({}),
         )
         .await
