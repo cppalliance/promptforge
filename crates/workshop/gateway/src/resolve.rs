@@ -18,13 +18,26 @@ use workshop_support::GatewayConfig;
 
 /// The gateway endpoint state construction connects to, and how it was
 /// found.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResolvedGateway {
     base_url: String,
     api_key: String,
     identity: Option<ValidatedConnection>,
     source: GatewaySource,
     stale: Option<StaleReason>,
+}
+
+// Manual so the bearer key is never written to logs.
+impl std::fmt::Debug for ResolvedGateway {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedGateway")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .field("identity", &self.identity)
+            .field("source", &self.source)
+            .field("stale", &self.stale)
+            .finish()
+    }
 }
 
 /// Which source won gateway endpoint resolution.

@@ -11,15 +11,12 @@
 //!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
 //!   `promptforge-*` crate. `cargo test -p build-xtask` enforces the product
 //!   and container boundaries.
-//! - The server stores each value verbatim and never interprets it
-//!   beyond the allow-listed key and the size cap; the SPA owns every
-//!   value's schema.
+//! - The SPA owns every value's schema.
 //! - One writer: every put updates the in-memory map under one mutex and
 //!   rewrites the whole file through the shared atomic-write helper, so
 //!   a crash leaves the old document or the new, never a truncation.
-//! - A missing, unreadable, or corrupt file reads as "no state yet" -
-//!   logged and tolerated; a refused put is a value returned to the
-//!   caller and writes nothing.
+//! - A missing, unreadable, or corrupt file reads as "no state yet"; a
+//!   refused put is a value returned to the caller and writes nothing.
 //! - The crate maps its own [`UserStateError`] to the wire envelope at
 //!   its route boundary; no server error type appears here.
 

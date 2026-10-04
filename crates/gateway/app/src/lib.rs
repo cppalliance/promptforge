@@ -75,9 +75,8 @@
 //! - The listener binds and reports readiness before any model download
 //!   or model process starts; slow provisioning runs afterward as a
 //!   command on the gateway's queue.
-//! - Vendor credentials never leave this process. Clients reach
-//!   credentialed providers only through the relays here, and no route
-//!   hands a vendor key to a browser or to Lua.
+//! - Clients reach credentialed providers only through the relays here,
+//!   and no route hands a vendor key to Lua.
 //! - The local model set is fixed for the process lifetime. Profile and
 //!   local-model changes persist and report `restart_required`, and a
 //!   remote routing change swaps the routing table atomically without

@@ -22,8 +22,8 @@
 //!   or time; opening the link still confines.
 //! - The in-memory grant set is the confinement source of truth; an
 //!   optional workspace file (a single Turso database) mirrors it between
-//!   sessions and is never consulted on a request path. A persist that
-//!   fails is logged degradation; the in-memory state stands.
+//!   sessions. A persist that fails is logged degradation; the in-memory
+//!   state stands.
 //! - The crate maps its own [`WorkspaceError`] to the wire envelope at
 //!   its route boundary; no server error type appears here.
 

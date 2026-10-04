@@ -2,7 +2,7 @@
 //!
 //! ## Invariants
 //!
-//! - Tier: tooling; depends on no workspace crates. The tidy-style
+//! - Tier: tooling. The tidy-style
 //!   architecture checks run as tests (`cargo test -p build-xtask`);
 //!   `cargo xtask tidy` prints the same report on demand.
 //! - `cargo xtask api` reads rustdoc JSON, so it runs only on the nightly

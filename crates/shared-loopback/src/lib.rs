@@ -6,8 +6,7 @@
 //! DNS rebinding. The config-ui crate wraps its SPA asset routes with the
 //! peer check (re-exporting it as its own public surface), and the gateway
 //! applies the peer check to its admin config endpoints and the host check
-//! to its whole loopback-bound surface, so each check exists in exactly one
-//! place. The crate is deliberately tiny -
+//! to its whole loopback-bound surface. The crate is deliberately tiny -
 //! axum is its only dependency - because the gateway needs the wall in
 //! every build, including headless builds that never compile the
 //! config-ui crate and its embedded-asset machinery.
