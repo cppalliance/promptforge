@@ -47,6 +47,9 @@ confidence-threshold = 0.8
 # visible without hard-failing a large native-dependency graph.
 multiple-versions = "warn"
 wildcards = "warn"
+# Workspace crates are all `publish = false` and reference each other by path,
+# which cargo-deny otherwise reports as wildcard dependencies.
+allow-wildcard-paths = true
 
 # JSON that reaches a recorder or a replay comparison must round-trip with
 # canonical (sorted) object keys, which `preserve_order` would replace with

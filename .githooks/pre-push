@@ -10,7 +10,8 @@ CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --exclude workshop --exclude 
 
 if command -v cargo-deny >/dev/null 2>&1; then
     echo "==> Running cargo deny check..."
-    cargo deny check
+    # Errors only; CI prints the full warning report.
+    cargo deny --log-level error check
 fi
 
 echo "==> Pre-push checks passed successfully."
