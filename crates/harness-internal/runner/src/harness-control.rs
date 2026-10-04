@@ -10,13 +10,16 @@ use std::task::{Context, Poll};
 use futures_util::task::AtomicWaker;
 use promptforge::cancel::CancelHandle;
 
-/// Steers one run from outside its future: [`stop_round`](Self::stop_round)
-/// drops the work in flight and leaves the run going, and
-/// [`cancel`](Self::cancel) ends the run.
+/// A handle that drops a run's in-flight round or cancels the run, from
+/// outside the future that drives it.
 ///
-/// Cheap to clone; every clone steers the same run. Take one from
-/// [`Harness::control`](crate::Harness::control) before calling
-/// [`Harness::run`](crate::Harness::run), which consumes the Harness.
+/// [`stop_round`](Self::stop_round) drops the work in flight, and the run
+/// goes on. [`cancel`](Self::cancel) ends the run.
+///
+/// Cloning is cheap, and every clone controls the same run. Take one from
+/// [`Harness::control`](crate::Harness::control) before you call
+/// [`Harness::run`](crate::Harness::run), because `run` consumes the
+/// Harness.
 #[derive(Clone)]
 pub struct RunControl {
     cancel: CancelHandle,
@@ -32,23 +35,30 @@ impl RunControl {
         }
     }
 
-    /// Drops every effect in flight except questions to the operator, and
-    /// answers each `Dropped`. The run's cancel flag stays clear, so the
-    /// run goes on: a `pcall` around the dropped call catches the
-    /// cancelled error, and an uncaught one ends the run cancelled. A stop
-    /// reaches only what is in flight when the run's loop sees it, which
-    /// it does as it waits for an answer and before it starts a step's
-    /// effects, so a stop raised while nothing it drops is in flight
-    /// changes nothing, and no stop reaches an effect started after the
-    /// loop saw it.
+    /// Drops the effects in flight, except questions to the operator, and
+    /// lets the run go on.
+    ///
+    /// A question to the operator is a call to the
+    /// `promptforge/user-input/ask` tool. Every other effect in flight is
+    /// aborted and answered `Dropped`. The run's cancel flag stays clear,
+    /// so the run continues. A `pcall` around a dropped call catches its
+    /// cancelled error. An uncaught one ends the run cancelled.
+    ///
+    /// A stop reaches only the effects in flight when the loop that drives
+    /// the run sees it. The loop looks for a stop while it waits for an
+    /// answer and before it starts a step's effects. A stop raised while
+    /// nothing it can drop is in flight changes nothing. A stop never
+    /// reaches an effect that starts after the loop saw it.
     pub fn stop_round(&self) {
         self.stop.raise();
     }
 
-    /// Cancels the run: every effect in flight, questions to the operator
-    /// included, is answered `Dropped`, and the run ends cancelled. A
-    /// cancel before the run begins ends it before it reaches the
-    /// recorder. Idempotent.
+    /// Cancels the run.
+    ///
+    /// Every effect in flight, questions to the operator included, is
+    /// answered `Dropped`, and the run ends cancelled. A cancel raised
+    /// before the run begins ends the run before it reaches the recorder.
+    /// Calling `cancel` again has no further effect.
     pub fn cancel(&self) {
         self.cancel.cancel();
     }

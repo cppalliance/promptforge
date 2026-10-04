@@ -14,10 +14,11 @@ use reqwest::header::HeaderValue;
 
 use super::{HostAddressException, MAX_REDIRECTS_CEILING, MaxRedirects, UserAgent, canonical_host};
 
-/// An opaque configuration error.
+/// The error reported when a fetch configuration fails validation or its HTTP
+/// client cannot be built.
 ///
-/// Its representation is private and free to change. The [`Display`] rendering
-/// names the field and the constraint that was violated.
+/// When a field fails validation, the [`Display`] message names the field and
+/// the constraint it violated.
 ///
 /// [`Display`]: std::fmt::Display
 #[derive(Debug, thiserror::Error)]

@@ -4,21 +4,29 @@
 use promptforge::model::{CompletionOptions, Message, ToolSchema};
 use serde_json::Value;
 
-/// Builds the completion request body.
+/// Builds the JSON body of a streaming chat-completions request.
 ///
-/// Every request streams: `stream` is always true and
-/// `stream_options.include_usage` asks the backend for the final
-/// empty-choices usage chunk, so token accounting survives the SSE path.
-/// When `tools` is `Some` and non-empty, each schema is wrapped into the
-/// `OpenAI` function shape and sent as the request's `tools` array (with
-/// `tool_choice` set to `auto`); passing `None` or an empty slice omits the
-/// `tools` field, preserving the plain chat-completions behavior.
-/// `options.model()` names the model on the wire; optional `temperature`,
-/// `max_tokens`, and `thinking` extend the request when present.
+/// The body names the model given by `options.model()` and carries
+/// `messages` as given. Every request streams, so `stream` is always true.
+/// The body also sets `stream_options.include_usage`. That asks the backend
+/// to send token usage in a final chunk with an empty `choices` list, so
+/// token counts still arrive when the reply streams as server-sent events.
 ///
-/// A transport performing a `Chat` effect passes the effect's messages,
-/// tools, and options here, sends the result as the JSON body of its
-/// chat-completions request, and later hands the same value to
+/// When `tools` is `Some` and non-empty, the body sends each schema in its
+/// `tools` array as an `OpenAI` function tool. Each entry is an object with
+/// `type` set to `"function"` and a `function` object that holds the tool's
+/// `name`, `description`, and `parameters`. The body then also sets
+/// `tool_choice` to `"auto"`. When `tools` is `None` or an empty slice, the
+/// body has neither field and the request is a plain chat completion.
+///
+/// The optional settings in `options` extend the body only when set.
+/// `temperature` and `max_tokens` become fields of the same name. `thinking`
+/// becomes `chat_template_kwargs.enable_thinking`.
+///
+/// A transport that performs a `Chat` effect must build its request body
+/// here. It passes the effect's messages, tools, and options, sends the
+/// result as the JSON body of its chat-completions request, and later hands
+/// the same value to
 /// [`read_completion_stream`](crate::read_completion_stream). Building the
 /// body anywhere else would let two transports send different requests
 /// for one effect.

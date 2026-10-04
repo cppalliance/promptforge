@@ -103,19 +103,21 @@ struct GatewaySearchResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GatewaySearchErrorKind {
-    /// The request could not be sent or its reply could not be read,
-    /// timeouts included.
+    /// The request could not be sent or a successful reply could not be
+    /// read, timeouts included.
     Transport,
     /// The Gateway answered with a failure status or an unusable body.
     Backend,
 }
 
-/// Why a Gateway web search failed: its kind, a message, and the cause when
-/// there is one.
+/// An error from a failed Gateway web search, with its kind, a message, and
+/// the underlying cause when there is one.
 ///
-/// The message names what failed with no tool prefix, such as `request
-/// failed` or `backend returned 502: ...`. A Gateway error body in it is
-/// bounded and control-escaped first. It never holds the bearer key.
+/// The message says what failed, such as `request failed` or
+/// `backend returned 502: ...`, and does not start with a tool name. When
+/// the message includes the Gateway's error body, that body is truncated to
+/// a size limit and its control characters are escaped. The message never
+/// contains the bearer key.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct GatewaySearchError {
@@ -154,12 +156,14 @@ impl GatewaySearchError {
 }
 
 /// The [`SearchProvider`] a Host supplies to search the web through the
-/// Gateway, bound to one Gateway API root and its shared bearer key.
+/// Gateway.
 ///
-/// Each search POSTs `{api_root}/tools/web_search` under a 30-second
-/// deadline that covers the whole round, body included. The search
-/// vendor's credential stays in the Gateway; this provider presents only
-/// the Gateway's key.
+/// It sends every search to one Gateway API root with the Gateway's shared
+/// bearer key. Each search is one `POST {api_root}/tools/web_search`
+/// request under a 30-second deadline. The deadline covers the whole
+/// exchange, including reading the reply body. The search vendor's
+/// credential stays in the Gateway. This provider sends only the Gateway's
+/// key.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewaySearch {
@@ -264,15 +268,15 @@ impl GatewaySearch {
 
 #[async_trait::async_trait]
 impl SearchProvider for GatewaySearch {
-    /// Runs `query` as one Gateway web search and returns the reply's rows
-    /// field by field.
+    /// Runs `query` as one Gateway web search and returns the Gateway's
+    /// results with every field copied unchanged.
     ///
     /// # Errors
     /// Returns a [`SearchError`] with the message of the
     /// [`GatewaySearchError`] it keeps as its source. Its kind is:
     /// - `Transport` when the request cannot be sent (`request failed`) or
-    ///   the reply cannot be read (`reading response failed`), including
-    ///   when the deadline passes;
+    ///   a successful reply cannot be read (`reading response failed`),
+    ///   including when the deadline passes;
     /// - `Backend` when the Gateway answers a failure status
     ///   (`backend returned {code}: {body}`, or `backend returned {code},
     ///   and its error body could not be read`), or a success body that is

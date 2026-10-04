@@ -1,7 +1,10 @@
-//! The Harness a Host builds for each run. [`Harness::new`] takes the
+//! The Harness, which runs one prompt for a Host and records the run.
+//!
+//! A Host builds one Harness for each run. [`Harness::new`] takes the
 //! Host's recorder, inference broker, timer, capability registry, and
-//! services, [`Harness::run`] runs one prompt to its [`RunReport`], and the
-//! Host steers that run through its [`RunControl`].
+//! services. [`Harness::run`] runs the prompt to its end and returns its
+//! [`RunReport`]. While the run goes on, the Host steers it through the
+//! [`RunControl`] it took from `Harness::control` before the run started.
 //!
 //! The crate's `run-prompt` example runs one prompt from start to end.
 
@@ -44,8 +47,8 @@ pub mod capability {
 }
 
 pub mod record {
-    //! The recorder a run writes every effect, answer, and event to, and an
-    //! in-memory recorder.
+    //! The recorder that receives every effect, answer, and event of a run,
+    //! and an in-memory recorder.
 
     pub use harness_runner::recorder::MemoryRecorder;
     pub use harness_runner::recorder::Record;
@@ -59,8 +62,8 @@ pub mod record {
 }
 
 pub mod vfs {
-    //! The file handle a Host hands a run, and the origin each operation
-    //! carries.
+    //! The handle to the virtual filesystem a Host gives each run, and the
+    //! origin each file operation carries to say who asked for it.
 
     pub use promptforge::vfs::Origin;
     pub use promptforge::vfs::VfsError;

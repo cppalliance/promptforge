@@ -18,23 +18,35 @@ use crate::fetch::FetchClient;
 use crate::provider::SearchProvider;
 use crate::search::WebSearch;
 
-/// The Host's search provider, which every `promptforge/web/search` call
-/// runs through.
+/// The service key for the Host's search provider.
+///
+/// The key's id is `promptforge/search-provider`. Every
+/// `promptforge/web/search` call runs through the provider registered
+/// under this key.
 pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
     ServiceKey::new("promptforge/search-provider");
 
-/// The Host's tokio runtime, which every `promptforge/web/fetch` call is
-/// spawned onto.
+/// The service key for the Host's tokio runtime handle.
+///
+/// The key's id is `promptforge/tokio-runtime`. The fetch tool spawns
+/// every `promptforge/web/fetch` call onto the runtime registered under
+/// this key.
 pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio-runtime");
 
-/// The `promptforge/web` capability.
+/// A capability that gives a run web access: one tool that fetches a page
+/// and one that searches the web.
 ///
-/// Contributes `promptforge/web/fetch` (a hardened page fetch rendering to
-/// markdown) and `promptforge/web/search` (a search through the Host's
-/// [`SearchProvider`]). It needs both [`SEARCH_PROVIDER`] and
-/// [`TOKIO_RUNTIME`]: a run that requires the capability is refused when
-/// either is missing, and a run that declares it optional gets no web
-/// tools.
+/// Its id is `promptforge/web`. It gives each run two tools.
+/// `promptforge/web/fetch` fetches a URL through a hardened HTTP client
+/// and returns its content as text, with an HTML page rendered as
+/// markdown. `promptforge/web/search` runs a search through the Host's
+/// [`SearchProvider`].
+///
+/// It needs two services: the search provider registered under the key
+/// [`SEARCH_PROVIDER`] and the tokio runtime handle registered under the
+/// key [`TOKIO_RUNTIME`]. A run that requires the capability is refused
+/// when either service is missing. A run that declares it optional gets
+/// no web tools.
 #[derive(Debug, Clone)]
 pub struct Web {
     /// The stable identity, `promptforge/web`.
@@ -44,13 +56,16 @@ pub struct Web {
 }
 
 impl Web {
-    /// Builds the capability over the default fetch policy. The fetch
-    /// client is built here, once, and every run's fetch tool shares it.
+    /// Builds the capability with the default fetch policy.
+    ///
+    /// The HTTP client is built here, once, and every run's fetch tool
+    /// shares it.
     ///
     /// # Panics
-    /// Panics only if the literal capability id `promptforge/web` fails to
-    /// parse, or the HTTP client cannot be built for the default policy
-    /// (the TLS backend failed to initialize): defects, not caller errors.
+    /// Panics only if the built-in capability id `promptforge/web` fails to
+    /// parse, or if the HTTP client cannot be built for the default policy
+    /// because the TLS backend failed to initialize. Either would be a
+    /// defect, not a caller error.
     #[must_use]
     pub fn new() -> Web {
         #[expect(

@@ -1,42 +1,49 @@
-//! harness-web - the `promptforge/web` capability a Host registers: the
-//! `promptforge/web/fetch` tool, which fetches a URL and returns its
-//! content as text (markdown for an HTML page), and the
-//! `promptforge/web/search` tool, which runs a search through the Host's
-//! [`SearchProvider`].
+//! Web access for prompts: a capability that gives a run two tools, one
+//! that fetches a page and one that searches the web.
 //!
-//! A research prompt wants both tools or neither, so the capability
-//! activates as one frontmatter line (`capabilities: [promptforge/web]`).
-//! The Host registers [`Web`] in its capability registry and provides two
-//! services beside it: its [`SearchProvider`] under [`SEARCH_PROVIDER`],
-//! and the tokio runtime handle every fetch is spawned onto under
-//! [`TOKIO_RUNTIME`]. A run without either gets no web tools.
+//! A Host registers [`Web`] in its capability registry. A prompt turns it
+//! on with one frontmatter line, `capabilities: [promptforge/web]`. The
+//! run then gets both tools: `promptforge/web/fetch`, which fetches a URL
+//! and returns its content as text, and `promptforge/web/search`, which
+//! runs a search through the Host's [`SearchProvider`]. A prompt gets both
+//! tools or neither.
 //!
-//! The fetch tool is security-critical. A model supplies the URL, so the
-//! tool is the SSRF boundary between an untrusted argument and the
-//! network. Its whole configurable surface is one validated policy entry
-//! point ([`FetchConfig`] and [`FetchConfigBuilder`]) and one opaque
-//! configuration error ([`ConfigError`]); the address, resolver, redirect,
-//! URL-policy, and error machinery are crate-private. It performs a GET,
-//! routes the response on its `Content-Type`, and refuses a type it
-//! cannot render. An HTML page has its main article content extracted
-//! with [`readabilityrs`] and rendered to markdown; a page with no article
-//! to extract falls back to a whole-page HTML-to-markdown conversion with
-//! [`htmd`]. A non-HTML text body (JSON, XML, plain text) is returned
-//! decoded, with no extraction.
+//! The Host also provides two services beside the capability. Its
+//! [`SearchProvider`] is registered under the key [`SEARCH_PROVIDER`]. The
+//! tokio runtime handle that every fetch is spawned onto is registered
+//! under the key [`TOKIO_RUNTIME`]. A run missing either service gets no
+//! web tools.
 //!
-//! The search tool validates the model's arguments into a [`SearchQuery`],
-//! hands it to the provider, and returns the [`SearchResults`] as
-//! untrusted compact JSON in the Gateway's shape. The provider owns the
+//! The fetch tool is security-critical. The model supplies the URL, so the
+//! tool is the server-side request forgery (SSRF) boundary between an
+//! untrusted argument and the network. A Host can replace the default
+//! fetch policy with a [`FetchConfig`] built by [`FetchConfigBuilder`].
+//! A configuration problem is reported as a [`ConfigError`].
+//!
+//! The fetch tool sends a GET request and chooses how to render the
+//! response from its `Content-Type`. It refuses a type it cannot render.
+//! For an HTML page, it extracts the main article with `readabilityrs` and
+//! renders it to markdown. A page with no article to extract is converted
+//! whole to markdown with `htmd` instead. Any other text body, such as
+//! JSON, XML, or plain text, is decoded and returned with no extraction.
+//!
+//! The search tool validates the model's arguments into a [`SearchQuery`]
+//! and hands it to the provider. It returns the provider's
+//! [`SearchResults`] as compact JSON, marked untrusted. The JSON matches
+//! the Gateway's search output: an object with the `query` and a `results`
+//! array. Each result has a `title`, `url`, and `description`, plus `age`,
+//! `site_name`, and `extra_snippets` when present. The provider owns the
 //! transport and its deadline, so a search vendor's credential stays
 //! wherever the provider keeps it.
 //!
 //! ## Invariants
 //!
-//! - Every model- or tool-selected URL and every resolved address is
-//!   revalidated on each redirect hop; a non-global address is denied
-//!   unless the fetch policy grants an exact host-and-address exception.
-//! - No fetch includes an ambient identity on any hop: the client has
-//!   no proxy, no cookie store, no automatic `Referer`, and no default
+//! - Every URL selected by the model or a tool, and every resolved
+//!   address, is validated again on each redirect hop. A non-global
+//!   address is denied unless the fetch policy grants an exact
+//!   host-and-address exception.
+//! - No fetch includes an ambient identity on any hop. The client has no
+//!   proxy, no cookie store, no automatic `Referer` header, and no default
 //!   credentials.
 //! - Every fetch runs on the Host's runtime handle, and dropping the call
 //!   aborts it.

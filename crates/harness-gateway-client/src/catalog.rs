@@ -151,16 +151,19 @@ async fn get_authed(
     Err(classify_http_failure(status.as_u16(), &body))
 }
 
-/// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
+/// Fetches a [`ModelCatalog`] from the Gateway's `/models` endpoint.
 ///
-/// `base_url` is the OpenAI-compatible API root (for example
-/// `http://127.0.0.1:8081/v1`).
+/// `base_url` is the root of the Gateway's OpenAI-compatible API, for
+/// example `http://127.0.0.1:8081/v1`. The request sends `token` as a
+/// bearer token.
 ///
 /// # Errors
-/// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
-/// `Transport` or `Timeout` on transport failure, the kind
-/// [`classify_http_failure`] reads from a non-success status, and
-/// `MalformedResponse` when the body is not a model list.
+/// Returns a [`CompletionError`]. Its [`kind`](CompletionError::kind) is:
+///
+/// - `Transport` or `Timeout` when the HTTP request or a response read fails;
+/// - the kind [`classify_http_failure`] picks for the response when the
+///   Gateway returns a non-success status;
+/// - `MalformedResponse` when the body is not a valid model list.
 pub async fn fetch_model_catalog(
     base_url: &str,
     token: &str,

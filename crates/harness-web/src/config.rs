@@ -118,12 +118,15 @@ fn canonical_host(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
-/// Security policy for the `web_fetch` tool.
+/// The security policy for the web fetch tool, `promptforge/web/fetch`.
 ///
-/// A `FetchConfig` is immutable and validated: every field is a private newtype
-/// that a constructor already checked, so no field can hold an invalid state.
-/// Take the built-in safe policy with [`FetchConfig::default`], or customize one
-/// through [`FetchConfig::builder`].
+/// The policy sets which URLs, ports, and addresses a fetch may reach and how
+/// many redirects it may follow. It also sets the size caps on the response and
+/// the returned text, the timeouts, and the `User-Agent` header.
+///
+/// A `FetchConfig` is always valid and never changes once built. Use
+/// [`FetchConfig::default`] for the built-in safe policy, or start from
+/// [`FetchConfig::builder`] to customize one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchConfig {
     /// Whether to permit `http://` URLs; `https://` is always allowed.
@@ -242,11 +245,12 @@ impl Default for FetchConfig {
     }
 }
 
-/// A fallible builder for [`FetchConfig`].
+/// A builder for a custom [`FetchConfig`].
 ///
-/// Every setter returns `self` for chaining and records a raw value; validation
-/// happens once in [`FetchConfigBuilder::build`], which reports the first
-/// offending field as a [`ConfigError`].
+/// The builder starts from the built-in default policy. Each setter stores its
+/// value unchecked and returns the builder, so calls can be chained.
+/// [`FetchConfigBuilder::build`] checks every value at once and reports the
+/// first invalid one as a [`ConfigError`].
 #[derive(Debug, Clone)]
 pub struct FetchConfigBuilder {
     allow_http: bool,
@@ -297,18 +301,22 @@ impl FetchConfigBuilder {
         self
     }
 
-    /// Sets whether a bare IP-literal host is permitted.
+    /// Sets whether a URL may give its host as a bare IP address.
     ///
-    /// This grants literal *syntax* only: a permitted literal is still
-    /// classified against the address policy, so a loopback, private,
-    /// link-local, or otherwise non-global literal remains blocked.
+    /// This lifts only the syntax rule. The address itself is still checked
+    /// against the blocked ranges. A loopback, private, link-local, or other
+    /// non-global address stays blocked unless an exact host-and-address
+    /// exception allows it.
     #[must_use]
     pub fn allow_ip_literals(mut self, yes: bool) -> FetchConfigBuilder {
         self.allow_ip_literals = yes;
         self
     }
 
-    /// Adds a denied CIDR range, parsed from text by [`build`].
+    /// Adds a CIDR range to block, on top of the built-in blocked ranges.
+    ///
+    /// The text is parsed by [`build`], which reports a range that does not
+    /// parse.
     ///
     /// [`build`]: FetchConfigBuilder::build
     #[must_use]
@@ -317,10 +325,13 @@ impl FetchConfigBuilder {
         self
     }
 
-    /// Adds an exact host-plus-address escape hatch.
+    /// Adds an exception that lets one host reach one otherwise-blocked address.
     ///
-    /// The host is canonicalized and validated by [`build`]. This is the only
-    /// supported way to reach an otherwise-blocked address.
+    /// The exception applies only when a fetch to `host` connects to `addr`.
+    /// Another host that resolves to `addr` stays blocked. The host match
+    /// ignores case and a trailing dot. [`build`] checks that `host` is a valid
+    /// domain name or IP address. This is the only supported way to reach an
+    /// otherwise-blocked address.
     ///
     /// [`build`]: FetchConfigBuilder::build
     #[must_use]
@@ -354,21 +365,21 @@ impl FetchConfigBuilder {
         self
     }
 
-    /// Sets the per-hop connect timeout.
+    /// Sets the time allowed to open a TCP connection, on every redirect hop.
     #[must_use]
     pub fn connect_timeout(mut self, d: Duration) -> FetchConfigBuilder {
         self.connect_timeout = d;
         self
     }
 
-    /// Sets the whole-request timeout.
+    /// Sets the cap on the total time a single request may take.
     #[must_use]
     pub fn timeout(mut self, d: Duration) -> FetchConfigBuilder {
         self.timeout = d;
         self
     }
 
-    /// Sets the idle-connection pool timeout.
+    /// Sets how long an idle pooled connection is kept before it is closed.
     #[must_use]
     pub fn pool_idle_timeout(mut self, d: Duration) -> FetchConfigBuilder {
         self.pool_idle_timeout = d;
@@ -382,12 +393,20 @@ impl FetchConfigBuilder {
         self
     }
 
-    /// Validates every field and produces an immutable [`FetchConfig`].
+    /// Checks every value and returns the finished [`FetchConfig`].
     ///
     /// # Errors
-    /// Returns [`ConfigError`] for a header-invalid user agent, a zero or
-    /// over-ceiling `max_bytes`/`max_chars`, an over-ceiling `max_redirects`, a
-    /// zero timeout, a malformed denied CIDR, or a malformed exact host.
+    /// Returns [`ConfigError`] for the first invalid value it finds:
+    ///
+    /// - a `User-Agent` that is not a legal HTTP header value;
+    /// - a `max_bytes` of zero or above 64 MiB;
+    /// - a `max_chars` of zero or above 10,000,000;
+    /// - a `max_redirects` above 20;
+    /// - a `connect_timeout` of zero or above 60 seconds;
+    /// - a `timeout` of zero or above 300 seconds;
+    /// - a `pool_idle_timeout` of zero or above 600 seconds;
+    /// - a denied CIDR range that does not parse;
+    /// - an exception host that is not a valid domain name or IP address.
     pub fn build(self) -> Result<FetchConfig, ConfigError> {
         let user_agent = validate_user_agent(self.user_agent)?;
         let max_bytes = validate_limit("max_bytes", self.max_bytes, MAX_BYTES_CEILING)?;

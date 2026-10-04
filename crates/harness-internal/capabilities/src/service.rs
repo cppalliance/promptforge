@@ -25,9 +25,10 @@ mod tests;
 
 /// The name of a Host service and the type its provider supplies.
 ///
-/// Ids compare, hash, and display by their literal alone, so two keys
-/// with one literal name one service. The type decides only whether a
-/// provider satisfies the id: see [`HostServices::provides`].
+/// Ids compare, hash, and display by their `namespace/name` literal
+/// alone. Two keys with the same literal therefore name the same service,
+/// whatever their types. The type matters only for whether a provider
+/// satisfies the id; see [`HostServices::provides`].
 #[derive(Clone, Copy)]
 pub struct ServiceId {
     /// The `namespace/name` literal.
@@ -64,25 +65,28 @@ impl fmt::Debug for ServiceId {
 }
 
 impl fmt::Display for ServiceId {
-    /// The `namespace/name` literal.
+    /// Writes the `namespace/name` literal.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.literal)
     }
 }
 
-/// Binds one service id literal to the type `T` its provider supplies.
+/// Binds the `namespace/name` id of a Host service to the type `T` its
+/// provider supplies.
 ///
-/// The crate that defines a service declares its key once, as a `const`,
-/// and both the Host that provides the service and the capability that
-/// reads it name that key.
+/// The crate that defines a service declares its key once, as a `const`.
+/// The Host provides the service under that key, and a capability reads
+/// the service through the same key.
 pub struct ServiceKey<T: ?Sized + Send + Sync + 'static> {
     id: ServiceId,
     provider: PhantomData<fn() -> Arc<T>>,
 }
 
 impl<T: ?Sized + Send + Sync + 'static> ServiceKey<T> {
-    /// Builds the key for the service named `literal`. The literal is
-    /// checked when a provider is supplied under it.
+    /// Builds the key for the service named `literal`.
+    ///
+    /// This does not check `literal`. `HostServices::provide` checks it
+    /// when a provider is supplied under this key.
     #[must_use]
     pub const fn new(literal: &'static str) -> ServiceKey<T> {
         ServiceKey {
@@ -124,10 +128,10 @@ struct Entry {
     provider: Arc<dyn Any + Send + Sync>,
 }
 
-/// The services a Host provides: a map from id to provider that records
-/// each provider's type.
+/// The services a Host provides, as a map from service id to provider.
 ///
-/// Cloning shares the providers.
+/// The map records the type each provider was supplied as. Cloning the
+/// map shares the providers rather than copying them.
 #[derive(Clone, Default)]
 pub struct HostServices {
     entries: BTreeMap<&'static str, Entry>,
@@ -140,13 +144,14 @@ impl HostServices {
         HostServices::default()
     }
 
-    /// Provides `provider` under `key`'s id.
+    /// Adds `provider` to the map under the id of `key`.
     ///
     /// # Errors
-    /// Returns [`ServiceError::InvalidId`] when the id literal is not a
-    /// two-segment `namespace/name` id, and [`ServiceError::DuplicateId`]
-    /// when a provider is already supplied under the literal, whatever its
-    /// type. The map is unchanged on either error.
+    /// Returns [`ServiceError::InvalidId`] when the id literal of `key` is
+    /// not a two-segment `namespace/name` id. Returns
+    /// [`ServiceError::DuplicateId`] when the map already holds a provider
+    /// under that literal, whatever the provider's type. The map is
+    /// unchanged on either error.
     pub fn provide<T: ?Sized + Send + Sync + 'static>(
         &mut self,
         key: &ServiceKey<T>,
@@ -178,8 +183,10 @@ impl HostServices {
         );
     }
 
-    /// Returns the provider under `key`'s id, or `None` when there is none
-    /// or it was supplied as another type.
+    /// Returns the provider supplied under the id of `key`.
+    ///
+    /// Returns `None` when no provider is under that id, or when the
+    /// provider was supplied as a type other than `T`.
     #[must_use]
     pub fn get<T: ?Sized + Send + Sync + 'static>(&self, key: &ServiceKey<T>) -> Option<Arc<T>> {
         self.entries
@@ -189,8 +196,10 @@ impl HostServices {
             .cloned()
     }
 
-    /// Returns whether a provider is under `id` and was supplied as the
-    /// type `id` names. A provider of another type does not count.
+    /// Returns whether the map holds a provider under `id` that was
+    /// supplied as the type `id` names.
+    ///
+    /// A provider of another type does not count.
     #[must_use]
     pub fn provides(&self, id: &ServiceId) -> bool {
         self.entries
@@ -208,20 +217,20 @@ impl fmt::Debug for HostServices {
     }
 }
 
-/// Why [`HostServices::provide`] refused a provider.
+/// The error [`HostServices::provide`] returns when it refuses a provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServiceError {
     /// The id literal is not a two-segment `namespace/name` id.
     InvalidId {
-        /// The refused literal.
+        /// The id literal that was refused.
         id: &'static str,
-        /// Why it does not parse.
+        /// Why the literal does not parse as an id.
         source: CapabilityIdError,
     },
-    /// A provider is already supplied under the id.
+    /// The map already holds a provider under the id.
     DuplicateId {
-        /// The literal already provided.
+        /// The id literal that already has a provider.
         id: &'static str,
     },
 }

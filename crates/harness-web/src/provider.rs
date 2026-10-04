@@ -3,28 +3,33 @@
 //! [`SearchResults`] it answers with, and the [`SearchError`] it fails
 //! with.
 
-/// Runs one web search for the `promptforge/web/search` tool.
+/// A backend that runs web searches for the `promptforge/web/search` tool.
 ///
-/// The Host provides one under [`SEARCH_PROVIDER`](crate::SEARCH_PROVIDER).
-/// The tool validates the model's arguments before it calls the provider,
-/// and sets no deadline of its own: the provider bounds its own round.
+/// The Host registers one under the key
+/// [`SEARCH_PROVIDER`](crate::SEARCH_PROVIDER). The tool validates the
+/// model's arguments before it calls the provider. The tool sets no
+/// deadline, so the provider must limit how long each search takes.
 #[async_trait::async_trait]
 pub trait SearchProvider: Send + Sync {
     /// Runs `query` and returns its results.
     ///
     /// # Errors
     /// Returns a [`SearchError`] whose kind says whether the transport or
-    /// the backend failed. Its message reaches the model after a
-    /// `web_search: ` prefix, so it must hold no credential.
+    /// the backend failed. The model sees the error's message after a
+    /// `web_search: ` prefix, so the message must not contain a credential.
     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError>;
 }
 
 /// The validated arguments of one `promptforge/web/search` call.
 ///
-/// The search tool builds one only from arguments that passed its checks:
-/// a non-blank `query` of at most 400 characters, a `count` in `1..=20`,
-/// a `country` and `search_lang` of 1 to 128 characters, and at most 20
-/// hostnames in each domain list. An empty domain list filters nothing.
+/// The search tool builds one only from arguments that pass its checks:
+///
+/// - `query` is not blank and has at most 400 characters.
+/// - `count`, when given, is in `1..=20`.
+/// - `country` and `search_lang`, when given, have 1 to 128 characters.
+/// - Each domain list holds at most 20 hostnames.
+///
+/// An empty domain list filters nothing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchQuery {
     /// The search query.
@@ -45,9 +50,11 @@ pub struct SearchQuery {
     pub exclude_domains: Vec<String>,
 }
 
-/// The freshness filter of a [`SearchQuery`], deserialized from the
-/// model's arguments as a closed enum so an unknown token is refused as an
-/// invalid argument rather than forwarded.
+/// How recent the results of a [`SearchQuery`] must be.
+///
+/// The search tool reads it from the model's arguments. It refuses an
+/// unknown token as an invalid argument, so the token never reaches the
+/// provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -63,7 +70,7 @@ pub enum Freshness {
 }
 
 impl Freshness {
-    /// The filter's token: `pd`, `pw`, `pm`, or `py`.
+    /// Returns the filter's token: `pd`, `pw`, `pm`, or `py`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -75,8 +82,11 @@ impl Freshness {
     }
 }
 
-/// The SafeSearch level of a [`SearchQuery`], deserialized as a closed
-/// enum.
+/// The SafeSearch filtering level of a [`SearchQuery`].
+///
+/// The search tool reads it from the model's arguments. It refuses an
+/// unknown token as an invalid argument, so the token never reaches the
+/// provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -90,7 +100,7 @@ pub enum SafeSearch {
 }
 
 impl SafeSearch {
-    /// The level's token: `off`, `moderate`, or `strict`.
+    /// Returns the level's token: `off`, `moderate`, or `strict`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -101,11 +111,14 @@ impl SafeSearch {
     }
 }
 
-/// What a [`SearchProvider`] answers: the query it ran and its results.
+/// The results a [`SearchProvider`] returns for one search, with the query
+/// it ran.
 ///
-/// The search tool renders it as compact JSON in the Gateway's field
-/// order and leaves out an absent `age` or `site_name` and an empty
-/// `extra_snippets`, as the Gateway does.
+/// The search tool returns it to the model as compact JSON: an object with
+/// `query` and a `results` array. The fields appear in the same order as
+/// in the Gateway's search output. Like the Gateway, the JSON leaves out a
+/// result's `age` and `site_name` when absent and its `extra_snippets` when
+/// empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SearchResults {
     /// The query the provider ran.
@@ -114,8 +127,11 @@ pub struct SearchResults {
     pub results: Vec<SearchResult>,
 }
 
-/// One row of [`SearchResults`]. The search tool refuses a reply holding
-/// a row whose `url` is blank.
+/// One result in [`SearchResults`]: a title, a URL, a description, and
+/// optional extras.
+///
+/// The search tool rejects the provider's whole reply when any result has
+/// a blank `url`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SearchResult {
     /// The result's title.
@@ -135,22 +151,22 @@ pub struct SearchResult {
     pub extra_snippets: Vec<String>,
 }
 
-/// Which side of a search failed.
+/// Which part of a search failed: the transport or the backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SearchErrorKind {
-    /// The request could not be sent or its reply could not be read,
-    /// timeouts included.
+    /// The request could not be sent or its reply could not be read. A
+    /// timeout counts as this kind.
     Transport,
     /// The backend answered with a failure or an unusable reply.
     Backend,
 }
 
-/// Why a [`SearchProvider`] failed: its kind, a message, and the cause
-/// when there is one.
+/// The error a [`SearchProvider`] returns when a search fails.
 ///
-/// The search tool keeps the whole error as its own error's source, so
-/// the cause survives the provider boundary.
+/// It holds a kind, a message, and an optional cause. The search tool
+/// keeps the whole error as the source of the tool error it returns, so
+/// the cause is not lost.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SearchError {
@@ -185,7 +201,7 @@ impl SearchError {
         }
     }
 
-    /// Returns which side of the search failed.
+    /// Returns which part of the search failed.
     #[must_use]
     pub fn kind(&self) -> SearchErrorKind {
         self.kind

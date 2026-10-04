@@ -40,24 +40,33 @@ mod tools;
 
 pub use tools::ActivatedTools;
 
-/// A boxed, sendable, owning future: what an asynchronous performer
-/// returns and the loop polls.
+/// The boxed future a performer returns for the Harness to poll.
+///
+/// The future is `Send` and `'static`. It can move between threads, and it
+/// owns the data it uses.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// The Host's inference: lists the models it serves and performs a `Chat`
-/// effect as one model round over `messages` with `tools` advertised,
-/// under `binding`'s frozen `options`.
+/// The model inference the Host supplies to the Harness.
+///
+/// A broker lists the models it serves and performs each `Chat` effect as
+/// one model round.
 ///
 /// The Harness polls each round inside the run's own future, so a broker
-/// must not block while polled; blocking or CPU-heavy work goes to the
-/// Host's own runtime.
+/// must not block while polled. A broker sends blocking or CPU-heavy work
+/// to the Host's own runtime.
 pub trait InferenceBroker: Send + Sync {
     /// Lists the models the broker serves.
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>>;
 
-    /// Runs the round. `round` is the round's run-wide id and the path
-    /// that dispatched it. The Harness takes only the finished reply; a
-    /// broker that shows the reply as it forms streams it on its own.
+    /// Runs one model round and returns the finished reply.
+    ///
+    /// The round runs under `binding`. It sends `messages` to the model
+    /// with `tools` advertised, using `options`, the fixed request settings
+    /// built from `binding`. `round` holds the round's run-wide id and the
+    /// path that dispatched it.
+    ///
+    /// The Harness takes only the finished reply. A broker that shows the
+    /// reply as it forms streams it on its own.
     fn chat(
         &self,
         binding: ModelBinding,
@@ -82,10 +91,10 @@ pub trait ToolPerformer: Send + Sync {
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// The Host's clock: performs a `Timer` effect as one sleep.
+/// The Host's clock, which performs each `Timer` effect as one sleep.
 ///
 /// The Harness polls each sleep inside the run's own future, so a timer
-/// must not block while polled; it waits on the Host's own runtime.
+/// must not block while polled. It waits on the Host's own runtime instead.
 pub trait Timer: Send + Sync {
     /// Resolves once `seconds` have passed.
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;

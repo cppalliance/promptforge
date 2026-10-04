@@ -116,22 +116,33 @@ use crate::tool::Tool;
 #[path = "user_input-tests.rs"]
 mod tests;
 
-/// The ask tool's full id: what `input.ask()` calls, and what a prompt
-/// binds under an alias of its own to let its model ask the operator.
+/// The full tool id of the ask tool, which asks the operator for their
+/// next message.
+///
+/// `input.ask()` calls the ask tool by this id. To let its model ask the
+/// operator, a prompt binds this id under an alias of its own.
 pub const USER_INPUT_ASK_TOOL: &str = "promptforge/user-input/ask";
 
-/// The run's input broker, `promptforge/input-broker`: the service the
-/// ask tool waits on.
+/// The service key for the input broker, the Host service that carries a
+/// question to the operator.
+///
+/// The key's id is `promptforge/input-broker`. A Host with an operator
+/// provides its broker under this key. The ask tool waits on that broker.
 pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("promptforge/input-broker");
 
 /// What the ask tool answers on a Host with nobody to ask.
 const FALLBACK: &str = "User input is unavailable in this host; continue without it.";
 
-/// The first-party `promptforge/user-input` capability.
+/// The first-party capability that lets a prompt section pause and ask the
+/// operator for their next message.
 ///
-/// Needs [`INPUT_BROKER`]. Contributes the ask tool,
-/// [`USER_INPUT_ASK_TOOL`], and a prelude defining `input.ask()` and
-/// `input.connected()`. The module page covers what a script receives.
+/// Its id is `promptforge/user-input`. It needs the input broker provided
+/// under the key [`INPUT_BROKER`]. It gives each run the ask tool,
+/// [`USER_INPUT_ASK_TOOL`], and a prelude that defines `input.ask()` and
+/// `input.connected()` in every section of the run.
+///
+/// `input.ask()` returns the operator's text and `true`. When the run has
+/// no broker, it returns a fixed fallback sentence and `false`.
 #[derive(Debug, Clone)]
 pub struct UserInput {
     /// The stable identity, `promptforge/user-input`.
@@ -141,12 +152,13 @@ pub struct UserInput {
 }
 
 impl UserInput {
-    /// Builds the capability. It takes no configuration: everything it
-    /// needs arrives per run in [`RunServices`].
+    /// Builds the capability.
+    ///
+    /// The input broker it needs arrives with each run, in [`RunServices`].
     ///
     /// # Panics
-    /// Panics only if the literal capability or tool id fails to parse, a
-    /// defect in this crate rather than a caller error.
+    /// Panics only if the built-in capability id or tool id fails to parse.
+    /// That would be a defect in the Harness, not a caller error.
     #[must_use]
     pub fn new() -> UserInput {
         #[expect(

@@ -1,59 +1,70 @@
-//! harness-gateway-client - the standard way a Host talks to the
-//! PromptForge Gateway: the inference broker a Host hands the Harness, the
-//! search provider it supplies for web search, the HTTP client that sends
-//! a `Chat` effect's round to the Gateway and fetches its model catalog,
-//! and the OpenAI chat-completions wire code under it that turns the round
-//! into a request body, a streamed reply into a
-//! [`Completion`](promptforge::model::Completion), and a failed response
-//! into the [`CompletionError`] the round carries.
+//! The standard client a Host uses to run model rounds, list models, and
+//! search the web through the PromptForge Gateway.
 //!
-//! [`GatewayBroker`] is the [`harness::InferenceBroker`] a Gateway Host
-//! passes to `Harness::new`: it runs every model round on a
-//! [`GatewayChat`] under the Engine's default run limits and lists the
+//! [`GatewayBroker`] is the [`harness::InferenceBroker`] that a Host using
+//! the Gateway passes to `Harness::new`. It runs every model round on a
+//! [`GatewayChat`] under the Engine's default run limits, and it lists the
 //! Gateway's models through [`fetch_model_catalog`]. A Host that shows a
 //! reply as it forms runs the round through
-//! [`GatewayBroker::chat_streaming`], which hands each [`StreamDelta`] to
-//! the Host's callback as it arrives.
+//! [`GatewayBroker::chat_streaming`] instead, which hands each
+//! [`StreamDelta`] to the Host's callback as it arrives.
 //!
-//! [`GatewayChat`] speaks the always-streaming `/chat/completions` SSE
-//! shape to one Gateway URL with, usually, the Gateway's shared bearer
-//! key: [`GatewayChat::complete`] sends the request body, reads the
-//! stream under the run's byte cap and timeout, invokes the caller's delta
-//! callback live, and returns the one completion the round produced.
-//! [`fetch_model_catalog`] reads the Gateway's typed model list. The
-//! client holds only the Gateway's URL and the shared key; the vendor
-//! credential sits in the Gateway.
+//! [`GatewayChat`] is the HTTP client that sends a `Chat` effect's round
+//! to one Gateway URL. It presents the Gateway's shared bearer key, or no
+//! key when built keyless. Every request streams: the Gateway's
+//! `/chat/completions` endpoint answers with server-sent events (SSE).
+//! [`GatewayChat::complete`] sends the request body and reads the stream
+//! within the client's byte cap and per-receive timeout. It calls the
+//! caller's delta callback as each piece arrives and returns the one
+//! completion the round produced. [`fetch_model_catalog`] fetches the
+//! Gateway's model list as a typed `ModelCatalog`. The client holds no
+//! credential except the Gateway's shared key. The model vendor's
+//! credential stays in the Gateway.
 //!
-//! [`GatewaySearch`] is the [`harness_web::SearchProvider`] a Gateway Host
-//! supplies: it runs each search through the Gateway's
-//! `/tools/web_search` relay under a 30-second deadline and maps the
-//! reply into the provider's results; the search vendor's credential
-//! stays in the Gateway too.
+//! [`GatewaySearch`] is the [`harness_web::SearchProvider`] that a Host
+//! using the Gateway supplies for web search. It sends each search through
+//! the Gateway's `/tools/web_search` relay with a 30-second deadline and
+//! maps the reply into the provider's results. The search vendor's
+//! credential also stays in the Gateway.
 //!
-//! [`build_request_body`] builds the one JSON body every round sends.
-//! [`read_completion_stream`] reads the SSE reply over a caller's
-//! [`ChunkSource`] to its `[DONE]` sentinel under a byte cap, forwards each
-//! live delta, and folds the stream into a completion under one strict turn
-//! rule set. [`read_body_capped`] reads a body the caller decodes whole.
-//! [`escape_controls`] bounds and escapes a backend error body, and
-//! [`classify_http_failure`] and [`classify_stream_error`] turn a status or
-//! an in-stream error envelope into a failure kind. The wire code opens no
-//! connection and reads no clock: the client, or another broker, supplies
-//! the chunks and the clock.
+//! Under the client sits the OpenAI chat-completions wire code. It turns a
+//! round into a request body, a streamed reply into a
+//! [`Completion`](promptforge::model::Completion), and a failed response
+//! into the [`CompletionError`] the round fails with.
+//!
+//! - [`build_request_body`] builds the JSON body that every round sends.
+//! - [`read_completion_stream`] reads a streamed reply from a
+//!   [`ChunkSource`] the caller supplies, up to its `[DONE]` sentinel and
+//!   within a byte cap. It forwards each live delta, assembles the stream
+//!   into one completion, and checks that turn against one strict set of
+//!   rules.
+//! - [`read_body_capped`] reads, within a byte cap, a body that the caller
+//!   decodes whole.
+//! - [`escape_controls`] cuts a backend error body to a length limit and
+//!   escapes its control characters.
+//! - [`classify_http_failure`] turns a failure status and its body into a
+//!   `CompletionError` of the matching kind. [`classify_stream_error`] does
+//!   the same for an error envelope that arrives inside the stream.
+//!
+//! The wire code opens no connection and reads no clock. The client, or
+//! another broker, supplies the chunks and the clock.
 //!
 //! ## Invariants
 //!
-//! - Every `Completion` and `ToolCall` is built through the public
-//!   validating constructors, so the Engine's neutral reply checks run on
-//!   every decoded turn.
+//! - Every `Completion` and `ToolCall` is built through the Engine's public
+//!   validating constructors, so the Engine's model-independent reply
+//!   checks run on every decoded turn.
 //! - A Gateway bearer key is never written to logs, `Debug`, `Display`, or
 //!   error text.
 //! - A backend error body is bounded and control-escaped before it is
-//!   kept: a chat round keeps it only as the opt-in
+//!   kept. A chat round keeps it only in the opt-in
 //!   `CompletionError::detail`, and a search keeps it in the
 //!   `GatewaySearchError` message.
-//! - A keyless client is an explicit choice; nothing here checks the
-//!   endpoint's address on the caller's behalf.
+//! - A client sends requests without a key only when the caller builds it
+//!   with `GatewayChat::keyless`, which does not check the endpoint's
+//!   address, or when `GatewayChat::from_env` finds no key for a loopback
+//!   URL. A client built with `GatewayChat::disabled` also holds no key,
+//!   but it sends no requests.
 
 mod broker;
 mod catalog;

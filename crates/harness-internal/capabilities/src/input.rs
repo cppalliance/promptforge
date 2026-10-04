@@ -18,26 +18,28 @@ use std::fmt;
 ///
 /// - [`wait`](InputBroker::wait) returns the operator's text byte-exact:
 ///   no trimming, no re-encoding, no wrapping.
-/// - A wait whose future is dropped (the run was cancelled) must not
-///   leave the operator prompting against it, and must not panic.
-/// - [`wait`](InputBroker::wait) must not block while polled: the Harness
-///   polls it inside the run's own future, beside every other effect of
-///   the run, so a broker hands any blocking work to the Host's own
-///   runtime.
+/// - A wait whose future is dropped, as happens when the run is
+///   cancelled, must not leave a prompt open for the operator. It must
+///   not panic either.
+/// - [`wait`](InputBroker::wait) must not block while it is polled. The
+///   Harness polls it inside the run's own future, beside every other
+///   effect of the run. A broker therefore hands any blocking work to the
+///   Host's own runtime.
 #[async_trait::async_trait]
 pub trait InputBroker: Send + Sync {
     /// Waits for the operator's next message and returns it byte-exact.
     ///
     /// # Errors
     /// Returns an [`InputError`] when the wait ends without an answer, for
-    /// example because the Host withdrew it.
+    /// example because the Host withdrew the wait.
     async fn wait(&self) -> Result<String, InputError>;
 }
 
 /// A broker's failure to produce the operator's message.
 ///
-/// The `Display` message is broker-authored and safe to hand to a model; any
-/// underlying cause hides behind [`std::error::Error::source`].
+/// The broker writes the `Display` message. That message is safe to hand
+/// to a model. Any underlying cause stays out of it and is returned by
+/// [`std::error::Error::source`].
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct InputError {
@@ -55,7 +57,8 @@ impl InputError {
         }
     }
 
-    /// Builds a failure with `source` as the hidden cause.
+    /// Builds a failure with a message and with `source` as its underlying
+    /// cause, which the `Display` message does not show.
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,

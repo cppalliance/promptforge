@@ -12,14 +12,15 @@ use promptforge::vfs::{Origin, VfsError, VfsOp, VfsOutcome, VfsRef, perform_vfs_
 
 use crate::recorder::RunOutcome;
 
-/// Why a run's report has no output text. A missing output never fails
-/// the run: the prompt's run succeeded, and only its declared output file
-/// is absent.
+/// Why a run's report has no output text.
+///
+/// A missing output never fails the run. The report keeps the run's own
+/// outcome, and only the output text is absent.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OutputError {
-    /// The run did not complete: it failed, was cancelled, or ended
-    /// before it began, so its output file is not read.
+    /// The run did not complete, so its output file is not read. The run
+    /// failed or was cancelled, possibly before it began.
     #[error("the run did not complete")]
     NotCompleted,
     /// The prompt declares no `output:` file.

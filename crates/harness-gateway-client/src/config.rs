@@ -3,13 +3,14 @@
 
 use std::fmt;
 
-/// Why the gateway client could not be set up: a missing or unusable
-/// environment variable, bearer key, or endpoint URL.
+/// The error returned when the gateway client cannot be set up because an
+/// environment variable, the bearer key, or the endpoint URL is missing or
+/// unusable.
 ///
-/// This is a setup error, not a model failure. It happens before any round
-/// is sent, so it never reaches the Engine and has no
+/// This is a setup error, not a model failure. It happens before the client
+/// sends any request, so it never reaches the Engine and has no
 /// [`CompletionErrorKind`](crate::CompletionErrorKind). The message names
-/// the variable or the rule that failed, and never a key.
+/// the environment variable or the rule that failed, and never contains a key.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GatewayConfigError {
@@ -25,25 +26,30 @@ pub enum GatewayConfigError {
     #[error("{0}")]
     InvalidConfig(String),
 
-    /// A configuration input was invalid, and the concrete cause (a URL
-    /// parse failure, an unusable secret) is kept as the source instead of
-    /// being flattened into the message.
+    /// A configuration input was invalid, and the error keeps the concrete
+    /// cause.
+    ///
+    /// The cause, such as a URL parse failure or an unusable secret, is
+    /// available as the error's `source` instead of being copied into the
+    /// message.
     #[error("{message}")]
     Config {
-        /// The human-readable diagnostic, with no raw source dump.
+        /// A human-readable description of the problem. It does not repeat
+        /// the text of the source error.
         message: String,
-        /// The originating failure, kept as the cause.
+        /// The underlying error that caused this one.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 
-/// A bearer credential whose contents never appear in `Debug`, `Display`, or
-/// logs.
+/// A bearer credential whose contents never appear in `Debug` or `Display`
+/// output or in logs.
 ///
-/// Wrap any secret (the gateway bearer key) in a `SecretString` at the boundary
-/// so an accidental `{:?}` or log line cannot leak it; only crate-internal
-/// transport code reads the exposed value to set the `Authorization` header.
+/// Wrap a secret, such as the gateway bearer key, in a `SecretString` as soon
+/// as you read it, so an accidental `{:?}` or log line cannot leak it. The
+/// client reads the value only to set the `Authorization` header of its
+/// requests.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct SecretString(String);
@@ -52,8 +58,8 @@ impl SecretString {
     /// Wraps a non-empty secret so it is redacted everywhere it is formatted.
     ///
     /// # Errors
-    /// Returns [`SecretError::Empty`] when `secret` is empty (F12), so a client
-    /// can never be built to authenticate with a blank bearer credential.
+    /// Returns [`SecretError::Empty`] when `secret` is empty, so a client can
+    /// never be built to authenticate with a blank bearer credential.
     pub fn new(secret: impl Into<String>) -> std::result::Result<SecretString, SecretError> {
         let secret = secret.into();
         if secret.is_empty() {
@@ -102,11 +108,12 @@ impl fmt::Display for SecretString {
     }
 }
 
-/// A validated gateway API base URL (the OpenAI-compatible `/v1` root).
+/// A validated base URL for the gateway's OpenAI-compatible API (its `/v1`
+/// root).
 ///
-/// Construction rejects a URL without an `http`/`https` scheme or host, so a
-/// client can never be pointed at an unusable endpoint. A trailing slash is
-/// trimmed so request paths join cleanly.
+/// Construction rejects a URL that has no `http` or `https` scheme or no
+/// host, so a client can never be pointed at an unusable endpoint. Any
+/// trailing slash is removed so request paths join cleanly.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayEndpoint {
@@ -119,13 +126,14 @@ pub struct GatewayEndpoint {
 impl GatewayEndpoint {
     /// Validates and normalizes a gateway base URL.
     ///
+    /// The URL is checked with a strict URL parser.
+    ///
     /// # Errors
     /// Returns a [`GatewayConfigError`] when `url` is not a valid absolute
-    /// URL, does not use an `http`/`https` scheme, names no host, embeds
-    /// credentials (a `user:pass@` component), or has a query or fragment (an
-    /// API root is a bare path). Parsing goes through a strict URL type (F12)
-    /// rather than a hand-rolled prefix/host scan. No error echoes `url`,
-    /// which can embed a credential.
+    /// URL, does not use an `http` or `https` scheme, names no host, embeds
+    /// credentials (a `user:pass@` component), or has a query or fragment.
+    /// A query or fragment is rejected because an API root is a bare path.
+    /// No error includes `url`, because a URL can contain a credential.
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, GatewayConfigError> {
         let reject = GatewayConfigError::InvalidConfig;
         let trimmed = url.trim();
@@ -176,11 +184,12 @@ impl GatewayEndpoint {
 
     /// Returns whether the endpoint's host is the local machine.
     ///
-    /// True for `localhost`, `127.0.0.1` (and the rest of `127.0.0.0/8`), and
-    /// `::1`; false for every other name or address. A loopback gateway admits
-    /// keyless same-machine callers by default, so
+    /// It returns `true` for `localhost`, for `127.0.0.1` and the rest of
+    /// `127.0.0.0/8`, and for `::1`. It returns `false` for every other name
+    /// or address. A gateway on the local machine accepts callers that send
+    /// no key by default, so
     /// [`GatewayChat::from_env`](crate::GatewayChat::from_env) makes the
-    /// bearer key optional exactly when this holds.
+    /// bearer key optional exactly when this returns `true`.
     #[must_use]
     pub fn is_loopback(&self) -> bool {
         self.loopback

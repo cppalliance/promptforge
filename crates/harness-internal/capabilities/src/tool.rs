@@ -20,77 +20,83 @@ mod tests;
 ///
 /// # Implementing
 ///
-/// A complete implementation supplies a stable identity, a transport wire name,
-/// a model-facing description, a JSON-Schema parameter object, and an async
-/// [`call`](Tool::call).
+/// An implementation supplies a stable identity, a wire name for the model
+/// transport, a description for the model, a JSON Schema for its parameters,
+/// and an async [`call`](Tool::call).
 ///
 /// # Compatibility policy
 ///
-/// This trait is a stable extension point and is deliberately open. Adding a
-/// **new required** method (one without a default body) is a breaking change for
-/// downstream implementers; new capabilities must therefore ship with a default
+/// This trait is a stable extension point that downstream crates may
+/// implement. A **new required** method (one without a default body) would
+/// break those implementations, so every new method ships with a default
 /// implementation. Existing method signatures are stable.
 ///
 /// # Invariants
 ///
-/// - [`id`](Tool::id) returns the same value on every call for a given tool; it
-///   is the catalog key and must be unique within a catalog (whose entries are
-///   the tool's [`ToolDescriptor`]).
-/// - [`wire_name`](Tool::wire_name) is the transport name, not identity; it is
-///   distinct from [`id`](Tool::id) and may be aliased when advertised.
-/// - [`parameters_schema`](Tool::parameters_schema) returns a JSON-Schema
-///   `object` describing the accepted [`call`](Tool::call) arguments.
-/// - [`call`](Tool::call) is cancellation-aware, must not panic (a panic answers
-///   its effect `Dropped` and is logged), and must classify every failure
-///   trust-correctly: any output that embeds attacker-influenceable data is
+/// - [`id`](Tool::id) returns the same value on every call for a given tool.
+///   It is the catalog key and must be unique within a catalog. A catalog's
+///   entries are the tools' [`ToolDescriptor`] values.
+/// - [`wire_name`](Tool::wire_name) is the name on the model transport, not
+///   the tool's identity. It is distinct from [`id`](Tool::id), and an alias
+///   may replace it when the tool is advertised to a model.
+/// - [`parameters_schema`](Tool::parameters_schema) returns a JSON Schema
+///   `object` that describes the arguments [`call`](Tool::call) accepts.
+/// - [`call`](Tool::call) is cancellation-aware and must not panic. If it
+///   panics, the Harness answers its effect `Dropped` and logs the panic.
+/// - [`call`](Tool::call) must mark the trust of every output correctly. Any
+///   output that embeds data an attacker can influence is
 ///   [`ToolOutput::untrusted`].
-/// - [`call`](Tool::call) must not block while polled: the Harness polls it
-///   inside the run's own future, beside every other effect of the run, so a
-///   call with blocking or CPU-heavy work hands it to the Host's own runtime.
+/// - [`call`](Tool::call) must not block while polled. The Harness polls it
+///   inside the run's own future, beside every other effect of the run. A
+///   call that does blocking or CPU-heavy work hands that work to the Host's
+///   own runtime.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
-    /// Returns the tool's stable live identity.
+    /// Returns the tool's stable identity.
     ///
-    /// This is the catalog key. It must be stable across calls and unique
-    /// within any catalog the tool is described into.
+    /// The identity is the tool's key in a catalog. It must be the same on
+    /// every call and unique within any catalog that lists the tool.
     fn id(&self) -> ToolId;
 
-    /// Returns the concrete name used by the current model transport.
+    /// Returns the name the current model transport uses for the tool.
     ///
-    /// This is not the tool's identity. It may later be replaced by a
-    /// prompt-local alias when the tool is advertised to a model. It should be a
-    /// non-empty transport-legal token (no `/` separator or control characters).
+    /// This name is not the tool's identity. When the tool is advertised to a
+    /// model, a prompt-local alias may replace it. It should be a non-empty
+    /// token that is legal on the transport, with no `/` separator and no
+    /// control characters.
     fn wire_name(&self) -> &str;
 
-    /// A one-sentence description supplied to the model.
+    /// Returns a one-sentence description of the tool for the model.
     fn description(&self) -> &str;
 
-    /// The JSON Schema describing the tool's parameters.
+    /// Returns the JSON Schema for the tool's parameters.
     ///
-    /// Returns a JSON-Schema `object` (a map with `"type": "object"` and a
-    /// `properties` map) whose shape matches the arguments [`call`](Tool::call)
+    /// The schema is a JSON `object` (a map with `"type": "object"` and a
+    /// `properties` map) that matches the arguments [`call`](Tool::call)
     /// accepts.
     fn parameters_schema(&self) -> serde_json::Value;
 
-    /// Whether [`call`](Tool::call) output is structured JSON rather than
-    /// plain text.
+    /// Returns whether [`call`](Tool::call) output is structured JSON rather
+    /// than plain text.
     ///
-    /// A structured tool's output text is one JSON value, and an executor
-    /// that supports structured results resumes it into the script as data
-    /// (for example, a Lua table) instead of a string. The default is
-    /// `false`: plain text. Structured output is honored for trusted
-    /// output only - an untrusted result is nonce-wrapped before any
-    /// parse, so the wrapped text no longer parses as JSON and the call
-    /// fails rather than smuggling attacker-influenceable data past the
-    /// guard.
+    /// A structured tool's output text is one JSON value. An executor that
+    /// supports structured results resumes the script with that value as
+    /// data (for example, a Lua table) instead of a string. The default is
+    /// `false`, meaning plain text.
+    ///
+    /// Structured output works only for trusted output. An untrusted result
+    /// is nonce-wrapped before any parse, so the wrapped text no longer
+    /// parses as JSON. The call then fails instead of letting data an
+    /// attacker can influence bypass the wrapping.
     fn structured_output(&self) -> bool {
         false
     }
 
-    /// The tool as data: the descriptor the Harness derives from this
-    /// implementation when it assembles the run's catalog, with no
-    /// conflicts recorded (the contributing capability's are added at
-    /// assembly).
+    /// Returns the tool's descriptor, built from its other methods.
+    ///
+    /// The Harness calls this when it assembles a run's catalog. The returned
+    /// descriptor records no conflicts. The Harness adds the contributing
+    /// capability's conflicts during assembly.
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor::new(
             self.id(),
@@ -103,13 +109,14 @@ pub trait Tool: Send + Sync {
 
     /// Executes the tool with the given JSON arguments and returns its output.
     ///
-    /// The returned [`ToolOutput`] includes its own
-    /// [`OutputTrust`](promptforge::tools::OutputTrust), so trust
-    /// is mandatory and cannot be forgotten: an
+    /// The returned [`ToolOutput`] carries its own
+    /// [`OutputTrust`](promptforge::tools::OutputTrust), so an implementation
+    /// cannot forget to set trust. An
     /// [`OutputTrust::Untrusted`](promptforge::tools::OutputTrust::Untrusted)
     /// result is nonce-wrapped before it can reach model input. A failure
-    /// returns a narrow, model-safe [`ToolError`]. Implementations must not
-    /// panic and should return promptly when the run is cancelled.
+    /// returns a narrow [`ToolError`] whose message is safe to show the model.
+    /// Implementations must not panic and should return promptly when the run
+    /// is cancelled.
     ///
     /// # Errors
     /// Returns a [`ToolError`] if the arguments are unacceptable, the backend

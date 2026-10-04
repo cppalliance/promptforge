@@ -21,12 +21,13 @@ use crate::wire::read::{ChunkSource, read_body_capped, read_completion_stream};
 use crate::wire::request::build_request_body;
 use crate::wire::stream::escape_controls;
 
-/// A chat completions client bound to one gateway URL and, usually, the
-/// gateway's shared bearer key.
+/// A client that sends chat completion requests to one gateway URL.
 ///
-/// The key is optional: a gateway on the same machine admits keyless
-/// loopback callers by default, and a client built without a key
-/// ([`GatewayChat::keyless`]) omits the `Authorization` header entirely.
+/// The client usually presents the gateway's shared bearer key on every
+/// request. The key is optional: by default, a gateway on the same machine
+/// admits loopback callers that present no key. A client built without a
+/// key ([`GatewayChat::keyless`]) omits the `Authorization` header
+/// entirely.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewayChat {
@@ -84,9 +85,12 @@ impl fmt::Debug for GatewayChat {
 }
 
 impl GatewayChat {
-    /// Builds a client from a validated [`GatewayEndpoint`] and a redacted
-    /// [`SecretString`] bearer key (used by tests and by
-    /// [`GatewayChat::from_env`]).
+    /// Builds a client that sends requests to `endpoint` with `key` as the
+    /// bearer key.
+    ///
+    /// The endpoint is a validated [`GatewayEndpoint`], and the key is a
+    /// [`SecretString`], which keeps it redacted. [`GatewayChat::from_env`]
+    /// builds its client this way when a key is set.
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayChat {
         GatewayChat {
@@ -100,12 +104,15 @@ impl GatewayChat {
 
     /// Builds a client that presents no bearer key.
     ///
-    /// Every request goes out without an `Authorization` header. This fits a
-    /// gateway on the same machine, which trusts keyless loopback callers by
-    /// default (and, on a shared machine, every other OS account there)
-    /// unless its operator set `trust_loopback = false`; against any other
-    /// gateway the requests fail with an `Unavailable` 401. Nothing here checks
-    /// the endpoint's host - the caller decides, and
+    /// Every request goes out without an `Authorization` header. This suits
+    /// a gateway on the same machine, because such a gateway trusts loopback
+    /// callers that present no key, unless its operator set
+    /// `trust_loopback = false`. On a shared machine, that trust also covers
+    /// every other OS account there. Against any other gateway, the requests
+    /// fail with an `Unavailable`-kind error when the gateway answers 401.
+    ///
+    /// This constructor does not check the endpoint's host, so the caller
+    /// decides when a keyless client is appropriate.
     /// [`GatewayChat::from_env`] decides by [`GatewayEndpoint::is_loopback`].
     #[must_use]
     pub fn keyless(endpoint: GatewayEndpoint) -> GatewayChat {
@@ -118,12 +125,12 @@ impl GatewayChat {
         }
     }
 
-    /// Builds an explicit sentinel client that the Harness uses for hermetic
-    /// execution paths.
+    /// Builds a client that never contacts a gateway, for execution paths
+    /// that must stay hermetic.
     ///
     /// Any attempted model call fails with an `Unavailable`-kind
-    /// [`CompletionError`]; the client reads no gateway configuration and
-    /// sends no HTTP.
+    /// [`CompletionError`]. The client reads no gateway configuration and
+    /// sends no HTTP request.
     #[must_use]
     pub fn disabled() -> GatewayChat {
         GatewayChat {
@@ -142,14 +149,16 @@ impl GatewayChat {
         self.key.is_some()
     }
 
-    /// Applies the run's HTTP limits to this client.
+    /// Applies the run's HTTP limits to this client: a timeout for each
+    /// receive and a cap on the response size.
     ///
     /// `request_timeout` is the longest a completion request waits for its
-    /// response headers, and then for each next body chunk; every receive
-    /// restarts it, so a long stream that keeps arriving completes while
-    /// one that stalls fails as a timeout. The response body is refused
-    /// once it would exceed `max_response_bytes` before any UTF-8 or JSON
-    /// decoding runs.
+    /// response headers, and then for each next body chunk. Every chunk that
+    /// arrives restarts the wait. A long stream that keeps arriving
+    /// completes, and a stream that stalls fails as a timeout.
+    ///
+    /// The client refuses the response body as soon as it would exceed
+    /// `max_response_bytes`, before any UTF-8 or JSON decoding runs.
     #[must_use]
     pub fn with_request_limits(
         mut self,
@@ -161,23 +170,25 @@ impl GatewayChat {
         self
     }
 
-    /// Builds a client from the environment.
+    /// Builds a client from environment variables.
     ///
-    /// - URL: `PROMPTFORGE_GATEWAY_URL`. Required.
-    /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer.
-    ///   Required unless the URL's host is loopback (`127.0.0.1`, `::1`,
-    ///   `localhost`); a loopback gateway trusts keyless same-machine callers
-    ///   by default, so the client is then built keyless. An empty value
-    ///   counts as unset. That trust also admits every other OS account on a
-    ///   shared machine, so an operator there sets `trust_loopback = false`;
-    ///   then set the key, or a keyless client's requests fail with an
-    ///   `Unavailable` 401.
+    /// - `PROMPTFORGE_GATEWAY_URL` holds the gateway URL. It is required.
+    /// - `PROMPTFORGE_GATEWAY_API_KEY` holds the gateway's shared bearer key.
+    ///   An empty value counts as unset. The key is required unless the
+    ///   URL's host is loopback (`127.0.0.1`, `::1`, `localhost`). By
+    ///   default, a loopback gateway trusts callers on the same machine that
+    ///   present no key, so without a key the client is built keyless.
+    ///
+    /// That trust also admits every other OS account on a shared machine, so
+    /// the gateway's operator there sets `trust_loopback = false`. Then set
+    /// the key, or a keyless client's requests fail with an
+    /// `Unavailable`-kind error when the gateway answers 401.
     ///
     /// # Errors
     /// Returns a [`GatewayConfigError`] when `PROMPTFORGE_GATEWAY_URL` is
-    /// unset or invalid, when either variable is set to a non-Unicode value,
-    /// or when the URL's host is not loopback (a LAN or remote gateway) and
-    /// `PROMPTFORGE_GATEWAY_API_KEY` is unset or empty.
+    /// unset or invalid, when either variable is set to a value that is not
+    /// valid Unicode, or when the URL's host is not loopback (a LAN or
+    /// remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is unset or empty.
     pub fn from_env() -> Result<GatewayChat, GatewayConfigError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
@@ -190,44 +201,54 @@ impl GatewayChat {
         })
     }
 
-    /// Sends a list of messages and returns the model's accumulated outcome.
+    /// Sends a list of messages to the gateway and returns the model's reply.
     ///
-    /// The one completion method, always streaming: the request asks for SSE
-    /// with `stream_options.include_usage`, deltas are accumulated into the
-    /// buffered body shape, and `on_delta` is invoked live with each
-    /// [`StreamDelta`] text or reasoning fragment (a caller with no use for
-    /// deltas passes a no-op closure). The returned [`Completion`] holds
-    /// the reassembled turn, the metadata parsed from the stream's summary
-    /// chunk, and a [`ClientTiming`](promptforge::metrics::ClientTiming)
-    /// measured on this client's own clock
-    /// (TTFT, mean inter-token latency, end-to-end).
+    /// The request always streams. It asks for server-sent events (SSE) and
+    /// sets `stream_options.include_usage`, so the stream ends with a
+    /// summary chunk that reports token usage. The client reassembles the
+    /// streamed fragments into the body a non-streaming chat completion
+    /// response would carry. It calls `on_delta` with each text or reasoning
+    /// fragment, as a [`StreamDelta`], as soon as the fragment arrives. A
+    /// caller with no use for the fragments passes a closure that does
+    /// nothing.
     ///
-    /// When `tools` is `Some` and non-empty, each schema is wrapped into the
-    /// `OpenAI` function shape and sent as the request's `tools` array (with
-    /// `tool_choice` set to `auto`); passing `None` or an empty slice omits
-    /// the `tools` field, preserving the plain chat-completions behavior.
+    /// The returned [`Completion`] holds the reassembled turn, the metadata
+    /// parsed from the stream's summary chunk, and a
+    /// [`ClientTiming`](promptforge::metrics::ClientTiming) measured on this
+    /// client's own clock: time to first token, mean inter-token latency,
+    /// and end-to-end time.
     ///
-    /// `options.model` names the model on the wire and labels the returned
-    /// completion, whatever name the response gave. Optional `temperature`,
-    /// `max_tokens`, and `thinking` extend the request when present.
+    /// When `tools` is `Some` and non-empty, the request carries a `tools`
+    /// array with one `OpenAI` function tool per schema: an object whose
+    /// `type` is `function` and whose `function` holds the schema's name,
+    /// description, and parameters. The request also sets `tool_choice` to
+    /// `auto`. Passing `None` or an empty slice omits the `tools` field, so
+    /// the request is a plain chat completion.
+    ///
+    /// The request names the model that `options` names, and the returned
+    /// completion is labeled with that name, whatever name the response
+    /// gave. The optional `temperature`, `max_tokens`, and `thinking`
+    /// settings in `options` extend the request when present.
     ///
     /// # Errors
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
-    /// (F11 - the full reachable set):
+    /// one of the following, and never any other kind:
     /// - `Unavailable` when this client was built with [`GatewayChat::disabled`],
-    ///   or the gateway answers 401 or 403;
-    /// - `Timeout` when no headers or next chunk arrive within the timeout;
-    /// - `Transport` on any other transport-layer failure (connection) or
-    ///   when the stream contains a mid-flight error envelope that names no
-    ///   known cause;
+    ///   or when the gateway answers 401 or 403.
+    /// - `Timeout` when the response headers or the next body chunk do not
+    ///   arrive within the request timeout.
+    /// - `Transport` on any other transport failure, such as a failed
+    ///   connection, or when the stream carries a mid-stream error envelope
+    ///   that names no known cause.
     /// - `ContextOverflow`, `RateLimited`, `QuotaExhausted`, `Overloaded`,
-    ///   `Refused`, `ServerError`, or `Rejected` when the gateway responds
-    ///   with a non-success status, as [`classify_http_failure`] reads it;
-    /// - `MalformedResponse` when the stream exceeds the size cap, a chunk's
-    ///   shape is unusable (the JSON decode failure is retained as a private
-    ///   `#[source]`), the stream ends without the `[DONE]` sentinel, or a
-    ///   tool-call batch is truncated by a `length`/`content_filter` finish
-    ///   reason (partial arguments must not execute);
+    ///   `Refused`, `ServerError`, or `Rejected` when the gateway answers
+    ///   with a non-success status, as [`classify_http_failure`] reads it.
+    /// - `MalformedResponse` when the stream exceeds the response size cap,
+    ///   a chunk is not usable JSON (a JSON decode error is kept as the
+    ///   error's source), or the stream ends without the `[DONE]` sentinel.
+    ///   It is also the kind when a `length` or `content_filter` finish
+    ///   reason cuts off a batch of tool calls, because partial arguments
+    ///   must not run.
     /// - `EmptyReply` when the turn has neither non-empty tool calls nor
     ///   non-empty text.
     pub async fn complete(

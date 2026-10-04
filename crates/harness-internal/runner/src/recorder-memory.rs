@@ -37,8 +37,9 @@ impl MemoryRecorder {
         Self::default()
     }
 
-    /// The run's records in the order they were appended; empty for a run
-    /// this recorder never began.
+    /// Returns the records of run `run` in the order they were appended.
+    ///
+    /// The list is empty if this recorder never began that run.
     #[must_use]
     pub fn records(&self, run: RunId) -> Vec<Record> {
         self.lock()
@@ -47,15 +48,18 @@ impl MemoryRecorder {
             .unwrap_or_default()
     }
 
-    /// The meta the run began with; `None` for a run this recorder never
-    /// began.
+    /// Returns the `RunMeta` that run `run` began with.
+    ///
+    /// Returns `None` if this recorder never began that run.
     #[must_use]
     pub fn meta(&self, run: RunId) -> Option<RunMeta> {
         self.lock().get(slot(run)).map(|found| found.meta.clone())
     }
 
-    /// How the run ended; `None` while the run is open, and for a run this
-    /// recorder never began.
+    /// Returns how run `run` ended.
+    ///
+    /// Returns `None` while the run is still open, or if this recorder never
+    /// began that run.
     #[must_use]
     pub fn outcome(&self, run: RunId) -> Option<RunOutcome> {
         self.lock()

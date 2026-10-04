@@ -26,17 +26,20 @@ use crate::capability::Capability;
 #[path = "registry-tests.rs"]
 mod tests;
 
-/// An explicit Host-built registry of installed capabilities.
+/// A registry of the capabilities a Host has installed.
 ///
-/// Linking a capability crate alone registers nothing: the Host registers
+/// Linking a capability crate does not register it. The Host registers
 /// each installed capability by hand and hands the registry to the
 /// Harness, which passes it to [`activate`](crate::activate) for each run.
-/// v1 is unversioned - one
-/// capability per id - so a duplicate registration is rejected rather than
-/// shadowing the installed capability, and an id differing from a
-/// registered id only by `-`/`_`/`.` punctuation is rejected as a
-/// normalization collision. A clone shares the registered capabilities and
-/// takes registrations of its own.
+///
+/// The registry holds one capability per id. Registering a second
+/// capability under an id that is already registered fails, and the first
+/// registration stays in place. Registering an id that differs from a
+/// registered id only by `-`, `_`, or `.` punctuation also fails, as a
+/// normalization collision.
+///
+/// A clone shares the capabilities registered so far. After that, each
+/// copy takes its own registrations.
 #[derive(Clone)]
 pub struct CapabilityRegistry {
     /// The installed capabilities, keyed by their stable ids.
@@ -56,10 +59,10 @@ impl CapabilityRegistry {
     ///
     /// # Errors
     /// Returns [`RegistryError`] with [`RegistryErrorKind::DuplicateId`]
-    /// when a capability with the same id is already registered; the
+    /// when a capability with the same id is already registered. The
     /// registry keeps the first registration. Returns [`RegistryError`]
     /// with [`RegistryErrorKind::NormalizationCollision`] when the id
-    /// differs from an existing registration only by `-`/`_`/`.`
+    /// differs from a registered id only by `-`, `_`, or `.`
     /// punctuation.
     pub fn register(&mut self, capability: Arc<dyn Capability>) -> Result<(), RegistryError> {
         let id = capability.id().clone();
@@ -112,15 +115,15 @@ impl fmt::Debug for CapabilityRegistry {
     }
 }
 
-/// A stable, matchable classification of a [`RegistryError`].
+/// The kind of a [`RegistryError`], as a stable value that code can match on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RegistryErrorKind {
     /// A capability with the same id was already registered.
     DuplicateId,
-    /// The id differs from an existing registration only by `-`/`_`/`.`
-    /// punctuation: punctuation twins would be indistinguishable to a
-    /// model reading a catalog, so the second one is rejected.
+    /// The id differs from a registered id only by `-`, `_`, or `.`
+    /// punctuation. A model reading a run's tool catalog could not tell
+    /// such ids apart, so the registry rejects the second one.
     NormalizationCollision,
 }
 

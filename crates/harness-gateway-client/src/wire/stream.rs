@@ -448,16 +448,22 @@ fn append_string_fragment(
     }
 }
 
-/// Escapes control characters in a diagnostic body and bounds it to `max` chars.
+/// Truncates a backend response body and escapes its control characters so it
+/// is safe to show in a diagnostic.
 ///
-/// Control characters (including newlines and carriage returns) are rendered in
-/// their `\u{..}`/`\n` escaped form so a backend body cannot forge log lines or
-/// smuggle terminal control sequences into a diagnostic. An empty body is
-/// reported as a fixed marker.
+/// The function keeps the first `max` characters of `body`. It replaces each
+/// control character among them, including newlines and carriage returns, with
+/// its escaped form, such as `\n` or `\u{1b}`. Escaping can make the result
+/// longer than `max` characters. An empty body returns the fixed marker
+/// `(empty body)`.
 ///
-/// A transport runs a non-success status's error body through here before
-/// handing it to [`classify_http_failure`](crate::classify_http_failure), so
-/// every transport bounds and escapes a backend body by the same rule.
+/// The escaping stops a backend body from forging log lines or slipping
+/// terminal control sequences into a diagnostic.
+///
+/// A transport passes the error body of a non-success response through this
+/// function before it hands the body to
+/// [`classify_http_failure`](crate::classify_http_failure). Every transport
+/// therefore truncates and escapes a backend body by the same rule.
 #[must_use]
 pub fn escape_controls(body: &str, max: usize) -> String {
     if body.is_empty() {

@@ -51,13 +51,18 @@ const CREDENTIALS_PHRASE: &str = "the model backend did not accept the credentia
 /// Classifies a non-success HTTP response into a [`CompletionError`].
 ///
 /// `body` must already be bounded and passed through
-/// [`escape_controls`](crate::escape_controls); the classifier keeps
-/// exactly that text as the error's [`detail`](CompletionError::detail) and
-/// never puts it in the message. The message is the kind's fixed phrase
-/// with ` (status N)` appended; a 401 or 403 is `Unavailable` with the
-/// message `the model backend did not accept the credentials` in place of
-/// the phrase. A body that matches no rule is `Rejected`
-/// (or `ServerError` for a 5xx), never a success.
+/// [`escape_controls`](crate::escape_controls). The error keeps exactly that
+/// text as its [`detail`](CompletionError::detail). The message never
+/// includes it.
+///
+/// The message is the kind's fixed phrase with ` (status N)` appended. A 401
+/// or 403 is `Unavailable`, and its message uses
+/// `the model backend did not accept the credentials` in place of the
+/// phrase.
+///
+/// The result is never a success. When the body matches no rule, a 429 is
+/// `RateLimited`, a 503 or 529 is `Overloaded`, any other 5xx is
+/// `ServerError`, and any other status except 401 and 403 is `Rejected`.
 #[must_use]
 pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
     let lower = body.to_lowercase();
@@ -89,15 +94,18 @@ pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
     }
 }
 
-/// Classifies an error envelope that arrived inside a 200 response stream.
+/// Classifies an error envelope that arrives inside a 200 response stream.
 ///
-/// The envelope has no status, so only the body-text rules apply: a context
-/// limit is `ContextOverflow`, quota words are `QuotaExhausted`, `overloaded`
-/// is `Overloaded`, and a content policy term is `Refused`. Text that
-/// matches no rule is `Transport`, because the stream died in flight. The
-/// message is the kind's fixed phrase with no status, and `body` is kept as
-/// the error's [`detail`](CompletionError::detail). `body` must already be
-/// bounded and control-escaped.
+/// The envelope has no status, so only the body-text rules apply, in this
+/// order. Text that names a context limit is `ContextOverflow`. Text that
+/// names quota or billing is `QuotaExhausted`. Text that contains
+/// `overloaded` is `Overloaded`. Text that names a content policy term is
+/// `Refused`. Text that matches no rule is `Transport`, because the stream
+/// died in flight.
+///
+/// The message is the kind's fixed phrase with no status. `body` must
+/// already be bounded and control-escaped. The error keeps it as its
+/// [`detail`](CompletionError::detail).
 #[must_use]
 pub fn classify_stream_error(body: &str) -> CompletionError {
     let lower = body.to_lowercase();

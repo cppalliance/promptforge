@@ -13,20 +13,24 @@ use promptforge::model::{CompletionError, ModelDescriptor, ModelId};
 
 use crate::performers::InferenceBroker;
 
-/// The Host state a run reads at launch: what the `ui()` global serves
-/// and the model the prompt's roles bind to.
+/// The Host state a run reads when it launches.
+///
+/// It supplies what the `ui()` global serves and the model selection
+/// that the prompt's roles bind to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HostSnapshot {
     /// The client's selected model id, when one is selected.
     pub selected_model: Option<String>,
-    /// The workspace roots the client has granted; the first is the
-    /// `ui()` snapshot's `workspace_root`.
+    /// The workspace roots the client has granted. The first root is the
+    /// `workspace_root` in the `ui()` snapshot.
     pub workspace_roots: Vec<PathBuf>,
 }
 
 impl HostSnapshot {
-    /// The `ui()` snapshot: `selected_model` and `workspace_root`, each
-    /// `null` when absent.
+    /// Returns the `ui()` snapshot as a JSON object.
+    ///
+    /// The object has the keys `selected_model` and `workspace_root`.
+    /// Each is `null` when absent.
     #[must_use]
     pub fn ui(&self) -> serde_json::Value {
         let root = self
@@ -37,14 +41,15 @@ impl HostSnapshot {
     }
 }
 
-/// Why launch-time model resolution cannot bind a descriptor. Each cause
-/// becomes the run's error, reported to the operator instead of binding
-/// a fabricated fallback descriptor.
+/// The reason a run could not resolve its model at launch.
+///
+/// Each variant becomes the run's error and is reported to the operator.
+/// The run never binds a fabricated fallback descriptor in its place.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CurrentModelError {
-    /// The broker's model list could not be fetched; the broker's failure
-    /// is the source.
+    /// The inference broker could not fetch its model list. The broker's
+    /// error is the source.
     #[error("the model catalog could not be fetched")]
     CatalogFetchFailed(#[source] CompletionError),
     /// The selected id is absent from the fetched catalog.

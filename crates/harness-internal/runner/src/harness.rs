@@ -31,8 +31,11 @@ mod control;
 pub use control::RunControl;
 pub(crate) use control::StopSignal;
 
-/// Drives one run for a Host: holds the Host's recorder, broker, timer,
-/// capabilities, and services, and consumes itself in [`Harness::run`].
+/// Drives one run of a prompt for a Host.
+///
+/// It holds what the Host supplies for the run: a recorder, an inference
+/// broker, a timer, a capability registry, and services. [`Harness::run`]
+/// consumes it.
 pub struct Harness {
     recorder: Arc<dyn RunRecorder>,
     broker: Arc<dyn InferenceBroker>,
@@ -52,68 +55,79 @@ impl std::fmt::Debug for Harness {
     }
 }
 
-/// What to run: the prompt's source and arguments, its declared input
-/// text, the filesystem it works in, and the Host state it reads.
+/// The inputs to one run: the prompt's source and arguments, its declared
+/// input text, the filesystem it works in, and the Host state it reads.
 #[derive(Debug, Clone)]
 pub struct RunRequest {
-    /// The run's name: every event's `execution` and the run metadata's
-    /// `name`.
+    /// The run's name. It becomes the `execution` field of every event and
+    /// the `name` field of the run metadata.
     pub name: String,
-    /// The prompt's Markdown source: the Harness's one prompt input.
+    /// The prompt's Markdown source. The Harness reads the prompt only
+    /// from this text.
     pub source: String,
     /// The run's argument text.
     pub args: String,
-    /// Text staged at the prompt's declared `input:` file before the run.
+    /// Text written to the prompt's declared `input:` file before the run
+    /// starts.
     pub input_text: Option<String>,
-    /// The run's whole filesystem: its declared store and any real mounts.
+    /// The run's whole filesystem: the store that holds the prompt's
+    /// declared files, plus any real directories mounted into it.
     pub vfs: VfsRef,
-    /// The Host's selection and granted roots, which the run binds its
-    /// model from and the `ui()` global serves.
+    /// The Host state the run reads: its selected model and the workspace
+    /// roots it has granted. The run resolves its model from the
+    /// selection, and the prompt's `ui()` global serves this state.
     pub host: HostSnapshot,
 }
 
 /// How one run ended, and what it left at its declared output file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
-    /// The run's id at the recorder; `None` when a cancel ended the run
-    /// before the recorder began it.
+    /// The id the recorder issued for the run. `None` when a cancel ended
+    /// the run before the recorder began it.
     pub run_id: Option<RunId>,
-    /// How the run ended, as the recorder was told.
+    /// How the run ended. When `run_id` is `Some`, the recorder holds this
+    /// same outcome.
     pub outcome: RunOutcome,
-    /// The text a completed run left at its declared `output:` file.
+    /// The text a completed run left at its declared `output:` file, or
+    /// the reason there is no such text.
     pub output: Result<String, OutputError>,
 }
 
-/// Why a run ended without an outcome of its own.
+/// An error that stopped a run without an outcome.
+///
+/// `Harness::run` returns it in place of a `RunReport`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HarnessError {
-    /// The Host's current model could not be resolved through its broker;
-    /// the resolution failure is the source. The run never began.
+    /// The Harness could not resolve the Host's current model through the
+    /// inference broker. The resolution failure is the error's source. The
+    /// run never began.
     #[error("the run's model could not be resolved")]
     Model(#[source] CurrentModelError),
-    /// The recorder refused a write, so the run is not driven further.
-    /// `run` is the run the recorder issued, `None` when it refused to
-    /// begin one.
+    /// The recorder refused a write, so the Harness drives the run no
+    /// further.
     #[error("the run could not be recorded")]
     Recorder {
-        /// The run the recorder issued before it refused.
+        /// The id of the run the recorder issued before it refused. `None`
+        /// when the recorder refused to begin the run.
         run: Option<RunId>,
-        /// The recorder's refusal.
+        /// The error the recorder returned.
         #[source]
         source: RecorderError,
     },
-    /// The run is pending with nothing in flight, which means the Harness
-    /// lost an effect.
+    /// The run was still pending, but no effect was in flight. This means
+    /// the Harness lost track of an effect.
     #[error("the effect loop has nothing to await for a pending run")]
     Stalled,
 }
 
 impl Harness {
-    /// A Harness for one run that records through `recorder`, performs
-    /// model rounds and resolves the run's model through `broker`, sleeps
-    /// through `timer`, activates the prompt's capabilities from
-    /// `capabilities`, and hands `services` to them. Nothing runs until
+    /// Creates a Harness for one run.
+    ///
+    /// The Harness records the run through `recorder`. It resolves the
+    /// run's model and gets the model's replies through `broker`. It sleeps
+    /// through `timer`. It activates the capabilities the prompt declares
+    /// from `capabilities` and hands them `services`. Nothing runs until
     /// [`Harness::run`].
     #[must_use]
     pub fn new(
@@ -133,29 +147,35 @@ impl Harness {
         }
     }
 
-    /// The control that steers this Harness's run. Take it before
-    /// [`Harness::run`], which consumes the Harness.
+    /// Returns the control that steers this Harness's run from outside its
+    /// future.
+    ///
+    /// Take it before calling [`Harness::run`], which consumes the Harness.
     #[must_use]
     pub fn control(&self) -> RunControl {
         self.control.clone()
     }
 
-    /// Runs `request` to its end: resolves the launch model, prepares the
-    /// source, drives the run, and reads the declared output file of a
-    /// completed run. The future is `Send` and needs no runtime of its
-    /// own.
+    /// Runs `request` to its end and reports how it ended.
     ///
-    /// A source that does not parse, a declared input that cannot be put
-    /// in place, and an environment that cannot satisfy the prompt each
-    /// end the run as failed, reported with its outcome. A cancel before
-    /// `run` or while the broker lists its models reports `Cancelled` with
-    /// no run.
+    /// It resolves the run's model through the inference broker, prepares
+    /// the prompt from its source, drives the run, and reads the declared
+    /// output file if the run completed. The returned future is `Send` and
+    /// needs no runtime of its own.
+    ///
+    /// Three problems end the run as failed and still return a report with
+    /// that outcome: a source that does not parse, a declared input file
+    /// that cannot be put in place, and an environment that cannot satisfy
+    /// the prompt. A cancel raised before calling `run`, or while the
+    /// broker lists its models, returns a report with the outcome
+    /// `Cancelled` and `run_id` set to `None`.
     ///
     /// # Errors
     /// Returns [`HarnessError::Model`] when the broker cannot list its
-    /// models or lacks the selected one, [`HarnessError::Recorder`] when
-    /// the recorder refuses a write, and [`HarnessError::Stalled`] when the
-    /// run pends with nothing in flight.
+    /// models or does not list the selected one. Returns
+    /// [`HarnessError::Recorder`] when the recorder refuses a write.
+    /// Returns [`HarnessError::Stalled`] when the run is pending with no
+    /// effect in flight.
     pub async fn run(self, request: RunRequest) -> Result<RunReport, HarnessError> {
         Box::pin(self.run_to_end(request)).await
     }

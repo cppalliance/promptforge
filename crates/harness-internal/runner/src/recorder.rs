@@ -24,18 +24,17 @@ mod memory;
 
 pub use memory::MemoryRecorder;
 
-/// A boxed, sendable future that borrows the recorder: what each
-/// [`RunRecorder`] call returns.
+/// The future that each [`RunRecorder`] method returns.
 ///
-/// The name keeps it apart from the effect loop's per-event `sink`
-/// callback.
+/// It is boxed, can be sent between threads, and borrows the recorder.
 pub type RecorderFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RecorderError>> + Send + 'a>>;
 
-/// Why a recorder could not take a write; the cause is the source.
+/// The error a recorder returns when it cannot store a write.
 ///
-/// The Harness stops the run that hit it. The text names the failing
-/// layer only, so read the cause chain for the reason.
+/// It wraps the recorder's own error as its source. The Harness stops the
+/// run that received it. Its message says only that the run recorder
+/// failed, so read the source chain for the reason.
 #[derive(Debug, thiserror::Error)]
 #[error("the run recorder failed")]
 pub struct RecorderError {
@@ -54,12 +53,13 @@ impl RecorderError {
     }
 }
 
-/// Where the Harness writes a run's history.
+/// The storage that the Harness writes each run's history to.
 ///
-/// A run calls [`begin_run`](Self::begin_run) once, then
-/// [`append`](Self::append) for every record, then
-/// [`end_run`](Self::end_run) once. The recorder issues each [`RunId`].
-/// A write that returns an error ends the run it belongs to.
+/// For each run, the Harness calls [`begin_run`](Self::begin_run) once,
+/// then [`append`](Self::append) for every record, then
+/// [`end_run`](Self::end_run) once. The recorder issues each run's
+/// [`RunId`]. If a write returns an error, the Harness stops the run it
+/// belongs to.
 pub trait RunRecorder: Send + Sync {
     /// Opens a run's history and returns its id.
     ///
@@ -84,8 +84,9 @@ pub trait RunRecorder: Send + Sync {
     fn end_run(&self, run: RunId, outcome: RunOutcome) -> RecorderFuture<'_, ()>;
 }
 
-/// A run's identity as its recorder issued it: whatever
-/// [`RunRecorder::begin_run`] returned. It means something only to the
+/// The id a recorder assigns to a run.
+///
+/// [`RunRecorder::begin_run`] returns it. It means something only to the
 /// recorder that issued it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RunId(i64);
@@ -118,28 +119,30 @@ pub struct RunMeta {
     /// A content hash of the prompt file, so a transcript can be matched
     /// to the exact text that produced it.
     pub prompt_hash: String,
-    /// The Harness-drawn seed handed to the Engine.
+    /// The seed the Harness drew and passed to the Engine.
     pub seed: u64,
-    /// The Engine's behavior flags, a bitset; empty until a flag exists.
+    /// The Engine's behavior flags, as a bitset.
     pub flags: u32,
-    /// When the run started, UTC milliseconds since the Unix epoch; the
-    /// Engine's `started_at` input, so the record and the run agree.
+    /// When the run started, in UTC milliseconds since the Unix epoch.
+    /// The Engine receives the same value as `started_at`, so the record
+    /// and the run agree.
     pub started_at: i64,
 }
 
 /// Which side of the effect loop a record came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecordKind {
-    /// An effect the Engine issued; the payload is an `EffectRecord`.
+    /// An effect the Engine issued. The record's payload is an
+    /// `EffectRecord`.
     Effect,
-    /// The answer to an effect; the payload is an `EffectAnswer`.
+    /// The answer to an effect. The record's payload is an `EffectAnswer`.
     Answer,
-    /// An event the Engine emitted; the payload is an `Event`.
+    /// An event the Engine emitted. The record's payload is an `Event`.
     Event,
 }
 
 impl RecordKind {
-    /// The kind's stored text.
+    /// The text that stores this kind: `effect`, `answer`, or `event`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -149,7 +152,8 @@ impl RecordKind {
         }
     }
 
-    /// Parses stored kind text; `None` for text no kind writes.
+    /// Parses the stored text of a kind. Returns `None` for text that
+    /// matches no kind.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         match text {
@@ -161,17 +165,20 @@ impl RecordKind {
     }
 }
 
-/// One record as the Harness appends it. The recorder decides each
-/// record's position and time.
+/// One entry in a run's history, as the Harness appends it.
+///
+/// The recorder decides each record's position and time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    /// The nearest enclosing task, as the Engine's `TaskId` renders: a
-    /// dot-separated path of child indices from the root chain, so the
-    /// main walk is task `0` and its second child task is `0.1`.
+    /// The id of the nearest enclosing task, in the text form of the
+    /// Engine's `TaskId`.
+    ///
+    /// The id is a dot-separated path of child indices. The run's root
+    /// task is `0`, and its second child task is `0.1`.
     pub task_id: String,
     /// The record's position within its task.
     pub task_seq: u32,
-    /// Which side of the loop the record came from.
+    /// Which side of the effect loop the record came from.
     pub kind: RecordKind,
     /// The in-flight effect handle, for effects and their answers.
     pub effect_id: Option<u64>,
@@ -199,7 +206,8 @@ pub enum RunOutcome {
 }
 
 impl RunOutcome {
-    /// The outcome's stored text.
+    /// The text that stores this outcome: `completed`, `failed`, or
+    /// `cancelled`.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {

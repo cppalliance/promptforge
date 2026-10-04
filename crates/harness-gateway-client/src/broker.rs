@@ -24,18 +24,23 @@ use crate::config::{GatewayEndpoint, SecretString};
 use crate::transport::GatewayChat;
 use crate::wire::delta::StreamDelta;
 
-/// The [`InferenceBroker`] a Host hands the Harness to reach the Gateway:
-/// it performs the Engine's `Chat` effects on a [`GatewayChat`] and lists
-/// the Gateway's models through [`fetch_model_catalog`], both at one API
-/// root under one bearer key.
+/// A model broker that sends the Harness's model rounds to the PromptForge
+/// Gateway and lists the Gateway's models.
 ///
-/// Every round runs under the Engine's default run limits: the per-receive
-/// timeout and the response byte cap of [`RunLimits::new`].
+/// A Host passes this broker to the Harness as its [`InferenceBroker`].
+/// The broker performs each `Chat` effect from the Engine as one model
+/// round on a [`GatewayChat`]. It lists the Gateway's models through
+/// [`fetch_model_catalog`]. Both kinds of request go to the same API root
+/// and authenticate with the same bearer key.
+///
+/// Every round uses the Engine's default run limits from
+/// [`RunLimits::new`]: the wait limit for each part of the response and
+/// the cap on response size in bytes.
 ///
 /// The broker's futures, [`models`](InferenceBroker::models) included, need
-/// a tokio runtime with its reactor and timer, so a Host that uses this
-/// broker awaits `Harness::run` inside one. The Harness itself needs no
-/// runtime.
+/// a tokio runtime with its reactor and timer. A Host that uses this broker
+/// must therefore await `Harness::run` inside such a runtime. The Harness
+/// itself needs no runtime.
 #[derive(Clone)]
 pub struct GatewayBroker {
     client: GatewayChat,
@@ -56,8 +61,11 @@ impl fmt::Debug for GatewayBroker {
 }
 
 impl GatewayBroker {
-    /// A broker whose rounds and model list reach the Gateway API root
-    /// `endpoint` (the OpenAI-compatible `/v1` root) under `key`.
+    /// Creates a broker that reaches the Gateway at `endpoint` with the
+    /// bearer key `key`.
+    ///
+    /// `endpoint` is the Gateway's OpenAI-compatible API root, the `/v1`
+    /// path. Model rounds and model-list requests both go to it.
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayBroker {
         let limits = RunLimits::new();
@@ -70,9 +78,12 @@ impl GatewayBroker {
         }
     }
 
-    /// Runs one round as the [`InferenceBroker`] round does, handing
-    /// `on_piece` each live piece of the reply as it arrives, in the
-    /// stream's order. The returned completion holds the whole reply.
+    /// Runs one model round and passes each piece of the reply to
+    /// `on_piece` as it arrives.
+    ///
+    /// The round is the same one `InferenceBroker::chat` runs. `on_piece`
+    /// receives the pieces in the order the stream delivers them. The
+    /// returned completion holds the whole reply.
     ///
     /// `on_piece` is called inline as each piece is read, so it must not
     /// block.
