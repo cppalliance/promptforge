@@ -1,9 +1,9 @@
 //! Configuration for the PromptForge inference gateway.
 //!
-//! This crate owns everything needed to turn one version-2 `gateway.toml`
-//! plus its sibling profile state into a validated [`Config`]: TOML parsing,
-//! `${VAR}` interpolation, startup profile selection, and validation of every
-//! profile before any can run.
+//! This crate owns everything needed to turn one `gateway.toml` at
+//! `config-version = 0` plus its sibling profile state into a validated
+//! [`Config`]: TOML parsing, `${VAR}` interpolation, startup profile
+//! selection, and validation of every profile before any can run.
 //!
 //! It is deliberately free of the gateway's HTTP stack: consumers that only
 //! need to read a configuration (IDE tooling, config editors, CLIs) depend on
@@ -13,9 +13,10 @@
 //! command-line, environment, or sibling-state selection, while
 //! [`Config::from_toml_str`] validates an unselected in-memory catalog.
 //! Removed include chains, profile directories, top-level allowlists, and
-//! `[workshop.voice]` fields produce hard-break diagnostics with file, key,
-//! and line. Failures are reported as the opaque
-//! [`ConfigError`]; classify them with [`ConfigError::kind`].
+//! `[workshop.voice]` fields, and a missing or unsupported `config-version`,
+//! produce hard-break diagnostics that name the file, line, problem, and
+//! fix. Failures are reported as the opaque [`ConfigError`]; classify them
+//! with [`ConfigError::kind`].
 //!
 //! Pending edits stage as a shadow file beside the real one
 //! (`gateway.toml` gains `gateway.toml.next`):

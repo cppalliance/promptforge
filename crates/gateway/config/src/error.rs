@@ -45,19 +45,18 @@ pub(crate) enum ConfigError {
     #[error("invalid config: {0}")]
     Validation(String),
 
-    /// A removed layout feature was found with an actionable source location.
+    /// A layout this loader rejects was found with an actionable source
+    /// location: a removed key or directory, or a missing or unsupported
+    /// `config-version`.
     #[non_exhaustive]
-    #[error(
-        "{}:{line}: removed config key `{key}`; {replacement}",
-        path.display()
-    )]
+    #[error("{}:{line}: {problem}; {replacement}", path.display())]
     HardBreak {
-        /// The file containing the removed layout.
+        /// The file containing the rejected layout.
         path: std::path::PathBuf,
         /// One-based source line.
         line: usize,
-        /// Removed key or layout feature.
-        key: &'static str,
+        /// What the file holds, such as "removed config key `include`".
+        problem: String,
         /// One-sentence replacement.
         replacement: &'static str,
     },
