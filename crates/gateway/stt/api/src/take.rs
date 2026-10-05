@@ -117,7 +117,7 @@ impl Take {
         }
     }
 
-    pub(crate) fn consumed(&self) -> u64 {
+    fn consumed(&self) -> u64 {
         TakeState::lock(&self.state.segmenter).consumed()
     }
 

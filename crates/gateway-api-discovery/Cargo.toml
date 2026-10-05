@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway discovery seam: the gateway.json gateway discovery file, its launch lock, stale detection, and the health probe shared by the gateway and the workshop readers"
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -36,29 +34,8 @@ test-fixtures = []
 [dev-dependencies]
 tempfile.workspace = true
 
-# Not `workspace = true`: the process-image shims under src/sys/ are raw FFI
-# and cannot be written without unsafe, and a workspace `forbid` cannot be
-# overridden by a module allow. The workspace lint set is mirrored with
-# unsafe_code lowered to deny, which the sys modules alone opt out of.
-[lints.rust]
-unsafe_code = "deny"
-missing_docs = "warn"
-missing_debug_implementations = "warn"
-unreachable_pub = "warn"
-unsafe_op_in_unsafe_fn = "deny"
-future_incompatible = { level = "warn", priority = -1 }
+[build-dependencies]
+build-ceiling.workspace = true
 
-[lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-
-[lints.clippy]
-all = { level = "deny", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-unwrap_used = "deny"
-expect_used = "deny"
-dbg_macro = "warn"
-doc_markdown = "allow"
-assert_is_empty = "allow"
-undocumented_unsafe_blocks = "deny"
-missing_safety_doc = "deny"
+[lints]
+workspace = true

@@ -48,7 +48,7 @@ pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding
 }
 
 /// Every tool and model alias the prompt's frontmatter declares, filled or
-/// not: the names a capability prelude's globals must not take, so whether
+/// not: the names a Plugin prelude's globals must not take, so whether
 /// a prelude installs depends only on the frontmatter.
 pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
     let frontmatter = prompt.frontmatter();
@@ -72,8 +72,8 @@ fn keyword_name(keyword: ModelKeyword) -> &'static str {
         ModelKeyword::Small => "small",
         ModelKeyword::Creative => "creative",
         ModelKeyword::Chat => "chat",
-        // The vocabulary is closed today; a future keyword reports its
-        // debug spelling rather than breaking the fill.
+        // `ModelKeyword` is `#[non_exhaustive]`; an unlisted keyword
+        // reports as unknown rather than breaking the fill.
         _ => "unknown",
     }
 }

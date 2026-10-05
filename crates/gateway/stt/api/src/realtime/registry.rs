@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-pub(crate) const MAX_ACTIVE_REALTIME_SESSIONS: usize = 8;
+const MAX_ACTIVE_REALTIME_SESSIONS: usize = 8;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum RegisterError {
@@ -171,7 +171,7 @@ pub(crate) struct SessionRegistration {
 }
 
 impl SessionRegistration {
-    pub(crate) fn retire<T, U>(
+    pub(super) fn retire<T, U>(
         &mut self,
         interim_tasks: Vec<JoinHandle<T>>,
         finalization_tasks: Vec<JoinHandle<U>>,

@@ -1,218 +1,289 @@
-//! The gateway transport error and its stable classifier.
+//! The model failure vocabulary: the closed set of kinds a broker maps its
+//! failures into, and the error that carries one.
 
-use crate::Error;
+/// A type-erased owned error cause.
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// A stable, matchable classification of a [`CompletionError`].
+/// The kind of failure a model round ended with.
 ///
-/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::CompletionErrorKind;
-///
-/// let kind = CompletionErrorKind::Backend;
-/// let retry_hint = match kind {
-///     CompletionErrorKind::Transport | CompletionErrorKind::MalformedResponse => "retry",
-///     _ => "inspect",
-/// };
-/// assert_eq!(retry_hint, "inspect");
-/// ```
+/// The kinds form a closed set, so a caller can branch on the kind alone.
+/// The caller that performs a round maps every failure into one of these
+/// kinds. Each kind is either retryable or permanent (see
+/// [`CompletionError::is_retryable`]). The enum is `#[non_exhaustive]`, so
+/// a `match` on it needs a wildcard arm.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionErrorKind {
-    /// The HTTP request failed at the transport layer (connection, timeout).
+    /// The request exceeds the model's context window. Permanent.
+    ContextOverflow,
+    /// The backend is limiting the request rate. Retryable.
+    RateLimited,
+    /// The billing or usage quota is spent. Permanent.
+    QuotaExhausted,
+    /// The backend is temporarily at capacity. Retryable.
+    Overloaded,
+    /// The provider declined the content on policy grounds. Permanent.
+    Refused,
+    /// The wait for a reply or the next chunk timed out. Retryable.
+    Timeout,
+    /// The connection failed or the stream broke. Retryable.
     Transport,
-    /// The backend returned a non-success status.
-    Backend,
-    /// The backend response could not be decoded or was structurally invalid.
+    /// The backend reported a fault of its own. Retryable.
+    ServerError,
+    /// The backend refused the request for any other reason. Permanent.
+    Rejected,
+    /// The reply was malformed, or it was larger than the size limit for a
+    /// reply. Retryable.
     MalformedResponse,
-    /// The model returned neither non-empty tool calls nor non-empty text.
+    /// The model's reply was empty of text and tool calls. Permanent.
     EmptyReply,
-    /// Gateway access was explicitly disabled by the Host.
-    Disabled,
-    /// The client could not be configured (missing environment, bad endpoint).
-    Config,
+    /// Model access is turned off or lacks a configuration. Permanent.
+    Unavailable,
 }
 
-/// The error a model round or a catalog fetch fails with: what the
-/// transport that performed it (the Harness's gateway client) reports, and
-/// what comes back into the Engine in a `Chat` effect's answer.
+impl CompletionErrorKind {
+    /// Returns the fixed phrase for this kind: one lowercase phrase written
+    /// for a model to read.
+    ///
+    /// The caller builds a [`CompletionError`] message from this phrase. For
+    /// a failure that came from an HTTP status, it appends ` (status N)`. A
+    /// 401 or 403 is `Unavailable`, and its message uses the phrase
+    /// `the model backend did not accept the credentials`. Only
+    /// `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the
+    /// phrase with `: ` and specific text that the caller's own code wrote.
+    /// Provider text never enters the message. It goes in the
+    /// [`detail`](CompletionError::detail).
+    #[must_use]
+    pub fn phrase(self) -> &'static str {
+        match self {
+            CompletionErrorKind::ContextOverflow => {
+                "the request is larger than the model's context window"
+            }
+            CompletionErrorKind::RateLimited => "the model backend is limiting the request rate",
+            CompletionErrorKind::QuotaExhausted => {
+                "the model backend says the usage quota is spent"
+            }
+            CompletionErrorKind::Overloaded => "the model backend is overloaded",
+            CompletionErrorKind::Refused => {
+                "the model backend refused the request on content policy grounds"
+            }
+            CompletionErrorKind::Timeout => "the model backend did not answer in time",
+            CompletionErrorKind::Transport => "the connection to the model backend failed",
+            CompletionErrorKind::ServerError => "the model backend reported a fault of its own",
+            CompletionErrorKind::Rejected => "the model backend rejected the request",
+            CompletionErrorKind::MalformedResponse => {
+                "the model backend sent a reply that could not be understood"
+            }
+            CompletionErrorKind::EmptyReply => "the model replied with no text and no tool calls",
+            CompletionErrorKind::Unavailable => "model access is turned off or not configured",
+        }
+    }
+
+    fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            CompletionErrorKind::RateLimited
+                | CompletionErrorKind::Overloaded
+                | CompletionErrorKind::Timeout
+                | CompletionErrorKind::Transport
+                | CompletionErrorKind::ServerError
+                | CompletionErrorKind::MalformedResponse
+        )
+    }
+}
+
+/// The error a model round or a catalog fetch fails with.
 ///
-/// Holds a stable [`kind`](CompletionError::kind) classifier plus the
-/// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
-/// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`,
-/// so a transport builds one only by converting the crate's
-/// [`Error`](crate::Error) through `From`.
+/// The caller that performs the round or fetch reports this error. For a
+/// model round, it comes back into the Engine in a `Chat` effect's answer.
 ///
-/// # Examples
+/// It holds a [`kind`](CompletionError::kind) from a closed set, a
+/// [`message`](CompletionError::message) written for the operator and the
+/// model, and optional extras: the token counts of a context overflow, the
+/// backend's `finish_reason` for an empty reply, a provider
+/// [`detail`](CompletionError::detail), and the underlying cause behind
+/// [`std::error::Error::source`]. `Display` shows only the message. The
+/// detail is provider text that the caller bounded and control-escaped. It
+/// is an opt-in channel and never appears in `Display`.
 ///
-/// ```
-/// use promptforge::model::{CompletionError, CompletionErrorKind};
+/// The caller builds one with [`new`](CompletionError::new) or
+/// [`context_overflow`](CompletionError::context_overflow) and adds the
+/// extras with the `with_` methods.
 ///
-/// fn report(error: &CompletionError) -> &'static str {
-///     if error.kind() == CompletionErrorKind::Backend {
-///         return "gateway returned a non-success status";
-///     }
-///     if error.is_retryable() {
-///         return "transient; safe to retry";
-///     }
-///     "inspect"
-/// }
-/// # let _ = report;
-/// ```
+/// The message is the kind's fixed phrase. For a failure that came from an
+/// HTTP status, the caller appends ` (status N)`. A 401 or 403 is
+/// `Unavailable`, and its message uses the phrase
+/// `the model backend did not accept the credentials`. `MalformedResponse`,
+/// `EmptyReply`, and `Unavailable` may extend the message with `: ` and
+/// specific text that the caller's own code wrote, such as the byte limit
+/// that was hit. Provider text never enters the message. It goes in the
+/// [`detail`](CompletionError::detail).
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionError {
-    inner: Error,
+    kind: CompletionErrorKind,
+    message: String,
+    prompt_tokens: Option<u32>,
+    window: Option<u32>,
+    finish_reason: Option<String>,
+    detail: Option<String>,
+    source: Option<BoxedSource>,
 }
 
 impl CompletionError {
-    /// Returns the stable classification of this failure.
+    /// Builds a failure of `kind` with `message` as its display text.
+    ///
+    /// The caller uses the kind's fixed
+    /// [`phrase`](CompletionErrorKind::phrase) as the message. For a failure
+    /// that came from an HTTP status, it appends ` (status N)`. A 401 or 403
+    /// is `Unavailable`, and its message uses the phrase
+    /// `the model backend did not accept the credentials`. For
+    /// `MalformedResponse`, `EmptyReply`, and `Unavailable`, the caller may
+    /// extend the phrase with `: ` and specific text that its own code wrote.
+    /// Provider text never enters the message. The caller passes it to
+    /// [`with_detail`](CompletionError::with_detail).
+    #[must_use]
+    pub fn new(kind: CompletionErrorKind, message: impl Into<String>) -> CompletionError {
+        CompletionError {
+            kind,
+            message: message.into(),
+            prompt_tokens: None,
+            window: None,
+            finish_reason: None,
+            detail: None,
+            source: None,
+        }
+    }
+
+    /// Builds a [`ContextOverflow`](CompletionErrorKind::ContextOverflow)
+    /// failure with the token counts the provider stated. Pass `None` for a
+    /// count the provider omitted.
+    #[must_use]
+    pub fn context_overflow(
+        prompt_tokens: Option<u32>,
+        window: Option<u32>,
+        message: impl Into<String>,
+    ) -> CompletionError {
+        CompletionError {
+            prompt_tokens,
+            window,
+            ..CompletionError::new(CompletionErrorKind::ContextOverflow, message)
+        }
+    }
+
+    /// Keeps `source` as the underlying cause, reachable through
+    /// [`std::error::Error::source`].
+    #[must_use]
+    pub fn with_source(
+        mut self,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> CompletionError {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// Records the `finish_reason` the backend gave, for an
+    /// [`EmptyReply`](CompletionErrorKind::EmptyReply) failure.
+    #[must_use]
+    pub fn with_finish_reason(mut self, reason: impl Into<String>) -> CompletionError {
+        self.finish_reason = Some(reason.into());
+        self
+    }
+
+    /// Records provider text that explains the failure. The caller bounds
+    /// and control-escapes the text before passing it. The text never
+    /// appears in `Display`.
+    #[must_use]
+    pub fn with_detail(mut self, text: impl Into<String>) -> CompletionError {
+        self.detail = Some(text.into());
+        self
+    }
+
+    /// Builds a failure whose message is the kind's fixed phrase.
+    pub(crate) fn phrased(kind: CompletionErrorKind) -> CompletionError {
+        CompletionError::new(kind, kind.phrase())
+    }
+
+    /// Builds a failure whose message is the kind's fixed phrase extended
+    /// with `: ` and a specific this crate wrote.
+    fn specific(kind: CompletionErrorKind, specific: impl std::fmt::Display) -> CompletionError {
+        CompletionError::new(kind, format!("{}: {specific}", kind.phrase()))
+    }
+
+    /// Builds a `MalformedResponse` failure naming what was wrong with the
+    /// reply.
+    pub(crate) fn malformed(specific: impl std::fmt::Display) -> CompletionError {
+        CompletionError::specific(CompletionErrorKind::MalformedResponse, specific)
+    }
+
+    /// Returns the kind of this failure.
     #[must_use]
     pub fn kind(&self) -> CompletionErrorKind {
-        match &self.inner {
-            Error::Http(_) | Error::BackendBodyRead { .. } => CompletionErrorKind::Transport,
-            Error::Backend { .. } => CompletionErrorKind::Backend,
-            Error::MalformedResponse(_) | Error::MalformedResponseSource { .. } => {
-                CompletionErrorKind::MalformedResponse
-            }
-            Error::EmptyModelReply { .. } => CompletionErrorKind::EmptyReply,
-            Error::GatewayDisabled => CompletionErrorKind::Disabled,
-            Error::MissingEnv(_)
-            | Error::InvalidEnv(_)
-            | Error::InvalidConfig(_)
-            | Error::Config { .. }
-            | Error::ModelSetLock(_) => CompletionErrorKind::Config,
-        }
+        self.kind
     }
 
-    /// Returns the choice's `finish_reason`, when the failure was an empty
-    /// model reply and the backend supplied one.
-    ///
-    /// The tool loop gates on this: an empty turn with `Some("stop")` after
-    /// successful tool calls is a clean exit, while a missing or `"length"`
-    /// reason stays a hard failure.
-    #[must_use]
-    pub fn finish_reason(&self) -> Option<&str> {
-        match &self.inner {
-            Error::EmptyModelReply { finish_reason, .. } => finish_reason.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// Returns the bounded, control-escaped backend error body, when the failure
-    /// was a non-success backend status.
-    ///
-    /// This is an explicit opt-in diagnostic channel: the raw body never
-    /// appears in the public [`Display`](std::fmt::Display), so a hostile or
-    /// sensitive payload cannot forge log lines or leak into an error message.
-    /// The returned text is bounded and has its control characters escaped.
-    #[must_use]
-    pub fn backend_body(&self) -> Option<&str> {
-        match &self.inner {
-            Error::Backend { body, .. } => Some(body),
-            _ => None,
-        }
-    }
-
-    /// Returns the backend HTTP status from a status or body-read failure.
-    ///
-    /// `BackendBodyRead` failures are classified as
-    /// [`CompletionErrorKind::Transport`] but still retain the response status.
-    #[must_use]
-    pub fn status(&self) -> Option<u16> {
-        match &self.inner {
-            Error::Backend { status, .. } | Error::BackendBodyRead { status, .. } => Some(*status),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` when the transport failure was a timeout.
-    ///
-    /// The transport marks a timeout by wrapping its own error in
-    /// [`Timeout`](crate::Timeout); this crate names no HTTP client.
-    #[must_use]
-    pub fn is_timeout(&self) -> bool {
-        match &self.inner {
-            Error::Http(source) | Error::BackendBodyRead { source, .. } => {
-                source.downcast_ref::<crate::Timeout>().is_some()
-            }
-            _ => false,
-        }
-    }
-
-    /// Returns `true` when retrying may succeed (transient transport or 5xx).
+    /// Returns `true` when retrying may succeed. The answer depends only on
+    /// the kind. `RateLimited`, `Overloaded`, `Timeout`, `Transport`,
+    /// `ServerError`, and `MalformedResponse` are retryable, and the rest
+    /// are permanent.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
-        match &self.inner {
-            Error::Http(_)
-            | Error::MalformedResponse(_)
-            | Error::MalformedResponseSource { .. }
-            | Error::BackendBodyRead { .. } => true,
-            Error::Backend { status, .. } => *status >= 500,
-            _ => false,
-        }
+        self.kind.is_retryable()
+    }
+
+    /// Returns the token counts that a context overflow reported, as
+    /// `(prompt_tokens, window)`. A count is `None` when the provider
+    /// omitted it, and both are `None` for every kind other than
+    /// `ContextOverflow`.
+    #[must_use]
+    pub fn overflow(&self) -> (Option<u32>, Option<u32>) {
+        (self.prompt_tokens, self.window)
+    }
+
+    /// Returns the backend's `finish_reason` when the failure was an empty
+    /// model reply and the backend supplied one.
+    ///
+    /// The Engine's tool loop reads this value. An empty reply with
+    /// `Some("stop")` after at least one answered tool call, including a
+    /// call whose tool failed, is the model's clean exit. An empty reply
+    /// with a missing or `"length"` reason stays a hard failure.
+    #[must_use]
+    pub fn finish_reason(&self) -> Option<&str> {
+        self.finish_reason.as_deref()
+    }
+
+    /// Returns the message `Display` shows.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Returns the provider text behind the failure, which the caller
+    /// bounded and control-escaped.
+    ///
+    /// The detail is an explicit opt-in diagnostic channel. The text never
+    /// appears in [`Display`](std::fmt::Display), so a hostile or sensitive
+    /// payload cannot forge log lines or leak into an error message.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
     }
 }
 
 impl std::fmt::Display for CompletionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner)
+        f.write_str(&self.message)
     }
 }
 
 impl std::error::Error for CompletionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        std::error::Error::source(&self.inner)
-    }
-}
-
-impl From<Error> for CompletionError {
-    fn from(inner: Error) -> Self {
-        CompletionError { inner }
-    }
-}
-
-impl From<CompletionError> for Error {
-    fn from(error: CompletionError) -> Self {
-        error.inner
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn std::error::Error + 'static))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::detail::error_http;
-
-    #[test]
-    fn a_timeout_marked_transport_failure_reports_is_timeout() {
-        let timed_out = CompletionError::from(error_http(crate::Timeout(Box::new(
-            std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
-        ))));
-        assert!(timed_out.is_timeout());
-        assert_eq!(timed_out.kind(), CompletionErrorKind::Transport);
-        let plain = CompletionError::from(error_http(std::io::Error::other("reset")));
-        assert!(!plain.is_timeout());
-        let body_read = CompletionError::from(Error::BackendBodyRead {
-            status: 500,
-            source: Box::new(crate::Timeout(Box::new(std::io::Error::other("slow")))),
-        });
-        assert!(body_read.is_timeout());
-        assert_eq!(body_read.status(), Some(500));
-    }
-
-    #[test]
-    fn every_config_variant_classifies_as_config() {
-        for error in [
-            Error::MissingEnv("URL".to_owned()),
-            Error::InvalidEnv("URL".to_owned()),
-            Error::InvalidConfig("bad endpoint".to_owned()),
-        ] {
-            assert_eq!(
-                CompletionError::from(error).kind(),
-                CompletionErrorKind::Config
-            );
-        }
-    }
-}
+#[path = "error-tests.rs"]
+mod tests;

@@ -27,7 +27,7 @@ impl Claims {
         dir: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = &scope.view(id);
+        let view = &scope.view(id, dir)?;
         if let Some(region) = tables.ancestors.get(dir) {
             for (&other, &(other_scope, other_clock)) in &region.created {
                 if tables.conflicts(scope, view, other_scope, other, other_clock) {
@@ -68,7 +68,7 @@ impl Claims {
         pattern: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = &scope.view(id);
+        let view = &scope.view(id, pattern)?;
         for (path, region) in &tables.paths {
             if !pattern_matches_path(pattern, path) {
                 continue;
@@ -132,7 +132,7 @@ impl Claims {
         path: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = scope.view(id, path)?;
         Self::check_subtree(&tables, scope, &view, path)?;
         Self::record_subtree(&mut tables, scope, &view, path);
         Self::finish_claim(scope, id, &mut tables, view.own, 1);
@@ -151,7 +151,7 @@ impl Claims {
         to: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = scope.view(id, from)?;
         Self::check_subtree(&tables, scope, &view, from)?;
         Self::check_write(&tables, scope, &view, to)?;
         Self::record_subtree(&mut tables, scope, &view, from);
@@ -171,7 +171,7 @@ impl Claims {
         to: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = scope.view(id, from)?;
         Self::check_read(&tables, scope, &view, from)?;
         Self::check_write(&tables, scope, &view, to)?;
         Self::record_read(&mut tables, scope, &view, from);

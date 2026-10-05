@@ -4,8 +4,7 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn live_h1_infer_runs_once() {
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
 
     let source = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
@@ -17,7 +16,8 @@ async fn live_h1_infer_runs_once() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(addr))).await else {
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    else {
         panic!("live H1 path must run");
     };
 
@@ -30,8 +30,7 @@ async fn the_harness_client_serves_a_run_the_context_never_names() {
     // The context is the Engine's input; the client lives on the Harness's
     // `RunHarness`, and `Environment::run` performs the run's completions
     // with it. Nothing about the gateway crosses the Engine's boundary.
-    let gateway = ScriptedGateway::start(vec![resp_text("canned answer")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("canned answer")]);
 
     let source = "---\nname: harness-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Harness Client\n\n\
@@ -43,7 +42,7 @@ async fn the_harness_client_serves_a_run_the_context_never_names() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let harness = RunHarness::new().client(gateway_client(addr));
+    let harness = RunHarness::new().client(gateway_client(&gateway));
     let (ctx, _harness) = to_context(silent());
     let RunResult::Ok(out) =
         crate::test_support::run_with_harness(&env, &prompt, "", ctx, harness).await
@@ -61,7 +60,7 @@ async fn the_harness_client_serves_a_run_the_context_never_names() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
-    // H1 prose no longer drives inference: an unread buffer - even one
+    // H1 prose does not drive inference: an unread buffer - even one
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.
@@ -152,10 +151,10 @@ async fn shared_library_calls_engine_globals_at_load_time() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
-    // The bound slots arrive from the frontmatter: the capability installs
+    // The bound slots arrive from the frontmatter: the Plugin installs
     // the tool, the exact slot binds the alias, and the captured alias
     // globals install in every section VM - H1 never runs a bind.
-    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Captured Bindings\n\n\
          ```lua shared\n\
          function binding_names() return echo.name .. ':' .. writer.name end\n\
@@ -176,7 +175,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
-    // The Harness pattern: the fixture capability is activated into the
+    // The Harness pattern: the fixture Plugin is activated into the
     // catalog and the Harness's tool table; the run's tool slot fills by id.
     let out = super::run(
         &TestPrompt {
@@ -202,7 +201,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // The live H1 `models.infer` resolves the current model from the
     // producer's bindings-so-far and runs the one infer shape: a single
     // tool-free round on a fresh conversation that leaves `sys` untouched.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
     let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
@@ -214,8 +213,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) =
-        env_run(&env, &prompt, "", to_context(gatewayed(gateway.addr()))).await
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("live H1 models.infer must run");
     };
@@ -226,17 +224,18 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         .last_request()
         .expect("infer must reach the gateway");
     assert_eq!(
-        body["model"], "claude-sonnet-4-6",
+        body.options.model(),
+        "claude-sonnet-4-6",
         "models.infer must use the section's current model"
     );
     assert!(
-        body.get("tools").is_none(),
-        "models.infer advertises no tools: {body}"
+        body.tools.is_empty(),
+        "models.infer advertises no tools: {body:?}"
     );
     assert_eq!(
-        body["messages"].as_array().expect("messages array").len(),
+        body.messages.len(),
         1,
-        "models.infer runs on a fresh context: {body}"
+        "models.infer runs on a fresh context: {body:?}"
     );
 }
 
@@ -245,8 +244,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     // A nested Lua infer must surface its model-turn observation to the
     // run's observer, proving owned-observer propagation reaches the nested
     // inference path.
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Nested Infer Observations\n\n\
         ```lua\n\
@@ -266,7 +264,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         to_context(RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         }),
     )
@@ -297,11 +295,10 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
-    )])
-    .await;
+    )]);
     let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Cancelled Infer\n\n\
         ```lua\n\
@@ -328,7 +325,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .cancel(cancel);
     let harness = RunHarness::new()
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
-        .client(gateway_client(gateway.addr()));
+        .client(gateway_client(&gateway));
     let result = env_run(&env, &prompt, "", (ctx, harness)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
@@ -351,7 +348,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
-    let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "ghost", "{}")]).await;
+    let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "ghost", "{}")]);
     let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Infer Tool Call\n\n\
         ```lua\n\
@@ -363,7 +360,7 @@ async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
         "",
         &[],
         &TestStore::new(),
-        gatewayed(gateway.addr()),
+        gatewayed(&gateway),
     )
     .await
     .expect_err("a tool-call result from direct infer must be rejected");
@@ -382,8 +379,7 @@ async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
 async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // The live H1 pass reads its pending buffer only through an explicit
     // infer, and `var` writes accumulate across the pass into the walk.
-    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
     let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
@@ -401,7 +397,8 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(addr))).await else {
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    else {
         panic!("live H1 prose infers explicitly");
     };
 
@@ -413,7 +410,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
 async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // The live H1 pass and the H2 section each read their own pending
     // buffer into an explicit infer: two completions, in source order.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 reply"), resp_text("h2 reply")]);
     let source = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
@@ -430,8 +427,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) =
-        env_run(&env, &prompt, "", to_context(gatewayed(gateway.addr()))).await
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("H1 prose and H2 prose each infer explicitly");
     };
@@ -443,12 +439,8 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         "the H1 prose and the H2 prose each drive exactly one completion"
     );
     let requests = gateway.requests();
-    let first_prose = requests[0]["messages"][0]["content"]
-        .as_str()
-        .expect("the first request includes a user message");
-    let second_prose = requests[1]["messages"][0]["content"]
-        .as_str()
-        .expect("the second request includes a user message");
+    let first_prose = requests[0].messages[0].content();
+    let second_prose = requests[1].messages[0].content();
     assert!(
         first_prose.contains("h1 prose turn"),
         "the first completion is the H1 prose: {first_prose}"

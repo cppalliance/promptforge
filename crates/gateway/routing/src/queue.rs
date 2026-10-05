@@ -15,8 +15,7 @@
 //! round-robin order keyed by the `X-PromptForge-Client` header. That header
 //! is self-asserted: a scheduling hint for trusted callers, not an
 //! authenticated identity. There is deliberately no discipline abstraction -
-//! per-client round-robin is the only discipline, and a future cost-based
-//! discipline (DRR, token costs) would be a change contained in this file.
+//! per-client round-robin is the only discipline.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -24,49 +23,10 @@ use std::sync::{Arc, Mutex};
 use gateway_config::{Config, QueuePolicy};
 use tokio::sync::oneshot;
 
-/// A bounded scheduling identity parsed from the client header.
-///
-/// Callers name themselves via `X-PromptForge-Client` for fair queueing. The
-/// value is parsed at the boundary into a bounded id (max length, restricted
-/// charset); anything missing, empty, oversized, or containing other characters
-/// maps to the single documented `default` bucket so an authenticated caller
-/// cannot mint unbounded, attacker-chosen scheduler identities.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientId(String);
+#[path = "queue-client.rs"]
+mod client;
 
-impl ClientId {
-    /// Maximum accepted client-id length, in bytes.
-    pub const MAX_LEN: usize = 64;
-    /// The fallback bucket for absent or invalid ids.
-    pub const DEFAULT: &'static str = "default";
-
-    /// Parses an optional header string into a bounded [`ClientId`].
-    pub fn from_header(value: Option<&str>) -> ClientId {
-        value.map_or_else(|| ClientId(Self::DEFAULT.to_owned()), Self::parse)
-    }
-
-    /// Parses a raw string into a bounded [`ClientId`], falling back to `default`.
-    #[must_use]
-    pub fn parse(raw: &str) -> ClientId {
-        let trimmed = raw.trim();
-        let valid = !trimmed.is_empty()
-            && trimmed.len() <= Self::MAX_LEN
-            && trimmed
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
-        if valid {
-            ClientId(trimmed.to_owned())
-        } else {
-            ClientId(Self::DEFAULT.to_owned())
-        }
-    }
-
-    /// The validated id as a string slice.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+pub use self::client::ClientId;
 
 /// Failure to admit a request onto a dominion queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

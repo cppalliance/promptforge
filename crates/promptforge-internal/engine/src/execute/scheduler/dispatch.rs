@@ -21,6 +21,7 @@ use crate::lua::{ToolSet, resolve_model_binding};
 use crate::model::Message;
 use crate::model::ModelBinding;
 use crate::{Error, Result};
+use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
 use promptforge_types::event::lifecycle::Lifecycle;
 use promptforge_vfs::VfsError;
@@ -120,7 +121,7 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet, the store arm's error when the
+    /// no call surface produces, the store arm's error when the
     /// chain's access capability is gone, or the `local_tool_done` arm's
     /// error when no local tool call is open.
     pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {
@@ -244,15 +245,17 @@ impl Scheduler {
             )?
         };
         // A nested infer round consumes only the accumulated completion;
-        // live deltas have no consumer here.
+        // its `Infer` origin tells the Harness its live deltas have no
+        // consumer.
+        let round = self.number_round(ReplyOrigin::Infer);
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
             messages: vec![Message::user(prompt)],
             tools: Vec::new(),
-            stream: false,
+            round,
         };
-        self.issue(id, effect, Continuation::Infer);
+        self.issue(id, effect, Continuation::Infer(round.id));
         Ok(())
     }
 

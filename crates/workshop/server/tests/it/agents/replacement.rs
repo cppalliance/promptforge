@@ -1,289 +1,80 @@
-//! Gateway replacement against live agent sessions: an accepted input
-//! interrupted mid-wait, the retained catalog generation replaying on
-//! the replacement Gateway, and an unavailable catalog holding the
-//! session instead of relaunching stale bindings.
+//! Gateway replacement against a live agent conversation: the Harness
+//! holds no gateway, so a replacement published while `chat` waits for
+//! input retires nothing, and the waiting turn's round reaches the
+//! replacement.
 
 use super::*;
 
-#[tokio::test]
-async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
-    let started = Arc::new(Notify::new());
-    let request_started = Arc::clone(&started);
-    let original_requests = Arc::new(Mutex::new(Vec::new()));
-    let captured_original = Arc::clone(&original_requests);
-    let original = spawn_gateway(with_typed_catalog(Router::new().route(
+/// A gateway that records each completion body into `requests` and echoes
+/// the last user message, with the typed catalog every test selects from.
+fn recording_gateway(requests: Arc<Mutex<Vec<serde_json::Value>>>) -> Router {
+    with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
-            let request_started = Arc::clone(&request_started);
-            let captured_original = Arc::clone(&captured_original);
+            let requests = Arc::clone(&requests);
             async move {
-                record_request(&captured_original, &body);
-                hanging_completions(&request_started)
+                record_request(&requests, &body);
+                echo_completions(body).await
             }
         }),
-    )))
-    .await;
+    ))
+}
+
+#[tokio::test]
+async fn a_replacement_published_while_chat_waits_keeps_the_wait_and_answers_on_the_replacement() {
+    let original_requests = Arc::new(Mutex::new(Vec::new()));
+    let original = spawn_gateway(recording_gateway(Arc::clone(&original_requests))).await;
     let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
     state
-        .catalog()
-        .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog();
-    state
         .menu()
-        .set_selected("model-a")
-        .expect("the original model becomes selected");
+        .set_selected("test-model")
+        .expect("the retained catalog holds test-model");
     let mut socket = connect(&base).await;
     let session = launch(&mut socket, "chat").await;
     let token = next_wait_token(&mut socket).await;
 
-    let catalog_state = state.clone();
-    state
-        .agents()
-        .deliver_input_after_acceptance_for_test(
-            &session,
-            workshop_server::InputResponse {
-                token,
-                text: "accepted across replacements".to_owned(),
-            },
-            move || {
-                catalog_state.catalog().publish(vec![json!({
-                    "id": "model-b",
-                    "object": "model",
-                })]);
-            },
-        )
-        .expect("the session remains registered")
-        .expect("the accepted input resumes its run");
-    tokio::time::timeout(Duration::from_secs(10), started.notified())
-        .await
-        .expect("the accepted turn reaches the hanging Gateway");
-    assert_eq!(
-        original_requests
-            .lock()
-            .expect("the request capture lock is healthy")[0]["model"],
-        "model-a",
-        "the accepted turn reads the still-selected model-a while retirement is deferred"
-    );
-
-    state.menu().reconcile_catalog();
-    state
-        .menu()
-        .set_selected("model-b")
-        .expect("the replacement model becomes selected");
     let replacement_requests = Arc::new(Mutex::new(Vec::new()));
-    let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
-        "/v1/chat/completions",
-        post(move |body: String| {
-            let captured_replacement = Arc::clone(&captured_replacement);
-            async move {
-                record_request(&captured_replacement, &body);
-                echo_completions(body).await
-            }
-        }),
-    )))
-    .await;
+    let replacement = spawn_gateway(recording_gateway(Arc::clone(&replacement_requests))).await;
     replace_gateway(&state, &replacement, 1_757_000_000);
 
-    let fresh = tokio::time::timeout(Duration::from_secs(10), next_wait_token(&mut socket))
-        .await
-        .expect("Gateway replacement overrides the catalog settlement wait");
-    answer(&mut socket, &fresh, "after replacement").await;
-    let turn = collect_turn(&mut socket).await;
-    assert_replacement_request(&replacement_requests, "model-b", "after replacement");
-    assert_eq!(
-        delta_text(&turn),
-        "echo:after replacement",
-        "the relaunched run uses the replacement Gateway"
+    // The original token still answers: nothing cancelled the wait.
+    answer(&mut socket, &token, "after replacement").await;
+    let reply = socket
+        .recv_until(Duration::from_secs(10), |frame| {
+            assert_ne!(
+                frame["type"], "input_cancelled",
+                "a replacement retires no wait: {frame}"
+            );
+            assert_ne!(
+                frame["type"], "error",
+                "no error frame may interrupt: {frame}"
+            );
+            frame["type"] == "agent_event" && frame["event"]["kind"] == "agent_message"
+        })
+        .await;
+    assert_eq!(reply["event"]["content"], "echo:after replacement");
+    assert!(
+        original_requests
+            .lock()
+            .expect("the request capture lock is healthy")
+            .is_empty(),
+        "the original gateway receives no post-publication round"
     );
-    socket.close().await;
-}
-
-#[tokio::test]
-async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
-    let started = Arc::new(Notify::new());
-    let request_started = Arc::clone(&started);
-    let original = spawn_gateway(with_typed_catalog(Router::new().route(
-        "/v1/chat/completions",
-        post(move |body: String| {
-            let request_started = Arc::clone(&request_started);
-            async move {
-                assert_eq!(
-                    serde_json::from_str::<serde_json::Value>(&body).expect("the request is JSON")
-                        ["model"],
-                    "model-a"
-                );
-                hanging_completions(&request_started)
-            }
-        }),
-    )))
-    .await;
-    let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
-    state
-        .catalog()
-        .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog();
-    state
-        .menu()
-        .set_selected("model-a")
-        .expect("the original model becomes selected");
-    let mut socket = connect(&base).await;
-    let session = launch(&mut socket, "chat").await;
-    let token = next_wait_token(&mut socket).await;
-
-    let catalog_state = state.clone();
-    state
-        .agents()
-        .deliver_input_after_acceptance_for_test(
-            &session,
-            workshop_server::InputResponse {
-                token,
-                text: "retained before replay".to_owned(),
-            },
-            move || {
-                catalog_state
-                    .catalog()
-                    .publish(vec![json!({ "id": "model-b", "object": "model" })]);
-            },
-        )
-        .expect("the session remains registered")
-        .expect("the accepted input resumes its run");
-    tokio::time::timeout(Duration::from_secs(10), started.notified())
-        .await
-        .expect("the replacement generation is observed before the old request starts");
-
-    state
-        .catalog()
-        .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    let replacement_requests = Arc::new(Mutex::new(Vec::new()));
-    let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
-        "/v1/chat/completions",
-        post(move |body: String| {
-            let captured_replacement = Arc::clone(&captured_replacement);
-            async move {
-                record_request(&captured_replacement, &body);
-                echo_completions(body).await
-            }
-        }),
-    )))
-    .await;
-    replace_gateway(&state, &replacement, 1_757_000_001);
-
-    let fresh = tokio::time::timeout(Duration::from_secs(10), next_wait_token(&mut socket))
-        .await
-        .expect("the retained generation relaunches instead of resolving stale model-b");
-    answer(&mut socket, &fresh, "after retained replay").await;
-    let turn = collect_turn(&mut socket).await;
-    assert_eq!(delta_text(&turn), "echo:after retained replay");
-    assert_replacement_request(&replacement_requests, "model-a", "after retained replay");
-    socket.close().await;
-}
-
-#[tokio::test]
-async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
-    let started = Arc::new(Notify::new());
-    let request_started = Arc::clone(&started);
-    let original = spawn_gateway(with_typed_catalog(Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let request_started = Arc::clone(&request_started);
-            async move { hanging_completions(&request_started) }
-        }),
-    )))
-    .await;
-    let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
-    state
-        .catalog()
-        .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog();
-    state
-        .menu()
-        .set_selected("model-a")
-        .expect("the original model becomes selected");
-    let mut socket = connect(&base).await;
-    let session = launch(&mut socket, "chat").await;
-    let token = next_wait_token(&mut socket).await;
-
-    let catalog_state = state.clone();
-    state
-        .agents()
-        .deliver_input_after_acceptance_for_test(
-            &session,
-            workshop_server::InputResponse {
-                token,
-                text: "retained while unavailable".to_owned(),
-            },
-            move || {
-                catalog_state
-                    .catalog()
-                    .publish(vec![json!({ "id": "model-b", "object": "model" })]);
-            },
-        )
-        .expect("the session remains registered")
-        .expect("the accepted input resumes its run");
-    tokio::time::timeout(Duration::from_secs(10), started.notified())
-        .await
-        .expect("the replacement generation is observed before the old request starts");
-
-    state.menu().reconcile_catalog();
-    state
-        .menu()
-        .set_selected("model-b")
-        .expect("the pending replacement model becomes selected");
-    state.catalog().publish(Vec::new());
-    let replacement_requests = Arc::new(Mutex::new(Vec::new()));
-    let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
-        "/v1/chat/completions",
-        post(move |body: String| {
-            let captured_replacement = Arc::clone(&captured_replacement);
-            async move {
-                record_request(&captured_replacement, &body);
-                echo_completions(body).await
-            }
-        }),
-    )))
-    .await;
-    let mut lifecycle = state
-        .registry()
-        .state::<harness::Harness>()
-        .expect("the harness is registered")
-        .session(&harness::SessionId::new(&session))
-        .expect("the session remains registered")
-        .subscribe_state();
-    replace_gateway(&state, &replacement, 1_757_000_002);
-
-    // The supervisor marks the retired run Closed and executes a relaunch
-    // in one synchronous step on this single-threaded runtime, so Closed
-    // is observable only when the session holds.
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        lifecycle.wait_for(|run| *run == harness::SessionState::Closed),
-    )
-    .await
-    .expect("an unavailable catalog cannot relaunch model-b on the replacement Gateway")
-    .expect("the session remains registered");
+    {
+        let requests = replacement_requests
+            .lock()
+            .expect("the request capture lock is healthy");
+        assert_eq!(
+            requests.len(),
+            1,
+            "the waiting turn's round reaches the replacement"
+        );
+        assert_eq!(requests[0]["model"], "test-model");
+    }
     assert_eq!(
-        state.agents().unresolved_waits(&session),
-        Some(Vec::new()),
-        "the held session stays registered with no open wait"
+        state.agents().run_id(&session),
+        Some(workshop_run_log::RunId::from_raw(1)),
+        "the replacement keeps the conversation's one run, the first the log began"
     );
-
-    state
-        .catalog()
-        .publish(vec![json!({ "id": "model-c", "object": "model" })]);
-    state.menu().reconcile_catalog();
-    state
-        .menu()
-        .set_selected("model-c")
-        .expect("the newly available model becomes selected");
-    let fresh = tokio::time::timeout(Duration::from_secs(10), next_wait_token(&mut socket))
-        .await
-        .expect("a later usable catalog relaunches the waiting session");
-    answer(&mut socket, &fresh, "after unavailable").await;
-    let turn = collect_turn(&mut socket).await;
-    assert_eq!(delta_text(&turn), "echo:after unavailable");
-    assert_replacement_request(&replacement_requests, "model-c", "after unavailable");
     socket.close().await;
 }

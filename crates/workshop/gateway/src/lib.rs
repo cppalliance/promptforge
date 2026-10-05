@@ -10,13 +10,15 @@
 //! ## Invariants
 //!
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
-//!   `workshop-support`. Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `workshop-support`. `cargo test -p build-xtask` enforces the product
+//!   and container boundaries.
 //! - No axum type appears in this crate's public API: the domain code
 //!   speaks `reqwest` statuses and raw bodies, and the server maps them
 //!   to HTTP responses.
 //! - A bearer key is never written to logs or `Debug` output.
+//! - Workshop reaches model providers only through the gateway, so no
+//!   vendor credential passes through this crate or reaches the page or
+//!   Lua.
 //! - User-visible reporting flows through the registry's push facade, and
 //!   the gateway drives the menu through its
 //!   [`MenuPush`](workshop_registry::MenuPush) face, so this crate never

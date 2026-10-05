@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway web-search service: the Brave Search provider client, request validation, and result post-processing"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "proxy", "search"]
-categories = ["web-programming::http-client"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 gateway-config.workspace = true
 gateway-protocol.workspace = true
@@ -24,6 +18,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

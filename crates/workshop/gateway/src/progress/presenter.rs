@@ -20,11 +20,11 @@ use workshop_registry::Push;
 
 /// How long the gateway must stay busy before the barberpole appears;
 /// work shorter than this never disturbs the status bar.
-pub(crate) const SHOW_DELAY: Duration = Duration::from_secs(1);
+pub(super) const SHOW_DELAY: Duration = Duration::from_secs(1);
 
 /// How long the barberpole stays up once shown, so work that ends just
 /// past [`SHOW_DELAY`] reads as a completed activity.
-pub(crate) const MIN_VISIBLE: Duration = Duration::from_millis(500);
+pub(super) const MIN_VISIBLE: Duration = Duration::from_millis(500);
 
 /// The tooltip on every gateway busy frame.
 const DESCRIPTION: &str = "gateway activity";
@@ -33,16 +33,16 @@ const DESCRIPTION: &str = "gateway activity";
 /// run against a live mock gateway without waiting out the production
 /// values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Policy {
+pub(super) struct Policy {
     /// Busy time before the barberpole appears.
-    pub(crate) show_delay: Duration,
+    pub(super) show_delay: Duration,
     /// Minimum time the barberpole stays up once shown.
-    pub(crate) min_visible: Duration,
+    pub(super) min_visible: Duration,
 }
 
 impl Policy {
     /// The production policy.
-    pub(crate) const DEFAULT: Self = Self {
+    pub(super) const DEFAULT: Self = Self {
         show_delay: SHOW_DELAY,
         min_visible: MIN_VISIBLE,
     };
@@ -64,7 +64,7 @@ struct Shown {
 
 /// The anti-flicker state machine over gateway snapshots.
 #[derive(Debug)]
-pub(crate) struct Presenter {
+pub(super) struct Presenter {
     policy: Policy,
     live: Option<Live>,
     shown: Option<Shown>,
@@ -72,7 +72,7 @@ pub(crate) struct Presenter {
 
 impl Presenter {
     /// A presenter at rest: nothing live, nothing shown.
-    pub(crate) fn new(policy: Policy) -> Self {
+    pub(super) fn new(policy: Policy) -> Self {
         Self {
             policy,
             live: None,
@@ -84,7 +84,7 @@ impl Presenter {
     /// transition it calls for. A busy snapshot starts the show delay
     /// (or replaces the live text); an idle snapshot ends the busy run
     /// and starts the minimum-visible hold if the bar is up.
-    pub(crate) fn apply(&mut self, snapshot: Progress, now: Instant, push: &Push) {
+    pub(super) fn apply(&mut self, snapshot: Progress, now: Instant, push: &Push) {
         if snapshot.busy {
             match &mut self.live {
                 Some(live) => live.text = snapshot.text,
@@ -104,14 +104,14 @@ impl Presenter {
     /// Re-evaluates the deadlines at `now` without a new snapshot: the
     /// show delay lapsing pushes the bar up, the minimum-visible hold
     /// lapsing pushes it idle.
-    pub(crate) fn tick(&mut self, now: Instant, push: &Push) {
+    pub(super) fn tick(&mut self, now: Instant, push: &Push) {
         self.settle(now, push);
     }
 
     /// The next moment [`Presenter::tick`] can change state without a
     /// snapshot: the show deadline while the gateway warms up, or the
     /// earliest idle moment once the gateway went idle under a shown bar.
-    pub(crate) fn next_wake(&self) -> Option<Instant> {
+    pub(super) fn next_wake(&self) -> Option<Instant> {
         match (&self.live, &self.shown) {
             (Some(live), None) => Some(live.since + self.policy.show_delay),
             (None, Some(shown)) => Some(shown.at + self.policy.min_visible),
@@ -125,7 +125,7 @@ impl Presenter {
     /// its minimum-visible hold has lapsed, the same hold an idle snapshot
     /// gets; the subscriber keeps [`Presenter::next_wake`] armed between
     /// subscriptions so the hold lapses on time.
-    pub(crate) fn detach(&mut self, now: Instant, push: &Push) {
+    pub(super) fn detach(&mut self, now: Instant, push: &Push) {
         self.live = None;
         self.settle(now, push);
     }

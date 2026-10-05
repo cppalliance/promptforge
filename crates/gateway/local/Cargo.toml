@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway local inference: GGUF provisioning, artifact store, and the llama-server child lifecycle"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "gguf"]
-categories = ["web-programming::http-server"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 async-trait.workspace = true
 flate2.workspace = true
@@ -44,6 +38,9 @@ minijinja.workspace = true
 minijinja-contrib.workspace = true
 gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

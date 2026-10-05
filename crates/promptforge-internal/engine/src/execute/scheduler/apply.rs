@@ -11,10 +11,14 @@
 //! operation's outcome. A timer's firing completes its
 //! slot and wakes the waiter instead of resuming a chain. A `Dropped`
 //! answer resumes the chain with the cancelled error, whatever it was
-//! parked on.
+//! parked on. A tool call's answer, of either kind, also ends the call's
+//! identity: what the tool did is joined back into the chain, and the
+//! call's access refuses every later operation.
 
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{ToolError, ToolOutput};
-use promptforge_vfs::VfsError;
+use promptforge_vfs::detail::{access_id, end_access};
+use promptforge_vfs::{ExecId, VfsError};
 
 use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
 use crate::execute::tools::accept_infer;
@@ -30,12 +34,12 @@ use super::{
 
 /// The cancelled answer for a chain parked on `resume`'s kind of effect:
 /// the protocol variant the chain's shim expects, holding the run's
-/// cancellation error. A timer resumes no chain; its drop is applied to
-/// its slot instead, before this is reached.
+/// cancellation error. A timer's drop is applied to its slot and its
+/// waiter instead, before this is reached.
 fn dropped_answer(resume: &Continuation) -> Answer<Error> {
     match resume {
-        Continuation::Infer => Answer::Infer(Err(Error::Interrupted)),
-        Continuation::Chat => Answer::Chat(Err(Error::Interrupted)),
+        Continuation::Infer(_) => Answer::Infer(Err(Error::Interrupted)),
+        Continuation::Chat(_) => Answer::Chat(Err(Error::Interrupted)),
         Continuation::ToolCall(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
         // A timer's drop never reaches here; the cancelled store answer
         // is the harmless stand-in should it ever do so.
@@ -49,7 +53,11 @@ impl Scheduler {
     /// under the effect's continuation (emitting the round's events), and
     /// re-queues the chain. A timer's firing completes its slot and wakes
     /// its waiter instead. A `Dropped` answer is the Harness giving the
-    /// effect up: the chain resumes with the cancelled error.
+    /// effect up: the chain resumes with the cancelled error. Every answer
+    /// to a tool call, `Dropped` included, first ends the call's identity
+    /// through [`Scheduler::end_tool_call`], so whatever the tool did
+    /// happens before the chain's next step and nothing it tries after is
+    /// admitted.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when no pending entry explains the id
@@ -66,17 +74,20 @@ impl Scheduler {
                 "an answer arrived for an effect the run did not issue or already answered",
             ));
         };
+        if let Continuation::ToolCall(call) = &resume {
+            self.end_tool_call(chain, call.exec);
+        }
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
                 self.drop_timer(id);
                 return Ok(());
             }
             (resume, EffectAnswer::Dropped) => dropped_answer(&resume),
-            (Continuation::Infer, EffectAnswer::Chat(result)) => {
-                Answer::Infer(self.accept_infer(chain, result))
+            (Continuation::Infer(round), EffectAnswer::Chat(result)) => {
+                Answer::Infer(self.accept_infer(chain, round, result))
             }
-            (Continuation::Chat, EffectAnswer::Chat(result)) => {
-                self.accept_chat(chain, result.map_err(Error::from))?
+            (Continuation::Chat(round), EffectAnswer::Chat(result)) => {
+                self.accept_chat(chain, round, result.map_err(Error::from))?
             }
             (Continuation::ToolCall(call), EffectAnswer::ToolCall(result)) => {
                 Answer::ToolCallResult(self.accept_tool_call(chain, &call, result))
@@ -101,16 +112,36 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Ends `exec`, the identity of the tool call `chain` was parked on,
+    /// whether the call was answered or aborted: merges it into the
+    /// chain's access when the chain still holds one, and refuses every
+    /// later operation, spawn, or store view through the call's access.
+    /// A run whose scope has closed has already refused every access, so
+    /// there is nothing to end.
+    pub(super) fn end_tool_call(&self, chain: ChainIndex, exec: ExecId) {
+        let Some(scope) = &self.scope else {
+            return;
+        };
+        let owner = self.chains[chain.index()]
+            .access()
+            .ok()
+            .map(|access| access_id(access));
+        end_access(scope, owner, exec);
+    }
+
     /// Applies a nested infer round's completion: the single-prose-round
-    /// reporting through the chain's own emitter, then the round's text.
+    /// reporting through the chain's own emitter, stamped with `round`,
+    /// then the round's text.
     fn accept_infer(
         &self,
         chain: ChainIndex,
+        round: RoundId,
         result: std::result::Result<Box<Completion>, CompletionError>,
     ) -> Result<String> {
         let chain = &self.chains[chain.index()];
         accept_infer(
             result,
+            round,
             chain.ctx.emitter(),
             chain.section_name(),
             chain.ctx.turns(),
@@ -199,17 +230,38 @@ impl Scheduler {
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
-    /// `Cancelled` without waking its owner. The Harness drops a live timer
-    /// only when it is cancelling the run, and that cancel tears the
-    /// waiter down with every other chain.
+    /// `Cancelled`. While the run's cancel flag is clear, the Harness gave
+    /// up the timeout and the run goes on, so the chain parked on the
+    /// timer leaves its wait with the cancelled error, as a dropped `Chat`
+    /// or `ToolCall` does: a timed `tasks.join` or `tasks.join_any` raises
+    /// it, and the model's `await_tasks` resumes its tool call with it. A
+    /// timer nothing waits on is dropped silently. Under a run cancel the
+    /// drop wakes no one, since the cancel tears the waiter down with
+    /// every other chain.
     fn drop_timer(&mut self, effect: EffectId) {
-        if let Some(slot) = self
+        let Some((task, owner)) = self
             .tasks
-            .values_mut()
-            .find(|slot| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
+            .iter_mut()
+            .find(|(_, slot)| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
+            .map(|(task, slot)| {
+                slot.state = TaskState::Cancelled;
+                slot.ok = Some(false);
+                (task.clone(), slot.owner)
+            })
+        else {
+            return;
+        };
+        if self.ctx.cancel().is_cancelled()
+            || !self.chains[owner.index()].waiting_on.contains(&task)
         {
-            slot.state = TaskState::Cancelled;
-            slot.ok = Some(false);
+            return;
         }
+        let chain = &mut self.chains[owner.index()];
+        chain.waiting_on.clear();
+        let answer = match chain.awaiting.take() {
+            Some(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
+            None => Answer::JoinAny(Err(Error::Interrupted)),
+        };
+        self.wake_from_wait(owner, answer);
     }
 }

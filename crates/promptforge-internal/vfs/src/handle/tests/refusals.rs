@@ -1,7 +1,10 @@
-//! Tests for a backend that refuses acquisition, at acquire, through a
-//! mount, and at spawn.
+//! Tests for refusals: a backend that refuses acquisition, at acquire,
+//! through a mount, and at spawn, and an identity whose tool call has
+//! ended while its scope stays open.
 
 use super::*;
+use crate::MemoryBackend;
+use crate::detail::{end_access, scope_handle};
 
 /// A backend that refuses every acquisition: the trait's contract
 /// allows refusal, so the handle must surface it as an error rather
@@ -105,5 +108,46 @@ fn a_backend_refusal_fails_spawn_and_releases_the_refused_child() -> Result<(), 
     let other = vfs.acquire(test_origin())?;
     let message = conflict_message(other.write("/f.txt", b"2"));
     assert!(message.contains("/f.txt"), "{message}");
+    Ok(())
+}
+
+#[test]
+fn an_ended_identity_refuses_operations_spawns_and_views_while_the_scope_stays_open()
+-> Result<(), VfsError> {
+    fn refused<T: std::fmt::Debug>(result: Result<T, VfsError>, expected: &str) {
+        match result {
+            Err(VfsError::PermissionDenied { path, reason }) => {
+                assert_eq!(path, expected);
+                assert!(
+                    reason.contains("the tool call that owned this access has ended"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected an ended-call refusal on {expected}, got {other:?}"),
+        }
+    }
+
+    let vfs = VfsRef::builder()
+        .mount("/", MemoryBackend::new())
+        .store("/my/store", MemoryBackend::new())
+        .build();
+    let owner = vfs.acquire(test_origin())?;
+    let call = owner.spawn(test_origin())?;
+    call.write("/a.txt", b"call")?;
+    let view = call.store_view()?;
+    end_access(&scope_handle(&owner), Some(owner.id), call.id);
+    refused(call.read("/a.txt"), "/a.txt");
+    refused(call.write("/b.txt", b"late"), "/b.txt");
+    refused(view.write("b.md", b"late"), "b.md");
+    refused(call.spawn(test_origin()), "/");
+    refused(call.store_view(), "/");
+    // The scope stays open: the end joined the call's write into the
+    // owner, and the owner still spawns and derives views.
+    assert!(!owner.scope.ended());
+    assert_eq!(owner.read("/a.txt")?, b"call");
+    assert!(!owner.exists("/b.txt")?);
+    assert!(!owner.exists("/my/store/b.md")?);
+    owner.spawn(test_origin())?.write("/c.txt", b"arm")?;
+    owner.store_view()?.write("c.md", b"view")?;
     Ok(())
 }

@@ -25,7 +25,7 @@ use super::walk::{Role, Visit};
 use compact::{Placement, Shared, placement, trait_name};
 
 /// The committed listing's path under the workspace root.
-pub(crate) fn path(root: &Path) -> PathBuf {
+pub(super) fn path(root: &Path) -> PathBuf {
     crate::facade_shape::FACADE_DIR
         .iter()
         .fold(root.to_path_buf(), |dir, part| dir.join(part))
@@ -33,7 +33,7 @@ pub(crate) fn path(root: &Path) -> PathBuf {
 }
 
 /// The listing lines for one build, sorted and deduplicated.
-pub(crate) fn lines(surface: &Surface, visits: &[Visit<'_>]) -> Vec<String> {
+pub(super) fn lines(surface: &Surface, visits: &[Visit<'_>]) -> Vec<String> {
     let mut lines: BTreeSet<String> = surface
         .modules
         .iter()
@@ -67,7 +67,7 @@ pub(crate) fn lines(surface: &Surface, visits: &[Visit<'_>]) -> Vec<String> {
 }
 
 /// The listing file's text: each line newline-terminated.
-pub(crate) fn text(lines: &[String]) -> String {
+pub(super) fn text(lines: &[String]) -> String {
     let mut text = String::new();
     for line in lines {
         text.push_str(line);
@@ -79,7 +79,7 @@ pub(crate) fn text(lines: &[String]) -> String {
 /// The report lines for how `committed` (the file's text, or `None` when
 /// it is missing) differs from `lines`; empty when they match exactly.
 /// Line endings are compared as `\n`, whatever the checkout wrote.
-pub(crate) fn difference(committed: Option<&str>, lines: &[String]) -> Vec<String> {
+pub(super) fn difference(committed: Option<&str>, lines: &[String]) -> Vec<String> {
     let committed_text = committed.map(|text| text.replace("\r\n", "\n"));
     if committed_text.as_deref() == Some(text(lines).as_str()) {
         return Vec::new();

@@ -1,13 +1,12 @@
-//! THE PARITY GATE: in-process tests over the SSE mock gateway, each
-//! pinned to a behavior the built-in `chat` agent must keep. The agent
-//! replaced the direct-to-gateway chat relay; these tests hold the parity
-//! the relay established.
+//! THE CHAT GATE: in-process tests over the SSE mock gateway, each
+//! pinned to a behavior the built-in `chat` agent must keep.
 //!
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
-//! a Markdown prompt on the unified runtime. A session's transcript sits
-//! in memory until the Harness's run log lands, so no gate here spans a
-//! server restart; reconnect within one process is the agents suite's.
+//! a Markdown prompt on the unified runtime. A conversation's transcript
+//! sits in Workshop's memory, and the Harness records each run through
+//! the Host's recorder, so no gate here spans a server restart; reconnect
+//! within one process is the agents suite's.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant
@@ -28,7 +27,7 @@ use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
 
-use workshop_server::fixtures::{gateway_updater, replace_gateway, spawn_bindings_forwarder};
+use workshop_server::fixtures::{gateway_updater, replace_gateway};
 use workshop_server::{AgentsConfig, AppState, Config, InputResponse};
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
@@ -77,12 +76,6 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
     echo_stream(&model, &last)
 }
 
-/// A profile selection the gateway serves without a restart, whose
-/// refreshed catalog replaces the launch-time model with `model-b`.
-async fn switch_to_model_b() -> Response {
-    axum::Json(json!({"profile": "beta", "restart_required": false})).into_response()
-}
-
 /// One workshop server over the gate mock. The agents directory is
 /// missing on purpose: every `chat` launch runs the embedded built-in.
 struct GateServer {
@@ -92,13 +85,12 @@ struct GateServer {
     state: AppState,
     /// The mock's captured request bodies.
     captured: CapturedRequests,
-    /// Keeps the state directory alive.
-    _dir: tempfile::TempDir,
+    /// The state directory the run log sits under, kept alive.
+    dir: tempfile::TempDir,
 }
 
 /// Every id a gate may select, in the order the typed catalog lists
-/// them. `model-b` stays first: the profile-switch gates rely on the menu
-/// auto-selecting it from this list.
+/// them.
 const GATE_MODELS: &[&str] = &["model-b", "model-a", "test-model", "claude-opus-4-6"];
 
 /// Spawns the gate server with `models` in the retained catalog and the
@@ -122,7 +114,6 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
                     async move { gate_completions(&captured, &body) }
                 }),
             )
-            .route("/admin/switch-profile", post(switch_to_model_b))
             .route(
                 "/admin/profiles",
                 get(|| async { axum::Json(json!({"profiles": ["main", "beta"]})) }),
@@ -142,10 +133,6 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
         ..test_config(&gateway_url, dir.path())
     };
     let (state, ws_base) = spawn_router(&config).await;
-    // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the Harness is spawned here.
-    spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models
             .iter()
@@ -162,7 +149,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
         ws_base,
         state,
         captured,
-        _dir: dir,
+        dir,
     }
 }
 

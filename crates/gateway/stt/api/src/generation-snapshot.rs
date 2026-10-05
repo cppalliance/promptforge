@@ -93,7 +93,7 @@ impl GenerationSpec {
 /// The smallest immutable runtime handle: engine, identity, guidance, and
 /// admission ownership shared by every admitted request and worker job.
 #[derive(Debug)]
-pub(crate) struct SpeechRuntime {
+pub(super) struct SpeechRuntime {
     backend: Backend,
     engine: SttEngine,
     names: ModelNames,

@@ -17,7 +17,7 @@ const SUNSET_LIFECYCLES: &[&str] = &["retired", "deprecated", "legacy"];
 /// retirement date. A live label with no date is no deprecation; a date
 /// alone still is one, under a neutral status, because a retirement
 /// date is the stronger signal.
-pub(crate) fn deprecation_of(lifecycle: Option<&str>, date: Option<Date>) -> Option<Deprecation> {
+pub(super) fn deprecation_of(lifecycle: Option<&str>, date: Option<Date>) -> Option<Deprecation> {
     let label = lifecycle
         .map(str::trim)
         .filter(|label| !label.is_empty())
@@ -44,7 +44,7 @@ pub(crate) fn deprecation_of(lifecycle: Option<&str>, date: Option<Date>) -> Opt
 /// publisher is the useful first grouping level, as with the registry's
 /// other multi-vendor catalog. A card with no publisher yields `None`
 /// and keeps its id as the family.
-pub(crate) fn family_of(publisher: Option<&str>) -> Option<String> {
+pub(super) fn family_of(publisher: Option<&str>) -> Option<String> {
     publisher
         .map(str::trim)
         .filter(|publisher| !publisher.is_empty())
@@ -54,7 +54,7 @@ pub(crate) fn family_of(publisher: Option<&str>) -> Option<String> {
 /// The workload, from the card's inference tasks. An unrecognized task
 /// falls through to the output modality, so a task Azure adds later
 /// still lands in the right bucket instead of defaulting to chat.
-pub(crate) fn model_kind(tasks: &[String], output_modalities: &[String]) -> ModelKind {
+pub(super) fn model_kind(tasks: &[String], output_modalities: &[String]) -> ModelKind {
     for task in tasks {
         let kind = match task.as_str() {
             "chat-completion" | "chat-completions" | "responses" | "messages"

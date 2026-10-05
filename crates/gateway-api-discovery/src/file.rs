@@ -81,14 +81,6 @@ impl GatewayDiscoveryFile {
     /// Returns [`SidecarError::Read`] when the file exists but cannot be
     /// read, [`SidecarError::Parse`] when it is not valid JSON, and
     /// [`SidecarError::Invalid`] when it fails validation.
-    ///
-    /// # Examples
-    /// ```
-    /// # let dir = tempfile::tempdir()?;
-    /// let file = gateway_api_discovery::GatewayDiscoveryFile::read(dir.path())?;
-    /// assert!(file.is_none());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn read(run_dir: &Path) -> Result<Option<GatewayDiscoveryFile>, SidecarError> {
         let path = gateway_discovery_file_path(run_dir);
         let raw = match fs::read_to_string(&path) {

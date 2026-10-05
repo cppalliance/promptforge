@@ -1,11 +1,11 @@
-//! Tests for capability prelude install: the restricted environment, the
+//! Tests for Plugin prelude install: the restricted environment, the
 //! collision checks, the top-level seal, and load failures.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mlua::{FromLuaMulti, Value};
-use promptforge_types::capabilities::{CapabilityId, Prelude};
+use promptforge_types::plugins::{PluginId, Prelude};
 use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
@@ -63,11 +63,8 @@ fn section_vm() -> SectionVm {
     section_vm_with_var(None)
 }
 
-fn prelude(capability: &str, source: &str) -> Prelude {
-    Prelude::new(
-        CapabilityId::parse(capability).expect("a valid capability id"),
-        source,
-    )
+fn prelude(plugin: &str, source: &str) -> Prelude {
+    Prelude::new(PluginId::parse(plugin).expect("a valid Plugin id"), source)
 }
 
 /// Installs `preludes` with no frontmatter aliases and returns the
@@ -133,9 +130,9 @@ fn a_table_global_is_sealed_at_its_top_level() {
     assert!(!ok, "assigning a field of a sealed table raises");
     assert!(
         message.contains("kit is read-only")
-            && message.contains("capability `acme/kit`")
+            && message.contains("Plugin `acme/kit`")
             && message.contains("'extra'"),
-        "the refusal names the global, its capability, and the field: {message}"
+        "the refusal names the global, its Plugin, and the field: {message}"
     );
     let seal: String = eval(&vm, "return getmetatable(kit)");
     assert_eq!(seal, "kit is sealed");
@@ -154,11 +151,11 @@ fn a_sealed_global_raises_the_whole_refusal_for_a_string_or_integer_key() {
     for (target, refusal) in [
         (
             "kit.extra",
-            "kit is read-only: capability `acme/kit` defines it; cannot set 'extra'",
+            "kit is read-only: Plugin `acme/kit` defines it; cannot set 'extra'",
         ),
         (
             "kit[1]",
-            "kit is read-only: capability `acme/kit` defines it; cannot set 'Integer(1)'",
+            "kit is read-only: Plugin `acme/kit` defines it; cannot set 'Integer(1)'",
         ),
     ] {
         let message: String = eval(
@@ -211,10 +208,10 @@ fn a_global_that_collides_with_an_engine_global_fails_naming_both_sides() {
     let vm = section_vm();
     let message = install_failure(&vm, &[prelude("acme/kit", "store = {}")]);
     assert!(
-        message.contains("capability `acme/kit`")
+        message.contains("Plugin `acme/kit`")
             && message.contains("`store`")
             && message.contains("Engine global"),
-        "the collision names the capability, the global, and the Engine global: {message}"
+        "the collision names the Plugin, the global, and the Engine global: {message}"
     );
 }
 
@@ -226,10 +223,10 @@ fn a_global_named_tools_store_or_models_is_refused_and_leaves_the_namespace_in_p
         let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = {{}}"))]);
         assert!(
             message.contains(&format!(
-                "capability `acme/kit`: its prelude defines the global `{name}`, \
+                "Plugin `acme/kit`: its prelude defines the global `{name}`, \
                  which is reserved as an Engine global"
             )),
-            "the collision names the capability, the global, and the reservation: {message}"
+            "the collision names the Plugin, the global, and the reservation: {message}"
         );
         let after: mlua::Table = vm.lua().globals().raw_get(name).expect("a raw read");
         assert_eq!(
@@ -247,10 +244,10 @@ fn ui_and_item_collide_on_a_vm_that_binds_neither() {
         assert!(!bound, "the fixture VM binds no `{name}`");
         let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = 1"))]);
         assert!(
-            message.contains("capability `acme/kit`")
+            message.contains("Plugin `acme/kit`")
                 && message.contains(&format!("`{name}`"))
                 && message.contains("reserved"),
-            "the collision names the capability and the reserved global: {message}"
+            "the collision names the Plugin and the reserved global: {message}"
         );
     }
 }
@@ -270,10 +267,10 @@ fn argv_and_prose_collide_though_the_g_metatable_serves_them() {
         assert!(served, "the `_G` metatable serves `{name}` to author code");
         let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = 1"))]);
         assert!(
-            message.contains("capability `acme/kit`")
+            message.contains("Plugin `acme/kit`")
                 && message.contains(&format!("`{name}`"))
                 && message.contains("reserved"),
-            "the collision names the capability and the reserved global: {message}"
+            "the collision names the Plugin and the reserved global: {message}"
         );
     }
 }
@@ -314,15 +311,15 @@ fn a_global_that_collides_with_a_frontmatter_alias_fails_naming_the_alias() {
         .expect_err("the alias collision must fail")
         .to_string();
     assert!(
-        message.contains("capability `acme/kit`")
+        message.contains("Plugin `acme/kit`")
             && message.contains("`search`")
             && message.contains("frontmatter"),
-        "the collision names the capability, the global, and the alias: {message}"
+        "the collision names the Plugin, the global, and the alias: {message}"
     );
 }
 
 #[test]
-fn two_preludes_defining_one_global_fail_naming_both_capabilities() {
+fn two_preludes_defining_one_global_fail_naming_both_plugins() {
     let vm = section_vm();
     let message = install_failure(
         &vm,
@@ -332,10 +329,10 @@ fn two_preludes_defining_one_global_fail_naming_both_capabilities() {
         ],
     );
     assert!(
-        message.contains("capability `acme/two`")
+        message.contains("Plugin `acme/two`")
             && message.contains("`shared`")
-            && message.contains("capability `acme/one`"),
-        "the collision names the global and both capabilities: {message}"
+            && message.contains("Plugin `acme/one`"),
+        "the collision names the global and both Plugins: {message}"
     );
 }
 
@@ -351,47 +348,47 @@ fn a_global_whose_name_is_not_a_utf8_string_fails_naming_the_key() {
         let vm = section_vm();
         let message = install_failure(&vm, &[prelude("acme/kit", source)]);
         assert!(
-            message.contains("capability `acme/kit`")
+            message.contains("Plugin `acme/kit`")
                 && message.contains(key)
                 && message.contains("must be a UTF-8 string"),
-            "the refusal names the capability and the key: {message}"
+            "the refusal names the Plugin and the key: {message}"
         );
     }
 }
 
 #[test]
-fn a_prelude_that_raises_while_loading_fails_naming_its_capability() {
+fn a_prelude_that_raises_while_loading_fails_naming_its_plugin() {
     let vm = section_vm();
     let message = install_failure(&vm, &[prelude("acme/boom", "local x = 1\nerror('boom')")]);
     assert!(
-        message.starts_with("capability `acme/boom`: its prelude failed to load: ")
+        message.starts_with("Plugin `acme/boom`: its prelude failed to load: ")
             && message.contains("boom.")
             && message.contains(
                 "A prelude only defines functions; it must not call tools while loading."
             ),
-        "the failure names the capability and gives the rule: {message}"
+        "the failure names the Plugin and gives the rule: {message}"
     );
     assert!(
-        traceback(&message).contains("capability:acme/boom:2:"),
+        traceback(&message).contains("plugin:acme/boom:2:"),
         "the traceback names the prelude chunk and line: {message}"
     );
 }
 
 #[test]
-fn a_prelude_that_calls_a_tool_while_loading_fails_naming_its_capability() {
+fn a_prelude_that_calls_a_tool_while_loading_fails_naming_its_plugin() {
     let vm = section_vm();
     let message = install_failure(
         &vm,
         &[prelude("acme/eager", "tools.call('acme/eager/run')")],
     );
     assert!(
-        message.starts_with("capability `acme/eager`: its prelude failed to load: ")
+        message.starts_with("Plugin `acme/eager`: its prelude failed to load: ")
             && message.contains("yield")
             && message.contains("it must not call tools while loading."),
-        "the failure names the capability and gives the rule: {message}"
+        "the failure names the Plugin and gives the rule: {message}"
     );
     assert!(
-        traceback(&message).contains("capability:acme/eager:1:"),
+        traceback(&message).contains("plugin:acme/eager:1:"),
         "the traceback names the prelude chunk and line: {message}"
     );
 }

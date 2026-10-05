@@ -7,15 +7,14 @@ use promptforge_types::tools::ToolDescriptor;
 use crate::model::{ModelDescriptor, ModelId};
 use crate::tools::ToolId;
 
-/// The run's model satisfaction: which concrete model each declared role
-/// is bound to, and the descriptors of every model this run may use.
+/// The models bound for a run: which model each declared role uses, and
+/// the descriptor of every model the run may use.
 ///
-/// Written by the fill function at
-/// [`prepare`](super::Environment::prepare); v1's fill is deliberately
-/// trivial - every declared role binds to the context's current model.
-/// The structure is general from day one (a table of models and a map of
-/// roles) so multi-model satisfaction arrives as a smarter fill function,
-/// never a structural change. Handles resolve label -> id -> descriptor.
+/// [`prepare`](super::Environment::prepare) fills these bindings. It binds
+/// every declared role to the run context's current model.
+///
+/// A lookup goes from a role label to a model identity, and from that
+/// identity to the model's descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelBindings {
@@ -28,25 +27,27 @@ pub struct ModelBindings {
 impl ModelBindings {
     /// Binds the role `label` to `model`, recording the descriptor under
     /// its identity. The fill function's only writer.
-    pub(crate) fn bind(&mut self, label: &str, model: ModelDescriptor) {
+    pub(super) fn bind(&mut self, label: &str, model: ModelDescriptor) {
         self.roles.insert(label.to_owned(), model.id().clone());
         self.models.entry(model.id().clone()).or_insert(model);
     }
 
-    /// Returns the identity bound to the role `label`, when it was filled.
+    /// Returns the identity of the model bound to the role `label`, or
+    /// `None` when the role was not filled.
     #[must_use]
     pub fn role_id(&self, label: &str) -> Option<&ModelId> {
         self.roles.get(label)
     }
 
-    /// Resolves a role label all the way to its descriptor:
-    /// label -> id -> descriptor.
+    /// Returns the descriptor of the model bound to the role `label`, or
+    /// `None` when the role was not filled.
     #[must_use]
     pub fn resolve(&self, label: &str) -> Option<&ModelDescriptor> {
         self.roles.get(label).and_then(|id| self.models.get(id))
     }
 
-    /// Returns the descriptor bound under `id`, when this run may use it.
+    /// Returns the descriptor of the model with the identity `id`, or
+    /// `None` when this run may not use that model.
     #[must_use]
     pub fn model(&self, id: &ModelId) -> Option<&ModelDescriptor> {
         self.models.get(id)
@@ -58,23 +59,28 @@ impl ModelBindings {
         self.roles.len()
     }
 
-    /// Returns whether no roles are bound.
+    /// Returns whether the set of bound roles is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty()
     }
 }
 
-/// The run's tool bindings: which tool each declared alias is bound to,
-/// and the descriptors of every tool this run may call.
+/// The tools bound for a run: which tool each declared alias names, and
+/// the descriptor of every tool the run may call.
 ///
-/// Written by [`prepare`](super::Environment::prepare)'s slot fill: exact
-/// slots fill by identity against the Harness-supplied catalog, and every
-/// fill is journaled here so the Host and evals see what each alias resolved
-/// to. The bindings hold descriptors, never implementations: the Engine
-/// advertises and calls a tool by its data, and the Harness resolves the id
-/// a `ToolCall` effect names. The model only ever sees the prompt-local
-/// alias, never the global path. Handles resolve alias -> id -> descriptor.
+/// [`prepare`](super::Environment::prepare) fills these bindings from the
+/// prompt's tool slots. It fills each exact slot by tool identity, from the
+/// tool catalog the caller supplies. Every fill is recorded here, so the
+/// caller and any evaluation of the run can see what each alias resolved
+/// to.
+///
+/// The bindings hold tool descriptors. The Engine advertises and calls a
+/// tool through its descriptor. The caller resolves the tool identity that
+/// a `ToolCall` effect names. The model sees only the prompt-local alias.
+///
+/// A lookup goes from an alias to a tool identity, and from that identity
+/// to the tool's descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolBindings {
@@ -89,27 +95,29 @@ impl ToolBindings {
     /// Binds the prompt-local `alias` to the tool `descriptor` describes,
     /// recording the descriptor under its identity. The slot fill's only
     /// writer.
-    pub(crate) fn bind(&mut self, alias: &str, descriptor: ToolDescriptor) {
+    pub(super) fn bind(&mut self, alias: &str, descriptor: ToolDescriptor) {
         self.aliases.insert(alias.to_owned(), descriptor.id.clone());
         self.tools
             .entry(descriptor.id.clone())
             .or_insert(descriptor);
     }
 
-    /// Returns the identity bound to `alias`, when the slot was filled.
+    /// Returns the identity of the tool bound to the prompt-local `alias`,
+    /// or `None` when its slot was not filled.
     #[must_use]
     pub fn alias_id(&self, alias: &str) -> Option<&ToolId> {
         self.aliases.get(alias)
     }
 
-    /// Resolves a prompt-local alias all the way to its descriptor:
-    /// alias -> id -> descriptor.
+    /// Returns the descriptor of the tool bound to the prompt-local
+    /// `alias`, or `None` when its slot was not filled.
     #[must_use]
     pub fn resolve(&self, alias: &str) -> Option<&ToolDescriptor> {
         self.aliases.get(alias).and_then(|id| self.tools.get(id))
     }
 
-    /// Returns the descriptor bound under `id`, when this run may call it.
+    /// Returns the descriptor of the tool with the identity `id`, or `None`
+    /// when this run may not call that tool.
     #[must_use]
     pub fn tool(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.get(id)
@@ -121,7 +129,7 @@ impl ToolBindings {
         self.aliases.len()
     }
 
-    /// Returns whether no aliases are bound.
+    /// Returns whether the set of bound aliases is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.aliases.is_empty()
@@ -155,9 +163,8 @@ mod tests {
 
     #[test]
     fn two_roles_bound_to_one_model_share_one_descriptor_entry() {
-        // v1's trivial fill: every role binds the same model, and the
-        // descriptor table holds it once - the seam a smarter fill grows
-        // into is visible in the shape, not the content.
+        // The trivial fill binds every role to the same model, and the
+        // descriptor table holds it once.
         let model = descriptor("current");
         let mut bindings = ModelBindings::default();
         bindings.bind("analyst", model.clone());

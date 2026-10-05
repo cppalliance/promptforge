@@ -10,7 +10,7 @@ mod switch;
 mod timeouts;
 
 /// Binds `app` on a free loopback port and returns its base URL.
-pub(super) async fn serve(app: axum::Router) -> String {
+async fn serve(app: axum::Router) -> String {
     let (addr, _handle) = workshop_support::fixtures::serve(app).await;
     format!("http://{addr}")
 }

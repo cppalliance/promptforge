@@ -1,0 +1,26 @@
+[package]
+name = "harness-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+# The Engine's public API: the prompt and requirements activation reads,
+# the tool vocabulary a Plugin contributes, and the filesystem access a
+# tool call borrows.
+promptforge.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+workspace-hack.workspace = true
+
+[dev-dependencies]
+# The runtime the `Tool::call` dispatch test awaits on; the activation
+# suite drives its runs synchronously.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

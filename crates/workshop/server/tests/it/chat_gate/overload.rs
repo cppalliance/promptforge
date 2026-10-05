@@ -1,11 +1,11 @@
-//! The turn-cancel gate: a stop mid-generation returns to waiting
-//! without an error.
+//! The stop gate: a stop mid-generation returns to waiting without an
+//! error, and the run keeps its conversation.
 
 use super::*;
 
-/// GATE 5 - turn-cancel. Current-chat behavior: the stop button kills
-/// generation mid-stream without an error, and the chat is immediately
-/// usable again.
+/// GATE 5 - stop. The stop button kills generation mid-stream without
+/// an error, and the chat is immediately usable again with the
+/// conversation so far.
 #[tokio::test]
 async fn gate_cancel_mid_generation_returns_to_waiting_and_next_input_works() {
     let server = spawn_chat_server(&["test-model"]).await;
@@ -29,23 +29,33 @@ async fn gate_cancel_mid_generation_returns_to_waiting_and_next_input_works() {
 
     socket.send_json(&json!({ "type": "cancel" })).await;
 
-    // Cancellation is a stop reason: the relaunched run returns to
-    // waiting, and next_wait_token refuses error frames on the way -
-    // which asserts exactly the no-error contract.
+    // A stop is a stop reason: the chat's pcall takes the dropped round,
+    // and its loop asks again, and next_wait_token refuses error frames
+    // on the way - which asserts exactly the no-error contract.
     let fresh = next_wait_token(&mut socket).await;
-    assert_ne!(fresh, token, "the relaunched run opens a fresh wait");
+    assert_ne!(fresh, token, "the chat's next ask opens a fresh wait");
     answer(&mut socket, &fresh, "after cancel").await;
     let turn = collect_turn(&mut socket).await;
     assert_eq!(
         delta_text(&turn),
-        "echo:after cancel",
-        "the next input after a mid-generation cancel runs a full turn"
+        "echo:hang\n\nafter cancel",
+        "the next input after a mid-generation stop runs a full turn"
     );
     assert!(
         turn.events
             .iter()
             .all(|event| event["event"]["content"] != "echo:hang"),
-        "the cancelled generation never completes into a reply"
+        "the stopped generation never completes into a reply"
     );
+    {
+        let requests = server.captured.lock().expect("the capture lock is healthy");
+        assert_eq!(requests.len(), 2, "the stopped round and the next one");
+        assert_eq!(
+            role_content_pairs(&requests[1]),
+            vec![pair("user", "hang\n\nafter cancel")],
+            "the next round's request holds the earlier turn: the stopped \
+             input stays in the retained message list beside the new one"
+        );
+    }
     socket.close().await;
 }

@@ -35,25 +35,25 @@ use promptforge_types::emitter::Emitter;
 /// `item` global and the `{{ item }}` substitution source) and `opts.index`
 /// (reported as `sys.index`). Empty for every other entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TaskSeed {
+pub(super) struct TaskSeed {
     /// The chain's `item` global, when the spawn gave one.
-    pub(crate) item: Option<serde_json::Value>,
+    pub(super) item: Option<serde_json::Value>,
     /// The chain's `sys.index`, when the spawn gave one.
-    pub(crate) index: Option<u64>,
+    pub(super) index: Option<u64>,
 }
 
 /// One local tool call whose handler is running in the frame's block
 /// coroutine: opened when the `tool_call` is answered with the handler,
 /// closed by the shim's `local_tool_done`, which reports under it.
-pub(crate) struct LocalCall {
+pub(super) struct LocalCall {
     /// The local tool's alias.
-    pub(crate) alias: String,
+    pub(super) alias: String,
     /// The model-issued call id, `None` for a script call.
-    pub(crate) call_id: Option<String>,
+    pub(super) call_id: Option<String>,
     /// The coordinates recorded at dispatch, so the result reports the
     /// model turn the call was made in even when the handler runs model
     /// rounds of its own.
-    pub(crate) report: ScriptReport,
+    pub(super) report: ScriptReport,
 }
 
 /// One section entry's owned frame within a run.
@@ -64,7 +64,7 @@ pub(crate) struct LocalCall {
 /// fresh one for the target - only `var` crosses, as call data.
 /// No derives: the VM and the trait-object handles support neither `Clone`
 /// nor `Debug`.
-pub(crate) struct SectionContext {
+pub(super) struct SectionContext {
     /// The frame's VM: the owned section VM, `Some` from construction
     /// until the frame's `Drop` takes it for the teardown boundary.
     /// `SectionVm` is `promptforge-lua`'s type, tested in that crate.
@@ -103,11 +103,11 @@ pub(crate) struct SectionContext {
 /// The frame's effective reporting handles for a model round: the
 /// task-scoped event emitter (which also knows whether the run captures
 /// raw model-turn bodies) and the model-turn counter.
-pub(crate) struct ReportingHandles {
+pub(super) struct ReportingHandles {
     /// The frame's task-scoped event emitter.
-    pub(crate) emitter: Arc<Emitter>,
+    pub(super) emitter: Arc<Emitter>,
     /// The model-turn counter the frame advances.
-    pub(crate) turns: Arc<AtomicU32>,
+    pub(super) turns: Arc<AtomicU32>,
 }
 
 impl SectionContext {
@@ -119,7 +119,7 @@ impl SectionContext {
     /// Returns [`Error::Lua`] if the VM's `var` cannot be
     /// converted back to JSON (the write guard keeps this conversion from
     /// failing in practice).
-    pub(crate) fn read_var(&mut self) -> Result<serde_json::Value> {
+    pub(super) fn read_var(&mut self) -> Result<serde_json::Value> {
         let Some(vm) = self.vm.as_mut() else {
             return Err(Error::internal(
                 "the section frame's VM lives until the frame's own drop",
@@ -136,7 +136,7 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Lua`] when H1 left `argv` as
     /// non-JSON data, or [`Error::Internal`] if the VM is gone.
-    pub(crate) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
+    pub(super) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
         self.vm()?.argv_json().map_err(Error::from)
     }
 
@@ -144,7 +144,7 @@ impl SectionContext {
     /// return included) and the final `var` is read back, so the frame's
     /// drop fires `SECTION_FINISHED` after the teardown pair. No error
     /// path arms it, so an error never fires `SECTION_FINISHED`.
-    pub(crate) fn mark_completed(&mut self) {
+    pub(super) fn mark_completed(&mut self) {
         self.completed = true;
     }
 
@@ -154,7 +154,7 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Internal`] if the VM is gone, which only the frame's
     /// own drop does - a live frame always holds it.
-    pub(crate) fn vm(&self) -> Result<&SectionVm> {
+    pub(super) fn vm(&self) -> Result<&SectionVm> {
         self.vm.as_ref().ok_or(Error::internal(
             "the section frame's VM lives until the frame's own drop",
         ))
@@ -169,7 +169,7 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Lua`] if the guard cannot be installed, or
     /// [`Error::Internal`] if the VM is gone.
-    pub(crate) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
+    pub(super) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
         let template = template.to_owned();
         let raw_args = ctx.args().to_owned();
         let argv = ctx.argv().cloned();
@@ -194,7 +194,7 @@ impl SectionContext {
     /// scheduler applies on this chain (the `models.loop` shim's among
     /// them), each seeded out of the run context (a fanout arm's fork) at
     /// construction.
-    pub(crate) fn reporting_handles(&self) -> ReportingHandles {
+    pub(super) fn reporting_handles(&self) -> ReportingHandles {
         ReportingHandles {
             emitter: Arc::clone(&self.emitter),
             turns: Arc::clone(&self.turns),
@@ -212,7 +212,7 @@ impl SectionContext {
     /// # Errors
     /// Returns the [`Error`] of the scope install or the
     /// alias seeding.
-    pub(crate) fn script_call_counts(
+    pub(super) fn script_call_counts(
         &mut self,
         ctx: &RunState,
         effective: &[ToolBinding],
@@ -236,12 +236,12 @@ impl SectionContext {
     }
 
     /// Opens a local tool call whose handler the shim is about to run.
-    pub(crate) fn push_local_call(&mut self, call: LocalCall) {
+    pub(super) fn push_local_call(&mut self, call: LocalCall) {
         self.local_calls.push(call);
     }
 
     /// Closes the innermost open local tool call; `None` when none is open.
-    pub(crate) fn pop_local_call(&mut self) -> Option<LocalCall> {
+    pub(super) fn pop_local_call(&mut self) -> Option<LocalCall> {
         self.local_calls.pop()
     }
 }

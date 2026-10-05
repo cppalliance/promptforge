@@ -2,7 +2,7 @@
 //! descriptor's data is copied verbatim and its structured-output flag
 //! selects the binding's output kind.
 
-use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
@@ -18,7 +18,7 @@ fn descriptor(structured: bool) -> ToolDescriptor {
     )
     .structured(structured)
     .with_conflicts(vec![
-        CapabilityId::parse("tests/other").expect("the id is valid"),
+        PluginId::parse("tests/other").expect("the id is valid"),
     ])
 }
 

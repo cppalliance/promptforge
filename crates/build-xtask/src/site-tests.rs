@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -340,11 +341,123 @@ fn the_crate_page_uses_the_underscored_crate_name() {
 }
 
 #[test]
-fn the_harness_site_documents_the_harness_facade() {
-    assert!(
-        RUSTDOC_SITES.contains(&("harness", "harness")),
-        "the harness/ folder documents the crate harness: {RUSTDOC_SITES:?}"
+fn the_harness_sites_document_each_public_harness_crate() {
+    for krate in ["harness", "harness-gateway-client", "harness-web"] {
+        assert!(
+            RUSTDOC_SITES
+                .iter()
+                .any(|(dir, documented, _)| *dir == krate && *documented == krate),
+            "the {krate}/ folder documents the crate {krate}: {RUSTDOC_SITES:?}"
+        );
+    }
+}
+
+/// A stage output holding, per `(book, title, description)`, the book's
+/// folder with a `book.toml` giving that title and description.
+fn staged_with(books: &[(&str, &str, &str)]) -> tempfile::TempDir {
+    let staged = tempfile::tempdir().expect("tempdir");
+    for (book, title, description) in books {
+        let config = format!("[book]\ntitle = \"{title}\"\ndescription = \"{description}\"\n");
+        write_page(staged.path(), &format!("{book}/book.toml"), &config);
+    }
+    staged
+}
+
+const STAGED: [(&str, &str, &str); 3] = [
+    ("gateway", "Gateway Guide", "Running the Gateway"),
+    ("language", "Language Guide", "Writing prompts"),
+    ("workshop", "Workshop Guide", "The desktop app"),
+];
+
+fn staged_landing() -> String {
+    let staged = staged_with(&STAGED);
+    let books = staged_books(staged.path()).expect("books");
+    landing::page(staged.path(), &books).expect("landing page")
+}
+
+#[test]
+fn the_landing_page_has_one_row_per_rustdoc_site_and_per_staged_book() {
+    let html = staged_landing();
+    assert_eq!(
+        html.matches("<tr>").count(),
+        1 + RUSTDOC_SITES.len() + STAGED.len(),
+        "a header row, then one row per site and book: {html}"
     );
+    for (dir, krate, covers) in RUSTDOC_SITES {
+        let link = format!("<a href=\"{dir}/index.html\">{krate}</a>");
+        assert_eq!(html.matches(&link).count(), 1, "{dir}: {html}");
+        assert!(!covers.is_empty() && html.contains(covers), "{dir}: {html}");
+    }
+    for (book, title, description) in STAGED {
+        let link = format!("<a href=\"{book}/index.html\">{title}</a>");
+        assert_eq!(html.matches(&link).count(), 1, "{book}: {html}");
+        assert!(html.contains(description), "{book}: {html}");
+    }
+}
+
+#[test]
+fn the_landing_page_has_no_images() {
+    let html = staged_landing();
+    assert!(!html.contains("<img"), "{html}");
+}
+
+#[test]
+fn a_staged_book_without_a_description_is_named() {
+    let staged = tempfile::tempdir().expect("tempdir");
+    write_page(
+        staged.path(),
+        "gateway/book.toml",
+        "[book]\ntitle = \"Gateway Guide\"\n",
+    );
+    let books = staged_books(staged.path()).expect("books");
+    let error = landing::page(staged.path(), &books).expect_err("no description");
+    let config = staged.path().join("gateway").join("book.toml");
+    assert!(error.contains(&config.display().to_string()), "{error}");
+    assert!(error.contains("description"), "{error}");
+}
+
+#[test]
+fn every_guide_book_config_gives_its_landing_title_and_description() {
+    let books_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../guide/books");
+    let books = staged_books(&books_dir).expect("guide/books holds the book configs");
+    landing::page(&books_dir, &books).expect("each book.toml has a title and a description");
+}
+
+#[test]
+fn the_site_without_promptforge_docs_fails_naming_it_before_building() {
+    for unset in [None, Some(OsStr::new(""))] {
+        let root = tempfile::tempdir().expect("tempdir");
+        let error = site(root.path(), unset, &[]).expect_err("PROMPTFORGE_DOCS is unset");
+        assert!(error.contains("PROMPTFORGE_DOCS"), "{unset:?}: {error}");
+        assert!(!root.path().join("target").exists(), "{unset:?}");
+    }
+}
+
+#[test]
+fn the_site_with_a_missing_docs_root_fails_naming_promptforge_docs_and_the_path() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let missing = root.path().join("no-such-docs");
+    let error = site(root.path(), Some(missing.as_os_str()), &[]).expect_err("missing docs root");
+    assert!(error.contains("PROMPTFORGE_DOCS"), "{error}");
+    assert!(error.contains(&missing.display().to_string()), "{error}");
+    assert!(!root.path().join("target").exists());
+}
+
+#[test]
+fn the_stage_outputs_files_land_in_the_site_root_without_the_book_trees() {
+    let staged = site_with(&["gateway/src/01-start.md", "gateway/book.toml"]);
+    write_page(
+        staged.path(),
+        "promptforge-gateway-guide.md",
+        "# The Gateway\n",
+    );
+    let site = tempfile::tempdir().expect("tempdir");
+    copy_files(staged.path(), site.path()).expect("copy");
+    assert_eq!(
+        read(&site.path().join("promptforge-gateway-guide.md")),
+        "# The Gateway\n"
+    );
+    assert!(!site.path().join("gateway").exists());
 }
 
 #[test]

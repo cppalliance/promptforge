@@ -12,7 +12,7 @@ use crate::error::ConfigError;
 /// # Errors
 /// Returns [`ConfigError::Interpolation`] on an unclosed `${...}` and
 /// [`ConfigError::UnresolvedVar`] when a referenced variable is unset.
-pub(crate) fn interpolate(input: &str) -> Result<String, ConfigError> {
+pub(super) fn interpolate(input: &str) -> Result<String, ConfigError> {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -54,7 +54,7 @@ pub(crate) fn interpolate(input: &str) -> Result<String, ConfigError> {
 /// Recursively interpolates `${VAR}` in every string leaf of a TOML value,
 /// leaving keys, comments (already stripped by the parser), and non-string
 /// scalars untouched. (CFG-007)
-pub(crate) fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+pub(super) fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
     match value {
         toml::Value::String(text) => {
             *text = interpolate(text)?;

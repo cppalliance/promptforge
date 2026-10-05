@@ -39,7 +39,7 @@ pub(super) fn test_context(name: impl Into<String>) -> RunContext {
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
 /// boundaries; the typed error/limit/result surfaces and the environment must
 /// be too.
-pub(super) const fn _public_execution_types_are_send_sync_static() {
+const fn _public_execution_types_are_send_sync_static() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync_static::<Environment>();
@@ -57,14 +57,14 @@ pub(super) const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 /// The `writer` role declaration every model-facing fixture prompt includes:
 /// the frontmatter slot, filled by prepare's trivial fill from the
 /// context's current model.
-pub(super) const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
+const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
 
 /// The H1 block parking the declared role as the prompt-wide default.
-pub(super) const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
+const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
 
 /// Declares the `writer` role in the prompt's frontmatter, unless the
 /// frontmatter already declares roles.
-pub(super) fn declare_writer(source: &str) -> String {
+fn declare_writer(source: &str) -> String {
     let frontmatter_end = source.find("\n---\n").expect("frontmatter closes");
     let frontmatter = &source[..frontmatter_end];
     if frontmatter.contains("\nmodels:") {
@@ -117,10 +117,10 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
 /// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts with their own `models.default` call (or the `models.bind`
-/// call the removal tests expect to fail) keep their shape and get only
-/// the role declaration.
-pub(super) fn ensure_model_h1(md: &str) -> String {
+/// Prompts with their own `models.default` call (or a `models.bind` call,
+/// which the tests expect to fail) keep their shape and get only the role
+/// declaration.
+fn ensure_model_h1(md: &str) -> String {
     let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
         return declare_writer(&source);
@@ -159,7 +159,7 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
 
 // The helper takes no resolver: live tool binding resolves elsewhere, so a
 // resolver argument would imply a resolution path the helper does not
-// exercise. Exact slots fill by identity against the fixture capability's
+// exercise. Exact slots fill by identity against the fixture Plugin's
 // contributed tools at prepare.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();
@@ -182,18 +182,18 @@ pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
 }
 
 /// Owned run inputs a test supplies: the run name, the progress observer,
-/// and optional client/capture sinks. Mirrors the old borrowed `RunOptions`
-/// with owned `Arc` instrumentation so it can build a [`RunContext`].
+/// and optional client/capture sinks. The instrumentation is owned `Arc`s
+/// so it can build a [`RunContext`].
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
     pub(super) observer: Arc<dyn Observer>,
-    pub(super) client: Option<MockGatewayClient>,
+    pub(super) client: Option<ScriptedChat>,
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
 }
 
-/// The test stand-in for the old `StoreRef::memory()`: a fresh default
-/// VFS handle (a memory store at `/`) whose `read`/`glob` helpers each go
-/// through a fresh, immediately dropped access and its store view. A
+/// The test store: a fresh default VFS handle (a memory store at `/`)
+/// whose `read`/`glob` helpers each go through a fresh, immediately
+/// dropped access and its store view. A
 /// short-lived access per call is what keeps seeding and post-run
 /// assertions conflict-free: each access is its own scope, and its claims
 /// die with it, so a held seeder access would meet the run's own scope as
@@ -264,27 +264,31 @@ pub(super) fn silent() -> RunOptions {
     }
 }
 
-/// Builds a client pointed at the given scripted gateway.
-pub(super) fn gateway_client(addr: SocketAddr) -> MockGatewayClient {
-    MockGatewayClient::new(addr, "test")
+/// A client answering from the given scripted model, sharing its script,
+/// count, and record.
+pub(super) fn gateway_client(chat: &ScriptedChat) -> ScriptedChat {
+    chat.clone()
 }
 
-/// Options that report nowhere and point the run's client at the given
-/// scripted gateway.
-pub(super) fn gatewayed(addr: SocketAddr) -> RunOptions {
+/// Options that report nowhere and answer the run's rounds from the given
+/// scripted model.
+pub(super) fn gatewayed(chat: &ScriptedChat) -> RunOptions {
     RunOptions {
         execution: EXECUTION,
         observer: Arc::new(NullObserver::default()),
-        client: Some(gateway_client(addr)),
+        client: Some(gateway_client(chat)),
         debug: None,
     }
 }
 
-/// Options that point at a scripted gateway and record debug events.
-pub(super) fn gatewayed_with_debug(addr: SocketAddr, capture: Arc<dyn DebugCapture>) -> RunOptions {
+/// Options that answer from a scripted model and record debug events.
+pub(super) fn gatewayed_with_debug(
+    chat: &ScriptedChat,
+    capture: Arc<dyn DebugCapture>,
+) -> RunOptions {
     RunOptions {
         debug: Some(capture),
-        ..gatewayed(addr)
+        ..gatewayed(chat)
     }
 }
 
@@ -313,7 +317,7 @@ pub(super) async fn run(
         // catalog the run binds its frontmatter slots against, and the
         // implementations go to the Harness's tool table the driver's tool
         // performer resolves a `ToolCall` effect in - the two halves a
-        // Harness assembles from its activated capabilities.
+        // Harness assembles from its activated Plugins.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
         harness = harness.tools(table);

@@ -2,22 +2,26 @@
 //! the Harness family, the sans-I/O Engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
 //! `engine_guards`), the `promptforge` and `harness` facades' source
-//! shape (run from `facade_shape`), and the `doc(hidden)` ban over both
-//! facades and their containers (run from `doc_hidden`).
+//! shape (run from `facade_shape`), the `doc(hidden)` ban over both
+//! facades and their containers (run from `doc_hidden`), the doctest ban
+//! over every workspace crate (run from `no_doctests`), the unsafe
+//! allowlist (run from `unsafe_allowlist`), and the ceiling wiring (run
+//! from `wiring`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
 //! enforces the architecture; `cargo xtask tidy` prints the same report
-//! on demand. The file ceiling and lint inheritance checks bind every
-//! `workshop-*` and `harness-*` crate (minus the `workshop` desktop app)
-//! by package name, every other crate whose crate
-//! docs have the `## Invariants` marker, and every crate directory whose
-//! manifest the shared walk could not read, parse, or find a package name
-//! in - a crate with no readable name cannot be shown exempt. Those read
-//! failures are reported by `marker_violations`, their one owner.
+//! on demand. The lint inheritance check binds every workspace crate, and
+//! so does the ceiling wiring check, which requires every crate's build
+//! script to run `build_ceiling::check()`, the compile-time 500-line file
+//! limit. The shared walk's read failures are reported by
+//! `marker_violations`, their one owner.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[path = "tidy-wiring.rs"]
+mod wiring;
 
 /// A tiered workshop crate: its package name and its directory under the
 /// `crates/workshop/` container.
@@ -35,24 +39,19 @@ const SERVICES: &[Tiered] = &[
     ("workshop-menu", "menu"),
     ("workshop-status", "status"),
 ];
-/// Tier 2: features. Depend on vocabulary and service crates. The
-/// sessions subsystem sits inside the server since Workshop moved onto the
-/// Harness, so it has no crate here.
+/// Tier 2: features. Depend on vocabulary and service crates.
 const FEATURES: &[Tiered] = &[
+    ("workshop-agents", "agents"),
+    ("workshop-run-log", "run-log"),
     ("workshop-user-state", "user-state"),
     ("workshop-workspace", "workspace"),
 ];
 /// Tier 3: the server. May depend on every lower tier.
 const SERVER: &[Tiered] = &[("workshop-server", "server")];
 
-/// File-line ceiling from the `AGENTS.md` structural rules.
-const MAX_FILE_LINES: usize = 500;
-
 /// Marker in a crate's `lib.rs` (or `main.rs`) crate docs. Mandatory for
 /// every `workshop-*` and `harness-*` crate (see [`family_requires_marker`]);
-/// on any other crate it opts that crate into the decomposed-architecture
-/// checks (`build-xtask` includes it deliberately). The `new-crate`
-/// scaffolder emits it.
+/// optional on any other crate. The `new-crate` scaffolder emits it.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
 /// Runs every check and returns all violations.
@@ -60,16 +59,19 @@ const INVARIANT_MARKER: &str = "//! ## Invariants";
 pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     let mut violations = tier_dependency_violations(root);
     violations.extend(marker_violations(root));
-    violations.extend(file_ceiling_violations(root));
     violations.extend(lint_inheritance_violations(root));
+    violations.extend(wiring::ceiling_wiring_violations(root));
+    violations.extend(crate::unsafe_allowlist::unsafe_allowlist_violations(root));
     violations.extend(walled_tier_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
-    violations.extend(crate::harness_bans::harness_clippy_bans(
+    violations.extend(crate::harness_bans::harness_tokio_bans(
         &root.join("crates").join("harness-internal"),
+        &root.join("crates").join("harness"),
     ));
     violations.extend(crate::engine_guards::engine_guard_violations(root));
     violations.extend(crate::facade_shape::facade_shape_violations(root));
     violations.extend(crate::doc_hidden::doc_hidden_violations(root));
+    violations.extend(crate::no_doctests::no_doctests_violations(root));
     violations
 }
 
@@ -105,10 +107,9 @@ fn packages(tiers: &[&[Tiered]]) -> Vec<&'static str> {
 
 /// Checks that tiered `workshop-*` crates depend only on lower tiers.
 ///
-/// Every tiered crate has landed, so a missing manifest is a violation,
-/// not a crate to skip.
+/// A missing manifest is a violation, not a crate to skip.
 #[must_use]
-pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
+fn tier_dependency_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
     for (name, dir) in [VOCABULARY, SERVICES, FEATURES, SERVER].concat() {
         let Some(allowed) = allowed_dependencies(name) else {
@@ -174,33 +175,12 @@ fn collect_workshop_deps(table: &toml::map::Map<String, toml::Value>, names: &mu
     }
 }
 
-/// Checks the 500-line file ceiling on every crate participating in the
-/// decomposed architecture (its `lib.rs` or `main.rs` has the invariant
-/// marker).
+/// Checks that every workspace crate, unread ones included, inherits
+/// `[lints] workspace = true` (which includes `unreachable_pub`) and that
+/// the workspace root sets it. A walk that found no crate fails: a crate
+/// that was never read cannot be shown to inherit.
 #[must_use]
-pub(crate) fn file_ceiling_violations(root: &Path) -> Vec<String> {
-    let mut violations = Vec::new();
-    for dir in participating_crates(root) {
-        for file in rust_files(&dir) {
-            let Ok(text) = fs::read_to_string(&file) else {
-                continue;
-            };
-            let lines = text.lines().count();
-            if lines > MAX_FILE_LINES {
-                violations.push(format!(
-                    "{} has {lines} lines, over the {MAX_FILE_LINES}-line ceiling",
-                    file.display()
-                ));
-            }
-        }
-    }
-    violations
-}
-
-/// Checks that every participating crate inherits `[lints] workspace = true`
-/// (which includes `unreachable_pub`) and that the workspace root sets it.
-#[must_use]
-pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
+fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
     let root_manifest = root.join("Cargo.toml");
     match fs::read_to_string(&root_manifest)
@@ -222,8 +202,22 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
         }
         None => violations.push(format!("{}: unparseable manifest", root_manifest.display())),
     }
-    for dir in participating_crates(root) {
-        let manifest_path = dir.join("Cargo.toml");
+    let walk = crate::product::workspace_crates(root);
+    let dirs: Vec<&PathBuf> = walk
+        .crates
+        .iter()
+        .map(|krate| &krate.dir)
+        .chain(&walk.unread)
+        .collect();
+    if dirs.is_empty() {
+        violations.push(format!(
+            "{}: the lint inheritance check scanned nothing: no workspace crate was found, \
+             so none can be shown to inherit `[lints] workspace = true`",
+            root.join("crates").display()
+        ));
+    }
+    for dir in dirs {
+        let manifest_path = root.join(dir).join("Cargo.toml");
         let inherits = fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
@@ -252,7 +246,7 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
 /// walk's read failures; the product-boundary check shares the walk and
 /// leaves them here.
 #[must_use]
-pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
+fn marker_violations(root: &Path) -> Vec<String> {
     let walk = crate::product::workspace_crates(root);
     let mut violations = walk.violations;
     for krate in &walk.crates {
@@ -273,22 +267,6 @@ pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
 /// so they are exempt.
 fn family_requires_marker(name: &str) -> bool {
     name != "workshop" && (name.starts_with("workshop-") || name.starts_with("harness-"))
-}
-
-/// Crates bound by the file ceiling and lint inheritance checks: the union
-/// of the crates the families bind by name, every crate with the marker,
-/// and every crate whose manifest the walk could not read - an unreadable
-/// manifest cannot show a crate exempt.
-fn participating_crates(root: &Path) -> Vec<PathBuf> {
-    let walk = crate::product::workspace_crates(root);
-    walk.crates
-        .iter()
-        .filter(|krate| {
-            family_requires_marker(&krate.package) || has_marker(&root.join(&krate.dir))
-        })
-        .map(|krate| root.join(&krate.dir))
-        .chain(walk.unread.iter().map(|dir| root.join(dir)))
-        .collect()
 }
 
 /// Whether a crate's `lib.rs` or `main.rs` crate docs have the marker.
@@ -328,7 +306,7 @@ const WALLED_ALLOWLIST: [&str; 3] = [
 /// A source file the check cannot read is reported rather than skipped: a
 /// file that was never scanned cannot be shown clean.
 #[must_use]
-pub(crate) fn walled_tier_violations(root: &Path) -> Vec<String> {
+fn walled_tier_violations(root: &Path) -> Vec<String> {
     let app_src = root.join("crates").join("gateway").join("app").join("src");
     let tier = app_src.join("admin").join("walled");
     let mut violations = Vec::new();

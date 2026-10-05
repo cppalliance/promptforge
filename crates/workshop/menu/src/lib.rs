@@ -7,9 +7,8 @@
 //! ## Invariants
 //!
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
-//!   `workshop-support`. Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `workshop-support`. `cargo test -p build-xtask` enforces the product
+//!   and container boundaries.
 //! - The server owns all Model-menu state and the UI only renders it;
 //!   `chat_ready` is computed here and never derived client-side.
 //! - Publishing never blocks: a publish with no sessions is a no-op, and

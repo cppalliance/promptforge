@@ -44,10 +44,10 @@ const APPLY: RouteInfo = RouteInfo::walled("/admin/config-apply", &[Method::POST
 const REVERT: RouteInfo = RouteInfo::walled("/admin/config-revert", &[Method::POST]);
 
 /// The apply and revert routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[APPLY, REVERT];
+pub(super) const ROUTES: &[RouteInfo] = &[APPLY, REVERT];
 
 /// The apply and revert routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(APPLY.path, post(admin_config_apply))
         .route(REVERT.path, post(admin_config_revert))
@@ -55,7 +55,7 @@ pub(crate) fn routes() -> Router<AppState> {
 
 /// The `POST /admin/config-apply` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct ApplyReply {
+struct ApplyReply {
     /// The promoted real files, relative to the config root, sorted.
     applied: Vec<String>,
     /// Whether a config shadow applied and the remote routing reloaded.
@@ -66,7 +66,7 @@ pub(crate) struct ApplyReply {
 
 /// The `POST /admin/config-revert` reply.
 #[derive(Debug, Serialize)]
-pub(crate) struct RevertReply {
+struct RevertReply {
     /// The deleted shadow files, relative to the config root.
     reverted: Vec<String>,
 }
@@ -93,7 +93,7 @@ pub(crate) struct RevertReply {
 /// the user's cancel, a revert, or shutdown - replies
 /// [`GatewayError::ApplyCancelled`] (503). In both cases every shadow is
 /// still staged, so a retry of Apply re-runs the whole thing.
-pub(crate) async fn admin_config_apply(
+async fn admin_config_apply(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<ApplyReply>, GatewayError> {
@@ -154,7 +154,7 @@ pub(crate) async fn admin_config_apply(
 /// by a save, so nothing is rewritten: deleting the shadows is the whole
 /// revert. An apply cancelled here settles its route with
 /// [`GatewayError::ApplyCancelled`].
-pub(crate) async fn admin_config_revert(
+async fn admin_config_revert(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<RevertReply>, GatewayError> {

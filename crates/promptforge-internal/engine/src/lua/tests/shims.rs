@@ -397,10 +397,9 @@ fn captured_model_aliases_install_as_plain_handles() {
 
 #[test]
 fn handles_reject_colon_methods() {
-    // Namespace-only invocation: a handle is a frozen, inspectable value,
-    // so the old `handle:infer` method is gone - reading `infer` off the
-    // userdata fails, and the one invocation form is the leading handle
-    // argument to `models.infer`.
+    // Namespace-only invocation: a handle is a frozen, inspectable value
+    // with no methods - reading `infer` off the userdata fails, and the one
+    // invocation form is the leading handle argument to `models.infer`.
     let vm = scheduler_vm(&test_models(), None);
     let (is_userdata, read_failed): (bool, bool) = vm
         .lua()

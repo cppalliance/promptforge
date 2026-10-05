@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness-internal/runner", "crates/harness-internal/models", "crates/harness-internal/capabilities", "crates/harness-internal/log", "crates/harness-internal/sessions", "crates/harness-internal/web", "crates/harness-internal/webfetch", "crates/harness-internal/web-search"]
+members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/workshop/agents", "crates/harness-internal/runner", "crates/harness-internal/plugins"]
 # crates/shared-ui is not a Rust crate: it is the TypeScript+CSS package
 # the Gateway config UI consumes (the Workshop uses its fork in
 # crates/workshop/look), so the crates/* glob skips it.
@@ -27,52 +27,51 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
-promptforge = { path = "crates/promptforge", version = "0.3.0" }
-promptforge-engine = { path = "crates/promptforge-internal/engine", version = "0.3.0" }
-promptforge-types = { path = "crates/promptforge-internal/types", version = "0.3.0" }
-gateway-api-types = { path = "crates/gateway-api-types", version = "0.3.0" }
-gateway-cloud-providers = { path = "crates/gateway/cloud-providers", version = "0.3.0" }
-gateway = { path = "crates/gateway/app", version = "0.3.0" }
-gateway-config = { path = "crates/gateway/config", version = "0.3.0" }
-gateway-config-ui = { path = "crates/gateway/config-ui", version = "0.3.0" }
-gateway-local = { path = "crates/gateway/local", version = "0.3.0" }
-gateway-logging = { path = "crates/gateway/logging", version = "0.3.0" }
-shared-error-source = { path = "crates/shared-error-source", version = "0.3.0" }
-shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
-gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
-gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }
-harness = { path = "crates/harness", version = "0.3.0" }
-harness-runner = { path = "crates/harness-internal/runner", version = "0.3.0" }
-harness-models = { path = "crates/harness-internal/models", version = "0.3.0" }
-harness-capabilities = { path = "crates/harness-internal/capabilities", version = "0.3.0" }
-harness-log = { path = "crates/harness-internal/log", version = "0.3.0" }
-harness-sessions = { path = "crates/harness-internal/sessions", version = "0.3.0" }
-harness-web = { path = "crates/harness-internal/web", version = "0.3.0" }
-harness-webfetch = { path = "crates/harness-internal/webfetch", version = "0.3.0" }
-harness-web-search = { path = "crates/harness-internal/web-search", version = "0.3.0" }
-gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
-promptforge-lua = { path = "crates/promptforge-internal/lua", version = "0.3.0" }
-promptforge-model-client = { path = "crates/promptforge-internal/model-client", version = "0.3.0" }
-promptforge-parser = { path = "crates/promptforge-internal/parser", version = "0.3.0" }
-gateway-progress = { path = "crates/gateway/progress", version = "0.3.0" }
-gateway-stt = { path = "crates/gateway/stt/api", version = "0.3.0" }
-promptforge-vfs = { path = "crates/promptforge-internal/vfs", version = "0.3.0" }
-gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
-gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
-gateway-web-search = { path = "crates/gateway/web-search", version = "0.3.0" }
-workshop-server = { path = "crates/workshop/server", version = "0.3.0" }
-workshop-server-api = { path = "crates/workshop/server-api", version = "0.0.0" }
-workshop-gateway = { path = "crates/workshop/gateway", version = "0.0.0" }
-workshop-menu = { path = "crates/workshop/menu", version = "0.0.0" }
-workshop-protocol = { path = "crates/workshop/protocol", version = "0.0.0" }
-workshop-status = { path = "crates/workshop/status", version = "0.0.0" }
-workshop-support = { path = "crates/workshop/support", version = "0.0.0" }
-workshop-registry = { path = "crates/workshop/registry", version = "0.0.0" }
-workshop-workspace = { path = "crates/workshop/workspace", version = "0.0.0" }
-workshop-user-state = { path = "crates/workshop/user-state", version = "0.0.0" }
-gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi", version = "0.3.0" }
+build-ceiling = { path = "crates/build-ceiling" }
+promptforge = { path = "crates/promptforge" }
+promptforge-engine = { path = "crates/promptforge-internal/engine" }
+promptforge-types = { path = "crates/promptforge-internal/types" }
+gateway-api-types = { path = "crates/gateway-api-types" }
+gateway-cloud-providers = { path = "crates/gateway/cloud-providers" }
+gateway = { path = "crates/gateway/app" }
+gateway-config = { path = "crates/gateway/config" }
+gateway-config-ui = { path = "crates/gateway/config-ui" }
+gateway-local = { path = "crates/gateway/local" }
+gateway-logging = { path = "crates/gateway/logging" }
+shared-error-source = { path = "crates/shared-error-source" }
+shared-loopback = { path = "crates/shared-loopback" }
+gateway-protocol = { path = "crates/gateway/protocol" }
+gateway-api-discovery = { path = "crates/gateway-api-discovery" }
+harness = { path = "crates/harness" }
+harness-gateway-client = { path = "crates/harness-gateway-client" }
+harness-runner = { path = "crates/harness-internal/runner" }
+harness-plugins = { path = "crates/harness-internal/plugins" }
+harness-web = { path = "crates/harness-web" }
+gateway-routing = { path = "crates/gateway/routing" }
+promptforge-lua = { path = "crates/promptforge-internal/lua" }
+promptforge-model-client = { path = "crates/promptforge-internal/model-client" }
+promptforge-parser = { path = "crates/promptforge-internal/parser" }
+gateway-progress = { path = "crates/gateway/progress" }
+gateway-stt = { path = "crates/gateway/stt/api" }
+promptforge-vfs = { path = "crates/promptforge-internal/vfs" }
+gateway-stt-engine = { path = "crates/gateway/stt/engine" }
+gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper" }
+gateway-web-search = { path = "crates/gateway/web-search" }
+workshop-server = { path = "crates/workshop/server" }
+workshop-server-api = { path = "crates/workshop/server-api" }
+workshop-gateway = { path = "crates/workshop/gateway" }
+workshop-menu = { path = "crates/workshop/menu" }
+workshop-protocol = { path = "crates/workshop/protocol" }
+workshop-status = { path = "crates/workshop/status" }
+workshop-support = { path = "crates/workshop/support" }
+workshop-registry = { path = "crates/workshop/registry" }
+workshop-workspace = { path = "crates/workshop/workspace" }
+workshop-run-log = { path = "crates/workshop/run-log" }
+workshop-agents = { path = "crates/workshop/agents" }
+workshop-user-state = { path = "crates/workshop/user-state" }
+gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi" }
 # cargo-hakari's feature-unification crate; every member inherits it.
-workspace-hack = { path = "crates/workspace-hack", version = "0.1" }
+workspace-hack = { path = "crates/workspace-hack" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
@@ -233,8 +232,8 @@ tauri-build = "2.6.3"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-process = "2.3.1"
-# default-features off drops the plugin's `rustls-tls` default, which is the
-# one dependency in the tree that pins rustls to the `ring` backend (and
+# default-features off drops the Tauri plugin's `rustls-tls` default, which is
+# the one dependency in the tree that pins rustls to the `ring` backend (and
 # installs it as the process-global CryptoProvider). Through workspace-hack
 # that feature would put `ring` back into every member, the gateway included.
 # The plugin's reqwest calls still get TLS: cargo unifies reqwest's features
@@ -258,7 +257,7 @@ minijinja = { version = "2.24", default-features = false, features = [
 minijinja-contrib = { version = "2.24", default-features = false, features = ["pycompat"] }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
@@ -275,6 +274,14 @@ pedantic = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 dbg_macro = "warn"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+exit = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"

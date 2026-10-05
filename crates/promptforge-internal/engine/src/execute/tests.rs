@@ -1,16 +1,10 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::Json;
-use axum::Router;
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::routing::post;
 use serde_json::{Value, json};
 
 use super::context::RunState;
@@ -21,9 +15,9 @@ use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
+use crate::test_support::scripted_chat::{ScriptedCall, ScriptedChat, ScriptedReply};
 use crate::test_support::tokio_driver::TokioDriver;
 use crate::test_support::{RunHarness, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
@@ -44,13 +38,10 @@ use self::context::*;
 use self::fixtures::*;
 use self::gateway::*;
 
-// --- Schema description overrides (ported from the deleted tool_bag.rs) ---
+// --- Schema description overrides ---
 //
-// `ToolBag::prepare` wrapped exactly this construction -
-// `current_tool_bindings` plus `prepare_scoped_tools` - so the schema-level
-// override coverage ports onto the prose path's scope building directly. The
-// bag's generation cache is deleted with the bag, so the cache test has no
-// behavior left to port; per-block scope rebuilds stay covered by the
+// These tests build the advertised scope through `current_tool_bindings`
+// plus `prepare_scoped_tools`. Per-block scope rebuilds are covered by the
 // tool-scoping and fanout-arm suites.
 
 /// The catalog text is advertised when no override exists at any layer, and a
@@ -120,7 +111,7 @@ fn tool_description_override_appears_in_model_schema() {
 }
 
 /// Precedence at the advertised schema: a `tools.add` override beats the
-/// `model_description` recorded by `tools.bind` / `tools.always`, which itself
+/// `model_description` recorded by `tools.always`, which itself
 /// beats the catalog text.
 #[test]
 fn bind_override_reaches_the_schema_and_add_beats_bind() {
@@ -207,7 +198,7 @@ impl TestTool for SlowTool {
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
-        // Matches the function name the mock gateway asks for.
+        // Matches the function name the scripted replies ask for.
         "echo"
     }
 
@@ -252,15 +243,15 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 
 // --- Guard-wrapping of untrusted tool results in the loop ---
 
-/// The content of the first `tool`-role message in the last recorded body.
+/// The content of the first `tool`-role message in the last recorded round.
 ///
-/// The second request the loop sends includes the dispatched tool's result;
+/// The second round the loop sends includes the dispatched tool's result;
 /// this pulls that result string back out so a test can assert on it.
-fn last_tool_turn_content(bodies: &[Value]) -> String {
+fn last_tool_turn_content(bodies: &[ScriptedCall]) -> String {
     let last = bodies.last().expect("the loop must send a second request");
-    last["messages"]
+    last.messages_json()
         .as_array()
-        .expect("a request body must include a messages array")
+        .expect("a round's messages serialize to an array")
         .iter()
         .find(|m| m["role"] == "tool")
         .expect("the re-sent conversation must include the tool turn")["content"]
@@ -269,12 +260,13 @@ fn last_tool_turn_content(bodies: &[Value]) -> String {
         .to_string()
 }
 
-/// Extracts the guard-tag nonce from every `tool`-role turn in the last body.
-fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
+/// Extracts the guard-tag nonce from every `tool`-role turn in the last
+/// recorded round.
+fn tool_turn_nonces(bodies: &[ScriptedCall]) -> Vec<String> {
     let last = bodies.last().expect("the loop must send a final request");
-    last["messages"]
+    last.messages_json()
         .as_array()
-        .expect("a request body must include a messages array")
+        .expect("a round's messages serialize to an array")
         .iter()
         .filter(|m| m["role"] == "tool")
         .filter_map(|m| m["content"].as_str())
@@ -295,7 +287,7 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // different nonces, so an envelope's tag stays unguessable from one run
     // to the next as long as the Harness draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\
@@ -411,8 +403,10 @@ mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;
+mod precheck_anchor;
 mod preludes;
 mod provenance;
+mod rounds;
 mod run_inputs;
 mod run_termination;
 mod scheduler;
@@ -420,6 +414,7 @@ mod serial_driver;
 mod suite;
 mod tasks;
 mod timeouts;
+mod tool_call_access;
 mod tool_call_arm;
 mod tool_loop;
 mod tool_scoping;

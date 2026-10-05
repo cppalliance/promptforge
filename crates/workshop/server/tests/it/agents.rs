@@ -1,8 +1,8 @@
 //! End-to-end agent-session tests over the `/agents/ws` socket: launch,
 //! the full turn cycle with reply-id coalescing and indexed durable
-//! frames, reconnect replay, turn-cancel, session isolation, status-bus
-//! order, backoff reset, and teardown wait cleanup - all in-process
-//! against an SSE mock gateway.
+//! frames, reconnect replay, the stop, conversation isolation,
+//! status-bus order, backoff reset, and teardown wait cleanup - all
+//! in-process against an SSE mock gateway.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant
@@ -16,16 +16,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::Body;
-use axum::http::header;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::post;
 use serde_json::json;
-use tokio::sync::Notify;
 
-use workshop_server::fixtures::{
-    gateway_updater, replace_gateway as replace_fixture_gateway, spawn_bindings_forwarder,
-};
+use workshop_server::fixtures::{gateway_updater, replace_gateway as replace_fixture_gateway};
 use workshop_server::{AgentsConfig, AppState, Config};
 
 use crate::common::{
@@ -40,7 +35,7 @@ const ECHO_MD: &str = r"---
 name: echo
 description: The echo test agent on the unified runtime.
 promptforge: 0
-capabilities:
+plugins:
   - promptforge/user-input
 ---
 
@@ -73,17 +68,6 @@ async fn echo_completions(body: String) -> Response {
     echo_stream("test-model", text)
 }
 
-/// Accepts one completion and then leaves its SSE body open forever.
-fn hanging_completions(started: &Notify) -> Response {
-    started.notify_one();
-    let stream = futures_util::stream::pending::<Result<String, std::io::Error>>();
-    (
-        [(header::CONTENT_TYPE, "text/event-stream")],
-        Body::from_stream(stream),
-    )
-        .into_response()
-}
-
 /// Adds the typed `/v1/models` catalog holding every id these tests
 /// select; a mock without this route fails the launch with the reported
 /// catalog-fetch cause.
@@ -100,36 +84,6 @@ fn record_request(requests: &Mutex<Vec<serde_json::Value>>, body: &str) {
         .lock()
         .expect("the request capture lock is healthy")
         .push(serde_json::from_str(body).expect("the request is JSON"));
-}
-
-/// Asserts one replacement request and its fresh-history boundary: the
-/// relaunched chat run starts a new message list, because history sits in
-/// the section's Lua state until the deferred persistence work lands.
-fn assert_replacement_request(
-    requests: &Mutex<Vec<serde_json::Value>>,
-    model: &str,
-    current_input: &str,
-) {
-    let requests = requests
-        .lock()
-        .expect("the request capture lock is healthy");
-    assert_eq!(requests.len(), 1, "one replacement run dispatches");
-    assert_eq!(
-        requests[0]["model"], model,
-        "the replacement request reads the live selection"
-    );
-    let messages = requests[0]["messages"]
-        .as_array()
-        .expect("the request includes a messages array");
-    assert_eq!(
-        messages.len(),
-        1,
-        "the relaunched run starts a fresh message list"
-    );
-    assert_eq!(
-        messages[0]["content"], current_input,
-        "the fresh list opens with the new turn's input"
-    );
 }
 
 /// Binds the workshop router against an echoing SSE mock gateway, with
@@ -155,12 +109,8 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
         ..test_config(&base_url, dir.path())
     };
     let (state, base) = spawn_router(&config).await;
-    // The router is bound without the serving loop that spawns the
-    // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the Harness is spawned here.
-    spawn_bindings_forwarder(&state);
-    // The session's model catalog is built from the retained catalog at
-    // launch, so the catalog lands before any test launches.
+    // A run starts only once the retained catalog has a chat-capable
+    // model, so the catalog lands before any test launches.
     state
         .catalog()
         .publish(vec![json!({ "id": "test-model", "object": "model" })]);
@@ -217,7 +167,7 @@ pub(crate) async fn answer(socket: &mut JsonSocket, token: &str, text: &str) {
 pub(crate) struct Turn {
     pub(crate) deltas: Vec<serde_json::Value>,
     pub(crate) events: Vec<serde_json::Value>,
-    pub(crate) waits: Vec<String>,
+    waits: Vec<String>,
 }
 
 /// Collects frames until the turn's `agent_message` event arrives,

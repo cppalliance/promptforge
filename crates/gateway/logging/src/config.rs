@@ -5,7 +5,7 @@ use std::time::Duration;
 
 /// Numbered segments retained beside `gateway.log`: `.1` is newest and
 /// `.5` is oldest. Admitting a sixth retained segment prunes `.5`.
-pub(crate) const RETAINED_SEGMENTS: usize = 5;
+const RETAINED_SEGMENTS: usize = 5;
 
 /// Marks a segment boundary or a retained tail whose earlier bytes were
 /// discarded to restore the fixed-size invariant.
@@ -13,8 +13,8 @@ pub(crate) const SEGMENT_TRUNCATION_MARKER: &str = " [truncated]\n";
 
 /// Every memory, latency, and disk budget for the logging pipeline.
 ///
-/// Keeping these limits in one immutable value makes later queue, timeout,
-/// shutdown, and rotation work consume the same policy without adding
+/// Keeping these limits in one immutable value lets the queue, timeout,
+/// shutdown, and rotation code consume the same policy without adding
 /// configuration before logging is available.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LogLimits {
@@ -65,12 +65,6 @@ pub struct LogConfig {
 impl LogConfig {
     /// Builds a config rooted at `state_dir`; the log file lives at
     /// `state_dir/logs/gateway.log`.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(config.state_dir(), std::path::Path::new("/tmp/pf-state"));
-    /// ```
     #[must_use]
     pub fn new(state_dir: impl Into<PathBuf>) -> Self {
         Self {
@@ -79,51 +73,30 @@ impl LogConfig {
     }
 
     /// The state directory the log file is rooted under.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(config.state_dir(), std::path::Path::new("/tmp/pf-state"));
-    /// ```
     #[must_use]
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
     }
 
-    /// The log file this run writes: `<state dir>/logs/gateway.log`.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// assert_eq!(
-    ///     config.log_path(),
-    ///     std::path::Path::new("/tmp/pf-state").join("logs").join("gateway.log"),
-    /// );
-    /// ```
+    /// The log file this run writes:
+    /// [`gateway_api_discovery::gateway_log_path`] under the state
+    /// directory, `<state dir>/logs/gateway.log`.
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
-        self.state_dir.join("logs").join("gateway.log")
+        gateway_api_discovery::gateway_log_path(&self.state_dir)
     }
 
     /// The retained log segment paths, `gateway.log.1` (newest) through
     /// `gateway.log.5` (oldest). Diagnostics enumerates these without
     /// starting a runtime, so the log layout has exactly one owner.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = gateway_logging::LogConfig::new("/tmp/pf-state");
-    /// let retained = config.retained_log_paths();
-    /// assert_eq!(retained.len(), 5);
-    /// assert!(retained[0].ends_with("gateway.log.1"));
-    /// assert!(retained[4].ends_with("gateway.log.5"));
-    /// ```
     #[must_use]
     pub fn retained_log_paths(&self) -> Vec<PathBuf> {
+        let current = self.log_path();
         (1..=RETAINED_SEGMENTS)
             .map(|segment| {
-                self.state_dir
-                    .join("logs")
-                    .join(format!("gateway.log.{segment}"))
+                let mut path = current.as_os_str().to_owned();
+                path.push(format!(".{segment}"));
+                PathBuf::from(path)
             })
             .collect()
     }

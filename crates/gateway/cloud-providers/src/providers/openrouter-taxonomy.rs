@@ -17,7 +17,7 @@ fn family_of(id: &str) -> String {
 
 /// The workload, from the output modalities: the first non-text output
 /// is the model's product; a text-only model is chat.
-pub(crate) fn model_kind(output_modalities: &[String]) -> ModelKind {
+pub(super) fn model_kind(output_modalities: &[String]) -> ModelKind {
     for modality in output_modalities {
         match modality.as_str() {
             "embeddings" => return ModelKind::Embedding,

@@ -1,4 +1,8 @@
-//! The facade's integration suite, written against `harness` paths only.
+//! The `harness` facade suite: a Host builds one Harness per run through
+//! the public API alone.
 
-mod gateway;
+mod broker;
+mod host;
 mod launch;
+mod support;
+mod vfs;

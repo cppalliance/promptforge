@@ -4,8 +4,10 @@
 //! Dispatch resolves the round's binding and tool scope (the bound and
 //! local halves, plus the model's task built-ins once the section has run
 //! `tools.allow_tasks`), records the scope on the chain as `advertised`,
-//! prechecks the projected conversation against the model's context
-//! window, and issues the single gateway round as a `Chat` effect - the
+//! prechecks the projected conversation, with room kept for the reply,
+//! against the model's context window (counting from the provider's usage
+//! for the chain's last measured round when the request extends it), and
+//! issues the single gateway round as a `Chat` effect - the
 //! same effect a nested `infer` issues, over the author's conversation
 //! and the advertised schemas. The driver classifies the answered
 //! completion into the round's answer when it arrives
@@ -28,15 +30,16 @@ use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
 use crate::lua::{
-    MessageRecord, OverflowReason, current_tool_bindings, is_context_overflow, precheck,
+    MessageRecord, OverflowReason, current_tool_bindings, output_reserve, precheck,
     project_messages, resolve_model_binding,
 };
 use crate::model::ModelBinding;
-use crate::model::{Completion, CompletionResult, ToolCall};
+use crate::model::{Completion, CompletionErrorKind, CompletionResult, ToolCall};
 use crate::{Error, Result};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
+use promptforge_types::ids::RoundId;
 
 use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
@@ -143,32 +146,43 @@ impl Scheduler {
             }
         };
         let context = binding.context();
-        self.chains[id.index()].advertised = Some(dispatch);
-        // The pre-dispatch precheck: an over-window request never leaves.
-        // The refusal is the round's answer - the overflow flag - and is
-        // observed as a failed turn, exactly as the loop reported it.
-        if let Err(reason) = precheck(&conversation, context) {
+        let reserve = output_reserve(context, binding.invocation().max_tokens);
+        let chain = &mut self.chains[id.index()];
+        chain.advertised = Some(dispatch);
+        // The pre-dispatch precheck: a request that leaves the reply no
+        // room never leaves. The refusal is the round's answer - the
+        // overflow flag - and is observed as a failed turn, exactly as the
+        // loop reported it. The count starts from the provider's numbers
+        // for the chain's last measured round when this request extends it
+        // and goes to the same model.
+        let anchor = chain.anchor.measured(binding.id());
+        if let Err(reason) = precheck(&conversation, context, reserve, anchor) {
             emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
                 overflow_result(reason, handles.turns.load(Ordering::Relaxed)),
             )))));
         }
+        chain
+            .anchor
+            .sending(binding.id().clone(), conversation.clone());
+        let round = self.number_round(ReplyOrigin::Chat);
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
             messages: conversation,
             tools: schemas,
-            stream: true,
+            round,
         };
-        self.issue(id, effect, Continuation::Chat);
+        self.issue(id, effect, Continuation::Chat(round.id));
         Ok(ChatDispatch::Issued)
     }
 
     /// Classifies one arrived chat round into the chain's answer, emitting
-    /// the round's events through the chain's task-scoped emitter.
+    /// the round's events through the chain's task-scoped emitter, each
+    /// content event stamped with `round`.
     ///
-    /// A provider context rejection is the overflow answer under a failed
-    /// turn. An empty reply is a completed round with the reply absent -
+    /// A `ContextOverflow` failure is the overflow answer under a failed
+    /// turn. An `EmptyReply` is a completed round with the reply absent -
     /// the turn advances and completes - so the shim applies its exit
     /// rules against `finish_reason`. Every other failure is a failed turn
     /// and the call's error. A served completion advances the turn, fires
@@ -177,14 +191,18 @@ impl Scheduler {
     /// observation on a `length` finish) or the tool-call batch; a
     /// requested tool outside the scope this chain advertised for the round
     /// fails the call as out of scope after a failed-tool-call observation.
+    /// A round that reported usage becomes the chain's measurement for the
+    /// next dispatch's precheck to the same model, whatever the round's
+    /// outcome; any other round only releases the messages it sent.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the parked chain has lost its frame
     /// or the scope it advertised for the round, or the run's tool set
     /// cannot be read.
     pub(super) fn accept_chat(
-        &self,
+        &mut self,
         id: ChainIndex,
+        round: RoundId,
         result: Result<Box<Completion>>,
     ) -> Result<Answer<Error>> {
         let chain = &self.chains[id.index()];
@@ -193,21 +211,26 @@ impl Scheduler {
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         let handles = frame.reporting_handles();
-        let round = Round {
+        let round = ArrivedRound {
+            id: round,
             section: chain.section_name().to_owned(),
             emitter: handles.emitter,
             turns: handles.turns,
         };
         let completion = match result {
             Ok(completion) => completion,
-            Err(error) => return Ok(Answer::Chat(round.failed(error))),
+            Err(error) => {
+                let failure = round.failed(error);
+                self.chains[id.index()].anchor.settle(None);
+                return Ok(Answer::Chat(failure));
+            }
         };
         // A round trip that produced a reply is a turn, whether the reply
         // is text or a batch of tool calls.
         let turn = advance_turn(&round.turns);
         let (outcome, served) = round.served(*completion, turn);
         let result = match outcome {
-            CompletionResult::Text(text) => Ok(Round::text_reply(&served, text, turn)),
+            CompletionResult::Text(text) => Ok(ArrivedRound::text_reply(&served, text, turn)),
             CompletionResult::ToolCalls(calls) => {
                 // The scope is recorded before the round is spawned; its
                 // absence is a scheduler fault, never an author-visible
@@ -226,22 +249,28 @@ impl Scheduler {
             // neither resumed nor promoted to an answer.
             _ => Err(Error::internal("unrecognized completion outcome")),
         };
+        let usage = served
+            .metrics
+            .as_ref()
+            .and_then(|metrics| metrics.usage.as_ref());
+        self.chains[id.index()].anchor.settle(usage);
         Ok(Answer::Chat(result.map(Box::new)))
     }
 }
 
-/// One arrived round's reporting context: the chain's section label, its
-/// task-scoped emitter, and the turn counter it advances (a task chain's
-/// own, so its turns count against its own cap).
-struct Round {
+/// One arrived round's reporting context: the round's id, the chain's
+/// section label, its task-scoped emitter, and the turn counter it
+/// advances (a task chain's own, so its turns count against its own cap).
+struct ArrivedRound {
+    id: RoundId,
     section: String,
     emitter: Arc<Emitter>,
     turns: Arc<AtomicU32>,
 }
 
-impl Round {
-    /// Classifies a round that produced no completion. A provider context
-    /// rejection is the overflow answer under a failed turn. An empty reply
+impl ArrivedRound {
+    /// Classifies a round that produced no completion. A `ContextOverflow`
+    /// failure is the overflow answer under a failed turn. An `EmptyReply`
     /// is a completed round with the reply absent - the turn advances and
     /// completes - because whether it is the model's clean exit or a
     /// failure depends on the rounds before it, which only the shim knows;
@@ -250,7 +279,7 @@ impl Round {
     /// turn and the call's error.
     fn failed(&self, error: Error) -> std::result::Result<Box<ChatResult>, Error> {
         match error {
-            Error::Backend { status, body } if is_context_overflow(status, &body) => {
+            Error::Completion(error) if error.kind() == CompletionErrorKind::ContextOverflow => {
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_FAILED);
                 Ok(Box::new(overflow_result(
@@ -258,11 +287,7 @@ impl Round {
                     self.turns.load(Ordering::Relaxed),
                 )))
             }
-            Error::EmptyModelReply {
-                detail: phrase,
-                finish_reason,
-                ..
-            } => {
+            Error::Completion(error) if error.kind() == CompletionErrorKind::EmptyReply => {
                 let turn = advance_turn(&self.turns);
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
@@ -270,9 +295,9 @@ impl Round {
                     overflow: false,
                     overflow_reason: None,
                     reply: None,
-                    empty_detail: Some(phrase.into_owned()),
+                    empty_detail: Some(error.message().to_owned()),
                     tool_calls: None,
-                    finish_reason,
+                    finish_reason: error.finish_reason().map(str::to_owned),
                     model: String::new(),
                     metrics: None,
                     turn,
@@ -296,6 +321,7 @@ impl Round {
             &self.emitter,
             &self.section,
             turn,
+            self.id,
             completion,
             ReplyOrigin::Chat,
         )
@@ -344,7 +370,7 @@ impl Round {
             })
             .collect();
         self.emitter
-            .assistant_tool_calls(&self.section, turn, &served.model, &events);
+            .assistant_tool_calls(&self.section, turn, self.id, &served.model, &events);
         if let Some(rogue) = calls
             .iter()
             .find(|call| !advertised.contains_key(call.name()))

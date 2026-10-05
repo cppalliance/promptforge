@@ -17,9 +17,8 @@
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: no internal `workshop-*` crates.
-//!   Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 //! - Zero I/O: no sockets, tasks, or clocks, so every wire shape is
 //!   pinned by a plain test.
 //!
@@ -44,7 +43,7 @@
 //! # Agent-session input frames
 //!
 //! An agent session asks its operator for input through the Harness's
-//! `promptforge/user-input` capability, whose `input.ask()` waits on the
+//! `promptforge/user-input` Plugin, whose `input.ask()` waits on the
 //! session. Three frames make up that conversation: the server
 //! pushes [`InputFrame::Required`] when a wait opens and
 //! [`InputFrame::Cancelled`] when one dies unresolved, and the client

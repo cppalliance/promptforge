@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 mod events;
-pub(crate) mod progress_stream;
+mod progress_stream;
 mod socket;
 mod sse;
 

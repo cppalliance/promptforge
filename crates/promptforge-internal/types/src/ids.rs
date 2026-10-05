@@ -20,7 +20,8 @@
 //! [`AbandonReason`] names how a task's owner ended while the task was
 //! still live, for the `abandoned` terminal state. [`Provenance`] extends a
 //! task's id with a per-task sequence number: the replay key stamped on
-//! every effect and event the Engine emits.
+//! every effect and event the Engine emits. [`RoundId`] numbers the run's
+//! model rounds, so a round's effect and its content events name it alike.
 //!
 //! Ids order as paths: a chain before its descendants, siblings by index.
 //! The tasks one chain owns are its direct children, so sorting their ids
@@ -36,8 +37,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 mod tests;
 
 /// The hierarchical id of one chain: a path of child indices from the root
-/// chain. Orders lexicographically as a path: a chain before its
-/// descendants, siblings by child index.
+/// chain.
+///
+/// It displays and serializes as decimal components joined by dots, such
+/// as `0.2.0`. Ids order as paths: a chain before its descendants, and
+/// siblings by child index.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChainId(Vec<u32>);
 
@@ -48,8 +52,9 @@ impl ChainId {
         Self(vec![0])
     }
 
-    /// The id of this chain's `index`-th child chain (a `call` child or a
-    /// spawned task; the two share the parent's counter).
+    /// The id of this chain's child chain number `index`. A `call` child
+    /// and a spawned task are both child chains, and they share the
+    /// parent's counter.
     #[must_use]
     pub fn child(&self, index: u32) -> Self {
         let mut components = Vec::with_capacity(self.0.len() + 1);
@@ -59,8 +64,8 @@ impl ChainId {
     }
 
     /// The id of this chain's `index`-th section entry, rendered as a
-    /// path: the value a section reads as `sys.id`. A section id is not a
-    /// chain id, so it is returned as text rather than as `ChainId`.
+    /// path: the value a section reads as `sys.id`. A section id names an
+    /// entry inside a chain, so it is returned as text.
     #[must_use]
     pub fn entry(&self, index: u32) -> String {
         format!("{self}.{index}")
@@ -79,7 +84,11 @@ impl fmt::Display for ChainId {
     }
 }
 
-/// The parse failure of a [`ChainId`] or [`TaskId`] path.
+/// The error returned when text fails to parse as a [`ChainId`] or
+/// [`TaskId`] path.
+///
+/// A valid path is one or more components joined by dots, such as `0.2.0`.
+/// Each component is plain decimal digits that fit in a `u32`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid chain id `{input}`: required a dot-separated path of decimal components")]
 pub struct ParseIdError {
@@ -134,10 +143,12 @@ impl<'de> Deserialize<'de> for ChainId {
     }
 }
 
-/// The id of one task: its chain's id. A task and the chain that runs it
-/// are one thing named from two sides, so the two ids are the same path;
-/// the newtype keeps a task-keyed table from accepting an arbitrary chain
-/// by accident. Orders as its chain id does.
+/// The id of one task, which is the id of the chain that runs it.
+///
+/// A task and its chain are one thing named from two sides, so both ids are
+/// the same path. The separate type makes a table keyed by task accept
+/// only task ids, so a chain id enters it by explicit conversion. Orders
+/// as its chain id does.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskId(ChainId);
 
@@ -173,37 +184,23 @@ impl<'de> Deserialize<'de> for TaskId {
     }
 }
 
-/// The replay key of one effect or event: the nearest enclosing task and
-/// the effect's or event's position within that task.
+/// The replay key of one effect or event: its nearest enclosing task and its
+/// position within that task.
 ///
 /// `task` is the task whose chain emitted the item. The main walk is task
-/// `0`; a `call` child reports its parent's task, which is unambiguous
-/// because a `call` blocks its parent, so the two never interleave. `seq`
-/// is a counter local to that task, shared by its effects and its events
-/// so the two kinds order against each other within one task. Two runs of
-/// the same prompt with the same inputs and answers stamp the same
-/// provenance on the same items regardless of how their chains interleave,
-/// which is what lets a log slice by task, order within a task, and later
-/// replay a run against its record: in durable-execution vocabulary this is
-/// the replay key. The in-flight `EffectId` is a separate, opaque run-wide
-/// handle that need not reproduce.
+/// `0`. A `call` child reports its parent's task. This is well defined
+/// because a `call` blocks its parent, so the two run one at a time. `seq`
+/// is a counter local to that task. The task's effects and events share
+/// it, so the two kinds order against each other within one task.
 ///
-/// The name is chosen over `Origin` because the virtual filesystem's
-/// `Origin` already names the claims origin label and [`TaskOrigin`] names
-/// the spawning principal.
+/// Two runs of the same prompt with the same inputs and answers stamp the
+/// same provenance on the same items, however their chains interleave.
+/// That lets a log slice by task, order items within a task, and later
+/// replay a run against its record. The `EffectId` of an in-flight effect
+/// is a separate, opaque handle counted across the whole run, and it can
+/// differ between runs.
 ///
 /// Orders by task path, then by sequence.
-///
-/// # Examples
-/// ```
-/// use promptforge::ids::{Provenance, TaskId};
-///
-/// let task: TaskId = "0.2".parse()?;
-/// let first = Provenance { task: task.clone(), seq: 0 };
-/// let second = Provenance { task, seq: 1 };
-/// assert!(first < second);
-/// # Ok::<(), promptforge::ids::ParseIdError>(())
-/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Provenance {
     /// The nearest enclosing task.
@@ -212,24 +209,56 @@ pub struct Provenance {
     pub seq: u32,
 }
 
-/// The principal that started a task.
+/// The id of one model round: its position in the run's dispatch order,
+/// counting from 0.
 ///
-/// The two are treated differently at the owner's chain end: an author
-/// task that outlives its owner is the author's bug and fails the chain,
-/// a model task that outlives its owner is abandoned and reported. The
-/// tag is the string the Lua shims and the `tasks.pending` filter use.
+/// One counter for the whole run numbers every round, both a section's chat
+/// rounds and its nested `models.infer` rounds. A round's `Chat` effect
+/// holds its id, and so do the thinking, reply, and tool-call events
+/// reported from the round's answer. The caller can use the id to pair the
+/// partial output it shows while a round runs with the events that report
+/// the round's answer. When tasks run concurrently, the order in which
+/// the caller answers effects can change which round gets which number.
+/// Serializes as a bare number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RoundId(u64);
+
+impl RoundId {
+    /// The round numbered `id`.
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The round's number.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// The principal that started a task: the prompt's author or the model.
+///
+/// The two are treated differently when the owner chain ends while the
+/// task is still live. An author task that outlives its owner is the
+/// author's bug, so it fails the owner chain. A model task that outlives
+/// its owner is abandoned and reported. Lua code writes an origin as its
+/// tag, `author` or `model`, for example in the `origin` filter of
+/// `tasks.pending`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum TaskOrigin {
-    /// The prompt's author, through `tasks.spawn` (and `fanout` over it).
+    /// The prompt's author, through `tasks.spawn` or `fanout`, which is
+    /// built on it.
     Author,
     /// The model, through its `task` tool.
     Model,
 }
 
 impl TaskOrigin {
-    /// The tag the shims and filters use: `author` or `model`.
+    /// The origin's tag as Lua code writes it: `author` or `model`.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -238,7 +267,8 @@ impl TaskOrigin {
         }
     }
 
-    /// Parses a tag; `None` for anything outside the two exact tags.
+    /// Parses a tag that is exactly `author` or `model`. Returns `None` for
+    /// any other text.
     #[must_use]
     pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
@@ -252,30 +282,33 @@ impl TaskOrigin {
 /// Why a live task was abandoned: how its owner chain ended while the task
 /// was still running.
 ///
-/// A task ends with its owner. `abandoned` is kept apart from `cancelled`
-/// because "lost its owner" and "was stopped on purpose" are different
-/// facts for the log, the UI, and the model notice; the reason says which
-/// kind of owner end it was, so the notice can say more than "abandoned".
+/// A task ends with its owner. The `abandoned` terminal state is separate
+/// from `cancelled`, because losing an owner and being stopped on purpose
+/// are different facts for a log, a UI, and the notice the model receives.
+/// The reason says which kind of owner end it was, so the notice can say
+/// more than "abandoned".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AbandonReason {
-    /// The owner ended normally - a scalar return or an exhausted walk -
-    /// without waiting on or cancelling the task. For an author task this
-    /// is the `tasks_live` error; a model task is abandoned quietly.
+    /// The owner ended normally, by returning a scalar or finishing its
+    /// walk, and left the task running. For an author task, the owner's
+    /// outcome becomes the `tasks_live` error. A model task is abandoned,
+    /// and the owner's outcome stands.
     OwnerReturned,
     /// The owner failed.
     OwnerFailed,
-    /// The owner's model-tool loop ran past its round cap: a failure kept
-    /// apart from [`OwnerFailed`](Self::OwnerFailed) because the model
-    /// notice must say so - the model's own task outlived the loop that
-    /// started it.
+    /// The owner's model tool loop ran past its round cap. This is a
+    /// failure, reported apart from [`OwnerFailed`](Self::OwnerFailed)
+    /// because the notice the model receives must say that the model's own
+    /// task outlived the loop that started it.
     ToolLoopExhausted,
-    /// The owner was aborted from outside: a fatal sibling's fail-fast,
-    /// or its own owner ending first.
+    /// The owner was aborted from outside, either by fail-fast after a
+    /// sibling failed fatally or because the owner's own owner ended first.
     OwnerAborted,
-    /// The run itself ended - cancelled by the Host or ended by a fatal
-    /// answer - while the task was live; the Engine ended it with the run.
+    /// The run itself ended while the task was live, because the caller
+    /// cancelled the run or an answer was fatal. The Engine ended the task
+    /// with the run.
     RunTerminated,
 }
 

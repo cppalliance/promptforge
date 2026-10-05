@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "Safe Whisper decoder backend for the PromptForge STT engine"
-
 [dependencies]
 gateway-stt-engine.workspace = true
 gateway-whisper-ffi.workspace = true
@@ -23,6 +21,9 @@ tokio.workspace = true
 
 [features]
 test-fixtures = ["gateway-stt-engine/test-fixtures"]
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

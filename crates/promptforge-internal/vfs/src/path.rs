@@ -11,10 +11,12 @@ use std::sync::Arc;
 
 use crate::error::{PathReason, VfsError};
 
-/// Canonical virtual path. Produced by `canonicalize` at the moment the
-/// API receives a path. The string is `Arc`-shared per value lineage:
-/// clones share one allocation, and the string frees when its last
-/// owner drops. There is no global table and no lock.
+/// A virtual path in canonical form.
+///
+/// The virtual file system canonicalizes each path as soon as its API
+/// receives it, and this type holds the result. Clones share one `Arc`
+/// string allocation, and the string frees when its last owner drops.
+/// A path shares state only with its own clones.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VfsPath {
     text: Arc<str>,
@@ -53,9 +55,10 @@ impl fmt::Display for VfsPath {
     }
 }
 
-/// Owned canonical virtual path, for places that outlive an interned
-/// reference or arrive owned (symlink targets). Ordered for
-/// the mount table's `BTreeMap`.
+/// A canonical virtual path that owns its own copy of the string.
+///
+/// Symlink targets arrive as this type. It is ordered, so the mount table
+/// can use it as a key in a `BTreeMap`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VfsPathBuf(String);
 

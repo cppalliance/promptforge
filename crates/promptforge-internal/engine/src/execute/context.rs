@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
-use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::{Emitter, EventSink};
 use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::plugins::Prelude;
 
 use crate::Result;
 use crate::cancel::CancelHandle;
@@ -75,7 +75,7 @@ pub(crate) struct RunState {
     emitter: Arc<Emitter>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
-    /// same flag the activated capabilities and the run's `cancel` share.
+    /// same flag the activated Plugins and the run's `cancel` share.
     cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
     /// the values themselves - their provenance included - without
@@ -116,7 +116,7 @@ pub(crate) struct RunState {
     /// The run's Host-state snapshot; its presence gives every section VM
     /// the `ui()` global and the raw-model-id `models.get` fallback.
     ui: Option<Arc<serde_json::Value>>,
-    /// The run's capability preludes, in install order: every section VM
+    /// The run's Plugin preludes, in install order: every section VM
     /// installs each one before the shared library replays.
     preludes: Arc<[Prelude]>,
     /// Every tool and model alias the prompt's frontmatter declares: the
@@ -137,13 +137,13 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free) - the full-id bindings of `ctx`'s catalog, and the
+    /// Plugin-free) - the full-id bindings of `ctx`'s catalog, and the
     /// prompt's frontmatter alias names that `ctx`'s preludes are checked
     /// against; the nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
-    pub(crate) fn new(
+    pub(super) fn new(
         prompt: Arc<Prompt>,
         args: &str,
         vfs: &VfsRef,
@@ -198,7 +198,7 @@ impl RunState {
     /// run starts, so a test fixture can drive the scheduler's `tool_call`
     /// arm with one model-issued call.
     #[cfg(test)]
-    pub(crate) fn expose_raw_shims_for_test(&mut self) {
+    pub(super) fn expose_raw_shims_for_test(&mut self) {
         self.raw_shims = true;
     }
 
@@ -207,52 +207,52 @@ impl RunState {
     /// Install before the scheduler is built: the drain reads the tap
     /// through the scheduler's root context.
     #[cfg(test)]
-    pub(crate) fn record_events_for_test(&mut self) -> Arc<Mutex<Vec<Event>>> {
+    pub(super) fn record_events_for_test(&mut self) -> Arc<Mutex<Vec<Event>>> {
         let tap = Arc::new(Mutex::new(Vec::new()));
         self.tap = Some(Arc::clone(&tap));
         tap
     }
 
     /// The prompt this run executes.
-    pub(crate) fn prompt(&self) -> &Prompt {
+    pub(super) fn prompt(&self) -> &Prompt {
         &self.prompt
     }
 
     /// The prompt's shared handle, for a caller that must hold the tree
     /// independently of this context's borrow.
-    pub(crate) fn prompt_arc(&self) -> &Arc<Prompt> {
+    pub(super) fn prompt_arc(&self) -> &Arc<Prompt> {
         &self.prompt
     }
 
     /// The run's cancel flag.
-    pub(crate) fn cancel(&self) -> &CancelHandle {
+    pub(super) fn cancel(&self) -> &CancelHandle {
         &self.cancel
     }
 
     /// The run's untrusted-envelope nonce.
-    pub(crate) fn nonce(&self) -> &GuardNonce {
+    pub(super) fn nonce(&self) -> &GuardNonce {
         &self.nonce
     }
 
     /// The run's VFS handle.
-    pub(crate) fn vfs(&self) -> &VfsRef {
+    pub(super) fn vfs(&self) -> &VfsRef {
         &self.vfs
     }
 
     /// The execution identifier stamped on every observation.
-    pub(crate) fn execution(&self) -> &str {
+    pub(super) fn execution(&self) -> &str {
         &self.execution
     }
 
     /// The run's argument string.
-    pub(crate) fn args(&self) -> &str {
+    pub(super) fn args(&self) -> &str {
         &self.args
     }
 
     /// The run's `argv`: the parsed form of the args string, or `None`
     /// (nil) when it did not parse. On the walk this is the value H1 left
     /// behind at the freeze.
-    pub(crate) fn argv(&self) -> Option<&serde_json::Value> {
+    pub(super) fn argv(&self) -> Option<&serde_json::Value> {
         self.argv.as_deref()
     }
 
@@ -263,14 +263,14 @@ impl RunState {
 
     /// This context's task-scoped emitter: where every report the
     /// scheduler makes on this chain goes.
-    pub(crate) fn emitter(&self) -> &Arc<Emitter> {
+    pub(super) fn emitter(&self) -> &Arc<Emitter> {
         &self.emitter
     }
 
     /// Drains the run's event buffer: every event pushed since the last
     /// drain, in push order. The run's `step` calls this once per step and
     /// hands the batch to the Harness.
-    pub(crate) fn take_events(&self) -> Vec<Event> {
+    pub(super) fn take_events(&self) -> Vec<Event> {
         let events = self.events.take();
         #[cfg(test)]
         if let Some(tap) = &self.tap {
@@ -282,13 +282,13 @@ impl RunState {
     }
 
     /// The model-turn counter this context advances.
-    pub(crate) fn turns(&self) -> &Arc<AtomicU32> {
+    pub(super) fn turns(&self) -> &Arc<AtomicU32> {
         &self.turns
     }
 
     /// The concrete handle behind the tools view, shared with every
     /// section VM the run constructs.
-    pub(crate) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
+    pub(super) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
         Arc::clone(&self.tool_set)
     }
 
@@ -298,7 +298,7 @@ impl RunState {
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
     /// poisoned.
-    pub(crate) fn tool_set_snapshot(&self) -> Result<ToolSet> {
+    pub(super) fn tool_set_snapshot(&self) -> Result<ToolSet> {
         Ok(ToolSet::from_parts(
             self.tools.bindings()?,
             self.tools.always()?,
@@ -308,30 +308,30 @@ impl RunState {
     /// The binding for the catalog tool whose full id is `id`, the
     /// fallback a script `tools.call` resolves when no frontmatter alias
     /// matches.
-    pub(crate) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
+    pub(super) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
         self.catalog_bindings.get(id)
     }
 
     /// The run's model set, read-only.
-    pub(crate) fn models(&self) -> &dyn ModelView {
+    pub(super) fn models(&self) -> &dyn ModelView {
         &*self.models
     }
 
     /// The concrete handle behind the models view, shared with every
     /// section VM the run constructs.
-    pub(crate) fn model_set(&self) -> Arc<Mutex<ModelSet>> {
+    pub(super) fn model_set(&self) -> Arc<Mutex<ModelSet>> {
         Arc::clone(&self.model_set)
     }
 
     /// The resolved per-section tool-loop cap: the frontmatter's
     /// `max_tool_iterations` over the limits default.
-    pub(crate) fn max_tool_iterations(&self) -> usize {
+    fn max_tool_iterations(&self) -> usize {
         promptforge_parser::detail::max_tool_iterations(self.prompt.frontmatter())
             .resolve(self.limits.tool_iterations().get() as usize)
     }
 
     /// The run's top-level section count, reported as `sys.section_count`.
-    pub(crate) fn section_count(&self) -> usize {
+    fn section_count(&self) -> usize {
         promptforge_parser::detail::sections(&self.prompt).len()
     }
 
@@ -343,7 +343,7 @@ impl RunState {
     /// the views read. `when` needs none either: it is the run's
     /// `started_at`, the same for the pass and the walk.
     #[must_use]
-    pub(crate) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {
+    pub(super) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {
         let mut ctx = self.clone();
         ctx.argv = argv.map(Arc::from);
         ctx
@@ -354,7 +354,7 @@ impl RunState {
     /// run's args for the chain - and `argv` re-derives from the chain's
     /// args, so the chain sees the parsed form of what it was passed.
     #[must_use]
-    pub(crate) fn with_args(&self, args: &str) -> Self {
+    pub(super) fn with_args(&self, args: &str) -> Self {
         let mut ctx = self.clone();
         ctx.argv = derive_argv(&self.prompt, args).map(Arc::from);
         ctx.args = Arc::from(args);
@@ -365,7 +365,7 @@ impl RunState {
     /// the chain's own `task` on every report, and `turns` in place of the
     /// run's counter, so the task's turns count against its own cap.
     #[must_use]
-    pub(crate) fn with_task(&self, task: TaskId, turns: Arc<AtomicU32>) -> Self {
+    pub(super) fn with_task(&self, task: TaskId, turns: Arc<AtomicU32>) -> Self {
         let mut ctx = self.clone();
         ctx.emitter = Arc::new(self.emitter.for_task(task));
         ctx.turns = turns;
@@ -379,7 +379,7 @@ impl RunState {
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
     /// one), and the section name.
-    pub(crate) fn vm_setup<'a>(
+    pub(super) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
         seed: VmSeed<'a>,
@@ -408,7 +408,7 @@ impl RunState {
     /// The `sys` JSON for one section or arm of this run under the run's
     /// `when`, with the driver supplying only the section entry's
     /// hierarchical id, the entering chain's task id, and the section name.
-    pub(crate) fn sys_json(
+    pub(super) fn sys_json(
         &self,
         id: &str,
         task_id: &TaskId,
@@ -460,7 +460,7 @@ impl fmt::Debug for RunState {
                 &self
                     .preludes
                     .iter()
-                    .map(Prelude::capability)
+                    .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
             .field("frontmatter_aliases", &self.frontmatter_aliases)

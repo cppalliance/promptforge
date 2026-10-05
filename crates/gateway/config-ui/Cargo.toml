@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway config UI: embedded SPA assets and the shared loopback middleware, mounted by the gateway at /config"
-
 [dependencies]
 axum.workspace = true
 # The shared loopback wall; defined in its own always-on crate so headless
@@ -24,6 +22,7 @@ tower.workspace = true
 # The build script bundles the UI with esbuild into OUT_DIR through the
 # shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
+build-ceiling.workspace = true
 build-ui = { path = "../../build-ui" }
 
 [lints]

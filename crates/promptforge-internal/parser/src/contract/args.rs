@@ -11,7 +11,10 @@ use serde::Deserialize;
 
 use super::{ContractKeys, deserialize_contract_map};
 
-/// The closed set of declared arg types.
+/// The type of a declared prompt arg.
+///
+/// The `type` key of an arg declaration accepts only `string`, `boolean`,
+/// `integer`, and `number`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -37,7 +40,8 @@ impl std::fmt::Display for ArgType {
     }
 }
 
-/// One declared arg: its type, optionality, default, and description.
+/// The declaration of one prompt arg: its type, whether it is optional, its
+/// default, and its description.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ArgDecl {
@@ -54,8 +58,10 @@ impl ArgDecl {
         self.kind
     }
 
-    /// Returns whether a call may omit the field entirely. Optional means
-    /// absent, and absent is not the empty string.
+    /// Returns whether a call may omit this arg entirely.
+    ///
+    /// An omitted arg is absent from the call. An empty string is a supplied
+    /// value.
     #[must_use]
     pub fn is_optional(&self) -> bool {
         self.optional
@@ -126,11 +132,12 @@ impl<'de> Deserialize<'de> for ArgDecl {
     }
 }
 
-/// A prompt's typed args declaration: arg name to declaration.
+/// The args a prompt declares: a map from each arg name to its declaration.
 ///
-/// There are no freeform prompts: a prompt with no `args:` key gets the
-/// default declaration of one optional string field named `prose`, and prose
-/// at the interface wraps into `argv = { prose = "<text>" }`.
+/// Every prompt has an args declaration. A prompt whose frontmatter omits
+/// the `args` key gets the default declaration: one optional string arg
+/// named `prose`. The input text of such a prompt arrives wrapped as
+/// `argv = { prose = "<text>" }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ArgsDecl {
@@ -143,8 +150,12 @@ pub struct ArgsDecl {
 }
 
 impl ArgsDecl {
-    /// Returns whether this declaration is the implicit default (no `args:`
-    /// key), whose interface prose wraps into `argv.prose`.
+    /// Returns whether this is the default declaration, which a prompt gets
+    /// when its frontmatter omits the `args` key.
+    ///
+    /// The input text of such a prompt arrives wrapped as `argv.prose`. This
+    /// returns `false` for every explicit `args` key, even one that declares
+    /// the same single `prose` arg.
     #[must_use]
     pub fn is_default(&self) -> bool {
         self.implicit
@@ -167,7 +178,7 @@ impl ArgsDecl {
         self.fields.len()
     }
 
-    /// Returns whether no args are declared.
+    /// Returns whether zero args are declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()

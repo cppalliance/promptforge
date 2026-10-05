@@ -89,7 +89,7 @@ fn kind(event: &Event) -> String {
 }
 
 /// Folds one event to the record a suite compares.
-pub(crate) fn observation(event: &Event) -> Observation {
+fn observation(event: &Event) -> Observation {
     if let Event::Lua { message, .. } = event {
         return Observation::Lua(message.clone());
     }
@@ -104,7 +104,7 @@ pub(crate) fn observation(event: &Event) -> Observation {
 
 /// One recorded content report: the tool result's turn, call id, alias,
 /// content, and trusted flag, field for field.
-pub(crate) type ToolResultRecord = (u32, String, String, String, bool);
+type ToolResultRecord = (u32, String, String, String, bool);
 
 /// An emitter over a private sink, with the events it produced read back
 /// as records: the suites' recording observer.
@@ -124,7 +124,7 @@ impl Default for Recorder {
 
 impl Recorder {
     /// A recorder whose emitter reports under `execution`.
-    pub(crate) fn for_execution(execution: &str) -> Self {
+    pub(super) fn for_execution(execution: &str) -> Self {
         let sink = EventSink::default();
         let emitter = Emitter::root(sink.clone(), execution, DebugMode::Off);
         Self {
@@ -141,12 +141,12 @@ impl Recorder {
 
     /// A second emitter over the same sink reporting under another
     /// execution id, for a test that interleaves runs.
-    pub(crate) fn emitter_for(&self, execution: &str) -> Emitter {
+    pub(super) fn emitter_for(&self, execution: &str) -> Emitter {
         Emitter::root(self.sink.clone(), execution, DebugMode::Off)
     }
 
     /// Every event reported so far, in order.
-    pub(crate) fn events(&self) -> Vec<Event> {
+    fn events(&self) -> Vec<Event> {
         let mut seen = self
             .seen
             .lock()
@@ -156,7 +156,7 @@ impl Recorder {
     }
 
     /// Every report so far as `(execution, section, observation)`.
-    pub(crate) fn records(&self) -> Vec<(String, String, Observation)> {
+    pub(super) fn records(&self) -> Vec<(String, String, Observation)> {
         self.events()
             .iter()
             .map(|event| {
@@ -170,7 +170,7 @@ impl Recorder {
     }
 
     /// Every report so far as `(section, observation)`.
-    pub(crate) fn observations(&self) -> Vec<(String, Observation)> {
+    pub(super) fn observations(&self) -> Vec<(String, Observation)> {
         self.events()
             .iter()
             .map(|event| (event.section().to_owned(), observation(event)))

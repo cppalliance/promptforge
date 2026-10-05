@@ -154,7 +154,7 @@ impl Default for ReconnectBackoff {
 
 /// xorshift64: a tiny deterministic generator; jitter needs spread, not
 /// cryptography, and this keeps the dependency tree unchanged.
-pub(crate) fn xorshift(state: &mut u64) -> u64 {
+fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;

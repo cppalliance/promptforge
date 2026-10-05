@@ -55,7 +55,7 @@ fn build(state: Workspace, limit: std::time::Duration) -> axum::Router {
 
 /// The query string of `GET /workspace/tree`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct TreeQuery {
+struct TreeQuery {
     /// The directory to list; absent or empty lists the granted roots.
     path: Option<String>,
 }
@@ -81,28 +81,28 @@ pub(crate) struct WriteRequest {
 
 /// The JSON body of `POST /workspace/grant`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct GrantRequest {
+struct GrantRequest {
     /// The dropped path: a folder grants itself, a file grants its parent.
     path: String,
 }
 
 /// The JSON body of a successful grant.
 #[derive(Debug, Serialize)]
-pub(crate) struct GrantResponse {
+struct GrantResponse {
     /// The root that was registered.
     granted: std::path::PathBuf,
 }
 
 /// The JSON body of `POST /workspace/revoke`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct RevokeRequest {
+struct RevokeRequest {
     /// The granted root to remove, as listed by the roots tree.
     path: String,
 }
 
 /// The JSON body of a successful revoke.
 #[derive(Debug, Serialize)]
-pub(crate) struct RevokeResponse {
+struct RevokeResponse {
     /// The root that was removed.
     revoked: std::path::PathBuf,
 }
@@ -111,10 +111,7 @@ pub(crate) struct RevokeResponse {
 /// query has no path. The listing is filesystem work and runs on the
 /// blocking pool; the confinement check runs inside the same call, so the
 /// check-then-use window is no wider than before.
-pub(crate) async fn tree(
-    State(workspace): State<Workspace>,
-    Query(query): Query<TreeQuery>,
-) -> Response {
+async fn tree(State(workspace): State<Workspace>, Query(query): Query<TreeQuery>) -> Response {
     respond(
         try_blocking(
             move || workspace.tree(query.path.as_deref().map(Path::new)),
@@ -163,10 +160,7 @@ pub(crate) async fn write_file(
 
 /// Registers a dropped path as a granted root, mirrored into the open
 /// workspace file when there is one.
-pub(crate) async fn grant(
-    State(workspace): State<Workspace>,
-    Json(body): Json<GrantRequest>,
-) -> Response {
+async fn grant(State(workspace): State<Workspace>, Json(body): Json<GrantRequest>) -> Response {
     respond(
         workspace
             .grant_and_persist(Path::new(&body.path))
@@ -177,10 +171,7 @@ pub(crate) async fn grant(
 
 /// Removes a granted root, mirrored into the open workspace file when
 /// there is one; paths under it fail their next operation.
-pub(crate) async fn revoke(
-    State(workspace): State<Workspace>,
-    Json(body): Json<RevokeRequest>,
-) -> Response {
+async fn revoke(State(workspace): State<Workspace>, Json(body): Json<RevokeRequest>) -> Response {
     respond(
         workspace
             .revoke_and_persist(Path::new(&body.path))

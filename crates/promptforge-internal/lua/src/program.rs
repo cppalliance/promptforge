@@ -48,36 +48,11 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// [`source_line`](Self::source_line) are safe positional metadata (a chunk name
 /// and a line number) and hold no source text. The crate itself never logs the
 /// retained source; compilation observations contain only fixed strings.
-///
-/// # Examples
-/// A program is obtained from the parser (which compiles it at parse time)
-/// and exposes its source and position; here one is compiled directly:
-/// ```
-/// use std::num::NonZeroU32;
-///
-/// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-/// use promptforge_lua::LuaProgram;
-///
-/// let sink = EventSink::default();
-/// let emitter = Emitter::root(sink.clone(), "doc", DebugMode::Off);
-/// let program = LuaProgram::compile(
-///     "return 1",
-///     "section `Only` prologue",
-///     NonZeroU32::MIN,
-///     &emitter,
-///     "Only",
-/// )?;
-/// assert_eq!(sink.take().len(), 2, "compilation started, then succeeded");
-/// assert_eq!(program.source(), "return 1");
-/// assert!(program.source_line().get() >= 1);
-/// assert!(program.location().contains("Only"));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LuaProgram {
     source: String,
-    pub(crate) bytecode: Vec<u8>,
+    bytecode: Vec<u8>,
     /// Parser location string used as the Lua chunk name (for example
     /// `section \`Web Search\` epilog`).
     location: String,
@@ -100,29 +75,6 @@ impl LuaProgram {
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
     /// retaining the source, location, and Lua diagnostic. Returns
     /// [`Error::Lua`] if the temporary compiler VM cannot be created.
-    ///
-    /// # Examples
-    /// ```
-    /// use std::num::NonZeroU32;
-    ///
-    /// use mlua::Lua;
-    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_lua::LuaProgram;
-    ///
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let program = LuaProgram::compile(
-    ///     "return 40 + 2",
-    ///     "example prologue",
-    ///     NonZeroU32::MIN,
-    ///     &emitter,
-    ///     "Example",
-    /// )?;
-    /// let lua = Lua::new();
-    /// let chunk = program.load(&lua)?;
-    /// let answer: i64 = chunk.call(())?;
-    /// assert_eq!(answer, 42);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn compile(
         source: &str,
         location: &str,
@@ -265,7 +217,7 @@ impl LuaProgram {
 ///
 /// Recognizes the stable quota messages our Engine functions emit so a refusal
 /// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
-pub(crate) fn quota_resource(raw: &str) -> Option<&'static str> {
+fn quota_resource(raw: &str) -> Option<&'static str> {
     use crate::error::lua_quota;
     if raw.contains(lua_quota::LOG_EVENT) {
         Some("log event")

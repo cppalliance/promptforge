@@ -1,7 +1,7 @@
 //! The gated-backend test helpers for the scheduler suites: a one-shot gate on
 //! the first backend write or append beside the store and observer that open it.
 //!
-//! The gate no longer forces a conflict - claims are never released during a
+//! The gate does not force a conflict - claims are never released during a
 //! run, so an unordered second op conflicts however late it starts. It parks
 //! the first write-intent op so the cancel-wait suite can cancel a child
 //! while its write is still in flight: the cancel lands while the child is

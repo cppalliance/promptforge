@@ -87,26 +87,17 @@ pub(super) fn owner_prompt(frontmatter: &str, owner_body: &str, child_body: &str
 }
 
 /// The names the gateway saw advertised on `body`.
-fn advertised(body: &Value) -> Vec<String> {
-    body["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+fn advertised(body: &ScriptedCall) -> Vec<String> {
+    body.tool_names().into_iter().map(str::to_owned).collect()
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_scripted_model_starts_a_task_and_reads_its_status() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("done"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks({ '## Child' })\n\
@@ -121,7 +112,7 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the model starts and inspects its task");
@@ -153,11 +144,10 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Only\"}"),
         resp_text("done"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks({ '## Child' })\n\
@@ -170,7 +160,7 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the refusal is the call's content, not a raise");
@@ -189,11 +179,10 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks()\n\
@@ -210,7 +199,7 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -248,11 +237,10 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     // `tasks_live` and the model's is absent, while both slots end
     // abandoned. Two same-origin tasks could not tell the arm's two sides
     // apart.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks()\n\
@@ -266,7 +254,7 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let error = scheduler
         .drive()
         .await
@@ -322,12 +310,11 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![resp_tool_call(
         "call_1",
         "task",
         "{\"target\":\"## Child\"}",
-    )])
-    .await;
+    )]);
     let md = owner_prompt(
         "max_tool_iterations: 1\n",
         "tools.allow_tasks()\n\
@@ -340,7 +327,7 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let error = scheduler
         .drive()
         .await
@@ -373,12 +360,11 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_cancel", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks()\n\
@@ -392,7 +378,7 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -420,11 +406,10 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
 async fn the_model_sees_only_its_own_tasks() {
     // The author's task is `0.0`; the model's status read of it is refused
     // and the author's cancel then ends it, so the run completes clean.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks()\n\
@@ -439,7 +424,7 @@ async fn the_model_sees_only_its_own_tasks() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the author's cancel ends its task before the chain ends");
@@ -451,7 +436,7 @@ async fn the_model_sees_only_its_own_tasks() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn without_allow_tasks_the_built_ins_are_not_advertised() {
-    let gateway = ScriptedGateway::start(vec![resp_text("bye")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("bye")]);
     let md = owner_prompt(
         "",
         "local msgs = messages.new()\n\
@@ -463,7 +448,7 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a tool-free round completes");

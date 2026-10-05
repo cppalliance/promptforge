@@ -13,7 +13,7 @@ pub struct WhisperConfig {
     pub(crate) final_model: Option<PathBuf>,
     /// The load's activity, weakly held: the factory outlives the load, so
     /// a decoder built after the caller's guard dropped reports nothing.
-    pub(crate) progress: Option<Weak<Activity>>,
+    progress: Option<Weak<Activity>>,
 }
 
 impl WhisperConfig {

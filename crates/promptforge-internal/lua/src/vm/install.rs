@@ -75,24 +75,6 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if Engine values cannot be bridged or if Engine
     /// values were already injected.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use promptforge_lua::SectionVm;
-    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_types::untrusted::GuardNonce;
-    ///
-    /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vfs = promptforge_vfs::VfsRef::default();
-    /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
-    /// );
-    /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.inject_values("input", &serde_json::json!({ "id": 1 }), &access)?;
-    /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn inject_values(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
         self.inject_values_with_var(args, sys, access, None, Argv::Frozen(None))
     }

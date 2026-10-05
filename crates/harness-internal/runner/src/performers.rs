@@ -6,74 +6,101 @@
 //! [`EffectAnswer`](promptforge::effect::EffectAnswer); a performer is
 //! the Harness code that turns the one into the other. Each trait takes the
 //! effect's fields and returns the answer's payload for its kind, so a
-//! performer never sees the run, the log, or another kind's effects. The
+//! performer never sees the run, the recorder, or another kind's effects. The
 //! effect loop owns the correlation: it hands each result back to the run
 //! under the effect's id and writes the answer's record.
 //!
-//! Each performer returns a boxed `'static` future the loop spawns as its
-//! own task, so a performer must move what its future needs into it. A
-//! `Vfs` effect has no performer: the VFS is synchronous by design, so the
-//! loop answers it inline through the Engine's store operation.
+//! Each performer returns a boxed `'static` future that the loop polls
+//! inside the run's own future, beside every other effect in flight, so a
+//! performer must move what its future needs into it. A performer must not
+//! block while polled: one that blocks stalls every other effect of the
+//! run, and the run's stop and cancel with them. A performer with blocking
+//! or CPU-heavy work hands it to the Host's own runtime and awaits the
+//! result. A `Vfs` effect has no performer: the VFS is synchronous by
+//! design, so the loop answers it inline through the Engine's store
+//! operation.
 //!
-//! The runner supplies two performers itself - [`TokioTimer`] and
-//! [`ActivatedTools`] - because each is machinery it already holds:
-//! tokio's timer wheel and the tool table run preparation activated. The
-//! chat performer lives with what it reaches, the gateway client.
+//! The runner supplies one performer itself, [`ActivatedTools`], over the
+//! tool table run preparation activated. The Host supplies the
+//! [`InferenceBroker`] and the [`Timer`].
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use promptforge::effect::{Round, ToolCallOrigin};
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 use serde_json::Value;
 
-#[path = "performers-builtin.rs"]
-mod builtin;
 #[path = "performers-tools.rs"]
 mod tools;
 
-pub use builtin::TokioTimer;
 pub use tools::ActivatedTools;
 
-/// A boxed, sendable, owning future: what an asynchronous performer
-/// returns and the loop spawns.
+/// The boxed future a performer returns for the Harness to poll.
+///
+/// The future is `Send` and `'static`. It can move between threads, and it
+/// owns the data it uses.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// Performs a `Chat` effect: one model round over `messages` with `tools`
-/// advertised, under `binding`'s frozen `options`.
-pub trait ChatPerformer: Send + Sync {
-    /// Runs the round. `stream` says whether the round's live deltas have
-    /// a consumer (a section's `chat` round) or only the completed reply
-    /// does (a nested `models.infer`).
+/// The model inference the Host supplies to the Harness.
+///
+/// A broker lists the models it serves and performs each `Chat` effect as
+/// one model round.
+///
+/// The Harness polls each round inside the run's own future, so a broker
+/// must not block while polled. A broker sends blocking or CPU-heavy work
+/// to the Host's own runtime.
+pub trait InferenceBroker: Send + Sync {
+    /// Lists the models the broker serves.
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>>;
+
+    /// Runs one model round and returns the finished reply.
+    ///
+    /// The round runs under `binding`. It sends `messages` to the model
+    /// with `tools` advertised, using `options`, the fixed request settings
+    /// built from `binding`. `round` holds the round's run-wide id and the
+    /// path that dispatched it.
+    ///
+    /// The Harness takes only the finished reply. A broker that shows the
+    /// reply as it forms streams it on its own.
     fn chat(
         &self,
         binding: ModelBinding,
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
-        stream: bool,
+        round: Round,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>>;
 }
 
 /// Performs a `ToolCall` effect: resolves `tool` to an implementation and
-/// calls it with `args`.
+/// calls it with `args`, lending it the call's `access` and `origin`.
 pub trait ToolPerformer: Send + Sync {
     /// Calls the tool. `alias` is the prompt-local name the call used,
     /// for the performer's own diagnostics; `tool` is the identity it
-    /// resolves.
+    /// resolves. `access` is the call's own filesystem access and
+    /// `origin` says who made the call. The returned future owns both
+    /// until it finishes, and drops them when it finishes or is dropped.
     fn call(
         &self,
         tool: ToolId,
         alias: String,
+        access: Arc<Access>,
+        origin: ToolCallOrigin,
         args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// Performs a `Timer` effect: one sleep.
-pub trait TimerPerformer: Send + Sync {
+/// The Host's clock, which performs each `Timer` effect as one sleep.
+///
+/// The Harness polls each sleep inside the run's own future, so a timer
+/// must not block while polled. It waits on the Host's own runtime.
+pub trait Timer: Send + Sync {
     /// Resolves once `seconds` have passed.
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;
 }
@@ -82,16 +109,16 @@ pub trait TimerPerformer: Send + Sync {
 /// effect. The loop answers a `Vfs` effect inline and has no performer
 /// for it.
 ///
-/// Shared handles, so the loop can move a performer into the task it
-/// spawns for each effect while the bundle stays whole.
+/// Shared handles, so the loop can move a performer into the future it
+/// starts for each effect while the bundle stays whole.
 #[derive(Clone)]
 pub struct Performers {
     /// Performs `Chat` effects.
-    pub chat: Arc<dyn ChatPerformer>,
+    pub broker: Arc<dyn InferenceBroker>,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
     /// Performs `Timer` effects.
-    pub timer: Arc<dyn TimerPerformer>,
+    pub timer: Arc<dyn Timer>,
 }
 
 impl std::fmt::Debug for Performers {

@@ -6,8 +6,7 @@ use super::*;
 
 #[tokio::test]
 async fn debug_capture_receives_request_and_response_when_set() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
@@ -16,7 +15,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
         "",
         &[],
         &TestStore::new(),
-        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
+        gatewayed_with_debug(&gateway, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .unwrap();
@@ -27,10 +26,14 @@ async fn debug_capture_receives_request_and_response_when_set() {
     assert_eq!(events[0].0, EXECUTION);
     assert_eq!(events[0].1, "Only");
     assert_eq!(events[0].2, 1);
+    let round = gateway.last_request().expect("infer must reach the model");
+    assert_eq!(round.options.model(), "claude-sonnet-4-6");
+    assert!(!round.messages.is_empty());
+    // A scripted completion carries no raw exchange, so both bodies are
+    // the `null` a broker without one reports.
     match &events[0].3 {
         crate::test_support::recording::DebugEvent::Request { body } => {
-            assert_eq!(body["model"], "claude-sonnet-4-6");
-            assert!(body["messages"].as_array().is_some_and(|m| !m.is_empty()));
+            assert!(body.is_null(), "{body}");
         }
         other => panic!("expected request first, got {other:?}"),
     }
@@ -42,10 +45,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
         } => {
             assert_eq!(finish_reason, &None);
             assert_eq!(reasoning_content, &None);
-            assert_eq!(
-                body["choices"][0]["message"]["content"],
-                "hello from the mock"
-            );
+            assert!(body.is_null(), "{body}");
         }
         other => panic!("expected response second, got {other:?}"),
     }
@@ -55,8 +55,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
     // A nested infer called from Lua must route its request/response
     // capture to the run's owned debug sink instead of dropping it.
-    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
@@ -72,7 +71,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         "",
         &[],
         &TestStore::new(),
-        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
+        gatewayed_with_debug(&gateway, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .expect("handle-form infer must return text");
@@ -104,8 +103,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
     // The arm's debug side channel: the fanout's run-context fork keeps
     // the run's own debug sink, so an arm's model-turn events land on the
     // run's sink under the worker's section name.
-    let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("arm reply")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
@@ -124,7 +122,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         "",
         &[],
         &TestStore::new(),
-        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
+        gatewayed_with_debug(&gateway, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .expect("the fanout must succeed");
@@ -153,8 +151,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
 
 #[tokio::test]
 async fn debug_capture_none_changes_nothing() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
@@ -162,7 +159,7 @@ async fn debug_capture_none_changes_nothing() {
         "",
         &[],
         &TestStore::new(),
-        gatewayed(addr),
+        gatewayed(&gateway),
     )
     .await
     .unwrap();
@@ -178,7 +175,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         "canonical_echo",
         "Echo a test value.",
     ));
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\
@@ -211,11 +208,10 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     use super::models_loop::{always_tool, loop_context, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
         resp_text("final answer"),
-    ])
-    .await;
+    ]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
@@ -224,7 +220,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a tool's own failure becomes the call's result, not the loop's");
@@ -239,7 +235,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     // The first script dispatch installs the counts seeded from the
     // effective scope, so an added but uncalled alias reads as 0 and an
     // author assert on it fails the run with its own message.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\n  other: tests/tools/other\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  search: tests/tools/search\n  other: tests/tools/other\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
@@ -271,7 +267,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  search: tests/tools/search\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
@@ -306,8 +302,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
 async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     // The one infer shape: `models.infer(handle, ...)` returns the round's text and never
     // sets `reply` or `sys.reply_finish_reason`.
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         writer = models.default('writer')\n```\n\n\
@@ -322,7 +317,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md);
-    let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(addr))
+    let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(&gateway))
         .await
         .expect("handle-form infer must return text");
     assert_eq!(out, "pong");
@@ -330,8 +325,8 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         .last_request()
         .expect("infer must reach the gateway");
     assert!(
-        body.get("tools").is_none(),
-        "handle-form infer advertises no tools: {body}"
+        body.tools.is_empty(),
+        "handle-form infer advertises no tools: {body:?}"
     );
 }
 

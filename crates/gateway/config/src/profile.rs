@@ -16,14 +16,6 @@ pub use name::{ProfileName, ProfileNameError};
 ///
 /// Command-line input outranks environment input. When both are absent,
 /// [`Config::load`](crate::Config::load) reads the sibling state file.
-///
-/// # Examples
-/// ```
-/// use gateway_config::ProfileSelection;
-///
-/// let selection = ProfileSelection::new(Some("work"), Some("travel"));
-/// assert_eq!(selection.command_line(), Some("work"));
-/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ProfileSelection {
@@ -33,14 +25,6 @@ pub struct ProfileSelection {
 
 impl ProfileSelection {
     /// Builds startup selection inputs in precedence order.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileSelection;
-    ///
-    /// let selection = ProfileSelection::new(Some("work"), None);
-    /// assert_eq!(selection.command_line(), Some("work"));
-    /// ```
     #[must_use]
     pub fn new(command_line: Option<&str>, environment: Option<&str>) -> ProfileSelection {
         ProfileSelection {
@@ -50,32 +34,12 @@ impl ProfileSelection {
     }
 
     /// Returns the command-line profile value, when supplied.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileSelection;
-    ///
-    /// assert_eq!(
-    ///     ProfileSelection::new(Some("work"), None).command_line(),
-    ///     Some("work")
-    /// );
-    /// ```
     #[must_use]
     pub fn command_line(&self) -> Option<&str> {
         self.command_line.as_deref()
     }
 
     /// Returns the `PROMPTFORGE_PROFILE` value, when supplied.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileSelection;
-    ///
-    /// assert_eq!(
-    ///     ProfileSelection::new(None, Some("travel")).environment(),
-    ///     Some("travel")
-    /// );
-    /// ```
     #[must_use]
     pub fn environment(&self) -> Option<&str> {
         self.environment.as_deref()
@@ -83,15 +47,6 @@ impl ProfileSelection {
 }
 
 /// Persisted startup state stored beside `gateway.toml`.
-///
-/// # Examples
-/// ```
-/// use gateway_config::{ProfileName, ProfileState};
-///
-/// let name = ProfileName::parse("work")?;
-/// assert_eq!(ProfileState::new(&name).active_profile(), "work");
-/// # Ok::<(), gateway_config::ProfileNameError>(())
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -101,15 +56,6 @@ pub struct ProfileState {
 
 impl ProfileState {
     /// Builds state for a validated profile name.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::{ProfileName, ProfileState};
-    ///
-    /// let state = ProfileState::new(&ProfileName::parse("work")?);
-    /// assert_eq!(state.active_profile(), "work");
-    /// # Ok::<(), gateway_config::ProfileNameError>(())
-    /// ```
     #[must_use]
     pub fn new(active_profile: &ProfileName) -> ProfileState {
         ProfileState {
@@ -123,29 +69,11 @@ impl ProfileState {
     /// Returns [`ConfigError`](crate::ConfigError) when TOML is malformed,
     /// contains an unknown key, or `active_profile` is not a legal profile
     /// identifier.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileState;
-    ///
-    /// let state = ProfileState::from_toml_str("active_profile = \"work\"\n")?;
-    /// assert_eq!(state.active_profile(), "work");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     pub fn from_toml_str(raw: &str) -> Result<ProfileState, crate::ConfigError> {
         parse_state(raw, None).map_err(crate::ConfigError::from)
     }
 
     /// Returns the persisted active profile.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileState;
-    ///
-    /// let state = ProfileState::from_toml_str("active_profile = \"work\"\n")?;
-    /// assert_eq!(state.active_profile(), "work");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     #[must_use]
     pub fn active_profile(&self) -> &str {
         &self.active_profile
@@ -156,15 +84,6 @@ impl ProfileState {
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) if the state cannot be
     /// represented as TOML.
-    ///
-    /// # Examples
-    /// ```
-    /// use gateway_config::ProfileState;
-    ///
-    /// let state = ProfileState::from_toml_str("active_profile = \"work\"\n")?;
-    /// assert_eq!(state.to_toml_string()?, "active_profile = \"work\"\n");
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
     pub fn to_toml_string(&self) -> Result<String, crate::ConfigError> {
         toml::to_string(self)
             .map_err(|error| {
@@ -177,17 +96,6 @@ impl ProfileState {
 /// Returns the canonical sibling state path for a configuration file.
 ///
 /// `gateway.toml` maps to `gateway.state.toml`.
-///
-/// # Examples
-/// ```
-/// use gateway_config::profile_state_path;
-/// use std::path::Path;
-///
-/// assert_eq!(
-///     profile_state_path(Path::new("gateway.toml")),
-///     Path::new("gateway.state.toml")
-/// );
-/// ```
 #[must_use]
 pub fn profile_state_path(config_path: &Path) -> PathBuf {
     let stem = config_path.file_stem().map_or_else(

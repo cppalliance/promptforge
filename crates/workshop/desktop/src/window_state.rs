@@ -5,8 +5,8 @@
 //! user drags, once more on close - and reapplies them when the SPA opens,
 //! saves as, or duplicates a workspace file (its
 //! `promptforge:workspace-opened` event). The workspace file, not a
-//! plugin-owned location, owns the geometry: an ephemeral workspace has
-//! nowhere to keep it and the server answers `saved: false`.
+//! Tauri-plugin-owned location, owns the geometry: an ephemeral workspace
+//! has nowhere to keep it and the server answers `saved: false`.
 //!
 //! Every failure here logs and continues: a window that opens at the
 //! default size is a nuisance, a window that never opens is a boot
@@ -27,10 +27,10 @@ use tauri::{
 /// How long a burst of resize and move events must go quiet before the
 /// geometry is written. A drag fires dozens of events a second; one save
 /// per gesture is plenty.
-pub(crate) const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
+const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// The budget for the final save on close. Past it the window closes
 /// with whatever the last debounced save wrote.
-pub(crate) const CLOSE_SAVE_TIMEOUT: Duration = Duration::from_secs(2);
+const CLOSE_SAVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// The budget for a fetch or a debounced save against the in-process
 /// server: loopback, so generous.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -46,32 +46,32 @@ const VISIBILITY_INSET: i32 = 16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct WindowState {
     /// Logical width.
-    pub(crate) width: u32,
+    width: u32,
     /// Logical height.
-    pub(crate) height: u32,
+    height: u32,
     /// Logical x position of the window's outer top-left corner.
-    pub(crate) x: i32,
+    x: i32,
     /// Logical y position of the window's outer top-left corner.
-    pub(crate) y: i32,
+    y: i32,
     /// Whether the window is maximized; the rectangle is the normal one
     /// to return to.
-    pub(crate) maximized: bool,
+    maximized: bool,
 }
 
 /// The part of the `GET /workspace/file/current` answer the desktop app reads.
 /// The path, name, and grants belong to the SPA and are ignored here.
 #[derive(Debug, Deserialize)]
-pub(crate) struct CurrentResponse {
+struct CurrentResponse {
     /// The saved geometry; `null` while ephemeral or never saved.
-    pub(crate) window_state: Option<WindowState>,
+    window_state: Option<WindowState>,
 }
 
 /// The `PUT /workspace/file/window-state` answer.
 #[derive(Debug, Deserialize)]
-pub(crate) struct SavedResponse {
+struct SavedResponse {
     /// Whether the geometry was written; `false` for an ephemeral
     /// workspace.
-    pub(crate) saved: bool,
+    saved: bool,
 }
 
 /// The desktop app's minimal client for the in-process server's workspace-file
@@ -106,7 +106,7 @@ impl ServerClient {
 
     /// Fetches the open workspace's saved geometry: `None` while the
     /// workspace is ephemeral or has never saved one.
-    pub(crate) async fn current(&self) -> anyhow::Result<Option<WindowState>> {
+    async fn current(&self) -> anyhow::Result<Option<WindowState>> {
         let url = self.endpoint("workspace/file/current")?;
         let response = self
             .http
@@ -126,7 +126,7 @@ impl ServerClient {
     /// Saves `state` into the open workspace file within `timeout`.
     /// Returns whether the server wrote it (`false` for an ephemeral
     /// workspace).
-    pub(crate) async fn put_window_state(
+    async fn put_window_state(
         &self,
         state: WindowState,
         timeout: Duration,
@@ -153,7 +153,7 @@ impl ServerClient {
 /// The window's geometry in logical pixels, as the file keeps it. The OS
 /// reports physical pixels; dividing by the scale factor keeps a window
 /// the same apparent size when the file moves between displays.
-pub(crate) fn geometry(
+fn geometry(
     inner: PhysicalSize<u32>,
     outer: PhysicalPosition<i32>,
     scale_factor: f64,
@@ -173,7 +173,7 @@ pub(crate) fn geometry(
 /// Merges a fresh snapshot with the last known geometry. A maximized
 /// window reports the screen rectangle, so only its flag is taken and the
 /// normal rectangle stays what it was; anything else is taken whole.
-pub(crate) fn merge(previous: Option<WindowState>, current: WindowState) -> WindowState {
+fn merge(previous: Option<WindowState>, current: WindowState) -> WindowState {
     match previous {
         Some(previous) if current.maximized => WindowState {
             maximized: true,
@@ -187,7 +187,7 @@ pub(crate) fn merge(previous: Option<WindowState>, current: WindowState) -> Wind
 /// `delay` of each other replace one another, and the sink sees only the
 /// last of a burst once it goes quiet. One thread, not one per event,
 /// because a drag produces hundreds.
-pub(crate) struct Debouncer<T> {
+struct Debouncer<T> {
     /// The event side; the worker owns the receiver.
     events: mpsc::Sender<T>,
 }
@@ -231,7 +231,7 @@ impl<T: Send + 'static> Debouncer<T> {
 
     /// Offers a value; the sink sees it only if nothing newer arrives
     /// within the delay.
-    pub(crate) fn push(&self, value: T) {
+    fn push(&self, value: T) {
         // A dead worker means saves are off; there is nothing to report
         // per event.
         let _ = self.events.send(value);

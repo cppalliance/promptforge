@@ -1,0 +1,30 @@
+[package]
+name = "workshop-run-log"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The recorder trait and the record values the log stores and returns,
+# through the Harness's public API.
+harness.workspace = true
+serde_json.workspace = true
+shared-error-source = { workspace = true, features = ["database", "json"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "sync"] }
+turso.workspace = true
+workspace-hack.workspace = true
+
+[dev-dependencies]
+# The fidelity suite round-trips the Engine's events through the log.
+promptforge.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[build-dependencies]
+build-ceiling.workspace = true
+
+[lints]
+workspace = true

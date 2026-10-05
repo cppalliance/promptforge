@@ -151,7 +151,7 @@ fn feature_lists(manifest: &toml::Value) -> Vec<(&str, Vec<&str>)> {
         .collect()
 }
 
-/// Whether the interim exemption holds for the optional dependency `key`:
+/// Whether the exemption holds for the optional dependency `key`:
 /// `test-support` is the one feature, directly or through other features,
 /// that enables it.
 fn is_exempt(features: &[(&str, Vec<&str>)], key: &str) -> bool {

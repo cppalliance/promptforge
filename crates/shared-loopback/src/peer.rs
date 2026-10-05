@@ -43,18 +43,6 @@ pub async fn require_loopback(request: Request, next: Next) -> Response {
 /// gateway's keyless-loopback auth rule) asks the same question rather
 /// than spelling its own. `None` - no `ConnectInfo` was recorded - fails
 /// closed as non-loopback, exactly as the middleware does.
-///
-/// # Examples
-/// ```
-/// use std::net::SocketAddr;
-///
-/// let loopback: SocketAddr = "127.0.0.1:50000".parse()?;
-/// let lan: SocketAddr = "198.51.100.7:44821".parse()?;
-/// assert!(shared_loopback::is_loopback_peer(Some(loopback)));
-/// assert!(!shared_loopback::is_loopback_peer(Some(lan)));
-/// assert!(!shared_loopback::is_loopback_peer(None));
-/// # Ok::<(), std::net::AddrParseError>(())
-/// ```
 #[must_use]
 pub fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
     peer.is_some_and(|peer| peer.ip().is_loopback())

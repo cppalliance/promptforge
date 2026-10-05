@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop status subsystem: the status-bar broadcast bus every /ws session forwards from"
-
 [dependencies]
 tokio.workspace = true
 workshop-protocol.workspace = true
@@ -17,6 +15,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

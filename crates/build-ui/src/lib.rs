@@ -336,7 +336,10 @@ fn bundle(ui_dir: &Path, dist_dir: &Path, config: &UiBuild) -> anyhow::Result<()
 /// Builds the command that invokes the esbuild install [`find_esbuild`]
 /// locates, failing with the setup instructions when there is none: `npm
 /// ci` belongs where the nearest lockfile is. On Windows the npm shim is a
-/// `.cmd` file, which only runs through `cmd /c`.
+/// `.cmd` file; `Command` runs it through `cmd.exe` and quotes the whole
+/// line for it. A hand-built `cmd /c` line breaks once both the shim path
+/// and an argument need quotes, because `cmd` strips the first and last
+/// quote, as when the checkout path has a space.
 fn esbuild_command(ui_dir: &Path) -> anyhow::Result<Command> {
     let Some(esbuild) = find_esbuild(ui_dir) else {
         return Err(anyhow::anyhow!(
@@ -345,13 +348,7 @@ fn esbuild_command(ui_dir: &Path) -> anyhow::Result<Command> {
             install_root(ui_dir).display()
         ));
     };
-    if cfg!(windows) {
-        let mut command = Command::new("cmd");
-        command.arg("/c").arg(esbuild);
-        Ok(command)
-    } else {
-        Ok(Command::new(esbuild))
-    }
+    Ok(Command::new(esbuild))
 }
 
 /// Copies the static UI files next to the bundle, keeping the relative

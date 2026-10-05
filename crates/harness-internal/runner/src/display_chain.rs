@@ -9,14 +9,14 @@
 
 use std::error::Error;
 
-/// Renders `error`'s text followed by each cause in its `source()` chain,
-/// separated by `: `.
+/// Renders an error's text followed by the text of each cause in its
+/// `source()` chain, separated by `: `.
 ///
-/// A cause whose text the accumulated rendering already contains is
-/// skipped: some variants copy their source's text into their own
-/// message (an Engine `LuaRuntime { message, source }`, for one), and
-/// appending that cause again would print it twice. The check is a plain
-/// substring test on the text rendered so far.
+/// A cause is skipped when its text already appears in the text rendered
+/// so far. Some error variants copy their source's text into their own
+/// message, and the Engine's `LuaRuntime` variant is one example.
+/// Appending such a cause again would print its text twice. The check is
+/// a plain substring test.
 #[must_use]
 pub fn display_chain(error: &dyn Error) -> String {
     let mut rendered = error.to_string();

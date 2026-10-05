@@ -2,7 +2,7 @@
 //! `models.get`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
-//! to Lua. Invocation is namespace-only (A9), so
+//! to Lua. Invocation is namespace-only, so
 //! `models.infer(handle?, prompt)` takes the handle as an optional leading
 //! argument.
 
@@ -34,32 +34,32 @@ impl LuaModelHandle {
 
     /// Returns the prompt-local alias.
     #[must_use]
-    pub(crate) fn name(&self) -> &str {
+    fn name(&self) -> &str {
         self.binding.alias()
     }
 
     /// Returns the role label the binding filled (the alias, under the
     /// frontmatter's role vocabulary).
     #[must_use]
-    pub(crate) fn label(&self) -> &str {
+    fn label(&self) -> &str {
         self.binding.alias()
     }
 
     /// Returns the bound role's full keyword set.
     #[must_use]
-    pub(crate) fn capabilities(&self) -> &[String] {
+    fn capabilities(&self) -> &[String] {
         self.binding.capabilities()
     }
 
     /// Returns the caller-facing catalog model id.
     #[must_use]
-    pub(crate) fn model_id(&self) -> &str {
+    fn model_id(&self) -> &str {
         self.binding.id().name()
     }
 
     /// Returns the capability description of the bound role.
     #[must_use]
-    pub(crate) fn description(&self) -> &str {
+    fn description(&self) -> &str {
         self.binding.description()
     }
 
@@ -68,13 +68,13 @@ impl LuaModelHandle {
     /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
     /// is exposed only here, at the Lua presentation boundary.
     #[must_use]
-    pub(crate) fn context(&self) -> u32 {
+    fn context(&self) -> u32 {
         self.binding.context().get()
     }
 
     /// Returns the frozen thinking switch, when the role declared one.
     #[must_use]
-    pub(crate) fn thinking(&self) -> Option<bool> {
+    fn thinking(&self) -> Option<bool> {
         self.binding.invocation().thinking
     }
 
@@ -84,7 +84,7 @@ impl LuaModelHandle {
     /// [`Temperature`](promptforge_model_client::model::Temperature); the
     /// raw `f64` is exposed only here, at the Lua presentation boundary.
     #[must_use]
-    pub(crate) fn temperature(&self) -> Option<f64> {
+    fn temperature(&self) -> Option<f64> {
         self.binding
             .invocation()
             .temperature
@@ -96,7 +96,7 @@ impl LuaModelHandle {
     /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
     /// is exposed only here, at the Lua presentation boundary.
     #[must_use]
-    pub(crate) fn max_tokens(&self) -> Option<u32> {
+    fn max_tokens(&self) -> Option<u32> {
         self.binding
             .invocation()
             .max_tokens

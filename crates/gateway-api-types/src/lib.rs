@@ -412,8 +412,8 @@ mod tests {
 
     #[test]
     fn missing_new_fields_fail_to_parse() {
-        // The new fields are required: no serde defaults, so an old-shape
-        // document must be rejected rather than silently defaulted.
+        // `family` and `env_vars` are required: no serde defaults, so a
+        // document missing them must be rejected rather than silently defaulted.
         let mut value = serde_json::to_value(entry("m1")).expect("entry must serialize");
         value
             .as_object_mut()

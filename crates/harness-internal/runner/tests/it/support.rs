@@ -1,22 +1,23 @@
 //! Fixtures shared by the runner's suites: a one-section prompt, a run
 //! over it, and fake performers that answer by script.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
-use harness_log::{RunId, RunOutcome};
-use harness_runner::effect_loop::SharedLog;
-use harness_runner::performers::{
-    BoxFuture, ChatPerformer, Performers, TimerPerformer, ToolPerformer,
+use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, ToolPerformer};
+use harness_runner::recorder::{
+    MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
+use promptforge::effect::{Round, ToolCallOrigin};
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
 use promptforge::vfs::{
-    AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+    Access, AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
+    VfsRef,
 };
 use promptforge::{Environment, Prompt, Run, RunContext};
 use serde_json::{Value, json};
@@ -43,7 +44,7 @@ fn catalog() -> ToolCatalog {
 }
 
 /// A prompt whose one section runs `lua` as its only block.
-pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
+fn prompt(lua: &str) -> Arc<Prompt> {
     let source = format!(
         "---\nname: runner-test\ndescription: a runner fixture\npromptforge: 0\n---\n\n\
          # Fixture\n\n## Only\n\n```lua\n{lua}\n```\n"
@@ -52,7 +53,7 @@ pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
     Arc::new(prompt.expect("the fixture prompt parses"))
 }
 
-/// A capability-free run over `prompt` with a fixed seed and start,
+/// A Plugin-free run over `prompt` with a fixed seed and start,
 /// prepared against the fixture [`catalog`], over the run's filesystem
 /// `vfs`.
 fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
@@ -65,20 +66,20 @@ fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
     Run::new(prompt, "", ctx)
 }
 
-/// A capability-free run over `lua` with a fixed seed and start, over a
+/// A Plugin-free run over `lua` with a fixed seed and start, over a
 /// fresh memory store.
 pub(crate) fn run(lua: &str) -> Run {
     run_over(lua, VfsRef::default())
 }
 
-/// A capability-free run over `lua` whose `store` table operates on
+/// A Plugin-free run over `lua` whose `store` table operates on
 /// `vfs`: the test holds the handle, so it can read what the run wrote or
 /// mount a backend of its own.
 pub(crate) fn run_over(lua: &str, vfs: VfsRef) -> Run {
     prepared(prompt(lua), vfs)
 }
 
-/// A capability-free run over two sections: `## Main` runs `main`, and
+/// A Plugin-free run over two sections: `## Main` runs `main`, and
 /// `## Child` runs `child` when the main spawns it as a task.
 pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     let source = format!(
@@ -100,14 +101,18 @@ pub(crate) const TIMED_MAIN: &str = "local t = tasks.spawn('## Child')\n\
 /// reaching one is the test's failure.
 pub(crate) struct Unused;
 
-impl ChatPerformer for Unused {
+impl InferenceBroker for Unused {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        unreachable!("the effect loop never lists models")
+    }
+
     fn chat(
         &self,
         _binding: ModelBinding,
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
-        _stream: bool,
+        _round: Round,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("no test issues a Chat effect")
     }
@@ -118,13 +123,15 @@ impl ToolPerformer for Unused {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         unreachable!("this test issues no ToolCall effect")
     }
 }
 
-impl TimerPerformer for Unused {
+impl Timer for Unused {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         unreachable!("no test issues a Timer effect")
     }
@@ -135,7 +142,7 @@ impl TimerPerformer for Unused {
 pub(crate) fn unused() -> Performers {
     let unused = Arc::new(Unused);
     Performers {
-        chat: unused.clone(),
+        broker: unused.clone(),
         tool: unused.clone(),
         timer: unused,
     }
@@ -149,6 +156,8 @@ impl ToolPerformer for TextTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let text = self.0;
@@ -164,6 +173,8 @@ impl ToolPerformer for PendingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::pending())
@@ -179,6 +190,8 @@ impl ToolPerformer for PanickingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::poll_fn(
@@ -189,10 +202,10 @@ impl ToolPerformer for PanickingTool {
     }
 }
 
-/// Closes the run's row in the log before answering, so the loop's next
-/// write is refused: the log failing under a live run.
+/// Ends the run at the recorder before answering, so the loop's next
+/// write is refused: the recorder failing under a live run.
 pub(crate) struct ClosingTool {
-    pub(crate) log: SharedLog,
+    pub(crate) recorder: Arc<MemoryRecorder>,
     pub(crate) run_id: RunId,
 }
 
@@ -201,23 +214,105 @@ impl ToolPerformer for ClosingTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
-        let log = Arc::clone(&self.log);
+        let recorder = Arc::clone(&self.recorder);
         let run_id = self.run_id;
         Box::pin(async move {
-            log.lock()
-                .await
+            recorder
                 .end_run(run_id, RunOutcome::Cancelled)
                 .await
-                .expect("the open row closes");
+                .expect("the open run ends");
             Ok(ToolOutput::trusted("late"))
         })
     }
 }
 
+/// A recorder that refuses one chosen call and keeps the rest in memory:
+/// the recorder failing under a live run. Calls count from one across
+/// `begin_run`, `append`, and `end_run` in the order they reach it, and a
+/// refused call records nothing. A test that drives the loop alone begins
+/// its run on `inner()`, which counts nothing, so the count starts at the
+/// loop's first write.
+pub(crate) struct FailingRecorder {
+    inner: MemoryRecorder,
+    fail_on: usize,
+    calls: AtomicUsize,
+    begun: Mutex<Vec<RunId>>,
+}
+
+impl FailingRecorder {
+    /// A recorder that refuses its `call`th call, counting from one.
+    pub(crate) fn failing_on(call: usize) -> Self {
+        Self {
+            inner: MemoryRecorder::new(),
+            fail_on: call,
+            calls: AtomicUsize::new(0),
+            begun: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The runs this recorder issued through its own `begin_run`, in
+    /// order.
+    pub(crate) fn begun(&self) -> Vec<RunId> {
+        self.begun.lock().unwrap().clone()
+    }
+
+    /// A recorder that refuses nothing, for counting the calls of a run.
+    pub(crate) fn never_failing() -> Self {
+        Self::failing_on(usize::MAX)
+    }
+
+    /// The calls that have reached the recorder, refused one included.
+    pub(crate) fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    /// The memory recorder behind the wrapper, which holds what was kept.
+    pub(crate) fn inner(&self) -> &MemoryRecorder {
+        &self.inner
+    }
+
+    fn count(&self) -> Result<(), RecorderError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if call == self.fail_on {
+            return Err(RecorderError::new(format!(
+                "the fixture recorder refuses call {call}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl RunRecorder for FailingRecorder {
+    fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
+        Box::pin(async move {
+            self.count()?;
+            let run = self.inner.begin_run(meta).await?;
+            self.begun.lock().unwrap().push(run);
+            Ok(run)
+        })
+    }
+
+    fn append(&self, run: RunId, record: Record) -> RecorderFuture<'_, ()> {
+        Box::pin(async move {
+            self.count()?;
+            self.inner.append(run, record).await
+        })
+    }
+
+    fn end_run(&self, run: RunId, outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+        Box::pin(async move {
+            self.count()?;
+            self.inner.end_run(run, outcome).await
+        })
+    }
+}
+
 /// Raises its flag when dropped: how a test sees a future torn down.
-struct RaiseOnDrop(Arc<AtomicBool>);
+pub(crate) struct RaiseOnDrop(pub(crate) Arc<AtomicBool>);
 
 impl Drop for RaiseOnDrop {
     fn drop(&mut self) {
@@ -227,11 +322,12 @@ impl Drop for RaiseOnDrop {
 
 /// Never fires, and raises `dropped` when its sleep is torn down: the
 /// timer a cancel or an abort must reach.
+#[derive(Default)]
 pub(crate) struct PendingTimer {
     pub(crate) dropped: Arc<AtomicBool>,
 }
 
-impl TimerPerformer for PendingTimer {
+impl Timer for PendingTimer {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         let raise = RaiseOnDrop(Arc::clone(&self.dropped));
         Box::pin(async move {
@@ -253,6 +349,8 @@ impl ToolPerformer for GatedTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let gate = Arc::clone(&self.gate);

@@ -5,14 +5,14 @@
 #[path = "wire-canned.rs"]
 mod canned;
 
-use promptforge_types::metrics::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
+use promptforge_types::metrics::CallMetrics;
 use serde_json::Value;
 
-/// A single chat message.
+/// One message in a chat-completions conversation.
 ///
-/// A plain `user` message serializes to just `{"role":..,"content":..}`; the
-/// optional `tool_call_id` and `tool_calls` fields are emitted only when set,
-/// which keeps the wire shape of ordinary messages unchanged.
+/// A message serializes to a JSON object with `role` and `content` keys.
+/// The optional `tool_call_id` and `tool_calls` keys appear only when set,
+/// so a plain `user` message serializes to just `{"role":..,"content":..}`.
 // `PartialEq`/`Eq` compare messages structurally. `serde_json::Value`
 // implements `Eq` (its `Number` compares/hashes float bits), so the
 // `tool_calls` field does not block a total equivalence.
@@ -40,16 +40,6 @@ pub struct Message {
 
 impl Message {
     /// Constructs a `user` message.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::model::Message;
-    ///
-    /// let message = Message::user("hello");
-    /// assert_eq!(message.role(), "user");
-    /// assert_eq!(message.content(), "hello");
-    /// ```
     #[must_use]
     pub fn user(content: impl Into<String>) -> Message {
         Message {
@@ -73,7 +63,8 @@ impl Message {
         }
     }
 
-    /// Constructs a plain `assistant` text turn (no `tool_calls` field).
+    /// Constructs a plain `assistant` text turn that serializes to just
+    /// `role` and `content`.
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Message {
         Message {
@@ -90,18 +81,21 @@ impl Message {
         &self.role
     }
 
-    /// Returns the message text, or `""` when the content is a
-    /// content-parts array rather than a string (only the Engine builds
-    /// that form).
+    /// Returns the message text, or `""` when the content is a multimodal
+    /// content-parts array.
+    ///
+    /// Only the Engine builds multimodal messages. The `user`, `tool`, and
+    /// `assistant` constructors always produce text.
     #[must_use]
     pub fn content(&self) -> &str {
         self.content.as_str().unwrap_or("")
     }
 }
 
-/// A tool advertised to the model, in the `OpenAI` function-calling shape.
+/// A tool offered to the model: a name, a description, and a JSON Schema
+/// for the tool's parameters.
 ///
-/// When serialized into a request the wrapping code turns this into
+/// A request lists each schema as an `OpenAI` function tool:
 /// `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
 // `PartialEq`/`Eq` compare schemas structurally. `serde_json::Value`
 // implements `Eq`, so the `parameters` schema does not block equivalence.
@@ -116,6 +110,28 @@ pub struct ToolSchema {
     pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
     pub(crate) parameters: Value,
+}
+
+impl ToolSchema {
+    /// Returns the tool's name as sent to the model. It holds one or more
+    /// characters, all from `[A-Za-z0-9_.-]`.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the one-sentence description shown to the model.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the JSON Schema for the tool's parameters, always a JSON
+    /// object.
+    #[must_use]
+    pub fn parameters(&self) -> &Value {
+        &self.parameters
+    }
 }
 
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
@@ -143,19 +159,19 @@ pub enum ToolSchemaError {
     },
 }
 
-/// A tool invocation requested by the model.
+/// A tool call the model asked for: a call id, a tool name, and arguments.
 ///
-/// `OpenAI` returns tool calls with `function.arguments` as a JSON-encoded
-/// string; the wire decoder stores that string decoded into a JSON object,
-/// and fails the turn when the arguments are missing, not a string, not
-/// valid JSON, or not an object.
+/// `OpenAI` sends a call's `function.arguments` as a JSON-encoded string.
+/// A decoded `ToolCall` holds that string parsed into a JSON object.
+/// Decoding fails with an error when the arguments are missing, are not a
+/// string, are not valid JSON, or do not parse to an object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
-    pub(crate) id: String,
+    pub(super) id: String,
     /// The name of the tool to invoke.
-    pub(crate) name: String,
+    pub(super) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
     /// crate-private: the Harness inspects arguments through
     /// [`ToolCall::arguments`].
@@ -175,11 +191,10 @@ impl ToolCall {
         &self.name
     }
 
-    /// Returns a typed, borrowed view of the call's arguments.
+    /// Returns a borrowed view of the call's arguments.
     ///
-    /// The raw wire JSON - a [`serde_json::Value`] - stays crate-private;
-    /// callers inspect the arguments through [`ToolArguments`] (canonical
-    /// JSON text, key presence, argument names).
+    /// The [`ToolArguments`] view gives the arguments as canonical JSON text,
+    /// says whether a key is present, and lists the argument names.
     #[must_use]
     pub fn arguments(&self) -> ToolArguments<'_> {
         ToolArguments {
@@ -188,12 +203,10 @@ impl ToolCall {
     }
 }
 
-/// A typed, borrowed view over one [`ToolCall`]'s arguments.
+/// A borrowed, read-only view of one [`ToolCall`]'s arguments.
 ///
-/// The arguments are always a JSON object: the wire decoder and
-/// [`ToolCall::from_parts`] both refuse any other value. This view exposes
-/// them without leaking a [`serde_json::Value`] into the public API. The
-/// raw `Value` is confined to crate-private wire code.
+/// The arguments are always a JSON object: decoding and
+/// [`ToolCall::from_parts`] both reject any other value.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ToolArguments<'a> {
@@ -207,7 +220,7 @@ impl ToolArguments<'_> {
         self.value.to_string()
     }
 
-    /// Returns whether the arguments object has no keys.
+    /// Returns whether the arguments object is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.value {
@@ -234,36 +247,11 @@ impl ToolArguments<'_> {
     }
 }
 
-/// The outcome of a completion round trip.
+/// What the model returned for one completion: a final text reply or a
+/// request to call tools.
 ///
-/// `Eq` holds because [`ToolCall`] arguments are a [`serde_json::Value`],
-/// which implements `Eq`, so structural equivalence over the outcome is
-/// total.
-///
-/// # Examples
-///
-/// A caller matches the outcome and, for a tool turn, reads each call's typed
-/// accessors ([`ToolCall::id`], [`ToolCall::name`], [`ToolCall::arguments`]) and
-/// the borrowed [`ToolArguments`] view. Obtaining a result performs gateway
-/// I/O, so the example is `no_run`:
-///
-/// ```no_run
-/// # async fn example(completion: promptforge::model::Completion) {
-/// use promptforge::model::CompletionResult;
-///
-/// match completion.result() {
-///     CompletionResult::Text(reply) => println!("text: {reply}"),
-///     CompletionResult::ToolCalls(calls) => {
-///         for call in calls {
-///             let args = call.arguments();
-///             println!("{} -> {} {}", call.id(), call.name(), args.to_json_string());
-///             let _ = args.contains("query");
-///         }
-///     }
-///     _ => {}
-/// }
-/// # }
-/// ```
+/// For a tool request, read each call through [`ToolCall::id`],
+/// [`ToolCall::name`], and [`ToolCall::arguments`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CompletionResult {
@@ -273,44 +261,76 @@ pub enum CompletionResult {
     ToolCalls(Vec<ToolCall>),
 }
 
-/// A parsed chat-completions round trip, including metadata later steps need.
+/// The raw JSON request and response of one model call, kept for debug
+/// capture.
 ///
-/// [`CompletionResult`] remains the decision the tool loop matches on.
-/// `finish_reason` and `reasoning_content` sit beside it so observers can
-/// report payload-free signals without reading the raw bodies, and the call
-/// metadata - the serving model plus the canonical metrics vocabulary
-/// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
-/// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
-/// accounting. Outside crates read through the accessor methods.
+/// The caller that sends a request in a JSON wire format can attach the
+/// pair to the [`Completion`] it returns, so the application's debug
+/// capture shows exactly what was sent and received. The Engine treats
+/// both values as opaque and passes them only to the debug capture.
+/// Build one with [`RawExchange::new`]. `Completion::from_result` builds a
+/// completion with `raw` set to `None`, and the caller attaches one with
+/// `Completion::with_raw`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RawExchange {
+    /// The request as it left for the backend.
+    request: Value,
+    /// The response as the backend returned it, reassembled into the
+    /// buffered chat-completion shape when it streamed.
+    response: Value,
+}
+
+impl RawExchange {
+    /// Creates a raw exchange from the request that was sent and the
+    /// response that was read. It accepts any two JSON values and stores
+    /// them as given.
+    #[must_use]
+    pub fn new(request: Value, response: Value) -> RawExchange {
+        RawExchange { request, response }
+    }
+
+    /// Returns the request as it left for the backend.
+    #[must_use]
+    pub fn request(&self) -> &Value {
+        &self.request
+    }
+
+    /// Returns the response as the backend returned it.
+    #[must_use]
+    pub fn response(&self) -> &Value {
+        &self.response
+    }
+}
+
+/// The parsed result of one chat-completions call, with its metadata.
+///
+/// The [`CompletionResult`] is what the tool loop matches on. Beside it, a
+/// completion carries the backend's `finish_reason` and reasoning text, so
+/// observers can report them straight from the completion. It also
+/// carries the name of the model that served the call and the
+/// [`CallMetrics`] the call measured, for attribution and accounting. The
+/// caller may also attach the call's [`RawExchange`] for debug capture.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
     pub(crate) result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub(crate) finish_reason: Option<String>,
+    finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
-    pub(crate) reasoning_content: Option<String>,
+    reasoning_content: Option<String>,
     /// The model that served the call, empty when the body named none.
-    pub(crate) model: String,
-    /// Token accounting, when the backend reported `usage`.
-    pub(crate) usage: Option<Usage>,
-    /// llama.cpp's `timings` extension, when that backend served the call.
-    pub(crate) llama_timings: Option<LlamaTimings>,
-    /// vLLM's `metrics` extension, when that backend served the call.
-    pub(crate) vllm_metrics: Option<VllmMetrics>,
-    /// Timing measured by this client's own clock: time to first token,
-    /// mean inter-token latency, and end-to-end wall time for the stream.
-    pub(crate) client_timing: Option<ClientTiming>,
+    model: String,
+    /// Everything the call measured, when anything reported: the backend's
+    /// `usage` and timing extensions, and the client's own clock.
+    metrics: Option<CallMetrics>,
     /// One line per response metadata section that was present but
     /// malformed and degraded to `None`; empty for a well-formed body. The
     /// Engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
-    /// The JSON body sent to the gateway.
-    pub(crate) request_body: Value,
-    /// The buffered chat-completion body reassembled from the streamed
-    /// chunks, in the same shape a non-streaming backend would return.
-    pub(crate) response_body: Value,
+    /// The request and response the broker attached for debug capture.
+    raw: Option<RawExchange>,
 }
 
 impl Completion {
@@ -320,43 +340,54 @@ impl Completion {
         &self.result
     }
 
-    /// Returns the choice's `finish_reason`, when the backend supplied one.
+    /// Returns the `finish_reason` the backend gave for the reply, when it
+    /// supplied one.
     #[must_use]
     pub fn finish_reason(&self) -> Option<&str> {
         self.finish_reason.as_deref()
     }
 
-    /// Returns the reasoning side channel, when the backend supplied one. It is
-    /// never promoted into the answer.
+    /// Returns the reasoning text the backend sent beside the reply, when it
+    /// sent any. It stays separate from the answer.
     #[must_use]
     pub fn reasoning_content(&self) -> Option<&str> {
         self.reasoning_content.as_deref()
     }
 
-    /// Returns the model that served the call, as the backend named it in the
-    /// response body (empty when the body named none).
+    /// Returns one line for each metadata section of the response that was
+    /// present but malformed and so was treated as absent. The list is
+    /// empty for a well-formed response. The Engine reports each line as a
+    /// `model_metadata_degraded` event.
+    #[must_use]
+    pub fn metadata_diagnostics(&self) -> &[String] {
+        &self.metadata_diagnostics
+    }
+
+    /// Returns the name of the model that served the call.
+    ///
+    /// That is the name last set through
+    /// [`with_model`](Completion::with_model), or else the name the
+    /// completion was built with. A completion decoded from a response is
+    /// built with the model the response body named, or an empty name when
+    /// the body omits one.
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model
     }
 
-    /// Returns the backend's token accounting, when it reported `usage`.
+    /// Returns what the call measured, or `None` when nothing reported. It
+    /// covers token usage, llama.cpp's `timings`, vLLM's `metrics`, and the
+    /// timing the client measured on its own clock. Each section is present
+    /// only when its source reported it.
     #[must_use]
-    pub fn usage(&self) -> Option<&Usage> {
-        self.usage.as_ref()
+    pub fn metrics(&self) -> Option<&CallMetrics> {
+        self.metrics.as_ref()
     }
 
-    /// Returns llama.cpp's `timings` for the call, when that backend served
-    /// it.
+    /// Returns the raw request and response the caller attached for debug
+    /// capture, if it attached them.
     #[must_use]
-    pub fn llama_timings(&self) -> Option<&LlamaTimings> {
-        self.llama_timings.as_ref()
-    }
-
-    /// Returns the timing this client measured on its own clock, when the
-    /// transport measured one.
-    #[must_use]
-    pub fn client_timing(&self) -> Option<&ClientTiming> {
-        self.client_timing.as_ref()
+    pub fn raw(&self) -> Option<&RawExchange> {
+        self.raw.as_ref()
     }
 }

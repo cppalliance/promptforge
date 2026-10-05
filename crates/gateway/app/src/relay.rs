@@ -47,7 +47,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// catalog names while the boot load is still downloading - receives a 503
 /// naming the active queue command rather than a bare 404, so the caller
 /// knows to retry once the command completes. With no command active the
-/// miss is [`GatewayError::UnknownModel`], as before the queue existed.
+/// miss is [`GatewayError::UnknownModel`].
 pub(crate) async fn resolve_routed_model(
     state: &AppState,
     name: &str,
@@ -78,7 +78,7 @@ pub(crate) async fn resolve_routed_model(
 }
 
 /// The chat route to a backend.
-pub(crate) async fn chat_completions(
+async fn chat_completions(
     State(state): State<AppState>,
     caller: AuthedCaller,
     WireJson(request): WireJson<ChatRequest>,
@@ -167,10 +167,7 @@ pub(crate) async fn chat_completions(
 /// goes away the response body is dropped, which drops the chunk stream,
 /// which drops the upstream response and aborts the upstream connection,
 /// releasing the permit in the same unwind. There is no explicit cancel path.
-pub(crate) fn relay_sse(
-    streamed: crate::upstream::StreamedChunks,
-    permit: crate::queue::Permit,
-) -> Response {
+fn relay_sse(streamed: crate::upstream::StreamedChunks, permit: crate::queue::Permit) -> Response {
     use futures_util::StreamExt as _;
 
     let relayed = futures_util::stream::unfold(
@@ -216,7 +213,7 @@ pub(crate) fn relay_sse(
 
 /// The embeddings route to a backend: the same auth, routing, kind guard, and
 /// dominion queue admission as chat, for `kind = "embedding"` models.
-pub(crate) async fn embeddings(
+async fn embeddings(
     State(state): State<AppState>,
     caller: AuthedCaller,
     WireJson(request): WireJson<EmbeddingRequest>,
@@ -245,7 +242,7 @@ pub(crate) async fn embeddings(
 
 /// The rerank route to a backend: the same auth, routing, kind guard, and
 /// dominion queue admission as chat, for `kind = "classifier"` models.
-pub(crate) async fn rerank(
+async fn rerank(
     State(state): State<AppState>,
     caller: AuthedCaller,
     WireJson(request): WireJson<RerankRequest>,

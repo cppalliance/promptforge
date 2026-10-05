@@ -1,21 +1,22 @@
-//! The effect loop against fake performers and an in-memory log: the
+//! The effect loop against fake performers and an in-memory recorder: the
 //! record stream is events, then effects, then answers per step; a cancel
 //! drops every outstanding effect with one `Dropped` answer each; a
 //! performer that panics drops its effect rather than stranding the run;
-//! and a refused log write ends the drive with the log's error and aborts
-//! the performers still out. The Vfs effect the loop answers inline has
-//! its own module, `vfs`.
+//! and a refused recorder write ends the drive with the recorder's error
+//! and tears down the performers still out. The Vfs effect the loop
+//! answers inline has its own module, `vfs`, and the `Chat` effect the
+//! inference broker answers has `broker`.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use harness_log::{
-    LogError, RecordFilter, RecordKind, RunId, RunLog, RunMeta, RunOutcome, StoredRecord,
+use harness_runner::display_chain;
+use harness_runner::effect_loop::{DriveError, drive_run};
+use harness_runner::recorder::{
+    MemoryRecorder, Record, RecordKind, RunId, RunMeta, RunOutcome, RunRecorder,
 };
-use harness_runner::effect_loop::{DriveError, SharedLog, drive_run};
 use promptforge::cancel::CancelHandle;
-use promptforge::event::Event;
 use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
 use serde_json::json;
 
@@ -24,14 +25,17 @@ use crate::support::{
     run_over, run_with_child, unused,
 };
 
+#[path = "effect_loop-broker.rs"]
+mod broker;
+#[path = "effect_loop-recorder.rs"]
+mod recorder_failures;
 #[path = "effect_loop-vfs.rs"]
 mod vfs;
 
-/// A run's opening row; the loop closes it.
+/// A run's opening metadata; the loop ends the run.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "runner-test".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:fixture".to_owned(),
         seed: 7,
         flags: 0,
@@ -39,16 +43,15 @@ fn meta() -> RunMeta {
     }
 }
 
-/// An in-memory log with one run begun in it.
-async fn begun_log() -> (SharedLog, RunId) {
-    let mut log = RunLog::in_memory().await.unwrap();
-    let run_id = log.begin_run(meta()).await.unwrap();
-    (Arc::new(tokio::sync::Mutex::new(log)), run_id)
+/// An in-memory recorder with one run begun in it.
+async fn begun_log() -> (Arc<MemoryRecorder>, RunId) {
+    let recorder = Arc::new(MemoryRecorder::new());
+    let run_id = recorder.begin_run(meta()).await.unwrap();
+    (recorder, run_id)
 }
 
 /// Fires `cancel` from another thread after `delay`: the Host's cancel
-/// arriving while the loop waits, without a second tokio task in the
-/// test (the Harness spawns only through its tagged wrapper).
+/// arriving while the loop waits, from outside the run's own future.
 fn cancel_after(cancel: &CancelHandle, delay: Duration) {
     let trigger = cancel.clone();
     std::thread::spawn(move || {
@@ -57,56 +60,44 @@ fn cancel_after(cancel: &CancelHandle, delay: Duration) {
     });
 }
 
-/// Every record of the run, in loop order.
-async fn records(log: &SharedLog, run_id: RunId) -> Vec<StoredRecord> {
-    log.lock()
-        .await
-        .records(run_id, RecordFilter::default())
-        .await
-        .unwrap()
-}
-
 /// The kinds of `records`, in order.
-fn kinds(records: &[StoredRecord]) -> Vec<RecordKind> {
-    records.iter().map(|stored| stored.record.kind).collect()
+fn kinds(records: &[Record]) -> Vec<RecordKind> {
+    records.iter().map(|record| record.kind).collect()
 }
 
 /// Asserts every effect record has exactly one answer record, that the
 /// answer comes after its effect, and that the two share one provenance.
-fn assert_one_answer_per_effect(records: &[StoredRecord]) {
-    let effects: Vec<&StoredRecord> = records
+fn assert_one_answer_per_effect(records: &[Record]) {
+    let effects: Vec<(usize, &Record)> = records
         .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Effect)
+        .enumerate()
+        .filter(|(_, record)| record.kind == RecordKind::Effect)
         .collect();
-    let answers: Vec<&StoredRecord> = records
+    let answers: Vec<(usize, &Record)> = records
         .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Answer)
+        .enumerate()
+        .filter(|(_, record)| record.kind == RecordKind::Answer)
         .collect();
     assert_eq!(effects.len(), answers.len(), "one answer per effect");
-    for effect in effects {
-        let id = effect
-            .record
-            .effect_id
-            .expect("an effect record names its id");
-        let matching: Vec<&&StoredRecord> = answers
+    for (position, effect) in effects {
+        let id = effect.effect_id.expect("an effect record names its id");
+        let matching: Vec<&(usize, &Record)> = answers
             .iter()
-            .filter(|answer| answer.record.effect_id == Some(id))
+            .filter(|(_, answer)| answer.effect_id == Some(id))
             .collect();
         assert_eq!(matching.len(), 1, "effect {id} has exactly one answer");
-        let answer = matching[0];
-        assert!(answer.seq > effect.seq, "the answer follows its effect");
-        assert_eq!(answer.record.task_id, effect.record.task_id);
-        assert_eq!(answer.record.task_seq, effect.record.task_seq);
+        let (answer_position, answer) = *matching[0];
+        assert!(answer_position > position, "the answer follows its effect");
+        assert_eq!(answer.task_id, effect.task_id);
+        assert_eq!(answer.task_seq, effect.task_seq);
     }
 }
 
 #[tokio::test]
 async fn records_are_events_then_effects_then_answers_per_step() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let mut performers = unused();
     performers.tool = Arc::new(TextTool("hi"));
-    let seen: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&seen);
     let vfs = VfsRef::builder().store("/", MemoryBackend::new()).build();
 
     let outcome = drive_run(
@@ -115,10 +106,9 @@ async fn records_are_events_then_effects_then_answers_per_step() {
             vfs.clone(),
         ),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
-        move |event| sink.lock().unwrap().push(event),
     )
     .await
     .unwrap();
@@ -135,7 +125,7 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         "the inline answer performed the write on the run's store"
     );
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     let kinds = kinds(&records);
     // The run opens with its own events before the first effect; each
     // effect is followed by its answer before the next step's events.
@@ -161,7 +151,7 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     );
     assert_one_answer_per_effect(&records);
 
-    let payload = |position: usize| records[position].record.payload.clone();
+    let payload = |position: usize| records[position].payload.clone();
     assert_eq!(
         payload(effect_positions[0]),
         json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
@@ -184,35 +174,21 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         json!({ "ToolCall": { "Ok": { "text": "hi", "trusted": true } } })
     );
 
-    // Every logged event reached the sink, in order, and the row closed.
-    let logged_events: Vec<serde_json::Value> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Event)
-        .map(|stored| stored.record.payload.clone())
-        .collect();
-    let delivered: Vec<serde_json::Value> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|event| serde_json::to_value(event).unwrap())
-        .collect();
-    assert_eq!(logged_events, delivered);
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert_eq!(row.outcome, Some(outcome));
+    // The run ended once, with the loop's outcome.
+    assert_eq!(recorder.outcome(run_id), Some(outcome));
 }
 
 /// The answer records of `records`, in loop order.
-fn answers(records: &[StoredRecord]) -> Vec<&StoredRecord> {
+fn answers(records: &[Record]) -> Vec<&Record> {
     records
         .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Answer)
+        .filter(|record| record.kind == RecordKind::Answer)
         .collect()
 }
 
-/// Waits until `flag` is raised, or fails after a bounded wait: an
-/// aborted task is torn down by the runtime after the abort, not at it.
-/// Under paused time each sleep is a yield that lets the teardown run
-/// and then advances the clock, so the wait costs no wall time.
+/// Waits until `flag` is raised, or fails after a bounded wait. Under
+/// paused time each sleep is a yield that advances the clock, so the wait
+/// costs no wall time.
 async fn await_raised(flag: &AtomicBool, what: &str) {
     for _ in 0..200 {
         if flag.load(Ordering::SeqCst) {
@@ -225,7 +201,7 @@ async fn await_raised(flag: &AtomicBool, what: &str) {
 
 #[tokio::test]
 async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let timer_dropped = Arc::new(AtomicBool::new(false));
     let mut performers = unused();
     performers.tool = Arc::new(PendingTool);
@@ -240,21 +216,20 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
     let outcome = drive_run(
         run_with_child(TIMED_MAIN, WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         cancel,
-        |_event| {},
     )
     .await
     .unwrap();
     assert_eq!(outcome, RunOutcome::Cancelled);
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_one_answer_per_effect(&records);
     let effects: Vec<serde_json::Value> = records
         .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Effect)
-        .map(|stored| stored.record.payload.clone())
+        .filter(|record| record.kind == RecordKind::Effect)
+        .map(|record| record.payload.clone())
         .collect();
     assert_eq!(
         effects,
@@ -272,23 +247,22 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
     let answers = answers(&records);
     assert_eq!(answers.len(), 2, "one drop per outstanding effect");
     for answer in &answers {
-        assert_eq!(answer.record.payload, json!("Dropped"));
+        assert_eq!(answer.payload, json!("Dropped"));
     }
     assert_ne!(
-        answers[0].record.effect_id, answers[1].record.effect_id,
+        answers[0].effect_id, answers[1].effect_id,
         "each drop answers its own effect"
     );
     assert!(
         timer_dropped.load(Ordering::SeqCst),
         "the parked timer's performer was aborted and joined before the run ended"
     );
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
+    assert_eq!(recorder.outcome(run_id), Some(RunOutcome::Cancelled));
 }
 
 #[tokio::test]
 async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let mut performers = unused();
     performers.tool = Arc::new(PanickingTool);
 
@@ -299,10 +273,9 @@ async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
         drive_run(
             run(WAITS),
             performers,
-            Arc::clone(&log),
+            recorder.clone(),
             run_id,
             CancelHandle::new(),
-            |_event| {},
         ),
     )
     .await
@@ -314,54 +287,57 @@ async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
         "the chain resumed with the cancelled error of a dropped effect"
     );
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_one_answer_per_effect(&records);
     let answers = answers(&records);
     assert_eq!(answers.len(), 1, "the one panicked tool call");
-    assert_eq!(answers[0].record.payload, json!("Dropped"));
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
+    assert_eq!(answers[0].payload, json!("Dropped"));
+    assert_eq!(recorder.outcome(run_id), Some(RunOutcome::Cancelled));
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_refused_log_write_returns_the_log_error_and_aborts_the_parked_performers() {
-    let (log, run_id) = begun_log().await;
+async fn a_refused_recorder_write_returns_the_recorder_error_and_aborts_the_parked_performers() {
+    let (recorder, run_id) = begun_log().await;
     let timer_dropped = Arc::new(AtomicBool::new(false));
     let mut performers = unused();
     performers.tool = Arc::new(ClosingTool {
-        log: Arc::clone(&log),
+        recorder: Arc::clone(&recorder),
         run_id,
     });
     performers.timer = Arc::new(PendingTimer {
         dropped: Arc::clone(&timer_dropped),
     });
 
-    // The child's tool performer closes the run's row before it
-    // answers, so recording its answer is the loop's first refused
-    // write; the main section's timer is still parked at that moment.
+    // The child's tool performer ends the run at the recorder before it
+    // answers, so recording its answer is the loop's first refused write;
+    // the main section's timer is still parked at that moment.
     let error = drive_run(
         run_with_child(TIMED_MAIN, WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .expect_err("a refused write ends the drive");
     assert!(
-        matches!(error, DriveError::Log(LogError::RunEnded(id)) if id == run_id),
-        "the log's refusal is returned as is: {error:?}"
+        matches!(error, DriveError::Recorder(_)),
+        "the recorder's refusal is returned as is: {error:?}"
+    );
+    assert!(
+        display_chain(&error).contains(&format!("run {run_id} has ended")),
+        "the chain names the recorder's reason: {}",
+        display_chain(&error)
     );
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_eq!(
         records
             .iter()
-            .filter(|stored| stored.record.kind == RecordKind::Effect)
+            .filter(|record| record.kind == RecordKind::Effect)
             .count(),
         2,
-        "both effects were recorded before the log closed"
+        "both effects were recorded before the run ended"
     );
     assert!(
         answers(&records).is_empty(),
@@ -375,10 +351,9 @@ async fn a_refused_log_write_returns_the_log_error_and_aborts_the_parked_perform
 }
 
 #[tokio::test]
-async fn a_closed_run_refuses_the_first_write_before_any_performer_starts() {
-    let (log, run_id) = begun_log().await;
-    log.lock()
-        .await
+async fn an_ended_run_refuses_the_first_write_before_any_performer_starts() {
+    let (recorder, run_id) = begun_log().await;
+    recorder
         .end_run(run_id, RunOutcome::Cancelled)
         .await
         .unwrap();
@@ -390,16 +365,12 @@ async fn a_closed_run_refuses_the_first_write_before_any_performer_starts() {
     let error = drive_run(
         run(WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
-    .expect_err("a closed run refuses its first write");
-    assert!(
-        matches!(error, DriveError::Log(LogError::RunEnded(id)) if id == run_id),
-        "got {error:?}"
-    );
-    assert!(records(&log, run_id).await.is_empty());
+    .expect_err("an ended run refuses its first write");
+    assert!(matches!(error, DriveError::Recorder(_)), "got {error:?}");
+    assert!(recorder.records(run_id).is_empty());
 }

@@ -1,32 +1,3 @@
-# promptforge-model-client
+# Engine model vocabulary
 
-The PromptForge model vocabulary: the chat-completions wire types a
-`Chat` effect exchanges (`Message`, `ToolSchema`, `ToolCall`,
-`Completion`, `CompletionResult`), the SSE reassembly that folds a
-streamed body into one `Completion`, the model catalog (`ModelCatalog`,
-`ModelDescriptor`, `ModelId`), and the prompt-local binding vocabulary
-(`ModelBinding`, `ModelSet`, `ModelView`) the executor resolves model
-declarations against. The model catalog types are defined in
-`promptforge-types` and re-exported by this crate's `model` module. No
-transport: the HTTP client that sends a round to
-the gateway is the Harness's (`harness-models`).
-
-A round is always streamed. The transport asks for
-`stream_options.include_usage`, hands each SSE `data:` payload to the
-`StreamAccumulator`, and invokes the caller's callback with each live
-`StreamDelta` text or reasoning fragment; `finish` applies the one rule
-set (a tool-call batch finished by `length` or `content_filter` fails
-whole, so partial arguments never execute; an empty product is
-`EmptyReply`) and produces the `Completion`.
-
-Each `Completion` holds the call's metadata parsed from the stream:
-the serving `model`, `usage` token accounting (with cached- and
-reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
-`client_timing` (TTFT, mean inter-token latency, end-to-end) the
-transport measured on its own clock. The metrics vocabulary (`Usage`,
-`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) and
-`StreamDelta` are canonical in `promptforge-types`; this crate uses them
-from there and does not re-export them. A
-malformed metadata section degrades to `None` with a diagnostic line that
-the Engine reports as a `model_metadata_degraded` event; it never fails
-the call.
+This crate defines the messages, tool schemas, completions, and failures a model round exchanges, along with the model catalog and the prompt-local model bindings the executor resolves. Its constructors check every reply the same way, whoever built it. It holds no transport and no wire parsing, which live in the Harness's gateway client.

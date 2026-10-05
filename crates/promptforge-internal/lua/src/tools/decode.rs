@@ -41,9 +41,9 @@ pub(crate) fn tool_alias(value: &Value) -> mlua::Result<String> {
 }
 
 /// One flattened `tools.add` entry: alias plus optional model-description override.
-pub(crate) struct ToolsAddEntry {
-    pub(crate) alias: String,
-    pub(crate) description_override: Option<String>,
+pub(super) struct ToolsAddEntry {
+    pub(super) alias: String,
+    pub(super) description_override: Option<String>,
 }
 
 /// Reads one `tools.add` element as an alias: a string or a Tool handle.
@@ -61,7 +61,7 @@ fn add_alias(value: &Value) -> mlua::Result<String> {
 /// `tools.add(alias, override?)` takes one alias (string or Tool handle) with
 /// an optional model-description override. The array form
 /// `tools.add({"a", "b"})` covers bulk and takes no per-element overrides.
-pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
+pub(super) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
     let mut args = args.into_iter();
     let Some(target) = args.next() else {
         return Ok(Vec::new());
@@ -117,7 +117,7 @@ pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
 /// walk's order is unspecified, so a schema left in it would read differently
 /// in two VMs; `properties` needs no sort because it is a `serde_json::Map`,
 /// a `BTreeMap` with no `preserve_order` in the graph.
-pub(crate) fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
+pub(super) fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for pair in params.pairs::<String, Value>() {

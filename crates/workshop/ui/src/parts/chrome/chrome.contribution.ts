@@ -116,7 +116,7 @@ addAction({
 // File > Exit, the catalog's chrome row. The run body invokes the
 // desktop app's quit command - the same path the native menu's quit
 // item runs: stop the gateway supervisor, request the local gateway's
-// shutdown, then exit. Never call the process plugin's exit(0) here
+// shutdown, then exit. Never call the Tauri process plugin's exit(0) here
 // instead; it would strand the sidecar gateway. Desktop-only: the
 // !isWeb precondition disables the row in a browser.
 addAction({

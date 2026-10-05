@@ -9,29 +9,29 @@ fn kind_of(input: &str) -> GlobalNameErrorKind {
 }
 
 #[test]
-fn a_two_segment_name_parses_as_a_capability_name() {
-    let name = GlobalName::parse("promptforge/web").expect("a valid capability name");
+fn a_two_segment_name_parses_as_a_plugin_name() {
+    let name = GlobalName::parse("promptforge/web").expect("a valid Plugin name");
     assert_eq!(name.namespace(), "promptforge");
-    assert_eq!(name.pack(), "web");
+    assert_eq!(name.plugin(), "web");
 }
 
 #[test]
 fn a_three_segment_name_parses_as_a_tool_name() {
     let name = GlobalName::parse("promptforge/web/fetch").expect("a valid tool name");
     assert_eq!(name.namespace(), "promptforge");
-    assert_eq!(name.pack(), "web");
+    assert_eq!(name.plugin(), "web");
 }
 
 #[test]
 fn a_reverse_dns_namespace_parses() {
-    let name = GlobalName::parse("org.rustalliance/core").expect("a valid capability name");
+    let name = GlobalName::parse("org.rustalliance/core").expect("a valid Plugin name");
     assert_eq!(name.namespace(), "org.rustalliance");
-    assert_eq!(name.pack(), "core");
+    assert_eq!(name.plugin(), "core");
 }
 
 #[test]
 fn display_round_trips_a_two_segment_name() {
-    let name = GlobalName::parse("promptforge/web").expect("a valid capability name");
+    let name = GlobalName::parse("promptforge/web").expect("a valid Plugin name");
     assert_eq!(name.to_string(), "promptforge/web");
     assert_eq!(
         GlobalName::parse(&name.to_string()).expect("the display form re-parses"),

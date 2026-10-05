@@ -114,30 +114,29 @@ fn typed_error_survives_the_lua_external_boundary() {
 }
 
 #[test]
-fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
-    // A transport's configuration failure (an unusable credential, a
-    // bad endpoint URL) arrives as the client error type's `Config`
-    // variant with its concrete cause attached; the cause survives both
-    // the public CompletionError::source and the mapping onto this
-    // crate's error type, classified as Config.
+fn completion_errors_preserve_their_causes_across_the_error_type_bridge() {
+    // A broker's failure arrives as a `CompletionError` with its concrete
+    // cause attached; the cause survives both the public
+    // `CompletionError::source` and the mapping onto this crate's error
+    // type.
     use crate::model::CompletionError;
-    use promptforge_model_client::Error as ClientError;
     use promptforge_model_client::model::CompletionErrorKind;
 
-    let cause = std::io::Error::other("gateway URL is not a valid URL");
-    let completion = CompletionError::from(ClientError::Config {
-        message: "gateway endpoint is unusable".to_owned(),
-        source: Box::new(cause),
-    });
-    assert_eq!(completion.kind(), CompletionErrorKind::Config);
+    let cause = std::io::Error::other("connection refused");
+    let completion = CompletionError::new(
+        CompletionErrorKind::Unavailable,
+        "model access is turned off or not configured",
+    )
+    .with_source(cause);
+    assert_eq!(completion.kind(), CompletionErrorKind::Unavailable);
     assert!(
         std::error::Error::source(&completion).is_some(),
         "the configuration cause must survive the public wrapper"
     );
     let bridged = Error::from(completion);
     assert!(
-        matches!(bridged, Error::Config { .. }),
-        "the error type maps Config onto Config, got {bridged:?}"
+        matches!(&bridged, Error::Completion(error) if error.kind() == CompletionErrorKind::Unavailable),
+        "the error type holds the completion error whole, got {bridged:?}"
     );
     assert!(
         std::error::Error::source(&bridged).is_some(),
@@ -147,7 +146,7 @@ fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
 
 #[test]
 fn frontmatter_locations_surface_through_the_run_error() {
-    // Step 6: the parser's surfaced YAML position crosses the error-type
+    // The parser's surfaced YAML position crosses the error-type
     // bridge and lands on `RunError::location` for navigation. A
     // frontmatter failure predates the prompt's name, so the path is
     // the placeholder the Host replaces with its own label for the source.
@@ -155,14 +154,14 @@ fn frontmatter_locations_surface_through_the_run_error() {
         "---\n",
         "name: x\n",
         "description: d\n",
-        "capabilities:\n",
-        "  - not a capability id\n",
+        "plugins:\n",
+        "  - not a Plugin id\n",
         "---\n",
         "\n# T\n\n## S\n\np\n",
     );
     let parse = Prompt::parse(source, "test")
         .0
-        .expect_err("a capability id with spaces must be rejected");
+        .expect_err("a Plugin id with spaces must be rejected");
     let run_error = crate::RunError::from(Error::from(parse));
     assert_eq!(run_error.kind(), crate::RunErrorKind::Parse);
     let location = run_error
@@ -175,7 +174,7 @@ fn frontmatter_locations_surface_through_the_run_error() {
 
 #[test]
 fn structured_locations_include_the_prompt_name_through_the_run_error() {
-    // Step 6: a post-frontmatter parse failure reports the prompt's
+    // A post-frontmatter parse failure reports the prompt's
     // frontmatter name as the location's path, plus the offending
     // span's line and column.
     let source = "---\nname: dup\ndescription: d\n---\n\n# T\n\n## S\n\np\n\n## S\n\nq\n";
@@ -194,7 +193,7 @@ fn structured_locations_include_the_prompt_name_through_the_run_error() {
 
 #[test]
 fn internal_faults_report_the_rust_file_and_line() {
-    // Step 6: an internal invariant failure locates itself in the Rust
+    // An internal invariant failure locates itself in the Rust
     // source, captured at the construction site.
     let expected_line = line!() + 1;
     let run_error = crate::RunError::from(Error::internal("a test invariant"));
@@ -216,9 +215,8 @@ fn errors_without_a_location_return_none() {
 
 #[test]
 fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
-    // Step 10: the refusal notice is the whole Display - it may arrive
-    // as tool output when the prompt runs as a sub-run tool - and the
-    // kind classifies it for code. Retrying cannot help: the
+    // The refusal notice is the whole Display, and the kind classifies
+    // it for code. Retrying cannot help: the
     // environment, not the transport, is what falls short.
     let error = Error::RequirementsUnmet {
         notice: "the environment cannot satisfy this prompt:\n- role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000".to_owned(),
@@ -229,4 +227,29 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
     assert!(!run_error.is_retryable());
     assert!(run_error.location().is_none());
     assert!(run_error.to_string().contains("analyst"));
+}
+
+#[test]
+fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
+    // The run's own model-set mutex failing is not a model failure: it
+    // keeps the Lua mapping it always had, and a Host never sees it as a
+    // retryable completion kind.
+    use crate::model::{ModelSet, ModelView};
+    use std::sync::{Arc, Mutex};
+
+    let set = Arc::new(Mutex::new(ModelSet::default()));
+    let poisoner = Arc::clone(&set);
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock();
+        panic!("poison the model set");
+    })
+    .join();
+
+    let failure = set.bindings().expect_err("a poisoned set cannot be read");
+    let error = Error::from(failure);
+    assert!(
+        matches!(&error, Error::Lua(message) if message == "model set mutex was poisoned"),
+        "the lock failure is a Lua error: {error:?}"
+    );
+    assert!(!crate::RunError::from(error).is_retryable());
 }

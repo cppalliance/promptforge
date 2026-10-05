@@ -1,10 +1,9 @@
 //! Model-metadata vocabulary: what a model can do, independent of how the
 //! gateway reaches it.
 //!
-//! These types are the canonical home of the metadata hoisted from
-//! `gateway-config` (`Capabilities`, `ModelKind`, `ThinkingMode`) and
-//! `gateway-protocol` (`ModelInfo`); both crates re-export them at their
-//! old paths so downstream call sites compile unchanged.
+//! These types are the canonical home of the model metadata;
+//! `gateway-config` re-exports `Capabilities`, `ModelKind`, and
+//! `ThinkingMode`, and `gateway-protocol` re-exports `ModelInfo`.
 
 use std::fmt;
 
@@ -120,13 +119,6 @@ pub struct Capabilities {
 impl Capabilities {
     /// Returns the max output tokens the model can emit per completion, when
     /// set.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.max_output = Some(4096);
-    /// assert_eq!(capabilities.max_output(), Some(4096));
-    /// ```
     #[must_use]
     pub fn max_output(&self) -> Option<u32> {
         self.max_output
@@ -134,39 +126,18 @@ impl Capabilities {
 
     /// Returns the sampling temperature applied when the caller omits one,
     /// when set.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.default_temperature = Some(0.7);
-    /// assert_eq!(capabilities.default_temperature(), Some(0.7));
-    /// ```
     #[must_use]
     pub fn default_temperature(&self) -> Option<f32> {
         self.default_temperature
     }
 
     /// Returns whether the model accepts image inputs.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.images = true;
-    /// assert!(capabilities.images());
-    /// ```
     #[must_use]
     pub fn images(&self) -> bool {
         self.images
     }
 
     /// Returns whether the model can emit parallel tool calls.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.parallel_tool_calls = true;
-    /// assert!(capabilities.parallel_tool_calls());
-    /// ```
     #[must_use]
     pub fn parallel_tool_calls(&self) -> bool {
         self.parallel_tool_calls
@@ -174,26 +145,12 @@ impl Capabilities {
 
     /// Returns the reasoning-effort levels the model accepts (empty when the
     /// model has no effort knob).
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.effort_levels = vec!["low".to_owned(), "high".to_owned()];
-    /// assert_eq!(capabilities.effort_levels(), ["low", "high"]);
-    /// ```
     #[must_use]
     pub fn effort_levels(&self) -> &[String] {
         &self.effort_levels
     }
 
     /// Returns the effort level applied when the caller omits one, when set.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.default_effort = Some("low".to_owned());
-    /// assert_eq!(capabilities.default_effort(), Some("low"));
-    /// ```
     #[must_use]
     pub fn default_effort(&self) -> Option<&str> {
         self.default_effort.as_deref()
@@ -201,13 +158,6 @@ impl Capabilities {
 
     /// Returns whether the model adaptively chooses how much to think per
     /// request.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.adaptive_thinking = true;
-    /// assert!(capabilities.adaptive_thinking());
-    /// ```
     #[must_use]
     pub fn adaptive_thinking(&self) -> bool {
         self.adaptive_thinking
@@ -215,13 +165,6 @@ impl Capabilities {
 
     /// Returns the voices the model offers for speech synthesis (empty when
     /// the model exposes no fixed voice list).
-    ///
-    /// # Examples
-    /// ```
-    /// let mut capabilities = gateway_api_types::Capabilities::default();
-    /// capabilities.voices = vec!["alloy".to_owned(), "nova".to_owned()];
-    /// assert_eq!(capabilities.voices(), ["alloy", "nova"]);
-    /// ```
     #[must_use]
     pub fn voices(&self) -> &[String] {
         &self.voices
@@ -257,8 +200,7 @@ mod tests {
 
     #[test]
     fn model_kind_variants_use_catalog_spelling() {
-        // Catches a serde rename or Display regression on every variant,
-        // including the hoisted transcription/image/video extensions.
+        // Catches a serde rename or Display regression on every variant.
         for (kind, spelling) in [
             (ModelKind::Chat, "chat"),
             (ModelKind::Embedding, "embedding"),
@@ -276,7 +218,7 @@ mod tests {
 
     #[test]
     fn thinking_mode_uses_catalog_spelling() {
-        // Catches a serde rename regression on the hoisted ThinkingMode.
+        // Catches a serde rename regression on ThinkingMode.
         for (mode, spelling) in [
             (ThinkingMode::Never, "never"),
             (ThinkingMode::Always, "always"),

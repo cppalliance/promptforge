@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use promptforge::Prompt;
 use promptforge::prompt::{
-    ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
+    ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, PluginDecl, ToolSlot,
 };
 
 use crate::error::AppError;
@@ -29,7 +29,7 @@ pub(crate) fn routes() -> axum::Router {
 
 /// The JSON body of `POST /prompts/contract`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct ContractRequest {
+struct ContractRequest {
     /// The prompt's display name (the file's, when it came from one).
     name: String,
     /// The prompt markdown to parse.
@@ -39,7 +39,7 @@ pub(crate) struct ContractRequest {
 /// The Run-window contract: everything the panel renders, built from
 /// the parsed frontmatter.
 #[derive(Debug, Serialize)]
-pub(crate) struct ContractResponse {
+struct ContractResponse {
     /// The prompt's identifier.
     name: String,
     /// The one-line description shown in listings.
@@ -52,8 +52,8 @@ pub(crate) struct ContractResponse {
     input: Option<FileDto>,
     /// The declared output file; `null` when absent.
     output: Option<FileDto>,
-    /// The declared capabilities, in declaration order.
-    capabilities: Vec<CapabilityDto>,
+    /// The declared Plugins, in declaration order.
+    plugins: Vec<PluginDto>,
     /// The declared tool slots, sorted by alias.
     tools: Vec<ToolDto>,
     /// The typed args declaration.
@@ -64,7 +64,7 @@ pub(crate) struct ContractResponse {
 
 /// A declared input or output file.
 #[derive(Debug, Serialize)]
-pub(crate) struct FileDto {
+struct FileDto {
     /// The store-internal path.
     path: String,
     /// The human-readable purpose.
@@ -80,17 +80,17 @@ impl From<&FileDecl> for FileDto {
     }
 }
 
-/// A declared capability: its global id and optionality.
+/// A declared Plugin: its global id and optionality.
 #[derive(Debug, Serialize)]
-pub(crate) struct CapabilityDto {
-    /// The capability's global id (`namespace/pack`).
+struct PluginDto {
+    /// The Plugin's global id (`namespace/plugin`).
     id: String,
-    /// Whether an absent capability skips instead of failing.
+    /// Whether an absent Plugin skips instead of failing.
     optional: bool,
 }
 
-impl From<&CapabilityDecl> for CapabilityDto {
-    fn from(decl: &CapabilityDecl) -> Self {
+impl From<&PluginDecl> for PluginDto {
+    fn from(decl: &PluginDecl) -> Self {
         Self {
             id: decl.id().to_string(),
             optional: decl.is_optional(),
@@ -101,26 +101,25 @@ impl From<&CapabilityDecl> for CapabilityDto {
 /// One tool slot, tagged by filling posture.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-pub(crate) enum ToolDto {
+enum ToolDto {
     /// An exact global tool path.
     Exact {
         /// The prompt-local alias.
         alias: String,
-        /// The canonical `namespace/pack/name` path.
+        /// The canonical `namespace/plugin/name` path.
         path: String,
     },
 }
 
 impl ToolDto {
     /// Builds the DTO for the slot declared under `alias`, or `None` for
-    /// a posture this wire format predates.
+    /// a posture with no wire form.
     fn new(alias: &str, slot: &ToolSlot) -> Option<Self> {
         match slot {
             ToolSlot::Exact(id) => Some(Self::Exact {
                 alias: alias.to_owned(),
                 path: id.to_string(),
             }),
-            // The deferred open posture has no wire form yet.
             _ => None,
         }
     }
@@ -128,7 +127,7 @@ impl ToolDto {
 
 /// The typed args declaration.
 #[derive(Debug, Serialize)]
-pub(crate) struct ArgsDto {
+struct ArgsDto {
     /// True when the declaration is the implicit default (no `args:` key).
     implicit: bool,
     /// The declared fields, sorted by name.
@@ -149,7 +148,7 @@ impl From<&ArgsDecl> for ArgsDto {
 
 /// One declared arg.
 #[derive(Debug, Serialize)]
-pub(crate) struct ArgDto {
+struct ArgDto {
     /// The arg name.
     name: String,
     /// The declared type (`string`, `boolean`, `integer`, `number`).
@@ -182,7 +181,7 @@ impl ArgDto {
 
 /// One declared model role.
 #[derive(Debug, Serialize)]
-pub(crate) struct ModelDto {
+struct ModelDto {
     /// The prompt-local role label.
     label: String,
     /// The declared keywords (kebab-case wire vocabulary).
@@ -215,7 +214,7 @@ fn keyword_wire(keyword: ModelKeyword) -> &'static str {
         ModelKeyword::Small => "small",
         ModelKeyword::Creative => "creative",
         ModelKeyword::Chat => "chat",
-        // A keyword added after this DTO predates its wire form.
+        // Any other keyword has no wire form of its own.
         _ => "unknown",
     }
 }
@@ -231,11 +230,7 @@ impl From<&Frontmatter> for ContractResponse {
                 .map(std::num::NonZeroU32::get),
             input: frontmatter.input().map(FileDto::from),
             output: frontmatter.output().map(FileDto::from),
-            capabilities: frontmatter
-                .capabilities()
-                .iter()
-                .map(CapabilityDto::from)
-                .collect(),
+            plugins: frontmatter.plugins().iter().map(PluginDto::from).collect(),
             tools: frontmatter
                 .tools()
                 .iter()
@@ -253,7 +248,7 @@ impl From<&Frontmatter> for ContractResponse {
 
 /// Parses the posted prompt text and answers the contract DTO, or a
 /// `422` envelope when the text is not a valid prompt.
-pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
+async fn contract(Json(body): Json<ContractRequest>) -> Response {
     // The contract needs the tree alone; the parse-time events are not
     // this route's to log.
     match Prompt::parse(&body.text, &body.name).0 {

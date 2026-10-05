@@ -24,16 +24,16 @@ use crate::registry::RouteInfo;
 const MODEL_INFO: RouteInfo = RouteInfo::walled("/admin/model-info", &[Method::GET]);
 
 /// The GGUF header readout route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[MODEL_INFO];
+pub(super) const ROUTES: &[RouteInfo] = &[MODEL_INFO];
 
 /// The GGUF header readout route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(MODEL_INFO.path, get(admin_model_info))
 }
 
 /// Query parameters for `GET /admin/model-info`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct ModelInfoQuery {
+struct ModelInfoQuery {
     /// Cache-relative path of the GGUF file to inspect.
     path: String,
 }
@@ -50,7 +50,7 @@ pub(crate) struct ModelInfoQuery {
 /// arbitrary file. A missing or escaping path maps to 400; a file that is
 /// missing or not a well-formed GGUF header maps to 422. The UI treats any
 /// failure as "layer count unknown" and falls back to a plain readout.
-pub(crate) async fn admin_model_info(
+async fn admin_model_info(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WireQuery(query): WireQuery<ModelInfoQuery>,

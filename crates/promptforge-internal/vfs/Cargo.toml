@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge virtual filesystem: canonical paths, claims, routing, backends, and the mode policy"
-
 # Zero-dependency rule: std only. No dependencies, workspace or external.
 # The manifest test enforces this; never weaken it. workspace-hack is
 # excluded: this crate has no third-party dependencies, so feature

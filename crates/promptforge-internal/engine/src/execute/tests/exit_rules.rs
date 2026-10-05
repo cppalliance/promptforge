@@ -10,6 +10,7 @@ use super::models_loop::{
 use super::run;
 use super::*;
 use crate::lua::ToolSet;
+use crate::model::CompletionErrorKind;
 use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test]
@@ -80,7 +81,7 @@ async fn supported_major_zero_proceeds() {
 
 #[tokio::test]
 async fn unsupported_major_one_is_refused() {
-    // Major 1 is no longer implemented: the gate refuses it and names the
+    // Major 1 is unsupported: the gate refuses it and names the
     // declared version rather than silently degrading to major 0.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
@@ -92,7 +93,7 @@ async fn unsupported_major_one_is_refused() {
 
 #[tokio::test]
 async fn unsupported_major_is_refused() {
-    // A future major is refused, never silently degraded to major 0.
+    // Any major other than 0 is refused, never silently degraded to major 0.
     let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let err = run_offline(md)
@@ -171,15 +172,15 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// the section's result, the loop's observation sequence, and the run's
 /// turn count.
 async fn drive_loop(
-    replies: Vec<GatewayReply>,
+    replies: Vec<ScriptedReply>,
     tools: impl Into<FixtureTools>,
 ) -> (Result<String>, Vec<String>, u32) {
-    let gateway = ScriptedGateway::start(replies).await;
+    let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let recorder = Arc::new(Recorder::default());
     let (ctx, harness) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await;
     (
@@ -260,17 +261,16 @@ async fn empty_stop_turn_without_tool_calls_fails() {
     for tools in [FixtureTools::default(), echo_tools()] {
         let (out, events, turns) = drive_loop(vec![resp_text_finish("", "stop")], tools).await;
         match out {
-            Err(Error::EmptyModelReply {
-                finish_reason,
-                detail: phrase,
-            }) => {
-                assert_eq!(finish_reason.as_deref(), Some("stop"));
+            Err(Error::Completion(error)) => {
+                assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+                assert_eq!(error.finish_reason(), Some("stop"));
                 assert_eq!(
-                    phrase, "empty model reply",
-                    "the client's phrase is the message"
+                    error.message(),
+                    "the model replied with no text and no tool calls",
+                    "the fixed phrase for the kind is the message"
                 );
             }
-            other => panic!("expected EmptyModelReply, got {other:?}"),
+            other => panic!("expected an EmptyReply failure, got {other:?}"),
         }
         assert_eq!(turns, 1, "the empty round is a completed turn");
         assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
@@ -285,10 +285,11 @@ async fn empty_truncated_final_text_fails_without_truncation_detail() {
     let (out, events, _) =
         drive_loop(vec![resp_text_finish("", "length")], ToolSet::default()).await;
     match out {
-        Err(Error::EmptyModelReply { finish_reason, .. }) => {
-            assert_eq!(finish_reason.as_deref(), Some("length"));
+        Err(Error::Completion(error)) => {
+            assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+            assert_eq!(error.finish_reason(), Some("length"));
         }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
+        other => panic!("expected an EmptyReply failure, got {other:?}"),
     }
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
 }
@@ -306,10 +307,11 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
     )
     .await;
     match out {
-        Err(Error::EmptyModelReply { finish_reason, .. }) => {
-            assert_eq!(finish_reason, None);
+        Err(Error::Completion(error)) => {
+            assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+            assert_eq!(error.finish_reason(), None);
         }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
+        other => panic!("expected an EmptyReply failure, got {other:?}"),
     }
     assert_eq!(turns, 2, "the tool-call turn and the completed empty round");
     assert_eq!(
@@ -327,7 +329,7 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     // The raise is pcall-able as the `empty_model_reply` kind holding the
     // finish reason as its field and the client's phrase as its message,
     // and the rejected round leaves the author's list untouched.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text_finish("", "stop")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('say nothing')\n\
@@ -338,9 +340,42 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
-    assert_eq!(out, "empty_model_reply|stop|empty model reply");
+    assert_eq!(
+        out,
+        "empty_model_reply|stop|the model replied with no text and no tool calls"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
+    // The crate's own wording extends the fixed phrase after a colon, so the
+    // author sees why the round counted as empty.
+    let gateway = ScriptedChat::new(vec![ScriptedReply::Text {
+        model: MOCK_MODEL.to_owned(),
+        content: String::new(),
+        finish_reason: Some("stop".to_owned()),
+        reasoning: Some("only thinking".to_owned()),
+        metrics: None,
+    }]);
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('think only')\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         return err.kind .. '|' .. tostring(err)",
+    );
+    let prompt = parse(&md);
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+        .drive()
+        .await
+        .expect("the call-site raise is pcall-able");
+    assert_eq!(
+        out,
+        "empty_model_reply|the model replied with no text and no tool calls: \
+         reasoning content was present but ignored"
+    );
 }

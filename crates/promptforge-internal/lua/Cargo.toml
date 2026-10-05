@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge sandboxed Lua runtime: the section VM, coroutine protocol, and Engine globals"
-readme = "README.md"
-keywords = ["prompt", "llm", "lua", "sandbox", "scripting"]
-categories = ["text-processing", "api-bindings"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 mlua.workspace = true
 promptforge-model-client.workspace = true
@@ -37,6 +31,9 @@ criterion.workspace = true
 name = "surface"
 harness = false
 required-features = ["test-support"]
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

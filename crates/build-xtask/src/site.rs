@@ -1,20 +1,26 @@
 //! `cargo xtask site [--books-only]`: builds the documentation site into
 //! `target/site/`, in this order:
 //!
-//! 1. Clears `target/site/` and `target/site-books/`.
-//! 2. Stages one mdBook tree per book into `target/site-books/` by running
-//!    `cargo run -p build-user-guide -- stage` as a subprocess, so this
-//!    crate still depends on no workspace crates.
-//! 3. Runs `$MDBOOK build` (`MDBOOK` defaults to `mdbook`) on every staged
+//! 1. Checks that `PROMPTFORGE_DOCS` names a directory, the root of the
+//!    `promptforge-docs` checkout that holds the book chapters.
+//! 2. Clears `target/site/` and `target/site-books/`.
+//! 3. Stages one mdBook tree per book, and beside them each book's
+//!    single-file export, into `target/site-books/` by running
+//!    `cargo run -p build-user-guide -- stage` as a subprocess with
+//!    `PROMPTFORGE_DOCS` set to that root, so this crate still depends on
+//!    no workspace crates.
+//! 4. Runs `$MDBOOK build` (`MDBOOK` defaults to `mdbook`) on every staged
 //!    folder, into `target/site/<book>/`. The folders are read from the
 //!    stage output; no book is named here.
-//! 4. Unless `--books-only` is set, builds the rustdoc sites
-//!    `target/site/promptforge/` and `target/site/harness/` through the
-//!    separate `target/site-doc` folder, so the developer's `target/doc`
-//!    is untouched. Each page carries the `guide/chrome/banner.html` bar,
-//!    and each site folder gets an `index.html` redirect to its crate.
-//! 5. Copies `guide/landing/` into `target/site/`.
-//! 6. Checks the links on every built page: each relative `href` in an
+//! 5. Unless `--books-only` is set, builds every rustdoc site in
+//!    `RUSTDOC_SITES` through the separate `target/site-doc` folder, so the
+//!    developer's `target/doc` is untouched. Each page carries the
+//!    `guide/chrome/banner.html` bar, and each site folder gets an
+//!    `index.html` redirect to its crate.
+//! 6. Copies `guide/landing/` and the staged exports into `target/site/`,
+//!    then writes the landing page `target/site/index.html`: one table row
+//!    per rustdoc site and per staged book (see `site-landing.rs`).
+//! 7. Checks the links on every built page: each relative `href` in an
 //!    `.html` file under `target/site/`, resolved from the page's own
 //!    folder, must name a file under `target/site/`. The rustdoc folders,
 //!    which rustdoc checks itself, and the books' `404.html` pages are not
@@ -22,7 +28,7 @@
 //!    skipped.
 //!
 //! Every path passed to a child process is absolute, built from the
-//! workspace root.
+//! workspace root or made absolute from `PROMPTFORGE_DOCS`.
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
@@ -31,25 +37,55 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+#[path = "site-landing.rs"]
+mod landing;
+
 const USAGE: &str = "usage: cargo xtask site [--books-only]";
 
-/// The rustdoc sites: the folder under `target/site/` and the crate it
-/// documents, with default features, the facade as dependents read it.
-const RUSTDOC_SITES: [(&str, &str); 2] = [("promptforge", "promptforge"), ("harness", "harness")];
+/// The environment variable naming the root of the `promptforge-docs`
+/// checkout.
+pub(crate) const DOCS_VAR: &str = "PROMPTFORGE_DOCS";
+
+/// The rustdoc sites: the folder under `target/site/`, the crate it
+/// documents, with default features, the facade as dependents read it, and
+/// the few broad words its landing row shows under Covers.
+const RUSTDOC_SITES: [(&str, &str, &str); 4] = [
+    (
+        "promptforge",
+        "promptforge",
+        "The Engine: parsing and running prompts",
+    ),
+    (
+        "harness",
+        "harness",
+        "The Harness: running prompts for a Host",
+    ),
+    (
+        "harness-gateway-client",
+        "harness-gateway-client",
+        "Model calls through the Gateway",
+    ),
+    (
+        "harness-web",
+        "harness-web",
+        "Web fetch and web search tools",
+    ),
+];
 
 /// Link targets the link check never resolves.
 const IGNORED_PREFIXES: [&str; 4] = ["http:", "https:", "mailto:", "#"];
 
 /// What `cargo xtask site` was asked to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Options {
+struct Options {
     /// Skip the rustdoc stage, for PR runs and chapter previews.
-    pub(crate) books_only: bool,
+    books_only: bool,
 }
 
-/// Runs `cargo xtask site` with the arguments after `site`.
-pub(crate) fn run(root: &Path, args: &[String]) -> ExitCode {
-    match parse_args(args).and_then(|options| build(root, options)) {
+/// Runs `cargo xtask site` with the arguments after `site`, reading the
+/// chapters from `docs`, the value of `PROMPTFORGE_DOCS`.
+pub(crate) fn run(root: &Path, docs: Option<&OsStr>, args: &[String]) -> ExitCode {
+    match site(root, docs, args) {
         Ok(site) => {
             println!("site: built {}", site.display());
             ExitCode::SUCCESS
@@ -61,6 +97,39 @@ pub(crate) fn run(root: &Path, args: &[String]) -> ExitCode {
     }
 }
 
+/// Builds the site for the workspace at `root` as [`run`] does, returning
+/// its folder. Nothing is cleared or built until the arguments parse and
+/// `docs` names a directory.
+fn site(root: &Path, docs: Option<&OsStr>, args: &[String]) -> Result<PathBuf, String> {
+    let options = parse_args(args)?;
+    let docs = docs_root(docs)?;
+    build(root, &docs, options)
+}
+
+/// The absolute form of `docs`, the value of `PROMPTFORGE_DOCS`, or an
+/// error naming the variable when it is unset, empty, or names no
+/// directory.
+fn docs_root(docs: Option<&OsStr>) -> Result<PathBuf, String> {
+    const HELP: &str = "set it to the root of a promptforge-docs checkout";
+    let Some(docs) = docs.filter(|docs| !docs.is_empty()) else {
+        return Err(format!("site: {DOCS_VAR} is not set; {HELP}"));
+    };
+    let docs = std::path::absolute(docs).map_err(|error| {
+        format!(
+            "site: {DOCS_VAR} names {}, which has no absolute form ({error}); {HELP}",
+            Path::new(docs).display()
+        )
+    })?;
+    if docs.is_dir() {
+        Ok(docs)
+    } else {
+        Err(format!(
+            "site: {DOCS_VAR} names {}, which is not a directory; {HELP}",
+            docs.display()
+        ))
+    }
+}
+
 fn parse_args(args: &[String]) -> Result<Options, String> {
     match args {
         [] => Ok(Options { books_only: false }),
@@ -69,8 +138,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     }
 }
 
-/// Builds the site for the workspace at `root`, returning its folder.
-fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
+/// Builds the site for the workspace at `root` from the chapters in the
+/// absolute docs root `docs`, returning its folder.
+fn build(root: &Path, docs: &Path, options: Options) -> Result<PathBuf, String> {
     let target = root.join("target");
     let site = target.join("site");
     let staged = target.join("site-books");
@@ -82,17 +152,19 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
         Command::new(&cargo)
             .current_dir(root)
             .args(["run", "-p", "build-user-guide", "--", "stage"])
-            .arg(&staged),
+            .arg(&staged)
+            .env(DOCS_VAR, docs),
     )?;
 
     let mdbook = std::env::var_os("MDBOOK").unwrap_or_else(|| OsString::from("mdbook"));
-    for book in staged_books(&staged)? {
+    let books = staged_books(&staged)?;
+    for book in &books {
         run_child(
             Command::new(&mdbook)
                 .arg("build")
-                .arg(staged.join(&book))
+                .arg(staged.join(book))
                 .arg("-d")
-                .arg(site.join(&book)),
+                .arg(site.join(book)),
         )?;
     }
 
@@ -101,6 +173,10 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
     }
 
     copy_dir(&root.join("guide").join("landing"), &site)?;
+    copy_files(&staged, &site)?;
+    let landing = site.join("index.html");
+    fs::write(&landing, landing::page(&staged, &books)?)
+        .map_err(|error| format!("site: cannot write {}: {error}", landing.display()))?;
     check_links(&site, options.books_only)?;
     Ok(site)
 }
@@ -109,7 +185,7 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
 fn build_rustdoc(root: &Path, cargo: &OsStr, site: &Path) -> Result<(), String> {
     let target_dir = root.join("target").join("site-doc");
     let flags = encoded_rustdoc_flags(&root.join("guide").join("chrome").join("banner.html"));
-    for (dir, krate) in RUSTDOC_SITES {
+    for (dir, krate, _) in RUSTDOC_SITES {
         // Rustdoc merges every crate in a doc folder into one crate list and
         // search index, so each crate starts from an empty folder.
         run_child(
@@ -215,16 +291,35 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
         if entry.file_type().map_err(read_error)?.is_dir() {
             copy_dir(&source, &target)?;
         } else {
-            fs::copy(&source, &target).map_err(|error| {
-                format!(
-                    "site: cannot copy {} to {}: {error}",
-                    source.display(),
-                    target.display()
-                )
-            })?;
+            copy_file(&source, &target)?;
         }
     }
     Ok(())
+}
+
+/// Copies the files directly in `from` into the existing folder `to`,
+/// skipping subfolders: the stage output's exports, without its book trees.
+fn copy_files(from: &Path, to: &Path) -> Result<(), String> {
+    let read_error =
+        |error: std::io::Error| format!("site: cannot read {}: {error}", from.display());
+    for entry in fs::read_dir(from).map_err(read_error)? {
+        let entry = entry.map_err(read_error)?;
+        if entry.file_type().map_err(read_error)?.is_file() {
+            copy_file(&entry.path(), &to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Copies one file, overwriting `to`.
+fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
+    fs::copy(from, to).map(drop).map_err(|error| {
+        format!(
+            "site: cannot copy {} to {}: {error}",
+            from.display(),
+            to.display()
+        )
+    })
 }
 
 /// Fails with every broken link on every page [`checked_pages`] names,
@@ -290,7 +385,7 @@ fn checked_pages(site: &Path) -> Result<Vec<String>, String> {
 }
 
 fn is_rustdoc_folder(name: &str) -> bool {
-    RUSTDOC_SITES.iter().any(|(dir, _)| *dir == name)
+    RUSTDOC_SITES.iter().any(|(dir, _, _)| *dir == name)
 }
 
 /// Every `href="..."` value in `html`, the page at the `/`-separated path

@@ -211,7 +211,7 @@ impl From<WorkspaceFileError> for WorkspaceError {
 
 impl WorkspaceError {
     /// The one HTTP status this failure answers with.
-    pub(crate) fn status(&self) -> StatusCode {
+    fn status(&self) -> StatusCode {
         match self {
             Self::NotADirectory
             | Self::NotAFile
@@ -236,7 +236,7 @@ impl WorkspaceError {
     }
 
     /// The machine-readable code of the JSON error envelope.
-    pub(crate) fn code(&self) -> &'static str {
+    fn code(&self) -> &'static str {
         match self {
             Self::ResolveGrant { .. } => "resolve_grant",
             Self::ResolvePath { .. } => "resolve_path",

@@ -1,40 +1,33 @@
-//! Recovery gates: a live chat relaunching on a replacement Gateway, a
-//! failed completion the chat survives, and a selection lost mid-turn.
+//! Recovery gates: a live chat's wait answering on a replacement Gateway,
+//! a failed completion the chat survives, and a selection lost mid-turn.
 
 use super::*;
 
 #[tokio::test]
-async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
+async fn a_live_chat_wait_answers_on_the_replacement_port_and_key() {
     let server = spawn_chat_server(&["test-model"]).await;
     let mut socket = connect_chat(&server.ws_base).await;
-    let _session = launch_chat(&mut socket).await;
+    let session = launch_chat(&mut socket).await;
     let original_wait = next_wait_token(&mut socket).await;
 
     let replacement_captured = CapturedRequests::default();
     let captured = Arc::clone(&replacement_captured);
-    let replacement = spawn_gateway(
-        Router::new()
-            .route(
-                "/v1/chat/completions",
-                post(move |headers: axum::http::HeaderMap, body: String| {
-                    let captured = Arc::clone(&captured);
-                    async move {
-                        if headers
-                            .get(header::AUTHORIZATION)
-                            .and_then(|value| value.to_str().ok())
-                            != Some("Bearer replacement-key")
-                        {
-                            return StatusCode::UNAUTHORIZED.into_response();
-                        }
-                        gate_completions(&captured, &body)
-                    }
-                }),
-            )
-            // The relaunch resolves its model through the replacement's
-            // catalog; without one it binds the fallback window and the
-            // chat role's minimum refuses the run.
-            .route("/v1/models", typed_catalog(GATE_MODELS)),
-    )
+    let replacement = spawn_gateway(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: axum::http::HeaderMap, body: String| {
+            let captured = Arc::clone(&captured);
+            async move {
+                if headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    != Some("Bearer replacement-key")
+                {
+                    return StatusCode::UNAUTHORIZED.into_response();
+                }
+                gate_completions(&captured, &body)
+            }
+        }),
+    ))
     .await;
     replace_gateway(
         &gateway_updater(&server.state),
@@ -43,12 +36,9 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
     )
     .expect("the replacement publishes");
 
-    let replacement_wait = next_wait_token(&mut socket).await;
-    assert_ne!(
-        replacement_wait, original_wait,
-        "the endpoint generation retires and relaunches the waiting agent"
-    );
-    answer(&mut socket, &replacement_wait, "after gateway recovery").await;
+    // The wait the original gateway's run opened still answers, and its
+    // round goes to the replacement port under the replacement key.
+    answer(&mut socket, &original_wait, "after gateway recovery").await;
     let turn = collect_turn(&mut socket).await;
     assert_eq!(delta_text(&turn), "echo:after gateway recovery");
     assert!(
@@ -67,12 +57,16 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
         1,
         "the replacement endpoint and bearer complete the next turn"
     );
+    assert_eq!(
+        server.state.agents().run_id(&session),
+        Some(workshop_run_log::RunId::from_raw(1)),
+        "the replacement keeps the conversation's one run, the first the log began"
+    );
     socket.close().await;
 }
 
-/// GATE 6 - error survival. Current-chat behavior: a failed completion
-/// surfaces an error to the operator and the chat keeps working - the
-/// behavior that replaces the relay's gateway-health short-circuit.
+/// GATE 6 - error survival. A failed completion surfaces an error to
+/// the operator and the chat keeps working.
 #[tokio::test]
 async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
     let server = spawn_chat_server(&["test-model"]).await;
@@ -110,9 +104,9 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
 
 /// GATE 7 - selection-loss recovery, unified-runtime semantics: the run's
 /// model is the dropdown selection bound at launch, so a selection that
-/// vanishes mid-turn no longer skips anything - the frozen binding drives
+/// vanishes mid-turn skips nothing - the frozen binding drives
 /// the raced turn to completion, and the same run keeps serving turns
-/// until a catalog replacement retires it.
+/// until a close ends it.
 #[tokio::test]
 async fn gate_selection_loss_leaves_the_runs_frozen_binding_untouched() {
     let server = spawn_chat_server(&["test-model"]).await;

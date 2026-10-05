@@ -85,7 +85,7 @@ The Message role uses these only when the staged diff proves the step occurred; 
 1. **Protocol:** the gateway's wire types and upstream trait are consumed by routing, local inference, and external clients; a dedicated crate lets headless and remote-only builds avoid local-inference dependencies and gives every consumer one protocol contract.
 2. **Client:** executor code needs gateway communication without the parser, Lua, or executor coming along; a scoped client crate isolates HTTP and keeps the model catalog reusable.
 3. **Workshop facade:** two parallel gateway clients had drift-prone duplicate wire types; one wire crate with a typed facade and an opaque relay facade removes the duplication without forcing Workshop UI frames into the protocol.
-4. **Store:** the virtual filesystem has zero dependencies on the rest of core; extraction makes it independently testable and reusable by tools, Lua, and future addons.
+4. **Store:** the virtual filesystem has zero dependencies on the rest of core; extraction makes it independently testable and reusable by tools, Lua, and future Plugins.
 5. **Gateway-local:** local inference is a 10k-line subsystem with heavy archive and process dependencies; extraction keeps headless gateway builds lean and confines the CUDA staging boundary.
 6. **Lua:** the sandbox and Engine globals are core's second-largest subsystem and its heaviest dependency (`mlua`); extraction improves build parallelism and gives the planned markdown Engine function a home.
 7. **Parser:** parse-only consumers should not link the executor; a narrow prompt-document parser crate serves MCP and CLI preview directly.
@@ -113,7 +113,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Where the plan came from
 - The extraction menu originated in an operator-directed sweep: "spawn 4 subagents and explore @promptforge//crates and look at gateway, ws, ws-server, core, see if you can find big pieces that deserve to be in separate crates."
-- Scope was checked against a future plan: "given that I plan to do this eventually @c:\Users\Vinnie\.cursor\plans\addon_dll_abi_435f28aa.plan.md what do you suggest in terms of these crate extractions?" - the extraction boundaries were chosen to serve the planned addon DLL ABI.
+- Scope was checked against a future plan: "given that I plan to do this eventually @c:\Users\Vinnie\.cursor\plans\addon_dll_abi_435f28aa.plan.md what do you suggest in terms of these crate extractions?" - the extraction boundaries were chosen to serve the planned Plugin DLL ABI.
 - The decision was staged deliberately: "start a plan for items 1 through 10. I will decide which of those I want to keep and which to defer" - then the operator decided to implement all of them: "now we are going to implement all of these crate extractions". That is why item 9's defer recommendation was overridden.
 - `promptforge-confinement` was dropped on the evidence: after the trace showed no shared jail exists, the operator directed dropping it and renumbering (paraphrase of "well promptforge-confinement and edit the plan to renumber the items").
 

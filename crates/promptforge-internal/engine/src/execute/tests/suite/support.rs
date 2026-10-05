@@ -59,7 +59,7 @@ impl RunOptions {
 /// prepared context, the Harness that holds the observer, and the run's own VFS
 /// handle - the prepared router - for seeding before the run and
 /// extraction after. The fixture tools are accepted for signature parity
-/// only; contributing them to a run takes a capability and a declared
+/// only; contributing them to a run takes a Plugin and a declared
 /// slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,
@@ -72,7 +72,7 @@ pub(super) fn prepare_run(
     let (ctx, requirements) = env.prepare(prompt, context(execution));
     assert!(
         requirements.is_satisfied(),
-        "fixture prompts declare no capabilities or model roles: {requirements:?}"
+        "fixture prompts declare no Plugins or model roles: {requirements:?}"
     );
     let vfs = ctx.vfs_handle().clone();
     (ctx, opts.harness(), vfs)
@@ -107,7 +107,7 @@ pub(super) async fn run(
 /// Harness-supplied handle contract, for tests of custom store backends (a
 /// gated store mount or one on a real directory, which the prepare pass
 /// would replace with the run's own fresh store).
-pub(super) async fn run_unprepared(
+async fn run_unprepared(
     prompt: &Prompt,
     args: &str,
     vfs: VfsRef,
@@ -156,10 +156,9 @@ pub(super) fn parse_execution_fixture(
 }
 
 /// An inline fixture that omits the required H1 title gets the shared
-/// `# Test prompt` heading the in-crate test support's `parse` injected
-/// before the moved cases were ported; a source that already carries an H1
-/// (every fixture file, and the cases that author their own title) is parsed
-/// as written.
+/// `# Test prompt` heading; a source that already carries an H1 (every
+/// fixture file, and the cases that author their own title) is parsed as
+/// written.
 fn with_test_title(source: &str) -> std::borrow::Cow<'_, str> {
     if source.lines().any(|line| line.starts_with("# ")) {
         std::borrow::Cow::Borrowed(source)

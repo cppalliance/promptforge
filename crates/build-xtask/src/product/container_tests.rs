@@ -302,12 +302,12 @@ fn harness_container_siblings_may_depend_on_each_other() {
         root.path(),
         "harness-internal/sessions",
         "harness-sessions",
-        "[dependencies]\nharness-capabilities = { path = \"../capabilities\" }\n",
+        "[dependencies]\nharness-plugins = { path = \"../plugins\" }\n",
     );
     write_crate(
         root.path(),
-        "harness-internal/capabilities",
-        "harness-capabilities",
+        "harness-internal/plugins",
+        "harness-plugins",
         "",
     );
     let violations = product_boundary_violations(root.path());

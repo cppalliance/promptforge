@@ -6,8 +6,7 @@
 //! serde conversion, prose substitution, and the chat protocol's validation
 //! consume the records as if the author had written the array by
 //! hand. The protocol parse owns the whole message contract. The chainable
-//! builders are the one deliberate exception to the methodless-handle rule
-//! (A9).
+//! builders are the one deliberate exception to the methodless-handle rule.
 //!
 //! The shim is pure Lua with no privileged captures (it never yields), so it
 //! installs with the Engine globals during Engine injection, ahead of the shared

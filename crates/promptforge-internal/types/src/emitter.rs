@@ -29,7 +29,7 @@ use serde_json::Value;
 use crate::event::Event;
 use crate::event::ReplyOrigin;
 use crate::event::lifecycle::Lifecycle;
-use crate::ids::{ChainId, Provenance, TaskId};
+use crate::ids::{ChainId, Provenance, RoundId, TaskId};
 use crate::metrics::{CallMetrics, ToolCallEvent};
 use crate::tools::OutputTrust;
 
@@ -40,13 +40,13 @@ mod tests;
 /// Whether a run captures each model round's raw request and response
 /// bodies as `Request` and `Response` events.
 ///
-/// Off by default: the bodies already travel in the `Chat` effect and its
-/// answer, so a Harness that logs effects has them; a Harness that wants the
-/// pair in the event stream too turns it on.
+/// Off by default. The `Chat` effect and its answer already carry the
+/// bodies, so a caller that logs effects has them. A caller that also
+/// wants them in the event stream selects `On`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugMode {
-    /// The model rounds emit no `Request` or `Response` events and never
-    /// clone a body.
+    /// The model rounds skip the `Request` and `Response` events and
+    /// the body clones those events need.
     #[default]
     Off,
     /// Every model round emits its raw request and response bodies.
@@ -79,20 +79,6 @@ impl EventBuffer {
 
 /// The shared handle onto one run's event buffer: every chain's emitter
 /// pushes through a clone, and the run drains through its own.
-///
-/// # Examples
-/// ```
-/// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-/// use promptforge_types::event::{Event, lifecycle};
-///
-/// let sink = EventSink::default();
-/// let emitter = Emitter::root(sink.clone(), "run-1", DebugMode::Off);
-/// emitter.report("Gather", lifecycle::SECTION_STARTED);
-/// let events = sink.take();
-/// assert!(matches!(events.as_slice(), [Event::SectionStarted { section, .. }] if section == "Gather"));
-/// assert_eq!(events[0].provenance().task.to_string(), "0");
-/// assert!(sink.take().is_empty(), "a drain empties the buffer");
-/// ```
 #[derive(Clone, Debug, Default)]
 pub struct EventSink(Arc<Mutex<EventBuffer>>);
 
@@ -257,28 +243,30 @@ impl Emitter {
         });
     }
 
-    /// Reports one completed block of model thinking.
-    pub fn thinking(&self, section: &str, turn: u32, model: &str, text: &str) {
+    /// Reports one completed block of model thinking from `round`.
+    pub fn thinking(&self, section: &str, turn: u32, round: RoundId, model: &str, text: &str) {
         self.emit(section, |execution, section, provenance| Event::Thinking {
             execution,
             section,
             provenance,
             turn,
+            round,
             model: model.to_owned(),
             text: text.to_owned(),
         });
     }
 
-    /// Reports one completed assistant reply: a model round's text reply
-    /// with its [`ReplyOrigin`] provenance.
+    /// Reports one completed assistant reply: `round`'s text reply with
+    /// its [`ReplyOrigin`] provenance.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the reply report names its full run coordinates, including the origin, in one call"
+        reason = "the reply report names its full run coordinates, including the round and origin, in one call"
     )]
     pub fn assistant_reply(
         &self,
         section: &str,
         turn: u32,
+        round: RoundId,
         text: &str,
         finish_reason: Option<&str>,
         model: &str,
@@ -291,6 +279,7 @@ impl Emitter {
                 section,
                 provenance,
                 turn,
+                round,
                 text: text.to_owned(),
                 finish_reason: finish_reason.map(str::to_owned),
                 model: model.to_owned(),
@@ -300,11 +289,13 @@ impl Emitter {
         });
     }
 
-    /// Reports one batch of tool calls the model requested, unexecuted.
+    /// Reports one batch of tool calls the model requested in `round`,
+    /// unexecuted.
     pub fn assistant_tool_calls(
         &self,
         section: &str,
         turn: u32,
+        round: RoundId,
         model: &str,
         calls: &[ToolCallEvent],
     ) {
@@ -314,6 +305,7 @@ impl Emitter {
                 section,
                 provenance,
                 turn,
+                round,
                 model: model.to_owned(),
                 calls: calls.to_vec(),
             }

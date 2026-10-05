@@ -3,9 +3,9 @@
 //! file, or launches a process; a route that would belongs in
 //! [`super::walled`].
 
-pub(crate) mod profiles;
-pub(crate) mod progress;
-pub(crate) mod queue;
+mod profiles;
+mod progress;
+mod queue;
 pub(crate) mod status;
 
 use axum::Router;

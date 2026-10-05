@@ -1,6 +1,5 @@
 //! Directory tree listings: one level of a confined directory, or the
-//! granted roots rendered as a synthetic listing. Split from
-//! `workspace.rs` to keep that file under the line ceiling.
+//! granted roots rendered as a synthetic listing.
 
 use std::fs;
 use std::path::Path;

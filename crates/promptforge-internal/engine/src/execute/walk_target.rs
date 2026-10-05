@@ -29,7 +29,7 @@ pub(super) fn section_position(slice: &[Section], target: &Section) -> Option<us
 /// arm's case, whose home slice is the worker's resolution set with the
 /// worker already removed, so the arm's visible set comes out as exactly
 /// the home slice plus the worker's children.
-pub(super) fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
+fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
     let caller_index = section_position(home, caller);
     home.iter()
         .enumerate()

@@ -236,3 +236,16 @@ fn load_reads_and_parses_a_file() {
     let config = Config::load(&path).expect("fixture loads");
     assert_eq!(config.gateway.api_key, "k");
 }
+
+#[test]
+fn debug_redacts_the_gateway_api_key() {
+    let raw = "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"secret-key\"\n";
+    let config = Config::from_toml_str(raw).expect("fixture parses");
+    for rendered in [format!("{:?}", config.gateway), format!("{config:?}")] {
+        assert!(!rendered.contains("secret-key"), "key leaked: {rendered}");
+        assert!(
+            rendered.contains("http://127.0.0.1:8081"),
+            "base_url is still shown: {rendered}"
+        );
+    }
+}

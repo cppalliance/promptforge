@@ -70,7 +70,7 @@ fn write_creates_overwrites_and_materializes_ancestor_directories() -> Result<()
     let mut access = seeded(&[])?;
     access.write(&path("/a/b/f.txt")?, b"one")?;
     assert_eq!(access.read(&path("/a/b/f.txt")?)?, b"one");
-    // MemStore semantics: no mkdir was needed; the ancestors exist.
+    // No mkdir was needed; the ancestors exist.
     assert!(access.exists(&path("/a")?)?);
     assert!(access.exists(&path("/a/b")?)?);
     access.write(&path("/a/b/f.txt")?, b"two")?;

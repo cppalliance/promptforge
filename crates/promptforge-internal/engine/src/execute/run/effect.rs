@@ -10,8 +10,8 @@
 //! emitting the round's events there. The Engine thus decides *what* to do
 //! and *what it means*; the Harness performs it.
 //!
-//! An [`Effect`] may hold a live handle (the store access capability) and
-//! so does not serialize itself. [`Effect::record`] projects it onto an
+//! An [`Effect`] may hold a live handle (a filesystem access) and so does
+//! not serialize itself. [`Effect::record`] projects it onto an
 //! [`EffectRecord`], the effect minus its handles, which round-trips
 //! through serde: a run log stores records, and a later replay compares a
 //! re-executed run's records against them. An [`EffectAnswer`] likewise
@@ -22,6 +22,8 @@
 use std::sync::Arc;
 
 use promptforge_model_client::detail::tool_schema_name;
+use promptforge_types::event::ReplyOrigin;
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,15 +34,18 @@ use promptforge_vfs::{Access, VfsError};
 
 use crate::execute::protocol::{VfsOp, VfsOutcome};
 
-/// Run-wide handle of one in-flight effect: an opaque correlation key
-/// between an issued [`Effect`] and its [`EffectAnswer`]. Allocated from a
-/// run-wide counter; it need not reproduce across runs.
+/// The identifier of one in-flight effect, which pairs an issued
+/// [`Effect`] with its [`EffectAnswer`].
+///
+/// The id is opaque. The run allocates it from a run-wide counter, so the
+/// same effect may get a different id in another run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EffectId(pub(crate) u64);
 
 impl EffectId {
-    /// The raw handle, for the Harness to key its log or its task table by
-    /// it. Meaningful only within the run that issued it.
+    /// Returns the id as a raw number. The caller can use it as a key, for
+    /// example in its log or its task table. The number is meaningful only
+    /// within the run that issued it.
     #[must_use]
     pub const fn get(self) -> u64 {
         self.0
@@ -53,66 +58,93 @@ impl std::fmt::Display for EffectId {
     }
 }
 
-/// One piece of work the Engine asks the Harness to perform.
+/// The identity of one model round: its id and the path that dispatched
+/// it. Every [`Effect::Chat`] carries one.
+///
+/// Ids number the run's model rounds from 0 in dispatch order. Chat rounds
+/// and nested `models.infer` rounds share one sequence. The thinking,
+/// reply, and tool-call events reported from the round's answer carry the
+/// same id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Round {
+    /// The round's run-wide id.
+    pub id: RoundId,
+    /// The path that dispatched the round. [`ReplyOrigin::Chat`] marks a
+    /// section's `chat` round, the kind `models.loop` runs, whose live
+    /// deltas the caller can stream. [`ReplyOrigin::Infer`] marks a nested
+    /// `models.infer` round, where only the completed reply is consumed.
+    pub origin: ReplyOrigin,
+}
+
+/// One piece of work the Engine asks the caller to perform.
 #[derive(Debug)]
 pub enum Effect {
-    /// One model round over `messages` with `tools` advertised, under
-    /// `binding`'s frozen `options`. A nested `models.infer` is a round
-    /// over one user message with no tools and no live deltas.
+    /// One model round: send `messages` to the model with `tools`
+    /// advertised, using the frozen `options` built from `binding`. A
+    /// nested `models.infer` round sends one user message with an empty
+    /// tool list, and the Engine consumes only its completed reply.
     Chat {
         /// The binding the round runs under.
         binding: ModelBinding,
-        /// The projected conversation, in wire order.
+        /// The conversation to send, in wire order.
         messages: Vec<Message>,
-        /// The tool schemas advertised for the round; empty advertises
-        /// none.
+        /// The tool schemas advertised to the model for this round.
         tools: Vec<ToolSchema>,
-        /// The per-request fields, built from `binding`.
+        /// The per-request completion options, built from `binding`.
         options: CompletionOptions,
-        /// Whether the Harness forwards the round's live deltas to its delta
-        /// hook: `true` for a section's `chat` round (the `models.loop`
-        /// rounds the hook is documented for), `false` for a nested
-        /// `models.infer`, where only the completed reply is consumed.
-        /// Not part of the record: a delta is not an event, and the hint
-        /// changes no request body.
-        stream: bool,
+        /// The round's id and origin. The caller needs to forward live
+        /// deltas only for a round whose origin is [`ReplyOrigin::Chat`].
+        /// The effect's record keeps the id and drops the origin, because
+        /// the request sent to the model is the same for either origin.
+        round: Round,
     },
-    /// One bound tool call: `tool` is the stable identity the performer
-    /// resolves to an implementation (the Harness against its activated
-    /// capabilities, the Engine's internal table against the run's
-    /// catalog), `alias` the prompt-local name it was called by, and
-    /// `origin` who made the call and where, both kept for the record.
+    /// One call to a bound tool. The caller resolves `tool`, the tool's
+    /// stable identity, to an implementation. `alias` is the prompt-local
+    /// name the call used, and `origin` says who made the call and where.
+    /// The effect's record keeps both and leaves out `access`.
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
-        /// The prompt-local alias the call named.
+        /// The prompt-local alias the call used.
         alias: String,
         /// The call's arguments.
         args: Value,
-        /// The run, the section, and the kind of caller that made the
-        /// call.
+        /// Who made the call: the run, the section, and whether the
+        /// section's script or a model round asked for it.
         origin: ToolCallOrigin,
+        /// The call's own identity, forked from the calling chain's
+        /// access when the call is issued and joined back into it when the
+        /// answer is applied or the call is aborted, so the chain's earlier
+        /// work happens before the tool's and the tool's before the chain's
+        /// next step. It is rooted at `/`. Once the answer is applied or the
+        /// call is aborted, every operation through it is refused.
+        access: Arc<Access>,
     },
-    /// One operation on the run's store view - one of the eight `store.*`
-    /// calls a prompt makes - under an ordinary access the Engine derived
-    /// from the chain's capability at dispatch, rooted at the handle's
-    /// declared store. Other code that touches the VFS, such as a tool or
-    /// the Host reading files, does not appear as this effect. The
-    /// Harness, performing the effect, uses the access exactly as given
-    /// and within the scope it carries. When it drops never affects
-    /// correctness: claims follow happens-before within the run's scope,
-    /// which the run ends at `Done` or when it is dropped, after which the
-    /// view refuses every operation.
+    /// One operation on the run's store view, issued for one of the eight
+    /// `store.*` calls a prompt can make.
+    ///
+    /// `access` is an ordinary access that the Engine derives from the
+    /// chain's capability at dispatch. It is rooted at the store declared
+    /// by the handle that the chain's access came from. Only the `store.*`
+    /// calls produce this effect. A tool reaches files through the access
+    /// its [`ToolCall`](Effect::ToolCall) effect carries.
+    ///
+    /// The caller must use the access exactly as given and within the
+    /// scope it carries. Correctness holds whenever the caller drops the
+    /// access. Store claims follow happens-before order within the
+    /// run's scope. The run ends that scope at `Done` or when the run is
+    /// dropped, and after that the view refuses every operation.
     Vfs {
-        /// The chain's store view: the chain's identity over the store
-        /// root alone.
+        /// The chain's store view: an access with the chain's identity
+        /// that reaches only the store root.
         access: Arc<Access>,
         /// The validated operation.
         op: VfsOp,
     },
-    /// One sleep of `seconds`: the internal timeout behind a timed wait.
+    /// One sleep of `seconds` seconds, which the Engine uses as the
+    /// timeout behind a timed wait.
     Timer {
-        /// The duration in seconds, non-negative and finite.
+        /// The duration in seconds, finite and zero or greater.
         seconds: f64,
     },
 }
@@ -126,8 +158,8 @@ fn wire_value<T: Serialize>(value: &T) -> Value {
 }
 
 impl Effect {
-    /// The effect's record: the same request minus its live handles, in a
-    /// form a log stores and a replay compares.
+    /// Returns the effect's record: the same request with its live handles
+    /// removed, in a form that a run log stores and a replay compares.
     #[must_use]
     pub fn record(&self) -> EffectRecord {
         match self {
@@ -135,11 +167,12 @@ impl Effect {
                 binding,
                 messages,
                 tools,
+                round,
                 ..
             } => {
                 let invocation = binding.invocation();
                 EffectRecord::Chat {
-                    model: binding.id().name().to_owned(),
+                    round: round.id,
                     alias: binding.alias().to_owned(),
                     messages: messages.iter().map(wire_value).collect(),
                     tools: tools
@@ -156,6 +189,7 @@ impl Effect {
                 alias,
                 args,
                 origin,
+                ..
             } => EffectRecord::ToolCall {
                 tool: tool.clone(),
                 alias: alias.clone(),
@@ -168,20 +202,23 @@ impl Effect {
     }
 }
 
-/// An [`Effect`] minus its live handles: what a run log stores for the
-/// effect and what a replay compares a re-issued effect against.
+/// An [`Effect`] with its live handles removed, as a run log stores it. A
+/// replay compares each re-issued effect against its record.
 ///
-/// The `Chat` record flattens the binding to what identifies the round -
-/// the model, the alias, and the frozen invocation - and stores the
-/// messages in their wire form, so the record reads the same as the
-/// request body the Harness would build from it.
+/// The `Chat` record keeps only what identifies the round: its id, the
+/// alias of the model slot it ran under, and the frozen invocation
+/// settings (temperature, generation cap, and thinking switch). It stores
+/// the messages in their wire form. It names the slot by alias, because the
+/// caller may serve the slot with a different model from the bound one.
+/// The answer's [`ChatAnswerRecord`] names the model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectRecord {
     /// One model round.
     Chat {
-        /// The bound model's name.
-        model: String,
-        /// The prompt-local alias the round ran under.
+        /// The round's run-wide id, which the round's content events also
+        /// carry.
+        round: RoundId,
+        /// The prompt-local alias of the slot the round ran under.
         alias: String,
         /// The conversation, one wire-form message per entry.
         messages: Vec<Value>,
@@ -198,12 +235,12 @@ pub enum EffectRecord {
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
-        /// The prompt-local alias the call named.
+        /// The prompt-local alias the call used.
         alias: String,
         /// The call's arguments.
         args: Value,
-        /// The run, the section, and the kind of caller that made the
-        /// call.
+        /// Who made the call: the run, the section, and whether the
+        /// section's script or a model round asked for it.
         origin: ToolCallOrigin,
     },
     /// One operation on the run's store view.
@@ -220,13 +257,15 @@ pub enum EffectRecord {
 
 /// Who made one tool call and where: the run's execution, the section
 /// whose Lua was running, and whether the section's script or a model
-/// round asked for the call. A log attributes the call by it, and the Host
-/// can apply different policy to the same tool depending on its caller.
+/// round asked for the call.
+///
+/// A log uses it to attribute the call. The application can use it to
+/// apply different policy to the same tool depending on who called it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallOrigin {
     /// The run's execution identifier.
     pub execution: String,
-    /// The section that made the call.
+    /// The name of the section that made the call.
     pub section: String,
     /// Which kind of code asked for the call.
     pub caller: ToolCaller,
@@ -243,35 +282,35 @@ pub enum ToolCaller {
     Model,
 }
 
-/// What a performer answers one [`Effect`] with: one variant per effect
-/// kind, plus [`Dropped`](EffectAnswer::Dropped) for an effect the Harness
-/// gave up on. Every effect receives exactly one answer.
+/// The answer to one [`Effect`]: one variant per effect kind, plus
+/// [`Dropped`](EffectAnswer::Dropped) for an effect the caller gave up on.
+/// Every effect receives exactly one answer.
 #[derive(Debug)]
 pub enum EffectAnswer {
-    /// The model round's completion or its failure. Boxed: a completion
-    /// holds both request and response bodies, and the box keeps every
-    /// other answer's size from being set by this one.
+    /// The model round's completion or its failure.
     Chat(std::result::Result<Box<Completion>, CompletionError>),
-    /// The tool's own output or its own failure, before the Engine's
-    /// trust and count rules apply.
+    /// The tool's own output or its own failure, before the Engine applies
+    /// its trust rule.
     ToolCall(std::result::Result<ToolOutput, ToolError>),
     /// The outcome of the operation on the run's store view, or the
     /// store's own structured failure.
     Vfs(std::result::Result<VfsOutcome, VfsError>),
     /// The timer fired.
     Timer,
-    /// The Harness dropped the effect without performing it (a cancelled
-    /// run, or an effect whose task ended first): the chain, if it still
-    /// waits, resumes with a cancelled error. A drop is an answer like any
-    /// other, so every issued effect receives exactly one.
+    /// The caller gave up on the effect and dropped it, for example
+    /// because the run was cancelled or the effect's task ended first. If
+    /// the chain still waits on the effect, it resumes with a cancelled
+    /// error. A drop is an answer like any other, so it counts as the
+    /// effect's one answer.
     Dropped,
 }
 
 impl EffectAnswer {
-    /// The answer's record: its outcome minus what a log cannot hold
-    /// whole. A failure is recorded as its display text; a completion as
-    /// the reply or the requested tool names, since the round's bodies
-    /// travel as debug events and its metrics as the turn's event.
+    /// Returns the answer's record: the parts of its outcome that a log can
+    /// hold whole. A failure is recorded as its display text. A completion
+    /// is recorded as its reply or its requested tool names. The round's
+    /// request and response bodies travel as debug events, and its metrics
+    /// travel in the turn's event.
     #[must_use]
     pub fn record(&self) -> AnswerRecord {
         match self {
@@ -305,21 +344,21 @@ pub enum AnswerRecord {
     Chat(std::result::Result<ChatAnswerRecord, String>),
     /// The tool call's outcome.
     ToolCall(std::result::Result<ToolAnswerRecord, String>),
-    /// The outcome of the operation on the run's store view, the
-    /// [`VfsOutcome`] itself as the success payload, or its failure's
-    /// display text.
+    /// The outcome of the operation on the run's store view: the
+    /// [`VfsOutcome`] itself on success, or the failure's display text.
     Vfs(std::result::Result<VfsOutcome, String>),
     /// The timer fired.
     Timer,
-    /// The Harness dropped the effect without performing it.
+    /// The caller gave up on the effect and dropped it.
     Dropped,
 }
 
 /// A completed model round as the log records it: what identifies the
-/// answer without the request and response bodies.
+/// answer. The round's request and response bodies travel separately, as
+/// debug events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatAnswerRecord {
-    /// The model that served the round, as the response body named it.
+    /// The model that served the round, as the completion names it.
     pub model: String,
     /// The provider's finish reason, when it sent one.
     pub finish_reason: Option<String>,

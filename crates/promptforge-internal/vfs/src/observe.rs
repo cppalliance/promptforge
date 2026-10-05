@@ -7,9 +7,7 @@
 //! seam is fire-and-forget: no outcome flows back, and a policy-denied
 //! operation never fires. Claims still key on the internal
 //! [`ExecId`](crate::ExecId); the origin is observability, never
-//! identity. The deferred consumers - the bounded event log, the Lua
-//! pull query, and enrichment policies - subscribe through this seam in
-//! later steps.
+//! identity.
 
 use std::panic::Location;
 use std::sync::Arc;
@@ -17,28 +15,33 @@ use std::sync::Arc;
 use crate::path::VfsPath;
 use crate::traits::Op;
 
-/// Who asked for an operation: a label and the most precise source
-/// position the caller knows. Pure observability - an origin never gates
-/// an operation and never appears in a claim.
+/// Who asked for a file operation: a label and the most precise source
+/// position the caller knows.
+///
+/// An origin is for observation only. It never decides whether an
+/// operation is allowed, and it never appears in a claim.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Origin {
     /// The most specific label the caller has: a section name for a
     /// chain, a tool id for a tool, a fixture name for a test.
     pub label: String,
-    /// The source file or document `line` refers to: a Rust source file
-    /// for [`Origin::new`], the prompt's name for [`Origin::at`].
+    /// The file or document that `line` refers to: the Rust source file
+    /// for [`Origin::new`], or the name the caller passes to
+    /// [`Origin::at`], such as a prompt's name.
     pub file: String,
     /// The 1-based line within `file`.
     pub line: u32,
 }
 
 impl Origin {
-    /// Stamps the Rust call site via [`Location::caller`]: Harness code and
-    /// tests get their position for free. Use the most specific label
-    /// available - a section name for a chain, a tool id for a tool, a
-    /// fixture name for a test - never a generic label when a specific
-    /// one exists.
+    /// Creates an origin with the given label, positioned at the Rust call
+    /// site.
+    ///
+    /// The file and line come from [`Location::caller`], so callers and
+    /// tests get their position automatically. Use the most specific
+    /// label available, such as a section name for a chain, a tool id for
+    /// a tool, or a fixture name for a test.
     #[must_use]
     #[track_caller]
     pub fn new(label: impl Into<String>) -> Origin {
@@ -50,10 +53,12 @@ impl Origin {
         }
     }
 
-    /// Sets an explicit position: the executor substitutes the prompt's
-    /// position for the Rust one, so every event's position
-    /// is the most precise thing the caller knows. The label guidance of
-    /// [`Origin::new`] applies unchanged.
+    /// Creates an origin with the given label at an explicit file and line.
+    ///
+    /// Use it when the caller knows a more precise position than the Rust
+    /// call site, such as a line in a prompt, so each event carries the
+    /// most precise position available. Choose the label as for
+    /// [`Origin::new`].
     #[must_use]
     pub fn at(label: impl Into<String>, file: impl Into<String>, line: u32) -> Origin {
         Origin {
@@ -64,9 +69,13 @@ impl Origin {
     }
 }
 
-/// One admitted operation, handed to the installed sink. Borrows the
-/// capability's own values, so firing allocates nothing; a sink that
-/// retains events clones out of the views.
+/// One file operation that passed the policy and claim checks, as handed
+/// to the installed sink.
+///
+/// The event fires before the backend runs the operation. It borrows its
+/// values from the `Access` capability that admitted the operation, so
+/// firing is allocation-free. A sink that keeps events must clone the
+/// values it needs.
 #[derive(Debug)]
 pub struct OpEvent<'a> {
     pub(crate) op: Op,
@@ -88,15 +97,18 @@ impl<'a> OpEvent<'a> {
         self.path
     }
 
-    /// The origin of the capability that admitted the operation.
+    /// The origin of the `Access` capability that admitted the operation.
     #[must_use]
     pub fn origin(&self) -> &'a Origin {
         self.origin
     }
 }
 
-/// The installed operation sink. Must be cheap: store operations fire it
-/// from the blocking pool, inline with the operation.
+/// A callback that receives an `OpEvent` for each admitted file
+/// operation.
+///
+/// The sink must be cheap. Store operations call it from the blocking
+/// pool, inline with the operation.
 pub type OpSink = Arc<dyn Fn(OpEvent<'_>) + Send + Sync>;
 
 #[cfg(test)]

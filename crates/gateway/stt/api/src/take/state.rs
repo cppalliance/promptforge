@@ -102,7 +102,7 @@ impl TakeState {
     }
 
     #[cfg(test)]
-    pub(super) fn finalized_snapshot(&self) -> (String, u64) {
+    fn finalized_snapshot(&self) -> (String, u64) {
         self.finalized_snapshot_with(|| {})
     }
 

@@ -19,21 +19,21 @@ fn workshop_tier_dependencies_flow_one_way() {
 }
 
 #[test]
-fn participating_crates_respect_the_file_line_ceiling() {
-    let violations = file_ceiling_violations(&workspace_root());
+fn every_workspace_crate_inherits_workspace_lints() {
+    let violations = lint_inheritance_violations(&workspace_root());
     assert!(
         violations.is_empty(),
-        "ceiling violations:\n{}",
+        "lint violations:\n{}",
         violations.join("\n")
     );
 }
 
 #[test]
-fn participating_crates_inherit_workspace_lints() {
-    let violations = lint_inheritance_violations(&workspace_root());
+fn every_workspace_crate_runs_the_ceiling_from_its_build_script() {
+    let violations = wiring::ceiling_wiring_violations(&workspace_root());
     assert!(
         violations.is_empty(),
-        "lint violations:\n{}",
+        "ceiling wiring violations:\n{}",
         violations.join("\n")
     );
 }
@@ -68,8 +68,8 @@ fn a_tiered_crate_whose_manifest_is_missing_is_reported_not_skipped() {
 }
 
 /// Writes a crate under `crates/<dir>/` named `name`, with the given
-/// `lib.rs` docs and one source file of `lines` lines.
-fn write_crate(root: &Path, dir: &str, name: &str, lib_docs: &str, lines: usize) {
+/// `lib.rs` docs.
+fn write_crate(root: &Path, dir: &str, name: &str, lib_docs: &str) {
     let src = root.join("crates").join(dir).join("src");
     std::fs::create_dir_all(&src).expect("the crate source directory creates");
     std::fs::write(
@@ -78,68 +78,27 @@ fn write_crate(root: &Path, dir: &str, name: &str, lib_docs: &str, lines: usize)
     )
     .expect("the manifest writes");
     std::fs::write(src.join("lib.rs"), lib_docs).expect("lib.rs writes");
-    std::fs::write(src.join("big.rs"), "// line\n".repeat(lines)).expect("big.rs writes");
 }
 
 const MARKED: &str = "//! Effect loop.\n//!\n//! ## Invariants\n//!\n//! - none\n";
 const UNMARKED: &str = "//! Effect loop, with no invariants block.\n";
 
 #[test]
-fn a_harness_crate_with_the_marker_is_held_to_the_ceiling() {
+fn a_harness_crate_without_the_marker_is_a_violation() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "harness/runner",
-        "harness-runner",
-        MARKED,
-        MAX_FILE_LINES + 1,
-    );
-    let violations = file_ceiling_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("big.rs") && violations[0].contains("over the 500-line ceiling"),
-        "the oversized harness file is reported: {violations:?}"
-    );
-    assert!(
-        marker_violations(root.path()).is_empty(),
-        "a marked family crate is not a marker violation"
-    );
-}
-
-#[test]
-fn a_harness_crate_without_the_marker_is_a_violation_and_still_held_to_the_ceiling() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "harness/runner",
-        "harness-runner",
-        UNMARKED,
-        MAX_FILE_LINES + 1,
-    );
+    write_crate(root.path(), "harness/runner", "harness-runner", UNMARKED);
     let violations = marker_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("harness-runner") && violations[0].contains(INVARIANT_MARKER),
         "the crate and the missing marker are named: {violations:?}"
     );
-    let ceiling = file_ceiling_violations(root.path());
-    assert_eq!(
-        ceiling.len(),
-        1,
-        "family membership, not the marker, opts the crate into the ceiling: {ceiling:?}"
-    );
 }
 
 #[test]
 fn a_harness_crate_whose_manifest_has_no_package_name_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "harness/runner",
-        "harness-runner",
-        UNMARKED,
-        MAX_FILE_LINES + 1,
-    );
+    write_crate(root.path(), "harness/runner", "harness-runner", UNMARKED);
     let manifest = root
         .path()
         .join("crates")
@@ -152,12 +111,6 @@ fn a_harness_crate_whose_manifest_has_no_package_name_is_reported_not_skipped() 
     assert!(
         violations[0].contains("runner") && violations[0].contains("no package name"),
         "the directory and the failure mode are named: {violations:?}"
-    );
-    let ceiling = file_ceiling_violations(root.path());
-    assert_eq!(
-        ceiling.len(),
-        1,
-        "a crate with no readable name is not exempt from the ceiling: {ceiling:?}"
     );
 }
 
@@ -180,95 +133,91 @@ fn a_manifest_read_failure_is_reported_once_across_the_checks() {
 }
 
 #[test]
-fn a_crate_nested_under_a_subsystem_container_is_held_to_the_ceiling() {
+fn the_workshop_desktop_app_without_the_marker_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "gateway/stt/engine",
-        "gateway-stt-engine",
-        MARKED,
-        MAX_FILE_LINES + 1,
-    );
-    let violations = file_ceiling_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("big.rs"),
-        "the walk reaches a crate three levels under crates/: {violations:?}"
-    );
-}
-
-#[test]
-fn the_tidy_checks_and_the_product_checks_enumerate_the_same_crates() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(root.path(), "harness/runner", "harness-runner", MARKED, 1);
-    write_crate(
-        root.path(),
-        "gateway/stt/engine",
-        "gateway-stt-engine",
-        MARKED,
-        1,
-    );
-    assert_eq!(
-        participating_crates(root.path()).len(),
-        crate::product::workspace_crates(root.path()).crates.len(),
-        "the two walks find the same crates"
-    );
-}
-
-#[test]
-fn the_workshop_desktop_app_without_the_marker_passes_and_stays_outside_the_ceiling() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "workshop/desktop",
-        "workshop",
-        UNMARKED,
-        MAX_FILE_LINES + 1,
-    );
+    write_crate(root.path(), "workshop/desktop", "workshop", UNMARKED);
     assert!(
         marker_violations(root.path()).is_empty(),
         "the desktop app is exempt from the marker"
-    );
-    assert!(
-        file_ceiling_violations(root.path()).is_empty(),
-        "the unmarked desktop app does not participate in the ceiling"
-    );
-}
-
-#[test]
-fn a_marked_crate_outside_the_families_still_participates_in_the_ceiling() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "build-fixture",
-        "build-fixture",
-        MARKED,
-        MAX_FILE_LINES + 1,
-    );
-    let violations = file_ceiling_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("big.rs"),
-        "the marker alone opts a crate in: {violations:?}"
-    );
-    assert!(
-        marker_violations(root.path()).is_empty(),
-        "a non-family crate is never required to have the marker"
     );
 }
 
 #[test]
 fn an_unmarked_crate_outside_the_families_is_left_alone() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "gateway/local",
-        "gateway-local",
-        UNMARKED,
-        MAX_FILE_LINES + 1,
-    );
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED);
     assert!(marker_violations(root.path()).is_empty());
-    assert!(file_ceiling_violations(root.path()).is_empty());
+}
+
+/// Writes a workspace root manifest that sets `unreachable_pub`, the one
+/// workspace lint the inheritance check requires of the root.
+fn write_root_manifest(root: &Path) {
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace.lints.rust]\nunreachable_pub = \"warn\"\n",
+    )
+    .expect("the root manifest writes");
+}
+
+#[test]
+fn crates_that_inherit_the_workspace_lints_pass_with_or_without_the_marker() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED);
+    write_crate(root.path(), "harness/runner", "harness-runner", MARKED);
+    let violations = lint_inheritance_violations(root.path());
+    assert!(violations.is_empty(), "{violations:?}");
+}
+
+#[test]
+fn an_unmarked_crate_with_its_own_lint_table_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED);
+    std::fs::write(
+        root.path()
+            .join("crates")
+            .join("gateway")
+            .join("local")
+            .join("Cargo.toml"),
+        "[package]\nname = \"gateway-local\"\n[lints.clippy]\npedantic = \"warn\"\n",
+    )
+    .expect("the manifest rewrites");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("local") && violations[0].contains("[lints] workspace = true"),
+        "every crate, not only a marked one, must inherit: {violations:?}"
+    );
+}
+
+#[test]
+fn a_lint_inheritance_scan_that_finds_no_crate_fails() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    std::fs::create_dir_all(root.path().join("crates")).expect("the crates directory creates");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("scanned nothing"),
+        "a check that read no crate cannot show any inherits: {violations:?}"
+    );
+}
+
+#[test]
+fn a_crate_whose_manifest_does_not_parse_is_held_to_lint_inheritance_not_skipped() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_root_manifest(root.path());
+    write_crate(root.path(), "gateway/local", "gateway-local", UNMARKED);
+    let dir = root.path().join("crates").join("broken");
+    std::fs::create_dir_all(&dir).expect("the crate directory creates");
+    std::fs::write(dir.join("Cargo.toml"), "not [valid toml").expect("the manifest writes");
+    let violations = lint_inheritance_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("broken") && violations[0].contains("[lints] workspace = true"),
+        "a crate that was never read cannot be shown to inherit: {violations:?}"
+    );
 }
 
 /// Writes `text` into `crates/gateway/app/src/<relative>`, creating the
@@ -398,6 +347,10 @@ fn tier_table_grants_each_tier_only_lower_tiers() {
     );
     assert_eq!(
         allowed_dependencies("workshop-workspace"),
+        Some(packages(&[VOCABULARY, SERVICES]))
+    );
+    assert_eq!(
+        allowed_dependencies("workshop-agents"),
         Some(packages(&[VOCABULARY, SERVICES]))
     );
     assert_eq!(

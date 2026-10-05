@@ -6,11 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway wire vocabulary: the provider model sheet schema, the model metadata types, and the progress snapshot"
-keywords = ["prompt", "llm", "gateway", "models"]
-categories = ["rust-patterns"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 serde.workspace = true
 time = { workspace = true, features = ["parsing", "serde-human-readable"] }
@@ -18,6 +13,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

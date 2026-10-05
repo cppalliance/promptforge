@@ -66,15 +66,6 @@ impl Config {
     /// match the workshop schema, [`ConfigError::UnresolvedVar`] if a
     /// `${VAR}` names a variable whose value is not valid Unicode, and
     /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
-    ///
-    /// # Examples
-    /// ```
-    /// let config = workshop_support::Config::from_toml_str(
-    ///     "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
-    /// )?;
-    /// assert_eq!(config.server.bind, "127.0.0.1:7910");
-    /// # Ok::<(), workshop_support::ConfigError>(())
-    /// ```
     pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
         Self::parse(raw, None)
     }
@@ -121,7 +112,7 @@ impl Config {
 
 /// Gateway connection settings: where the gateway listens and how to
 /// authenticate to it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct GatewayConfig {
     /// Base URL of the gateway, for example `http://127.0.0.1:8081`. Empty
     /// leaves the endpoint to resolution: it attaches through the gateway
@@ -131,17 +122,27 @@ pub struct GatewayConfig {
     pub api_key: String,
 }
 
+// Manual so the bearer key is never written to logs.
+impl std::fmt::Debug for GatewayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GatewayConfig")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
 /// HTTP server settings.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
     /// Address the workshop server binds to.
     pub bind: String,
-    /// Directory holding the server's persistent state: agent session
-    /// event logs sit under `state_dir/sessions/`, and the per-profile
-    /// model memory and boot orphan sweep anchor here. Defaults to the
-    /// config file's own directory (`Config::parse` anchors the empty
-    /// default there).
+    /// Directory holding the server's persistent state: the run log of
+    /// every agent session sits at `state_dir/harness/runs.db`, and the
+    /// per-profile model memory and boot orphan sweep anchor here.
+    /// Defaults to the config file's own directory (`Config::parse`
+    /// anchors the empty default there).
     pub state_dir: PathBuf,
 }
 

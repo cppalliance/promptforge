@@ -271,7 +271,7 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
   - Behavior changes ship with tests in the same change; per `AGENTS.md`, structural checks are added only with explicit user approval.
 - Directory map:
   - `crates/promptforge/` is the Engine's public facade, with `public-api.txt` and facade pages as `src/*.md`; `crates/promptforge-internal/` holds `engine`, `types`, `parser`, `lua`, `vfs` and `model-client`.
-  - `crates/harness/` is the Harness facade; `crates/harness-internal/` holds `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch` and `web-search`.
+  - `crates/harness/` is the Harness facade; `crates/harness-internal/` holds `runner`, `models`, `plugins`, `log`, `sessions`, `web`, `webfetch` and `web-search`.
   - `crates/gateway/` is a private container (`app`, `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/` with its own four crates), beside the public root crates `gateway-api-types` and `gateway-api-discovery`.
   - `crates/workshop/` holds the desktop app, the in-process `server`, `server-api`, the subsystem crates (`gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`) and the TypeScript packages `ui`, `look` and `platform` under one npm workspace.
   - `crates/shared-*` are the cross-product crates (`shared-error-source`, `shared-loopback`), `crates/shared-ui` is the TypeScript and CSS package for the Gateway config UI, `crates/build-*` are meta tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), and `crates/workspace-hack` is the cargo-hakari unification crate.

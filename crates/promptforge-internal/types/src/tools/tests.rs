@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::{ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolId};
-use crate::capabilities::CapabilityId;
+use crate::plugins::PluginId;
 
 fn inspect_id() -> ToolId {
     ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
@@ -74,6 +74,20 @@ fn tool_error_classifies_and_hides_source() {
         !sourced.to_string().contains("cause"),
         "Display must not expose the tool error source: {sourced}"
     );
+}
+
+#[test]
+fn a_tool_error_built_with_a_source_is_a_backend_error() {
+    use super::{ToolError, ToolErrorKind};
+    let err = ToolError::with_source("backend failed", std::io::Error::other("boom"));
+    assert_eq!(err.kind(), ToolErrorKind::Backend);
+    assert!(std::error::Error::source(&err).is_some());
+}
+
+#[test]
+fn an_empty_catalog_builds_and_holds_no_tools() {
+    let catalog = ToolCatalog::new(&[]).expect("an empty catalog builds");
+    assert!(catalog.tools().is_empty());
 }
 
 #[test]
@@ -166,12 +180,12 @@ fn a_three_segment_tool_id_parses_and_exposes_its_name() {
 }
 
 #[test]
-fn a_tool_ids_capability_is_always_its_two_segment_prefix() {
+fn a_tool_ids_plugin_is_always_its_two_segment_prefix() {
     let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
     assert_eq!(
-        id.capability(),
-        CapabilityId::parse("promptforge/web").expect("a valid capability id"),
-        "dropping the last segment must yield the contributing capability's id"
+        id.plugin(),
+        PluginId::parse("promptforge/web").expect("a valid Plugin id"),
+        "dropping the last segment must yield the contributing Plugin's id"
     );
 }
 
@@ -180,13 +194,13 @@ fn containment_holds_for_a_reverse_dns_namespace() {
     let id = ToolId::parse("org.rustalliance/core/search").expect("a valid tool id");
     assert_eq!(id.name(), "search");
     assert_eq!(
-        id.capability(),
-        CapabilityId::parse("org.rustalliance/core").expect("a valid capability id")
+        id.plugin(),
+        PluginId::parse("org.rustalliance/core").expect("a valid Plugin id")
     );
 }
 
 #[test]
-fn a_two_segment_capability_name_is_rejected_as_a_tool_id() {
+fn a_two_segment_plugin_name_is_rejected_as_a_tool_id() {
     use super::ToolIdErrorKind;
     assert_eq!(
         tool_id_error_kind("promptforge/web"),
@@ -245,9 +259,7 @@ fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
 
 #[test]
 fn the_migrated_built_in_ids_parse() {
-    // The built-ins moved from 2-part server/name onto the global grammar:
-    // promptforge/web_fetch -> promptforge/web/fetch and
-    // promptforge/web_search -> promptforge/web/search.
+    // The built-in tool ids follow the 3-segment global grammar.
     assert!(ToolId::parse("promptforge/web/fetch").is_ok());
     assert!(ToolId::parse("promptforge/web/search").is_ok());
 }

@@ -17,10 +17,10 @@ use rustdoc_types::{Crate, FORMAT_VERSION};
 use super::toolchain::PINNED;
 
 /// The facade's package and crate name.
-pub(crate) const FACADE: &str = "promptforge";
+pub(super) const FACADE: &str = "promptforge";
 
 /// The rustdoc flags every build passes. Hidden items are documented
-/// because dependents can still name them, and the transport codec is still
+/// because dependents can still name them, and the transport codec is
 /// hidden in its defining crate. Lints are capped at warn: documenting
 /// hidden items lints docs the workspace docs gate never renders, and
 /// link integrity is that gate's to deny - an unresolved link never
@@ -36,17 +36,17 @@ const RUSTDOC_FLAGS: [&str; 6] = [
 
 /// The parsed rustdoc JSON of the facade and its internal crates.
 #[derive(Debug)]
-pub(crate) struct Loaded {
+pub(super) struct Loaded {
     /// The facade crate.
-    pub(crate) facade: Crate,
+    pub(super) facade: Crate,
     /// Every internal crate, keyed by its crate name (`promptforge_engine`).
-    pub(crate) internal: BTreeMap<String, Crate>,
+    pub(super) internal: BTreeMap<String, Crate>,
 }
 
 /// The package names of every crate under the internal container, sorted.
 /// A manifest that cannot be read or names no package is an error: a
 /// crate the check cannot name cannot be documented or matched.
-pub(crate) fn internal_packages(root: &Path) -> Result<Vec<String>, String> {
+fn internal_packages(root: &Path) -> Result<Vec<String>, String> {
     let container = root
         .join("crates")
         .join(crate::engine_guards::ENGINE_CONTAINER);
@@ -76,7 +76,7 @@ pub(crate) fn internal_packages(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// Builds and parses the rustdoc JSON for the workspace at `root`.
-pub(crate) fn load(root: &Path) -> Result<Loaded, String> {
+pub(super) fn load(root: &Path) -> Result<Loaded, String> {
     let packages = internal_packages(root)?;
     let target = root.join("target").join("xtask-api");
     run_cargo_doc(root, &target, &packages)?;
@@ -94,7 +94,7 @@ pub(crate) fn load(root: &Path) -> Result<Loaded, String> {
 /// A cargo command in `root` on the pinned nightly: the cargo that runs
 /// this process when there is one, with rustup's proxies told the pinned
 /// toolchain so the rustc and rustdoc it spawns match.
-pub(crate) fn cargo(root: &Path) -> Command {
+pub(super) fn cargo(root: &Path) -> Command {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(cargo);
     command

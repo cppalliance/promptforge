@@ -6,16 +6,16 @@
 /// A nightly toolchain paired with the `rustdoc-types` release matching
 /// its rustdoc JSON `format_version`.
 #[derive(Debug)]
-pub(crate) struct Pinned {
+pub(super) struct Pinned {
     /// The rustup toolchain name, as in `cargo +<nightly> xtask api`.
-    pub(crate) nightly: &'static str,
+    pub(super) nightly: &'static str,
     /// The exact `rustdoc-types` version the workspace manifest pins.
-    pub(crate) rustdoc_types: &'static str,
+    pub(super) rustdoc_types: &'static str,
 }
 
 /// The pinned pair. `nightly-2026-09-05` emits `format_version` 61, which
 /// `rustdoc-types` 0.61.0 reads.
-pub(crate) const PINNED: Pinned = Pinned {
+pub(super) const PINNED: Pinned = Pinned {
     nightly: "nightly-2026-09-05",
     rustdoc_types: "0.61.0",
 };
@@ -23,14 +23,14 @@ pub(crate) const PINNED: Pinned = Pinned {
 /// The toolchain rustup resolved for this process. Rustup sets
 /// `RUSTUP_TOOLCHAIN` for every tool it proxies, to the full name with the
 /// host triple (`nightly-2026-09-05-x86_64-pc-windows-msvc`).
-pub(crate) fn active() -> Option<String> {
+pub(super) fn active() -> Option<String> {
     std::env::var("RUSTUP_TOOLCHAIN").ok()
 }
 
 /// Accepts `active` only when it names the pinned nightly, with or without
 /// a host triple; anything else is refused before any build starts, with
 /// the command that runs on the right toolchain.
-pub(crate) fn require_pinned(active: Option<&str>) -> Result<(), String> {
+pub(super) fn require_pinned(active: Option<&str>) -> Result<(), String> {
     let nightly = PINNED.nightly;
     let found = match active {
         Some(name) if name == nightly => return Ok(()),

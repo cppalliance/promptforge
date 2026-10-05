@@ -6,9 +6,8 @@
 //! ## Invariants
 //!
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
-//!   `workshop-support`. Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `workshop-support`. `cargo test -p build-xtask` enforces the product
+//!   and container boundaries.
 //! - Sending on the bus never blocks: a send with no subscribers is a
 //!   no-op, and a lagging subscriber skips ahead, so instrumenting a hot
 //!   path cannot stall the subsystem it observes.

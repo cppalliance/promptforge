@@ -157,12 +157,11 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     // Round 1 starts the task; the child runs and ends while the owner is
     // between its drain and its round-2 chat, so the notice misses round 2
     // and lands in round 3 as one user record.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[6].role .. '|' .. msgs[6].content"),
@@ -175,7 +174,7 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the notice is a message, not a raise");
@@ -189,15 +188,15 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     );
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 3);
-    let round_2 = bodies[1]["messages"].as_array().expect("messages");
+    let round_2 = &bodies[1].messages;
     assert_eq!(
         round_2.len(),
         3,
         "round 2 was issued before the notice existed: {round_2:?}"
     );
-    let round_3 = bodies[2]["messages"].as_array().expect("messages");
+    let round_3 = &bodies[2].messages;
     assert_eq!(round_3.len(), 6, "round 3 holds the notice: {round_3:?}");
-    assert_eq!(round_3[5]["role"], "user");
+    assert_eq!(round_3[5].role(), "user");
     let notices = recorder.notices();
     assert_eq!(notices.len(), 1, "one notice is reported: {notices:?}");
     assert_eq!(notices[0].0, "Only", "the notice reports under the owner");
@@ -213,12 +212,11 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "await_tasks", "{}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content"),
@@ -231,7 +229,7 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[Duration::from_millis(300)]),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the wait resumes with content");
@@ -239,10 +237,7 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
         out.starts_with("Task id=0.0 (## Child) completed: ") && out.contains("child result"),
         "await_tasks answers with the finished task's notice: {out}"
     );
-    let round_3 = gateway.requests()[2]["messages"]
-        .as_array()
-        .expect("messages")
-        .len();
+    let round_3 = gateway.requests()[2].messages.len();
     assert_eq!(
         round_3, 5,
         "the notice was consumed by the wait, not drained again into round 3"
@@ -260,13 +255,12 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_times_out_naming_the_tasks_still_running() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_3", "await_tasks", "{\"timeout\":0.1}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt("", &loop_owner("return msgs[7].content"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
@@ -275,7 +269,7 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the timeout resumes with content and the owner's end abandons both");
@@ -284,13 +278,12 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "await_tasks", "{}"),
         resp_tool_call("call_2", "await_tasks", "{\"timeout\":0.05}"),
         resp_tool_call("call_3", "await_tasks", "{\"timeout\":\"soon\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[3].content .. '|' .. msgs[5].content .. '|' .. msgs[7].content"),
@@ -303,7 +296,7 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("every answer is content");
@@ -320,12 +313,11 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
     // the model's `Child` on one answered at 900ms. The model parks in
     // `await_tasks` within a few ms, so the sibling's log lands after the
     // round that answered `await_tasks` and before the child's end.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "await_tasks", "{}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
               # ModelTasks\n\n\
               ## Only\n\n\
@@ -349,7 +341,7 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("both tasks end and the owner collects them");

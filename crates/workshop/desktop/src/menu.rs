@@ -13,7 +13,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Wry};
 
 /// The quit item's menu id, matched by the event handler.
-pub(crate) const QUIT_MENU_ID: &str = "quit-promptforge";
+const QUIT_MENU_ID: &str = "quit-promptforge";
 
 /// Builds and installs the app menu. A local sidecar makes the quit item
 /// stop both products; a configured LAN Gateway makes it stop only the desktop app.

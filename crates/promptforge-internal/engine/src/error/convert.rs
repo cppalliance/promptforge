@@ -3,10 +3,8 @@
 //! for variant, and the rebuild of a raised Lua error table into the
 //! variant it stands in for.
 
-use std::borrow::Cow;
-
 use promptforge_lua::Error as LuaError;
-use promptforge_model_client::Error as GatewayClientError;
+use promptforge_model_client::model::ModelSetError;
 use promptforge_parser::Error as ParserError;
 use promptforge_types::ids::TaskId;
 
@@ -74,7 +72,7 @@ impl Error {
     /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
     /// `#[source]` cause rather than flattening it to a string.
     #[cfg(test)]
-    pub(crate) fn lua(source: mlua::Error) -> Error {
+    pub(super) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
             message: source.to_string(),
             source: Box::new(source),
@@ -88,48 +86,18 @@ impl From<crate::subst::SubstitutionError> for Error {
     }
 }
 
-/// Maps the gateway-client error type back onto this one variant for
-/// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
-/// classification are unchanged by the extraction. The client crate's
-/// error type is `#[non_exhaustive]`; a variant this match does not name
-/// becomes [`Error::Config`] with its display text and itself as the source,
-/// so it classifies as a completion failure that is not retryable.
-impl From<GatewayClientError> for Error {
-    fn from(error: GatewayClientError) -> Error {
-        match error {
-            GatewayClientError::MissingEnv(name) => Error::MissingEnv(name),
-            GatewayClientError::InvalidEnv(name) => Error::InvalidEnv(name),
-            GatewayClientError::InvalidConfig(detail) => Error::InvalidConfig(detail),
-            GatewayClientError::Config { message, source } => Error::Config { message, source },
-            GatewayClientError::GatewayDisabled => Error::GatewayDisabled,
-            GatewayClientError::Http(source) => Error::Http(source),
-            GatewayClientError::Backend { status, body } => Error::Backend { status, body },
-            GatewayClientError::MalformedResponse(message) => Error::MalformedResponse(message),
-            GatewayClientError::MalformedResponseSource { message, source } => {
-                Error::MalformedResponseSource { message, source }
-            }
-            GatewayClientError::BackendBodyRead { status, source } => {
-                Error::BackendBodyRead { status, source }
-            }
-            GatewayClientError::EmptyModelReply {
-                detail,
-                finish_reason,
-            } => Error::EmptyModelReply {
-                detail: Cow::Borrowed(detail),
-                finish_reason,
-            },
-            GatewayClientError::ModelSetLock(message) => Error::Lua(message),
-            other => Error::Config {
-                message: other.to_string(),
-                source: Box::new(other),
-            },
-        }
+/// Maps a poisoned model-set lock onto [`Error::Lua`]. The lock is the
+/// run's own mutex failing, not a model failure, so it never becomes an
+/// [`Error::Completion`].
+impl From<ModelSetError> for Error {
+    fn from(error: ModelSetError) -> Error {
+        Error::Lua(error.to_string())
     }
 }
 
 impl From<crate::model::CompletionError> for Error {
     fn from(error: crate::model::CompletionError) -> Error {
-        Error::from(GatewayClientError::from(error))
+        Error::Completion(error)
     }
 }
 
@@ -287,8 +255,7 @@ impl Error {
     /// onto the variant its kind names, so a Lua-side raise classifies as
     /// the Rust-raised error it stands in for. A kind whose variant needs
     /// structure the table does not hold (the tool-scope errors, the task
-    /// errors, `internal`) keeps its message as a Lua failure; those
-    /// classifications arrive with the shims that raise them.
+    /// errors, `internal`) keeps its message as a Lua failure.
     fn from_raised(raised: promptforge_lua::Raised) -> Error {
         match raised.kind {
             promptforge_lua::ErrorKind::ToolLoopExhausted => Error::ToolLoopExhausted,
@@ -296,14 +263,22 @@ impl Error {
                 Some(reason) => Error::ContextExhausted { reason },
                 None => Error::Lua(raised.message),
             },
-            promptforge_lua::ErrorKind::EmptyModelReply => Error::EmptyModelReply {
-                finish_reason: raised
-                    .fields
-                    .get("finish_reason")
-                    .and_then(promptforge_lua::ErrorField::as_str)
-                    .map(str::to_owned),
-                detail: Cow::Owned(raised.message),
-            },
+            promptforge_lua::ErrorKind::EmptyModelReply => {
+                let error = crate::model::CompletionError::new(
+                    crate::model::CompletionErrorKind::EmptyReply,
+                    raised.message,
+                );
+                Error::Completion(
+                    match raised
+                        .fields
+                        .get("finish_reason")
+                        .and_then(promptforge_lua::ErrorField::as_str)
+                    {
+                        Some(reason) => error.with_finish_reason(reason),
+                        None => error,
+                    },
+                )
+            }
             promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
             promptforge_lua::ErrorKind::Tool => Error::Tool {
                 message: raised.message.clone(),

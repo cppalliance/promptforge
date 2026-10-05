@@ -48,41 +48,23 @@ async fn gate_the_operators_message_frames_as_a_user_message_between_wait_frames
         );
     }
 
-    // The next ask's wait dies with the cancelled run. The dying run's
-    // cleared frame and the relaunch's fresh wait may arrive in either
-    // order, so both are collected.
-    let dying = wait_after(&mut socket, &turn).await;
-    assert_ne!(dying, token, "each ask opens its own wait");
+    // A stop with only the next ask open leaves that wait open: its own
+    // token answers it, and the turn it starts frames like the first.
+    let open = wait_after(&mut socket, &turn).await;
+    assert_ne!(open, token, "each ask opens its own wait");
     socket.send_json(&json!({ "type": "cancel" })).await;
-    let mut cleared = false;
-    let mut fresh = None;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !cleared || fresh.is_none() {
-            let frame = socket.recv_json().await;
-            match frame["type"].as_str() {
-                Some("error") => panic!("a cancel is not an error: {frame}"),
-                Some("input_cancelled") => {
-                    assert_eq!(frame["token"], dying.as_str(), "only the dying wait clears");
-                    cleared = true;
-                }
-                Some("input_required") => fresh = frame["token"].as_str().map(str::to_owned),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("the dying wait clears and the relaunched run asks again");
-    assert_ne!(
-        fresh.as_deref(),
-        Some(dying.as_str()),
-        "the relaunched run asks under a fresh wait"
+    answer(&mut socket, &open, "after stop").await;
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(
+        turn.events[0]["event"]["content"], "after stop",
+        "the open wait's own token answered it"
     );
     socket.close().await;
 }
 
-/// GATE 1 - multi-turn history. Current-chat behavior: the conversation
-/// accumulates turn over turn, and what the user typed reaches the model
-/// byte-exact with no untrusted envelope around it.
+/// GATE 1 - multi-turn history. The conversation accumulates turn over
+/// turn, and what the user typed reaches the model byte-exact with no
+/// untrusted envelope around it.
 #[tokio::test]
 async fn gate_history_accumulates_across_three_turns_byte_exact() {
     let server = spawn_chat_server(&["test-model"]).await;

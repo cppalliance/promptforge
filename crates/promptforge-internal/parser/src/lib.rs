@@ -18,10 +18,9 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-types` and `promptforge-lua`. Read the
-//!   repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//! - May depend on: `promptforge-types` and `promptforge-lua`.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 
 pub use promptforge_lua::LuaProgram;
 
@@ -41,10 +40,10 @@ pub use build::{
     FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
 };
 pub use contract::{
-    ArgDecl, ArgType, ArgsDecl, CapabilityDecl, ModelKeyword, ModelRole, ModelRoles, ToolSlot,
+    ArgDecl, ArgType, ArgsDecl, ModelKeyword, ModelRole, ModelRoles, PluginDecl, ToolSlot,
     ToolSlots,
 };
-pub(crate) use error::Result;
+use error::Result;
 pub use error::{Error, ParseError, ParseErrorKind};
 pub use prompt::{Block, Prompt, Section};
 

@@ -1,0 +1,402 @@
+//! The bounds and refusals: the disabled sentinel, the byte caps on both
+//! paths, the per-receive timeout, and the malformed or cut-off stream.
+
+use std::num::NonZeroU64;
+use std::time::Duration;
+
+use promptforge::model::{CompletionResult, Message};
+
+use super::*;
+use crate::CompletionErrorKind;
+
+#[tokio::test]
+async fn complete_on_a_disabled_client_is_an_unavailable_error() {
+    // F14: a disabled client never touches the network.
+    let client = GatewayChat::disabled();
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a disabled client cannot complete");
+    assert_eq!(err.kind(), CompletionErrorKind::Unavailable);
+    assert_eq!(
+        err.to_string(),
+        "model access is turned off or not configured"
+    );
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
+    use axum::Router;
+    use axum::routing::post;
+
+    // A non-success body holding control characters and a would-be secret.
+    async fn handler() -> (axum::http::StatusCode, String) {
+        (
+            axum::http::StatusCode::BAD_GATEWAY,
+            "forged\nlog: super-secret".to_owned(),
+        )
+    }
+    let app = Router::new().route("/v1/chat/completions", post(handler));
+    let client = client_for(app).await;
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a 502 must surface as a classified failure");
+
+    // F5: the public Display names only the kind and the status, never the
+    // raw body.
+    assert_eq!(err.kind(), CompletionErrorKind::ServerError);
+    let shown = err.to_string();
+    assert_eq!(
+        shown,
+        "the model backend reported a fault of its own (status 502)"
+    );
+    assert!(
+        !shown.contains("super-secret") && !shown.contains('\n'),
+        "the raw body must not appear in Display, got {shown}"
+    );
+    // The bounded, control-escaped body is available only via the opt-in.
+    let body = err.detail().expect("the body is available opt-in");
+    assert!(
+        body.contains("\\n"),
+        "control chars must be escaped, got {body}"
+    );
+    assert!(
+        !body.contains('\n'),
+        "no raw newline in the diagnostic body"
+    );
+}
+
+#[tokio::test]
+async fn complete_refuses_a_success_stream_over_the_size_cap() {
+    // F14 (body-size, success path): a 200 stream larger than the cap is
+    // refused as the bytes arrive, before any further parsing.
+    let base = spawn_raw_gateway(
+        axum::http::StatusCode::OK,
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a long reply\"}}]}\n\n",
+    )
+    .await;
+    let client = keyed_client(&base).with_request_limits(
+        DEFAULT_REQUEST_TIMEOUT,
+        NonZeroU64::new(8).expect("non-zero cap"),
+    );
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("an oversize stream must be refused");
+    assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+         response stream exceeds the 8-byte limit"
+    );
+}
+
+#[tokio::test]
+async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
+    // F14 (body-size, error path): a non-success body larger than the cap is
+    // also refused before it is buffered.
+    let base = spawn_raw_gateway(
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "this backend error body is definitely longer than eight bytes",
+    )
+    .await;
+    let client = keyed_client(&base).with_request_limits(
+        DEFAULT_REQUEST_TIMEOUT,
+        NonZeroU64::new(8).expect("non-zero cap"),
+    );
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("an oversize error body must be refused");
+    assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(err.detail(), None, "the refused body is never kept");
+}
+
+#[tokio::test]
+async fn a_request_past_the_timeout_is_a_timeout_failure() {
+    use axum::Router;
+    use axum::routing::post;
+
+    // The timeout bounds the wait for the response headers; a gateway that
+    // never answers within it fails as Timeout.
+    async fn stall() -> (axum::http::StatusCode, String) {
+        std::future::pending().await
+    }
+    let app = Router::new().route("/v1/chat/completions", post(stall));
+    let client = client_for(app).await.with_request_limits(
+        Duration::from_millis(50),
+        NonZeroU64::new(1024).expect("non-zero cap"),
+    );
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a stalled gateway must time out");
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
+        "the timeout must be recognizable: {err:?}"
+    );
+    assert!(err.is_retryable());
+}
+
+/// Reads one request through its body, so answering and closing never
+/// resets a connection that still holds unread bytes.
+async fn read_request(sock: &mut tokio::net::TcpStream) {
+    use tokio::io::AsyncReadExt;
+
+    let mut request = Vec::new();
+    let mut buf = [0u8; 1024];
+    while let Ok(read @ 1..) = sock.read(&mut buf).await {
+        request.extend_from_slice(&buf[..read]);
+        let text = String::from_utf8_lossy(&request);
+        let Some(end) = text.find("\r\n\r\n") else {
+            continue;
+        };
+        let length = text[..end]
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        if request.len() >= end + 4 + length {
+            return;
+        }
+    }
+}
+
+/// Serves one completion as a chunked SSE response written piece by piece,
+/// each after its pause, and returns the `/v1` base. With `stall` the body
+/// is never terminated and the socket stays open.
+async fn spawn_paced_gateway(pieces: Vec<(Duration, String)>, stall: bool) -> String {
+    use tokio::io::AsyncWriteExt;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        // Small paced writes must leave at once, not wait on Nagle.
+        let _ = sock.set_nodelay(true);
+        read_request(&mut sock).await;
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                    Transfer-Encoding: chunked\r\n\r\n";
+        if sock.write_all(head.as_bytes()).await.is_err() {
+            return;
+        }
+        for (pause, piece) in pieces {
+            tokio::time::sleep(pause).await;
+            let frame = format!("{:x}\r\n{piece}\r\n", piece.len());
+            if sock.write_all(frame.as_bytes()).await.is_err() {
+                return;
+            }
+        }
+        if stall {
+            std::future::pending::<()>().await;
+        }
+        let _ = sock.write_all(b"0\r\n\r\n").await;
+    });
+    format!("http://{addr}/v1")
+}
+
+/// The stream's closing `stop` chunk and `[DONE]` sentinel.
+fn stream_close() -> String {
+    sse_body(&[serde_json::json!({
+        "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+    })])
+}
+
+/// A keyed client for `base` whose timeout is `budget`.
+fn budgeted_client(base: &str, budget: Duration) -> GatewayChat {
+    keyed_client(base).with_request_limits(budget, NonZeroU64::new(1024 * 1024).expect("non-zero"))
+}
+
+#[tokio::test]
+async fn a_steady_stream_longer_than_the_timeout_completes() {
+    let gap = Duration::from_millis(50);
+    let mut pieces: Vec<(Duration, String)> = (0..5)
+        .map(|_| (gap, format!("data: {}\n\n", content_chunk("tick"))))
+        .collect();
+    pieces.push((gap, stream_close()));
+    let base = spawn_paced_gateway(pieces, false).await;
+    let completion = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("a stream that keeps arriving is not timed out");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "tick".repeat(5).as_str()),
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_single_event_trickled_past_the_timeout_completes() {
+    let event = format!("data: {}\n\n", content_chunk("trickled"));
+    let gap = Duration::from_millis(30);
+    let step = event.len().div_ceil(10);
+    let mut pieces: Vec<(Duration, String)> = event
+        .as_bytes()
+        .chunks(step)
+        .map(|piece| (gap, String::from_utf8(piece.to_vec()).expect("ASCII event")))
+        .collect();
+    assert!(pieces.len() >= 9, "the event arrives in about ten pieces");
+    pieces.push((gap, stream_close()));
+    let base = spawn_paced_gateway(pieces, false).await;
+    let completion = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("every received piece restarts the timeout");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "trickled"),
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_stream_that_stalls_after_the_headers_is_a_timeout_failure() {
+    let pieces = vec![(
+        Duration::ZERO,
+        format!("data: {}\n\n", content_chunk("half")),
+    )];
+    let base = spawn_paced_gateway(pieces, true).await;
+    let err = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a stream that stops arriving must time out");
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
+        "the timeout must be recognizable: {err:?}"
+    );
+    assert!(err.is_retryable());
+}
+
+#[tokio::test]
+async fn a_body_read_timeout_is_a_timeout_failure() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // The catalog fetch builds a failed error-body read through the same
+    // helper as a send failure, so a timeout during that read is still a
+    // `Timeout`. The server answers a 500 with a large promised body, then
+    // stalls.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let header = "HTTP/1.1 500 Internal Server Error\r\n\
+                 Content-Length: 1000000\r\n\r\nabc";
+            let _ = sock.write_all(header.as_bytes()).await;
+            // The stall never ends on its own: the client's read timeout
+            // is what ends the test, and the runtime's teardown drops
+            // the socket.
+            std::future::pending::<()>().await;
+        }
+    });
+    let response = reqwest::Client::new()
+        .get(format!("http://{addr}/models"))
+        .timeout(Duration::from_millis(50))
+        .send()
+        .await
+        .expect("the headers arrive before the stall");
+    let read = response
+        .bytes()
+        .await
+        .expect_err("the body read stalls past the timeout");
+    assert!(read.is_timeout(), "reqwest reports the read as a timeout");
+
+    let err = transport_failure(read);
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
+        "a timed-out body read is a Timeout: {err:?}"
+    );
+    assert_eq!(err.to_string(), "the model backend did not answer in time");
+    assert!(
+        std::error::Error::source(&err)
+            .is_some_and(|source| source.downcast_ref::<reqwest::Error>().is_some()),
+        "the reqwest error is kept as the source"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_connection_is_a_transport_failure() {
+    // Bind a port, then drop the listener so nothing accepts on it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let err = keyed_client(&format!("http://{addr}/v1"))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("nothing listens on the port");
+    assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    assert_eq!(
+        err.to_string(),
+        "the connection to the model backend failed"
+    );
+    assert!(err.is_retryable());
+    assert!(std::error::Error::source(&err).is_some());
+}
+
+#[tokio::test]
+async fn complete_refuses_a_malformed_stream_chunk() {
+    // F14: a 200 whose stream holds an undecodable chunk is
+    // MalformedResponse, and the decode failure is preserved as the
+    // error-chain source.
+    let base = spawn_raw_gateway(axum::http::StatusCode::OK, "data: { not json\n\n").await;
+    let client = keyed_client(&base);
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("undecodable chunk must fail");
+    assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    let source =
+        std::error::Error::source(&err).expect("the decode error must be a preserved source");
+    assert!(
+        source.downcast_ref::<serde_json::Error>().is_some(),
+        "the preserved source must be the JSON decode error, got {source}"
+    );
+}
+
+#[tokio::test]
+async fn complete_refuses_malformed_tool_call_fragments_at_the_boundary() {
+    // F14: a well-formed HTTP 200 whose streamed tool-call fragment has
+    // non-string arguments is rejected at the client boundary, not passed on.
+    let client = sse_client(sse_body(&[serde_json::json!({
+        "choices": [{ "index": 0, "delta": { "tool_calls": [{
+            "index": 0, "id": "c1", "type": "function",
+            "function": { "name": "t", "arguments": 123 }
+        }] } }]
+    })]))
+    .await;
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("malformed tool arguments must be rejected");
+    assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+}
+
+#[tokio::test]
+async fn stream_without_done_sentinel_is_malformed() {
+    // A stream cut off before [DONE] may be missing its tail; it must never
+    // pass for a complete turn.
+    let base = spawn_raw_gateway(
+        axum::http::StatusCode::OK,
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"half\"}}]}\n\n",
+    )
+    .await;
+    let client = keyed_client(&base);
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a truncated stream must fail");
+    assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+         completion stream ended without the [DONE] sentinel"
+    );
+}

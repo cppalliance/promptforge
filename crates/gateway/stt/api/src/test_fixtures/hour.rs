@@ -166,7 +166,7 @@ impl HourSimulationProbe {
 }
 
 #[derive(Debug)]
-pub(super) struct HourSimulationFactory {
+struct HourSimulationFactory {
     probe: HourSimulationProbe,
 }
 
@@ -235,7 +235,7 @@ impl Decoder for HourSimulationDecoder {
     }
 }
 
-#[allow(
+#[expect(
     clippy::cast_possible_truncation,
     reason = "each shifted marker word is explicitly masked to sixteen bits"
 )]
@@ -300,7 +300,7 @@ fn decode_marker(samples: &[f32]) -> Option<u64> {
     Some(second)
 }
 
-#[allow(
+#[expect(
     clippy::cast_possible_truncation,
     reason = "validated normalized PCM16 fixture samples are converted back to their exact words"
 )]

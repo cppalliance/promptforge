@@ -102,8 +102,8 @@ async fn an_unknown_frame_type_is_refused_with_an_error_frame() {
     let (mut socket, _) = tokio_tungstenite::connect_async(&url)
         .await
         .expect("connect to /ws");
-    // The excised chat frame is now just an unknown type: the session
-    // answers with a refusal naming the two menu events and survives.
+    // A `chat` frame is an unknown type: the session answers with a
+    // refusal naming the two menu events and survives.
     let stale = serde_json::json!({
         "type": "chat",
         "id": 7,
@@ -221,11 +221,10 @@ async fn a_new_session_receives_the_retained_workbench_snapshot() {
     socket.close(None).await.expect("close the socket");
 }
 
-// Un-ignored with the session rewrite: the flip below now waits for
-// the heartbeat's observed outage, so the recovery is always a real
-// down-to-up transition and the catalog push always happens; the
-// session's own subscription is live before the flip for the same
-// reason.
+// The flip below waits for the heartbeat's observed outage, so the
+// recovery is always a real down-to-up transition and the catalog push
+// always happens; the session's own subscription is live before the
+// flip for the same reason.
 #[tokio::test]
 async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
     let healthy = Arc::new(AtomicBool::new(false));

@@ -6,14 +6,21 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop app"
-
 [dependencies]
+# `SearchProvider`, which the agent sessions' Gateway search implements,
+# is an `async_trait` trait.
+async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
-# The Harness public API: the composition root constructs and registers
-# the Harness that runs the agent sessions.
+# The Harness public API: each conversation's launch builds the per-run
+# Harness that runs it.
 harness.workspace = true
+# The Gateway web search client the agent sessions' search provider
+# sends each search through.
+harness-gateway-client.workspace = true
+# The `promptforge/web` Plugin the Harness's registry holds, and the
+# search-provider and runtime services it reads.
+harness-web.workspace = true
 # The Engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.
@@ -30,10 +37,14 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 url.workspace = true
+# The conversation layer: the conversation table, transcripts, input
+# waits, agent discovery, and the recorder tee each run writes through.
+workshop-agents.workspace = true
 workshop-gateway.workspace = true
 workshop-menu.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
+workshop-run-log.workspace = true
 workshop-status.workspace = true
 workshop-support.workspace = true
 workshop-user-state.workspace = true
@@ -67,6 +78,7 @@ tower.workspace = true
 # The build script bundles the UI with esbuild into OUT_DIR through the
 # shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
+build-ceiling.workspace = true
 build-ui = { path = "../../build-ui" }
 
 [lints]

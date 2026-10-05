@@ -2,23 +2,27 @@
 //! OpenAI/Brave backends (including a request-recording backend), gateway
 //! builders, and rendezvous helpers used across the area modules.
 
-use std::io::Read as _;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::State;
-use axum::http::{HeaderMap, Method, header::AUTHORIZATION};
-use axum::routing::post;
-use axum::{Json, Router};
 use gateway::{Config, Gateway, ProfilesContext};
 use serde_json::Value;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+
+mod backends;
+mod process;
+
+#[cfg(feature = "web-search")]
+pub(crate) use backends::fake_brave;
+pub(crate) use backends::{
+    RecordedRequest, Recorder, ReleaseTx, canned_reply, fake_backend, recording_backend,
+    slow_fake_backend, spawn_backend,
+};
+pub(crate) use process::GatewayProcess;
 
 /// Pinned tiny bge-small-en-v1.5 GGUF, used only by the ignored live-local
 /// embeddings test.
@@ -38,164 +42,6 @@ pub(crate) const SCENARIO_RERANK_MODEL_SHA256: &str =
 
 /// Per-phase timeout so a hung rendezvous fails fast instead of hanging CI.
 pub(crate) const PHASE_TIMEOUT: Duration = Duration::from_secs(10);
-const TEST_START_READY_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_READY";
-const TEST_START_RELEASE_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_RELEASE";
-
-/// A real Gateway child whose teardown is bounded even when a race test
-/// panics before its ordinary shutdown path.
-pub(crate) struct GatewayProcess {
-    child: Child,
-}
-
-impl GatewayProcess {
-    /// Starts the production binary against an isolated profile and config.
-    pub(crate) fn spawn(config: &Path, home: &Path) -> Self {
-        Self::spawn_command(config, home)
-            .spawn()
-            .map(|child| Self { child })
-            .expect("the Gateway race fixture spawns")
-    }
-
-    /// Starts the production binary with `profile` as its `--profile`, or
-    /// with no `--profile` at all, so the boot resolves the selection from
-    /// the environment and the sibling state file the way a restart does.
-    pub(crate) fn spawn_selecting(config: &Path, home: &Path, profile: Option<&str>) -> Self {
-        Self::command_selecting(config, home, profile)
-            .spawn()
-            .map(|child| Self { child })
-            .expect("the Gateway fixture spawns")
-    }
-
-    /// Starts the production binary paused immediately before lease
-    /// acquisition until `release` exists.
-    #[cfg(feature = "test-fixtures")]
-    pub(crate) fn spawn_gated(config: &Path, home: &Path, ready: &Path, release: &Path) -> Self {
-        let child = Self::spawn_command(config, home)
-            .env(TEST_START_READY_ENV, ready)
-            .env(TEST_START_RELEASE_ENV, release)
-            .spawn()
-            .expect("the gated Gateway race fixture spawns");
-        Self { child }
-    }
-
-    /// Starts the production binary with extra environment layered on the
-    /// isolated home. The child command line is the only safe way to hand
-    /// a spawned gateway a variable (edition 2024 makes `env::set_var`
-    /// unsafe, which the workspace forbids).
-    pub(crate) fn spawn_with_env(config: &Path, home: &Path, envs: &[(&str, &str)]) -> Self {
-        let mut command = Self::spawn_command(config, home);
-        command.envs(envs.iter().copied());
-        command
-            .spawn()
-            .map(|child| Self { child })
-            .expect("the Gateway fixture spawns")
-    }
-
-    /// Starts the default binary with rendezvous-looking environment that
-    /// must be inert when the test fixture feature is absent.
-    #[cfg(not(feature = "test-fixtures"))]
-    pub(crate) fn spawn_with_inert_rendezvous(
-        config: &Path,
-        home: &Path,
-        ready: &Path,
-        release: &Path,
-    ) -> Self {
-        let child = Self::spawn_command(config, home)
-            .env(TEST_START_READY_ENV, ready)
-            .env(TEST_START_RELEASE_ENV, release)
-            .spawn()
-            .expect("the default Gateway fixture spawns");
-        Self { child }
-    }
-
-    fn spawn_command(config: &Path, home: &Path) -> Command {
-        Self::command_selecting(config, home, Some("main"))
-    }
-
-    fn command_selecting(config: &Path, home: &Path, profile: Option<&str>) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"));
-        command.arg("--config").arg(config);
-        if let Some(profile) = profile {
-            command.arg("--profile").arg(profile);
-        }
-        command
-            .arg("--print-url")
-            .env("USERPROFILE", home)
-            .env("HOME", home)
-            .env_remove("RUST_LOG")
-            .env_remove("PROMPTFORGE_PROFILE")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        command
-    }
-
-    pub(crate) fn id(&self) -> u32 {
-        self.child.id()
-    }
-
-    pub(crate) fn try_wait(&mut self) -> Option<ExitStatus> {
-        self.child
-            .try_wait()
-            .expect("observe the Gateway race fixture")
-    }
-
-    pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> ExitStatus {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(status) = self.try_wait() {
-                return status;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the Gateway race fixture did not exit within {timeout:?}"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    #[cfg(feature = "test-fixtures")]
-    pub(crate) fn stdout(&mut self) -> String {
-        let mut output = String::new();
-        self.child
-            .stdout
-            .take()
-            .expect("the Gateway fixture has piped stdout")
-            .read_to_string(&mut output)
-            .expect("read the Gateway fixture stdout");
-        output
-    }
-
-    pub(crate) fn stderr(&mut self) -> String {
-        let mut output = String::new();
-        self.child
-            .stderr
-            .take()
-            .expect("the Gateway fixture has piped stderr")
-            .read_to_string(&mut output)
-            .expect("read the Gateway fixture stderr");
-        output
-    }
-
-    pub(crate) fn stop(&mut self, timeout: Duration) {
-        if self.try_wait().is_none() {
-            let _ = self.child.kill();
-        }
-        let _ = self.wait_for_exit(timeout);
-    }
-}
-
-impl Drop for GatewayProcess {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while self.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-}
 
 /// A gateway served on a caller-owned ephemeral listener.
 ///
@@ -332,126 +178,7 @@ pub(crate) fn wait_for_connection(
     }
 }
 
-/// Spawns a plain axum backend on an ephemeral port and returns its address.
-pub(crate) async fn spawn_backend(router: Router) -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, router).await;
-    });
-    addr
-}
-
-/// A fake OpenAI backend that echoes the model and returns a canned reply,
-/// speaking SSE when the request asks to stream and JSON otherwise.
-pub(crate) async fn fake_backend() -> SocketAddr {
-    async fn completions(Json(body): Json<Value>) -> axum::response::Response {
-        use axum::response::IntoResponse;
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if body.get("stream").and_then(Value::as_bool) == Some(true) {
-            return (
-                [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
-                canned_sse_reply(&model),
-            )
-                .into_response();
-        }
-        Json(canned_reply(&model)).into_response()
-    }
-    spawn_backend(Router::new().route("/chat/completions", post(completions))).await
-}
-
-pub(crate) fn canned_reply(model: &str) -> Value {
-    serde_json::json!({
-        "id": "cmpl-test",
-        "object": "chat.completion",
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "message": { "role": "assistant", "content": "pong" },
-            "finish_reason": "stop"
-        }]
-    })
-}
-
-/// The streamed form of [`canned_reply`]: two content chunks, the finish
-/// chunk, and the `[DONE]` sentinel.
-pub(crate) fn canned_sse_reply(model: &str) -> String {
-    let chunk = |delta: Value, finish: Value| {
-        serde_json::json!({
-            "id": "cmpl-test",
-            "object": "chat.completion.chunk",
-            "model": model,
-            "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }]
-        })
-    };
-    let events = [
-        chunk(serde_json::json!({ "content": "po" }), Value::Null),
-        chunk(serde_json::json!({ "content": "ng" }), Value::Null),
-        chunk(serde_json::json!({}), Value::String("stop".to_owned())),
-    ];
-    let mut body = String::new();
-    for event in &events {
-        body.push_str("data: ");
-        body.push_str(&event.to_string());
-        body.push_str("\n\n");
-    }
-    body.push_str("data: [DONE]\n\n");
-    body
-}
-
-/// One request as observed by the recording backend (IT-005/006).
-#[derive(Clone, Debug)]
-pub(crate) struct RecordedRequest {
-    pub(crate) method: String,
-    pub(crate) path: String,
-    pub(crate) authorization: Option<String>,
-    pub(crate) body: Value,
-}
-
-/// Shared, thread-safe log of requests the backend received.
-pub(crate) type Recorder = Arc<Mutex<Vec<RecordedRequest>>>;
-
-/// A fake OpenAI backend that validates and records each request it receives,
-/// then returns the canned reply. The recorder lets a test assert exactly what
-/// the gateway forwarded (method, path, bearer, rewritten model, messages).
-pub(crate) async fn recording_backend() -> (SocketAddr, Recorder) {
-    async fn completions(
-        State(recorder): State<Recorder>,
-        method: Method,
-        uri: axum::http::Uri,
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Json<Value> {
-        let authorization = headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        recorder.lock().unwrap().push(RecordedRequest {
-            method: method.to_string(),
-            path: uri.path().to_string(),
-            authorization,
-            body: body.clone(),
-        });
-        Json(canned_reply(&model))
-    }
-
-    let recorder: Recorder = Arc::new(Mutex::new(Vec::new()));
-    let router = Router::new()
-        .route("/chat/completions", post(completions))
-        .with_state(Arc::clone(&recorder));
-    (spawn_backend(router).await, recorder)
-}
-
-pub(crate) fn gateway_config(backend: SocketAddr) -> Config {
+fn gateway_config(backend: SocketAddr) -> Config {
     let toml = format!(
         r#"
 config-version = 0
@@ -483,25 +210,6 @@ pub(crate) async fn gateway_for(backend: SocketAddr) -> TestServer {
     let gateway =
         Gateway::from_config(&gateway_config(backend), ProfilesContext::default()).unwrap();
     TestServer::start(gateway).await
-}
-
-/// A fake Brave Search backend returning five hits on two hosts.
-#[cfg(feature = "web-search")]
-pub(crate) async fn fake_brave() -> SocketAddr {
-    async fn search() -> Json<Value> {
-        Json(serde_json::json!({
-            "web": {
-                "results": [
-                    { "title": "A1", "url": "https://a.com/1", "description": "first a", "age": "1 day ago", "extra_snippets": ["snippet a1"] },
-                    { "title": "A2", "url": "https://a.com/2", "description": "second a", "extra_snippets": ["snippet a2"] },
-                    { "title": "A3", "url": "https://a.com/3", "description": "third a" },
-                    { "title": "B1", "url": "https://b.com/1", "description": "first b", "extra_snippets": ["snippet b1"] },
-                    { "title": "B2", "url": "https://b.com/2", "description": "second b" }
-                ]
-            }
-        }))
-    }
-    spawn_backend(Router::new().route("/web/search", axum::routing::get(search))).await
 }
 
 /// Starts a gateway wired to a fake Brave backend for the web-search tool.
@@ -538,34 +246,6 @@ base_url = "http://{brave}"
     let config = Config::from_toml_str(&toml).unwrap();
     let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
     TestServer::start(gateway).await
-}
-
-/// Release handle handed back by the slow backend when a request arrives.
-pub(crate) type ReleaseTx = oneshot::Sender<()>;
-
-/// A fake backend that, on each arrival, hands the test a release handle and
-/// blocks until it is fired. No sleeps: arrival and release are rendezvous.
-async fn completions_slow(
-    State(arrivals): State<UnboundedSender<ReleaseTx>>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let (release, released) = oneshot::channel();
-    let _ = arrivals.send(release);
-    let _ = released.await;
-    let model = body
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    Json(canned_reply(&model))
-}
-
-pub(crate) async fn slow_fake_backend() -> (SocketAddr, UnboundedReceiver<ReleaseTx>) {
-    let (arrivals, receiver) = mpsc::unbounded_channel::<ReleaseTx>();
-    let router = Router::new()
-        .route("/chat/completions", post(completions_slow))
-        .with_state(arrivals);
-    (spawn_backend(router).await, receiver)
 }
 
 pub(crate) async fn gateway_with_queue(

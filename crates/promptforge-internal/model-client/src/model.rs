@@ -15,8 +15,8 @@ mod options;
 
 pub use error::{CompletionError, CompletionErrorKind};
 pub use options::{
-    CompletionOptions, ModelBinding, ModelInvocation, ModelSet, ModelView, Temperature,
-    TemperatureError,
+    CompletionOptions, ModelBinding, ModelInvocation, ModelSet, ModelSetError, ModelView,
+    Temperature, TemperatureError,
 };
 // The model identity/catalog vocabulary is canonical in
 // `promptforge-types` and re-exported here so existing

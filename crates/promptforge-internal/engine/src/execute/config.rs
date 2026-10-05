@@ -5,8 +5,8 @@ use std::fmt;
 #[path = "config-limits.rs"]
 mod limits;
 
-use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::DebugMode;
+use promptforge_types::plugins::Prelude;
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
@@ -19,120 +19,110 @@ use promptforge_vfs::VfsRef;
 
 use super::bindings::{ModelBindings, ToolBindings};
 
-/// One run. Created by the Harness from the
-/// [`Environment`](super::Environment) holding the per-run inputs,
-/// enriched at prepare, owned by the Engine for the run. Never shared
-/// between runs.
+/// The inputs for one run of a prompt.
 ///
-/// The context is the Engine's input and nothing else: it holds no
-/// observer, client, tool implementation, broker, or capture. Those are
-/// the Harness's; the Engine reports events and issues effects as values
-/// and hands each one to the Harness through `step`.
+/// The caller builds a context with `new` and the builder methods. The
+/// prepare step of an [`Environment`](super::Environment) then adds the
+/// tool catalog, the Plugin preludes, and the model and tool
+/// bindings. The Engine owns the context for the run. Each context
+/// belongs to exactly one run.
 ///
-/// The Engine takes its clock and randomness from the Harness: the run's
-/// `seed` and `started_at` are inputs the Harness supplies to
-/// [`new`](RunContext::new) (a Harness draws both, records both, and a
-/// replay hands back the recorded values), so given the same inputs and
-/// the same answers a run reproduces its nonces, `sys.when`, effects, and
-/// events. Both are required: for a live run the Harness draws
-/// the seed from its own CSPRNG and stamps its own clock.
+/// The context holds only the Engine's input. The observer, client, tool
+/// implementations, broker, and capture belong to the caller. The Engine
+/// reports events and issues effects as values, and returns each one to
+/// the caller from `step`.
 ///
-/// # Examples
-/// ```
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{RunContext, RunLimits};
-///
-/// let ctx = RunContext::new("example-run", 7, Timestamp::from_unix_millis(951_782_400_000))
-///     .limits(RunLimits::new());
-/// assert_eq!(ctx.name(), "example-run");
-/// assert_eq!(ctx.seed(), 7);
-/// assert_eq!(ctx.started_at().to_rfc3339(), "2000-02-29T00:00:00Z");
-/// ```
+/// The caller supplies the run's clock and randomness: it passes the
+/// run's `seed` and `started_at` to [`new`](RunContext::new), and both
+/// are required. For a live run, the caller must draw the seed from a
+/// CSPRNG and read the start time from its own clock. The caller records both
+/// values, and a replay passes back the recorded ones. Given the same
+/// inputs and the same answers, a run reproduces its nonces, `sys.when`,
+/// effects, and events.
 #[non_exhaustive]
 pub struct RunContext {
     /// Run identity, stamped on every report and event.
-    pub(crate) name: String,
+    pub(super) name: String,
     /// The run's seed: Harness-drawn, the source of the untrusted-envelope
-    /// nonce (and of every future in-run random choice).
-    pub(crate) seed: u64,
-    /// The behavior flags the run records; empty until an Engine change
-    /// gates itself behind one.
-    pub(crate) flags: Flags,
+    /// nonce (and of every other in-run random choice).
+    pub(super) seed: u64,
+    /// The behavior flags the run records; empty by default.
+    flags: Flags,
     /// When the run began, as the Harness stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
-    pub(crate) started_at: Timestamp,
+    pub(super) started_at: Timestamp,
     /// Where the root task's provenance sequence starts: 0 by default. When
     /// the Harness logged the prompt's parse events (stamped under task `0`
     /// from zero) ahead of the run, it passes their count, so the run's root
     /// task continues the sequence and `(task, seq)` is unique across the
     /// parse/run boundary.
-    pub(crate) provenance_start: u32,
+    pub(super) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
-    /// Always 0 today - the sub-run adapter that increments it lands with
-    /// the deferred prompt-pack.
-    pub(crate) depth: u32,
+    /// Nothing increments it, so it is always 0.
+    depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
     /// bodies already travel in the `Chat` effect and its answer, so the
     /// Harness's effect log has them, and the events serve a Harness that
     /// wants the pair in the event stream too.
-    pub(crate) report_debug: DebugMode,
+    pub(super) report_debug: DebugMode,
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
     /// flag reaches them all; the Harness hands the same flag to the
-    /// capabilities it activates.
-    pub(crate) cancel: CancelHandle,
+    /// Plugins it activates.
+    pub(super) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     /// The Host-state snapshot the `ui()` global serves, taken by the Host
     /// at run start; its presence also turns on the raw-model-id
     /// `models.get` fallback.
-    pub(crate) ui: Option<serde_json::Value>,
+    pub(super) ui: Option<serde_json::Value>,
     /// The run's whole filesystem: real directories and the declared
     /// store. The default is a fresh memory store at `/`; the Harness
     /// mounts the run's real directories and declared store and sets the
     /// handle with [`vfs`](RunContext::vfs).
-    pub(crate) vfs: VfsRef,
+    pub(super) vfs: VfsRef,
     /// The run's current model: the Host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
-    /// which binds every declared role to it. Grows into a catalog or
-    /// policy in the deferred multi-model future - a field change, never
-    /// a signature change.
-    pub(crate) model: Option<ModelDescriptor>,
+    /// which binds every declared role to it.
+    pub(super) model: Option<ModelDescriptor>,
     /// The run's model satisfaction, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function: which concrete model each declared role is bound to.
-    pub(crate) model_bindings: ModelBindings,
-    /// The run's assembled tool catalog: the activated capabilities'
+    pub(super) model_bindings: ModelBindings,
+    /// The run's assembled tool catalog: the activated Plugins'
     /// contributed tools in declaration order, with tool
     /// prefix-containment enforced at assembly. Written by
     /// [`Environment::prepare`](super::Environment::prepare); the
     /// slot-filling step fills the prompt's tool slots against it.
-    pub(crate) tools: ToolCatalog,
+    pub(super) tools: ToolCatalog,
     /// The run's tool bindings, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s slot
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
-    pub(crate) tool_bindings: ToolBindings,
-    /// The run's capability preludes, in install order. Written by
+    pub(super) tool_bindings: ToolBindings,
+    /// The run's Plugin preludes, in install order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before the
     /// shared library replays. Empty on a caller-built context that was
     /// never prepared.
-    pub(crate) preludes: Vec<Prelude>,
+    pub(super) preludes: Vec<Prelude>,
 }
 
 impl RunContext {
-    /// Builds a context for the run `name` under the Harness's `seed` and
-    /// `started_at`, with a fresh cancel flag, no `ui` snapshot, no debug
-    /// reporting, default [`RunLimits`], empty [`Flags`], and the default
-    /// filesystem, a fresh memory store at `/`.
+    /// Builds a context for a run named `name`, with the given `seed` and
+    /// `started_at`.
     ///
-    /// `seed` is the source of the untrusted-envelope nonce, so for a live
-    /// run the Harness draws it from a CSPRNG (a predictable seed is a
-    /// guessable nonce); `started_at` is the instant every section reads as
-    /// `sys.when`. The Engine takes both from its caller: the Harness draws
-    /// and records them, and a replay hands them back verbatim.
+    /// The new context has a fresh cancel flag, a `ui` snapshot of `None`,
+    /// debug reporting set to `DebugMode::Off`, default [`RunLimits`], empty
+    /// [`Flags`], and the default filesystem, which is a fresh memory store
+    /// at `/`.
+    ///
+    /// `seed` is the source of the untrusted-envelope nonce. For a live
+    /// run, the caller must draw it from a CSPRNG, because a predictable
+    /// seed makes a guessable nonce. `started_at` is the instant every
+    /// section reads as `sys.when`. The caller records both values, and a
+    /// replay passes them back verbatim.
     #[must_use]
     pub fn new(name: impl Into<String>, seed: u64, started_at: Timestamp) -> RunContext {
         RunContext {
@@ -156,21 +146,25 @@ impl RunContext {
     }
 
     /// Sets whether the run reports each model round's raw request and
-    /// response bodies as `Request` and `Response` events. The default
-    /// ([`DebugMode::Off`]) reports neither; when the Harness wants the pair in
-    /// the event stream (a debug capture), it passes [`DebugMode::On`].
+    /// response bodies as `Request` and `Response` events.
+    ///
+    /// The default, [`DebugMode::Off`], turns both events off. A caller that
+    /// wants the pair in the event stream, such as for a debug capture,
+    /// passes [`DebugMode::On`].
     #[must_use]
     pub fn report_debug(mut self, mode: DebugMode) -> RunContext {
         self.report_debug = mode;
         self
     }
 
-    /// Sets the run's cancellation flag: the synchronous [`CancelHandle`]
-    /// the Engine polls between chain steps and from the Lua instruction
-    /// hook. A Harness that cancels through an awaitable token bridges it to
-    /// this flag (set the flag when the token fires), and hands the same
-    /// flag to the capabilities it activates so one cancel reaches them
-    /// all. Replaces the flag minted at construction.
+    /// Sets the run's cancel flag, replacing the one that `new` created.
+    ///
+    /// The flag is a synchronous [`CancelHandle`] that the Engine polls
+    /// between chain steps and from the Lua instruction hook. A caller that
+    /// cancels through an awaitable token must bridge the token to this
+    /// flag by setting the flag when the token fires. The caller hands the
+    /// same flag to the Plugins it activates, so one cancel reaches
+    /// them all.
     #[must_use]
     pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
         self.cancel = handle;
@@ -184,153 +178,172 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's Host-state snapshot. Section VMs gain a `ui()` global
-    /// serving this snapshot (taken by the Host at run start, so a
-    /// Host-state change takes effect on the next run), and `models.get`
-    /// resolves an undeclared alias as a raw gateway catalog model id, so a
-    /// prompt can run `models.loop(models.get(ui().selected_model), ...)`
-    /// without declaring its model. The default (`None`) installs no `ui`
-    /// global and keeps strict declared-alias resolution.
+    /// Sets the snapshot of application state that prompts read through the
+    /// `ui()` global.
+    ///
+    /// With a snapshot set, every section VM gets a `ui()` global that
+    /// returns it. The caller takes the snapshot at run start, so a change
+    /// to application state takes effect on the next run. A snapshot also
+    /// makes `models.get` resolve an alias outside the prompt's declarations
+    /// as a raw model id. So a prompt can run
+    /// `models.loop(models.get(ui().selected_model), ...)` and skip
+    /// declaring its model. The default is `None`, which leaves the `ui`
+    /// global absent and limits `models.get` to declared aliases.
     #[must_use]
     pub fn ui(mut self, snapshot: serde_json::Value) -> RunContext {
         self.ui = Some(snapshot);
         self
     }
 
-    /// Sets the behavior flags the run records. Empty is the only value
-    /// this Engine version produces; a replay hands back the recorded set.
+    /// Sets the behavior flags the run records.
+    ///
+    /// A live run keeps the default, the empty set. A replay passes back the
+    /// set the original run recorded.
     #[must_use]
     pub fn flags(mut self, flags: Flags) -> RunContext {
         self.flags = flags;
         self
     }
 
-    /// Sets where the root task's provenance sequence starts. The default
-    /// (0) is a run recorded on its own. When the Harness records the prompt's
-    /// parse events ahead of the run in one stream, it passes their count:
-    /// `Prompt::parse` stamps them under task `0` from zero, and this seeds
-    /// the run's root counter past them so every `(task, seq)` in the
-    /// stream is unique. Spawned tasks are unaffected and count from zero.
+    /// Sets where the root task's provenance sequence starts.
+    ///
+    /// The default, 0, fits a run recorded on its own. When the caller
+    /// records the prompt's parse events ahead of the run in one stream, it
+    /// passes their count. `Prompt::parse` stamps those events under task
+    /// `0`, counting from zero, so this start moves the run's root counter
+    /// past them and every `(task, seq)` in the stream stays unique.
+    /// Spawned tasks count from zero.
     #[must_use]
     pub fn provenance_start(mut self, start: u32) -> RunContext {
         self.provenance_start = start;
         self
     }
 
-    /// Sets the run's current model: the Host's selection (in Workshop,
-    /// the dropdown). Input to
+    /// Sets the run's current model, which the caller chooses.
+    ///
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
-    /// function, which binds every declared role to it and checks the
-    /// roles' hard keywords and context minimums against its descriptor.
-    /// With the default (`None`), declared roles stay unbound and
-    /// selecting one at run time fails.
+    /// function binds every declared role to this model. It also checks
+    /// each role's hard keywords and context minimum against the model's
+    /// descriptor. With the default, `None`, the model bindings stay empty,
+    /// and selecting a declared role at run time fails.
     #[must_use]
     pub fn model(mut self, model: ModelDescriptor) -> RunContext {
         self.model = Some(model);
         self
     }
 
-    /// Sets the run's VFS handle, the run's whole filesystem: the real
-    /// directories and the declared store every section's `store` table
-    /// operates on. The default is a fresh memory store at `/`.
+    /// Sets the run's VFS handle, which is the run's whole filesystem.
     ///
-    /// A handle set here is the Harness's, used as given by
-    /// [`Environment::prepare`](super::Environment::prepare) - the
-    /// environment never replaces it - so the Harness, when it activates
-    /// capabilities, builds the run's handle first, hands it to
-    /// activation's services and to this builder, and the capabilities
-    /// and the run share one filesystem. The Harness seeds files before the
-    /// run and extracts output after it through the prepared handle
-    /// ([`vfs_handle`](RunContext::vfs_handle)).
+    /// The filesystem holds the real directories and the declared store
+    /// that every section's `store` table operates on. The default is a
+    /// fresh memory store at `/`.
+    ///
+    /// [`Environment::prepare`](super::Environment::prepare) keeps a handle
+    /// set here as given. So a caller that activates Plugins builds
+    /// the run's handle first, then passes it both to the services that
+    /// Plugin activation receives and to this builder. The
+    /// Plugins and the run then share one filesystem.
+    /// The caller seeds files before the run and extracts output after it
+    /// through the prepared handle, returned by
+    /// [`vfs_handle`](RunContext::vfs_handle).
     #[must_use]
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
         self
     }
 
-    /// Returns the run's VFS handle: the run's whole filesystem, real
-    /// directories and declared store included, through which the Harness
-    /// seeds files before the run and extracts output after it.
+    /// Returns the run's VFS handle, which is the run's whole filesystem.
     ///
-    /// Named `vfs_handle` because the builder half already owns
+    /// The filesystem includes the real directories and the declared
+    /// store. The caller seeds files through this handle before the run and
+    /// extracts output through it after the run. Set the handle with
     /// [`vfs`](RunContext::vfs).
     #[must_use]
     pub fn vfs_handle(&self) -> &VfsRef {
         &self.vfs
     }
 
-    /// Returns the run's current model, when the Host selected one.
+    /// Returns the run's current model, or `None` by default.
     #[must_use]
     pub fn current_model(&self) -> Option<&ModelDescriptor> {
         self.model.as_ref()
     }
 
-    /// Returns the run's cancel flag: the handle the Harness hands to the
-    /// capabilities it activates so one cancel reaches them and the run.
-    /// Named `cancel_handle` because the builder half already owns
+    /// Returns the run's cancel flag.
+    ///
+    /// The caller hands this flag to the Plugins it activates, so one
+    /// cancel reaches them and the run. Replace the flag with
     /// [`cancel`](RunContext::cancel).
     #[must_use]
     pub fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
     }
 
-    /// Returns the run's model satisfaction, written by
-    /// [`Environment::prepare`](super::Environment::prepare)'s fill
-    /// function: which concrete model each declared role is bound to, and
-    /// the descriptors this run may use. Handles resolve
-    /// label -> id -> descriptor.
+    /// Returns the run's model bindings, which map each declared role to a
+    /// concrete model.
+    ///
+    /// The bindings also hold the descriptors of the models this run may
+    /// use. [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// function writes them. A lookup goes from a role's label to a model
+    /// id, and from the id to the model's descriptor.
     #[must_use]
     pub fn model_bindings(&self) -> &ModelBindings {
         &self.model_bindings
     }
 
-    /// Returns the run's assembled tool catalog, written by
-    /// [`Environment::prepare`](super::Environment::prepare) from the
-    /// activated capabilities' contributions in declaration order. Empty
-    /// on a caller-built context that was never prepared.
+    /// Returns the run's assembled tool catalog.
+    ///
+    /// [`Environment::prepare`](super::Environment::prepare) writes the
+    /// catalog from the activated Plugins' contributions, in
+    /// declaration order. On a caller-built context, the catalog is empty
+    /// until prepare runs.
     #[must_use]
     pub fn tools(&self) -> &ToolCatalog {
         &self.tools
     }
 
-    /// Returns the run's tool bindings, written by
-    /// [`Environment::prepare`](super::Environment::prepare)'s slot
-    /// fill: which concrete tool each declared alias is bound to, with
-    /// every fill journaled. Handles resolve alias -> id -> tool.
-    /// Empty on a caller-built context that was never prepared.
+    /// Returns the run's tool bindings, which map each declared alias to a
+    /// concrete tool.
+    ///
+    /// [`Environment::prepare`](super::Environment::prepare)'s slot fill
+    /// writes the bindings and records every fill. A lookup goes from an
+    /// alias to a tool id, and from the id to the tool's descriptor. On a
+    /// caller-built context, the bindings are empty until prepare runs.
     #[must_use]
     pub fn tool_bindings(&self) -> &ToolBindings {
         &self.tool_bindings
     }
 
-    /// Returns the run identity shared by every report.
+    /// Returns the run's name, which identifies the run on every report and
+    /// event.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the run's seed, as the Harness drew it.
+    /// Returns the run's seed, as the caller supplied it.
     #[must_use]
     pub fn seed(&self) -> u64 {
         self.seed
     }
 
-    /// Returns the behavior flags the run records. Named `run_flags`
-    /// because the builder half already owns [`flags`](RunContext::flags).
+    /// Returns the behavior flags the run records. Set them with
+    /// [`flags`](RunContext::flags).
     #[must_use]
     pub fn run_flags(&self) -> Flags {
         self.flags
     }
 
-    /// Returns when the run began, as the Harness stamped it.
+    /// Returns when the run began, as the caller stamped it.
     #[must_use]
     pub fn started_at(&self) -> Timestamp {
         self.started_at
     }
 
-    /// Returns the model-orchestrated prompt-tool nesting depth (always 0
-    /// for a root run; the sub-run adapter that increments it lands with
-    /// the deferred prompt-pack).
+    /// Returns how many model-orchestrated prompt tools this run is nested
+    /// inside.
+    ///
+    /// The depth is 0 for a root run.
     #[must_use]
     pub fn depth(&self) -> u32 {
         self.depth
@@ -361,7 +374,7 @@ impl fmt::Debug for RunContext {
                 &self
                     .preludes
                     .iter()
-                    .map(Prelude::capability)
+                    .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
             .finish()

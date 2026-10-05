@@ -6,9 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge API: the one Engine crate that outside crates depend on to parse prompts and drive their runs"
-documentation = "https://cppalliance.github.io/promptforge/promptforge/promptforge/index.html"
-
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path.
 [dependencies]
@@ -21,8 +18,13 @@ promptforge-vfs.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The prepare suite's tool descriptors carry JSON parameter schemas.
+# The suite's and the `greeter` example's tool descriptors carry JSON
+# parameter schemas, and the suite reads its effect and event logs back
+# as JSON.
 serde_json.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

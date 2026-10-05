@@ -13,7 +13,7 @@ use promptforge_types::detail::model_id_from_validated;
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
 /// pre-fill the run's shared set directly.
-pub(super) fn writer_models() -> ModelSet {
+fn writer_models() -> ModelSet {
     ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",
@@ -77,16 +77,11 @@ pub(super) fn scheduler_context_from(
 }
 
 /// The prompt in each gateway request, in arrival order.
-pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
+pub(super) fn request_prompts(gateway: &ScriptedChat) -> Vec<String> {
     gateway
         .requests()
         .iter()
-        .map(|body| {
-            body["messages"][0]["content"]
-                .as_str()
-                .expect("an infer request includes a user message")
-                .to_owned()
-        })
+        .map(|body| body.messages[0].content().to_owned())
         .collect()
 }
 

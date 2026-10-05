@@ -4,14 +4,14 @@
 
 use std::io;
 
-use harness::LaunchError;
+use workshop_agents::LaunchError;
 
 use super::*;
 
 #[test]
 fn a_refused_launch_frame_includes_the_cause_text() {
     let cause = "agents directory is locked by another process";
-    let refusal = LaunchRefusal::Refused(LaunchError::SessionState {
+    let refusal = LaunchRefusal::Refused(LaunchError::Unreadable {
         source: io::Error::new(io::ErrorKind::PermissionDenied, cause),
     });
 
@@ -28,9 +28,9 @@ fn a_refused_launch_frame_includes_the_cause_text() {
 }
 
 #[test]
-fn an_unavailable_harness_renders_its_own_message_alone() {
+fn an_unusable_gateway_renders_its_own_message_alone() {
     assert_eq!(
-        refusal_text(&LaunchRefusal::Unavailable),
-        "agent sessions are unavailable"
+        refusal_text(&LaunchRefusal::GatewayUnusable),
+        "agent sessions need a usable gateway binding; check the gateway base URL and key"
     );
 }

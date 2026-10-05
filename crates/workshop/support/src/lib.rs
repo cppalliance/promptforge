@@ -9,9 +9,8 @@
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: no internal `workshop-*` crates.
-//!   Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 //! - A lock poisoned by a panicking peer recovers the value rather than
 //!   wedging the process.
 

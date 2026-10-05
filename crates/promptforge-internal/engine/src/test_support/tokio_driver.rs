@@ -47,12 +47,12 @@ use tokio::task::JoinHandle;
 use crate::cancel::CancelHandle;
 use crate::lua::run_store_op;
 #[cfg(test)]
-use crate::test_support::mock_gateway_client::MockGatewayClient;
+use crate::test_support::scripted_chat::ScriptedChat;
 use crate::{Error, Result};
 
-#[cfg(test)]
-use crate::execute::EffectRecord;
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
+#[cfg(test)]
+use crate::execute::{EffectRecord, Round};
 #[cfg(test)]
 use crate::test_support::RunHarness;
 
@@ -71,7 +71,7 @@ pub use performers::{BoxFuture, Performer, Performers};
 use test_hooks::shuffle_batch;
 
 /// The sink every drained event is handed to, in step order.
-pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
+pub(super) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 
 /// Drives `run` to its end on the current tokio runtime, performing its
 /// `Chat` and `ToolCall` effects through `performers`,
@@ -80,38 +80,6 @@ pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 ///
 /// The future is boxed internally: the step machinery is large, and the
 /// caller's own future stays small.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so
-/// the refusing performers are never called:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge::cancel::CancelHandle;
-/// use promptforge_engine::test_support::{Performers, drive_tokio};
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{Prompt, Run, RunContext, RunResult};
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let run = Run::new(Arc::new(prompt), "", ctx);
-/// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// let mut events = Vec::new();
-/// let result = runtime.block_on(drive_tokio(
-///     run,
-///     Performers::refusing(),
-///     |event| events.push(event),
-///     CancelHandle::new(),
-/// ));
-/// let RunResult::Ok(text) = result else {
-///     panic!("the literal run succeeds: {result:?}");
-/// };
-/// assert_eq!(text, "hello");
-/// assert!(!events.is_empty());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub async fn drive_tokio(
     run: Run,
     performers: Performers,
@@ -157,19 +125,22 @@ pub(crate) struct TokioDriver<'a> {
     /// Test-only: the record of every effect performed, in issue order.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
+    /// Test-only: the round of every `Chat` effect issued, in issue order.
+    #[cfg(test)]
+    rounds: Option<Arc<Mutex<Vec<Round>>>>,
 }
 
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
     /// and replaying its events through the `harness` the suite assembled
-    /// itself. The bundle supplies the observer, chat client, tools, delta
-    /// hook, and debug capture; `client` is the run's mock-gateway client
-    /// when the suite supplies one, overriding any in the bundle.
+    /// itself. The bundle supplies the observer, chat client, tools, and
+    /// debug capture; `client` is the run's scripted model when
+    /// the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
         harness: RunHarness,
-        client: Option<MockGatewayClient>,
+        client: Option<ScriptedChat>,
     ) -> TokioDriver<'static> {
         let mut harness = harness;
         if let Some(client) = client {
@@ -187,12 +158,7 @@ impl<'a> TokioDriver<'a> {
     }
 
     /// Builds the driver over an assembled run.
-    pub(crate) fn over(
-        run: Run,
-        performers: Performers,
-        sink: EventSink<'a>,
-        cancel: CancelHandle,
-    ) -> Self {
+    fn over(run: Run, performers: Performers, sink: EventSink<'a>, cancel: CancelHandle) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
             run,
@@ -204,6 +170,8 @@ impl<'a> TokioDriver<'a> {
             cancel,
             #[cfg(test)]
             tap: None,
+            #[cfg(test)]
+            rounds: None,
             #[cfg(test)]
             shuffle: None,
         }

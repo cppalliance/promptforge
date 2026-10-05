@@ -16,16 +16,15 @@
 //! and is re-exported here. The transport codec a round's performer runs
 //! (the request body builder, the read loop over a transport's chunk
 //! source, and the error type it builds a [`CompletionError`] from) is not:
-//! the facade publishes it from `promptforge-model-client` directly, and
-//! the Engine's own test client imports it from there. The Engine itself
-//! never performs a completion.
+//! the facade publishes it from `promptforge-model-client` directly. The
+//! Engine itself never performs a completion.
 
 pub(crate) use promptforge_model_client::client::{
     Completion, CompletionResult, Message, ToolCall, ToolSchema,
 };
 pub(crate) use promptforge_model_client::model::{
-    CompletionError, CompletionOptions, ModelBinding, ModelInvocation, ModelSet, ModelView,
-    Temperature,
+    CompletionError, CompletionErrorKind, CompletionOptions, ModelBinding, ModelInvocation,
+    ModelSet, ModelView, Temperature,
 };
 pub(crate) use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 

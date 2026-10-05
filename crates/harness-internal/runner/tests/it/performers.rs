@@ -1,24 +1,46 @@
-//! The runner's own performer and the inline Vfs answer under the effect
-//! loop: a tokio timer fires after its duration and is torn down by a
-//! cancel, a store operation runs through the Engine's store facade.
+//! A Host's timer and the inline Vfs answer under the effect loop: a
+//! timer effect is answered once its sleep ends and its sleep is torn down
+//! by a cancel, and a store operation runs through the Engine's store
+//! facade.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use harness_log::{RecordKind, RunLog, RunMeta, RunOutcome};
-use harness_runner::effect_loop::{SharedLog, drive_run};
-use harness_runner::performers::{BoxFuture, TokioTimer, ToolPerformer};
+use harness_runner::effect_loop::drive_run;
+use harness_runner::performers::{BoxFuture, Timer, ToolPerformer};
+use harness_runner::recorder::{
+    MemoryRecorder, Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
+};
 use promptforge::cancel::CancelHandle;
+use promptforge::effect::ToolCallOrigin;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
 use serde_json::{Value, json};
 
-use crate::support::{PendingTool, TIMED_MAIN, WAITS, run, run_with_child, unused};
+use crate::support::{PendingTool, RaiseOnDrop, TIMED_MAIN, WAITS, run, run_with_child, unused};
 
-/// A run's opening row.
+/// A Host's timer: sleeps on the test runtime's clock for the effect's
+/// seconds, and raises `dropped` when a sleep is torn down unfinished.
+#[derive(Default)]
+struct SleepTimer {
+    dropped: Arc<AtomicBool>,
+}
+
+impl Timer for SleepTimer {
+    fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+        let raise = RaiseOnDrop(Arc::clone(&self.dropped));
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+            std::mem::forget(raise);
+        })
+    }
+}
+
+/// A run's opening metadata.
 fn meta() -> RunMeta {
     RunMeta {
-        session_id: "session-1".to_owned(),
-        agent: "runner-test".to_owned(),
+        name: "session-1".to_owned(),
         prompt_hash: "sha256:fixture".to_owned(),
         seed: 7,
         flags: 0,
@@ -26,11 +48,50 @@ fn meta() -> RunMeta {
     }
 }
 
-/// An in-memory log with one run begun in it.
-async fn begun_log() -> (SharedLog, harness_log::RunId) {
-    let mut log = RunLog::in_memory().await.unwrap();
-    let run_id = log.begin_run(meta()).await.unwrap();
-    (Arc::new(tokio::sync::Mutex::new(log)), run_id)
+/// An in-memory recorder with one run begun in it.
+async fn begun_log() -> (Arc<MemoryRecorder>, RunId) {
+    let recorder = Arc::new(MemoryRecorder::new());
+    let run_id = recorder.begin_run(meta()).await.unwrap();
+    (recorder, run_id)
+}
+
+/// A memory recorder that notes when each append arrived, so a test can
+/// measure the time between two records. It holds one run: the arrival
+/// at index `n` is the `n`th record's.
+struct StampedRecorder {
+    inner: MemoryRecorder,
+    arrivals: Mutex<Vec<Instant>>,
+}
+
+impl StampedRecorder {
+    fn new() -> Self {
+        Self {
+            inner: MemoryRecorder::new(),
+            arrivals: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn arrival(&self, position: usize) -> Instant {
+        self.arrivals.lock().unwrap()[position]
+    }
+}
+
+impl RunRecorder for StampedRecorder {
+    fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
+        self.inner.begin_run(meta)
+    }
+
+    fn append(&self, run: RunId, record: Record) -> RecorderFuture<'_, ()> {
+        Box::pin(async move {
+            self.inner.append(run, record).await?;
+            self.arrivals.lock().unwrap().push(Instant::now());
+            Ok(())
+        })
+    }
+
+    fn end_run(&self, run: RunId, outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+        self.inner.end_run(run, outcome)
+    }
 }
 
 /// Answers every tool call with `text` once `delay` has passed: the tool
@@ -45,6 +106,8 @@ impl ToolPerformer for DelayedTool {
         &self,
         _tool: ToolId,
         _alias: String,
+        _access: Arc<Access>,
+        _origin: ToolCallOrigin,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let delay = self.delay;
@@ -66,9 +129,10 @@ fn completed(outcome: RunOutcome) -> String {
 
 #[tokio::test]
 async fn a_timer_effect_is_answered_after_its_duration() {
-    let (log, run_id) = begun_log().await;
+    let recorder = Arc::new(StampedRecorder::new());
+    let run_id = recorder.begin_run(meta()).await.unwrap();
     let mut performers = unused();
-    performers.timer = Arc::new(TokioTimer);
+    performers.timer = Arc::new(SleepTimer::default());
     performers.tool = Arc::new(DelayedTool {
         delay: Duration::from_millis(400),
         text: "late",
@@ -83,10 +147,9 @@ async fn a_timer_effect_is_answered_after_its_duration() {
     let outcome = drive_run(
         run_with_child(main, WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();
@@ -97,48 +160,44 @@ async fn a_timer_effect_is_answered_after_its_duration() {
          then delivers the child"
     );
 
-    // The timer is measured alone: the log stamps the effect row when the
-    // effect is issued and the answer row when the sleep returns, so the
-    // gap between the two is the sleep and nothing else. The whole run's
-    // wall time would not do; the child's 400ms tool call holds it open
-    // regardless of what the timer did.
-    let records = log
-        .lock()
-        .await
-        .records(run_id, harness_log::RecordFilter::default())
-        .await
-        .unwrap();
+    // The timer is measured alone: the recorder notes when the effect
+    // record arrived and when the answer record did, so the gap between
+    // the two is the sleep and nothing else. The whole run's wall time
+    // would not do; the child's 400ms tool call holds it open regardless
+    // of what the timer did.
+    let records = recorder.inner.records(run_id);
     let timer = records
         .iter()
-        .find(|stored| {
-            stored.record.kind == RecordKind::Effect
-                && stored.record.payload == json!({ "Timer": { "seconds": 0.05 } })
+        .position(|record| {
+            record.kind == RecordKind::Effect
+                && record.payload == json!({ "Timer": { "seconds": 0.05 } })
         })
         .expect("the timed wait issues one timer effect");
     let answer = records
         .iter()
-        .find(|stored| {
-            stored.record.kind == RecordKind::Answer
-                && stored.record.effect_id == timer.record.effect_id
+        .position(|record| {
+            record.kind == RecordKind::Answer && record.effect_id == records[timer].effect_id
         })
         .expect("the timer effect is answered");
     assert_eq!(
-        answer.record.payload,
+        records[answer].payload,
         json!("Timer"),
         "a fired timer is answered as a timer, not dropped"
     );
-    let slept = answer.at - timer.at;
+    let slept = recorder.arrival(answer) - recorder.arrival(timer);
     assert!(
-        slept >= 50,
-        "the timer was answered no earlier than its duration after it was issued: {slept}ms"
+        slept >= Duration::from_millis(50),
+        "the timer was answered no earlier than its duration after it was issued: {slept:?}"
     );
 }
 
 #[tokio::test]
 async fn a_pending_timer_is_torn_down_by_a_cancel() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
+    let timer = SleepTimer::default();
+    let dropped = Arc::clone(&timer.dropped);
     let mut performers = unused();
-    performers.timer = Arc::new(TokioTimer);
+    performers.timer = Arc::new(timer);
     performers.tool = Arc::new(PendingTool);
     let cancel = CancelHandle::new();
     let trigger = cancel.clone();
@@ -153,10 +212,9 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
     let outcome = drive_run(
         run_with_child(TIMED_MAIN, WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         cancel,
-        |_event| {},
     )
     .await
     .unwrap();
@@ -165,18 +223,15 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
         started.elapsed() < Duration::from_secs(10),
         "the cancel tore the sleep down instead of waiting it out"
     );
+    assert!(
+        dropped.load(Ordering::SeqCst),
+        "the 30-second sleep was torn down unfinished"
+    );
 
-    let records = log
-        .lock()
-        .await
-        .records(run_id, harness_log::RecordFilter::default())
-        .await
-        .unwrap();
-    let dropped = records
+    let dropped = recorder
+        .records(run_id)
         .iter()
-        .filter(|stored| {
-            stored.record.kind == RecordKind::Answer && stored.record.payload == json!("Dropped")
-        })
+        .filter(|record| record.kind == RecordKind::Answer && record.payload == json!("Dropped"))
         .count();
     assert_eq!(
         dropped, 2,
@@ -186,7 +241,7 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
 
 #[tokio::test]
 async fn an_inline_vfs_answer_performs_the_operation_the_effect_names() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let performers = unused();
 
     let outcome = drive_run(
@@ -195,10 +250,9 @@ async fn an_inline_vfs_answer_performs_the_operation_the_effect_names() {
              local ok, err = pcall(store.read, 'missing.md')\n\
              return store.read('notes.md') .. '|' .. tostring(ok) .. '|' .. tostring(store.exists('notes.md'))"),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
-        |_event| {},
     )
     .await
     .unwrap();

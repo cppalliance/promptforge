@@ -9,7 +9,8 @@ use std::sync::Arc;
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_model_client::model::{ModelInvocation, Temperature};
 use promptforge_types::detail::model_id_from_validated;
-use promptforge_types::event::Event;
+use promptforge_types::event::{Event, ReplyOrigin};
+use promptforge_types::ids::RoundId;
 use promptforge_types::tools::ToolId;
 use serde_json::json;
 
@@ -17,6 +18,9 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
+
+#[path = "tests-drops.rs"]
+mod drops;
 
 /// A context for the run `run-test` under fixed Harness inputs; nothing here
 /// reads the seed or `sys.when`.
@@ -50,7 +54,7 @@ fn binding() -> ModelBinding {
 }
 
 #[test]
-fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
+fn a_chat_effect_records_its_round_alias_messages_tools_and_invocation() {
     let binding = binding();
     let effect = Effect::Chat {
         options: binding.completion_options(),
@@ -60,13 +64,16 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
             tool_schema_new("grab", "Grab a value", json!({ "type": "object" }))
                 .expect("a valid schema"),
         ],
-        stream: true,
+        round: Round {
+            id: RoundId::new(3),
+            origin: ReplyOrigin::Chat,
+        },
     };
     let record = effect.record();
     assert_eq!(
         record,
         EffectRecord::Chat {
-            model: "test-model".to_owned(),
+            round: RoundId::new(3),
             alias: "writer".to_owned(),
             messages: vec![json!({ "role": "user", "content": "ask" })],
             tools: vec!["grab".to_owned()],
@@ -74,6 +81,31 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
             max_tokens: Some(256),
             thinking: Some(false),
         }
+    );
+    assert_eq!(round_trip(&record), record);
+}
+
+#[test]
+fn a_chat_record_serializes_its_round_and_its_alias_and_no_model() {
+    let record = EffectRecord::Chat {
+        round: RoundId::new(3),
+        alias: "writer".to_owned(),
+        messages: Vec::new(),
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+    };
+    let wire = serde_json::to_value(&record).expect("a record serializes");
+    assert_eq!(
+        wire["Chat"]["round"],
+        json!(3),
+        "the round is a bare number"
+    );
+    assert_eq!(wire["Chat"]["alias"], json!("writer"));
+    assert!(
+        wire["Chat"].get("model").is_none(),
+        "the record names its slot by alias, not by a model: {wire}"
     );
     assert_eq!(round_trip(&record), record);
 }
@@ -88,12 +120,18 @@ fn model_origin() -> ToolCallOrigin {
 }
 
 #[test]
-fn a_tool_call_effect_records_its_identity_alias_args_and_origin() {
+fn a_tool_call_effect_records_its_identity_alias_args_and_origin_and_drops_the_access() {
+    let access = Arc::new(
+        promptforge_vfs::VfsRef::default()
+            .acquire(promptforge_vfs::Origin::new("run test fixture"))
+            .expect("the stock backend acquires"),
+    );
     let effect = Effect::ToolCall {
         tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({ "value": "hi" }),
         origin: model_origin(),
+        access,
     };
     let record = effect.record();
     assert_eq!(
@@ -104,6 +142,11 @@ fn a_tool_call_effect_records_its_identity_alias_args_and_origin() {
             args: json!({ "value": "hi" }),
             origin: model_origin(),
         }
+    );
+    let text = serde_json::to_string(&record).expect("a record serializes");
+    assert!(
+        !text.contains("access"),
+        "the tool call record holds no access: {text}"
     );
     assert_eq!(round_trip(&record), record);
 }
@@ -170,7 +213,7 @@ fn a_timer_effect_records_its_seconds() {
     assert_eq!(round_trip(&record), record);
 }
 
-/// A run over one section whose only Lua block is `body`, capability-free.
+/// A run over one section whose only Lua block is `body`, Plugin-free.
 fn run_of(body: &str, ctx: RunContext) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\n{body}\n```\n"
@@ -360,16 +403,16 @@ fn a_context_without_a_harness_handle_shares_its_one_flag_with_prepare_and_the_r
     let prompt = Prompt::parse(source, "run-test")
         .0
         .expect("the run test prompt parses");
-    // The flag `prepare` hands the capabilities is the context's own.
+    // The flag `prepare` hands the Plugins is the context's own.
     let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, run_context());
-    let capabilities_flag = ctx.cancel.clone();
+    let plugins_flag = ctx.cancel.clone();
     let mut run = Run::new(Arc::new(prompt), "", ctx);
-    assert!(!capabilities_flag.is_cancelled());
+    assert!(!plugins_flag.is_cancelled());
     assert!(!run.cancel_handle().is_cancelled());
     run.cancel();
     assert!(
-        capabilities_flag.is_cancelled(),
-        "the run's cancel sets the flag the capabilities hold"
+        plugins_flag.is_cancelled(),
+        "the run's cancel sets the flag the Plugins hold"
     );
     assert!(
         run.cancel_handle().is_cancelled(),
@@ -398,6 +441,19 @@ fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
     run.resume(id, EffectAnswer::Dropped);
     assert!(matches!(run.step(), Step::Done { .. }));
     assert!(run.decided(), "a finished run stays decided");
+}
+
+#[test]
+fn a_run_whose_only_section_returns_a_literal_is_done_at_its_first_step() {
+    let mut run = run_of("return 'hello'", run_context());
+    let Step::Done {
+        result: RunResult::Ok(text),
+        ..
+    } = run.step()
+    else {
+        panic!("the literal run is done at once");
+    };
+    assert_eq!(text, "hello");
 }
 
 #[test]

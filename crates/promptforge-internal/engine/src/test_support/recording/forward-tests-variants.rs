@@ -1,7 +1,7 @@
 //! The every-variant coverage test: one value of each `Event` variant,
 //! forwarded alone, reaches exactly the seam the table names.
 
-use promptforge_types::ids::{AbandonReason, TaskOrigin};
+use promptforge_types::ids::{AbandonReason, RoundId, TaskOrigin};
 
 use super::*;
 
@@ -202,6 +202,7 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 section: "A".to_owned(),
                 provenance: provenance(),
                 turn: 1,
+                round: RoundId::new(0),
                 model: "m".to_owned(),
                 text: "hmm".to_owned(),
             },
@@ -213,6 +214,7 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 section: "A".to_owned(),
                 provenance: provenance(),
                 turn: 1,
+                round: RoundId::new(0),
                 text: "hi".to_owned(),
                 finish_reason: Some("stop".to_owned()),
                 model: "m".to_owned(),
@@ -227,6 +229,7 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 section: "A".to_owned(),
                 provenance: provenance(),
                 turn: 1,
+                round: RoundId::new(1),
                 text: "inferred".to_owned(),
                 finish_reason: Some("stop".to_owned()),
                 model: "m".to_owned(),
@@ -241,6 +244,7 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 section: "A".to_owned(),
                 provenance: provenance(),
                 turn: 1,
+                round: RoundId::new(0),
                 model: "m".to_owned(),
                 calls: vec![ToolCallEvent {
                     id: "call_1".to_owned(),

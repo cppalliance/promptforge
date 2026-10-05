@@ -84,18 +84,18 @@ mod walk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use promptforge_types::ids::{Provenance, TaskId};
+use promptforge_types::ids::{Provenance, RoundId, TaskId};
 use promptforge_vfs::Origin;
 use promptforge_vfs::detail::ScopeHandle;
 
 use crate::parser::{Block, Prompt, Section};
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle;
+use promptforge_types::event::{ReplyOrigin, lifecycle};
 
 use super::context::RunState;
 use super::protocol::Answer;
-use super::run::{Effect, EffectAnswer, EffectId};
-use chain_record::Chain;
+use super::run::{Effect, EffectAnswer, EffectId, Round};
+use chain_record::{Chain, ChatAnchor};
 use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
 
@@ -270,6 +270,9 @@ pub(crate) struct Scheduler {
     /// The next effect id: a run-wide counter, so every effect the run
     /// issues has a distinct in-flight handle.
     next_effect: u64,
+    /// The next round id: a run-wide counter numbering the model rounds
+    /// in dispatch order, chat and nested-infer rounds alike.
+    next_round: u64,
     /// The run's scope, taken where the run acquires its root identity:
     /// closed when the run reaches `Done` or is dropped before it, so a
     /// store view the Harness still holds never outlives the run.
@@ -285,7 +288,7 @@ impl Drop for Scheduler {
 impl Scheduler {
     /// Builds the scheduler for one run over `ctx`'s prompt and reports
     /// the run's start, so the first step's events open with it.
-    pub(crate) fn new(ctx: RunState) -> Self {
+    pub(super) fn new(ctx: RunState) -> Self {
         // The run's boundaries are events like every other report: pushed
         // into the buffer under the root task, so the Harness sees them in
         // order with the sections between them.
@@ -304,6 +307,7 @@ impl Scheduler {
             phase: Phase::Fresh,
             max_chains: u32::MAX as usize,
             next_effect: 0,
+            next_round: 0,
             scope: None,
         }
     }
@@ -324,7 +328,7 @@ impl Scheduler {
 
     /// Whether the run's outcome is decided: the end boundary is reported
     /// and only the orphans' answers stand between the run and `Done`.
-    pub(crate) fn decided(&self) -> bool {
+    pub(super) fn decided(&self) -> bool {
         matches!(self.phase, Phase::Ending(_) | Phase::Done)
     }
 
@@ -347,5 +351,13 @@ impl Scheduler {
         self.issued.push((id, provenance, effect));
         self.pending.insert(id, Pending { chain, resume });
         id
+    }
+
+    /// Numbers the model round about to be issued with `origin`: the run's
+    /// next round id, in dispatch order.
+    fn number_round(&mut self, origin: ReplyOrigin) -> Round {
+        let id = RoundId::new(self.next_round);
+        self.next_round += 1;
+        Round { id, origin }
     }
 }

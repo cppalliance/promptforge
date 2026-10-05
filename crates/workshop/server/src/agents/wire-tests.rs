@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use promptforge::event::{Event, ReplyOrigin};
-use promptforge::ids::{ChainId, Provenance, TaskId};
+use promptforge::ids::{ChainId, Provenance, RoundId, TaskId};
 use promptforge::metrics::{
     CallMetrics, ClientTiming, LlamaTimings, ToolCallEvent, Usage, VllmMetrics,
 };
@@ -47,6 +47,7 @@ fn stamped_fixture_event() -> Event {
         section: "chat".to_owned(),
         provenance: provenance(),
         turn: 2,
+        round: RoundId::new(1),
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
@@ -145,6 +146,7 @@ fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
         section: "chat".to_owned(),
         provenance: provenance(),
         turn: 1,
+        round: RoundId::new(0),
         model: "llama-3".to_owned(),
         calls: vec![ToolCallEvent {
             id: "call_1".to_owned(),
@@ -179,6 +181,7 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
         section: "chat".to_owned(),
         provenance: provenance(),
         turn: 2,
+        round: RoundId::new(1),
         model: "llama-3".to_owned(),
         text: "weighing the options".to_owned(),
     };

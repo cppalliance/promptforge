@@ -11,8 +11,8 @@ fn injected_io() -> io::Error {
     io::Error::other("injected disk failure")
 }
 
-/// Every workspace failure keeps the status, code, and message it
-/// answered with before the crate split.
+/// Every workspace failure answers with its pinned status, code, and
+/// message.
 #[test]
 fn workspace_failures_keep_their_wire_mapping() {
     let cases: Vec<(WorkspaceError, StatusCode, &str)> = vec![

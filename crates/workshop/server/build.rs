@@ -10,6 +10,10 @@
 //! so server-only integration tests need neither Node.js nor the bundle.
 
 fn main() -> std::process::ExitCode {
+    if let Err(error) = build_ceiling::check() {
+        eprintln!("{error}");
+        return std::process::ExitCode::FAILURE;
+    }
     if std::env::var_os("CARGO_FEATURE_HEADLESS").is_some() {
         return empty_asset_dir();
     }

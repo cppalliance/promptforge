@@ -32,10 +32,10 @@ test("AGENTS.md names two UI-state homes, not a TOML config or three buckets", a
   }
 });
 
-// Guard for the Engine, Harness, and Host definitions in the root AGENTS.md.
+// Guard for the Engine, Harness, Host, and Plugin definitions in the root AGENTS.md.
 // Coding sessions read the rulebooks (every AGENTS.md, every .cursor/rules
 // file, and the crate doc of every lib.rs or main.rs that carries
-// `## Invariants`) as instructions, so each one uses the three words one way.
+// `## Invariants`) as instructions, so each one uses the four words one way.
 // Inline and fenced code is skipped, and so is the Definitions section itself,
 // whose rule text names the words it restricts.
 const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist"]);
@@ -43,6 +43,10 @@ const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist"]);
 const HOST_ALLOWED = /host-and-address|self-hosted|github-hosted/gi;
 // Other senses that keep a lowercase "engine" or "harness".
 const TERM_ALLOWED = /speech engine|database engine|test harness/gi;
+// Other programs' plugins, which keep a lowercase "plugin".
+const PLUGIN_ALLOWED = /Tauri plugin|ProseMirror plugin|esbuild plugin|NSIS plugin/gi;
+// Senses of "capability" other than the Plugin.
+const CAPABILITY_ALLOWED = /access capability|Tauri capability|model capabilities/gi;
 const RETIRED = ["production host", "engine's host", "hosts the engine", "harness that hosts", "host globals", "host-support"];
 
 async function* walk(dir) {
@@ -94,7 +98,7 @@ async function rulebookLines() {
   return out;
 }
 
-test("rulebooks use Engine, Harness, and Host as the root AGENTS.md defines them", async () => {
+test("rulebooks use Engine, Harness, Host, and Plugin as the root AGENTS.md defines them", async () => {
   const offenders = [];
   for (const { file, number, text } of await rulebookLines()) {
     const where = `${file}:${number}: ${text.trim()}`;
@@ -109,6 +113,12 @@ test("rulebooks use Engine, Harness, and Host as the root AGENTS.md defines them
     const terms = file.startsWith("crates/gateway/stt/") ? /(?<![-_/:\w])harness(?![-_/:\w])/ : /(?<![-_/:\w])(engine|harness)(?![-_/:\w])/;
     if (terms.test(text.replace(TERM_ALLOWED, " "))) {
       offenders.push(`${where} (lowercase "engine" or "harness": required "Engine" or "Harness" for the defined term)`);
+    }
+    if (/(?<![-_/:\w])plugins?(?![-_/:\w])/.test(text.replace(PLUGIN_ALLOWED, " "))) {
+      offenders.push(`${where} (lowercase "plugin": required "Plugin" for the defined term, or the other program's name, such as "Tauri plugin")`);
+    }
+    if (/capabilit/i.test(text.replace(CAPABILITY_ALLOWED, " "))) {
+      offenders.push(`${where} ("capability": the Plugin is never called a capability; another sense names what it grants, such as "access capability")`);
     }
   }
   assert.deepEqual(offenders, [], "rulebook lines break the root AGENTS.md Definitions");

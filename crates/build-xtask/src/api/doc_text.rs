@@ -11,7 +11,7 @@ use super::walk::Visit;
 const REQUIRED: &str = "surface doc text that names no internal crate";
 
 /// The doc-text findings for one build's visits and the facade's modules.
-pub(crate) fn findings(loaded: &Loaded, surface: &Surface, visits: &[Visit<'_>]) -> Vec<Finding> {
+pub(super) fn findings(loaded: &Loaded, surface: &Surface, visits: &[Visit<'_>]) -> Vec<Finding> {
     let names = spellings(surface);
     let mut findings = Vec::new();
     for (label, id) in &surface.modules {

@@ -1,0 +1,315 @@
+//! Shared fixtures for the activation suite: the activate-then-prepare
+//! ceremony, the run driver, fixture Plugins and tools, and the log
+//! capture.
+
+use std::io;
+use std::sync::{Arc, Mutex};
+
+use harness_plugins::{
+    Activation, Contribution, Plugin, PluginError, PluginId, PluginRegistry, RunServices, Tool,
+    ToolContext, activate,
+};
+use promptforge::Prompt;
+use promptforge::Run;
+use promptforge::Step;
+use promptforge::cancel::CancelHandle;
+use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::timestamp::Timestamp;
+use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::perform_vfs_op;
+use promptforge::{Environment, Requirements, RunContext, RunResult};
+
+/// A [`RunContext`] for the run `name` under fixed Harness inputs: no fixture
+/// here asserts on the nonce or `sys.when`.
+pub(super) fn context(name: impl Into<String>) -> RunContext {
+    RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
+}
+
+/// Parses a fixture prompt.
+pub(super) fn parse(source: &str, execution: &str) -> Prompt {
+    Prompt::parse(source, execution)
+        .0
+        .expect("the fixture prompt parses")
+}
+
+/// The Harness's activate-then-prepare ceremony spelled out, so a test can
+/// inspect what the run path folds into one refusal: activates the
+/// prompt's declared Plugins against `registry` with the run's own
+/// services - its cancel flag - installs the resulting catalog, prepares
+/// the context, and merges activation's report into prepare's. Returns
+/// the prepared context, the merged report, and the activation (for its
+/// implementation table).
+pub(super) fn prepare_activated(
+    env: Environment,
+    registry: Option<&PluginRegistry>,
+    prompt: &Prompt,
+    ctx: RunContext,
+) -> (RunContext, Requirements, Activation) {
+    let services = RunServices::new(ctx.cancel_handle());
+    let activation = activate(registry, prompt, &services);
+    let env = env.tools(activation.catalog.clone());
+    let (ctx, mut requirements) = env.prepare(prompt, ctx);
+    requirements.merge(activation.requirements.clone());
+    (ctx, requirements, activation)
+}
+
+/// The Harness's run path with Plugins: activates against
+/// `registry`, installs the catalog, prepares, merges the activation
+/// report, refuses an unsatisfiable prompt, and otherwise drives the run
+/// on the store-only loop below (no fixture here performs a chat, tool,
+/// or input effect).
+pub(super) fn run_activated(
+    registry: &PluginRegistry,
+    prompt: &Prompt,
+    ctx: RunContext,
+) -> RunResult {
+    let (ctx, requirements, _activation) =
+        prepare_activated(Environment::new(), Some(registry), prompt, ctx);
+    if let Some(refusal) = requirements.refusal() {
+        return RunResult::Failure(refusal);
+    }
+    drive_store_only(Run::new(Arc::new(prompt.clone()), "", ctx))
+}
+
+/// Drives `run` to its result, answering [`Effect::Vfs`] through
+/// [`perform_vfs_op`] and panicking on any other effect, which names a
+/// fixture that issues something this suite does not answer.
+fn drive_store_only(mut run: Run) -> RunResult {
+    loop {
+        match run.step() {
+            Step::Pending { effects, .. } => {
+                for (id, _provenance, effect) in effects {
+                    let Effect::Vfs { access, op } = effect else {
+                        panic!("the activation suite performs only store effects: {effect:?}");
+                    };
+                    run.resume(id, EffectAnswer::Vfs(perform_vfs_op(&access, op)));
+                }
+            }
+            Step::Done { result, .. } => return result,
+        }
+    }
+}
+
+/// What one activation observed: the cancellation handle it was handed.
+#[derive(Debug)]
+pub(super) struct Observed {
+    /// The cancellation handle `create` received.
+    pub(super) cancel: CancelHandle,
+}
+
+/// A fixture Plugin recording each activation's services. `fail`
+/// turns every activation into a [`PluginError`].
+pub(super) struct Fixture {
+    id: PluginId,
+    description: String,
+    fail: bool,
+    activations: Arc<Mutex<Vec<Observed>>>,
+}
+
+impl Fixture {
+    /// Builds a fixture Plugin registered under `id`.
+    pub(super) fn new(id: &str, fail: bool) -> (Arc<Fixture>, Arc<Mutex<Vec<Observed>>>) {
+        let activations = Arc::new(Mutex::new(Vec::new()));
+        let fixture = Arc::new(Fixture {
+            id: PluginId::parse(id).expect("the fixture id is valid"),
+            description: format!("The {id} fixture Plugin."),
+            fail,
+            activations: Arc::clone(&activations),
+        });
+        (fixture, activations)
+    }
+}
+
+impl Plugin for Fixture {
+    fn id(&self) -> &PluginId {
+        &self.id
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
+        if self.fail {
+            return Err(PluginError::message("the fixture cannot activate"));
+        }
+        self.activations
+            .lock()
+            .expect("the activations lock is not poisoned")
+            .push(Observed {
+                cancel: services.cancel.clone(),
+            });
+        Ok(Contribution::default())
+    }
+}
+
+/// A fixture tool: a static id and description, its name segment as the
+/// wire name, and an empty trusted output.
+struct FixtureTool {
+    id: ToolId,
+    description: String,
+}
+
+#[async_trait::async_trait]
+impl Tool for FixtureTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &str {
+        self.id.name()
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(String::new()))
+    }
+}
+
+/// A fixture tool whose wire name is transport-illegal: identity is a
+/// valid contained id, but the advertised name contains a `/` separator.
+pub(super) struct BadWireTool {
+    pub(super) id: ToolId,
+    pub(super) wire: String,
+}
+
+#[async_trait::async_trait]
+impl Tool for BadWireTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &str {
+        &self.wire
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "A fixture tool with an illegal wire name."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(
+        &self,
+        _cx: ToolContext<'_>,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(String::new()))
+    }
+}
+
+/// A fixture Plugin contributing tools and declaring co-activation
+/// conflicts.
+pub(super) struct ToolFixture {
+    id: PluginId,
+    conflicts: Vec<PluginId>,
+    tools: Vec<Arc<dyn Tool>>,
+}
+
+impl ToolFixture {
+    /// Builds a fixture registered under `id`, contributing `tools` and
+    /// conflicting with each id in `conflicts`.
+    pub(super) fn new(id: &str, conflicts: &[&str], tools: Vec<Arc<dyn Tool>>) -> ToolFixture {
+        ToolFixture {
+            id: PluginId::parse(id).expect("the fixture id is valid"),
+            conflicts: conflicts
+                .iter()
+                .map(|id| PluginId::parse(id).expect("the conflict id is valid"))
+                .collect(),
+            tools,
+        }
+    }
+}
+
+impl Plugin for ToolFixture {
+    fn id(&self) -> &PluginId {
+        &self.id
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Plugin trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "A tool-contributing fixture Plugin."
+    }
+
+    fn conflicts(&self) -> &[PluginId] {
+        &self.conflicts
+    }
+
+    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
+        let _ = services;
+        Ok(Contribution {
+            tools: self.tools.clone(),
+            prelude: None,
+        })
+    }
+}
+
+/// Builds a fixture tool arc under `id`.
+pub(super) fn fixture_tool(id: &str) -> Arc<dyn Tool> {
+    Arc::new(FixtureTool {
+        id: ToolId::parse(id).expect("the fixture tool id is valid"),
+        description: "A fixture tool.".to_owned(),
+    })
+}
+
+/// Builds a fixture tool arc under `id` with an explicit description.
+pub(super) fn described_tool(id: &str, description: &str) -> Arc<dyn Tool> {
+    Arc::new(FixtureTool {
+        id: ToolId::parse(id).expect("the fixture tool id is valid"),
+        description: description.to_owned(),
+    })
+}
+
+/// A shared buffer a fmt subscriber writes log lines into.
+#[derive(Clone, Default)]
+struct Buffer {
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
+
+impl io::Write for Buffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.bytes
+            .lock()
+            .expect("the buffer lock is not poisoned")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Runs `f` under a fmt subscriber writing into a shared buffer and
+/// returns everything the subscriber captured.
+pub(super) fn captured_logs(f: impl FnOnce()) -> String {
+    let buffer = Buffer::default();
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    tracing::subscriber::with_default(subscriber, f);
+    let bytes = buffer
+        .bytes
+        .lock()
+        .expect("the buffer lock is not poisoned");
+    String::from_utf8_lossy(&bytes).into_owned()
+}

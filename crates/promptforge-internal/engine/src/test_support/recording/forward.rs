@@ -123,11 +123,7 @@ pub fn forward(events: Vec<Event>, observer: &dyn Observer) {
 
 /// Replays `events`, in order, onto `observer` and, for the debug variants,
 /// `debug`.
-pub(crate) fn forward_impl(
-    events: Vec<Event>,
-    observer: &dyn Observer,
-    debug: Option<&dyn DebugCapture>,
-) {
+fn forward_impl(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     for event in events {
         forward_one(event, observer, debug);
     }

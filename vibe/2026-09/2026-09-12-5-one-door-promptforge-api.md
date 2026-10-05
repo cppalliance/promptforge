@@ -78,7 +78,7 @@ Outside consumers see two crates: `promptforge-api` for the executor and `shared
 - Actors and workflows:
   - The Harness, which runs prompts for every Host, depends on `promptforge-api` for `run()`, `RunConfig`, `Prompt`, and re-exported parser/client types, and on `shared-promptforge-api` for `Observer`, `CancelHandle`, `Tool`, `ToolCatalog`, model vocabulary, and event/metrics types.
   - Workshop discovers `.md` file stems under `agents.path`. A directory `chat.md` shadows the embedded built-in (same shadowing semantics as the former `.lua` path, new extension). Every directory agent launches through `promptforge_api::run` on the unified Markdown runtime.
-  - `RunConfig` defaults the store handle to `promptforge_vfs::empty()` internally; the Harness omits it when it seeds no store. `ResolutionContext` accepts an optional tool picker; capability-free agents pass `None`.
+  - `RunConfig` defaults the store handle to `promptforge_vfs::empty()` internally; the Harness omits it when it seeds no store. `ResolutionContext` accepts an optional tool picker; Plugin-free agents pass `None`.
 - Inputs and outputs:
   - `promptforge-api::run(&Prompt, &str, ResolutionContext, RunConfig)` - the `&vfs` parameter is absorbed into `RunConfig` with a default.
   - `shared-promptforge-api` carries every symbol in the symbol table below. No other public items.
@@ -177,7 +177,7 @@ flowchart TD
     - `git mv crates/promptforge-core crates/promptforge-api`; rename the package; move integrator-facing metadata from the retiring facade.
     - Delete `crates/promptforge/` (facade, AGENTS.md, README).
     - Root `Cargo.toml`: replace `promptforge-core` and `promptforge` workspace entries with `promptforge-api`.
-    - `ResolutionContext` ([crates/promptforge-api/src/execute/gateway.rs](crates/promptforge-api/src/execute/gateway.rs)): make the tool picker optional so capability-free agents pass `None`.
+    - `ResolutionContext` ([crates/promptforge-api/src/execute/gateway.rs](crates/promptforge-api/src/execute/gateway.rs)): make the tool picker optional so Plugin-free agents pass `None`.
     - `RunConfig` ([crates/promptforge-api/src/execute/config.rs](crates/promptforge-api/src/execute/config.rs)): absorb the store handle as an optional entry defaulting to `promptforge_vfs::empty()`; `run()` drops its `&vfs` parameter.
     - Re-export posture: only two re-export modules survive, both justified by `run()`'s signature orbit. `parser` (`Prompt`, `ParseError`, `Block`, `Section`, ...) because facade consumers call `Prompt::parse()`. `client` (`GatewayClient`, `GatewayEndpoint`, `SecretString`, `CompletionError`/`CompletionErrorKind`) because facade consumers pass `GatewayClient` to `RunConfig::client()`. Drop `tools`, `observe`, `model`, `store` re-export modules and root `CancelHandle` re-export - all now in `shared-promptforge-api` or reachable through it. `store` re-exports are dropped because the VFS handle moves into `RunConfig` with a default; facade consumers that seed/extract the store depend on `shared-vfs` directly (a `shared-*` crate, legal for any product).
     - Mechanical: update `promptforge_core::` self-references in tests, benches, and doc comments.
@@ -495,7 +495,7 @@ Pieces within each component are sequential: each step's commit must compile and
 
 - Component: api-crate
 - Piece: api-signatures (sequential after crate-rename: edits land on the renamed crate)
-- `ResolutionContext` ([crates/promptforge-api/src/execute/gateway.rs](crates/promptforge-api/src/execute/gateway.rs)): make the tool picker optional so capability-free agents pass `None`.
+- `ResolutionContext` ([crates/promptforge-api/src/execute/gateway.rs](crates/promptforge-api/src/execute/gateway.rs)): make the tool picker optional so Plugin-free agents pass `None`.
 - `RunConfig` ([crates/promptforge-api/src/execute/config.rs](crates/promptforge-api/src/execute/config.rs)): absorb the store handle as an optional entry defaulting to `promptforge_vfs::empty()`; `run()` drops its `&vfs` parameter, becoming `run(&Prompt, &str, ResolutionContext, RunConfig)`.
 - Re-exports: keep only `parser` (`Prompt`, `ParseError`, `Block`, `Section`, ...) and `client` (`GatewayClient`, `GatewayEndpoint`, `SecretString`, `CompletionError`/`CompletionErrorKind`); drop the `tools`, `observe`, `model`, `store` re-export modules and the root `CancelHandle` re-export.
 - Tests in the same commit: executor API tests migrated to the new `run()` signature and optional picker.

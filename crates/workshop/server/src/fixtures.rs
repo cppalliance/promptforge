@@ -39,19 +39,6 @@ pub fn replace_gateway(
     updater.replace_fixture(base_url, api_key)
 }
 
-/// Starts the sessions subsystem's bindings forwarder over fixture state:
-/// the registered background task that pushes every gateway, catalog,
-/// menu, and workspace-roots change through the Harness's public API. The server
-/// spawns it with serving; a test that binds the router directly has no
-/// serving loop, so it spawns the forwarder here. The task ends with the
-/// state.
-#[cfg(feature = "test-fixtures")]
-pub fn spawn_bindings_forwarder(state: &crate::AppState) {
-    drop(tokio::spawn(crate::agents::forward_bindings(
-        state.registry().clone(),
-    )));
-}
-
 /// Starts a heartbeat around a fixture Gateway client.
 #[cfg(feature = "test-fixtures")]
 #[must_use]

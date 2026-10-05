@@ -5,10 +5,44 @@
 //! Both go through the handle's store view ([`VfsRef::acquire_store`]),
 //! so the store's strict path rules apply to the declared paths, which
 //! the parser takes as written, and the handle's policy and op sink see
-//! each operation like any other. Both are synchronous, like the VFS; a
-//! caller runs them on the blocking pool.
+//! each operation like any other. Both are synchronous, like the VFS, and
+//! the Harness runs them inline in the run's future.
 
 use promptforge::vfs::{Origin, VfsError, VfsOp, VfsOutcome, VfsRef, perform_vfs_op};
+
+use crate::recorder::RunOutcome;
+
+/// Why a run's report omits its output text.
+///
+/// The report keeps the run's own outcome. This error replaces only its
+/// output text.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum OutputError {
+    /// The run failed or was cancelled, possibly before it began, so the
+    /// report skips its output file.
+    #[error("the run did not complete")]
+    NotCompleted,
+    /// The prompt's frontmatter omits the `output:` declaration.
+    #[error("the prompt declares no `output:` file")]
+    Undeclared,
+    /// The run completed, but its declared output file is missing from the
+    /// store.
+    #[error("the run completed without writing its declared output file `{path}`")]
+    Missing {
+        /// The declared output path.
+        path: String,
+    },
+    /// The store refused the read of the declared output file.
+    #[error("the output file `{path}` could not be read")]
+    Vfs {
+        /// The declared output path.
+        path: String,
+        /// The store's failure.
+        #[source]
+        source: VfsError,
+    },
+}
 
 /// Why a run's declared input file could not be put in place.
 #[derive(Debug, thiserror::Error)]
@@ -96,4 +130,27 @@ pub fn read_output(vfs: &VfsRef, path: &str) -> Result<String, VfsError> {
             message: format!("a whole-file store read answered {other:?} instead of text"),
         }),
     }
+}
+
+/// The output a run's report carries: what a completed run left at its
+/// declared `output:` path in `vfs`'s store, and
+/// [`OutputError::NotCompleted`] for every other outcome.
+pub(crate) fn report_output(
+    vfs: &VfsRef,
+    path: Option<&str>,
+    outcome: &RunOutcome,
+) -> Result<String, OutputError> {
+    if !matches!(outcome, RunOutcome::Completed { .. }) {
+        return Err(OutputError::NotCompleted);
+    }
+    let path = path.ok_or(OutputError::Undeclared)?;
+    read_output(vfs, path).map_err(|error| match error {
+        VfsError::NotFound { .. } => OutputError::Missing {
+            path: path.to_owned(),
+        },
+        source => OutputError::Vfs {
+            path: path.to_owned(),
+            source,
+        },
+    })
 }

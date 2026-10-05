@@ -25,9 +25,9 @@ pub(crate) fn routes() -> Router<AppState> {
 
 /// The model-list wire response, including routed and active speech models.
 #[derive(Debug, Serialize)]
-pub(crate) struct CatalogModelsResponse {
+struct CatalogModelsResponse {
     /// Always `"list"`.
-    pub(crate) object: &'static str,
+    object: &'static str,
     /// Models currently accepting their respective request shape.
     pub(crate) data: Vec<CatalogModelInfo>,
 }
@@ -35,7 +35,7 @@ pub(crate) struct CatalogModelsResponse {
 /// One routed inference model or active speech model.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
-pub(crate) enum CatalogModelInfo {
+enum CatalogModelInfo {
     /// Existing chat, embedding, classifier, or speech metadata.
     Inference(ModelInfo),
     /// Generic transcription metadata.
@@ -44,12 +44,12 @@ pub(crate) enum CatalogModelInfo {
 }
 
 impl CatalogModelInfo {
-    pub(crate) fn inference(model: ModelInfo) -> Self {
+    fn inference(model: ModelInfo) -> Self {
         Self::Inference(model)
     }
 
     #[cfg(feature = "stt")]
-    pub(crate) fn speech(model: &gateway_stt::SpeechModelInfo) -> Self {
+    fn speech(model: &gateway_stt::SpeechModelInfo) -> Self {
         Self::Speech(SpeechCatalogModelInfo {
             id: model.name().to_owned(),
             object: "model",
@@ -61,14 +61,14 @@ impl CatalogModelInfo {
 /// Speech metadata contains only fields meaningful to transcription clients.
 #[cfg(feature = "stt")]
 #[derive(Debug, Serialize)]
-pub(crate) struct SpeechCatalogModelInfo {
+struct SpeechCatalogModelInfo {
     id: String,
     object: &'static str,
     kind: &'static str,
 }
 
 /// Bearer-authed catalog of configured models for catalog bind.
-pub(crate) async fn list_models(
+async fn list_models(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<CatalogModelsResponse>, GatewayError> {

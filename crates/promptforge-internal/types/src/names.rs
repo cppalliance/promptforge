@@ -1,11 +1,12 @@
 //! The one global naming grammar.
 //!
-//! Kind is encoded by arity: capabilities are `namespace/pack` (2 segments)
-//! and tools are `namespace/pack/name` (3 segments), so a reader can tell the
-//! kind of any name by counting segments. A namespace is reverse-DNS
+//! Kind is encoded by arity: Plugins are `namespace/plugin` (2 segments)
+//! and tools are `namespace/plugin/name` (3 segments), so a reader can tell
+//! the kind of any name by counting segments. A namespace is reverse-DNS
 //! (`org.rustalliance`) or the reserved first-party prefix `promptforge`.
 //! Segments are lowercase ASCII alphanumeric plus `-`, `_`, `.`, and
-//! comparison is case-sensitive. v1 is unversioned: a `@` is a parse error.
+//! comparison is case-sensitive. A name carries no version, so a `@` is a
+//! parse error.
 
 use std::fmt;
 
@@ -13,45 +14,42 @@ use std::fmt;
 #[path = "names-tests.rs"]
 mod tests;
 
-/// A validated global name of two or three segments.
+/// A validated global name for a Plugin or a tool.
 ///
-/// Two segments name a capability (`namespace/pack`); three segments name a
-/// tool (`namespace/pack/name`). Construct only through
-/// [`GlobalName::parse`]; the segment list is private so the arity and
-/// charset invariants hold by construction.
+/// A name has two or three segments separated by `/`. Two segments name a
+/// Plugin (`namespace/plugin`). Three segments name a tool
+/// (`namespace/plugin/name`).
+///
+/// Every value comes from [`GlobalName::parse`], so each segment always
+/// consists of one or more lowercase ASCII letters, digits, `-`, `_`, and `.`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalName {
-    /// The `/`-separated segments: exactly 2 (capability) or 3 (tool).
+    /// The `/`-separated segments: exactly 2 (Plugin) or 3 (tool).
     segments: Vec<String>,
 }
 
 impl GlobalName {
-    /// Parses a global name, enforcing the arity and charset rules.
+    /// Parses a string into a global name.
+    ///
+    /// The string must have 2 or 3 segments separated by `/`. Each segment must
+    /// consist of one or more lowercase ASCII letters, digits, `-`, `_`, and
+    /// `.`.
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalNameError`] when the segment count is not 2 or 3
-    /// ([`GlobalNameErrorKind::SegmentCount`]), a segment is empty
-    /// ([`GlobalNameErrorKind::Empty`]), or a segment contains a character
-    /// outside the allowed set ([`GlobalNameErrorKind::Control`]).
+    /// Returns [`GlobalNameError`] when:
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::capabilities::GlobalName;
-    ///
-    /// let name = GlobalName::parse("promptforge/web/fetch")?;
-    /// assert_eq!(name.namespace(), "promptforge");
-    /// assert_eq!(name.pack(), "web");
-    /// assert_eq!(name.to_string(), "promptforge/web/fetch");
-    /// # Ok::<(), promptforge::capabilities::GlobalNameError>(())
-    /// ```
+    /// - the name has fewer than 2 or more than 3 segments
+    ///   ([`GlobalNameErrorKind::SegmentCount`]);
+    /// - a segment is empty ([`GlobalNameErrorKind::Empty`]);
+    /// - a segment contains any other character
+    ///   ([`GlobalNameErrorKind::Control`]).
     pub fn parse(s: &str) -> Result<GlobalName, GlobalNameError> {
         let segments: Vec<&str> = s.split('/').collect();
         if !(2..=3).contains(&segments.len()) {
             return Err(GlobalNameError {
                 kind: GlobalNameErrorKind::SegmentCount,
-                reason: "must have exactly 2 segments (namespace/pack) or 3 (namespace/pack/name)",
+                reason: "must have exactly 2 segments (namespace/plugin) or 3 (namespace/plugin/name)",
             });
         }
         for segment in &segments {
@@ -62,15 +60,19 @@ impl GlobalName {
         })
     }
 
-    /// Returns the namespace segment (reverse-DNS or `promptforge`).
+    /// Returns the namespace, which is the first segment.
+    ///
+    /// By convention, a namespace is a reverse-DNS name such as
+    /// `org.rustalliance`, or `promptforge` for first-party names.
+    /// `GlobalName::parse` accepts any valid segment as the namespace.
     #[must_use]
     pub fn namespace(&self) -> &str {
         &self.segments[0]
     }
 
-    /// Returns the pack segment.
+    /// Returns the second segment, which names the Plugin.
     #[must_use]
-    pub fn pack(&self) -> &str {
+    pub fn plugin(&self) -> &str {
         &self.segments[1]
     }
 
@@ -81,10 +83,10 @@ impl GlobalName {
         &self.segments
     }
 
-    /// Returns the 2-segment capability prefix of a 3-segment (tool) name.
+    /// Returns the 2-segment Plugin prefix of a 3-segment (tool) name.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::capability`].
-    pub(crate) fn capability_prefix(&self) -> GlobalName {
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
+    pub(crate) fn plugin_prefix(&self) -> GlobalName {
         GlobalName {
             segments: self.segments[..2].to_vec(),
         }
@@ -101,8 +103,8 @@ impl fmt::Display for GlobalName {
 ///
 /// A segment must be non-empty and contain only lowercase ASCII
 /// alphanumeric characters plus `-`, `_`, `.`. Anything else - including
-/// uppercase (comparison is case-sensitive), `@` (v1 is unversioned),
-/// control characters, and non-ASCII - is rejected.
+/// uppercase (comparison is case-sensitive), `@`, control characters, and
+/// non-ASCII - is rejected.
 fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
     if segment.is_empty() {
         return Err(GlobalNameError {
@@ -127,22 +129,26 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
     Ok(())
 }
 
-/// A stable, matchable classification of a [`GlobalNameError`].
+/// A stable classification of a [`GlobalNameError`].
 ///
-/// Every public error exposes a `kind()` classifier so callers can branch on
-/// the failure without matching a private representation.
+/// `GlobalNameError::kind` returns it. Match on it to branch on why a name
+/// was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GlobalNameErrorKind {
-    /// The name did not have exactly 2 or 3 segments.
+    /// The name had fewer than 2 or more than 3 segments.
     SegmentCount,
     /// A segment was empty.
     Empty,
-    /// A segment contained a character outside the allowed set.
+    /// A segment contained a character other than a lowercase ASCII letter, a
+    /// digit, `-`, `_`, or `.`.
+    ///
+    /// This covers control characters, uppercase letters, `@`, and non-ASCII
+    /// characters.
     Control,
 }
 
-/// The reason a [`GlobalName`] could not be parsed.
+/// The error returned when a [`GlobalName`] fails to parse.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid global name: {reason}")]
 #[non_exhaustive]

@@ -1,9 +1,8 @@
 //! Section walk control flow over the offline fixtures: `call`, `jump`,
-//! `fanout`, `list_from_section`, and `var`. The in-crate cases reached the
-//! private `run`/`fixture`/`TestStore`/`silent`/`run_offline` helpers through
-//! `use super::*`; the moved cases keep their assertions and are rebuilt on
-//! the suite's `run_fixture` runner through the thin fixture support below.
-//! Each submodule holds one topic and reaches that support through `super`.
+//! `fanout`, `list_from_section`, and `var`. The cases run on the suite's
+//! `run_fixture` runner through the thin fixture support below: the
+//! `run`/`fixture`/`TestStore`/`silent`/`run_offline` helpers. Each
+//! submodule holds one topic and reaches that support through `super`.
 
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +14,7 @@ use super::support::{FixtureRun, FixtureStore, run_fixture};
 
 const EXECUTION: &str = "execute-test";
 
-/// The parsed fixture a moved case runs: its source, parsed and driven by the
+/// The parsed fixture a case runs: its source, parsed and driven by the
 /// suite's `run_fixture` at call time.
 struct TestPrompt<'a>(&'a str);
 
@@ -24,7 +23,7 @@ fn fixture(md: &str) -> TestPrompt<'_> {
     TestPrompt(md)
 }
 
-/// The execution id the moved cases run under.
+/// The execution id the cases run under.
 struct RunOptions {
     execution: &'static str,
 }
@@ -36,8 +35,8 @@ fn silent() -> RunOptions {
     }
 }
 
-/// The store a moved case asserts on: the wrapper the in-crate `TestStore`
-/// provided, filled from the run the local [`run`] drives.
+/// The store a case asserts on, filled from the run the local [`run`]
+/// drives.
 struct TestStore(Mutex<Option<FixtureStore>>);
 
 impl TestStore {

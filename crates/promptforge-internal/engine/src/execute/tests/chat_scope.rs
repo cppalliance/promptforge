@@ -6,27 +6,12 @@ use super::models_loop::{echo_tools, loop_context, loop_prompt};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// The function names one request advertised, in wire order.
-fn advertised_names(body: &serde_json::Value) -> Vec<&str> {
-    body["tools"]
-        .as_array()
-        .expect("tools is an array")
-        .iter()
-        .map(|tool| {
-            tool["function"]["name"]
-                .as_str()
-                .expect("a tool schema names its function")
-        })
-        .collect()
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn a_round_advertises_the_section_scope_with_local_tools() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "grab", "{\"value\":\"x\"}"),
         resp_text("done"),
-    ])
-    .await;
+    ]);
     let md = loop_prompt(
         "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
@@ -40,14 +25,14 @@ async fn a_round_advertises_the_section_scope_with_local_tools() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section scope includes local tools");
     assert_eq!(out, "ok");
     let body = &gateway.requests()[0];
     assert_eq!(
-        advertised_names(body),
+        body.tool_names(),
         ["echo", "grab"],
         "the bound scope then the local tools: {body:?}"
     );

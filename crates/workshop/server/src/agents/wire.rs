@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 /// Fields beyond the ones a variant names are ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum SessionRequest {
+pub(super) enum SessionRequest {
     /// `{"type":"launch","agent":"..."}` starts a session running `agent`.
     Launch {
         /// The discovered agent to run.
@@ -65,7 +65,7 @@ pub(crate) enum SessionRequest {
 /// as the socket's refusal text, so serde's own error text never reaches
 /// the client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum RequestRefusal {
+pub(super) enum RequestRefusal {
     /// A `launch` frame whose `agent` is absent or not a string.
     #[error("launch frame without an agent name")]
     LaunchWithoutAgent,
@@ -87,7 +87,7 @@ impl SessionRequest {
     ///
     /// # Errors
     /// Returns the [`RequestRefusal`] naming what the frame lacks.
-    pub(crate) fn parse(frame: &serde_json::Value) -> Result<Self, RequestRefusal> {
+    pub(super) fn parse(frame: &serde_json::Value) -> Result<Self, RequestRefusal> {
         let refusal = match frame.get("type").and_then(serde_json::Value::as_str) {
             Some("launch") => RequestRefusal::LaunchWithoutAgent,
             Some("attach") => RequestRefusal::AttachWithoutSession,
@@ -104,7 +104,7 @@ impl SessionRequest {
 /// Delivery: ephemeral - every push is the complete discovered list,
 /// resent on every connect; there is no incremental form to lose.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct AgentsFrame {
+pub(super) struct AgentsFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     /// The launchable agent names, in discovery order.
@@ -114,7 +114,7 @@ pub(crate) struct AgentsFrame {
 impl AgentsFrame {
     /// Builds the list frame over the discovered agent names.
     #[must_use]
-    pub(crate) fn new(agents: Vec<String>) -> Self {
+    pub(super) fn new(agents: Vec<String>) -> Self {
         Self {
             kind: "agents",
             agents,
@@ -130,7 +130,7 @@ impl AgentsFrame {
 /// Delivery: durable - a direct per-request reply sent by the loop that
 /// owns the socket, the contract's no-cursor case.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct AgentSessionFrame {
+pub(super) struct AgentSessionFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     /// The session's unguessable id.
@@ -142,7 +142,7 @@ pub(crate) struct AgentSessionFrame {
 impl AgentSessionFrame {
     /// Builds the acknowledgment for `session` running `agent`.
     #[must_use]
-    pub(crate) fn new(session: String, agent: String) -> Self {
+    pub(super) fn new(session: String, agent: String) -> Self {
         Self {
             kind: "agent_session",
             session,
@@ -167,7 +167,7 @@ impl AgentSessionFrame {
 /// lifecycle, task, and debug events never frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
-pub(crate) enum AgentEventKind {
+enum AgentEventKind {
     /// A completed assistant reply.
     #[serde(rename = "agent_message")]
     AssistantReply,
@@ -190,33 +190,31 @@ pub(crate) enum AgentEventKind {
 /// the kind-specific `content` string (a tool-call batch renders as the
 /// JSON array of its calls), and the model, tool-call id, finish reason,
 /// and metrics where the kind includes them. `content` and every other
-/// free-text field is untrusted model-, tool-, or user-authored data. An
-/// [`Event`] locates itself by its provenance (the task and sequence),
-/// which the wire does not yet expose.
+/// free-text field is untrusted model-, tool-, or user-authored data.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
-pub(crate) struct AgentEvent {
+struct AgentEvent {
     /// What kind of thing happened.
-    pub(crate) kind: AgentEventKind,
+    kind: AgentEventKind,
     /// The reporting scope: the agent's name.
-    pub(crate) section: String,
+    section: String,
     /// The model-turn counter the event was reported under.
-    pub(crate) turn: u32,
+    turn: u32,
     /// The kind-specific untrusted payload.
-    pub(crate) content: String,
+    content: String,
     /// The model that produced the event, for model-attributed kinds.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) model: Option<String>,
+    model: Option<String>,
     /// The provider-issued tool-call id the event answers to, for tool
     /// results.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tool_call_id: Option<String>,
+    tool_call_id: Option<String>,
     /// The provider's finish reason, when it sent one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) finish_reason: Option<String>,
+    finish_reason: Option<String>,
     /// Everything measured about the model call that produced the event.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) metrics: Option<CallMetrics>,
+    metrics: Option<CallMetrics>,
 }
 
 impl AgentEvent {
@@ -226,7 +224,7 @@ impl AgentEvent {
     /// frames as the operator's `user_message`, because its result is the
     /// text the operator typed.
     #[must_use]
-    pub(crate) fn from_event(event: &Event) -> Option<Self> {
+    fn from_event(event: &Event) -> Option<Self> {
         let base = |kind: AgentEventKind, turn: u32, content: String| AgentEvent {
             kind,
             section: event.section().to_owned(),
@@ -306,10 +304,10 @@ fn render_tool_calls(calls: &[ToolCallEvent]) -> String {
 /// deltas away (see [`AgentDeltaFrame`]).
 ///
 /// Delivery: durable - `index` is the entry's position in the session's
-/// event log, the per-client cursor recovers everything past it on
-/// reconnect, and a future `replayFrom` cursor is stored in the same field.
+/// event log, and the per-client cursor recovers everything past it on
+/// reconnect.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct AgentEventFrame {
+pub(super) struct AgentEventFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     /// The entry's log index.
@@ -326,7 +324,7 @@ impl AgentEventFrame {
     /// Builds the frame for the entry at `index`, or `None` when `event`
     /// is a variant the transcript does not render.
     #[must_use]
-    pub(crate) fn new(index: u64, reply: Option<u64>, event: &Event) -> Option<Self> {
+    pub(super) fn new(index: u64, reply: Option<u64>, event: &Event) -> Option<Self> {
         Some(Self {
             kind: "agent_event",
             index,
@@ -340,7 +338,7 @@ impl AgentEventFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub(crate) enum AgentDeltaKind {
+pub(super) enum AgentDeltaKind {
     /// Answer content, superseded by the round's `agent_message` event.
     Text,
     /// Reasoning content, superseded by the round's `agent_thought`
@@ -359,7 +357,7 @@ pub(crate) enum AgentDeltaKind {
 /// under lag; the completed-reply event is the repair path, which is why
 /// agent deltas never enter the event log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct AgentDeltaFrame {
+pub(super) struct AgentDeltaFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     /// Which side channel the chunk belongs to.
@@ -375,7 +373,7 @@ impl AgentDeltaFrame {
     /// Builds a delta frame holding `content` on `channel`, stamped with
     /// the superseding `reply` id.
     #[must_use]
-    pub(crate) fn new(channel: AgentDeltaKind, content: String, reply: u64) -> Self {
+    pub(super) fn new(channel: AgentDeltaKind, content: String, reply: u64) -> Self {
         Self {
             kind: "agent_delta",
             channel,

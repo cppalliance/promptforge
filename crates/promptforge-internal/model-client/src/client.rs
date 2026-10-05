@@ -3,34 +3,21 @@
 //!
 //! The wire types ([`Message`], [`ToolSchema`], [`ToolCall`],
 //! [`Completion`], [`CompletionResult`]) go out of the Engine in a `Chat`
-//! effect and come back in its answer. Beside them sit the
-//! protocol pieces every transport shares: the request body builder, so
-//! one JSON shape leaves for the gateway no matter who sends it; the SSE
-//! reassembly (scanner, accumulator, and its `finish` into a
-//! [`Completion`]), so streamed and buffered turns are judged by one rule
-//! set; and the read loop over a transport's [`ChunkSource`], so the byte
-//! cap, the sentinel rule, and the timing arithmetic live once. The body
-//! builder, the read loop, and [`escape_controls`] are the transport codec
-//! the facade publishes; the scanner and accumulator stay engine-internal,
-//! reached only through the read loop.
+//! effect and come back in its answer. Their validating constructors run
+//! the neutral reply checks, so a completion a wire decoder built and one
+//! a Harness built by hand are judged alike.
 //!
-//! Nothing here opens a connection or reads a clock. The HTTP client that
-//! sends the body and yields the chunks is the Harness's
-//! (`harness-models`); the Engine's own suites drive the same protocol
-//! through a dev-only client against a mock gateway. The Engine itself
-//! never performs a round: a model round is a `Chat` effect the Harness
-//! performs and answers.
+//! Nothing here opens a connection, reads a clock, or parses a provider's
+//! wire format. The OpenAI wire code that builds the request body and
+//! reads the streamed reply lives in `harness-gateway-client`. The Engine
+//! itself never performs a round: a model round is a `Chat` effect the
+//! Harness performs and answers.
 
-mod read;
-mod request;
-mod stream;
 mod wire;
 
-pub use read::{ChunkSource, read_body_capped, read_completion_stream};
-pub use request::build_request_body;
-pub use stream::{Applied, SseScanner, StreamAccumulator, escape_controls};
 pub use wire::{
-    Completion, CompletionResult, Message, ToolArguments, ToolCall, ToolSchema, ToolSchemaError,
+    Completion, CompletionResult, Message, RawExchange, ToolArguments, ToolCall, ToolSchema,
+    ToolSchemaError,
 };
 
 #[cfg(test)]

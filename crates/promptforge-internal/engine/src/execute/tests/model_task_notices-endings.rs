@@ -16,11 +16,10 @@ use crate::test_support::drive;
 /// Runs the two-section prompt with the model starting `Child` in round 1
 /// and replying in round 2, then returns every notice reported.
 async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, String)> {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt("", &loop_owner(owner_tail), child_body);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
@@ -29,7 +28,7 @@ async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the owner ends clean");
@@ -80,11 +79,10 @@ async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_
     // `Last` is the walk's only section and falls through with the model's
     // task still parked, so the walk position is past the slice's end when
     // the chain's end abandons the task and queues its notice.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"### Child\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = format!(
         "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
          # ModelTasks\n\n\
@@ -101,7 +99,7 @@ async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a model task the walk's end strands is abandoned, never leaked");
@@ -206,12 +204,11 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_model_issued_cancel_queues_no_notice() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_cancel", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
@@ -220,7 +217,7 @@ async fn a_model_issued_cancel_queues_no_notice() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the cancel leaves nothing live");

@@ -4,6 +4,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use promptforge_model_client::model::{CompletionError, CompletionErrorKind};
 use promptforge_types::tools::ToolError;
 
 use crate::execute::{Effect, EffectAnswer};
@@ -46,8 +47,11 @@ impl Performers {
 }
 
 /// The `Chat` refusal: the disabled-gateway completion error.
-pub(crate) fn refuse_chat() -> EffectAnswer {
-    EffectAnswer::Chat(Err(promptforge_model_client::Error::GatewayDisabled.into()))
+fn refuse_chat() -> EffectAnswer {
+    EffectAnswer::Chat(Err(CompletionError::new(
+        CompletionErrorKind::Unavailable,
+        "model access is turned off or not configured",
+    )))
 }
 
 /// The `ToolCall` refusal: the id resolves to no implementation.

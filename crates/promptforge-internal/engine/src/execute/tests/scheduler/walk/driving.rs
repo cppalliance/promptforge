@@ -9,8 +9,7 @@ use super::*;
 async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
     // On a current-thread runtime the nested call and both infers complete
     // on the one thread.
-    let gateway =
-        ScriptedGateway::start(vec![resp_text("inner answer"), resp_text("outer answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("inner answer"), resp_text("outer answer")]);
     let md = "---\nname: gate\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
         ## Outer\n\n\
@@ -24,7 +23,7 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the gate scenario runs end to end on one thread");
@@ -37,31 +36,30 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
     );
     let requests = gateway.requests();
     assert_eq!(
-        requests[0]["messages"][0]["content"].as_str(),
-        Some("inner ask"),
+        requests[0].messages[0].content(),
+        "inner ask",
         "the contained chain's infer runs first: {requests:?}"
     );
     assert_eq!(
-        requests[1]["messages"][0]["content"].as_str(),
-        Some("outer saw: inner answer"),
+        requests[1].messages[0].content(),
+        "outer saw: inner answer",
         "the parent resumes with the contained chain's final text: {requests:?}"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
-    )])
-    .await;
+    )]);
     let md = "---\nname: cancel\ndescription: d\npromptforge: 0\n---\n\n\
         # Cancel\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('hang')\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -118,7 +116,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     // a section's explicit `models.infer(prose)` reaches that gateway rather
     // than falling back to an environment client; the returned text becomes
     // the run's result.
-    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("prose answer")]);
     let md = "---\nname: prose\ndescription: d\npromptforge: 0\n---\n\n\
         # Prose\n\n\
         ## Only\n\n\
@@ -126,7 +124,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("an explicit infer of the prose runs through the scheduler");
@@ -134,9 +132,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     assert_eq!(out, "prose answer");
     assert_eq!(gateway.call_count(), 1, "the infer drives one completion");
     let requests = gateway.requests();
-    let content = requests[0]["messages"][0]["content"]
-        .as_str()
-        .unwrap_or_default();
+    let content = requests[0].messages[0].content();
     assert!(
         content.contains("Say something."),
         "the prose text reaches the gateway: {requests:?}"

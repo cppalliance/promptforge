@@ -1,5 +1,5 @@
 ---
-description: Workshop server crate architecture invariants - one-way dependency tiers, registry self-registration, 500-line file ceiling
+description: Workshop server crate architecture invariants - one-way dependency tiers, registry self-registration
 globs: crates/workshop*/**
 alwaysApply: false
 ---
@@ -9,7 +9,6 @@ alwaysApply: false
 ## One-way dependency graph
 
 - Dependencies flow one way: server -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph.
-- Tiers: vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`) <- services (`workshop-gateway`, `workshop-menu`, `workshop-status`) <- features (`workshop-user-state`, `workshop-workspace`) <- server (`workshop-server`). The `agents` subsystem has no crate of its own; it lives inside `workshop-server`.
 - Crates in the same tier never depend on each other, with one exception: `workshop-registry` depends on `workshop-protocol`, because the status push-channel slot holds `workshop-protocol`'s `StatusBarUpdate`. Otherwise same-tier crates meet through `workshop-protocol` wire types and `workshop-registry` proxy slots.
 - The desktop app (package `workshop`) sits outside the tiers and depends on `workshop-server-api`, never on `workshop-server`; the facade is its entire view of the server. `cargo test -p build-xtask` enforces this.
 - Every `workshop-*` crate's `lib.rs` opens with a `//!` doc carrying a `## Invariants` marker that lists what the crate may depend on and what it may not. Read it before adding an import.
@@ -20,7 +19,3 @@ alwaysApply: false
 - Subsystems self-register into `workshop-registry` proxy slots: routes, state handles, background tasks, push channels, and shutdown handles. The composition root (`crates/workshop/server/src/app/compose.rs`) calls each subsystem's `register` by name and requires its concrete handle, so a missing registration fails boot naming the type. Subsystems reach each other only through the registry.
 - Unregistered slots are graceful no-ops. Never add a hard dependency on an optional subsystem.
 - Registration handles are `#[must_use]`; registry traits are sealed so only workshop crates implement them.
-
-## File ceiling
-
-- No file exceeds 500 lines. If an edit would push a file past 500, split first, then edit. `cargo test -p build-xtask` enforces the ceiling, the tier graph, and lint inheritance over the Rust files in the workshop crates carrying the marker; the desktop app (the `workshop` crate) is exempt until the headless agent mode plan.

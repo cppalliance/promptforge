@@ -90,13 +90,9 @@ pub(super) fn model_starts(records: &[(String, Observation)]) -> Vec<(TaskId, St
         .collect()
 }
 
-/// The number of messages the gateway saw in its `round`th (0-based)
-/// request.
-fn message_count(gateway: &ScriptedGateway, round: usize) -> usize {
-    gateway.requests()[round]["messages"]
-        .as_array()
-        .expect("a chat request includes messages")
-        .len()
+/// The number of messages the model saw in its `round`th (0-based) round.
+fn message_count(gateway: &ScriptedChat, round: usize) -> usize {
+    gateway.requests()[round].messages.len()
 }
 
 /// The count of `event` recorded under `section`.
@@ -138,12 +134,11 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     // its notice as a user record ahead of the reply. The author's list
     // holds the whole exchange in order, each tool record correlated to
     // its call, and the task starts once and succeeds once.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner(
@@ -162,7 +157,7 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -221,11 +216,10 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
     // own, and reads the raw result. The slot is delivered (not abandoned
     // at the owner's end), the notice was queued when the task ended but
     // no round ever read it, and the author's own filter stays empty.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner(
@@ -244,7 +238,7 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[SOON]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -294,14 +288,13 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
     // with `Slow`'s alone (a delivered notice is never drained again), and
     // the reply round holds only the answered calls. Neither wait
     // allocates a timer.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Quick\"}"),
         resp_tool_call("call_2", "task", "{\"target\":\"## Slow\"}"),
         resp_tool_call("call_3", "await_tasks", "{}"),
         resp_tool_call("call_4", "await_tasks", "{}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = two_child_prompt(
         &loop_owner("return msgs[7].content .. '|' .. msgs[9].content .. '|' .. #msgs"),
         (
@@ -320,7 +313,7 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[SOON, LATER]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -386,13 +379,12 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
     // abandoned: the task's one terminal is `cancelled`, the fired timer
     // is an internal slot that starts nothing observable, and the model's
     // own cancel queues no notice.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "await_tasks", "{\"timeout\":0.1}"),
         resp_tool_call("call_3", "task_cancel", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner(
@@ -408,7 +400,7 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await

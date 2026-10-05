@@ -1,6 +1,6 @@
 //! Prepare-pass tests that reach engine-only items: the per-run store
 //! mount's claims isolation, and the Harness's prepare-run path refusing an
-//! unsatisfiable prompt with today's model-readable notice or running a
+//! unsatisfiable prompt with the model-readable notice or running a
 //! satisfiable one. The rest of the prepare suite runs against the
 //! `promptforge` facade.
 
@@ -12,10 +12,10 @@ use crate::{Environment, RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
-use super::super::{ScriptedGateway, gateway_client, resp_text};
+use super::super::{ScriptedChat, gateway_client, resp_text};
 use super::support::context;
 
-/// A prompt declaring no capabilities at all.
+/// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(
     "---\n",
     "name: declares-nothing\n",
@@ -109,8 +109,7 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     // The notice is written to be read by a model: it names the role,
-    // each failed check, and required versus actual - today's text,
-    // unchanged by the catalog moving to the Harness.
+    // each failed check, and required versus actual.
     assert!(
         notice.starts_with("the environment cannot satisfy this prompt:"),
         "the notice opens with the standing refusal line: {notice}"
@@ -173,7 +172,7 @@ const DECLARES_NO_THINKING: &str = concat!(
 #[tokio::test]
 async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let (ctx, requirements) = Environment::new().prepare(
         &prompt,
         context("switchable").model(current_model(32_000, ThinkingMode::Switchable)),
@@ -182,7 +181,7 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
         requirements.is_satisfied(),
         "a switchable model can turn thinking off: {requirements:?}"
     );
-    let harness = RunHarness::new().client(gateway_client(gateway.addr()));
+    let harness = RunHarness::new().client(gateway_client(&gateway));
     let result = run_harness(&prompt, "", ctx, harness).await;
     let RunResult::Ok(text) = result else {
         panic!("the prepared prompt runs: {result:?}");
@@ -191,8 +190,8 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
     let body = gateway
         .last_request()
         .expect("the round reaches the gateway");
-    assert_eq!(body["model"], "current");
-    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    assert_eq!(body.options.model(), "current");
+    assert_eq!(body.options.thinking(), Some(false));
 }
 
 #[tokio::test]
@@ -220,7 +219,7 @@ async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
     );
 }
 
-/// A prompt declaring one tool slot whose capability is not declared at
+/// A prompt declaring one tool slot whose Plugin is not declared at
 /// all.
 const DECLARES_ORPHAN_SLOT: &str = concat!(
     "---\n",
@@ -235,13 +234,13 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// The step's second test: an unmet requirement found at prepare refuses
-/// the run with today's model-readable notice text, line for line.
+/// An unmet requirement found at prepare refuses the run with the
+/// model-readable notice text, line for line.
 #[tokio::test]
 async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // An empty catalog: the slot's capability contributed nothing, which
-    // prepare reports as the missing capability.
+    // An empty catalog: the slot's Plugin contributed nothing, which
+    // prepare reports as the missing Plugin.
     let result = run_with_harness(
         &Environment::new(),
         &prompt,
@@ -257,6 +256,6 @@ async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required capability: promptforge/web"
+         - missing required Plugin: promptforge/web"
     );
 }

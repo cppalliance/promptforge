@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Scaffold `crates/<name>/` with a manifest, a facade `lib.rs` holding
-/// the invariant docs, and the crate's integration-test binary.
+/// the invariant docs, a build script that runs the compile-time file-size
+/// check, and the crate's integration-test binary.
 ///
 /// # Errors
 ///
@@ -21,6 +22,7 @@ pub(crate) fn scaffold(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     fs::create_dir_all(dir.join("src"))?;
     fs::create_dir_all(dir.join("tests").join("it"))?;
     fs::write(dir.join("Cargo.toml"), manifest(name))?;
+    fs::write(dir.join("build.rs"), BUILD_RS)?;
     fs::write(dir.join("src").join("lib.rs"), lib_rs(name))?;
     fs::write(
         dir.join("tests").join("it").join("main.rs"),
@@ -58,10 +60,20 @@ fn manifest(name: &str) -> String {
          \n\
          [dependencies]\n\
          \n\
+         [build-dependencies]\n\
+         build-ceiling.workspace = true\n\
+         \n\
          [lints]\n\
          workspace = true\n"
     )
 }
+
+/// The build script: the compile-time file-size check, and nothing else.
+const BUILD_RS: &str = "//! Runs the compile-time file-size check on this crate.\n\
+                        \n\
+                        fn main() -> Result<(), build_ceiling::Violations> {\n    \
+                        build_ceiling::check()\n\
+                        }\n";
 
 fn lib_rs(name: &str) -> String {
     format!(
@@ -70,9 +82,8 @@ fn lib_rs(name: &str) -> String {
          //! ## Invariants\n\
          //!\n\
          //! - Tier: TODO (vocabulary | services | features | server); may depend\n\
-         //!   on: TODO. Read the repository-root `AGENTS.md` before adding an import.\n\
-         //! - Every file in this crate stays under 500 lines; split first, then\n\
-         //!   edit.\n"
+         //!   on: TODO. `cargo test -p build-xtask` enforces the product and\n\
+         //!   container boundaries.\n"
     )
 }
 
@@ -104,6 +115,27 @@ mod tests {
         let lib = fs::read_to_string(dir.join("src").join("lib.rs")).expect("lib.rs");
         assert!(lib.contains("//! ## Invariants"));
         assert!(dir.join("tests").join("it").join("main.rs").is_file());
+    }
+
+    #[test]
+    fn scaffold_wires_the_file_size_check_into_the_build_script() {
+        let (_temp, _root, dir) = scaffold_scratch();
+        let build = fs::read_to_string(dir.join("build.rs")).expect("build.rs");
+        assert!(
+            build.ends_with(
+                "\nfn main() -> Result<(), build_ceiling::Violations> {\n    \
+                 build_ceiling::check()\n}\n"
+            ),
+            "{build}"
+        );
+        let text = fs::read_to_string(dir.join("Cargo.toml")).expect("manifest");
+        let manifest: toml::Value = toml::from_str(&text).expect("valid toml");
+        let ceiling = manifest
+            .get("build-dependencies")
+            .and_then(|table| table.get("build-ceiling"))
+            .and_then(|entry| entry.get("workspace"))
+            .and_then(toml::Value::as_bool);
+        assert_eq!(ceiling, Some(true), "{text}");
     }
 
     #[test]

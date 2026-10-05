@@ -1,51 +1,58 @@
 //! The preflight report: [`Requirements`].
 
-use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::plugins::PluginId;
 
 #[cfg(test)]
 #[path = "requirements-tests.rs"]
 mod tests;
 
-/// The preflight report: what the caller must still satisfy before the
-/// prompt can run.
+/// A report of what the caller must still satisfy before a prompt can run.
 ///
 /// [`Environment::prepare`](super::Environment::prepare) returns one
-/// alongside the enriched context. The report lists only what needs human
-/// attention: a skipped optional capability is a log line at prepare, not
-/// a report field.
+/// together with the prepared context. The report lists only what needs a
+/// person's attention. A skipped optional Plugin is logged.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
-    /// The model requirements the filled bindings do not satisfy: the
-    /// role, which check, and required versus actual (a `min_context` of
-    /// 200000 against a 32k model; `thinking` against a Never model).
-    /// Populated by the model fill; capability activation adds none.
+    /// The model requirements that the bound models fall short of.
+    ///
+    /// Each entry names the role, the check that failed, and what was
+    /// required versus what the model provides. Examples are a
+    /// `min_context` of 200000 against a model with a 32k context, and
+    /// `thinking` against a model whose thinking mode is `Never`. Only
+    /// model binding in `Environment::prepare` adds these.
     pub unmet_requirements: Vec<UnmetRequirement>,
-    /// The required capabilities the run cannot have: reported by
-    /// activation when absent from the Harness's registry or failed to
-    /// activate, and by prepare when an exact tool slot names a
-    /// capability that contributed nothing to the catalog. The run fails
-    /// until every one is satisfied.
-    pub missing_required: Vec<CapabilityId>,
-    /// The required capabilities that are present but need a Host
-    /// service this Host lacks: one entry per capability and
-    /// missing service. Reported by activation, which does not activate
-    /// such a capability; the run fails until the Host provides the
-    /// service or the prompt declares the capability optional.
+    /// The required Plugins that the run lacks.
+    ///
+    /// Plugin activation adds a Plugin that is missing from the
+    /// registry or that fails to activate. `Environment::prepare` adds the
+    /// Plugin of an exact tool slot when that Plugin is absent
+    /// from the tool catalog. The run fails until every one is satisfied.
+    pub missing_required: Vec<PluginId>,
+    /// The required Plugins that are registered but need a service
+    /// the application lacks.
+    ///
+    /// There is one entry for each Plugin and missing service.
+    /// Plugin activation adds these and skips each such Plugin.
+    /// The run fails until the application provides the service or the
+    /// prompt declares the Plugin optional.
     pub missing_services: Vec<MissingService>,
-    /// The declared co-activation conflicts: pairs of present
-    /// capabilities that cannot activate in one run (bashkit vs
-    /// terminal - two filesystem realities, and a context gets one or
-    /// the other, never both). Neither member of a conflicting pair
-    /// activates; the run fails until the prompt declares one or the
-    /// other. Reported by activation, never by prepare.
-    pub conflicts: Vec<CapabilityConflict>,
+    /// The declared conflicts: pairs of registered Plugins that
+    /// exclude each other in a run.
+    ///
+    /// For example, `bashkit` and `terminal` each give the run its own
+    /// view of the filesystem, so a run gets one or the other. Only
+    /// Plugin activation adds these, and it skips both members of each
+    /// pair. The run fails until the prompt declares only one of them.
+    pub conflicts: Vec<PluginConflict>,
 }
 
 impl Requirements {
-    /// Returns whether the report is satisfied: every model requirement
-    /// is met, every required capability is present and has the Host
-    /// services it needs, and no pair of capabilities conflicts.
+    /// Returns whether the report lets the run proceed.
+    ///
+    /// That holds when every model requirement is met, every required
+    /// Plugin is present and has the services it needs, and every
+    /// pair of Plugins is compatible.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
@@ -54,16 +61,19 @@ impl Requirements {
             && self.conflicts.is_empty()
     }
 
-    /// Folds `other` into this report: the Harness merges what activation
-    /// could not satisfy into what prepare could not, so one refusal names
-    /// every gap. A capability already reported missing, or a service
-    /// already reported missing for the same capability, is not repeated.
+    /// Adds the entries of `other` to this report.
     ///
-    /// A capability that lacks a service is not also reported missing.
-    /// Such a `missing_required` entry can come only from prepare's tool
-    /// fill, which sees an exact slot whose capability contributed nothing
-    /// because activation skipped it for the missing service, and the
-    /// service entry already names the real cause.
+    /// Use it to combine the Plugin activation report with the report
+    /// from `Environment::prepare`, so that one refusal names every gap.
+    /// The merge skips a Plugin already reported missing and a service
+    /// already reported missing for the same Plugin.
+    ///
+    /// The merge drops the `missing_required` entry of a Plugin that
+    /// lacks a service. That entry can come only from the tool slot check
+    /// in `Environment::prepare`. That check finds an exact slot whose
+    /// Plugin is absent from the catalog, because activation skipped
+    /// the Plugin for the missing service. The service entry already
+    /// names the real cause.
     pub fn merge(&mut self, other: Requirements) {
         for id in other.missing_required {
             if !self.missing_required.contains(&id) {
@@ -79,18 +89,19 @@ impl Requirements {
             !self
                 .missing_services
                 .iter()
-                .any(|missing| missing.capability == *id)
+                .any(|missing| missing.plugin == *id)
         });
         self.conflicts.extend(other.conflicts);
         self.unmet_requirements.extend(other.unmet_requirements);
     }
 
-    /// The refusal the Harness fails the run with when the report is
-    /// unsatisfied: a [`RunError`](super::RunError) of kind
-    /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet)
-    /// reporting the [`notice`](Requirements::notice), or `None` when
-    /// nothing blocks the run. The Harness checks this after merging
-    /// activation's report into prepare's, before building the run.
+    /// Returns the error to fail the run with, or `None` when the report
+    /// is satisfied.
+    ///
+    /// The error is a [`RunError`](super::RunError) of kind
+    /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet) that
+    /// reports the [`notice`](Requirements::notice). The caller checks it
+    /// after merging every report into one, and before building the run.
     #[must_use]
     pub fn refusal(&self) -> Option<super::RunError> {
         (!self.is_satisfied()).then(|| {
@@ -100,13 +111,11 @@ impl Requirements {
         })
     }
 
-    /// The refusal notice the Harness fails the run with when the report is
-    /// unsatisfied.
+    /// Returns the refusal notice, which explains what blocks the run.
     ///
-    /// Written to be read by a model - concise, factual, self-contained -
-    /// because it may arrive as tool output when the prompt runs as a
-    /// sub-run tool. Each line names what is missing or unmet, with
-    /// required versus actual.
+    /// Each line names what is missing or falls short, with required versus
+    /// actual. The notice is written for a model to read: concise, factual,
+    /// and self-contained.
     #[must_use]
     pub fn notice(&self) -> String {
         // Writing to a String is infallible, so each `write!` result is
@@ -114,19 +123,19 @@ impl Requirements {
         use std::fmt::Write as _;
         let mut notice = String::from("the environment cannot satisfy this prompt:");
         for id in &self.missing_required {
-            let _ = write!(notice, "\n- missing required capability: {id}");
+            let _ = write!(notice, "\n- missing required Plugin: {id}");
         }
         for missing in &self.missing_services {
             let _ = write!(
                 notice,
                 "\n- {} needs {}, and this host provides none",
-                missing.capability, missing.service
+                missing.plugin, missing.service
             );
         }
         for conflict in &self.conflicts {
             let _ = write!(
                 notice,
-                "\n- conflicting capabilities: {} and {} cannot be activated \
+                "\n- conflicting Plugins: {} and {} cannot be activated \
                  together; declare one or the other",
                 conflict.first, conflict.second
             );
@@ -150,56 +159,65 @@ impl Requirements {
     }
 }
 
-/// One declared co-activation conflict: two present capabilities that
-/// cannot activate in one run, named in declaration order.
+/// A declared conflict between two registered Plugins that exclude
+/// each other in a run.
+///
+/// The pair is named in the order the prompt declares them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct CapabilityConflict {
-    /// The earlier-declared capability.
-    pub first: CapabilityId,
-    /// The later-declared capability.
-    pub second: CapabilityId,
+pub struct PluginConflict {
+    /// The earlier-declared Plugin.
+    pub first: PluginId,
+    /// The later-declared Plugin.
+    pub second: PluginId,
 }
 
-impl CapabilityConflict {
-    /// Records one conflicting pair in declaration order: `first` was
-    /// declared before `second`. Only the Harness's activation reports
-    /// these.
+impl PluginConflict {
+    /// Creates a conflict between `first` and `second`, where the prompt
+    /// declares `first` before `second`.
+    ///
+    /// Only Plugin activation reports these.
     #[must_use]
-    pub fn new(first: CapabilityId, second: CapabilityId) -> CapabilityConflict {
-        CapabilityConflict { first, second }
+    pub fn new(first: PluginId, second: PluginId) -> PluginConflict {
+        PluginConflict { first, second }
     }
 }
 
-/// One Host service a required capability needs and the Host lacks,
-/// such as a capability that asks the operator on a batch Host
-/// with nobody to ask.
+/// A service that a required Plugin needs and the application lacks.
+///
+/// For example, a Plugin that asks the operator a question needs a
+/// service that reaches the operator, and a batch application runs on its
+/// own, so it lacks that service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MissingService {
-    /// The present, required capability that needs the service.
-    pub capability: CapabilityId,
-    /// The service's model-readable name, such as "an input broker". The
-    /// Harness owns its service vocabulary, so the report carries the name
-    /// the Harness gave it.
+    /// The registered, required Plugin that needs the service.
+    pub plugin: PluginId,
+    /// The name of the missing service.
+    ///
+    /// The caller defines its own service names, so the report carries
+    /// the name verbatim.
     pub service: String,
 }
 
 impl MissingService {
-    /// Records that `capability` needs the Host service named `service`
-    /// and the Host lacks it. Only the Harness's activation reports
-    /// these.
+    /// Creates an entry stating that `plugin` needs the service named
+    /// `service`, which the application lacks.
+    ///
+    /// Only Plugin activation reports these.
     #[must_use]
-    pub fn new(capability: CapabilityId, service: impl Into<String>) -> MissingService {
+    pub fn new(plugin: PluginId, service: impl Into<String>) -> MissingService {
         MissingService {
-            capability,
+            plugin,
             service: service.into(),
         }
     }
 }
 
-/// One failed model requirement: the role, which check failed, and what
-/// the prompt required versus what the filled model provides.
+/// A model requirement that the model bound to a role falls short of.
+///
+/// It names the role, the check that failed, and what the prompt required
+/// versus what the bound model provides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct UnmetRequirement {
@@ -207,11 +225,11 @@ pub struct UnmetRequirement {
     pub role: String,
     /// Which requirement check failed.
     pub check: RequirementCheck,
-    /// What the prompt required (a context minimum of `200000`; the
-    /// `thinking` keyword).
+    /// What the prompt required, such as a context minimum of `200000` or
+    /// the `thinking` keyword.
     pub required: String,
-    /// What the filled model provides (a context of `32000`; a `Never`
-    /// thinking capability).
+    /// What the bound model provides, such as a context of `32000` or a
+    /// thinking mode of `Never`.
     pub actual: String,
 }
 
@@ -219,9 +237,10 @@ pub struct UnmetRequirement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RequirementCheck {
-    /// The role's context minimum exceeds the filled model's context.
+    /// The role's context minimum exceeds the context of the model bound
+    /// to the role.
     ContextMinimum,
-    /// A hard keyword (`thinking`, `no-thinking`) the filled model's
-    /// descriptor does not satisfy.
+    /// The role declares a hard keyword, `thinking` or `no-thinking`, that
+    /// the bound model's descriptor fails to satisfy.
     HardKeyword,
 }

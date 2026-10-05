@@ -43,7 +43,7 @@ pub(crate) const TRACING_BRIDGE: crate::raw::LogCallback = Some(tracing_bridge);
 /// values outside the pinned enum degrade to [`tracing::Level::DEBUG`], so a
 /// runtime emitting an unknown level cannot spam the terminal.
 #[must_use]
-pub(crate) fn tracing_level(level: c_int) -> tracing::Level {
+fn tracing_level(level: c_int) -> tracing::Level {
     const GGML_LOG_LEVEL_INFO: c_int = 2;
     const GGML_LOG_LEVEL_WARN: c_int = 3;
     const GGML_LOG_LEVEL_ERROR: c_int = 4;
@@ -58,7 +58,7 @@ pub(crate) fn tracing_level(level: c_int) -> tracing::Level {
 /// Renders one C log fragment for `tracing`: lossy UTF-8 with the trailing
 /// newline whisper.cpp appends to every line removed.
 #[must_use]
-pub(crate) fn render_text(bytes: &[u8]) -> Cow<'_, str> {
+fn render_text(bytes: &[u8]) -> Cow<'_, str> {
     match String::from_utf8_lossy(bytes) {
         Cow::Borrowed(text) => Cow::Borrowed(text.trim_end_matches(['\r', '\n'])),
         Cow::Owned(mut text) => {

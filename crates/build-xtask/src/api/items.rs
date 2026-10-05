@@ -22,7 +22,7 @@ const STD_CRATES: [&str; 3] = ["std", "core", "alloc"];
 const ALLOWLIST: [&str; 4] = ["serde", "serde_core", "serde_json", "serde_yaml_ng"];
 
 /// What a closure mention must be, naming every crate it may come from.
-pub(crate) fn required() -> String {
+pub(super) fn required() -> String {
     format!(
         "a facade re-export, {}, or an allowlisted crate ({})",
         STD_CRATES.join(", "),
@@ -32,16 +32,16 @@ pub(crate) fn required() -> String {
 
 /// Where an id points, as the JSON that holds the id resolves it.
 #[derive(Debug)]
-pub(crate) struct Target<'a> {
+pub(super) struct Target<'a> {
     /// The defining crate's name.
-    pub(crate) krate: &'a str,
+    pub(super) krate: &'a str,
     /// The definition path, starting with the crate name.
-    pub(crate) path: &'a [String],
-    pub(crate) kind: ItemKind,
+    pub(super) path: &'a [String],
+    pub(super) kind: ItemKind,
 }
 
 /// The name of crate `crate_id` as `krate` numbers crates; 0 is `krate`.
-pub(crate) fn crate_name(krate: &Crate, crate_id: u32) -> Option<&str> {
+fn crate_name(krate: &Crate, crate_id: u32) -> Option<&str> {
     if crate_id == 0 {
         krate.index.get(&krate.root)?.name.as_deref()
     } else {
@@ -50,7 +50,7 @@ pub(crate) fn crate_name(krate: &Crate, crate_id: u32) -> Option<&str> {
 }
 
 /// Resolves `id` through `krate`'s path table.
-pub(crate) fn target(krate: &Crate, id: Id) -> Option<Target<'_>> {
+pub(super) fn target(krate: &Crate, id: Id) -> Option<Target<'_>> {
     let summary = krate.paths.get(&id)?;
     Some(Target {
         krate: crate_name(krate, summary.crate_id)?,
@@ -61,24 +61,24 @@ pub(crate) fn target(krate: &Crate, id: Id) -> Option<Target<'_>> {
 
 /// One facade re-export, resolved to its defining item.
 #[derive(Debug)]
-pub(crate) struct Entry {
+pub(super) struct Entry {
     /// The facade path dependents name it by (`promptforge::model::Message`).
-    pub(crate) label: String,
+    pub(super) label: String,
     /// The defining internal crate's name.
-    pub(crate) krate: String,
+    pub(super) krate: String,
     /// The item's id in the defining crate's JSON, present in its index.
-    pub(crate) id: Id,
+    pub(super) id: Id,
 }
 
 /// The facade's surface: its re-exports and its own modules.
 #[derive(Debug, Default)]
-pub(crate) struct Surface {
-    pub(crate) entries: Vec<Entry>,
+pub(super) struct Surface {
+    pub(super) entries: Vec<Entry>,
     /// Each facade module (the crate root first) and its id in the
     /// facade's JSON.
-    pub(crate) modules: Vec<(String, Id)>,
+    pub(super) modules: Vec<(String, Id)>,
     /// The internal crates' names.
-    pub(crate) internal: BTreeSet<String>,
+    pub(super) internal: BTreeSet<String>,
     /// Defining crate, then definition path, to facade path.
     facade_paths: HashMap<String, HashMap<Vec<String>, String>>,
 }
@@ -87,7 +87,7 @@ impl Surface {
     /// Walks the facade's modules from the crate root and resolves every
     /// re-export, returning a finding for each one that is not a single
     /// item defined in an internal crate.
-    pub(crate) fn resolve(loaded: &Loaded) -> (Surface, Vec<Finding>) {
+    pub(super) fn resolve(loaded: &Loaded) -> (Surface, Vec<Finding>) {
         let mut resolver = Resolver {
             loaded,
             local: loaded
@@ -112,13 +112,13 @@ impl Surface {
     }
 
     /// The facade path of the item defined at `path` in crate `krate`.
-    pub(crate) fn facade_path(&self, krate: &str, path: &[String]) -> Option<&str> {
+    pub(super) fn facade_path(&self, krate: &str, path: &[String]) -> Option<&str> {
         self.facade_paths.get(krate)?.get(path).map(String::as_str)
     }
 
     /// Why mentioning the item at `path` in `krate` breaks closure, or
     /// `None` when the facade re-exports it or its crate is allowed.
-    pub(crate) fn refusal(&self, krate: &str, path: &[String]) -> Option<String> {
+    pub(super) fn refusal(&self, krate: &str, path: &[String]) -> Option<String> {
         if krate == FACADE
             || STD_CRATES.contains(&krate)
             || ALLOWLIST.contains(&krate)

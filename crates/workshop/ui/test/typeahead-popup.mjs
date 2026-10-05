@@ -1,7 +1,7 @@
 // The mention typeahead popup (src/parts/chatbox/typeahead-popup.ts) in
 // jsdom, driven through a ChatBox (src/parts/chatbox/chat-box.ts) so the
-// suggestion plugin runs with the component's own configuration: the
-// injected or stub mentionSource, the debounce, minQueryLength 0, and
+// ProseMirror suggestion plugin runs with the component's own configuration:
+// the injected or stub mentionSource, the debounce, minQueryLength 0, and
 // the Enter/Tab yield in the editor's key handler. Covers: typing "@"
 // opens the popup with listbox semantics, a highlighted first row, and
 // inline position styles written by the managed mount (jsdom layout is
@@ -57,8 +57,8 @@ const bundle = await esbuild.build({
 // ProseMirror reads the DOM globals at construction, so the jsdom
 // globals must exist before the bundle is imported. pretendToBeVisual
 // supplies the requestAnimationFrame ProseMirror schedules with. The
-// suggestion plugin's managed mount also touches the HTMLElement,
-// Node, and DOMRect globals.
+// ProseMirror suggestion plugin's managed mount also touches the
+// HTMLElement, Node, and DOMRect globals.
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
   pretendToBeVisual: true,
@@ -110,9 +110,9 @@ function createBox(props = {}, sink = () => {}) {
   };
 }
 
-// The suggestion plugin debounces its item fetch (the component
-// configures 50 to 100 ms); a wait past that window lets the fetch and
-// the mount's computePosition settle.
+// The ProseMirror suggestion plugin debounces its item fetch (the
+// component configures 50 to 100 ms); a wait past that window lets the
+// fetch and the mount's computePosition settle.
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 160));
 }

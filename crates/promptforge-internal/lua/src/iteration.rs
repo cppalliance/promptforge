@@ -14,7 +14,7 @@
 //! ordered key sequence from the live table on each call; for a key still
 //! present it advances strictly, and for a cleared scalar key it resumes at
 //! the first key after the cleared key's sort position. A cleared integer key
-//! resumes as if it were in the array part, so its position no longer depends
+//! resumes as if it were in the array part, so its position does not depend
 //! on the mutable length hint `#t`. That resume is the stateless limit: an
 //! absent integer key cannot be told from a cleared array key, so a cleared
 //! non-array integer hash key (for example `t[7]` when there is no array part)

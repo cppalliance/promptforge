@@ -1,6 +1,9 @@
 //! Session lifecycle over `/agents/ws`: session isolation, status-bus
-//! ordering with the backoff reset, teardown wait cleanup, and a
-//! terminal agent failure surfacing as an error frame.
+//! ordering with the backoff reset, teardown wait cleanup, a terminal
+//! agent failure surfacing as an error frame, and the run log under the
+//! state directory.
+
+use workshop_run_log::{RunId, RunLog};
 
 use super::*;
 
@@ -137,7 +140,7 @@ async fn a_terminal_agent_failure_reaches_the_socket_as_an_error_frame() {
 name: boom
 description: The terminally failing test agent.
 promptforge: 0
-capabilities:
+plugins:
   - promptforge/user-input
 ---
 
@@ -188,5 +191,49 @@ error('kaboom')
     })
     .await
     .expect("a failed run leaves the registry");
+    socket.close().await;
+}
+
+#[tokio::test]
+async fn a_launched_run_is_recorded_in_the_run_log_under_the_state_directory() {
+    let (base, dir, state) = spawn_agent_server().await;
+    let log_file = dir.path().join("harness").join("runs.db");
+    assert!(
+        !log_file.exists(),
+        "the server opens no run log until a run starts"
+    );
+    let mut socket = connect(&base).await;
+    let session = launch_echo(&mut socket).await;
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "ping").await;
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&turn), "echo:ping");
+    assert!(state.agents().close(&session), "the session closes");
+
+    // The first run in a fresh log is run 1. Its end is the last write,
+    // so the row reads closed once the run has been recorded whole.
+    let run = RunId::from_raw(1);
+    let (log, row) = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(log) = RunLog::open(&log_file).await
+                && let Ok(row) = log.run(run).await
+                && row.outcome.is_some()
+            {
+                return (log, row);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the run is recorded and closed within the deadline");
+    assert_eq!(row.meta.name, session);
+    assert_eq!(row.agent, "echo", "Workshop writes the launched agent");
+    let events = log.transcript(run).await.expect("the events read back");
+    assert!(
+        events
+            .iter()
+            .any(|stored| stored.record.payload.to_string().contains("echo:ping")),
+        "the recorded events hold the reply: {events:?}"
+    );
     socket.close().await;
 }

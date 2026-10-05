@@ -13,15 +13,6 @@ use crate::error::ConfigError as ConfigErrorRepr;
 ///
 /// Opaque wrapper: the underlying `toml`, `io`, and validation detail are kept
 /// as a private `source()`; classify with [`ConfigError::kind`].
-///
-/// # Examples
-/// ```
-/// use gateway_config::{Config, ConfigErrorKind};
-///
-/// let err =
-///     Config::from_toml_str("config-version = 0\nthis is not valid = = toml").unwrap_err();
-/// assert_eq!(err.kind(), ConfigErrorKind::Parse);
-/// ```
 #[non_exhaustive]
 pub struct ConfigError(ConfigErrorRepr);
 
@@ -172,6 +163,13 @@ mod tests {
         });
         assert!(parse.source().is_some());
         assert!(parse.to_string().contains("inc.toml"));
+    }
+
+    #[test]
+    fn malformed_toml_classifies_as_parse() {
+        let err = crate::Config::from_toml_str("config-version = 0\nthis is not valid = = toml")
+            .unwrap_err();
+        assert_eq!(err.kind(), ConfigErrorKind::Parse);
     }
 
     #[test]

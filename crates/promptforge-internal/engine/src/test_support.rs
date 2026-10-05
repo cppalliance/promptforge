@@ -15,7 +15,7 @@
 //! Harness for the Engine's own suites.
 //!
 //! [`RunHarness`] bundles a suite's resources for one run - an observer, a
-//! client, a fixture tool table, a delta hook - and [`run_with_harness`] is
+//! client, a fixture tool table - and [`run_with_harness`] is
 //! the implicit-prepare path over the tokio driver: prepare, refuse or
 //! run. The tool fixtures implement
 //! the stand-in trait [`TestTool`]; the production trait is the Harness's,
@@ -38,47 +38,40 @@ use crate::execute::{
 };
 use crate::parser::Prompt;
 
-pub(crate) mod harness;
-#[cfg(test)]
-#[path = "test_support/mock-gateway-client.rs"]
-pub(crate) mod mock_gateway_client;
+mod harness;
 pub mod recording;
+#[cfg(test)]
+#[path = "test_support/scripted-chat.rs"]
+pub(crate) mod scripted_chat;
 pub(crate) mod tokio_driver;
-pub(crate) mod tools;
+mod tools;
 
-pub use harness::{ChatClient, DeltaHook, RunHarness};
+pub use harness::{ChatClient, RunHarness};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestTool, TestToolTable};
 
-/// The suites' mock-gateway client performs a `Chat` round over its
-/// dev-only HTTP under the run's limits.
+/// The suites' scripted model answers a `Chat` round in process under the
+/// run's limits.
 #[cfg(test)]
-impl ChatClient for mock_gateway_client::MockGatewayClient {
+impl ChatClient for scripted_chat::ScriptedChat {
     fn complete(
         &self,
         messages: Vec<crate::model::Message>,
         tools: Vec<crate::model::ToolSchema>,
         options: crate::model::CompletionOptions,
         limits: crate::execute::RunLimits,
-        on_delta: Option<DeltaHook>,
     ) -> BoxFuture<Result<crate::model::Completion, crate::model::CompletionError>> {
-        let client = self.clone();
+        let chat = self.clone();
         Box::pin(async move {
-            client
-                .complete(
-                    &messages,
-                    &tools,
-                    &options,
-                    limits.timeout(),
-                    limits.response_bytes(),
-                    |delta| {
-                        if let Some(hook) = &on_delta {
-                            hook(delta);
-                        }
-                    },
-                )
-                .await
+            chat.complete(
+                &messages,
+                &tools,
+                &options,
+                limits.timeout(),
+                limits.response_bytes(),
+            )
+            .await
         })
     }
 }
@@ -97,33 +90,6 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// `perform` is handed the effect's id beside the effect so a scripted
 /// performer can correlate answers however it likes; it must return an
 /// answer of the effect's own kind (or `Dropped`), as the run requires.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so the
-/// performer is never called:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge_engine::test_support::drive;
-/// use promptforge_engine::{Run, RunContext, RunResult};
-/// use promptforge_parser::Prompt;
-/// use promptforge_types::event::Event;
-/// use promptforge_types::timestamp::Timestamp;
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let run = Run::new(Arc::new(prompt), "", ctx);
-/// let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
-/// let RunResult::Ok(text) = result else {
-///     panic!("the literal run succeeds: {result:?}");
-/// };
-/// assert_eq!(text, "hello");
-/// assert!(matches!(events.first(), Some(Event::RunStarted { .. })));
-/// assert!(matches!(events.last(), Some(Event::RunSucceeded { .. })));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 pub fn drive(
     mut run: Run,
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,
@@ -166,10 +132,10 @@ pub fn drive(
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on `harness` ([`RunHarness::tools`]). Capability activation
+/// implementations on `harness` ([`RunHarness::tools`]). Plugin activation
 /// is the Harness's and never happens here.
 ///
-/// An unsatisfiable prompt - a missing required capability or an unmet
+/// An unsatisfiable prompt - a missing required Plugin or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.

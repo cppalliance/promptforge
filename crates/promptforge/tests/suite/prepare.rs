@@ -6,22 +6,22 @@
 //! prepare-run refusals drive the Harness in `promptforge-engine`'s test
 //! support, so they sit in that crate's own suite.
 //!
-//! Capability activation - resolving a prompt's declarations against a
+//! Plugin activation - resolving a prompt's declarations against a
 //! registry, conflict checking, and catalog assembly - is the Harness's,
-//! and its suite lives with it in `harness-capabilities`; the Engine's
+//! and its suite lives with it in `harness-plugins`; the Engine's
 //! prepare only ever sees the catalog the Harness hands it.
 
 use std::num::NonZeroU32;
 
-use promptforge::capabilities::CapabilityId;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::plugins::PluginId;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RequirementCheck};
 
 use super::support::context;
 
-/// A prompt declaring no capabilities at all.
+/// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(
     "---\n",
     "name: declares-nothing\n",
@@ -259,7 +259,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 
 // ToolBindings and slot filling: exact slots fill by identity against
 // the Harness-supplied catalog (an exact path's first two segments name its
-// capability, so a slot whose capability contributed nothing to the
+// Plugin, so a slot whose Plugin contributed nothing to the
 // catalog is reported as missing), with every fill journaled into the
 // run's tool bindings as descriptors, never implementations.
 
@@ -269,7 +269,7 @@ const DECLARES_EXACT_SLOT: &str = concat!(
     "name: declares-exact-slot\n",
     "description: d\n",
     "promptforge: 0\n",
-    "capabilities:\n",
+    "plugins:\n",
     "  - promptforge/web\n",
     "tools:\n",
     "  fetch: promptforge/web/fetch\n",
@@ -279,7 +279,7 @@ const DECLARES_EXACT_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring one tool slot whose capability is not declared at
+/// A prompt declaring one tool slot whose Plugin is not declared at
 /// all.
 const DECLARES_ORPHAN_SLOT: &str = concat!(
     "---\n",
@@ -305,8 +305,8 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     )
 }
 
-/// The step's first test: `prepare` fills a slot by identity against a
-/// catalog the Harness supplied directly - no registry, no activation, no
+/// `prepare` fills a slot by identity against a catalog the caller
+/// supplied directly - no registry, no activation, no
 /// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]
@@ -341,25 +341,25 @@ fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
 }
 
 #[test]
-fn an_exact_slot_whose_capability_is_inactive_is_reported() {
+fn an_exact_slot_whose_plugin_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // An empty catalog and no declaration: the slot's capability
+    // An empty catalog and no declaration: the slot's Plugin
     // contributed nothing the Engine can fill against.
     let (ctx, requirements) = Environment::new().prepare(&prompt, context("fill-orphan"));
-    // The exact path's first two segments name its capability.
+    // The exact path's first two segments name its Plugin.
     assert_eq!(
         requirements.missing_required,
-        [CapabilityId::parse("promptforge/web").expect("the id is valid")]
+        [PluginId::parse("promptforge/web").expect("the id is valid")]
     );
     assert!(!requirements.is_satisfied());
     assert!(ctx.tool_bindings().is_empty());
 }
 
 #[test]
-fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
+fn an_exact_slot_absent_from_an_active_plugin_is_not_reported_missing() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    // The capability is present in the catalog but contributed a different
-    // tool: the slot's capability is not missing, so the run must not fail
+    // The Plugin is present in the catalog but contributed a different
+    // tool: the slot's Plugin is not missing, so the run must not fail
     // unsatisfiably - installing changes nothing.
     let catalog = ToolCatalog::new(&[web_descriptor("promptforge/web/search", "Search the web")])
         .expect("the catalog builds");
@@ -367,7 +367,7 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
     let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
     assert!(
         requirements.missing_required.is_empty(),
-        "an active capability is never reported missing: {:?}",
+        "an active Plugin is never reported missing: {:?}",
         requirements.missing_required
     );
     assert!(requirements.is_satisfied());

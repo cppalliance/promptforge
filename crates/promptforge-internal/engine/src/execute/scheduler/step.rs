@@ -70,8 +70,8 @@ impl Scheduler {
                 match &chain.blocks(&prompt)[chain.block] {
                     Block::Lua(_) => Advance::StartLua,
                     Block::Prose { .. } => Advance::StashProse,
-                    // `Block` is `#[non_exhaustive]` across the crate seam; a
-                    // future variant has no advance rule yet.
+                    // `Block` is `#[non_exhaustive]` across the crate seam; an
+                    // unlisted variant has no advance rule.
                     _ => {
                         return Err(Error::internal("an unrecognized block kind cannot advance"));
                     }
@@ -272,9 +272,6 @@ impl Scheduler {
                         *root_result = Some(self.settle_owned_tasks(id, Ok(value)));
                         return Ok(());
                     }
-                    // H1 does not read the `reply` global back after a
-                    // Lua block: the pass's reply slot rolls forward through
-                    // prose alone.
                     chain.block += 1;
                     self.ready.push_back(id);
                     return Ok(());

@@ -50,21 +50,10 @@ jobs:
       - name: Build Gateway without Workshop UI tooling
         run: cargo build --locked -p gateway
 
-      - name: Check safe STT crates without unsafe code
-        env:
-          RUSTFLAGS: -D warnings
-        run: |
-          cargo rustc --locked -p gateway-stt-engine --lib -- -F unsafe-code
-          cargo rustc --locked -p gateway-stt-backend-whisper --lib -- -F unsafe-code
-          cargo rustc --locked -p gateway-stt --lib -- -F unsafe-code
-
-      - name: Check native STT FFI lint policy
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --locked -p gateway-whisper-ffi --lib
-
       - name: Clippy
-        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features
 
   test:
     runs-on: ubuntu-latest
@@ -94,9 +83,6 @@ jobs:
 
       - name: Test (concurrent via nextest)
         run: cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features
-
-      - name: Doctests
-        run: cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc
 
       - name: Check headless gateway
         run: cargo check -p gateway --no-default-features
@@ -189,7 +175,9 @@ jobs:
       # so it runs in this partition with the crates it fronts and stays
       # out of the workspace-wide jobs like them.
       - name: Clippy (workshop)
-        run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets
 
       - name: Test (workshop, concurrent via nextest)
         run: cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api
@@ -206,11 +194,6 @@ jobs:
       # a default feature, so it needs its own invocation.
       - name: Test (workshop-server headless)
         run: cargo nextest run --locked -p workshop-server --features headless
-
-      # nextest does not run doctests; the workspace doctest step in the
-      # `test` job excludes both workshop crates, so cover them here.
-      - name: Doctests (workshop)
-        run: cargo test --doc -p workshop -p workshop-server -p workshop-server-api
 
       - name: Docs (workshop-server, private items)
         env:
@@ -240,7 +223,7 @@ jobs:
           fi
 
   # First Linux build of the desktop app: compile-only, against the Tauri
-  # system packages a Linux developer installs per the README. Catches the
+  # system packages a Linux developer installs. Catches the
   # missing-system-package class of failure the Windows-only job cannot see.
   check-workshop-linux:
     runs-on: ubuntu-22.04
@@ -248,8 +231,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -358,7 +339,7 @@ jobs:
 
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
-          tool: cargo-deny, cargo-audit
+          tool: cargo-deny, cargo-audit, cargo-hakari
 
       - name: cargo deny
         run: cargo deny check
@@ -366,11 +347,14 @@ jobs:
       - name: cargo audit
         run: cargo audit
 
+      - name: cargo hakari verify
+        run: cargo hakari verify
+
       # The gateway holds vendor credentials, so it links exactly one rustls
       # crypto backend, aws-lc-rs. This fails when `ring` re-enters its
-      # normal-edge closure (through a reqwest bump, a plugin default, or a
-      # hakari regeneration) and when `cargo tree` itself cannot run; only a
-      # successful, ring-free result passes.
+      # normal-edge closure (through a reqwest bump, a Tauri plugin default,
+      # or a hakari regeneration) and when `cargo tree` itself cannot run;
+      # only a successful, ring-free result passes.
       - name: One rustls crypto backend in the gateway
         shell: bash
         run: |

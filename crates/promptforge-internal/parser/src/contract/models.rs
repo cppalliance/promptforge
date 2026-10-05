@@ -11,33 +11,40 @@ use serde::Deserialize;
 
 use super::{ContractKeys, deserialize_contract_map};
 
-/// The closed model-keyword vocabulary.
+/// A keyword that describes the model a role needs.
 ///
-/// Hard keywords (`thinking`, `no-thinking`) and the context minimum are
-/// checked per slot against the filled model's descriptor at prepare; soft
-/// keywords document author intent. Unknown keywords are parse errors;
-/// adding a keyword is a language change.
+/// Keywords are hard or soft. When a run is prepared, each role's hard
+/// keywords (`thinking` and `no-thinking`) and its minimum context window
+/// are checked against the descriptor of the model that fills the role.
+/// Soft keywords document the author's intent.
+///
+/// The set of keywords is fixed, and a keyword outside the set is a parse
+/// error. Adding a keyword is a change to the prompt language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum ModelKeyword {
-    /// The model supports extended thinking (hard).
+    /// The model supports extended thinking. This keyword is hard.
     Thinking,
-    /// The model never thinks (hard).
+    /// The model runs with thinking turned off. This keyword is hard.
     NoThinking,
-    /// A frontier-capability model (soft).
+    /// A frontier-capability model. This keyword is soft.
     Frontier,
-    /// A fast model (soft).
+    /// A fast model. This keyword is soft.
     Fast,
-    /// A small model (soft).
+    /// A small model. This keyword is soft.
     Small,
-    /// A creative model (soft).
+    /// A creative model. This keyword is soft.
     Creative,
-    /// A chat-tuned model (soft).
+    /// A chat-tuned model. This keyword is soft.
     Chat,
 }
 
-/// One declared model role: keywords, a context minimum, and a description.
+/// One model role a prompt declares: its keywords, minimum context window,
+/// and description.
+///
+/// A role is a slot for a model the prompt needs. When the run is
+/// prepared, a concrete model fills the slot.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -60,7 +67,7 @@ impl ModelRole {
         &self.keywords
     }
 
-    /// Returns the context minimum in tokens, when declared.
+    /// Returns the minimum context window in tokens, when declared.
     #[must_use]
     pub fn min_context(&self) -> Option<NonZeroU32> {
         self.min_context
@@ -73,13 +80,17 @@ impl ModelRole {
     }
 }
 
-/// The prompt's declared model roles: label to role.
+/// The model roles a prompt declares under the `models` frontmatter key,
+/// keyed by label.
 ///
-/// Labels are prompt-local (the alias grammar); the model never sees a
-/// concrete model id in the declaration. Each label installs as a section
-/// VM global, so a label that names an Engine global, a Lua standard-library
-/// global the sandbox keeps, or a Lua keyword is rejected at parse, as is
-/// a label that is also a tool alias.
+/// A label is a name local to the prompt. It follows the same grammar as
+/// a tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
+///
+/// Each label becomes a global variable of the same name in the Lua VM
+/// that runs a prompt section. The parser therefore rejects a label that
+/// names a global the Engine installs, a Lua standard-library global the
+/// sandbox keeps, or a Lua keyword. It also rejects a label that is also
+/// a tool alias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelRoles {
@@ -106,7 +117,7 @@ impl ModelRoles {
         self.roles.len()
     }
 
-    /// Returns whether no roles are declared.
+    /// Returns whether the set of declared roles is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty()

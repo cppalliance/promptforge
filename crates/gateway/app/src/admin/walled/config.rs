@@ -28,13 +28,13 @@ use crate::registry::RouteInfo;
 /// The reply of every shadow-write route: the shadow file the save
 /// staged, as a display path.
 #[derive(Debug, Serialize)]
-pub(crate) struct ShadowReply {
+pub(super) struct ShadowReply {
     shadow: String,
 }
 
 impl ShadowReply {
     /// The reply naming `shadow`.
-    pub(crate) fn staged(shadow: &Path) -> ShadowReply {
+    pub(super) fn staged(shadow: &Path) -> ShadowReply {
         ShadowReply {
             shadow: shadow.display().to_string(),
         }
@@ -44,10 +44,10 @@ impl ShadowReply {
 const CONFIG: RouteInfo = RouteInfo::walled("/admin/config", &[Method::GET, Method::PUT]);
 
 /// The `/admin/config` routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[CONFIG];
+pub(super) const ROUTES: &[RouteInfo] = &[CONFIG];
 
 /// The `/admin/config` routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(CONFIG.path, get(admin_config).put(admin_put_config))
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// config in the pending admin shape. The running profile is not part of
 /// the document (`GET /admin/status` reports it), so the reply round-trips
 /// through `PUT /admin/config` unchanged.
-pub(crate) async fn admin_config(
+async fn admin_config(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
@@ -72,7 +72,7 @@ pub(crate) async fn admin_config(
 /// is `{"shadow": path}`. A body containing `active_profile` is rejected
 /// as a config-write error: selection belongs to
 /// `POST /admin/switch-profile`.
-pub(crate) async fn admin_put_config(
+async fn admin_put_config(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WireJson(body): WireJson<serde_json::Value>,

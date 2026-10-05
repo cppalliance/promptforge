@@ -107,8 +107,8 @@ async fn subscribe_progress_decodes_snapshots_and_skips_heartbeat_comments() {
 
 #[tokio::test]
 async fn subscribe_progress_refuses_the_old_operation_event_shape_as_malformed() {
-    // A gateway still emitting the retired weighted-tree events is a
-    // version skew the decoder reports, never renders.
+    // A gateway emitting weighted-tree operation events is a version
+    // skew the decoder reports, never renders.
     let stale = serde_json::json!({
         "operation": 7,
         "path": "local-models/ggml/download",

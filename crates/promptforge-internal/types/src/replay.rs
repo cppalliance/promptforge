@@ -4,11 +4,9 @@
 //! A run is meant to be reproducible from its log: the same run inputs
 //! (seed, `started_at`, flags) and the same answers replayed in order
 //! produce the same effects and events, each keyed by its
-//! [`Provenance`](crate::ids::Provenance). Replay itself is
-//! not built yet; these types are defined now so the log schema and the run
-//! record have their columns from the first run written.
+//! [`Provenance`](crate::ids::Provenance).
 //!
-//! [`Flags`] is how a future Engine change that alters a recorded run's
+//! [`Flags`] is how an Engine change that alters a recorded run's
 //! behavior stays replayable: it runs the new behavior live and sets its
 //! flag, and a later replay honors the flag only if the original run
 //! recorded it. [`ReplayError`] keeps "the code under replay diverged" apart
@@ -22,36 +20,28 @@ use serde::{Deserialize, Serialize};
 #[path = "replay-tests.rs"]
 mod tests;
 
-/// The behavior flags recorded with a run: a bitset that is one `u32` on
-/// the wire and in the run record.
+/// The set of behavior flags recorded with a run.
 ///
-/// Numbering is reserve-forever: each flag a future change introduces is an
-/// associated constant `Flags(1 << n)` whose bit `n` is assigned once and
-/// never reused or renumbered, even after the behavior it gated becomes
-/// the only behavior. No flag is defined yet. Bits this build does not name
-/// are preserved through [`from_bits`](Self::from_bits) and
-/// [`bits`](Self::bits), so a record written by a newer Engine keeps its
-/// flags through an older reader.
+/// The set is a bitset stored as a single `u32`, both when serialized and
+/// in the run record.
 ///
-/// # Examples
-/// ```
-/// use promptforge::replay::Flags;
-///
-/// let recorded = Flags::from_bits(0b101);
-/// assert!(recorded.contains(Flags::from_bits(0b100)));
-/// assert!(!recorded.contains(Flags::from_bits(0b010)));
-/// assert!(Flags::EMPTY.is_empty());
-/// ```
+/// Each flag is an associated constant `Flags(1 << n)`. Its bit `n` is
+/// assigned once and belongs to that flag permanently, even after the
+/// behavior the flag gates becomes the only behavior.
+/// [`from_bits`](Self::from_bits) and [`bits`](Self::bits) preserve all 32
+/// bits. A record written by a newer Engine keeps every flag when an older
+/// reader loads it, including flags added after that reader was built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 #[serde(transparent)]
 pub struct Flags(u32);
 
 impl Flags {
-    /// No flag set: every run this plan produces records this value.
+    /// The empty set, with every bit clear.
     pub const EMPTY: Flags = Flags(0);
 
-    /// The set whose bits are exactly `bits`, unknown bits included.
+    /// Returns the set whose bits are exactly `bits`, including bits for
+    /// flags added in a newer build.
     #[must_use]
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)
@@ -63,7 +53,7 @@ impl Flags {
         self.0
     }
 
-    /// True when no flag is set.
+    /// True when every bit is clear.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0

@@ -25,12 +25,12 @@
 //! `SectionVm::run_chunk` as a Lua-category error.
 //!
 //! In scheduler mode the VM also holds `tasks`, the shims for spawning,
-//! waiting on, checking, noting, and cancelling tasks. Capability preludes
-//! are the Lua source an activated capability contributes: each runs once
+//! waiting on, checking, noting, and cancelling tasks. Plugin preludes
+//! are the Lua source an activated Plugin contributes: each runs once
 //! per VM in an environment of its own before the shared library replays,
 //! and its globals are checked against the reserved-name list and raw-set
 //! into `_G`. The `input` table that `promptforge/user-input` defines is
-//! one: `input.ask()` is an ordinary tool call to that capability's ask
+//! one: `input.ask()` is an ordinary tool call to that Plugin's ask
 //! tool.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
@@ -40,63 +40,68 @@
 //! ## Invariants
 //!
 //! - May depend on: `promptforge-types`, `promptforge-model-client`, and
-//!   `promptforge-vfs`. Read the repository-root `AGENTS.md` before adding
-//!   an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   `promptforge-vfs`. `cargo test -p build-xtask` enforces the product and
+//!   container boundaries.
+//! - Scheduler state changes only through a typed `Request` yielded by the
+//!   installed shim; a direct or malformed yield fails the block without
+//!   changing scheduler state.
+//! - Engine globals are namespace functions over plain values (`models.*`,
+//!   `tools.*`, `store.*`). Handles are frozen, inspectable, and
+//!   methodless, and an optional leading handle argument selects an
+//!   explicit binding. The chainable `messages.new()` builders are the one
+//!   deliberate exception.
 
-// These imports are re-exported `pub(crate)` so the child modules can pull
-// the full shared surface with a single `use super::*;`.
-pub(crate) use std::collections::BTreeMap;
-pub(crate) use std::num::NonZeroU32;
-pub(crate) use std::sync::Arc;
-pub(crate) use std::sync::Mutex;
-pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+// The shared surface that child modules pull with a single `use super::*;`.
+use std::collections::BTreeMap;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-pub(crate) use mlua::thread::ThreadStatus;
-pub(crate) use mlua::{
+use mlua::thread::ThreadStatus;
+use mlua::{
     Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Thread,
     Value, VmState,
 };
-pub(crate) use serde_json::Value as Json;
+use serde_json::Value as Json;
 
-pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
-pub(crate) use promptforge_types::emitter::Emitter;
-pub(crate) use promptforge_types::event::lifecycle;
-pub(crate) use promptforge_types::tools::ToolId;
-pub(crate) use promptforge_types::untrusted::GuardNonce;
-pub(crate) use promptforge_vfs::Access;
+use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::lifecycle;
+use promptforge_types::tools::ToolId;
+use promptforge_types::untrusted::GuardNonce;
+use promptforge_vfs::Access;
 
-pub(crate) use crate::compactors::install_compactors;
-pub(crate) use crate::error::Result;
-pub(crate) use crate::messages::install_messages;
-pub(crate) use crate::models::LuaModelHandle;
-pub(crate) use crate::models::install_models;
+use crate::compactors::install_compactors;
+use crate::error::Result;
+use crate::messages::install_messages;
+use crate::models::LuaModelHandle;
+use crate::models::install_models;
 
 pub use crate::error::{Error, SharedSource};
 
 /// How many instructions between hook firings.
-pub(crate) const HOOK_INTERVAL: u32 = 10_000;
+const HOOK_INTERVAL: u32 = 10_000;
 /// Hook-firing trip budget, effectively unlimited.
 ///
 /// Long-running and infinite loops are legal: no instruction ceiling aborts a
 /// block, so the hook's job is the cancellation poll and the run's
 /// `CancelHandle` is the kill switch for a runaway loop. The typed quota
 /// errors remain for the memory and log budgets.
-pub(crate) const HOOK_BUDGET: u64 = u64::MAX;
+const HOOK_BUDGET: u64 = u64::MAX;
 /// Maximum number of Unicode scalar values accepted by `log`.
-pub(crate) const LUA_LOG_CHARACTER_LIMIT: usize = 256;
+const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 /// Default per-VM Lua heap ceiling, matching the executor's `RunLimits`.
-pub(crate) const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 /// Default per-VM `log()` event budget, matching the executor's `RunLimits`.
-pub(crate) const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
+const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
 
 /// Cumulative `log()` byte ceiling derived from the event budget.
 ///
 /// Bounds total log volume (bytes) even when each event is under the per-event
 /// character ceiling. Derived as `events * LUA_LOG_CHARACTER_LIMIT` so it scales
 /// with the configured event budget.
-pub(crate) fn log_byte_budget(log_events: u32) -> usize {
+fn log_byte_budget(log_events: u32) -> usize {
     (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
 }
 
@@ -114,21 +119,19 @@ pub use error_value::{
 };
 mod globals;
 mod hardening;
-pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
+use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
 mod iteration;
-pub(crate) use coro::{block_guard, install_shim_prelude, take_failure};
-pub(crate) use iteration::install_deterministic_iteration;
+use coro::{block_guard, install_shim_prelude, take_failure};
+use iteration::install_deterministic_iteration;
 mod dispatch;
 mod sys;
-pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
+use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod engine_globals;
 pub use engine_globals::install_ui;
-pub(crate) use engine_globals::{
-    install_log, install_store_table, install_untrusted, route_store_to_shims,
-};
+use engine_globals::{install_log, install_store_table, install_untrusted, route_store_to_shims};
 mod tools;
-pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
+use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
 mod handles;
 mod messages;
 mod prelude;
@@ -138,7 +141,7 @@ mod prose;
 mod proxy;
 mod scope;
 mod vm;
-pub(crate) use handles::resolve_section_target;
+use handles::resolve_section_target;
 mod models;
 mod protocol;
 
@@ -146,7 +149,7 @@ mod protocol;
 // here. The facade re-exports only `VfsOp` and `VfsOutcome`.
 pub use crate::argv::Argv;
 pub use collection::render_item;
-pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
+pub use compactors::{Compactor, OverflowReason, UsageAnchor, output_reserve, precheck};
 #[cfg(feature = "test-support")]
 pub use coro::install_model_tool_call_shim;
 pub use coro::{install_section_loop_shim, install_store_shims};

@@ -361,15 +361,15 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/models",
-        "harness-models",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\ngateway-routing = { path = \"../../gateway-routing\" }\n",
     );
     write_crate(root.path(), "gateway-routing", "gateway-routing", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-models depends on gateway-routing:")
+        violations[0].starts_with("harness-plugins depends on gateway-routing:")
             && violations[0].contains("harness crates must not depend on gateway crates"),
         "the violation names the harness crate and the gateway ban: {violations:?}"
     );
@@ -424,7 +424,8 @@ fn a_workshop_crate_depending_on_a_harness_crate_other_than_the_facade_is_report
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("workshop-server depends on harness-runner:")
-            && violations[0].ends_with("only through harness"),
+            && violations[0]
+                .ends_with("only through harness, harness-gateway-client, or harness-web"),
         "the violation names the workshop crate and the harness facade: {violations:?}"
     );
 }

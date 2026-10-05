@@ -9,18 +9,14 @@
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`. Never on
 //!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
-//!   `promptforge-*` crate. Read the repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
-//! - The server stores each value verbatim and never interprets it
-//!   beyond the allow-listed key and the size cap; the SPA owns every
-//!   value's schema.
+//!   `promptforge-*` crate. `cargo test -p build-xtask` enforces the product
+//!   and container boundaries.
+//! - The SPA owns every value's schema.
 //! - One writer: every put updates the in-memory map under one mutex and
 //!   rewrites the whole file through the shared atomic-write helper, so
 //!   a crash leaves the old document or the new, never a truncation.
-//! - A missing, unreadable, or corrupt file reads as "no state yet" -
-//!   logged and tolerated; a refused put is a value returned to the
-//!   caller and writes nothing.
+//! - A missing, unreadable, or corrupt file reads as "no state yet"; a
+//!   refused put is a value returned to the caller and writes nothing.
 //! - The crate maps its own [`UserStateError`] to the wire envelope at
 //!   its route boundary; no server error type appears here.
 

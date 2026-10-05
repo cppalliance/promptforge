@@ -284,7 +284,7 @@ const TOKIO_SEEDS: [u64; 3] = [1, 2, 3];
 async fn tokio_results(
     prompt: &Prompt,
     store: &TestStore,
-    client: impl Fn() -> Option<MockGatewayClient>,
+    client: impl Fn() -> Option<ScriptedChat>,
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
@@ -369,8 +369,8 @@ async fn join_any_joins_the_task_it_returns_and_only_that_task() {
             "batching {index} produced an illegal verdict: {text}"
         );
     }
-    let gateway = ScriptedGateway::start(vec![resp_text("ra"), resp_text("rb")]).await;
-    for (index, result) in tokio_results(&prompt, &store, || Some(gateway_client(gateway.addr())))
+    let gateway = ScriptedChat::new(vec![resp_text("ra"), resp_text("rb")]);
+    for (index, result) in tokio_results(&prompt, &store, || Some(gateway_client(&gateway)))
         .await
         .iter()
         .enumerate()
@@ -391,8 +391,8 @@ async fn join_any_joins_the_task_it_returns_and_only_that_task() {
             "expected determinism, got {result:?}"
         );
     }
-    let gateway = ScriptedGateway::start(vec![resp_text("ra"), resp_text("rb")]).await;
-    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(gateway.addr())))
+    let gateway = ScriptedChat::new(vec![resp_text("ra"), resp_text("rb")]);
+    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
         .await
         .iter()
         .enumerate()
@@ -440,12 +440,11 @@ async fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() 
             "expected determinism, got {result:?}"
         );
     }
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "slow answer",
         std::time::Duration::from_millis(500),
-    )])
-    .await;
-    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(gateway.addr())))
+    )]);
+    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
         .await
         .iter()
         .enumerate()
@@ -464,12 +463,11 @@ async fn a_cancelled_tasks_partial_write_is_readable_after_the_join() {
     for result in &serial_results(&prompt, &store) {
         assert_eq!(ok_text(result), "partial");
     }
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "slow answer",
         std::time::Duration::from_millis(500),
-    )])
-    .await;
-    for result in &tokio_results(&prompt, &store, || Some(gateway_client(gateway.addr()))).await {
+    )]);
+    for result in &tokio_results(&prompt, &store, || Some(gateway_client(&gateway))).await {
         assert_eq!(ok_tokio_text(result), "partial");
     }
 }

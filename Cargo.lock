@@ -607,10 +607,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-ceiling"
+version = "0.3.0"
+
+[[package]]
 name = "build-llama-cuda"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "build-ceiling",
  "flate2",
  "serde",
  "serde_json",
@@ -625,6 +630,7 @@ name = "build-ui"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "build-ceiling",
  "serde_json",
  "tempfile",
  "workspace-hack",
@@ -634,6 +640,7 @@ dependencies = [
 name = "build-user-guide"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "tempfile",
  "workspace-hack",
 ]
@@ -643,6 +650,7 @@ name = "build-workshop"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "build-ceiling",
  "ctrlc",
  "tempfile",
  "workspace-hack",
@@ -653,7 +661,9 @@ name = "build-xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "build-ceiling",
  "proc-macro2",
+ "pulldown-cmark",
  "rustdoc-types",
  "serde_json",
  "syn 3.0.3",
@@ -844,9 +854,9 @@ checksum = "18758054972164c3264f7c8386f5fc6da6114cb46b619fd365d4e3b2dc3ae487"
 
 [[package]]
 name = "chacha20"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -1958,6 +1968,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "block2",
+ "build-ceiling",
  "dotenvy",
  "embed-resource",
  "futures-util",
@@ -2011,6 +2022,7 @@ dependencies = [
 name = "gateway-api-discovery"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "libc",
  "serde",
  "serde_json",
@@ -2025,6 +2037,7 @@ dependencies = [
 name = "gateway-api-types"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "serde",
  "serde_json",
  "time",
@@ -2035,6 +2048,7 @@ dependencies = [
 name = "gateway-cloud-providers"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "dotenvy",
  "futures-util",
  "gateway-api-types",
@@ -2054,6 +2068,7 @@ dependencies = [
 name = "gateway-config"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "gateway-api-types",
  "reqwest",
  "serde",
@@ -2071,6 +2086,7 @@ name = "gateway-config-ui"
 version = "0.3.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "build-ui",
  "rust-embed",
  "shared-loopback",
@@ -2085,6 +2101,7 @@ name = "gateway-local"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "build-ceiling",
  "flate2",
  "gateway-config",
  "gateway-progress",
@@ -2113,6 +2130,8 @@ dependencies = [
 name = "gateway-logging"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
+ "gateway-api-discovery",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -2122,6 +2141,7 @@ dependencies = [
 name = "gateway-progress"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "gateway-api-types",
  "tokio",
  "workspace-hack",
@@ -2132,6 +2152,7 @@ name = "gateway-protocol"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "build-ceiling",
  "bytes",
  "futures-util",
  "gateway-api-types",
@@ -2150,6 +2171,7 @@ dependencies = [
 name = "gateway-routing"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "gateway-config",
  "gateway-protocol",
  "thiserror 2.0.19",
@@ -2164,6 +2186,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "build-ceiling",
  "futures-util",
  "gateway-config",
  "gateway-local",
@@ -2189,6 +2212,7 @@ dependencies = [
 name = "gateway-stt-backend-whisper"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "gateway-progress",
  "gateway-stt-engine",
  "gateway-whisper-ffi",
@@ -2203,6 +2227,7 @@ dependencies = [
 name = "gateway-stt-engine"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -2213,6 +2238,7 @@ dependencies = [
 name = "gateway-web-search"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "gateway-config",
  "gateway-protocol",
  "reqwest",
@@ -2228,6 +2254,7 @@ dependencies = [
 name = "gateway-whisper-ffi"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "libloading 0.8.9",
  "thiserror 2.0.19",
  "tracing",
@@ -2594,17 +2621,35 @@ dependencies = [
 name = "harness"
 version = "0.3.0"
 dependencies = [
- "harness-capabilities",
- "harness-log",
+ "async-trait",
+ "harness-plugins",
  "harness-runner",
- "harness-sessions",
  "promptforge",
  "tokio",
  "workspace-hack",
 ]
 
 [[package]]
-name = "harness-capabilities"
+name = "harness-gateway-client"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "harness",
+ "harness-web",
+ "promptforge",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-plugins"
 version = "0.3.0"
 dependencies = [
  "async-trait",
@@ -2617,73 +2662,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-log"
-version = "0.3.0"
-dependencies = [
- "promptforge",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "turso",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-models"
-version = "0.3.0"
-dependencies = [
- "axum",
- "bytes",
- "harness-log",
- "harness-runner",
- "promptforge",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "url",
- "workspace-hack",
-]
-
-[[package]]
 name = "harness-runner"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "harness-capabilities",
- "harness-log",
+ "futures-util",
+ "harness-plugins",
  "promptforge",
  "rand 0.9.5",
  "serde_json",
  "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tokio-util",
- "tracing",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-sessions"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "harness-capabilities",
- "harness-log",
- "harness-models",
- "harness-runner",
- "harness-sessions",
- "harness-web",
- "promptforge",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -2694,48 +2682,19 @@ dependencies = [
 name = "harness-web"
 version = "0.3.0"
 dependencies = [
- "harness-capabilities",
- "harness-web-search",
- "harness-webfetch",
- "promptforge",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-web-search"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "harness-capabilities",
- "harness-runner",
- "promptforge",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "url",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-webfetch"
-version = "0.3.0"
-dependencies = [
  "async-trait",
  "axum",
  "encoding_rs",
  "flate2",
  "futures-util",
- "harness-capabilities",
- "harness-runner",
+ "harness",
  "htmd",
  "ipnet",
  "mime",
  "promptforge",
  "readabilityrs",
  "reqwest",
+ "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
@@ -4802,6 +4761,7 @@ dependencies = [
 name = "promptforge"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "promptforge-engine",
  "promptforge-lua",
  "promptforge-model-client",
@@ -4817,17 +4777,14 @@ name = "promptforge-engine"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "axum",
- "bytes",
+ "build-ceiling",
  "criterion",
  "mlua",
- "promptforge",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
  "promptforge-types",
  "promptforge-vfs",
- "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -4839,6 +4796,7 @@ dependencies = [
 name = "promptforge-lua"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "criterion",
  "mlua",
  "promptforge-model-client",
@@ -4854,7 +4812,7 @@ dependencies = [
 name = "promptforge-model-client"
 version = "0.3.0"
 dependencies = [
- "promptforge",
+ "build-ceiling",
  "promptforge-types",
  "serde",
  "serde_json",
@@ -4866,8 +4824,8 @@ dependencies = [
 name = "promptforge-parser"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "mlua",
- "promptforge",
  "promptforge-lua",
  "promptforge-types",
  "pulldown-cmark",
@@ -4881,7 +4839,7 @@ dependencies = [
 name = "promptforge-types"
 version = "0.3.0"
 dependencies = [
- "promptforge",
+ "build-ceiling",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -5950,6 +5908,7 @@ dependencies = [
 name = "shared-error-source"
 version = "0.3.0"
 dependencies = [
+ "build-ceiling",
  "reqwest",
  "serde_json",
  "thiserror 2.0.19",
@@ -5962,6 +5921,7 @@ name = "shared-loopback"
 version = "0.3.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "tokio",
  "tower",
  "workspace-hack",
@@ -8475,6 +8435,7 @@ name = "workshop"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "build-ceiling",
  "gateway-api-discovery",
  "reqwest",
  "serde",
@@ -8496,11 +8457,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-agents"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "build-ceiling",
+ "harness",
+ "promptforge",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "workshop-gateway"
 version = "0.0.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "build-ceiling",
  "futures-util",
  "gateway-api-discovery",
  "gateway-api-types",
@@ -8523,6 +8503,7 @@ dependencies = [
 name = "workshop-menu"
 version = "0.0.0"
 dependencies = [
+ "build-ceiling",
  "serde",
  "serde_json",
  "tempfile",
@@ -8539,6 +8520,7 @@ dependencies = [
 name = "workshop-protocol"
 version = "0.0.0"
 dependencies = [
+ "build-ceiling",
  "serde",
  "serde_json",
  "workspace-hack",
@@ -8549,6 +8531,7 @@ name = "workshop-registry"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "serde_json",
  "tokio",
  "workshop-protocol",
@@ -8556,14 +8539,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-run-log"
+version = "0.0.0"
+dependencies = [
+ "build-ceiling",
+ "harness",
+ "promptforge",
+ "serde_json",
+ "shared-error-source",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "turso",
+ "workspace-hack",
+]
+
+[[package]]
 name = "workshop-server"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "axum",
+ "build-ceiling",
  "build-ui",
  "futures-util",
  "gateway-api-discovery",
  "harness",
+ "harness-gateway-client",
+ "harness-web",
  "promptforge",
  "reqwest",
  "rust-embed",
@@ -8578,10 +8581,12 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+ "workshop-agents",
  "workshop-gateway",
  "workshop-menu",
  "workshop-protocol",
  "workshop-registry",
+ "workshop-run-log",
  "workshop-server",
  "workshop-status",
  "workshop-support",
@@ -8594,6 +8599,7 @@ dependencies = [
 name = "workshop-server-api"
 version = "0.0.0"
 dependencies = [
+ "build-ceiling",
  "workshop-server",
  "workshop-server-api",
  "workspace-hack",
@@ -8603,6 +8609,7 @@ dependencies = [
 name = "workshop-status"
 version = "0.0.0"
 dependencies = [
+ "build-ceiling",
  "tokio",
  "workshop-protocol",
  "workshop-registry",
@@ -8615,6 +8622,7 @@ name = "workshop-support"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "reqwest",
  "serde",
  "serde_json",
@@ -8632,6 +8640,7 @@ name = "workshop-user-state"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "serde_json",
  "shared-error-source",
  "tempfile",
@@ -8650,6 +8659,7 @@ name = "workshop-workspace"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "build-ceiling",
  "dunce",
  "humantime",
  "percent-encoding",
@@ -8747,7 +8757,6 @@ dependencies = [
  "time",
  "tinystr",
  "tokio",
- "tokio-util",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "tower",

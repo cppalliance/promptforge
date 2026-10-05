@@ -1,12 +1,7 @@
 //! A mock HTTP server for the dependent crates' tests: binds the caller's
 //! router on a free loopback port and serves it in a task.
 
-// An `allow` rather than an `expect`: whether the lint fires here depends
-// on the build's cfg permutation (clippy's allow-expect-in-tests covers
-// only `#[cfg(test)]` code, not this `test-fixtures`-gated module), so an
-// expectation would be unfulfilled in some builds and fail the -D warnings
-// gate.
-#![allow(
+#![expect(
     clippy::expect_used,
     reason = "test fixtures fail by panicking with the invariant named"
 )]

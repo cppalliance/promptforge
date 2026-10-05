@@ -10,13 +10,16 @@ use std::num::NonZeroU32;
 
 use serde::Deserialize;
 
-/// Stable identity of one catalogued model.
+/// The stable identity of one catalogued model.
 ///
-/// v0 uses the `"gateway"` namespace plus the caller-facing model name (the
-/// gateway `[[model]].name` / OpenAI `id`).
+/// An identity pairs a server namespace with a model name. A model the
+/// gateway serves uses the namespace `"gateway"` and the name the gateway
+/// lists it under. That name is the `name` key of the model's entry in the
+/// gateway configuration and the `id` field in the OpenAI-compatible model
+/// list.
 ///
-/// `#[non_exhaustive]` so the invariant-bearing identity is only ever built
-/// through [`ModelId::new`]/[`ModelId::gateway`], never by a struct literal.
+/// Both parts are always non-empty and free of control characters.
+/// [`ModelId::new`] and [`ModelId::gateway`] reject any other value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct ModelId {
@@ -25,25 +28,14 @@ pub struct ModelId {
 }
 
 impl ModelId {
-    /// The v0 gateway identity namespace.
+    /// The namespace for models the gateway serves.
     pub const GATEWAY: &'static str = "gateway";
 
     /// Builds an identity from its server namespace and model name.
     ///
     /// # Errors
     /// Returns [`ModelIdError`] if `server` or `name` is empty or contains a
-    /// control character, so an unusable identity is unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge::model::ModelId;
-    ///
-    /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
-    /// assert_eq!(id.server(), "gateway");
-    /// assert_eq!(id.name(), "claude-sonnet-4-6");
-    /// # Ok::<(), promptforge::model::ModelIdError>(())
-    /// ```
+    /// control character, so every `ModelId` is usable.
     pub fn new(
         server: impl Into<String>,
         name: impl Into<String>,
@@ -55,7 +47,8 @@ impl ModelId {
         Ok(Self { server, name })
     }
 
-    /// Builds a gateway-namespaced identity from a caller-facing model name.
+    /// Builds an identity in the `"gateway"` namespace from the name the
+    /// gateway lists the model under.
     ///
     /// # Errors
     /// Returns [`ModelIdError`] if `name` is empty or contains a control
@@ -95,20 +88,20 @@ impl ModelId {
         Ok(())
     }
 
-    /// Returns the identity namespace.
+    /// Returns the server namespace.
     #[must_use]
     pub fn server(&self) -> &str {
         &self.server
     }
 
-    /// Returns the caller-facing model name.
+    /// Returns the model name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 }
 
-/// The reason a [`ModelId`] could not be built from its components.
+/// The reason building a [`ModelId`] from its components failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid model id: {field} {reason}")]
 #[non_exhaustive]
@@ -119,7 +112,7 @@ pub struct ModelIdError {
     reason: &'static str,
 }
 
-/// The reason a [`ModelCatalog`] could not be built from its descriptors.
+/// The reason building a [`ModelCatalog`] from its descriptors failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ModelCatalogError {
@@ -136,22 +129,11 @@ pub enum ModelCatalogError {
 }
 
 /// Whether a catalogued model can emit thinking tokens.
-///
-/// # Examples
-///
-/// ```
-/// use promptforge::model::ThinkingMode;
-///
-/// // Deserialized from the lowercase gateway wire form.
-/// let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
-/// assert_eq!(mode, ThinkingMode::Switchable);
-/// # Ok::<(), serde_json::Error>(())
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum ThinkingMode {
-    /// The backend never emits thinking tokens.
+    /// The backend always runs with thinking off.
     Never,
     /// The backend always emits thinking tokens.
     Always,
@@ -159,10 +141,8 @@ pub enum ThinkingMode {
     Switchable,
 }
 
-/// One catalogued model with live-resolution metadata.
-///
-/// `#[non_exhaustive]` so the descriptor is only ever built through
-/// [`ModelDescriptor::new`] and its validated context window is preserved.
+/// One catalogued model: its identity, description, context window, and
+/// thinking mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelDescriptor {
@@ -175,26 +155,8 @@ pub struct ModelDescriptor {
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
     ///
-    /// The context window is a [`NonZeroU32`], so a zero-token window is
-    /// unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-    ///
-    /// let context = NonZeroU32::new(131_072).ok_or("context is non-zero")?;
-    /// let model = ModelDescriptor::new(
-    ///     ModelId::gateway("analyst")?,
-    ///     "A careful analysis model",
-    ///     context,
-    ///     ThinkingMode::Switchable,
-    /// );
-    /// assert_eq!(model.context(), context);
-    /// assert_eq!(model.thinking(), ThinkingMode::Switchable);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// The context window is a [`NonZeroU32`], so it always holds at least
+    /// one token.
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -216,7 +178,7 @@ impl ModelDescriptor {
         &self.id
     }
 
-    /// Returns the prose used for semantic resolve.
+    /// Returns the prose that describes the model.
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
@@ -235,10 +197,10 @@ impl ModelDescriptor {
     }
 }
 
-/// Complete live model set for one bind pass.
+/// A list of available models, each with a distinct identity.
 ///
-/// `#[non_exhaustive]` so the collision-free catalog invariant is only ever
-/// established through [`ModelCatalog::new`]/[`ModelCatalog::empty`].
+/// [`ModelCatalog::new`] rejects a repeated `ModelId`, and
+/// [`ModelCatalog::empty`] returns an empty catalog.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelCatalog {
@@ -246,30 +208,13 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Builds a catalog from descriptors in the Harness's order.
+    /// Builds a catalog from descriptors, keeping the order they are given
+    /// in.
     ///
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
-    /// stable [`ModelId`], so an ambiguous catalog is unrepresentable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-    ///
-    /// let ctx = NonZeroU32::new(8_192).ok_or("context is non-zero")?;
-    /// let id = ModelId::gateway("small")?;
-    /// let catalog = ModelCatalog::new([ModelDescriptor::new(
-    ///     id.clone(),
-    ///     "A tiny model",
-    ///     ctx,
-    ///     ThinkingMode::Never,
-    /// )])?;
-    /// assert!(catalog.contains(&id));
-    /// assert_eq!(catalog.models().len(), 1);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// stable [`ModelId`], so each identity in the catalog names exactly one
+    /// descriptor.
     pub fn new(
         models: impl IntoIterator<Item = ModelDescriptor>,
     ) -> std::result::Result<ModelCatalog, ModelCatalogError> {
@@ -285,7 +230,7 @@ impl ModelCatalog {
         Ok(Self { models })
     }
 
-    /// An empty catalog; every `models.bind` resolves as absent.
+    /// Returns an empty catalog.
     #[must_use]
     pub fn empty() -> Self {
         Self { models: Vec::new() }
@@ -341,6 +286,48 @@ mod tests {
         assert!(ModelId::new("server", "").is_err());
         assert!(ModelId::new("server", "na\nme").is_err());
         assert!(ModelId::gateway("valid-alias").is_ok());
+    }
+
+    #[test]
+    fn a_model_id_exposes_its_server_and_name() {
+        let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6").expect("a valid model id");
+        assert_eq!(id.server(), "gateway");
+        assert_eq!(id.name(), "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn a_thinking_mode_deserializes_from_its_lowercase_wire_form() {
+        let mode: ThinkingMode =
+            serde_json::from_str("\"switchable\"").expect("a thinking mode deserializes");
+        assert_eq!(mode, ThinkingMode::Switchable);
+    }
+
+    #[test]
+    fn a_model_descriptor_keeps_its_context_window_and_thinking_mode() {
+        let context = NonZeroU32::new(131_072).expect("test context window is non-zero");
+        let model = ModelDescriptor::new(
+            ModelId::gateway("analyst").expect("test model alias is valid"),
+            "A careful analysis model",
+            context,
+            ThinkingMode::Switchable,
+        );
+        assert_eq!(model.context(), context);
+        assert_eq!(model.thinking(), ThinkingMode::Switchable);
+    }
+
+    #[test]
+    fn a_model_catalog_contains_each_descriptor_it_was_built_from() {
+        let ctx = NonZeroU32::new(8_192).expect("test context window is non-zero");
+        let id = ModelId::gateway("small").expect("test model alias is valid");
+        let catalog = ModelCatalog::new([ModelDescriptor::new(
+            id.clone(),
+            "A tiny model",
+            ctx,
+            ThinkingMode::Never,
+        )])
+        .expect("a catalog with one descriptor builds");
+        assert!(catalog.contains(&id));
+        assert_eq!(catalog.models().len(), 1);
     }
 
     #[test]

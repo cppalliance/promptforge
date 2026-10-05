@@ -11,7 +11,7 @@
 -- error table, `fail(result)` raises an envelope's failure value, and
 -- `engine_type(value)` names a value's type as the protocol parse would.
 --
--- A Task handle is a plain methodless table `{ task = id }` (A9): every
+-- A Task handle is a plain methodless table `{ task = id }`: every
 -- operation here is a namespace function that accepts the handle or the
 -- bare id string, so a handle stored in `var` survives the serde boundary
 -- unchanged, and a `join` result entry (which includes `task`) is

@@ -90,6 +90,38 @@ fn a_forked_child_shares_its_parents_clock_snapshot_instead_of_copying_it() -> R
 }
 
 #[test]
+fn an_ended_identity_keeps_no_clock_snapshot() -> Result<(), VfsError> {
+    // The parent joins an arm before the spawn, so the snapshot the
+    // child forks is not empty.
+    let vfs = handle(&StubFs::default());
+    let parent = vfs.acquire(test_origin())?;
+    let arm = parent.spawn(test_origin())?;
+    arm.write("/arm.txt", b"arm")?;
+    let arm_id = arm.id;
+    drop(arm);
+    parent.join(arm_id);
+    let child = parent.spawn(test_origin())?;
+    child.write("/child.txt", b"child")?;
+    let child_id = child.id;
+    drop(child);
+    parent.scope.end(Some(parent.id), child_id);
+    {
+        let inner = parent.scope.lock();
+        let child_identity = inner
+            .identities
+            .get(&child_id)
+            .expect("the child's record stays");
+        assert!(
+            child_identity.seen.is_empty(),
+            "the ended child holds a snapshot of {} entries",
+            child_identity.seen.len()
+        );
+    }
+    assert_eq!(parent.read("/child.txt")?, b"child");
+    Ok(())
+}
+
+#[test]
 fn a_parents_post_spawn_write_conflicts_with_the_child_reading_it() -> Result<(), VfsError> {
     // The fork's other half: the parent's entry advanced at the
     // spawn, so a write after it is unordered with the child's reads.
@@ -254,5 +286,30 @@ fn a_prune_drops_emptied_regions_and_raises_its_threshold() -> Result<(), VfsErr
         2 * tables.entries,
         "the threshold doubles the survivors"
     );
+    Ok(())
+}
+
+#[test]
+fn a_prune_collapses_an_epoch_that_only_a_held_ended_identity_never_saw() -> Result<(), VfsError> {
+    // The call is still held, but an ended identity claims nothing
+    // again, so the prune need not wait for it to see the write.
+    let vfs = handle(&StubFs::default());
+    let owner = vfs.acquire(test_origin())?;
+    let call = owner.spawn(test_origin())?;
+    owner.write("/after.txt", b"1")?;
+    owner.scope.end(Some(owner.id), call.id);
+    for n in 0..PRUNE_AT {
+        owner.exists(&format!("/p{n}"))?;
+    }
+    let tables = vfs.volume.claims.tables();
+    let write = tables
+        .paths
+        .iter()
+        .find(|(path, _)| path.as_str() == "/after.txt")
+        .and_then(|(_, region)| region.write)
+        .expect("the owner's write is recorded");
+    assert_eq!(write.1.clock, 0, "the prune collapses the owner's write");
+    drop(tables);
+    drop(call);
     Ok(())
 }

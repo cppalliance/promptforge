@@ -1,13 +1,14 @@
 //! The serial sans-IO driver over `Run`, and the properties it makes
-//! testable without a runtime or a gateway: the doc example, a three-arm
-//! fanout whose answers arrive in reverse order, determinism (two runs
-//! under the same context and answers produce identical effects, events,
-//! provenances, and `sys.id`s), the batching-pairing property (answers
-//! delivered one per step, all at once, and shuffled within a batch
-//! produce identical per-task effects and events), and a model task whose
-//! owner ends first reporting `abandoned` in both its event and its
-//! notice. The helpers here - the canned completions, the local
-//! performer, and the scripted driver - are shared with the other suites.
+//! testable without a runtime or a gateway: a literal prompt that issues no
+//! effect, a three-arm fanout whose answers arrive in reverse order,
+//! determinism (two runs under the same context and answers produce
+//! identical effects, events, provenances, and `sys.id`s), the
+//! batching-pairing property (answers delivered one per step, all at once,
+//! and shuffled within a batch produce identical per-task effects and
+//! events), and a model task whose owner ends first reporting `abandoned`
+//! in both its event and its notice. The helpers here - the canned
+//! completions, the local performer, and the scripted driver - are shared
+//! with the other suites.
 
 use std::collections::BTreeMap;
 
@@ -144,7 +145,7 @@ pub(super) enum Batching {
 pub(super) struct Outcome {
     pub(super) result: RunResult,
     pub(super) events: Vec<Event>,
-    pub(super) effects: Vec<(Provenance, EffectRecord)>,
+    effects: Vec<(Provenance, EffectRecord)>,
 }
 
 impl Outcome {
@@ -242,10 +243,9 @@ fn succeeded(events: &[Event]) -> Vec<String> {
 }
 
 #[test]
-fn the_driver_doc_example_runs_a_literal_prompt_with_no_effect() {
-    // The `drive` doc example, pinned as a test: a literal return issues
-    // nothing, so the performer never runs, and the events open and close
-    // with the run's boundaries.
+fn the_driver_runs_a_literal_prompt_with_no_effect() {
+    // A literal return issues nothing, so the performer never runs, and the
+    // events open and close with the run's boundaries.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
     let run = Run::new(Arc::new(parse(md)), "", test_context(EXECUTION));
     let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));

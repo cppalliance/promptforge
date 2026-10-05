@@ -13,21 +13,6 @@ use gateway_config::ConfigError;
 ///
 /// Opaque wrapper preserving the underlying cause via `source()`. Classify with
 /// [`StartupError::kind`].
-///
-/// # Examples
-/// ```no_run
-/// use gateway::{ProfileName, ServeOptions, StartupErrorKind, run};
-/// use std::path::PathBuf;
-///
-/// let options = ServeOptions::new(
-///     Some(PathBuf::from("/etc/promptforge/gateway.toml")),
-///     ProfileName::parse("dev")?,
-/// );
-/// if let Err(err) = run(&options) {
-///     assert!(matches!(err.kind(), StartupErrorKind::Config | StartupErrorKind::Bind));
-/// }
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[non_exhaustive]
 pub struct StartupError(StartupRepr);
 

@@ -7,8 +7,6 @@
 //! classify this internal type and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the error type.
 
-use std::borrow::Cow;
-
 use promptforge_types::ids::TaskId;
 
 mod convert;
@@ -17,7 +15,7 @@ mod tests;
 mod value;
 
 /// A type-erased owned error cause used by the internal error type.
-pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
 /// message and its `tasks` field.
@@ -29,13 +27,14 @@ fn join_task_ids(tasks: &[TaskId]) -> String {
         .join(", ")
 }
 
-/// The crate's internal error type, spanning parsing, HTTP, and execution
+/// The crate's internal error type, spanning parsing, model, and execution
 /// failures.
 ///
 /// This type is `pub(crate)` and never appears in the public API; the public
 /// boundary errors wrap and classify it. Marked `#[non_exhaustive]` so future
-/// variants are not a breaking change. The transport variant hides its concrete
-/// source type so no dependency's error leaks through the wrappers' `source()`.
+/// variants are not a breaking change. The model variant holds the broker's
+/// closed error whole, so no HTTP client's error type leaks through the
+/// wrappers' `source()`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub(crate) enum Error {
@@ -84,110 +83,16 @@ pub(crate) enum Error {
         column: Option<u32>,
     },
 
-    /// A required environment variable was missing.
-    #[error("missing environment variable: {0}")]
-    MissingEnv(String),
-
-    /// An environment variable was set but its value was not valid Unicode.
-    #[error("environment variable is set but not valid Unicode: {0}")]
-    InvalidEnv(String),
-
-    /// A client or endpoint configuration value failed semantic validation.
-    #[error("{0}")]
-    InvalidConfig(String),
-
-    /// A client or endpoint configuration input was invalid, retaining the
-    /// concrete cause (a secret or URL validation failure) as a private
-    /// `#[source]` instead of flattening it into the message.
-    #[error("{message}")]
-    #[non_exhaustive]
-    Config {
-        /// The human-readable configuration diagnostic (no raw source dump).
-        message: String,
-        /// The originating validation failure (secret or URL parse), kept as
-        /// the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
-    /// Gateway access was explicitly disabled by the Host.
-    #[error("gateway access is disabled")]
-    GatewayDisabled,
-
-    /// The HTTP request to the model backend failed at the transport layer.
-    #[error("http transport failure")]
-    Http(#[source] BoxedSource),
-
-    /// The backend returned a non-success status.
+    /// A model round or a catalog fetch failed, as the broker that performed
+    /// it reported.
     ///
-    /// The `Display` is deliberately body-free: the bounded, control-escaped
-    /// body is stored only in the private `body` field, reachable through
-    /// the explicit
-    /// [`CompletionError::backend_body`](promptforge_model_client::model::CompletionError::backend_body) opt-in, so a raw or hostile
-    /// payload cannot forge log lines or leak into an error message.
-    #[error("non-success backend status {status}")]
-    Backend {
-        /// The HTTP status code returned by the backend.
-        status: u16,
-        /// The bounded, control-escaped response body, for opt-in diagnostics.
-        body: String,
-    },
-
-    /// The backend response could not be understood (missing choices, etc.).
-    #[error("malformed response: {0}")]
-    MalformedResponse(String),
-
-    /// The backend response could not be decoded, preserving the decoder cause.
-    ///
-    /// Like [`Error::MalformedResponse`] but retains the underlying decode
-    /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
-    /// rather than flattening it into the message, so the error chain
-    /// survives through the public wrappers' `source()`.
-    #[error("malformed response: {message}")]
-    #[non_exhaustive]
-    MalformedResponseSource {
-        /// The human-readable diagnostic (no raw body).
-        message: String,
-        /// The originating decode failure, kept as the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
-    /// Reading a non-success backend response body failed at the transport
-    /// layer.
-    ///
-    /// Retains the `reqwest::Error` as the `#[source]` cause rather than
-    /// flattening the read failure into display text, so the error chain
-    /// (timeout, connection reset) survives. The status the backend had
-    /// already returned is preserved for classification.
-    #[error("unreadable backend error body (status {status})")]
-    #[non_exhaustive]
-    BackendBodyRead {
-        /// The non-success HTTP status whose body could not be read.
-        status: u16,
-        /// The originating transport read failure, kept as the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
-    /// The model returned neither non-empty tool calls nor non-empty text.
-    ///
-    /// Reasoning side-channel text, when present, is never promoted into the
-    /// answer; `detail` may note that it was ignored, without pasting it. The
-    /// choice's `finish_reason` is included so the tool loop can classify the
-    /// empty turn (a `"stop"` exit differs from a truncation or a missing
-    /// reason).
-    #[error("{detail}")]
-    #[non_exhaustive]
-    EmptyModelReply {
-        /// The phrase naming the empty product (and ignored reasoning): the
-        /// model client's fixed text when the client classified the turn,
-        /// or the message a Lua-side `empty_model_reply` raise supplied, so
-        /// the error re-renders with the text the author saw.
-        detail: Cow<'static, str>,
-        /// The choice's `finish_reason`, when the backend supplied one.
-        finish_reason: Option<String>,
-    },
+    /// Holds the broker's [`CompletionError`](promptforge_model_client::model::CompletionError)
+    /// whole, so the closed kind, the fixed message, the opt-in detail, and
+    /// the cause chain survive the public wrappers. The Engine branches on
+    /// its kind only: a context overflow takes the provider overflow path
+    /// and an empty reply takes the empty-answer path.
+    #[error(transparent)]
+    Completion(crate::model::CompletionError),
 
     /// The Host cancelled the run (for example Ctrl-C during fanout).
     #[error("interrupted by Ctrl-C")]
@@ -250,8 +155,7 @@ pub(crate) enum Error {
     /// the schema validation error as the private `#[source]` cause rather
     /// than flattening it into `detail`.
     ///
-    /// Constructed only by the tool-scope preparation, which is test-only
-    /// until the `models.loop` step rewires it.
+    /// Constructed only by the tool-scope preparation.
     #[error("model-facing schema build failure for tool alias {alias:?}")]
     #[non_exhaustive]
     BindSchema {
@@ -332,7 +236,7 @@ pub(crate) enum Error {
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,
-        /// Whether the name exists in the prompt-wide `tools.bind` map.
+        /// Whether the name is one of the prompt's bound tool slots.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,
@@ -368,14 +272,13 @@ pub(crate) enum Error {
     #[error("unsupported promptforge version: {0} (this build supports major 0)")]
     UnsupportedVersion(u32),
 
-    /// The environment cannot satisfy the prompt: a required capability is
-    /// missing, a required capability needs a Host service this Host lacks,
-    /// two declared capabilities conflict, the filled model
+    /// The environment cannot satisfy the prompt: a required Plugin is
+    /// missing, a required Plugin needs a Host service this Host lacks,
+    /// two declared Plugins conflict, the filled model
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
     ///
-    /// The notice is the whole message, written to be read by a model: it
-    /// may arrive as tool output when the prompt runs as a sub-run tool.
+    /// The notice is the whole message, written to be read by a model.
     #[error("{notice}")]
     #[non_exhaustive]
     RequirementsUnmet {

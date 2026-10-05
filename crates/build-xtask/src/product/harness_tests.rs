@@ -1,6 +1,7 @@
 //! Harness-family fixtures: outside their family, Harness crates depend on
 //! `promptforge` and `workspace-hack` only, and outside crates reach the
-//! family only through `harness`.
+//! family only through `harness`, `harness-gateway-client`, and
+//! `harness-web`.
 
 use super::product_boundary_violations;
 use super::test_support::write_crate;
@@ -29,8 +30,8 @@ fn a_harness_crate_depending_on_a_shared_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/log",
-        "harness-log",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\nshared-error-source = { path = \"../../shared-error-source\" }\n",
     );
     write_crate(
@@ -42,7 +43,7 @@ fn a_harness_crate_depending_on_a_shared_crate_is_reported() {
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-log depends on shared-error-source:")
+        violations[0].starts_with("harness-plugins depends on shared-error-source:")
             && violations[0].contains("harness crates must not depend on shared crates"),
         "shared-* crates are closed to harness crates: {violations:?}"
     );
@@ -91,15 +92,15 @@ fn a_harness_crate_depending_on_an_unaffiliated_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/log",
-        "harness-log",
+        "harness-internal/plugins",
+        "harness-plugins",
         "[dependencies]\nsome-tool = { path = \"../../some-tool\" }\n",
     );
     write_crate(root.path(), "some-tool", "some-tool", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-log depends on some-tool:")
+        violations[0].starts_with("harness-plugins depends on some-tool:")
             && violations[0].contains(
                 "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge and workspace-hack"
             ),
@@ -121,8 +122,9 @@ fn a_non_workshop_outside_crate_depending_past_the_harness_facade_is_reported() 
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("outside-tool depends on harness-runner:")
-            && violations[0]
-                .ends_with("outside crates may depend on the harness family only through harness"),
+            && violations[0].ends_with(
+                "outside crates may depend on the harness family only through harness, harness-gateway-client, or harness-web"
+            ),
         "the harness facade rule binds every outside crate: {violations:?}"
     );
 }
@@ -141,8 +143,95 @@ fn a_build_crate_depending_past_the_harness_facade_is_reported() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("build-xtask depends on harness-runner:")
-            && violations[0]
-                .ends_with("outside crates may depend on the harness family only through harness"),
+            && violations[0].ends_with(
+                "outside crates may depend on the harness family only through harness, harness-gateway-client, or harness-web"
+            ),
         "container privacy exempts build-* crates, but the harness facade rule does not: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_on_the_harness_gateway_client_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop/server",
+        "workshop-server",
+        "[dependencies]\nharness-gateway-client = { path = \"../../harness-gateway-client\" }\n",
+    );
+    write_crate(
+        root.path(),
+        "harness-gateway-client",
+        "harness-gateway-client",
+        "",
+    );
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "harness-gateway-client is the second harness public crate: {violations:?}"
+    );
+}
+
+#[test]
+fn the_harness_gateway_client_depending_into_the_harness_container_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness-gateway-client",
+        "harness-gateway-client",
+        "[dependencies]\nharness-runner = { path = \"../harness-internal/runner\" }\n",
+    );
+    write_crate(root.path(), "harness-internal/runner", "harness-runner", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("harness-gateway-client depends on harness-runner:")
+            && violations[0].ends_with(
+                "crates/harness-internal is private to its family; only harness may depend into it"
+            ),
+        "being public does not admit the gateway client into the harness container: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_on_harness_web_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop/server",
+        "workshop-server",
+        "[dependencies]\nharness-web = { path = \"../../harness-web\" }\n",
+    );
+    write_crate(root.path(), "harness-web", "harness-web", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "harness-web is the third harness public crate: {violations:?}"
+    );
+}
+
+#[test]
+fn harness_web_depending_into_the_harness_container_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness-web",
+        "harness-web",
+        "[dependencies]\nharness-plugins = { path = \"../harness-internal/plugins\" }\n",
+    );
+    write_crate(
+        root.path(),
+        "harness-internal/plugins",
+        "harness-plugins",
+        "",
+    );
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("harness-web depends on harness-plugins:")
+            && violations[0].ends_with(
+                "crates/harness-internal is private to its family; only harness may depend into it"
+            ),
+        "harness-web reaches the container's crates only through the facade: {violations:?}"
     );
 }

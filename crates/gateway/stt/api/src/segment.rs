@@ -64,7 +64,7 @@ impl Segmenter {
     /// Rewinds the segmenter for a new take; the caller clears the buffer at
     /// the same time, so indices stay aligned.
     #[cfg(test)]
-    pub(crate) fn reset(&mut self) {
+    fn reset(&mut self) {
         *self = Self::new();
     }
 

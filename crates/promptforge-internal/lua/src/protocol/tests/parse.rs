@@ -214,7 +214,7 @@ fn tool_call_without_args_parses_the_empty_object() {
 #[test]
 fn a_tool_call_with_a_tool_object_alias_decodes_to_its_alias() {
     // The alias-or-Tool polymorphism at the protocol boundary: a Tool
-    // object (a captured alias global, a `tools.bind` return) names the
+    // object (a captured alias global) names the
     // binding it was created from.
     let lua = Lua::new();
     let table = request_table(&lua, "tool_call");

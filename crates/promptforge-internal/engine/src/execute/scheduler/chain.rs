@@ -12,7 +12,7 @@ use crate::execute::run::EffectId;
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath};
+use super::{Chain, ChainIndex, ChatAnchor, Continuation, Counters, Pending, Scheduler, SlicePath};
 
 impl Scheduler {
     /// Allocates the next child id under `owner`'s chain: the owner's id
@@ -110,6 +110,7 @@ impl Scheduler {
             pending_spawn: None,
             parent,
             advertised: None,
+            anchor: ChatAnchor::default(),
             h1: false,
         });
         Ok(id)
@@ -278,11 +279,20 @@ impl Scheduler {
 
     /// Orphans one in-flight leaf effect whose chain is going away: the
     /// pending entry leaves, and the id is recorded so the Harness's answer,
-    /// when it arrives, is discarded rather than failing the run. The Harness
-    /// still owes the answer: `Done` waits for every issued effect, so the
-    /// run ends only once the Harness has answered all of them.
+    /// when it arrives, is discarded rather than failing the run. A tool
+    /// call's identity ends here as its answer would end it, so what the
+    /// tool already did is joined into the parked chain and anything it
+    /// tries later is refused. The Harness still owes the answer: `Done`
+    /// waits for every issued effect, so the run ends only once the
+    /// Harness has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
-        self.pending.remove(&effect);
+        if let Some(Pending {
+            chain,
+            resume: Continuation::ToolCall(call),
+        }) = self.pending.remove(&effect)
+        {
+            self.end_tool_call(chain, call.exec);
+        }
         self.orphaned.insert(effect);
     }
 }

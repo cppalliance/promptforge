@@ -188,11 +188,10 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
     // store write, reads the mid-flight status (running, blocked on
     // `chat`, inside its section, with its note), waits on it, and reads
     // the terminal status (done, ok).
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "slow answer",
         Duration::from_millis(400),
-    )])
-    .await;
+    )]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local fresh = tasks.status(t)\n\
@@ -222,7 +221,7 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");
@@ -408,7 +407,7 @@ async fn pending_lists_the_callers_live_tasks_in_spawn_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_waits_old_names_are_not_defined() {
-    // The waits were renamed to `join_any` and `join`: a prompt calling
+    // The waits are `join_any` and `join`: a prompt calling
     // `tasks.when_any` or `tasks.when_all` reaches a nil field, so the
     // call fails as a plain string error, never a shim's structured one.
     // The spawned children are cancelled, so nothing stays live at chain

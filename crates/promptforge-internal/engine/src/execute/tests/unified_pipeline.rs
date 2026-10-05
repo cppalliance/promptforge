@@ -1,6 +1,6 @@
 //! One finite pipeline end to end through the unified prompt model: explicit
 //! lazy `prose`, `models.infer`, the Rust-backed `models.loop` with tool
-//! dispatch, `messages.new()` builders, the removed `reply` register, and
+//! dispatch, `messages.new()` builders, `reply` reading nil, and
 //! synchronous `call`, driven through the public `run` against a scripted
 //! gateway at `promptforge: 0`.
 
@@ -8,15 +8,13 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("draft text"),
         resp_tool_call("call_1", "echo", "{\"value\":\"polish\"}"),
         resp_text("refined text"),
-    ])
-    .await;
-    let addr = gateway.addr();
+    ]);
 
-    let source = "---\nname: unified\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let source = "---\nname: unified\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
         # Unified\n\n\
         ```lua\n\
         models.default('writer')\n\
@@ -48,7 +46,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         "quantum",
         &[Arc::new(EchoTool) as Arc<dyn TestTool>],
         &TestStore::new(),
-        gatewayed(addr),
+        gatewayed(&gateway),
     )
     .await
     .expect("the unified pipeline must run end to end");
@@ -61,29 +59,33 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     );
     let bodies = gateway.requests();
     assert_eq!(
-        bodies[0]["messages"][0]["content"], "Summarize in one word: quantum",
+        bodies[0].messages[0].content(),
+        "Summarize in one word: quantum",
         "the infer round sends the substituted lazy prose: {bodies:?}"
     );
     assert_eq!(
-        bodies[1]["messages"][0]["role"], "system",
+        bodies[1].messages[0].role(),
+        "system",
         "the loop sends the builder's system message first: {bodies:?}"
     );
     assert_eq!(
-        bodies[1]["messages"][1]["content"], "draft text",
+        bodies[1].messages[1].content(),
+        "draft text",
         "the loop sends the infer result as the user message: {bodies:?}"
     );
     assert_eq!(
-        bodies[1]["tools"][0]["function"]["name"], "echo",
+        bodies[1].tools[0].name(),
+        "echo",
         "the loop advertises the section's tool scope: {bodies:?}"
     );
-    let tool_turn = bodies[2]["messages"]
-        .as_array()
-        .expect("a request body includes a messages array")
+    let tool_turn = bodies[2]
+        .messages
         .iter()
-        .find(|message| message["role"] == "tool")
+        .find(|message| message.role() == "tool")
         .expect("the second loop round answers the tool call");
     assert_eq!(
-        tool_turn["content"], "echoed: polish",
+        tool_turn.content(),
+        "echoed: polish",
         "the dispatched tool result resumes into the loop: {bodies:?}"
     );
 }

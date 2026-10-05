@@ -42,7 +42,7 @@ pub fn routes(store: Arc<UserStateStore>) -> axum::Router {
 
 /// Reports every user-state value the store holds, keyed by its
 /// allow-listed name, `null` where nothing has been put.
-pub(crate) async fn get_state(State(store): State<Arc<UserStateStore>>) -> Response {
+async fn get_state(State(store): State<Arc<UserStateStore>>) -> Response {
     let document: serde_json::Map<String, Value> = store
         .all()
         .await
@@ -55,7 +55,7 @@ pub(crate) async fn get_state(State(store): State<Arc<UserStateStore>>) -> Respo
 /// Stores the JSON body under `key`. A refused key or body answers the
 /// envelope and changes nothing; a failed write answers the server-error
 /// envelope while the value stands in memory.
-pub(crate) async fn put_state(
+async fn put_state(
     State(store): State<Arc<UserStateStore>>,
     Path(key): Path<String>,
     body: Bytes,

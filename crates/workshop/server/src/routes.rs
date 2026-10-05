@@ -1,5 +1,5 @@
 //! Per-feature route constructors, one child module per domain, composed
-//! into the full router by [`crate::app::router`]. The extracted feature
+//! into the full router by [`crate::app::router`]. The feature
 //! subsystems (`/ws`, `/agents/ws`, `/v1/models`, `/workspace/*`,
 //! `/user/state`) self-register their routes through the registry
 //! instead of appearing here.

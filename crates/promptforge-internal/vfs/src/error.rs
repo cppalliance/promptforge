@@ -6,12 +6,12 @@ use std::fmt;
 
 /// Why a path or glob pattern was rejected before any backend saw it.
 ///
-/// Every [`VfsError::InvalidPath`] carries one. The store view's
-/// logical-path validation reports the first nine reasons; the last two
-/// are reported by the glob and rename sites alone:
-/// [`PathReason::Wildcard`] for a glob pattern whose wildcard grammar is
-/// invalid, and [`PathReason::IntoDescendant`] for a rename into the
-/// source's own descendant.
+/// Every [`VfsError::InvalidPath`] carries one. Store operations validate
+/// each path and report the first nine reasons. Only glob and rename
+/// operations report the last two: [`PathReason::Wildcard`] for a glob
+/// pattern whose wildcard grammar is invalid, and
+/// [`PathReason::IntoDescendant`] for a rename into the source's own
+/// descendant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PathReason {
@@ -19,7 +19,8 @@ pub enum PathReason {
     Empty,
     /// The path began with `/`, so it addressed outside the run's namespace.
     Absolute,
-    /// The path contained a `.` or `..` segment (parent or current traversal).
+    /// The path contained a `.` (current directory) or `..` (parent
+    /// directory) segment.
     Traversal,
     /// The path contained a control character (below `0x20`, or `0x7f`).
     Control,
@@ -29,23 +30,26 @@ pub enum PathReason {
     /// literal byte to one, a separator to another).
     Backslash,
     /// A segment was a platform-reserved device name (for example `CON`,
-    /// `NUL`, `COM1`), which some backends cannot represent as a plain file.
+    /// `NUL`, `COM1`), which some backends treat as the device itself.
     ReservedName,
     /// A segment ended in a byte some backends silently strip (a trailing `.`
-    /// or space), so the stored name would not round-trip.
+    /// or space), so the stored name would differ from the name supplied.
     UnsafeSuffix,
     /// The path exceeded the maximum supported length in bytes.
     TooLong,
     /// The wildcard grammar of a glob pattern is invalid: a run of three or
-    /// more `*`, or a `**` that does not occupy a whole path segment.
+    /// more `*`, or a `**` that shares its path segment with other characters.
     Wildcard,
     /// A rename named a destination inside the source's own subtree.
     IntoDescendant,
 }
 
 impl PathReason {
-    /// The short tag a store error value's `rule` field holds: the same
-    /// word [`PathReason::from_tag`] parses back, so the two round-trip.
+    /// Returns the short tag for this reason, such as `empty` or `too_long`.
+    ///
+    /// A store error value holds this tag in its `rule` field.
+    /// [`PathReason::from_tag`] parses the same word back, so the two
+    /// round-trip.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -63,8 +67,9 @@ impl PathReason {
         }
     }
 
-    /// Parses a [`PathReason::tag`]; `None` for a tag outside the
-    /// vocabulary.
+    /// Parses a tag from [`PathReason::tag`] back into its reason.
+    ///
+    /// Returns `None` for any other string.
     #[must_use]
     pub fn from_tag(tag: &str) -> Option<PathReason> {
         match tag {
@@ -105,20 +110,21 @@ impl fmt::Display for PathReason {
     }
 }
 
-/// The one error type returned by every virtual filesystem operation.
+/// The single error type returned by every virtual filesystem operation.
 ///
-/// Every variant is a plain struct with public fields: the variants are
-/// the kinds, so a caller matches on the variant and reads the fields
-/// directly - there are no helper methods. A custom backend builds
-/// variants directly, as literals. `#[non_exhaustive]` so new variants
-/// can ship without breaking match arms in downstream crates; the public
-/// surface of this crate is load-bearing.
+/// Each variant is one kind of failure and carries its details in public
+/// fields. A caller matches on the variant and reads the fields directly.
+/// A custom backend builds the variants directly as struct literals.
+///
+/// The enum is `#[non_exhaustive]` so that downstream crates keep
+/// compiling when new variants are added. A `match` on it outside this
+/// crate needs a wildcard arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VfsError {
-    /// The path does not exist in the serving backend.
+    /// The path is absent from the backend that serves it.
     NotFound {
-        /// The canonical path that did not resolve.
+        /// The canonical path that failed to resolve.
         path: String,
     },
     /// The path already exists where creation required absence.
@@ -136,14 +142,15 @@ pub enum VfsError {
         /// The canonical path that is a directory.
         path: String,
     },
-    /// A directory removal without `recursive` named a non-empty directory.
+    /// A directory removal with `recursive` set to `false` named a directory
+    /// that still has entries.
     DirectoryNotEmpty {
-        /// The canonical path of the non-empty directory.
+        /// The canonical path of the directory that still has entries.
         path: String,
     },
-    /// Text that is not UTF-8 appeared where UTF-8 text was required.
+    /// Bytes that are invalid UTF-8 appeared where UTF-8 text was required.
     NotUtf8 {
-        /// The path of the file whose contents are not UTF-8.
+        /// The path of the file whose contents are invalid UTF-8.
         path: String,
     },
     /// The path or glob pattern is malformed or escapes the namespace root.
@@ -160,19 +167,20 @@ pub enum VfsError {
         /// A short human-readable reason the range was rejected.
         reason: &'static str,
     },
-    /// A `str_replace` anchor did not occur exactly once: it was empty,
-    /// missing, or ambiguous.
+    /// A `str_replace` edit failed because its anchor text was empty, absent
+    /// from the file, or found more than once.
     Anchor {
         /// The path the edit targeted.
         path: String,
         /// The anchor text. Empty means the anchor was itself invalid and
         /// was refused before any search.
         anchor: String,
-        /// The number of times the anchor matched: `0` when it was not
-        /// found, and `2` or more when the edit would be ambiguous.
+        /// The number of times the anchor matched: `0` when it was absent,
+        /// and `2` or more when the edit would be ambiguous.
         count: usize,
     },
-    /// The operation is not permitted: a read-only mount or a policy denial.
+    /// The operation was refused because a mount is read-only or a policy
+    /// denied it.
     PermissionDenied {
         /// The canonical path the operation targeted.
         path: String,
@@ -180,24 +188,30 @@ pub enum VfsError {
         /// mount's refusal, naming the rule that fired.
         reason: String,
     },
-    /// The serving backend does not implement the operation.
+    /// The backend that serves the path lacks an implementation of the
+    /// operation.
     Unsupported {
         /// The canonical path the operation targeted.
         path: String,
-        /// What is unsupported and why.
+        /// What the backend lacks and why.
         detail: String,
     },
-    /// The operation conflicts with a claim unordered with its own: a
-    /// claim by another live scope's identity, or one in the same scope
-    /// whose epoch the operation's clock has not seen.
+    /// The operation conflicts with another access's claim on the same
+    /// path or pattern.
+    ///
+    /// Two overlapping claims conflict when at least one of them is a write
+    /// and the two are concurrent. Two claims are concurrent when the other
+    /// claim was made by an identity in another live scope, or in the same
+    /// scope at an epoch later than the last one the operation's clock has
+    /// seen.
     Conflict {
         /// The canonical path or pattern both accesses claimed.
         path: String,
-        /// The happens-before diagnosis, naming both identities and both
-        /// claim kinds.
+        /// A description of the conflict that names both identities and
+        /// both claim kinds.
         detail: String,
     },
-    /// The serving backend failed for any other reason.
+    /// The backend failed for a reason outside the other variants.
     Backend {
         /// The backend's own diagnosis.
         message: String,

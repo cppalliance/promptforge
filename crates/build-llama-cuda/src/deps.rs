@@ -1,17 +1,18 @@
 //! PE dependency-closure accounting for the built runtime tree.
 //!
-//! The bundle ships every llama.cpp/GGML runtime file the build emits.
-//! Windows system DLLs and declared CUDA Toolkit DLLs stay external: the
-//! machine that runs the bundle must have the same compatible CUDA Toolkit.
+//! The bundle ships every llama.cpp/GGML runtime file the build emits, plus
+//! the CUDA Toolkit runtime DLLs the executable imports, copied from the
+//! toolkit so the end user needs only the NVIDIA driver. Windows system and
+//! MSVC runtime DLLs stay external and are listed in the manifest.
 
 /// Classification of one imported DLL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DllClass {
     /// Windows system or MSVC runtime DLL: external, provided by the OS.
     System,
-    /// CUDA Toolkit runtime DLL: external, provided by the installed toolkit.
+    /// CUDA Toolkit runtime DLL: copied from the toolkit into the bundle.
     CudaToolkit,
-    /// Anything else: must be present in the bundle.
+    /// Anything else: the build must emit it beside the executable.
     Bundled,
 }
 
@@ -50,7 +51,8 @@ const SYSTEM_DLLS: &[&str] = &[
     "ws2_32.dll",
 ];
 
-/// CUDA Toolkit runtime DLL prefixes that stay external, lowercase.
+/// CUDA Toolkit runtime DLL name prefixes, lowercase. Matching imports are
+/// copied from the toolkit into the bundle.
 const CUDA_PREFIXES: &[&str] = &[
     "cublas",
     "cudart",
@@ -111,30 +113,6 @@ pub fn parse_dumpbin_dependents(output: &str) -> Vec<String> {
     dlls
 }
 
-/// Splits the import closure into the external DLL names the runtime machine
-/// must provide, requiring every bundle-classified import to be present in
-/// `bundled`.
-///
-/// # Errors
-/// Returns an error when an import is neither a known system/CUDA DLL nor
-/// present in the bundle.
-pub fn external_closure(imports: &[String], bundled: &[String]) -> anyhow::Result<Vec<String>> {
-    let mut external = Vec::new();
-    for dll in imports {
-        match classify(dll) {
-            DllClass::System | DllClass::CudaToolkit => external.push(dll.clone()),
-            DllClass::Bundled => anyhow::ensure!(
-                bundled.iter().any(|name| name.eq_ignore_ascii_case(dll)),
-                "imported DLL `{dll}` is neither a known system/CUDA DLL nor present \
-                 in the bundle; the dependency closure is incomplete"
-            ),
-        }
-    }
-    external.sort();
-    external.dedup();
-    Ok(external)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,32 +171,5 @@ mod tests {
     fn classifies_everything_else_as_bundled() {
         assert_eq!(classify("ggml-cuda.dll"), DllClass::Bundled);
         assert_eq!(classify("llama.dll"), DllClass::Bundled);
-    }
-
-    #[test]
-    fn closure_keeps_system_and_cuda_external() {
-        let imports: Vec<String> = ["KERNEL32.dll", "cublas64_13.dll"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        let external = external_closure(&imports, &[]).unwrap();
-        assert_eq!(external, vec!["KERNEL32.dll", "cublas64_13.dll"]);
-    }
-
-    #[test]
-    fn closure_accepts_bundled_dlls_present_in_the_tree() {
-        let imports: Vec<String> = ["ggml-cuda.dll"].iter().map(|s| (*s).to_string()).collect();
-        let bundled: Vec<String> = ["llama-server.exe", "ggml-cuda.dll"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        assert!(external_closure(&imports, &bundled).unwrap().is_empty());
-    }
-
-    #[test]
-    fn closure_rejects_unbundled_unknown_dlls() {
-        let imports: Vec<String> = ["mystery.dll"].iter().map(|s| (*s).to_string()).collect();
-        let err = external_closure(&imports, &[]).unwrap_err();
-        assert!(err.to_string().contains("mystery.dll"));
     }
 }

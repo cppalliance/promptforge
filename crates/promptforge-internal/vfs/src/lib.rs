@@ -16,10 +16,8 @@
 //! ## Invariants
 //!
 //! - May depend on: nothing. Std only, with no workspace or external
-//!   crate, which the manifest test enforces. Read the repository-root
-//!   `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   crate, which the manifest test enforces. `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 
 pub mod detail;
 mod error;
@@ -45,40 +43,56 @@ pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
 pub use traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
-/// The default handle: a memory store at `/` and nothing else.
+/// The default handle has one mount: an in-memory store at `/`.
 ///
-/// [`VfsRefBuilder::store`] mounts the backend at the root and
-/// declares it the store, so relative paths address the store
-/// directly.
+/// The handle is built with [`VfsRefBuilder::store`], which mounts the
+/// memory backend at `/` and declares it the store. Relative paths
+/// therefore address the store directly.
 impl Default for VfsRef {
     fn default() -> VfsRef {
         VfsRef::builder().store("/", MemoryBackend::new()).build()
     }
 }
 
-/// The editor mode: what the model may mutate right now.
+/// A permission mode that sets which changes the model may make to
+/// storage.
+///
+/// Reads are allowed in every mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Every mutation is refused pending user approval; reads flow.
+    /// Every change is refused pending user approval. Reads are allowed.
     Ask,
-    /// Mutations are allowed only to markdown paths; reads flow.
+    /// Changes are allowed only to markdown paths, which are paths that
+    /// end in `.md`, matched case-sensitively. Reads are allowed.
+    ///
+    /// A copy is checked on its source and its destination alike, so
+    /// both paths must end in `.md`.
     Plan,
     /// Every operation is allowed.
     Agent,
 }
 
-/// The mode gate: one policy per handle, consulted on every operation
-/// before the claims check. Modes gate mutations, never reads. The
-/// current mode sits behind a shared `Arc`: the UI holds the
-/// [`ModeHandle`] and flips modes mid-run, and the next operation sees
-/// it - no executor involvement. One-way vs reversible is just who
-/// still holds the handle.
+/// A policy that limits changes to storage according to the current
+/// `Mode`.
+///
+/// A `VfsRef` holds one policy and consults it on every operation,
+/// before it checks for conflicting claims. The mode limits only operations
+/// that change storage: writes, appends, deletes, renames, directory
+/// creation, copies, symbolic links, and permission changes.
+///
+/// The policy shares its current mode with every [`ModeHandle`] it
+/// returns. The caller keeps a handle and can change the mode mid-run.
+/// The change reaches the next operation through the shared mode alone.
+/// Whether a mode change can be undone depends only on whether anyone
+/// still holds a handle.
 #[derive(Debug)]
 pub struct ModePolicy {
     mode: Arc<Mutex<Mode>>,
 }
 
-/// The UI's half of the mode gate. Clones share the one cell.
+/// A handle that reads and changes the mode of a `ModePolicy`.
+///
+/// Clones share one mode with each other and with the policy.
 #[derive(Debug, Clone)]
 pub struct ModeHandle {
     mode: Arc<Mutex<Mode>>,
@@ -93,8 +107,8 @@ impl ModePolicy {
         }
     }
 
-    /// Returns the UI's half: flipping it mid-run takes effect on the
-    /// next operation.
+    /// Returns a handle that reads and changes this policy's mode. A
+    /// change made mid-run takes effect on the next operation.
     #[must_use]
     pub fn handle(&self) -> ModeHandle {
         ModeHandle {

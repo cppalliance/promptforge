@@ -27,7 +27,7 @@
 //! table the chunk reads, held in the registry.
 //!
 //! [`RESERVED_NAMES`] is the other half of `_G`'s contract: every name the
-//! globals table holds once section setup ends, before any capability
+//! globals table holds once section setup ends, before any Plugin
 //! prelude installs, plus the Lua keywords. A frontmatter tool alias or
 //! model role label installs as a global of its own name, so the parser
 //! refuses one that is reserved, and a prelude global may not take one
@@ -148,7 +148,7 @@ impl fmt::Display for Reserved {
 
 /// Every name reserved in a section VM's global namespace, sorted within
 /// each kind: the globals a section or H1 VM holds once section setup
-/// ends, before any capability prelude installs, and the Lua 5.5 keywords.
+/// ends, before any Plugin prelude installs, and the Lua 5.5 keywords.
 ///
 /// A global section setup installs must be listed here: the Engine's
 /// section setup tests compare this list against a set-up VM's globals in
@@ -220,7 +220,7 @@ pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
 ];
 
 /// Returns why `name` is reserved in a section VM's global namespace, or
-/// `None` when a frontmatter alias or a capability prelude global may take
+/// `None` when a frontmatter alias or a Plugin prelude global may take
 /// it. The match is case-sensitive, as Lua names are.
 #[must_use]
 pub fn reserved_name(name: &str) -> Option<Reserved> {

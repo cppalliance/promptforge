@@ -184,14 +184,14 @@ pub(crate) enum DebugEvent {
 impl DebugEvent {
     /// Builds a [`DebugEvent::Request`] from a serialized request `body`.
     #[must_use]
-    pub(crate) fn request(body: Value) -> DebugEvent {
+    fn request(body: Value) -> DebugEvent {
         DebugEvent::Request { body }
     }
 
     /// Builds a [`DebugEvent::Response`] from a response `body` and its
     /// parsed metadata.
     #[must_use]
-    pub(crate) fn response(
+    fn response(
         body: Value,
         finish_reason: Option<String>,
         reasoning_content: Option<String>,

@@ -20,16 +20,16 @@ use crate::shutdown;
 const PROGRESS: RouteInfo = RouteInfo::open("/admin/progress", &[Method::GET]);
 
 /// The progress stream route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[PROGRESS];
+pub(super) const ROUTES: &[RouteInfo] = &[PROGRESS];
 
 /// The progress stream route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(PROGRESS.path, get(admin_progress))
 }
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
 /// idle connection alive through NAT and firewall timeouts.
-pub(crate) const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
+const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The `GET /admin/progress` route: bearer-authed, streams the process
 /// activity hub as SSE.
@@ -45,7 +45,7 @@ pub(crate) const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::
 /// signal: an attached subscriber (the config SPA, the workshop) would
 /// otherwise hold its connection open through the graceful drain and pin
 /// the process.
-pub(crate) async fn admin_progress(
+async fn admin_progress(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
@@ -55,10 +55,7 @@ pub(crate) async fn admin_progress(
 /// Builds the progress SSE response over `hub`: the current snapshot first,
 /// then one line per change, heartbeats in the gaps, until `shutdown`
 /// fires.
-pub(crate) fn progress_sse_response(
-    hub: &ProgressHub,
-    shutdown: shutdown::ShutdownSignal,
-) -> Response {
+fn progress_sse_response(hub: &ProgressHub, shutdown: shutdown::ShutdownSignal) -> Response {
     // The receiver starts holding the current snapshot as unseen, so the
     // first `changed()` resolves at once with the opening line and nothing
     // between subscribe and first poll is lost.

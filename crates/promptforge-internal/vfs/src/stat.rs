@@ -3,10 +3,10 @@
 
 use std::time::SystemTime;
 
-/// The seven POSIX kinds, named rather than lumped: a virtual `/dev/null`
-/// (char device) is a plausible backend, and an `Other` kind would hide it.
-/// The Engine adapter maps the first four directly and the three specials
-/// to `File` with a trace.
+/// The kind of node at a path, one of the seven POSIX file kinds.
+///
+/// Every kind has its own variant, so a backend that serves a special
+/// node, such as a virtual `/dev/null`, can report it as a `CharDevice`.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileType {
@@ -28,9 +28,9 @@ pub enum FileType {
 
 /// Metadata for one path.
 ///
-/// Options preserve honesty: a backend that does not track a field says
-/// `None` rather than fabricating (an invented mtime is nondeterministic;
-/// a constant one makes `ls -t` sort garbage).
+/// A backend fills an optional field only with a value it tracks, and
+/// leaves it `None` otherwise, so that a reported time stays
+/// deterministic and a sort by time, such as `ls -t`, stays meaningful.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Stat {
@@ -46,11 +46,11 @@ pub struct Stat {
     pub created: Option<SystemTime>,
 }
 
-/// One directory entry.
+/// One entry in a directory listing, pairing a name with its metadata.
 ///
-/// `description` is the annotation column; backends leave it `None` and
-/// the Engine adapter drops it. `Entry` is designed to grow: annotations
-/// live here.
+/// The `description` field holds an optional annotation shown beside the
+/// entry. The built-in backends, `MemoryBackend` and `RealBackend`, leave
+/// it `None`.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Entry {

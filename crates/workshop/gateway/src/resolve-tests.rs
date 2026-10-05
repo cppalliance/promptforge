@@ -328,3 +328,16 @@ fn the_report_names_the_winning_source_and_a_removed_file() {
         connecting.description
     );
 }
+
+#[test]
+fn debug_redacts_the_api_key() {
+    let resolved = ResolvedGateway {
+        base_url: "http://127.0.0.1:4000".to_owned(),
+        api_key: "secret-key".to_owned(),
+        identity: None,
+        source: GatewaySource::Config,
+        stale: None,
+    };
+    let rendered = format!("{resolved:?}");
+    assert!(!rendered.contains("secret-key"), "key leaked: {rendered}");
+}

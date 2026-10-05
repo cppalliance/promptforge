@@ -14,10 +14,12 @@ use crate::handle::Scope;
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
 
-/// Identity of one serial thread of execution. Process-unique, vended
-/// from a process-global monotonic counter. Opaque: no public constructor -
-/// it must be nameable (it appears in [`Vfs::release`] and
-/// [`AcquireContext::id`]), but only the handle vends them.
+/// The identity of one serial thread of execution.
+///
+/// Each identity is unique within the process, because it comes from a
+/// process-wide counter that only counts up. Only a `VfsRef` and its
+/// `Access` capabilities create identities. A backend receives them
+/// through [`AcquireContext::id`] and [`Vfs::release`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ExecId(u64);
 
@@ -29,11 +31,14 @@ impl ExecId {
     }
 }
 
-/// What [`Vfs::acquire`] receives: the identity being acquired and,
-/// opaquely, the scope it belongs to. Opaque: no public constructor -
-/// only the handle builds one. A backend that wraps another [`Vfs`]
-/// forwards the context unchanged, so a wrapped handle joins the
-/// caller's scope and its claims stay ordered with the caller's.
+/// The context that [`Vfs::acquire`] receives: the identity being
+/// acquired and the scope it belongs to.
+///
+/// A `VfsRef` or one of its `Access` capabilities builds each context.
+/// A backend that wraps another [`Vfs`] must pass it the context
+/// exactly as received. A wrapped `VfsRef` then joins the outer
+/// session's scope, so its claims stay ordered with the outer session's
+/// claims.
 #[derive(Clone)]
 pub struct AcquireContext {
     id: ExecId,
@@ -67,33 +72,37 @@ impl fmt::Debug for AcquireContext {
     }
 }
 
-/// One backend behind the virtual namespace.
+/// A storage backend behind the virtual filesystem.
 ///
-/// Sync by design: the Lua VM and the executor's single driver thread are
-/// synchronous. Bytes at the operation level. `Send` is required, `Sync`
-/// is not: the handle serializes access. The only way to touch storage is
-/// to acquire an access object bound to an identity.
+/// Operations are synchronous because the Lua VM and the single thread
+/// that drives a run are both synchronous. They work on raw bytes. A
+/// backend must be `Send`, and `Sync` is optional, because `VfsRef`
+/// serializes access to it. Storage is reachable only through an access
+/// object that `acquire` binds to one identity.
 pub trait Vfs: Send {
-    /// Acquires an access object bound to the identity in `cx`. Every
-    /// operation on the returned object is attributed to
-    /// [`AcquireContext::id`]: backends that care can know who is
-    /// touching what; the rest ignore it. A backend that wraps another
-    /// [`Vfs`] passes `cx` through unchanged.
+    /// Acquires an access object bound to the identity in `cx`.
+    ///
+    /// Every operation on the returned object is attributed to
+    /// [`AcquireContext::id`]. A backend may use the identity to track
+    /// who touches what, or ignore it. A backend that wraps another
+    /// [`Vfs`] must pass it `cx` exactly as received.
     ///
     /// # Errors
     ///
-    /// Returns an error when the backend cannot open a session.
+    /// Returns an error when the backend fails to open a session.
     fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError>;
 
-    /// Releases `id`. Called from the access object's Drop - through a
-    /// router, once per mount the identity touched - so teardown paths
-    /// (cancel, panic, early return) cannot skip it. It ends the backend
-    /// session only; the happens-before claims live and die with the
-    /// scope, never with a release.
+    /// Ends the backend session for `id`.
+    ///
+    /// The access object calls this when it is dropped, so cancellation,
+    /// panics, and early returns cannot skip it. When backends are
+    /// mounted at several paths, each mount the identity touched gets one
+    /// release. A release ends only the backend session. The identity's
+    /// happens-before claims end with its scope.
     ///
     /// # Errors
     ///
-    /// Returns an error when the backend cannot release the identity.
+    /// Returns an error when the backend fails to release the identity.
     fn release(&mut self, id: ExecId) -> Result<(), VfsError>;
 
     /// Whether this backend rejects all mutations.
@@ -102,10 +111,13 @@ pub trait Vfs: Send {
     }
 }
 
-/// One identity's session with a backend. Holds the ExecId.
-/// All filesystem operations live here - no access object, no ops.
-/// Paths arrive validated, canonicalized, and interned; backends never
-/// re-validate.
+/// One identity's session with a backend, through which every
+/// filesystem operation runs.
+///
+/// Every operation on a session is attributed to the identity it was
+/// acquired for. Storage is reachable only through a session. Paths
+/// arrive validated, canonicalized, and interned, so a backend uses
+/// them as given.
 pub trait VfsAccess: Send {
     /// Reads the file at `path` as stored.
     ///
@@ -115,11 +127,11 @@ pub trait VfsAccess: Send {
     /// backend error when the read fails.
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError>;
 
-    /// Reads `len` bytes starting at byte `offset`.
+    /// Reads up to `len` bytes starting at byte `offset`.
     ///
-    /// Default: read whole, slice. Backends that can seek (real
-    /// directory, SQLite) override and never materialize the file.
-    /// The handle's line-based ranges are built on this.
+    /// The default reads the whole file and slices it. Backends that can
+    /// seek, such as `RealBackend`, override it to read only the
+    /// requested bytes.
     ///
     /// # Errors
     ///
@@ -146,26 +158,22 @@ pub trait VfsAccess: Send {
 
     /// Creates or overwrites the file at `path`.
     ///
-    /// Noted but not implemented in v1: a defaulted
-    /// `write_owned(&mut self, path: &VfsPath, contents: Vec<u8>)`
-    /// delegating to `write`, which the memory overlay would override to
-    /// move the buffer with zero copies. Add when profiling calls for it.
-    ///
     /// # Errors
     ///
-    /// Returns an error when the backend cannot write the contents.
+    /// Returns an error when the backend fails to write the contents.
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError>;
 
     /// Appends to the file at `path`, creating it if absent.
     ///
     /// # Errors
     ///
-    /// Returns an error when the backend cannot append the contents.
+    /// Returns an error when the backend fails to append the contents.
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError>;
 
     /// Removes the file, link, or directory at `path`.
-    /// Absent is NotFound; a directory without `recursive` is an error.
-    /// On a symlink, removes the link, never the target.
+    ///
+    /// Removing a directory that has entries requires `recursive`. On a
+    /// symbolic link, it removes the link and never the target.
     ///
     /// # Errors
     ///
@@ -173,11 +181,14 @@ pub trait VfsAccess: Send {
     /// error when the removal fails.
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError>;
 
-    /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
+    /// Reports whether `path` exists.
+    ///
+    /// A confirmed absence returns `Ok(false)`, and a backend failure
+    /// returns `Err`.
     ///
     /// # Errors
     ///
-    /// Returns an error when the backend cannot determine existence.
+    /// Returns an error when the backend fails to determine existence.
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError>;
 
     /// Returns stored paths matching `pattern`, sorted.
@@ -187,12 +198,13 @@ pub trait VfsAccess: Send {
     /// Returns an error when the pattern is invalid or the backend fails.
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError>;
 
-    /// Returns stored paths matching `pattern` that are files, or only
+    /// Returns the stored paths matching `pattern` that are files, or
     /// directories when `dirs_only` is set, sorted.
     ///
-    /// Default: [`VfsAccess::glob`], then filter each match through
-    /// [`VfsAccess::stat`]. Backends that index their own trees override
-    /// to filter without a stat per match.
+    /// The default calls [`VfsAccess::glob`] and keeps each match whose
+    /// [`VfsAccess::stat`] shows the wanted type. Backends that index
+    /// their own trees override it to read each match's type from that
+    /// index.
     ///
     /// # Errors
     ///
@@ -234,15 +246,16 @@ pub trait VfsAccess: Send {
     ///
     /// # Errors
     ///
-    /// Returns an error when the directory cannot be created.
+    /// Returns an error when creating the directory fails.
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError>;
 
-    /// Renames or moves, atomically where the backend allows.
+    /// Renames or moves `from` to `to`, atomically where the backend
+    /// allows.
     ///
     /// # Errors
     ///
     /// Returns an error when the rename fails; source and destination
-    /// are left unchanged.
+    /// stay as they were.
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError>;
 
     /// Copies the file at `from` to `to`.
@@ -250,18 +263,21 @@ pub trait VfsAccess: Send {
     /// # Errors
     ///
     /// Returns an error when the copy fails; source and destination
-    /// are left unchanged.
+    /// stay as they were.
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError>;
 
-    /// Replaces the unique occurrence of `old` with `new`.
-    /// Zero matches and multiple matches are both errors.
-    /// Default: read, count, replace, write. Override to push down.
+    /// Replaces the single occurrence of `old` with `new` in the file at
+    /// `path`.
+    ///
+    /// The default reads the file, counts the matches, replaces the one
+    /// match, and writes the file back. A backend can override it to do
+    /// the replacement itself.
     ///
     /// # Errors
     ///
-    /// Returns an error when `old` is empty, when the file is not UTF-8,
-    /// when the match count is not exactly one, or when the read or
-    /// write fails.
+    /// Returns an error when `old` is empty, when the file holds invalid
+    /// UTF-8, when `old` matches zero times or more than once, or when
+    /// the read or write fails.
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         if old.is_empty() {
             return Err(VfsError::Anchor {
@@ -295,11 +311,11 @@ pub trait VfsAccess: Send {
 
     /// Creates a symbolic link at `link` naming `target`.
     ///
-    /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    /// This is an optional POSIX operation.
     ///
     /// # Errors
     ///
-    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
+    /// The default returns [`VfsError::Unsupported`].
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
         let _ = target;
         Err(VfsError::Unsupported {
@@ -310,11 +326,11 @@ pub trait VfsAccess: Send {
 
     /// Reads the target of the symbolic link at `path`.
     ///
-    /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    /// This is an optional POSIX operation.
     ///
     /// # Errors
     ///
-    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
+    /// The default returns [`VfsError::Unsupported`].
     fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
         Err(VfsError::Unsupported {
             path: path.to_string(),
@@ -324,11 +340,11 @@ pub trait VfsAccess: Send {
 
     /// Changes the mode bits of `path`.
     ///
-    /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    /// This is an optional POSIX operation.
     ///
     /// # Errors
     ///
-    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
+    /// The default returns [`VfsError::Unsupported`].
     fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
         let _ = mode;
         Err(VfsError::Unsupported {
@@ -338,7 +354,8 @@ pub trait VfsAccess: Send {
     }
 }
 
-/// What operation is being attempted - the policy matches on this.
+/// The kind of filesystem operation being attempted, which a policy
+/// matches on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Op {
     /// Reading a file's bytes.
@@ -371,29 +388,40 @@ pub enum Op {
     Chmod,
 }
 
-/// The policy's answer. Reasons are load-bearing in both directions:
-/// Deny's string flows back to the model as the tool error (its
-/// recovery path); Ask's string is what the user sees in the
-/// approval dialog (what is being asked, and which rule fired).
+/// A policy's decision about one operation.
+///
+/// Each reason string reaches a reader. The `Deny` string goes back to
+/// the model as the tool error, so it tells the model how to recover.
+/// The `Ask` string names what is being asked and which rule fired, for
+/// the user to read in an approval dialog. The filesystem refuses an
+/// `Ask` operation with `VfsError::PermissionDenied`, the same as
+/// `Deny`, so any approval dialog belongs to the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// The operation may proceed.
     Allow,
-    /// The operation is refused; the string is the model's recovery path.
+    /// The operation is refused. The string tells the model how to
+    /// recover.
     Deny(String),
-    /// The operation needs user approval; the string is the dialog text.
+    /// The operation needs the user's approval. The string is the text
+    /// for an approval dialog.
     Ask(String),
 }
 
-/// One policy per VfsRef, consulted by Access on every operation,
-/// before the claims check. Dynamic through shared state: the Host
-/// or its UI holds the same Arc and changes behavior mid-run.
+/// A hook that decides whether each filesystem operation may proceed.
+///
+/// Each `VfsRef` has one policy. `Access` consults it on every
+/// operation, before checking for conflicting claims. A policy can
+/// change its answers during a run through shared state: the
+/// application holds the same `Arc` and changes the state mid-run.
 pub trait Policy: Send {
     /// Decides whether `op` on `path` may proceed.
     fn check(&self, op: Op, path: &VfsPath) -> Verdict;
 }
 
-/// The v1 policy: every operation is allowed.
+/// A policy that allows every operation.
+///
+/// `VfsRef::new` uses it, and `VfsRefBuilder` uses it by default.
 #[derive(Debug, Default)]
 pub struct AllowAll;
 

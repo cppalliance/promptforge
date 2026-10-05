@@ -16,7 +16,7 @@ const SUCCESS_BODY_CAP: usize = http_util::MAX_JSON_BODY;
 
 /// The Brave `/web/search` response envelope.
 #[derive(Deserialize)]
-pub(super) struct BraveResponse {
+struct BraveResponse {
     web: Option<BraveWeb>,
 }
 

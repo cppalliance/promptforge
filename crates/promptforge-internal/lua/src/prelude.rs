@@ -1,4 +1,4 @@
-//! Capability preludes: the Lua source an activated capability contributes,
+//! Plugin preludes: the Lua source an activated Plugin contributes,
 //! installed into every section VM before the shared library replays.
 //!
 //! A prelude runs once per VM as a main chunk, in an environment table of
@@ -21,7 +21,7 @@
 
 use mlua::Table;
 use mlua::chunk::ChunkMode;
-use promptforge_types::capabilities::{CapabilityId, Prelude};
+use promptforge_types::plugins::{PluginId, Prelude};
 
 use super::{BTreeMap, Error, Lua, Result, Value};
 use crate::proxy::read_only_proxy;
@@ -49,10 +49,10 @@ const VISIBLE_GLOBALS: [&str; 19] = [
     "untrusted",
 ];
 
-/// Installs the run's capability preludes, in order, into a section VM.
+/// Installs the run's Plugin preludes, in order, into a section VM.
 ///
 /// Each prelude loads from source under the chunk name
-/// `@capability:<id>` in its own restricted environment (see the module
+/// `@plugin:<id>` in its own restricted environment (see the module
 /// docs). The globals it defines must not collide with a reserved name
 /// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, with
 /// `aliases` (the prompt's frontmatter tool and model aliases, which
@@ -66,33 +66,33 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// coroutine, so a prelude that calls `tools.call` while loading fails.
 ///
 /// # Errors
-/// Returns [`Error::LuaRuntime`] naming the capability when a prelude
-/// fails to load, and [`Error::Lua`] naming the capability, the global,
+/// Returns [`Error::LuaRuntime`] naming the Plugin when a prelude
+/// fails to load, and [`Error::Lua`] naming the Plugin, the global,
 /// and what it collides with when a global collides or is not named by a
 /// string.
 pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Result<()> {
     let globals = lua.globals();
-    let mut installed: BTreeMap<String, &CapabilityId> = BTreeMap::new();
+    let mut installed: BTreeMap<String, &PluginId> = BTreeMap::new();
     for prelude in preludes {
-        let capability = prelude.capability();
+        let plugin = prelude.plugin();
         let env = environment(lua, &globals)?;
         lua.load(prelude.source())
-            .set_name(format!("@capability:{capability}"))
+            .set_name(format!("@plugin:{plugin}"))
             .set_mode(ChunkMode::Text)
             .set_environment(env.clone())
             .exec()
-            .map_err(|error| load_failure(capability, error))?;
-        let defined = defined_globals(capability, &env)?;
+            .map_err(|error| load_failure(plugin, error))?;
+        let defined = defined_globals(plugin, &env)?;
         for name in defined.keys() {
-            check_collision(&globals, capability, name, &installed, aliases)?;
+            check_collision(&globals, plugin, name, &installed, aliases)?;
         }
         for (name, value) in defined {
             let value = match value {
-                Value::Table(table) => Value::Table(seal(lua, capability, &name, table)?),
+                Value::Table(table) => Value::Table(seal(lua, plugin, &name, table)?),
                 other => other,
             };
             globals.raw_set(name.as_str(), value).map_err(Error::lua)?;
-            installed.insert(name, capability);
+            installed.insert(name, plugin);
         }
     }
     Ok(())
@@ -123,7 +123,7 @@ fn environment(lua: &Lua, globals: &Table) -> Result<Table> {
 /// proxy whose `__index` reads `target` and hands back each table it finds
 /// as a view of its own, so no depth of `var` is writable through it.
 fn read_only_var(lua: &Lua, target: Table, path: String) -> mlua::Result<Table> {
-    let refusal = format!("{path} is read-only inside a capability prelude; cannot set");
+    let refusal = format!("{path} is read-only inside a Plugin prelude; cannot set");
     let index = lua.create_function(move |lua, (_view, key): (Value, Value)| {
         match target.get::<Value>(key.clone())? {
             Value::Table(nested) => {
@@ -151,7 +151,7 @@ fn child_path(path: &str, key: &Value) -> String {
 
 /// Reads the prelude's globals off its environment table's own entries,
 /// sorted by name so the checks and the install run in a fixed order.
-fn defined_globals(capability: &CapabilityId, env: &Table) -> Result<BTreeMap<String, Value>> {
+fn defined_globals(plugin: &PluginId, env: &Table) -> Result<BTreeMap<String, Value>> {
     let mut defined = BTreeMap::new();
     for pair in env.pairs::<Value, Value>() {
         let (key, value) = pair.map_err(Error::lua)?;
@@ -166,7 +166,7 @@ fn defined_globals(capability: &CapabilityId, env: &Table) -> Result<BTreeMap<St
             other => format!("a key of type {}", other.type_name()),
         };
         return Err(Error::Lua(format!(
-            "capability `{capability}`: its prelude defines a global under {key}; a global's \
+            "Plugin `{plugin}`: its prelude defines a global under {key}; a global's \
              name must be a UTF-8 string"
         )));
     }
@@ -182,13 +182,13 @@ fn defined_globals(capability: &CapabilityId, env: &Table) -> Result<BTreeMap<St
 /// installs does not depend on the Host or the section.
 fn check_collision(
     globals: &Table,
-    capability: &CapabilityId,
+    plugin: &PluginId,
     name: &str,
-    installed: &BTreeMap<String, &CapabilityId>,
+    installed: &BTreeMap<String, &PluginId>,
     aliases: &[&str],
 ) -> Result<()> {
     let collides_with = if let Some(owner) = installed.get(name) {
-        format!("which capability `{owner}`'s prelude already defines")
+        format!("which Plugin `{owner}`'s prelude already defines")
     } else if aliases.contains(&name) {
         "which the prompt's frontmatter binds as a tool or model alias".to_owned()
     } else if let Some(kind) = crate::reserved_name(name) {
@@ -202,15 +202,15 @@ fn check_collision(
         return Ok(());
     };
     Err(Error::Lua(format!(
-        "capability `{capability}`: its prelude defines the global `{name}`, {collides_with}"
+        "Plugin `{plugin}`: its prelude defines the global `{name}`, {collides_with}"
     )))
 }
 
 /// Seals a prelude's table global at its top level: an empty proxy whose
 /// `__index` reads the hidden table, whose `__newindex` raises, and whose
 /// `__metatable` is set, so `pairs` over it sees nothing.
-fn seal(lua: &Lua, capability: &CapabilityId, name: &str, hidden: Table) -> Result<Table> {
-    let refusal = format!("{name} is read-only: capability `{capability}` defines it; cannot set");
+fn seal(lua: &Lua, plugin: &PluginId, name: &str, hidden: Table) -> Result<Table> {
+    let refusal = format!("{name} is read-only: Plugin `{plugin}` defines it; cannot set");
     read_only_proxy(
         lua,
         Value::Table(hidden),
@@ -230,7 +230,7 @@ fn field_name(key: &Value) -> String {
 
 /// Maps a prelude's load or run failure to the model-facing message,
 /// keeping the Lua traceback after it and the `mlua` error as the cause.
-fn load_failure(capability: &CapabilityId, error: mlua::Error) -> Error {
+fn load_failure(plugin: &PluginId, error: mlua::Error) -> Error {
     let rendered = match &error {
         mlua::Error::RuntimeError(message) => message.clone(),
         other => other.to_string(),
@@ -240,7 +240,7 @@ fn load_failure(capability: &CapabilityId, error: mlua::Error) -> Error {
         None => (rendered.as_str(), None),
     };
     let mut message = format!(
-        "capability `{capability}`: its prelude failed to load: {head}. A prelude only \
+        "Plugin `{plugin}`: its prelude failed to load: {head}. A prelude only \
          defines functions; it must not call tools while loading."
     );
     if let Some(traceback) = traceback {

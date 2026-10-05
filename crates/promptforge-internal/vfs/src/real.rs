@@ -1,4 +1,4 @@
-//! The real-filesystem backend, stage 1 (thin).
+//! The real-filesystem backend.
 //!
 //! [`RealBackend`] serves real directories behind the virtual
 //! namespace over direct `std::fs` calls. Two constructors:
@@ -15,9 +15,6 @@
 //! `copy`) follow links under the containment check, which denies a
 //! link that resolves outside the root and refuses a path that passes
 //! through a dangling link.
-//!
-//! Stage 2 hardening (the Bashkit RealFs resolver trio, symlink
-//! policies, Windows long paths and device names) is deferred.
 
 mod files;
 mod resolve;
@@ -70,13 +67,16 @@ fn map_io(path: &str, err: &std::io::Error) -> VfsError {
     }
 }
 
-/// A real-filesystem backend behind the virtual namespace.
+/// A filesystem backend that maps virtual paths onto real files and
+/// directories.
 ///
-/// Stage 1 (thin): direct `std::fs` operations, lexical plus
-/// canonicalize containment for [`RealBackend::rooted`], and
-/// failure-atomic writes, copies, and renames. `ExecId` attribution is
-/// accepted as a no-op: the real filesystem holds no per-identity
-/// state.
+/// Each operation calls `std::fs` directly. A backend built with
+/// [`RealBackend::rooted`] keeps every path inside its root directory.
+/// It checks containment both lexically and after canonicalizing the
+/// path. Writes, copies, and renames are failure-atomic.
+///
+/// The backend accepts an `ExecId` for attribution and ignores it,
+/// because every identity sees the same real filesystem.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RealBackend {
@@ -85,9 +85,10 @@ pub struct RealBackend {
 }
 
 impl RealBackend {
-    /// A backend whose virtual paths ARE real paths: virtual
-    /// `/a/b` is real `/a/b` (on Windows, virtual `/C:/a/b` is real
-    /// `C:\a\b`). No containment applies.
+    /// Creates a backend whose virtual paths are the real paths.
+    ///
+    /// Virtual `/a/b` is real `/a/b`. On Windows, virtual `/C:/a/b` is
+    /// real `C:\a\b`. The backend applies no containment check.
     #[must_use]
     pub fn identity() -> RealBackend {
         RealBackend {
@@ -96,9 +97,12 @@ impl RealBackend {
         }
     }
 
-    /// A chroot-style backend: the virtual root is `dir`, canonicalized
-    /// and validated as a directory at construction. Every resolved
-    /// path is containment-checked against the canonical root.
+    /// Creates a backend rooted at the real directory `dir`, like a
+    /// `chroot`.
+    ///
+    /// The virtual root `/` maps to `dir`. The constructor canonicalizes
+    /// `dir` and checks that it is a directory. Every path the backend
+    /// resolves must stay inside the canonical root.
     ///
     /// # Errors
     ///
@@ -116,8 +120,9 @@ impl RealBackend {
         })
     }
 
-    /// Sets whether the backend rejects all mutations. The flag is a
-    /// property of the mount, orthogonal to policy.
+    /// Sets whether the backend rejects all mutations.
+    ///
+    /// The flag is a property of the mount, separate from any policy.
     #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> RealBackend {
         self.read_only = read_only;

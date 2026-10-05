@@ -4,7 +4,7 @@
 
 use super::*;
 
-/// The `tasks` global is the task namespace (`tasks.spawn` and, later, the
+/// The `tasks` global is the task namespace (`tasks.spawn` and the
 /// waits), not a control-flow table: indexing it by a heading string reads
 /// nil, and control flow takes heading strings only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

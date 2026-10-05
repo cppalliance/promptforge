@@ -14,12 +14,12 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 /// catalog, journaling every fill into the returned bindings.
 ///
 /// Exact slots fill by identity: an exact path's first two segments name
-/// its capability, so a slot whose capability contributed nothing to the
+/// its Plugin, so a slot whose Plugin contributed nothing to the
 /// catalog - it was never activated - lands in
 /// [`Requirements::missing_required`] and the run fails until satisfied. A
-/// slot whose capability DID contribute to the catalog but not the named
-/// tool - the contribution was rejected at assembly, or the capability
-/// never offered that name - is not a missing capability: installing
+/// slot whose Plugin DID contribute to the catalog but not the named
+/// tool - the contribution was rejected at assembly, or the Plugin
+/// never offered that name - is not a missing Plugin: installing
 /// changes nothing. It is warned and left unfilled, and advertising the
 /// unfilled alias fails at run time.
 pub(super) fn fill_tool_bindings(
@@ -30,8 +30,7 @@ pub(super) fn fill_tool_bindings(
     let mut bindings = ToolBindings::default();
     let slots = prompt.frontmatter().tools();
     for (alias, slot) in slots.iter() {
-        // The open Harness-offered posture is deferred; a posture this fill
-        // does not model leaves its alias unbound.
+        // A posture this fill does not model leaves its alias unbound.
         let ToolSlot::Exact(id) = slot else {
             continue;
         };
@@ -39,24 +38,21 @@ pub(super) fn fill_tool_bindings(
             bindings.bind(alias, tool.clone());
             continue;
         }
-        let capability = id.capability();
-        let capability_present = catalog
-            .tools()
-            .iter()
-            .any(|tool| capability.contains(&tool.id));
-        // A capability that contributed to the catalog but not this tool
+        let plugin = id.plugin();
+        let plugin_present = catalog.tools().iter().any(|tool| plugin.contains(&tool.id));
+        // A Plugin that contributed to the catalog but not this tool
         // (the contribution was rejected at assembly or never made) is not
         // missing: reporting it would fail the run unsatisfiably, since
         // installing it changes nothing. The alias stays unbound instead,
         // and advertising it fails at run time with the alias named.
-        if !capability_present && !requirements.missing_required.contains(&capability) {
-            requirements.missing_required.push(capability);
+        if !plugin_present && !requirements.missing_required.contains(&plugin) {
+            requirements.missing_required.push(plugin);
         }
     }
     bindings
 }
 
-/// v1's deliberately trivial fill: binds every declared role to the
+/// The trivial model fill: binds every declared role to the
 /// context's current model and checks each role's hard keywords and
 /// context minimum against its descriptor, reporting required versus
 /// actual into [`Requirements::unmet_requirements`]. With no current
@@ -114,8 +110,8 @@ fn thinking_name(thinking: ThinkingMode) -> &'static str {
         ThinkingMode::Never => "Never",
         ThinkingMode::Always => "Always",
         ThinkingMode::Switchable => "Switchable",
-        // The vocabulary is closed today; a future mode reports as
-        // unknown rather than breaking the report.
+        // `ThinkingMode` is `#[non_exhaustive]`; an unlisted mode reports
+        // as unknown rather than breaking the report.
         _ => "unknown",
     }
 }

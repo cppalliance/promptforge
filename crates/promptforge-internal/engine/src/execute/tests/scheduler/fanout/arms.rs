@@ -235,7 +235,7 @@ async fn fanout_hash_collection_iterates_in_sorted_key_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
-    // The A9 seal on a result object: an assignment raises, `setmetatable`
+    // The seal on a result object: an assignment raises, `setmetatable`
     // is refused (the guard cannot be swapped out), `getmetatable` hands
     // back a decoy that exposes no `__index` (so the hidden fields table
     // cannot be reached and mutated), and the decoy still exposes

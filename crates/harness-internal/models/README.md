@@ -1,3 +1,0 @@
-# harness-models
-
-The Harness's model client: the HTTP transport that performs the Engine's `Chat` effects against the gateway a client has bound, streaming deltas back to the session, and the `GET /v1/models` catalog fetch. `GatewayClient::complete` sends the Engine's request body, reads the SSE stream under the run's byte cap and timeout, folds it through the Engine's shared reassembly, and returns one `Completion` with the client-side timing it measured. Private to the Harness family in `crates/harness-internal/`; clients reach it through the `harness` facade. Like every Harness crate, it may depend only on `promptforge` and its container siblings.

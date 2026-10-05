@@ -182,10 +182,10 @@ include = ["not-a-config-key.toml"]
     }
 }
 
-/// The format version this loader replaced. Spelled as a number so the
-/// repository-wide check that no `config-version` header at the previous
-/// value remains keeps passing while the tests still exercise a document
-/// written at that version.
+/// A `config-version` value the loader rejects with a hard break. Spelled as
+/// a number so the repository-wide check that no `config-version` header uses
+/// this value keeps passing while the tests still exercise a document written
+/// at it.
 const PREVIOUS_VERSION: u32 = 2;
 
 #[test]
@@ -360,6 +360,14 @@ fn absent_selection_loads_with_no_profile_and_every_remote_model() {
     assert_eq!(config.models()[0].name(), "cloud");
     assert_eq!(config.catalog_local_models().len(), 2);
     assert_eq!(config.catalog_stt_models().len(), 1);
+}
+
+#[test]
+fn an_in_memory_document_has_no_active_profile_or_stale_selection() {
+    let config = Config::from_toml_str(CATALOG).expect("catalog parses");
+
+    assert!(config.active_profile().is_none());
+    assert_eq!(config.stale_state_selection(), None);
 }
 
 #[test]

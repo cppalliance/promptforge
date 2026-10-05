@@ -29,7 +29,7 @@ pub use crate::writer::LogWriter;
 pub use crate::writer::LogEventWriter;
 
 #[cfg(test)]
-pub(crate) mod fault_injection {
+mod fault_injection {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
     use std::time::Duration;
@@ -97,7 +97,7 @@ pub(crate) mod fault_injection {
 }
 
 #[cfg(test)]
-pub(crate) mod allocation_tracking {
+mod allocation_tracking {
     use std::cell::Cell;
 
     thread_local! {

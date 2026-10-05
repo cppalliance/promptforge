@@ -10,8 +10,9 @@ version = 2
 # Vulnerabilities and yanked crates always fail. "unmaintained" is scoped to
 # crates this workspace depends on directly, so we are accountable for our own
 # choices without failing CI on unmaintained deep-transitive crates we cannot
-# control (currently RUSTSEC-2024-0436 paste via the candle/gemm stack).
+# control.
 unmaintained = "workspace"
+yanked = "deny"
 # Reviewed advisories consciously accepted go here, each with a rationale.
 ignore = []
 
@@ -30,7 +31,6 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     # Mozilla root-certificate bundle (webpki-root-certs), pulled by
     # rustls-platform-verifier (reqwest's `rustls` feature) for targets with
     # no OS trust store, wasm32 only; a permissive data license. The
@@ -42,11 +42,29 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# cfg_block (via turso_core) names its LICENSE file but sets no SPDX
+# expression; the file is the Apache-2.0 notice. A changed file changes the
+# hash, and cargo-deny falls back to scanning it.
+[[licenses.clarify]]
+crate = "cfg_block"
+expression = "Apache-2.0"
+license-files = [{ path = "LICENSE", hash = 0xc9663a1e }]
+
 [bans]
 # Warn on duplicate versions of the same crate so unification regressions are
 # visible without hard-failing a large native-dependency graph.
 multiple-versions = "warn"
 wildcards = "warn"
+# Workspace crates are all `publish = false` and reference each other by path,
+# which cargo-deny otherwise reports as wildcard dependencies.
+allow-wildcard-paths = true
+
+# JSON that reaches a recorder or a replay comparison must round-trip with
+# canonical (sorted) object keys, which `preserve_order` would replace with
+# insertion order for every crate in the graph.
+[[bans.features]]
+crate = "serde_json"
+deny = ["preserve_order"]
 
 [sources]
 # Only crates.io is an allowed registry; no git sources are expected.

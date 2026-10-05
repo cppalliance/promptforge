@@ -1,4 +1,4 @@
-//! Tests for a capability prelude's restricted environment: the globals
+//! Tests for a Plugin prelude's restricted environment: the globals
 //! it sees, the read-only `var` view at every depth, and its tool calls
 //! yielding from a block.
 
@@ -118,11 +118,11 @@ end";
     for (key, refusal) in [
         (
             "'mode'",
-            "var is read-only inside a capability prelude; cannot set 'mode'",
+            "var is read-only inside a Plugin prelude; cannot set 'mode'",
         ),
         (
             "1",
-            "var is read-only inside a capability prelude; cannot set 'Integer(1)'",
+            "var is read-only inside a Plugin prelude; cannot set 'Integer(1)'",
         ),
     ] {
         let message: String = eval(&vm, &format!("return probe_set({key})"));

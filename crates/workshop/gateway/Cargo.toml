@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop gateway subsystem: the bearer-authenticated gateway HTTP client, endpoint binding and discovery, heartbeat, and progress subscriber"
-
 [features]
 test-fixtures = ["dep:tempfile", "workshop-support/test-fixtures"]
 
@@ -44,6 +42,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # feature here (not only through the crate's own `test-fixtures` feature)
 # keeps `cargo test -p workshop-gateway` compiling without `--all-features`.
 workshop-support = { workspace = true, features = ["test-fixtures"] }
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

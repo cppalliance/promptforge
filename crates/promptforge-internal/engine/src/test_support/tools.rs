@@ -4,7 +4,7 @@
 //!
 //! The Engine holds no implementation and names no implementation trait;
 //! the production trait (`Tool`) is the Harness's, in
-//! `harness-capabilities`, and a `promptforge-*` crate never depends on a
+//! `harness-plugins`, and a `promptforge-*` crate never depends on a
 //! Harness crate. The suites still need something to perform a `ToolCall`
 //! effect with, so these are the test doubles: the same method shapes as
 //! the Harness's trait (so a fixture reads like a production tool), built
@@ -31,7 +31,7 @@ use promptforge_types::tools::{
 /// The future a fixture's async method returns: boxed, `Send`, and bounded
 /// by the borrow of `self`, exactly as `#[async_trait::async_trait]`
 /// expands an `async fn` impl.
-pub(crate) type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A fixture tool the tokio test driver dispatches a `ToolCall` effect to:
 /// the suites' stand-in for the Harness's `Tool`.

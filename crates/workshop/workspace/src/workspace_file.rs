@@ -9,9 +9,7 @@
 //!
 //! Schema v1 holds three tables: `meta`, `grants`, and `kv`. The `kv`
 //! table holds the window geometry and the opaque ui-state values the
-//! SPA owns ([`ui_state_kv`]). These table names are reserved for
-//! follow-on projects and unused in v1: `agent_windows`, `run_presets`,
-//! `runs`, `run_events`, `agents`, `documents`.
+//! SPA owns ([`ui_state_kv`]).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -38,23 +36,23 @@ pub(crate) use ui_state_kv::{UI_STATE_KEYS, empty_ui_state};
 use crate::blocking::{blocking, try_blocking};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
-pub(crate) const META_FORMAT: &str = "format";
+const META_FORMAT: &str = "format";
 /// Meta key holding the schema version; always [`SUPPORTED_VERSION`]
 /// for files this build writes.
-pub(crate) const META_VERSION: &str = "version";
+const META_VERSION: &str = "version";
 /// Meta key holding the display name; absent means "use the file stem".
-pub(crate) const META_NAME: &str = "name";
+const META_NAME: &str = "name";
 /// Meta key holding the RFC 3339 creation time.
-pub(crate) const META_CREATED_AT: &str = "created_at";
+const META_CREATED_AT: &str = "created_at";
 /// The kv key holding the desktop app's saved geometry as JSON; the other kv
 /// keys are the opaque ui-state values in [`UI_STATE_KEYS`].
-pub(crate) const KV_WINDOW: &str = "window";
+const KV_WINDOW: &str = "window";
 
 /// The value every workspace file stores under [`META_FORMAT`].
-pub(crate) const FORMAT_NAME: &str = "promptforge-workspace";
+const FORMAT_NAME: &str = "promptforge-workspace";
 /// The schema version this build reads and writes, as both the `meta`
 /// text and the `user_version` pragma.
-pub(crate) const SUPPORTED_VERSION: &str = "1";
+const SUPPORTED_VERSION: &str = "1";
 /// [`SUPPORTED_VERSION`] as the pragma integer.
 const SUPPORTED_USER_VERSION: i64 = 1;
 
@@ -461,7 +459,7 @@ async fn has_meta_table(conn: &turso::Connection) -> Result<bool, WorkspaceFileE
 }
 
 /// An I/O failure as the file error that wraps it.
-pub(crate) fn io_failure(source: io::Error) -> WorkspaceFileError {
+fn io_failure(source: io::Error) -> WorkspaceFileError {
     WorkspaceFileError::Io { source }
 }
 

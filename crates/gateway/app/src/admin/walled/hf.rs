@@ -31,10 +31,10 @@ const README: RouteInfo =
     RouteInfo::walled("/admin/hf/model/{owner}/{name}/readme", &[Method::GET]);
 
 /// The Hugging Face proxy routes, as the registry sees them.
-pub(crate) const ROUTES: &[RouteInfo] = &[SEARCH, MODEL, README];
+pub(super) const ROUTES: &[RouteInfo] = &[SEARCH, MODEL, README];
 
 /// The Hugging Face proxy routes.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(SEARCH.path, get(admin_hf_search))
         .route(MODEL.path, get(admin_hf_model))
@@ -159,7 +159,7 @@ impl HfProxy {
 /// is forwarded to the hub's model-search API, and everything else is
 /// dropped at this boundary.
 #[derive(Debug, Default)]
-pub(crate) struct HfSearchQuery {
+struct HfSearchQuery {
     /// Free-text search, forwarded as the hub's `search` parameter.
     q: Option<String>,
     /// Tag filter; the Discover view pins `gguf`.
@@ -178,7 +178,7 @@ pub(crate) struct HfSearchQuery {
 
 /// The `GET /admin/hf/search` route: bearer-authed, proxies the hub's
 /// `GET /api/models` search and returns its JSON body verbatim.
-pub(crate) async fn admin_hf_search(
+async fn admin_hf_search(
     State(state): State<AppState>,
     RawQuery(query): RawQuery,
     _caller: LoopbackCaller,
@@ -284,7 +284,7 @@ fn validate_search_value(
 /// The `GET /admin/hf/model/{owner}/{name}` route: bearer-authed, proxies
 /// the hub's model detail for an `owner/name` repo with `blobs=true`, so
 /// the sibling list includes the exact file sizes the quant picker needs.
-pub(crate) async fn admin_hf_model(
+async fn admin_hf_model(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WirePath((owner, name)): WirePath<(String, String)>,
@@ -300,7 +300,7 @@ pub(crate) async fn admin_hf_model(
 /// The `GET /admin/hf/model/{owner}/{name}/readme` route: bearer-authed,
 /// proxies the hub's raw README.md for the repo and returns it as
 /// `text/markdown; charset=utf-8`. A missing README maps to 404.
-pub(crate) async fn admin_hf_readme(
+async fn admin_hf_readme(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WirePath((owner, name)): WirePath<(String, String)>,

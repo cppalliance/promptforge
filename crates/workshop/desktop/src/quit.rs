@@ -21,7 +21,7 @@ use crate::{GatewaySupervisorSlot, ServerSlot};
 /// The quit ordering: stop the supervisor, then request the gateway's
 /// shutdown. The reverse order races: a supervisor still running when the
 /// gateway stops sees it missing and launches a replacement.
-pub(crate) fn stop_supervisor_then_request_shutdown(
+fn stop_supervisor_then_request_shutdown(
     stop_supervisor: impl FnOnce(),
     request_shutdown: impl FnOnce(),
 ) {
@@ -44,7 +44,7 @@ fn stop_supervisor(app: &AppHandle<Wry>) {
 /// no shutdown authority, so its snapshot sends nothing. A refused or
 /// undeliverable request is reported and quit proceeds anyway - quit
 /// always works, even when the Gateway is wedged.
-pub(crate) fn request_gateway_shutdown(gateway: Option<GatewayUpdater>) {
+fn request_gateway_shutdown(gateway: Option<GatewayUpdater>) {
     if let Some(gateway) = gateway
         && let Err(error) = gateway.request_shutdown()
     {

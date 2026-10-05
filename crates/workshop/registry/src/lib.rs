@@ -15,10 +15,8 @@
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: `workshop-protocol` (the wire
-//!   types the push-channel contributions use). Read the
-//!   repository-root `AGENTS.md` before adding an import.
-//! - Every file in this crate stays under 500 lines; split first, then
-//!   edit.
+//!   types the push-channel contributions use). `cargo test -p build-xtask`
+//!   enforces the product and container boundaries.
 //! - Every subsystem trait is sealed (a private empty supertrait), so
 //!   only this crate implements them: registrants plug in through the
 //!   adapters provided here, never by implementing a trait downstream.

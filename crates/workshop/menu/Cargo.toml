@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop menu subsystem: the server-owned Model menu workbench snapshot, its broadcast bus, the chat model catalog channel, and the per-profile model memory"
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -22,6 +20,9 @@ workspace-hack.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

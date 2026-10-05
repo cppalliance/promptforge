@@ -2,7 +2,7 @@
 //! executor's real setup path, compared in both directions: every global a
 //! walked section or the H1 pass leaves in `_G` is a reserved name, and
 //! every reserved global reads non-nil once the VM binds its conditional
-//! ones (`ui`, `item`, `prose`). No capability prelude and no frontmatter
+//! ones (`ui`, `item`, `prose`). No Plugin prelude and no frontmatter
 //! alias installs here, so what `_G` holds is exactly what the Engine installs.
 
 use std::sync::{Arc, Mutex};

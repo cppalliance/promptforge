@@ -85,7 +85,7 @@ pub(crate) fn install_log(
     lua.globals().raw_set("log", log).map_err(Error::lua)
 }
 
-pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
+fn is_log_line_break_or_control(character: char) -> bool {
     character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
 }
 

@@ -4,7 +4,7 @@
 //! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
 //! setup half (Engine injection, Engine globals, the control surface, the
-//! capability preludes, the shared replay, the store yield shims, the
+//! Plugin preludes, the shared replay, the store yield shims, the
 //! captured alias bindings) is shared; only the seed, the `sys` extras,
 //! and the `list_from_section` visible set differ.
 
@@ -30,7 +30,7 @@ impl SectionContext {
     /// `list_from_section` callbacks resolved over the section's visible
     /// set, plus the coroutine yield shims for the suspending calls), and
     /// the rest of the shared setup half (Engine injection, Engine globals, the
-    /// capability preludes, the shared replay, the store yield shims, the
+    /// Plugin preludes, the shared replay, the store yield shims, the
     /// captured alias bindings).
     ///
     /// `siblings` is the caller's own walk slice, from which the section's
@@ -130,7 +130,7 @@ impl SectionContext {
     /// `when` like every section after it), VM construction over the
     /// run's shared sets, limits, and the shared
     /// setup half (Engine injection, Engine globals, the control surface, the
-    /// coroutine shims, the capability preludes, the shared replay, the
+    /// coroutine shims, the Plugin preludes, the shared replay, the
     /// store yield shims, the captured alias bindings).
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`

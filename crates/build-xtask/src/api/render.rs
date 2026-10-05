@@ -17,26 +17,26 @@ use types::header;
 
 /// One path a rendering named.
 #[derive(Debug)]
-pub(crate) struct Mention {
+pub(super) struct Mention {
     /// Where on the item it appeared (`signature`, `bound`, ...).
-    pub(crate) context: &'static str,
+    pub(super) context: &'static str,
     /// The defining crate and definition path, when rustdoc resolved it.
-    pub(crate) target: Option<(String, Vec<String>)>,
+    pub(super) target: Option<(String, Vec<String>)>,
     /// The path as the source wrote it.
-    pub(crate) written: String,
+    pub(super) written: String,
 }
 
 /// Renders items whose ids resolve in one crate's JSON.
 #[derive(Debug)]
-pub(crate) struct Renderer<'a> {
+pub(super) struct Renderer<'a> {
     krate: &'a Crate,
     surface: &'a Surface,
     context: &'static str,
-    pub(crate) mentions: Vec<Mention>,
+    pub(super) mentions: Vec<Mention>,
 }
 
 impl<'a> Renderer<'a> {
-    pub(crate) fn new(krate: &'a Crate, surface: &'a Surface) -> Self {
+    pub(super) fn new(krate: &'a Crate, surface: &'a Surface) -> Self {
         Renderer {
             krate,
             surface,
@@ -48,7 +48,7 @@ impl<'a> Renderer<'a> {
     /// The listing line for `visit`, or `None` for an item the listing
     /// leaves to its impl line (trait impl methods, and inherent impl
     /// headers without generics). Mentions are recorded either way.
-    pub(crate) fn line(&mut self, visit: &Visit<'_>) -> Option<String> {
+    pub(super) fn line(&mut self, visit: &Visit<'_>) -> Option<String> {
         let label = visit.label.as_str();
         match (visit.role, &visit.item.inner) {
             (Role::Impl | Role::ImplItem, _) => self.impl_line(visit),

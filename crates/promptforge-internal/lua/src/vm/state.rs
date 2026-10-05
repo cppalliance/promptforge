@@ -20,25 +20,6 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if Engine values have not been injected or `var`
     /// cannot be represented as JSON.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use promptforge_lua::SectionVm;
-    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_types::untrusted::GuardNonce;
-    ///
-    /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vfs = promptforge_vfs::VfsRef::default();
-    /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
-    /// );
-    /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.inject_values("", &serde_json::json!({}), &access)?;
-    /// assert_eq!(vm.var()?, serde_json::json!({}));
-    /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     pub fn var(&self) -> Result<Json> {
         if !self.values_injected {
             return Err(Error::Lua(
@@ -246,7 +227,7 @@ pub fn resolve_model_binding(
 }
 
 /// Clones a frozen binding and applies any author model-description override.
-pub(crate) fn binding_for_scope(
+fn binding_for_scope(
     bindings: &ToolSet,
     runtime: &ToolRuntime,
     alias: &str,

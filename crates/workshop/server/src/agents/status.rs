@@ -1,31 +1,31 @@
-//! The server's status reporter for one agent session: the status-bar frames
-//! and the backoff reset, derived in the server from the session's live
-//! events, deltas, and error reports.
+//! The server's status reporter for one agent conversation: the
+//! status-bar frames and the backoff reset, derived in the server from
+//! the conversation's live events, deltas, and failure reports.
 //!
-//! One reporter task per session, spawned at launch. It holds only the
-//! session's broadcast receivers, never the session handle, so it ends by
-//! itself when the Harness lets the session go and the last socket
-//! detaches: the channels close, and the loop returns.
+//! One reporter task per conversation, spawned at launch. It holds only
+//! the conversation's broadcast receivers, never the conversation, and
+//! the conversation's channels close when its run ends, so the loop
+//! returns with it.
 
-use harness::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
 use promptforge::event::Event;
 use tokio::sync::broadcast;
+use workshop_agents::{Conversation, Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
 use workshop_protocol::Activity;
 use workshop_registry::Push;
 use workshop_support::ReconnectBackoff;
 
-/// Spawns the reporter for `session`, reporting through `push` and resetting
-/// `backoff` on completed replies.
-pub(super) fn spawn_reporter(session: &harness::Session, push: Push, backoff: ReconnectBackoff) {
-    let events = session.subscribe_events();
-    let deltas = session.subscribe_deltas();
-    let errors = session.subscribe_errors();
+/// Spawns the reporter for `conversation`, reporting through `push` and
+/// resetting `backoff` on completed replies.
+pub(super) fn spawn_reporter(conversation: &Conversation, push: Push, backoff: ReconnectBackoff) {
+    let events = conversation.subscribe_events();
+    let deltas = conversation.subscribe_deltas();
+    let errors = conversation.subscribe_errors();
     tokio::spawn(report(events, deltas, errors, push, backoff));
 }
 
-/// Reports until the session's channels close. Deltas are drained ahead of
-/// events, so a round's activity pulses precede the idle its reply
-/// pushes when both sit queued.
+/// Reports until the conversation's channels close. Deltas are drained
+/// ahead of events, so a round's activity pulses precede the idle its
+/// reply pushes when both sit queued.
 async fn report(
     mut events: broadcast::Receiver<SessionEvent>,
     mut deltas: broadcast::Receiver<Delta>,
@@ -46,7 +46,7 @@ async fn report(
             received = events.recv() => match received {
                 Ok(event) => on_event(&event, &push, &backoff),
                 // A lagged receiver missed at most a status transition the
-                // next event restates; the transcript itself is the log's.
+                // next event restates; the transcript still holds every event.
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             },
@@ -66,7 +66,7 @@ async fn report(
 fn on_delta(delta: &Delta, push: &Push) {
     let activity = match delta.kind {
         DeltaKind::Reasoning => Activity::Thinking,
-        // `Text`, or a side channel `harness-sessions` adds behind its
+        // `Text`, or any other kind of the conversation's
         // `#[non_exhaustive]` `DeltaKind`: the agent is producing output.
         _ => Activity::Generating,
     };
@@ -78,8 +78,8 @@ fn on_delta(delta: &Delta, push: &Push) {
 /// that releases the turn-dispatch Thinking push.
 fn on_event(event: &SessionEvent, push: &Push, backoff: &ReconnectBackoff) {
     let Ok(event) = serde_json::from_value::<Event>(event.event.clone()) else {
-        // A stored payload this build cannot read is the log's concern;
-        // the status bar has nothing to say about it.
+        // An event payload this build cannot read: the status bar has
+        // nothing to say about it.
         return;
     };
     if let Event::AssistantReply { .. } = event {
@@ -88,14 +88,14 @@ fn on_event(event: &SessionEvent, push: &Push, backoff: &ReconnectBackoff) {
     }
 }
 
-/// The label for a run that ended in error or the synthetic terminal of
-/// an interrupt: the agent itself is gone.
+/// The label for a run that ended in error or was cut short: the agent
+/// itself is gone.
 const RUN_FAILED_LABEL: &str = "Agent failed";
 
-/// The operator-facing failure status for one of the session's failure
-/// reports. The session reports the kind - a failed model turn or tool
-/// call the program survived, a run that ended in error, or the synthetic
-/// terminal of an interrupt - and the server labels it; the report's
+/// The operator-facing failure status for one of the conversation's
+/// failure reports. The conversation reports the kind - a failed model
+/// turn or tool call the program survived, a run that ended in error, or
+/// a run a close cut short - and the server labels it; the report's
 /// message passes through as the description, the same text the socket's
 /// error frame reports. Each kind is terminal for its turn and never
 /// reaches a reply, so this status is the one frame that releases the

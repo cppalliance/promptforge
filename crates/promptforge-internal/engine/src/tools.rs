@@ -4,7 +4,7 @@
 //! [`ToolCatalog`] of descriptors and issues each call as a `ToolCall`
 //! effect naming the [`ToolId`], which the Harness resolves against its own
 //! implementations (the Harness's `Tool` trait, in
-//! `harness-capabilities`). The runtime-agnostic vocabulary -
+//! `harness-plugins`). The runtime-agnostic vocabulary -
 //! [`ToolCatalog`], [`ToolId`], the output and error types - sits in the
 //! `promptforge-types` crate's `tools` module; this module is the
 //! crate-internal import surface for it, and other crates name the

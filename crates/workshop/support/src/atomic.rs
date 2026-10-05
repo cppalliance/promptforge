@@ -18,9 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// orphans by it.
 const TEMP_SUFFIX: &str = ".pf-tmp";
 
-/// Fixed temp name the pre-helper menu scheme wrote beside the workshop
-/// state file; a crash under that scheme left this orphan, which the
-/// sweep also removes.
+/// Fixed temp name beside the workshop state file that the sweep also
+/// removes as an orphan.
 const LEGACY_TEMP_NAME: &str = "workshop-state.json.tmp";
 
 /// Process-wide counter making each temp name unique, so two concurrent
@@ -200,8 +199,7 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let target = dir.path().join("workshop-state.json");
         fs::write(&target, b"good").expect("the seed write succeeds");
-        // A crash under the pre-helper menu scheme leaves exactly this:
-        // the fixed-name temp beside an intact state file.
+        // The fixed-name temp orphan beside an intact state file.
         let orphan = dir.path().join(LEGACY_TEMP_NAME);
         fs::write(&orphan, b"partial").expect("the simulated legacy residue writes");
         sweep_orphaned_temps(dir.path());

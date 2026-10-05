@@ -2,9 +2,9 @@
 //! events as values. The Harness loop is documented on the `promptforge`
 //! facade's crate page and its `effect` and `cancel` modules.
 //!
-//! The effect vocabulary itself - [`Effect`], its serializable
-//! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is defined in the
-//! `effect` child module and is re-exported here.
+//! The effect vocabulary itself - [`Effect`] and its [`Round`], its
+//! serializable [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is
+//! defined in the `effect` child module and is re-exported here.
 
 use std::sync::Arc;
 
@@ -14,8 +14,8 @@ use promptforge_types::ids::Provenance;
 mod effect;
 
 pub use effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, ToolAnswerRecord,
-    ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round,
+    ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;
@@ -28,23 +28,30 @@ use super::context::RunState;
 use super::error::RunError;
 use super::scheduler::Scheduler;
 
-/// What one [`Run::step`] produced.
+/// The outcome of one call to [`Run::step`]: the run either continues or
+/// is over.
 #[derive(Debug)]
 pub enum Step {
-    /// The run continues. `effects` are the leaf effects this step
-    /// issued, in issue order, each with the provenance of the task that
-    /// built it; an empty list means every chain waits on an effect
-    /// already issued. `events` are the reports the step made, in order.
+    /// The run continues.
+    ///
+    /// `effects` lists the effects this step issued for the caller to
+    /// perform, in issue order. Each comes with the provenance of the task
+    /// that built it. An empty list means every chain is waiting on an
+    /// effect that an earlier step issued. `events` lists the events the
+    /// step reported, in order.
     Pending {
-        /// The effects the Harness performs and answers through
+        /// The effects the caller must perform and answer through
         /// [`Run::resume`].
         effects: Vec<(EffectId, Provenance, Effect)>,
         /// The events the step reported.
         events: Vec<Event>,
     },
-    /// The run is over: its result and the last events, the run's own end
-    /// boundary among them. Returned only once every issued effect has
-    /// been answered.
+    /// The run is over.
+    ///
+    /// Carries the run's result and its last events. A step returns `Done`
+    /// only after every issued effect has been answered. The event that
+    /// marks the run's end comes with `Done`, or with an earlier `Pending`
+    /// step when effects were still outstanding as the run ended.
     Done {
         /// The run's outcome.
         result: RunResult,
@@ -53,33 +60,12 @@ pub enum Step {
     },
 }
 
-/// One run of one prompt, driven by the Harness through
+/// One run of one prompt, which the caller drives through
 /// [`step`](Self::step) and [`resume`](Self::resume).
 ///
 /// `Run` is `Send`: one caller drives it at a time, and the thread may
-/// change between calls. It owns its prompt through an `Arc`, so the Harness
-/// keeps parsing once and running many times.
-///
-/// # Examples
-/// A prompt whose only section returns a literal issues no effect, so the
-/// Harness drives it to `Done` in one step:
-/// ```
-/// use std::sync::Arc;
-///
-/// use promptforge::timestamp::Timestamp;
-/// use promptforge::{Prompt, Run, RunContext, RunResult, Step};
-///
-/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
-/// let prompt = prompt?;
-/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let mut run = Run::new(Arc::new(prompt), "", ctx);
-/// let Step::Done { result: RunResult::Ok(text), .. } = run.step() else {
-///     panic!("the literal run is done at once");
-/// };
-/// assert_eq!(text, "hello");
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// change between calls. It holds its prompt through an `Arc`, so the
+/// caller can parse a prompt once and run it many times.
 pub struct Run {
     /// The scheduler, present unless construction failed.
     scheduler: Option<Scheduler>,
@@ -100,13 +86,18 @@ impl std::fmt::Debug for Run {
 }
 
 impl Run {
-    /// Builds the run of `prompt` with `args` under `ctx`. A context that
-    /// never passed through
-    /// [`Environment::prepare`](super::Environment::prepare) runs
-    /// capability-free (empty tool and model sets). A prompt without a
-    /// supported `promptforge:` version, or a handle that declares no
-    /// store or whose store backend fails the probe, yields a run whose
-    /// first `step` is `Done` with the failure.
+    /// Builds a run of `prompt` with the arguments `args` and the context
+    /// `ctx`.
+    ///
+    /// A context that skipped
+    /// [`Environment::prepare`](super::Environment::prepare) runs with empty
+    /// tool and model sets.
+    ///
+    /// A run that fails to start is still built, and its first `step`
+    /// returns `Done` with the failure. A run fails to start when the
+    /// prompt has no supported `promptforge:` version, when the context's
+    /// filesystem declares no store, or when the store's backend fails its
+    /// probe.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "the public API takes the context by value: Run::new owns the run's inputs"
@@ -139,14 +130,16 @@ impl Run {
         }
     }
 
-    /// Drains the ready queue and returns what the run issued and
-    /// reported: [`Step::Pending`] while any chain waits on an answer,
-    /// [`Step::Done`] once the run is over and every issued effect is
-    /// answered. A step after `Done` is a Harness error and reports an
-    /// internal failure.
+    /// Advances the run until it needs an answer, and returns the effects
+    /// it issued and the events it reported.
     ///
-    /// Infallible by design: a run's failures are values in
-    /// [`RunResult::Failure`], so the Harness drives the loop and owns the
+    /// It returns [`Step::Pending`] while the run waits on an answer, and
+    /// [`Step::Done`] once the run is over and every issued effect is
+    /// answered. Calling `step` after `Done` is a caller error: it returns
+    /// `Done` again with an internal failure.
+    ///
+    /// `step` cannot fail: a run's failures are values in
+    /// [`RunResult::Failure`]. So the caller drives the loop and owns the
     /// retry policy without catching a panic.
     pub fn step(&mut self) -> Step {
         if let Some(error) = self.stillborn.take() {
@@ -166,46 +159,55 @@ impl Run {
         }
     }
 
-    /// Applies one effect's answer: the parked chain resumes with it (or
-    /// with a cancelled error for [`EffectAnswer::Dropped`]) and is
-    /// re-queued for the next `step`; the round's events are buffered for
-    /// that step. Each answer must match the kind of the effect it answers -
-    /// a chat answer for a `Chat` effect, a tool answer for a `ToolCall`,
-    /// and so on; a mismatch is an internal error that ends the run. An
-    /// answer for an effect whose chain stopped waiting is discarded. An
-    /// answer for an id the run never issued, or a second answer for one
-    /// effect, is likewise an internal error that ends the run.
+    /// Delivers the answer to one effect the run issued.
     ///
-    /// Infallible by design: a bad answer ends the run with a
-    /// [`RunResult::Failure`] rather than returning an error or panicking.
+    /// The chain waiting on the effect resumes with the answer at the next
+    /// `step`. For [`EffectAnswer::Dropped`], it resumes with a
+    /// cancellation error. Any events the answer produces are reported by
+    /// that next step.
+    ///
+    /// Each answer must match the kind of its effect: a chat answer for a
+    /// `Chat` effect, a tool answer for a `ToolCall` effect, and so on. A
+    /// mismatch is an internal error that ends the run. So is an answer for
+    /// an id the run never issued, or a second answer for one effect. An
+    /// answer for an effect whose chain stopped waiting is discarded.
+    ///
+    /// `resume` cannot fail: a bad answer ends the run with a
+    /// [`RunResult::Failure`] instead of returning an error or panicking.
     pub fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
         if let Some(scheduler) = self.scheduler.as_mut() {
             scheduler.resume(id, answer);
         }
     }
 
-    /// Sets the run's cancel flag. Running Lua observes it from its
-    /// instruction hook; the next `step` tears every chain down and, once
-    /// the outstanding effects are answered, reports the run as cancelled.
+    /// Asks the run to stop by setting its cancel flag.
     ///
-    /// Cancellation is a request that later steps finish: the Harness answers
-    /// each effect it abandons with [`EffectAnswer::Dropped`]. Infallible by
-    /// design, like `step` and `resume`.
+    /// Running Lua code sees the flag through its instruction hook. The
+    /// next `step` tears down every chain. The run then reports itself as
+    /// cancelled once every outstanding effect is answered.
+    ///
+    /// Cancellation is a request that later steps complete. The caller
+    /// must answer each effect it abandons with [`EffectAnswer::Dropped`].
+    /// Like `step` and `resume`, `cancel` cannot fail.
     pub fn cancel(&mut self) {
         self.cancel.cancel();
     }
 
-    /// The run's cancel flag, for the Harness to cancel from another thread.
+    /// Returns the run's cancel flag, so the caller can cancel the run from
+    /// another thread.
     #[must_use]
     pub fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
     }
 
-    /// Whether the run's outcome is decided: its end boundary has been
-    /// reported (or it never started) and every effect still out is an
-    /// orphan whose answer only `Done` waits on. The Harness reads this after
-    /// a `Pending` step to learn it may drop what it holds, so control
-    /// never depends on the events, which are a report and not a decision.
+    /// Returns whether the run's outcome is decided.
+    ///
+    /// The outcome is decided once the run has reported its end event, or
+    /// when the run failed to start. Any effect still outstanding at that
+    /// point is an orphan: only `Done` waits for its answer. The caller can
+    /// read this after a `Pending` step to learn that it may drop what it
+    /// holds for the run. This keeps control flow independent of the
+    /// events, which are only a report.
     #[must_use]
     pub fn decided(&self) -> bool {
         self.scheduler.as_ref().is_none_or(Scheduler::decided)

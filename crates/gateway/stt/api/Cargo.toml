@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway-owned speech-to-text runtime and HTTP endpoints"
-
 [dependencies]
 # Optional: the fixture API's controlled-finalization task bound, enabled
 # only by the `test-fixtures` feature.
@@ -43,6 +41,9 @@ test-fixtures = [
     "gateway-stt-backend-whisper/test-fixtures",
     "gateway-stt-engine/test-fixtures",
 ]
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

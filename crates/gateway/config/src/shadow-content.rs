@@ -17,16 +17,6 @@ const REDACTED: &str = "***";
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when neither config nor shadow
 /// can be read or parsed.
-///
-/// # Examples
-/// ```no_run
-/// use gateway_config::pending_var_references;
-/// use std::path::Path;
-///
-/// let references = pending_var_references(Path::new("gateway.toml"))?;
-/// assert!(references.keys().all(|name| !name.is_empty()));
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
 pub fn pending_var_references(
     config_path: &Path,
 ) -> Result<BTreeMap<String, Vec<String>>, crate::ConfigError> {

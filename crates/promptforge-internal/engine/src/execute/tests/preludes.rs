@@ -1,11 +1,11 @@
-//! Capability preludes in a run: every section VM installs the preludes
+//! Plugin preludes in a run: every section VM installs the preludes
 //! handed to `Environment::preludes`, the shared chunk, fanout arms, and
 //! spawned task chains included; a prelude that fails to load or whose
 //! global collides fails the run as a Lua failure before it issues any
 //! effect; and a prelude's functions, called from a block, reach the
 //! yielding store and tool shims.
 
-use promptforge_types::capabilities::{CapabilityId, Prelude};
+use promptforge_types::plugins::{PluginId, Prelude};
 
 use super::serial_driver::{perform_locally, text_reply};
 use super::*;
@@ -13,12 +13,9 @@ use crate::execute::protocol::VfsOp;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
 use crate::test_support::drive;
 
-/// A prelude contributed by the capability `id`.
+/// A prelude contributed by the Plugin `id`.
 fn prelude(id: &str, source: &str) -> Prelude {
-    Prelude::new(
-        CapabilityId::parse(id).expect("a valid capability id"),
-        source,
-    )
+    Prelude::new(PluginId::parse(id).expect("a valid Plugin id"), source)
 }
 
 /// A prelude defining one table global whose function greets a name.
@@ -115,7 +112,7 @@ fn a_prelude_that_calls_a_tool_while_loading_fails_the_run_as_lua_before_its_fir
             "tools.call('tests/tools/echo', { value = 'early' })",
         )],
         &[
-            "capability `acme/eager`: its prelude failed to load",
+            "Plugin `acme/eager`: its prelude failed to load",
             "it must not call tools while loading",
         ],
     );
@@ -130,8 +127,8 @@ fn two_preludes_defining_one_global_fail_the_run_as_lua_before_its_first_effect(
             prelude("acme/second", "greeter = {}"),
         ],
         &[
-            "capability `acme/second`: its prelude defines the global `greeter`",
-            "which capability `acme/first`'s prelude already defines",
+            "Plugin `acme/second`: its prelude defines the global `greeter`",
+            "which Plugin `acme/first`'s prelude already defines",
         ],
     );
 }
@@ -140,13 +137,13 @@ fn two_preludes_defining_one_global_fail_the_run_as_lua_before_its_first_effect(
 fn a_prelude_global_named_like_a_frontmatter_tool_alias_fails_the_run() {
     let md = EFFECT_FIRST.replace(
         "promptforge: 0\n",
-        "promptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n",
+        "promptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n",
     );
     assert_fails_before_any_effect(
         &md,
         vec![prelude("acme/echo", "echo = {}")],
         &[
-            "capability `acme/echo`: its prelude defines the global `echo`",
+            "Plugin `acme/echo`: its prelude defines the global `echo`",
             "which the prompt's frontmatter binds as a tool or model alias",
         ],
     );
@@ -162,7 +159,7 @@ fn a_prelude_global_named_like_a_frontmatter_model_alias_fails_the_run() {
         &md,
         vec![prelude("acme/writer", "writer = 'mine'")],
         &[
-            "capability `acme/writer`: its prelude defines the global `writer`",
+            "Plugin `acme/writer`: its prelude defines the global `writer`",
             "which the prompt's frontmatter binds as a tool or model alias",
         ],
     );
@@ -175,7 +172,7 @@ fn a_prelude_defining_ui_or_item_collides_on_a_run_that_binds_neither() {
             EFFECT_FIRST,
             vec![prelude("acme/reserved", &format!("{name} = {{}}"))],
             &[
-                &format!("capability `acme/reserved`: its prelude defines the global `{name}`"),
+                &format!("Plugin `acme/reserved`: its prelude defines the global `{name}`"),
                 "which is reserved as an Engine global",
             ],
         );

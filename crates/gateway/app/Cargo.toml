@@ -7,10 +7,6 @@ repository.workspace = true
 publish = false
 
 description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "proxy", "gguf"]
-categories = ["web-programming::http-server"]
-documentation = "https://cppalliance.github.io/promptforge/"
 
 [[bin]]
 name = "promptforge-gateway"
@@ -25,6 +21,7 @@ embed-resource.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
+build-ceiling.workspace = true
 
 [dependencies]
 # Optional: anyhow error payloads for the test-fixture rendezvous in
@@ -167,30 +164,8 @@ tempfile.workspace = true
 # loopback-wall tests can present a LAN peer no real TCP connection could.
 tower.workspace = true
 
-# Not `workspace = true`: the registry shim in src/boot.rs is raw Win32 FFI
-# and cannot be written without unsafe, and a workspace `forbid` cannot be
-# overridden by a module allow. The workspace lint set is mirrored with
-# unsafe_code lowered to deny, which the shim module alone opts out of.
-[lints.rust]
-unsafe_code = "deny"
-missing_docs = "warn"
-missing_debug_implementations = "warn"
-unreachable_pub = "warn"
-unsafe_op_in_unsafe_fn = "deny"
-future_incompatible = { level = "warn", priority = -1 }
-
-[lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-
-[lints.clippy]
-all = { level = "deny", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-unwrap_used = "deny"
-expect_used = "deny"
-dbg_macro = "warn"
-doc_markdown = "allow"
-assert_is_empty = "allow"
+[lints]
+workspace = true
 
 # Release packaging through cargo-dist (see dist-workspace.toml): the
 # sample systemd unit is included in the archive.

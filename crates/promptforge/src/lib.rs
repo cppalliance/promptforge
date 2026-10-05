@@ -1,8 +1,18 @@
-#![doc = include_str!("lib.md")]
+//! Parses PromptForge prompt files and runs them, leaving their outside work
+//! to the caller.
+//!
+//! A [`Prompt`] is a parsed prompt file. A [`Run`] executes one prompt.
+//! [`Run::step`] returns [`Step::Pending`] with the effects the run waits on.
+//! The caller performs each effect and hands its answer to [`Run::resume`].
+//! The run ends at [`Step::Done`] with its [`RunResult`].
+//! Before the run starts, [`Environment::prepare`] binds the prompt's model
+//! roles and tool slots into the run's [`RunContext`].
+//!
+//! The crate's `greeter` example is that whole loop in one program.
 
-pub use promptforge_engine::CapabilityConflict;
 pub use promptforge_engine::Environment;
 pub use promptforge_engine::MissingService;
+pub use promptforge_engine::PluginConflict;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;
 pub use promptforge_engine::Run;
@@ -19,7 +29,8 @@ pub use promptforge_parser::ParseErrorKind;
 pub use promptforge_parser::Prompt;
 
 pub mod effect {
-    #![doc = include_str!("effect.md")]
+    //! The outside work a run asks for, the answers it takes back, and the
+    //! records a run log stores for both.
 
     pub use promptforge_engine::AnswerRecord;
     pub use promptforge_engine::ChatAnswerRecord;
@@ -27,13 +38,14 @@ pub mod effect {
     pub use promptforge_engine::EffectAnswer;
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
+    pub use promptforge_engine::Round;
     pub use promptforge_engine::ToolAnswerRecord;
     pub use promptforge_engine::ToolCallOrigin;
     pub use promptforge_engine::ToolCaller;
 }
 
 pub mod event {
-    #![doc = include_str!("event.md")]
+    //! The events a run reports for the caller to log.
 
     pub use promptforge_types::emitter::DebugMode;
     pub use promptforge_types::event::Event;
@@ -41,23 +53,27 @@ pub mod event {
 }
 
 pub mod ids {
-    #![doc = include_str!("ids.md")]
+    //! Task, chain, and round ids, and the provenance that orders a run's
+    //! records.
 
     pub use promptforge_types::ids::AbandonReason;
     pub use promptforge_types::ids::ChainId;
     pub use promptforge_types::ids::ParseIdError;
     pub use promptforge_types::ids::Provenance;
+    pub use promptforge_types::ids::RoundId;
     pub use promptforge_types::ids::TaskId;
     pub use promptforge_types::ids::TaskOrigin;
 }
 
 pub mod model {
-    #![doc = include_str!("model.md")]
+    //! Model descriptions and catalogs, the models a prompt's roles are
+    //! bound to, and the chat vocabulary of a model round.
 
     pub use promptforge_engine::ModelBindings;
     pub use promptforge_model_client::client::Completion;
     pub use promptforge_model_client::client::CompletionResult;
     pub use promptforge_model_client::client::Message;
+    pub use promptforge_model_client::client::RawExchange;
     pub use promptforge_model_client::client::ToolArguments;
     pub use promptforge_model_client::client::ToolCall;
     pub use promptforge_model_client::client::ToolSchema;
@@ -74,23 +90,11 @@ pub mod model {
     pub use promptforge_types::models::ModelId;
     pub use promptforge_types::models::ModelIdError;
     pub use promptforge_types::models::ThinkingMode;
-    pub use promptforge_types::wire::StreamDelta;
-}
-
-pub mod transport {
-    #![doc = include_str!("transport.md")]
-
-    pub use promptforge_model_client::Error as ClientError;
-    pub use promptforge_model_client::Timeout as ClientTimeout;
-    pub use promptforge_model_client::client::ChunkSource;
-    pub use promptforge_model_client::client::build_request_body;
-    pub use promptforge_model_client::client::escape_controls;
-    pub use promptforge_model_client::client::read_body_capped;
-    pub use promptforge_model_client::client::read_completion_stream;
 }
 
 pub mod tools {
-    #![doc = include_str!("tools.md")]
+    //! Tool descriptions and catalogs, the tools a prompt's slots are bound
+    //! to, and the output or error that answers a tool call.
 
     pub use promptforge_engine::ToolBindings;
     pub use promptforge_types::tools::OutputTrust;
@@ -106,36 +110,39 @@ pub mod tools {
     pub use promptforge_types::tools::ToolOutput;
 }
 
-pub mod capabilities {
-    #![doc = include_str!("capabilities.md")]
+pub mod plugins {
+    //! Plugin ids, the Lua preludes Plugins add to a run, and the
+    //! global names those preludes may define.
 
-    pub use promptforge_types::capabilities::CapabilityId;
-    pub use promptforge_types::capabilities::CapabilityIdError;
-    pub use promptforge_types::capabilities::CapabilityIdErrorKind;
-    pub use promptforge_types::capabilities::Prelude;
     pub use promptforge_types::names::GlobalName;
     pub use promptforge_types::names::GlobalNameError;
     pub use promptforge_types::names::GlobalNameErrorKind;
+    pub use promptforge_types::plugins::PluginId;
+    pub use promptforge_types::plugins::PluginIdError;
+    pub use promptforge_types::plugins::PluginIdErrorKind;
+    pub use promptforge_types::plugins::Prelude;
 }
 
 pub mod prompt {
-    #![doc = include_str!("prompt.md")]
+    //! What a prompt's frontmatter declares: its files, Plugins, tool
+    //! slots, arguments, and model roles.
 
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
     pub use promptforge_parser::ArgsDecl;
-    pub use promptforge_parser::CapabilityDecl;
     pub use promptforge_parser::FileDecl;
     pub use promptforge_parser::Frontmatter;
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
+    pub use promptforge_parser::PluginDecl;
     pub use promptforge_parser::ToolSlot;
     pub use promptforge_parser::ToolSlots;
 }
 
 pub mod vfs {
-    #![doc = include_str!("vfs.md")]
+    //! A run's files: the store every section shares, real directories
+    //! beside it, and the policy that decides what the run may change.
 
     pub use promptforge_engine::perform_vfs_op;
     pub use promptforge_lua::VfsOp;
@@ -169,20 +176,21 @@ pub mod vfs {
 }
 
 pub mod cancel {
-    #![doc = include_str!("cancel.md")]
+    //! Cancel handles that stop runs and tasks from any thread.
 
     pub use promptforge_types::cancel::CancelHandle;
     pub use promptforge_types::cancel::Cancelled;
 }
 
 pub mod timestamp {
-    #![doc = include_str!("timestamp.md")]
+    //! The start time a run's context carries, which a prompt reads as
+    //! `sys.when`.
 
     pub use promptforge_types::timestamp::Timestamp;
 }
 
 pub mod metrics {
-    #![doc = include_str!("metrics.md")]
+    //! The token counts and timings of a model call.
 
     pub use promptforge_types::metrics::CallMetrics;
     pub use promptforge_types::metrics::ClientTiming;
@@ -193,7 +201,7 @@ pub mod metrics {
 }
 
 pub mod replay {
-    #![doc = include_str!("replay.md")]
+    //! The behavior flags a run's record keeps and hands back bit for bit.
 
     pub use promptforge_types::replay::Flags;
 }

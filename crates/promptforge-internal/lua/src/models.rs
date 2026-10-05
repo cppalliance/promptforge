@@ -212,7 +212,7 @@ impl ModelRuntime {
     /// Records a `models.use` selection, replacing any prior label and
     /// options: the selection is read at call time, so the latest call
     /// steers the next model round.
-    pub(crate) fn select(&mut self, alias: String, options: UseOptions) {
+    fn select(&mut self, alias: String, options: UseOptions) {
         self.used = Some((alias, options));
     }
 }

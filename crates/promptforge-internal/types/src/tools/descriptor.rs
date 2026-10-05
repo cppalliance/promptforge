@@ -5,56 +5,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ids::ToolId;
-use crate::capabilities::CapabilityId;
+use crate::plugins::PluginId;
 
-/// One tool as data: its stable identity, transport wire name, model-facing
-/// description, parameter schema, output kind, and the co-activation
-/// conflicts of the capability that contributed it. Never an
-/// implementation.
+/// A tool described as data.
 ///
-/// The Harness assembles descriptors from its activated capabilities into a
-/// [`ToolCatalog`](super::ToolCatalog) and keeps the implementations in a
-/// table of its own keyed by [`ToolId`]; the Engine fills its tool slots
-/// against the descriptors, advertises them, and issues each call as an
-/// effect naming the id, so the Harness resolves the implementation and the
-/// Engine never holds one.
+/// A descriptor holds the tool's stable id, its wire name, the description
+/// the model reads, its parameter schema, whether its output is structured,
+/// and the Plugins that conflict with the contributing Plugin.
+///
+/// The caller collects the descriptors of its activated Plugins into a
+/// [`ToolCatalog`](super::ToolCatalog). The implementations stay in the
+/// caller's own table, keyed by [`ToolId`]. The Engine binds its tool slots
+/// to the descriptors and advertises them to the model. It issues each tool
+/// call as an effect that names the tool's id. The caller resolves that id
+/// to the implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {
-    /// The stable live identity, the catalog key.
+    /// The tool's stable identity. The catalog uses it as the key.
     pub id: ToolId,
-    /// The transport wire name: a non-empty token without `/` or control
-    /// characters, aliased when the tool is advertised to a model.
+    /// The name the tool is sent under on the wire. It must be non-empty and
+    /// free of `/` and control characters. When the tool is advertised to a
+    /// model, it appears under its prompt-local alias.
     pub wire_name: String,
     /// The one-sentence description the model reads.
     pub description: String,
     /// The JSON-Schema `object` the tool's arguments must match.
     pub parameters_schema: Value,
-    /// Whether the tool's output text is one JSON value an executor resumes
-    /// into the script as data rather than as a string.
+    /// Whether the tool's output text is a single JSON value. When it is, a
+    /// script that calls the tool receives the output as data. Otherwise the
+    /// script receives it as a string.
     pub structured_output: bool,
-    /// The capabilities the contributing capability cannot be activated
-    /// with; stored for the record, checked by the Harness before activation.
-    pub conflicts: Vec<CapabilityId>,
+    /// The Plugins that conflict with the contributing Plugin. Each
+    /// of them and the contributing Plugin exclude each other in a run.
+    /// The descriptor only records them. The caller checks them before
+    /// activation.
+    pub conflicts: Vec<PluginId>,
 }
 
 impl ToolDescriptor {
-    /// Builds a plain-output descriptor with no conflicts.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolDescriptor, ToolId};
-    ///
-    /// let echo = ToolDescriptor::new(
-    ///     ToolId::parse("example/echo/echo")?,
-    ///     "echo",
-    ///     "Echo the `text` argument back.",
-    ///     serde_json::json!({"type": "object", "properties": {}}),
-    /// );
-    /// assert_eq!(echo.wire_name, "echo");
-    /// assert!(!echo.structured_output);
-    /// # Ok::<(), promptforge::tools::ToolIdError>(())
-    /// ```
+    /// Builds a descriptor with plain-text output and an empty conflict list.
     #[must_use]
     pub fn new(
         id: ToolId,
@@ -72,16 +62,19 @@ impl ToolDescriptor {
         }
     }
 
-    /// Marks the descriptor's output as structured JSON (or plain text).
+    /// Sets whether the tool's output is structured JSON (`true`) or plain
+    /// text (`false`).
     #[must_use]
     pub fn structured(mut self, structured: bool) -> ToolDescriptor {
         self.structured_output = structured;
         self
     }
 
-    /// Records the contributing capability's co-activation conflicts.
+    /// Sets the Plugins that conflict with the contributing Plugin.
+    /// Each of them and the contributing Plugin exclude each other in a
+    /// run.
     #[must_use]
-    pub fn with_conflicts(mut self, conflicts: Vec<CapabilityId>) -> ToolDescriptor {
+    pub fn with_conflicts(mut self, conflicts: Vec<PluginId>) -> ToolDescriptor {
         self.conflicts = conflicts;
         self
     }

@@ -14,10 +14,9 @@ use serde_json::{Value, json};
 use super::super::support::{Recorder, context, parse_execution_fixture};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
-/// with [`RunErrorKind::Vfs`]: every run needs a declared store, and
-/// the defensive fallback overlay is gone. (`Environment::prepare` never
-/// replaces the handle, so the raw handle's declaration is what the run
-/// sees.)
+/// with [`RunErrorKind::Vfs`]: every run needs a declared store.
+/// (`Environment::prepare` never replaces the handle, so the raw handle's
+/// declaration is what the run sees.)
 #[tokio::test]
 async fn a_handle_without_a_declared_store_fails_the_run() {
     let md = flow_prompt!(
@@ -74,18 +73,18 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
 }
 
 #[tokio::test]
-async fn default_environment_runs_a_capability_free_prompt() {
-    // A prompt with no capability binds runs under the default
+async fn default_environment_runs_a_plugin_free_prompt() {
+    // A prompt declaring no Plugins runs under the default
     // `Environment`: no registry, no client, no real roots.
     let md = flow_prompt!(
         "# Test prompt\n\n\
-        ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
+        ## Only\n\n```lua\nreturn 'no Plugins'\n```\n"
     );
     let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
         .await
         .result
-        .expect("a capability-free prompt runs under the default environment");
-    assert_eq!(out, "no capabilities");
+        .expect("a Plugin-free prompt runs under the default environment");
+    assert_eq!(out, "no Plugins");
 }
 
 #[tokio::test]
@@ -107,19 +106,19 @@ async fn default_run_context_store_handle_declares_a_fresh_store() {
 
 #[tokio::test]
 async fn advertising_an_unfilled_slot_fails_at_run_time() {
-    // An exact slot whose capability is active but contributed no such tool
-    // stays unfilled at prepare (the capability is not missing, so the run is
+    // An exact slot whose Plugin is active but contributed no such tool
+    // stays unfilled at prepare (the Plugin is not missing, so the run is
     // not refused); advertising the alias in a section is the run-time error
     // prepare promised.
     let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
         "# Test prompt\n\n\
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
     let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
-    // The catalog holds the capability's `echo`, never `search`: the slot's
-    // capability is present, so the slot is unfilled, not missing.
+    // The catalog holds the Plugin's `echo`, never `search`: the slot's
+    // Plugin is present, so the slot is unfilled, not missing.
     let tool: Arc<dyn TestTool> = Arc::new(EchoTool);
     let table = TestToolTable::from_tools(&[tool]);
     let catalog = table
@@ -169,8 +168,8 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
 }
 
-/// The fixture capability's `echo` tool, present so a prompt's `search` slot
-/// is unfilled rather than its capability missing. The implementation is never
+/// The fixture Plugin's `echo` tool, present so a prompt's `search` slot
+/// is unfilled rather than its Plugin missing. The implementation is never
 /// called by the unfilled-slot case.
 struct EchoTool;
 

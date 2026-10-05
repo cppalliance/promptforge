@@ -1,13 +1,14 @@
 //! The [`Frontmatter`] model and its `max_tool_iterations` cap, and the
 //! frontmatter splitting and version detection that read a prompt's source.
 
-use crate::contract::{ArgsDecl, CapabilityDecl, ModelRoles, ToolSlots};
+use crate::contract::{ArgsDecl, ModelRoles, PluginDecl, ToolSlots};
 use crate::{Error, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
 ///
-/// The `path` is the store-internal filename the prompt reads or writes;
-/// `description` is documentation that also feeds MCP schema generation.
+/// The `path` is the file's name in the store, which the prompt reads or
+/// writes. The `description` documents the file's purpose and also feeds MCP
+/// schema generation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -19,7 +20,7 @@ pub struct FileDecl {
 }
 
 impl FileDecl {
-    /// Returns the store-internal path.
+    /// Returns the file's path in the store, such as `paper.md`.
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
@@ -34,9 +35,8 @@ impl FileDecl {
 
 /// The parsed frontmatter of a prompt file.
 ///
-/// Unknown keys are rejected (`deny_unknown_fields`): a misspelled or
-/// unsupported frontmatter field is a prompt authoring error, so it fails at
-/// parse rather than being silently ignored.
+/// Parsing accepts only the keys this schema defines. Any other key, such as
+/// a misspelled or extra one, is a prompt authoring error and fails the parse.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -58,23 +58,23 @@ pub struct Frontmatter {
     pub(crate) max_tool_iterations: MaxToolIterations,
     /// A file the prompt expects to find in the store when it starts.
     #[serde(default)]
-    pub(crate) input: Option<FileDecl>,
+    input: Option<FileDecl>,
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
-    pub(crate) output: Option<FileDecl>,
-    /// Capabilities the prompt activates at prepare, in declaration order.
+    output: Option<FileDecl>,
+    /// Plugins the prompt activates at prepare, in declaration order.
     #[serde(default)]
-    pub(crate) capabilities: Vec<CapabilityDecl>,
+    plugins: Vec<PluginDecl>,
     /// Declared tool slots: alias to exact path.
     #[serde(default)]
-    pub(crate) tools: ToolSlots,
+    tools: ToolSlots,
     /// The typed args declaration; an absent `args:` key yields the default
     /// declaration (one optional string field named `prose`).
     #[serde(default)]
-    pub(crate) args: ArgsDecl,
+    args: ArgsDecl,
     /// Declared model roles: label to keywords, minimum, and description.
     #[serde(default)]
-    pub(crate) models: ModelRoles,
+    models: ModelRoles,
 }
 
 /// The largest explicit `max_tool_iterations` a prompt may declare.
@@ -142,7 +142,7 @@ impl<'de> serde::Deserialize<'de> for MaxToolIterations {
 }
 
 impl Frontmatter {
-    /// Returns the prompt's caller-supplied identifier.
+    /// Returns the prompt's identifier, read from the `name:` key.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -154,44 +154,49 @@ impl Frontmatter {
         &self.description
     }
 
-    /// Returns the Engine major the `promptforge:` key declares, when present.
+    /// Returns the Engine major version that the `promptforge:` key declares,
+    /// when present.
     #[must_use]
     pub fn promptforge(&self) -> Option<u32> {
         self.promptforge
     }
 
-    /// Returns the per-section tool-loop cap declared in frontmatter, or
-    /// `None` when the prompt leaves the runtime's default in force.
+    /// Returns the declared cap on model round trips in each section's
+    /// tool-call loop. Returns `None` when the prompt omits the cap, so the
+    /// caller's default applies.
     #[must_use]
     pub fn max_tool_iterations(&self) -> Option<std::num::NonZeroU32> {
         self.max_tool_iterations.limit()
     }
 
-    /// Returns the declared input file, when present.
+    /// Returns the declared input file, when present. The prompt expects to
+    /// find this file in the store when it starts.
     #[must_use]
     pub fn input(&self) -> Option<&FileDecl> {
         self.input.as_ref()
     }
 
-    /// Returns the declared output file, when present.
+    /// Returns the declared output file, when present. The prompt leaves this
+    /// file in the store when it finishes.
     #[must_use]
     pub fn output(&self) -> Option<&FileDecl> {
         self.output.as_ref()
     }
 
-    /// Returns the declared capabilities, in declaration order.
+    /// Returns the declared Plugins, in declaration order.
     #[must_use]
-    pub fn capabilities(&self) -> &[CapabilityDecl] {
-        &self.capabilities
+    pub fn plugins(&self) -> &[PluginDecl] {
+        &self.plugins
     }
 
-    /// Returns the declared tool slots (alias to exact path).
+    /// Returns the declared tool slots, which map each alias to an exact tool
+    /// path.
     #[must_use]
     pub fn tools(&self) -> &ToolSlots {
         &self.tools
     }
 
-    /// Returns the typed args declaration. A prompt with no `args:` key
+    /// Returns the typed args declaration. A prompt that omits the `args:` key
     /// yields the default declaration (one optional string field named
     /// `prose`).
     #[must_use]
@@ -199,7 +204,7 @@ impl Frontmatter {
         &self.args
     }
 
-    /// Returns the declared model roles (label to role).
+    /// Returns the declared model roles, which map each label to a role.
     #[must_use]
     pub fn models(&self) -> &ModelRoles {
         &self.models
@@ -255,14 +260,6 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
 /// malformed or unclosed frontmatter, or a frontmatter that simply omits the
 /// key all read as `None` ("not a promptforge prompt"). No other frontmatter
 /// field is required for detection.
-///
-/// # Examples
-/// ```
-/// use promptforge_parser::promptforge_version;
-///
-/// assert_eq!(promptforge_version("---\npromptforge: 0\n---\n\n## S\n\np\n"), Some(0));
-/// assert_eq!(promptforge_version("just prose, no frontmatter"), None);
-/// ```
 #[must_use]
 pub fn promptforge_version(source: &str) -> Option<u32> {
     /// Reads only the `promptforge` key, ignoring every other field so

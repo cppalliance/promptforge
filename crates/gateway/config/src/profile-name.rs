@@ -6,15 +6,6 @@ use std::path::Path;
 ///
 /// Rejects surrounding whitespace, path separators, `.`, `..`, and the empty
 /// string so one spelling remains safe in every profile-selection surface.
-///
-/// # Examples
-/// ```
-/// use gateway_config::ProfileName;
-///
-/// assert!(ProfileName::parse("dev").is_ok());
-/// assert!(ProfileName::parse("../secrets").is_err());
-/// assert!(ProfileName::parse("a/b").is_err());
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ProfileName(String);

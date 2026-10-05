@@ -213,8 +213,7 @@ async fn ws_route_rejects_a_non_upgrade_get() {
     assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
 }
 
-/// The excised buffered chat endpoint is gone from the router: a
-/// `POST /chat` answers 404.
+/// The router mounts no `/chat` route: a `POST /chat` answers 404.
 #[tokio::test]
 async fn post_chat_is_absent_and_answers_not_found() {
     use tower::ServiceExt as _;

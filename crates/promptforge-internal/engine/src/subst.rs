@@ -37,7 +37,7 @@ use crate::Result;
 
 /// A stable classification of a [`SubstitutionError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SubstErrorKind {
+enum SubstErrorKind {
     /// A `{{` was opened but never closed with `}}`.
     Unclosed,
     /// A bare namespace with no `.key` suffix where one is required.
@@ -139,7 +139,7 @@ fn render_scalar(value: &Value) -> Option<String> {
 /// the `fanout` shim's exhausted-arm stub so `{{ item }}` and the stub's
 /// heading render a member identically.
 #[must_use]
-pub(crate) fn render_item(item: &Value) -> String {
+fn render_item(item: &Value) -> String {
     crate::lua::render_item(item)
 }
 

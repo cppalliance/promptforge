@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway loopback wall: the one shared middleware refusing non-loopback peers on the config surface"
-
 [dependencies]
 axum.workspace = true
 workspace-hack.workspace = true
@@ -15,6 +13,9 @@ workspace-hack.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 tower.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

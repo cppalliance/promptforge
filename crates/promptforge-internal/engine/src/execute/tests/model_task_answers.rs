@@ -16,12 +16,11 @@ use crate::test_support::tokio_driver::TokioDriver;
 async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note() {
     // `Child` publishes a note, spawns `Leaf`, then parks on a tool call,
     // so the status read exercises every live-chain field of the rendering.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
               # ModelTasks\n\n\
               ## Only\n\n\
@@ -47,7 +46,7 @@ async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note(
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the owner's end abandons the parked task and its leaf");
@@ -61,12 +60,11 @@ async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note(
 
 #[tokio::test(flavor = "current_thread")]
 async fn task_status_reports_a_failed_task_as_done_failed() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks({ '## Child' })\n\
@@ -79,7 +77,7 @@ async fn task_status_reports_a_failed_task_as_done_failed() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a failed model task never fails its owner");
@@ -101,7 +99,7 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
     // target, with a non-string input; `task_status` and `task_cancel`
     // without an id, with a non-string id, with an unparsable id. Each
     // refusal is the call's content, and none starts a task.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{}"),
         resp_tool_call("call_2", "task", "{\"target\":7}"),
         resp_tool_call("call_3", "task", "{\"target\":\"## Child\",\"input\":7}"),
@@ -109,8 +107,7 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
         resp_tool_call("call_5", "task_cancel", "{\"id\":5}"),
         resp_tool_call("call_6", "task_status", "{\"id\":\"nope\"}"),
         resp_text("done"),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         "tools.allow_tasks({ '## Child' })\n\
@@ -125,7 +122,7 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("every refusal is content, not a raise");

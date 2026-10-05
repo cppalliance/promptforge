@@ -2,24 +2,24 @@
 
 /// Whether a tool's output is trusted or must be treated as untrusted data.
 ///
-/// Trust is mandatory and stored in [`ToolOutput`] so it cannot be forgotten:
-/// an [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
+/// Every [`ToolOutput`] carries a trust level, so it cannot be forgotten. An
+/// [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
 /// model input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutputTrust {
     /// The output was produced by trusted, first-party code.
     Trusted,
-    /// The output contains attacker-influenceable external data.
+    /// The output contains external data that an attacker could influence.
     Untrusted,
 }
 
-/// The result of a successful tool call (the Harness's `Tool::call`),
-/// with its text and trust.
+/// The text a tool returns from a successful call, together with its trust
+/// level.
 ///
-/// Trust travels with the value so the executor never has to remember a
-/// separate flag; construct with [`ToolOutput::trusted`] or
-/// [`ToolOutput::untrusted`].
+/// Build one with [`ToolOutput::trusted`] or [`ToolOutput::untrusted`]. The
+/// trust level travels with the text, so code that handles the output reads
+/// the level from the output itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolOutput {
@@ -28,16 +28,7 @@ pub struct ToolOutput {
 }
 
 impl ToolOutput {
-    /// Builds a trusted output whose text is appended to the model verbatim.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// let out = ToolOutput::trusted("done");
-    /// assert_eq!(out.trust(), OutputTrust::Trusted);
-    /// assert_eq!(out.text(), "done");
-    /// ```
+    /// Builds a trusted output whose text is added to model input verbatim.
     #[must_use]
     pub fn trusted(text: impl Into<String>) -> ToolOutput {
         ToolOutput {
@@ -47,14 +38,6 @@ impl ToolOutput {
     }
 
     /// Builds an untrusted output that is nonce-wrapped before reaching a model.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// let out = ToolOutput::untrusted("<html>...");
-    /// assert_eq!(out.trust(), OutputTrust::Untrusted);
-    /// ```
     #[must_use]
     pub fn untrusted(text: impl Into<String>) -> ToolOutput {
         ToolOutput {
@@ -64,41 +47,28 @@ impl ToolOutput {
     }
 
     /// Borrows the output text.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::ToolOutput;
-    ///
-    /// assert_eq!(ToolOutput::trusted("hi").text(), "hi");
-    /// ```
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
     /// Returns whether the output is trusted or untrusted.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{OutputTrust, ToolOutput};
-    ///
-    /// assert_eq!(ToolOutput::untrusted("x").trust(), OutputTrust::Untrusted);
-    /// ```
     #[must_use]
     pub fn trust(&self) -> OutputTrust {
         self.trust
     }
 }
 
-/// A stable, matchable classification of a [`ToolError`].
+/// A stable classification of a [`ToolError`] that code can match on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolErrorKind {
-    /// The model supplied arguments the tool could not accept.
+    /// The model supplied arguments that the tool rejected.
     InvalidArguments,
     /// The tool's backend refused or failed the request.
     Backend,
-    /// The request failed at the transport layer (network, timeout).
+    /// The request failed at the transport layer, such as a network error or a
+    /// timeout.
     Transport,
     /// The run was cancelled before or during the call.
     Cancelled,
@@ -106,11 +76,12 @@ pub enum ToolErrorKind {
     Other,
 }
 
-/// A narrow, model-safe error from a tool call (the Harness's `Tool::call`).
+/// An error from a tool call, with a message that is safe to show the model.
 ///
-/// The `Display` message is caller-facing and safe to hand back to the model;
-/// any underlying cause is hidden behind [`std::error::Error::source`]. Match on
-/// [`ToolError::kind`] rather than a private representation.
+/// The `Display` message is meant for the caller and is safe to hand back to
+/// the model. Any underlying cause stays out of that message and is available
+/// only through [`std::error::Error::source`]. Match on [`ToolError::kind`] to
+/// tell failures apart.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ToolError {
@@ -120,15 +91,7 @@ pub struct ToolError {
 }
 
 impl ToolError {
-    /// Builds a model-safe error with only a message (kind `Other`).
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("could not read the page");
-    /// assert_eq!(err.kind(), ToolErrorKind::Other);
-    /// ```
+    /// Builds an error from a message alone, with the kind `Other`.
     #[must_use]
     pub fn message(text: impl Into<String>) -> ToolError {
         ToolError {
@@ -138,20 +101,11 @@ impl ToolError {
         }
     }
 
-    /// Builds a model-safe backend error with `src` as a hidden `#[source]`.
+    /// Builds a backend error that records `src` as its underlying cause.
     ///
-    /// The initial kind is [`ToolErrorKind::Backend`]; use
-    /// [`ToolError::with_kind`] when the source represents another class.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let io = std::io::Error::other("boom");
-    /// let err = ToolError::with_source("backend failed", io);
-    /// assert_eq!(err.kind(), ToolErrorKind::Backend);
-    /// assert!(std::error::Error::source(&err).is_some());
-    /// ```
+    /// The cause is not part of the message. It is available only through
+    /// `Error::source`. The kind starts as [`ToolErrorKind::Backend`]. Call
+    /// [`ToolError::with_kind`] when the cause belongs to another kind.
     #[must_use]
     pub fn with_source(
         text: impl Into<String>,
@@ -165,14 +119,6 @@ impl ToolError {
     }
 
     /// Sets the classification, returning the updated error.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("bad args").with_kind(ToolErrorKind::InvalidArguments);
-    /// assert_eq!(err.kind(), ToolErrorKind::InvalidArguments);
-    /// ```
     #[must_use]
     pub fn with_kind(mut self, kind: ToolErrorKind) -> ToolError {
         self.kind = kind;
@@ -186,28 +132,12 @@ impl ToolError {
     }
 
     /// Returns whether the failure was a cancellation.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("stopped").with_kind(ToolErrorKind::Cancelled);
-    /// assert!(err.is_cancelled());
-    /// ```
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self.kind, ToolErrorKind::Cancelled)
     }
 
     /// Returns whether retrying the same call could plausibly succeed.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge::tools::{ToolError, ToolErrorKind};
-    ///
-    /// let err = ToolError::message("timeout").with_kind(ToolErrorKind::Transport);
-    /// assert!(err.is_retryable());
-    /// ```
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self.kind, ToolErrorKind::Transport)

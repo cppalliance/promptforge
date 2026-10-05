@@ -7,7 +7,7 @@
 // wiring changes; the rows are desktop-only (precondition !isWeb)
 // because their pickers are the native Tauri dialogs.
 //
-// The run bodies lazy-import the dialog plugin and the Tauri event API,
+// The run bodies lazy-import the Tauri dialog plugin and the Tauri event API,
 // so this module pulls neither into the initial bundle. Every action is
 // a switch: the server replaces the grants wholesale (open) or writes a
 // new file and moves onto it (save as, duplicate); the page then fires

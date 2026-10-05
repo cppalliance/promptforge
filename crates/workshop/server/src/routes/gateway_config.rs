@@ -50,10 +50,9 @@ pub(crate) fn routes(state: AppState) -> Router {
 /// display, so the panel must never subscribe - plus two admitted routes
 /// outside `/admin/`: `GET /v1/cache` and `DELETE /v1/cache/<digest>`
 /// for a well-formed 64-hex digest. Everything else is refused: chat
-/// completions, the model list, `/health`, `/shutdown`, and the config
-/// UI assets, and `POST /v1/cache`, so the removed direct-download flow
-/// cannot reach the cache through the panel. Dot segments are refused
-/// outright, because the forwarding URL parse would normalize them and
+/// completions, the model list, `/health`, `/shutdown`, the config UI
+/// assets, and `POST /v1/cache`. Dot segments are refused outright,
+/// because the forwarding URL parse would normalize them and
 /// a `..` under `/admin/` could otherwise escape onto a refused path;
 /// backslashes are refused for the same reason (the WHATWG parse folds
 /// them into slashes). A forwarded `/admin/` path the gateway does not

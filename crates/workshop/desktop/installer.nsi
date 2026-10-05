@@ -13,7 +13,7 @@ ManifestDPIAwareness PerMonitorV2
  SetCompressor /SOLID "{{compression}}"
 !endif
 
-; Keep above !include to stay ahead of any plugin command
+; Keep above !include to stay ahead of any NSIS plugin command
 ; see https://github.com/tauri-apps/tauri/pull/15422#discussion_r3289239624
 {{#if signed_plugins_path}}
 !addplugindir "{{signed_plugins_path}}"
@@ -129,7 +129,7 @@ VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 
-# additional plugins
+# additional NSIS plugins
 !addplugindir "${ADDITIONALPLUGINSPATH}"
 
 ; Uninstaller signing command
@@ -524,7 +524,7 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
  IntOp $5 $5 / 96
  IntOp $6 $6 / 96
  IntOp $7 $7 / 96
- System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
+ System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppDataAndState)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
  Pop $DeleteAppDataCheckbox
  SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
  SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
@@ -547,6 +547,10 @@ FunctionEnd
 {{#each language_files}}
  !include "{{this}}"
 {{/each}}
+; The "Delete app data" check box also removes the state directory, so its
+; text names what that wipes. It has its own string because redefining the
+; Tauri CLI's deleteAppData makes makensis warn that it is set twice.
+LangString deleteAppDataAndState ${LANG_ENGLISH} "Delete app data, including models, API keys, and settings"
 
 Function .onInit
  ${GetOptions} $CMDLINE "/P" $PassiveMode
@@ -1051,6 +1055,9 @@ Section Uninstall
  SetShellVarContext current
  RmDir /r "$APPDATA\${BUNDLEID}"
  RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+ ; The gateway and the Workshop keep their configuration, logs, sessions,
+ ; and downloaded models in the state directory, %USERPROFILE%\.promptforge.
+ RmDir /r "$PROFILE\.promptforge"
  ${EndIf}
 
  !ifmacrodef NSIS_HOOK_POSTUNINSTALL

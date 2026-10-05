@@ -143,11 +143,10 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
     // round; the second stays queued - `tasks.status` reads `running`
     // with `blocked == 'queued'` and no section - and its start event
     // fires only once the first child ends and frees the slot.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_delayed_text("slow", Duration::from_millis(200)),
         resp_text("fast"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\
         ## Main\n\n\
@@ -176,7 +175,7 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
         ceiling(1),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");
@@ -263,15 +262,14 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
     // re-acquire must beat the next sub-task's first admission - a
     // scheduler that admitted fresh starts first would let S2's request
     // reach the gateway before the walker's W1.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("S1"),
         resp_text("W1"),
         resp_text("S2"),
         resp_text("W2"),
         resp_text("S3"),
         resp_text("W3"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Resume\n\n\
         ## Main\n\n\
@@ -302,7 +300,7 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
         ceiling(1),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");
@@ -323,7 +321,7 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
     // interleave their rounds (x:a, y:a, x:b, y:b), and the next two are
     // admitted only once both of the first have ended - a limit that
     // admitted a third arm early would interleave x:a, y:a, z:a, ...
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("r1"),
         resp_text("r2"),
         resp_text("r3"),
@@ -332,8 +330,7 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         resp_text("r6"),
         resp_text("r7"),
         resp_text("r8"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\
         ## Main\n\n\
@@ -363,7 +360,7 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         ceiling(8),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the limited fanout completes");

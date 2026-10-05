@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway routing vocabulary: model/endpoint table entries and dominion admission queues"
-readme = "README.md"
-keywords = ["llm", "gateway", "openai", "proxy"]
-categories = ["web-programming::http-server"]
-documentation = "https://cppalliance.github.io/promptforge/"
-
 [dependencies]
 gateway-config.workspace = true
 gateway-protocol.workspace = true
@@ -26,6 +20,9 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # Exposes the DominionQueue observation seams (waiter_count, distinct_clients)
 # to downstream crates' test suites.
 test-helpers = []
+
+[build-dependencies]
+build-ceiling.workspace = true
 
 [lints]
 workspace = true

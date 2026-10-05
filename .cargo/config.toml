@@ -9,3 +9,8 @@ rustflags = ["-C", "target-feature=+crt-static"]
 [alias]
 workshop = "run -p build-workshop --"
 xtask = "run -p build-xtask --"
+
+# Clippy appends a docs-link line to every diagnostic; the lint name already
+# identifies it.
+[env]
+CLIPPY_DISABLE_DOCS_LINKS = "1"

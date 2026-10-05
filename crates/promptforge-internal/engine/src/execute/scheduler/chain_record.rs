@@ -7,17 +7,70 @@ use std::sync::Arc;
 
 use mlua::Thread;
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::metrics::Usage;
 use promptforge_vfs::Access;
 
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
 use crate::execute::scope::DispatchTarget;
 use crate::execute::section_context::{SectionContext, TaskSeed};
+use crate::lua::UsageAnchor;
+use crate::model::{Message, ModelId};
 use crate::parser::{Block, Prompt, Section};
 use crate::{Error, Result};
 
 use super::await_tasks::AwaitTasks;
 use super::{ChainIndex, Counters, SlicePath, SpawnRecord};
+
+/// What the chain's `chat` rounds taught the context precheck about token
+/// counts: the provider's numbers for the newest round that reported usage.
+///
+/// A chain has one parked `chat` round at a time. Dispatch holds that
+/// round's projected messages in `in_flight`, beside the id of the model
+/// they went to; the arrival of its answer settles them into `measured`
+/// when the round reported usage, and drops them otherwise. A round with no
+/// usage leaves the older measurement in place: it still describes a prefix
+/// of the conversation, and the precheck uses it only while the request
+/// extends that prefix on the same model.
+///
+/// The model is compared by [`ModelId`], the gateway server and model name
+/// the binding resolved to, because that is what picks the tokenizer. The
+/// alias is only a prompt-local label: two aliases of one model, with
+/// other temperature or thinking settings, count tokens alike and share a
+/// measurement.
+#[derive(Default)]
+pub(super) struct ChatAnchor {
+    in_flight: Option<(ModelId, Vec<Message>)>,
+    measured: Option<(ModelId, UsageAnchor)>,
+}
+
+impl ChatAnchor {
+    /// The newest measurement, for the precheck of the next dispatch to
+    /// `model`. A measurement from another model is not offered: its token
+    /// counts come from another tokenizer.
+    pub(super) fn measured(&self, model: &ModelId) -> Option<&UsageAnchor> {
+        self.measured
+            .as_ref()
+            .filter(|(measured_by, _)| measured_by == model)
+            .map(|(_, anchor)| anchor)
+    }
+
+    /// Records the projected messages of a round about to be sent to
+    /// `model`.
+    pub(super) fn sending(&mut self, model: ModelId, messages: Vec<Message>) {
+        self.in_flight = Some((model, messages));
+    }
+
+    /// Settles the parked round: its model, sent messages, and `usage`
+    /// replace the measurement when it reported usage; a failed round, or
+    /// one with no usage, only releases the sent messages.
+    pub(super) fn settle(&mut self, usage: Option<&Usage>) {
+        let sent = self.in_flight.take();
+        if let (Some((model, messages)), Some(usage)) = (sent, usage) {
+            self.measured = Some((model, UsageAnchor::new(messages, usage)));
+        }
+    }
+}
 
 /// One chain: a contained line of section execution.
 ///
@@ -177,6 +230,9 @@ pub(super) struct Chain {
     /// model invents or reaches for outside the scope fails as out of
     /// scope. `None` before the chain's first round.
     pub(super) advertised: Option<BTreeMap<String, DispatchTarget>>,
+    /// The provider's token counts for the chain's `chat` rounds, which the
+    /// next round's context precheck counts from.
+    pub(super) anchor: ChatAnchor,
     /// The H1 marker: the chain runs the prompt's H1 blocks under its
     /// title - section 0. Such a chain runs the walk's rules with three
     /// deltas: the frame keeps id 0 (no section observations fire), a
@@ -204,7 +260,7 @@ impl Chain {
     /// The chain's current section within `prompt`: the section at its
     /// walk position. Resolved against the caller's handle on the tree so
     /// the result outlives a mutable borrow of the chain.
-    pub(super) fn section<'p>(&self, prompt: &'p Prompt) -> &'p Section {
+    fn section<'p>(&self, prompt: &'p Prompt) -> &'p Section {
         &self.slice.resolve(prompt)[self.index]
     }
 
@@ -230,3 +286,7 @@ impl Chain {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "chain_record-tests.rs"]
+mod tests;

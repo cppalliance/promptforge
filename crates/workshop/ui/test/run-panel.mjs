@@ -117,7 +117,7 @@ function contractFor(name) {
     max_tool_iterations: 12,
     input: { path: "in/papers.md", description: "the papers" },
     output: { path: "out/verdicts.md", description: "the verdicts" },
-    capabilities: [{ id: "tools/web", optional: false }],
+    plugins: [{ id: "tools/web", optional: false }],
     tools: [{ kind: "exact", alias: "search", path: "tools/web/search" }],
     args: {
       implicit: false,
@@ -385,10 +385,10 @@ check(
   limitRow?.querySelector('input[type="number"]')?.value === "5" &&
     limitRow.querySelector('input[type="number"]')?.step === "1",
 );
-const capabilityRow = rowText("tools/web");
+const pluginRow = rowText("tools/web");
 check(
-  "a required capability is a disabled checkbox",
-  capabilityRow?.querySelector('input[type="checkbox"]')?.disabled === true,
+  "a required Plugin is a disabled checkbox",
+  pluginRow?.querySelector('input[type="checkbox"]')?.disabled === true,
 );
 const toolRows = rows.filter((row) => row.classList.contains("ws-run-panel__row--tool"));
 check(

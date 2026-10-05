@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use workshop_menu::MenuBus;
+use tokio::sync::watch;
+use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{WorkspaceRoots, WorkspaceRootsAdapter};
 
 use super::*;

@@ -40,7 +40,7 @@ fn declared_tools_are_not_injected_without_always_or_add() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("local_alias")).await;
+    let gateway = ScriptedChat::new(aliased_tool_script("local_alias"));
     let tool = Arc::new(ScopedFixtureTool::new(
         "concrete",
         "canonical_wire",
@@ -71,7 +71,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the always-scoped alias dispatches");
@@ -79,23 +79,23 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     assert_eq!(out, "aliased final");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
     let bodies = gateway.requests();
-    let function = &bodies[0]["tools"][0]["function"];
-    assert_eq!(function["name"], "local_alias");
-    assert_eq!(function["description"], "Concrete description.");
+    let function = &bodies[0].tools[0];
+    assert_eq!(function.name(), "local_alias");
+    assert_eq!(function.description(), "Concrete description.");
     assert_eq!(
-        function["parameters"],
-        json!({
+        function.parameters(),
+        &json!({
             "type": "object",
             "properties": {"value": {"type": "string"}},
             "required": ["value"]
         })
     );
-    assert_ne!(function["name"], "canonical_wire");
+    assert_ne!(function.name(), "canonical_wire");
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("section_tool")).await;
+    let gateway = ScriptedChat::new(aliased_tool_script("section_tool"));
     let tool = Arc::new(ScopedFixtureTool::new(
         "concrete",
         "canonical_wire",
@@ -148,15 +148,12 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let md = loop_prompt(&format!("tools.add('section_tool')\n{LOOP_TO_TEXT}"));
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section-scoped alias dispatches");
 
     assert_eq!(out, "aliased final");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        gateway.requests()[0]["tools"][0]["function"]["name"],
-        "section_tool"
-    );
+    assert_eq!(gateway.requests()[0].tools[0].name(), "section_tool");
 }

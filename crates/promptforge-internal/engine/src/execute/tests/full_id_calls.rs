@@ -32,7 +32,7 @@ fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
     let tools = if slots.is_empty() {
         String::new()
     } else {
-        format!("capabilities:\n  - tests/tools\ntools:\n{slots}")
+        format!("plugins:\n  - tests/tools\ntools:\n{slots}")
     };
     parse(&format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n{tools}---\n\n# FullId\n\n## Only\n\n```lua\n{lua}\n```\n"
@@ -103,7 +103,7 @@ async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_ful
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alias_and_added() {
-    let gateway = ScriptedGateway::start(vec![resp_text("before"), resp_text("after")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("before"), resp_text("after")]);
     let prompt = full_id_prompt(
         "  echo: tests/tools/echo\n",
         "tools.call('tests/tools/echo', { value = 'a' })\n\
@@ -118,7 +118,7 @@ async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alia
          return 'ok'",
     );
     let (ctx, harness) = catalog_context(&prompt, &echo_and_concrete());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both rounds complete");
     assert_eq!(out, "ok");

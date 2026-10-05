@@ -35,16 +35,16 @@ use crate::registry::RouteInfo;
 const REVEAL: RouteInfo = RouteInfo::walled("/admin/reveal", &[Method::POST]);
 
 /// The reveal route, as the registry sees it.
-pub(crate) const ROUTES: &[RouteInfo] = &[REVEAL];
+pub(super) const ROUTES: &[RouteInfo] = &[REVEAL];
 
 /// The reveal route.
-pub(crate) fn routes() -> Router<AppState> {
+pub(super) fn routes() -> Router<AppState> {
     Router::new().route(REVEAL.path, post(admin_reveal))
 }
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.
 #[derive(Debug, Deserialize)]
-pub(crate) struct RevealRequest {
+struct RevealRequest {
     /// Path of the file or directory to reveal. Must exist and must
     /// canonicalize to strictly inside the artifact cache or the profiles
     /// directory; the roots themselves are refused.
@@ -103,7 +103,7 @@ impl RevealLauncher for SpawnLauncher {
 /// (or is a root itself),
 /// [`GatewayError::RevealPathNotFound`] when the path does not exist, and
 /// [`GatewayError::RevealFailed`] when the file manager cannot spawn.
-pub(crate) async fn admin_reveal(
+async fn admin_reveal(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WireJson(request): WireJson<RevealRequest>,
