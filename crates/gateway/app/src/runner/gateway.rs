@@ -259,8 +259,11 @@ impl Gateway {
     /// Realtime sessions and aborts running decodes after their current
     /// encoder pass or decoder step, admitted speech work drains, and the
     /// speech engine's workers are joined, so a native decoder frees its
-    /// context before the process exits. A retirement still draining at
-    /// the deadline is abandoned the same way.
+    /// context before the process exits. The retirement finishes within
+    /// the deadline, is abandoned the same way when it is still draining at
+    /// the deadline, or runs on the blocking pool unawaited when the command
+    /// worker used the whole deadline; each of the last two logs one
+    /// warning when a speech runtime was published.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
@@ -338,18 +341,27 @@ impl Gateway {
         // workers free their native contexts while the process is still
         // whole: CUDA memory freed during process exit fails with "driver
         // shutting down". The retirement blocks until admitted speech work
-        // drains, so it runs on the blocking pool, and a drain still
-        // waiting at the deadline is abandoned to the runtime teardown
-        // bound like a stuck command.
+        // drains, so it runs on the blocking pool. Its status is read
+        // first, so a stop with nothing published logs no speech warning.
+        // It is spawned even when the join spent the whole deadline, so the
+        // runtime teardown bound can still finish it unawaited. With time
+        // left it is awaited until the deadline, and a drain still waiting
+        // then is abandoned to that bound like a stuck command.
         #[cfg(feature = "stt")]
-        if tokio::time::timeout_at(
-            deadline,
-            tokio::task::spawn_blocking(move || speech.shutdown()),
-        )
-        .await
-        .is_err()
         {
-            tracing::warn!("speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it");
+            let published = speech.status().ready();
+            let retirement = tokio::task::spawn_blocking(move || speech.shutdown());
+            if tokio::time::Instant::now() >= deadline {
+                if published {
+                    tracing::warn!(
+                        "speech retirement was not awaited: the command worker used the whole {WORKER_JOIN_TIMEOUT:?} deadline"
+                    );
+                }
+            } else if tokio::time::timeout_at(deadline, retirement).await.is_err() && published {
+                tracing::warn!(
+                    "speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it"
+                );
+            }
         }
         result
     }

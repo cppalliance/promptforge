@@ -40,7 +40,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - On Linux, the CUDA build needs `GLIBCXX_3.4.30`, a GCC 12 or later C++ runtime, where the CPU build needs `GLIBCXX_3.4.29`. RHEL 9, its rebuilds, and Amazon Linux 2023 cannot load it, so on those machines with an NVIDIA GPU, `auto` replaces a working CPU build with a failed speech load.
     - `auto` reads GPUs from `nvidia-smi`, which ignores `CUDA_VISIBLE_DEVICES`, so a machine that hides every GPU from CUDA still gets the CUDA build. On Windows that build then decodes on the CPU and crashes at a graceful stop.
     - On the Linux CUDA build, a graceful stop with long decodes running can still end in a CUDA error or a segmentation fault. A running decode cannot be interrupted, so admitted decodes that outlast the retirement deadline leave the retirement abandoned, and the process exits mid-decode.
-    - A stop during the 743 MB Linux CUDA download takes 10 s and abandons both the boot command and the speech retirement, because the whisper download ignores the boot command's cancellation token.
+    - A stop during the 743 MB Linux CUDA download takes 10 s and abandons the boot command's load, because the whisper download ignores the boot command's cancellation token. No speech retirement is abandoned, since nothing is published yet.
 - Goals:
   - A CUDA build for linux-x86_64 and a CPU build for windows-x86_64, from the same whisper.cpp tag, `b4938`, built and published by the existing whisper build workflow and pinned by digest like every other runtime. The pins land in one commit after this work merges.
   - One setting, `[stt] whisper_backend`, chooses the build on Windows x86-64 and Linux x86-64 the way `[local] llama_backend` chooses llama-server: `auto` detects an NVIDIA GPU, and an explicit value forces a build.
@@ -421,7 +421,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - The cause: on Windows the C++ terminate handler is per thread, so the reload finds the handler the previous load left behind.
     - It affects every Windows build, the published CUDA archive included.
     - No product path reaches it. The gateway loads speech once per process, and Rust's built-in test harness gives each test its own thread.
-  - A stop while a CUDA speech load outlasts the shared deadline still abandons the retirement, so that rare stop can still race the CUDA runtime's teardown. A load has no abort, and the decode abort does not cover it.
+  - A stop while a CUDA speech load outlasts the shared deadline still abandons the boot command's load, and that abandoned load, not the speech retirement, can still race the CUDA runtime's teardown in that rare stop. A load has no abort, and the decode abort does not cover it.
   - Before the decode abort, decodes could outlast the deadline too. Of four Linux CUDA stops with six 11-minute requests in flight, one printed `CUDA error: driver shutting down` and one exited 139. Windows exited 0 in three of three, because process exit ends the decode thread before the CUDA runtime unloads.
   - With the abort, a request whose decode is aborted fails, as admitted requests already do at shutdown. In the long-decode stops, every request still queued at the drain bound got HTTP 500.
   - The published Windows CUDA archive keeps OpenMP. Its decodes run on the GPU, and CI's native job, which loads and frees it test after test, passes.
@@ -578,7 +578,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - The older debt listed under the Decision Record's notes, running whisper out of process, and further changes to `whisper-lib.yml`'s build steps or its CUDA architecture list beyond Steps 2, 3, 9, and 10.
   - The residuals the fixes leave, which the docs record:
     - an explicit `cuda` on a Windows machine whose GPU CUDA cannot use decodes on the CPU and ends the gateway at a graceful stop;
-    - a stop while a speech load outlasts the deadline still abandons the retirement.
+    - a stop while a speech load outlasts the deadline still abandons the boot command's load, which can race the CUDA runtime's teardown.
   - Issues the end-to-end testing found that predate this work, tracked apart:
     - the gateway log dropping a failed command's cause;
     - the Windows native fixtures' temporary caches;
