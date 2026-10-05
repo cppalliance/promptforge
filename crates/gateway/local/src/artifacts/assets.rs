@@ -40,16 +40,24 @@ pub(super) struct CudaMachine {
 /// `gpu_count` GPUs. CUDA exposes only the devices listed before the first
 /// invalid entry, so a set value hides them all unless its first entry is a
 /// device index below `gpu_count` or a `GPU-` or `MIG-` identifier. The
-/// probe reads no UUIDs, so an identifier counts as visible without being
-/// matched: one that names no GPU, or an abbreviated one that names several,
-/// hides every GPU from CUDA but not here. An unset value hides none.
-pub(super) fn cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool {
+/// probe reads no UUIDs, so with `identifiers_visible` true this applies
+/// CUDA's rule and an identifier counts as visible without being matched:
+/// one that names no GPU, or an abbreviated one that names several, hides
+/// every GPU from CUDA but not here. With `identifiers_visible` false, an
+/// identifier the probe cannot match counts as hiding every GPU, so only a
+/// device index below `gpu_count` leaves one visible. An unset value hides
+/// none.
+pub(super) fn cuda_visible_devices_hides_every_gpu(
+    value: Option<&str>,
+    gpu_count: usize,
+    identifiers_visible: bool,
+) -> bool {
     let Some(value) = value else {
         return false;
     };
     let first = value.split(',').next().unwrap_or_default().trim();
-    let visible = first.starts_with("GPU-")
-        || first.starts_with("MIG-")
+    let identifier = first.starts_with("GPU-") || first.starts_with("MIG-");
+    let visible = (identifiers_visible && identifier)
         || first.parse::<usize>().is_ok_and(|index| index < gpu_count);
     !visible
 }
@@ -418,8 +426,9 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 /// lists no native compute capabilities or every probed GPU's is among
 /// them, and the row names no `min_glibcxx` or the machine's C++ runtime
 /// defines it. Anything else - including a failed probe, GPUs hidden from
-/// CUDA, an unreadable driver version under a floor, any GPU without native
-/// code, or no runtime read - gets the CPU build. A `None`
+/// CUDA, a Windows `CUDA_VISIBLE_DEVICES` whose first entry is a `GPU-` or
+/// `MIG-` identifier, an unreadable driver version under a floor, any GPU
+/// without native code, or no runtime read - gets the CPU build. A `None`
 /// `cuda_machine` counts as [`CudaMachine::default`].
 fn auto_whisper_backend(
     os: &str,
@@ -432,9 +441,13 @@ fn auto_whisper_backend(
     };
     let unread = CudaMachine::default();
     let machine = cuda_machine.unwrap_or(&unread);
+    // Only the Windows CUDA build crashes at a graceful stop after a CPU
+    // fallback, and the probe reads no UUIDs to match an identifier, so
+    // Windows counts an identifier as hiding every GPU.
     if cuda_visible_devices_hides_every_gpu(
         machine.visible_devices.as_deref(),
         probe.compute_caps.len(),
+        os != "windows",
     ) {
         return WhisperBackend::Cpu;
     }
@@ -747,12 +760,37 @@ mod tests {
             Some("GPU-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
             Some("MIG-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
         ] {
-            assert!(!cuda_visible_devices_hides_every_gpu(value, 2), "{value:?}");
+            assert!(
+                !cuda_visible_devices_hides_every_gpu(value, 2, true),
+                "{value:?}"
+            );
         }
         for value in ["", "-1", "2", "none", "-1,0", "2,0"] {
             assert!(
-                cuda_visible_devices_hides_every_gpu(Some(value), 2),
+                cuda_visible_devices_hides_every_gpu(Some(value), 2, true),
                 "{value:?}"
+            );
+        }
+        for value in [
+            "GPU-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b",
+            "MIG-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b",
+            "GPU-",
+        ] {
+            assert!(
+                cuda_visible_devices_hides_every_gpu(Some(value), 2, false),
+                "{value:?} with identifiers not visible"
+            );
+        }
+        for value in [None, Some("0"), Some("1"), Some("1,0"), Some("0,-1")] {
+            assert!(
+                !cuda_visible_devices_hides_every_gpu(value, 2, false),
+                "{value:?} with identifiers not visible"
+            );
+        }
+        for value in ["", "-1", "2", "none"] {
+            assert!(
+                cuda_visible_devices_hides_every_gpu(Some(value), 2, false),
+                "{value:?} with identifiers not visible"
             );
         }
     }
@@ -969,7 +1007,7 @@ mod tests {
                     "{os} with CUDA_VISIBLE_DEVICES={value:?}"
                 );
             }
-            for value in ["0", "1", "1,0", "0,-1", "GPU-8f6e2c1a"] {
+            for value in ["0", "1", "1,0", "0,-1"] {
                 assert_eq!(
                     auto_pick(os, &probe, Some(&visible(value))),
                     format!("{os}-x86_64-cuda"),
@@ -977,18 +1015,31 @@ mod tests {
                 );
             }
         }
+        for value in ["GPU-8f6e2c1a", "MIG-8f6e2c1a"] {
+            assert_eq!(
+                auto_pick("windows", &probe, Some(&visible(value))),
+                "windows-x86_64",
+                "windows with CUDA_VISIBLE_DEVICES={value:?}"
+            );
+            assert_eq!(
+                auto_pick("linux", &probe, Some(&visible(value))),
+                "linux-x86_64-cuda",
+                "linux with CUDA_VISIBLE_DEVICES={value:?}"
+            );
+        }
     }
 
     #[test]
     fn an_explicit_whisper_backend_ignores_the_probe() {
         // The drivers below each CUDA floor, a GPU without native code in the
-        // Windows build, GPUs hidden from CUDA, and a C++ runtime without the
-        // Linux build's version are included: an explicit `cuda` is honored
-        // there.
+        // Windows build, GPUs hidden from CUDA, a device identifier the probe
+        // cannot match, and a C++ runtime without the Linux build's version
+        // are included: an explicit `cuda` is honored there.
         let machines = [
             None,
             Some(cuda_ready()),
             Some(visible("-1")),
+            Some(visible("GPU-8f6e2c1a")),
             Some(runtime(None)),
             Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.29"])))),
         ];
