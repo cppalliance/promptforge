@@ -143,7 +143,7 @@ Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and th
     - End with the sentence "If no cohesive group splits out without widening visibility, stop and say why."
   - Ceiling wiring:
     - Wire a crate once all of its files are at or under 500 lines: add `build-ceiling.workspace = true` under `[build-dependencies]`, and give it a `build.rs` whose `main` calls `build_ceiling::check()`. A crate that already has a `build.rs` adds the call to it.
-    - Six crates include the source instead and get no manifest entry: `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-capabilities`, and `promptforge-vfs`. Their `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`.
+    - Six crates include the source instead and get no manifest entry: `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `promptforge-vfs`. Their `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`.
       - `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table.
       - `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency.
     - `build-ceiling`'s own `build.rs` includes its source the same way. If `unreachable_pub` fires on an included module, put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration.
@@ -279,7 +279,7 @@ The user settled each decision below in conversation, and their words are quoted
     - It is the last work item.
   - The gate turns warnings into errors with `CARGO_BUILD_WARNINGS=deny`, not in `.cargo/config.toml`, so a new stable Rust lint can't break every local build mid-session.
   - Six crates wire the 500-line check without naming `build-ceiling` in their manifests (added during decomposition, 2026-10-03):
-    - The product-boundary matrix in `crates/build-xtask/src/product.rs` bars the five Harness crates (`harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-capabilities`) from every `build-*` crate in every dependency table, build-dependencies included.
+    - The product-boundary matrix in `crates/build-xtask/src/product.rs` bars the five Harness crates (`harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`) from every `build-*` crate in every dependency table, build-dependencies included.
     - `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency, and its manifest says never to weaken that rule.
     - So these six crates' `build.rs` files pull in `crates/build-ceiling/src/lib.rs` with `#[path]` and call `build_ceiling::check()`, the way `build-ceiling`'s own `build.rs` does. Both existing rules stay unchanged, and the ceiling-wiring check accepts either form.
     - Rejected: exempting `build-ceiling` from both rules. It weakens a product boundary, and a rule its owner marked never to weaken, for the sake of tooling.
@@ -449,7 +449,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - Add `crates/harness/examples/run-prompt.rs`, the canonical example from the `harness` page's "Run a prompt" tour, using only the crate's existing dev-dependencies (`tokio`, `async-trait`).
 - Docs:
   - In `crates/promptforge/src/lib.rs` and `crates/promptforge-internal/engine/src/lib.rs`, remove the 14 `#![doc = include_str!(...)]` lines and write a short `//!` crate doc. Give each `pub mod` block in the facade that had a page a one-line module doc. Keep the engine's `## Invariants` section. New doc text names no internal crate, because `xtask api --check` rejects that in facade docs.
-  - In `crates/harness/src/lib.rs`, remove the four `include_str!` lines, write a short `//!` crate doc, and give the `capability`, `record`, and `vfs` module blocks one-line docs.
+  - In `crates/harness/src/lib.rs`, remove the four `include_str!` lines, write a short `//!` crate doc, and give the `plugin`, `record`, and `vfs` module blocks one-line docs.
 - Checks:
   - The Project Survey commands for `promptforge`, `promptforge-engine`, and `harness`, plus `cargo fmt --all --check`.
   - `cargo nextest run --locked -p promptforge -p promptforge-engine -p harness --all-features`.
@@ -473,7 +473,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - Scope: every compiled code block in a doc comment, meaning untagged fences, fences tagged `rust`, `no_run`, `should_panic`, `compile_fail`, `ignore`, or an edition, and indented code blocks. `text`, `json`, and `toml` blocks stay.
   - Delete examples that only restate a signature, and every `compile_fail` case. Move into the crate's tests, with its assertions, any example that exercises behavior no test covers.
 - Families, each covering every crate in it that has a compiled block:
-  - Engine and Harness: `promptforge-types`, `promptforge-engine`, `promptforge-lua`, `promptforge-parser`, `promptforge-model-client`, `promptforge-vfs`, `harness-runner`, `harness-capabilities`, `harness-gateway-client`, and `harness-web`. The most blocks are in `crates/promptforge-internal/types/src/tools/output.rs`, `crates/harness-internal/capabilities/src/capability.rs`, and `crates/harness-gateway-client/src/transport.rs`.
+  - Engine and Harness: `promptforge-types`, `promptforge-engine`, `promptforge-lua`, `promptforge-parser`, `promptforge-model-client`, `promptforge-vfs`, `harness-runner`, `harness-plugins`, `harness-gateway-client`, and `harness-web`. The most blocks are in `crates/promptforge-internal/types/src/tools/output.rs`, `crates/harness-internal/plugins/src/plugin.rs`, and `crates/harness-gateway-client/src/transport.rs`.
   - Gateway and shared: every package under `crates/gateway/`, plus `gateway-api-types`, `gateway-api-discovery`, and `shared-loopback`. Most blocks are in `gateway-config` (`crates/gateway/config/src/config/accessors.rs` alone holds about 70, then `config/stt.rs`, `shadow.rs`, and `profile.rs`), then `crates/gateway-api-types/src/metadata.rs`, `gateway-logging`, and `crates/gateway/local/src/runtime.rs`.
   - Workshop: `workshop-agents`, `workshop-gateway`, and `workshop-support`, as of 2026-10-03.
   - After the merge, the coding agent removes, the same way, any compiled block the tidy check still reports, such as one in a `build-*` crate or a binary.
@@ -508,7 +508,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 - READMEs, the 25 files:
   - The root `README.md` and `crates/README.md`.
   - The family indexes: `crates/promptforge-internal/README.md`, `crates/gateway/README.md`, and `crates/gateway/stt/README.md`.
-  - The crate READMEs in `crates/gateway/{app,config,config-ui,local,protocol,routing,web-search}/`, `crates/gateway-api-discovery/`, `crates/harness-gateway-client/`, `crates/harness-internal/{capabilities,runner}/`, `crates/harness-web/`, `crates/promptforge-internal/{engine,lua,model-client,parser,types,vfs}/`, `crates/shared-loopback/`, and `crates/workshop/run-log/`.
+  - The crate READMEs in `crates/gateway/{app,config,config-ui,local,protocol,routing,web-search}/`, `crates/gateway-api-discovery/`, `crates/harness-gateway-client/`, `crates/harness-internal/{plugins,runner}/`, `crates/harness-web/`, `crates/promptforge-internal/{engine,lua,model-client,parser,types,vfs}/`, `crates/shared-loopback/`, and `crates/workshop/run-log/`.
 - Each README becomes a few sentences stating the crate's or directory's responsibility in broad terms. Remove type, function, file, and crate names, dependency lists, crate lists, feature lists, commands, and numbers. Keep every file.
 - The root `README.md` keeps its six images (`images/banner-02.png` through `images/banner-06.png`, and `images/promptforge-portrait.png`) and its CI and license badges.
 - Remove everything tied to crates.io: the crates.io and docs.rs badges, and the `cargo install gateway` line in `crates/gateway/app/README.md`.
@@ -594,7 +594,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 - Checks:
   - The Project Survey commands for the crates this step touches, plus `cargo fmt --all --check`.
   - `cargo test -p build-xtask`, both clippy commands, and `cargo deny check`.
-  - Clippy on `harness-runner` and `harness-capabilities` (all targets, all features) passes under the root `clippy.toml`.
+  - Clippy on `harness-runner` and `harness-plugins` (all targets, all features) passes under the root `clippy.toml`.
   - `cargo check -p gateway --no-default-features`, and the docs commands.
   - `cargo nextest run --locked` for the four crates whose hand-copied lint tables this step replaces.
 
@@ -720,7 +720,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
     - `crates/workshop/desktop/build.rs` (package `workshop`), whose `main` returns `Result<(), Box<dyn Error>>`: call `build_ceiling::check()?` first, before the sidecar refresh and the Tauri build.
     - `crates/gateway/config-ui` and `crates/workshop/server`, whose `main` returns an `ExitCode`: call `build_ceiling::check()` first, and on an error print it with `eprintln!("{error}")` and return `ExitCode::FAILURE`.
   - `promptforge-parser` gets a new package-root `build.rs`. Its `src/build.rs` is an ordinary module, not a build script, and stays as it is.
-  - `#[path]` form, with no manifest entry, in `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-capabilities`, and `promptforge-vfs`: the `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`. Put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration if that lint fires. These six take no manifest entry because `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table, and `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency. Both rules stay unchanged.
+  - `#[path]` form, with no manifest entry, in `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `promptforge-vfs`: the `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`. Put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration if that lint fires. These six take no manifest entry because `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table, and `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency. Both rules stay unchanged.
   - `workspace-hack` gets no build script.
 - Ceiling wiring tidy check: `crates/build-xtask/src/tidy.rs` gains `ceiling_wiring_violations`, called from `all_violations`:
   - Every workspace crate's package-root `build.rs` calls `build_ceiling::check()`, and either names `build-ceiling` under `[build-dependencies]` or includes `build-ceiling/src/lib.rs` with `#[path]`. A `src/build.rs` module never counts as a build script.
@@ -731,7 +731,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 - A `build.rs` failure also fails release and installer builds. CI's clippy and test jobs build every crate first, so they catch a violation before a release does.
 - Retire the tidy ceiling once every crate is wired, removing what the compile-time check replaces:
   - In `crates/build-xtask/src/tidy.rs`: `MAX_FILE_LINES`, `file_ceiling_violations` and its call in `all_violations`, and `participating_crates`, which has no other caller now that `lint_inheritance_violations` binds every crate from `crate::product::workspace_crates`. Update the module doc's sentence about the file ceiling. Remove the ceiling tests in `crates/build-xtask/src/tidy-tests.rs`.
-  - The "Every file in this crate stays under 500 lines; split first, then edit." bullet in the `## Invariants` docs of 23 crates: `crates/build-xtask/src/main.rs`; the `lib.rs` of `harness-web`, `harness-gateway-client`, `harness-runner`, and `harness-capabilities`; `promptforge-engine`, `promptforge-lua`, `promptforge-model-client`, `promptforge-parser`, `promptforge-types`, and `promptforge-vfs`; and `workshop-agents`, `workshop-gateway`, `workshop-menu`, `workshop-protocol`, `workshop-registry`, `workshop-run-log`, `workshop-server`, `workshop-server-api`, `workshop-status`, `workshop-support`, `workshop-user-state`, and `workshop-workspace`. Remove the same bullet from the `lib_rs` template in `crates/build-xtask/src/new_crate.rs`.
+  - The "Every file in this crate stays under 500 lines; split first, then edit." bullet in the `## Invariants` docs of 23 crates: `crates/build-xtask/src/main.rs`; the `lib.rs` of `harness-web`, `harness-gateway-client`, `harness-runner`, and `harness-plugins`; `promptforge-engine`, `promptforge-lua`, `promptforge-model-client`, `promptforge-parser`, `promptforge-types`, and `promptforge-vfs`; and `workshop-agents`, `workshop-gateway`, `workshop-menu`, `workshop-protocol`, `workshop-registry`, `workshop-run-log`, `workshop-server`, `workshop-server-api`, `workshop-status`, `workshop-support`, `workshop-user-state`, and `workshop-workspace`. Remove the same bullet from the `lib_rs` template in `crates/build-xtask/src/new_crate.rs`.
   - In `.cursor/rules/workshop-architecture.mdc`, the "File ceiling" section, and ", 500-line file ceiling" from the `description` line.
   - In the module doc of `crates/workshop/server/src/agents/socket_frames.rs`, the clause "so each stays under the 500-line ceiling".
   - In the structural-checks line of `AGENTS.md`, ", and the 500-line file ceiling", restoring "and" before the last remaining item.

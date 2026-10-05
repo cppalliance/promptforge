@@ -276,7 +276,7 @@ Copy sources:
 - Gateway surface: `crates/gateway/app/src/lib.rs`.
 - Corrections to the old introduction:
   - Its "hash-chained" event store claim is dropped. No crate contains a hash chain; `crates/harness/log/src/lib.rs` describes an append-only Turso record.
-  - Its "compiles the structural rules of your method into the runtime" line is restated as what the code does (`crates/promptforge/src/lib.md`): frontmatter declares the models, tools, and capabilities a prompt may use, the parser rejects unknown keys, and control flow lives in the prompt's Lua.
+  - Its "compiles the structural rules of your method into the runtime" line is restated as what the code does (`crates/promptforge/src/lib.md`): frontmatter declares the models, tools, and Plugins a prompt may use, the parser rejects unknown keys, and control flow lives in the prompt's Lua.
 
 </implementation-contract>
 <verification-contract>

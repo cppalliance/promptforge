@@ -253,7 +253,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
 - Directory map:
   - `crates/` root: the public layer. `promptforge` (Engine facade), `harness` (Harness facade), `gateway-api-types` and `gateway-api-discovery` (the Gateway's public pair), `shared-error-source`, `shared-loopback`, `shared-ui` (a TypeScript and CSS package, not a Rust crate), `workspace-hack` (cargo-hakari), and build tooling: `build-xtask` (structural checks, `api`, `site`), `build-workshop` (`cargo workshop`), `build-ui`, `build-user-guide`, `build-llama-cuda`.
   - `crates/promptforge-internal/`: private Engine crates `engine`, `types`, `vfs`, `lua`, `parser`, `model-client`.
-  - `crates/harness-internal/`: private Harness crates `runner`, `models`, `capabilities`, `sessions`, `web`, `webfetch`, `web-search`.
+  - `crates/harness-internal/`: private Harness crates `runner`, `models`, `plugins`, `sessions`, `web`, `webfetch`, `web-search`.
   - `crates/gateway/`: private Gateway crates `app` (the `promptforge-gateway` binary), `cloud-providers`, `config`, `config-ui` (with an npm package in `ui/`), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api` = `gateway-stt`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: the desktop app `desktop` (package `workshop`, Tauri), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, `run-log`, and an npm workspace (`ui`, `look`, `platform`) for the SPA.
   - `guide/`: user guide books and site chrome, built by `cargo xtask site`. `prompts/`: example Markdown prompt programs. `tools/`: `cicerone.md` with its Python scripts and plans, plus Node scripts that stage the gateway sidecar. `vibe/`: `archdoc.md` and dated plan records. `local/` (gitignored), `cabinet/`, `images/`, `target/`, `target-msrv/`: working material, art, and build output.
@@ -448,7 +448,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
     - Update the `PUBLIC_HARNESS` doc comment (lines 137-140) and the violation text to name both public crates.
     - Leave `container_named_exception` (lines 277-282) alone, so the new crate still cannot depend into `crates/harness-internal`.
   - Fixtures: add one where a workshop crate depending on `harness-gateway-client` passes, and one where `harness-gateway-client` depending on a `harness-internal` crate is reported. The five existing facade fixtures stay valid. Update their message assertions only if the violation text changes.
-  - Rename the `harness-models` fixture crates, and their `harness-internal/models` directories, to a harness-internal crate that still exists, such as `harness-capabilities`. They are in `src/product/harness_tests.rs:33,45,95,102`, `src/product/tests.rs:365,372`, and `src/test_support_leak-tests.rs:265,285,320,341`.
+  - Rename the `harness-models` fixture crates, and their `harness-internal/models` directories, to a harness-internal crate that still exists, such as `harness-plugins`. They are in `src/product/harness_tests.rs:33,45,95,102`, `src/product/tests.rs:365,372`, and `src/test_support_leak-tests.rs:265,285,320,341`.
   - `AGENTS.md:69`: say that the Harness has two public root crates, `harness` and `harness-gateway-client`, and that crates outside the family reach the Harness only through them.
 - Tests: the two new fixtures pass, and the existing product, container, and test-support-leak fixtures pass.
 - Verify: run every exit criterion in the Testing Plan:

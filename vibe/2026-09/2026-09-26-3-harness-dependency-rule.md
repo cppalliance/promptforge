@@ -158,7 +158,7 @@ isProject: false
 - Directory map:
   - `crates/` root: the public layer - facades `promptforge` and `harness`, `gateway-api-types`, `gateway-api-discovery`, `shared-*` (`shared-error-source`, `shared-loopback`, `shared-ui`), `build-*` meta tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), and `workspace-hack` (hakari).
   - `crates/promptforge-internal/`: private Engine family - engine, lua, model-client, parser, store, types, vfs (`promptforge-*`).
-  - `crates/harness-internal/`: private Harness family - capabilities, log, models, runner, sessions, web, web-search, webfetch (`harness-*`).
+  - `crates/harness-internal/`: private Harness family - plugins, log, models, runner, sessions, web, web-search, webfetch (`harness-*`).
   - `crates/gateway/`: private gateway family - app (package `gateway`), cloud-providers, config, config-ui, local, logging, progress, protocol, routing, web-search, and the nested `stt/` subsystem (only `gateway-stt` is family-visible).
   - `crates/workshop/`: private workshop family - desktop (package `workshop`), server, server-api, gateway, menu, protocol, registry, status, support, user-state, workspace, and the TypeScript SPA in `ui/`.
   - `guide/`: user guide books and site sources; `prompts/`: example prompt programs; `tools/`: Node staging and live-test scripts; `vibe/`: plans, `archdoc.md`, and dependency notes; `.github/workflows/`: CI and release; `.githooks/`: pre-commit and pre-push; `.config/`: nextest and hakari config.

@@ -182,7 +182,7 @@ Existing suites are the invariant; each debt ID adds one behavior check that fai
 - Directory map:
   - `crates/` root: the public layer. Facades `promptforge` and `harness`, gateway public pair `gateway-api-types` and `gateway-api-discovery`, shared crates `shared-error-source` and `shared-loopback`, `workspace-hack` (cargo-hakari), and meta tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`. `crates/shared-ui` is a TypeScript and CSS package for the gateway config UI, not a crate.
   - `crates/promptforge-internal/`: private Engine family (`engine`, `types`, `vfs`, `lua`, `parser`, `model-client`).
-  - `crates/harness-internal/`: private Harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
+  - `crates/harness-internal/`: private Harness family (`runner`, `models`, `plugins`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
   - `crates/gateway/`: private gateway family; `app` builds the `promptforge-gateway` binary, plus `cloud-providers`, `config`, `config-ui` (with its `ui/` TypeScript app), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api` as `gateway-stt`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: private Workshop family; `desktop` (Tauri app, package `workshop`, binary `promptforge-workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and an npm workspace of `ui` (the SPA: `src/base`, `src/parts`, `src/services`, `src/tokens`, `src/main.ts`), `platform` (`@workshop/platform`), and `look` (`@workshop/look`).
   - `guide/`: user guide books and sources, built by `cargo xtask site`.

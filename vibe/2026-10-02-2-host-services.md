@@ -1,15 +1,15 @@
 ---
 name: Change 5 host services
-overview: First trim every AGENTS.md to the rules no test or check enforces, cutting the cicerone rule. Then replace the Harness's closed service enum with named, typed host services, have the Host register every capability through Harness::new, and merge the three web crates into a root harness-web crate whose search tool calls a Host search-provider service and whose fetch tool runs on the Host's tokio runtime service. The Gateway search HTTP client moves into harness-gateway-client, and Workshop adapts it.
+overview: First trim every AGENTS.md to the rules no test or check enforces, cutting the cicerone rule. Then replace the Harness's closed service enum with named, typed host services, have the Host register every Plugin through Harness::new, and merge the three web crates into a root harness-web crate whose search tool calls a Host search-provider service and whose fetch tool runs on the Host's tokio runtime service. The Gateway search HTTP client moves into harness-gateway-client, and Workshop adapts it.
 todos:
   - id: agents-trim
     content: "First: trim every AGENTS.md by the keep rule. Delete 10 crate files and cut 21 to their listed rules. Cut root to Definitions, Principles, Engineering, Verification, the flat-directory and dependency-cycle rules, and the SPA token and storage rules, removing the cicerone facade-page rule. Fix the build-xtask comments that point at removed AGENTS.md text"
     status: pending
   - id: service-ids
-    content: In harness-capabilities, replace the closed Service enum with const ServiceKey and ServiceId (id literal plus provider type) and HostServices; provides checks id and type, so activation treats a wrong-typed provider as missing and reports it by id; the input broker becomes the named service promptforge/input-broker
+    content: In harness-plugins, replace the closed Service enum with const ServiceKey and ServiceId (id literal plus provider type) and HostServices; provides checks id and type, so activation treats a wrong-typed provider as missing and reports it by id; the input broker becomes the named service promptforge/input-broker
     status: pending
   - id: host-registry
-    content: Harness::new takes the Host's CapabilityRegistry and HostServices; first_party_registry stops registering UserInput and keeps only a temporary built-in web until step 5; publish harness::capability with its hand-written page; update every Harness::new call; Workshop registers UserInput
+    content: Harness::new takes the Host's PluginRegistry and HostServices; first_party_registry stops registering UserInput and keeps only a temporary built-in web until step 5; publish harness::plugin with its hand-written page; update every Harness::new call; Workshop registers UserInput
     status: pending
   - id: gateway-search
     content: Copy the Gateway web-search HTTP client into harness-gateway-client as GatewaySearch over GatewayEndpoint and SecretString, keeping every message, deadline, and header unchanged; the internal web-search crate stays live until step 5; GatewayEndpoint errors stop echoing the URL
@@ -29,12 +29,12 @@ isProject: false
 
 ## Product Requirements
 
-The Harness still builds the only outside-world capability itself: on every gateway change it constructs `promptforge/web` from the gateway URL and key, and its service vocabulary is a closed enum with one member. This change makes the Host register every capability and supply every service as a named object, and moves the web bundle out of the Harness core into its own root crate. It first trims every `AGENTS.md` to the rules no test or check enforces, because stale rule files describe the old design and contradict this change. It is change 5 of a nine-change effort that moves I/O out of the Harness. Changes 1 to 4 have landed: the store-to-VFS rename, the Host-owned run recorder (`crates/harness/src/lib.rs:36-47`, `crates/workshop/run-log`), the transport-neutral failure vocabulary, and `harness-gateway-client`.
+The Harness still builds the only outside-world Plugin itself: on every gateway change it constructs `promptforge/web` from the gateway URL and key, and its service vocabulary is a closed enum with one member. This change makes the Host register every Plugin and supply every service as a named object, and moves the web bundle out of the Harness core into its own root crate. It first trims every `AGENTS.md` to the rules no test or check enforces, because stale rule files describe the old design and contradict this change. It is change 5 of a nine-change effort that moves I/O out of the Harness. Changes 1 to 4 have landed: the store-to-VFS rename, the Host-owned run recorder (`crates/harness/src/lib.rs:36-47`, `crates/workshop/run-log`), the transport-neutral failure vocabulary, and `harness-gateway-client`.
 
 - Problem and users:
   - Team developers working on the Harness, Workshop, and future Hosts such as Papergate.
-  - The Harness decides which capabilities exist: `first_party_registry` always registers user input and registers web whenever the gateway URL and key build it (`crates/harness-internal/sessions/src/environment.rs:104-131`), rebuilt per gateway generation by `Bindings::set_gateway` (`:267-285`) through `GatewayResources::build` (`:155-191`).
-  - `Service` is a closed enum with one variant, `Input` (`crates/harness-internal/capabilities/src/capability.rs:125-137`), whose doc says adding a service is a Harness change.
+  - The Harness decides which Plugins exist: `first_party_registry` always registers user input and registers web whenever the gateway URL and key build it (`crates/harness-internal/sessions/src/environment.rs:104-131`), rebuilt per gateway generation by `Bindings::set_gateway` (`:267-285`) through `GatewayResources::build` (`:155-191`).
+  - `Service` is a closed enum with one variant, `Input` (`crates/harness-internal/plugins/src/plugin.rs:125-137`), whose doc says adding a service is a Harness change.
   - The web search tool does its own HTTP to the Gateway with private copies of the endpoint and key types (`crates/harness-internal/web-search/src/endpoint.rs`, `secret.rs`), and the fetch tool assumes an ambient tokio runtime (`crates/harness-internal/webfetch/src/resolver.rs:45-54`).
   - Stale `AGENTS.md` files describe the old design and contradict this change:
     - `crates/harness-gateway-client/AGENTS.md` says the client speaks only chat completions and never puts a backend body in a message, but today's search messages hold the body.
@@ -43,19 +43,19 @@ The Harness still builds the only outside-world capability itself: on every gate
     - Root `AGENTS.md:98` requires `tools/cicerone.md` runs for facade pages, which recent plans have overridden.
 - Goals:
   - Every `AGENTS.md` holds only policy or guarantees that no test or structural check enforces, and no rule requires `tools/cicerone.md` runs.
-  - Host services are concrete, named objects. Each service has a string id in the capability id grammar, such as `promptforge/search-provider`, bound once to the Rust type a provider must supply.
-  - The Host registers every capability, including `promptforge/user-input`, and supplies every service, through `Harness::new`. The Harness builds no capability.
+  - Host services are concrete, named objects. Each service has a string id in the Plugin id grammar, such as `promptforge/search-provider`, bound once to the Rust type a provider must supply.
+  - The Host registers every Plugin, including `promptforge/user-input`, and supplies every service, through `Harness::new`. The Harness builds no Plugin.
   - One root crate, `crates/harness-web`, holds the `promptforge/web` bundle. Its search tool calls the Host's search-provider service, and its fetch tool runs on the Host's tokio runtime service.
   - The Gateway search HTTP client lives in `harness-gateway-client`, and Workshop adapts it to the search-provider service.
 - Non-goals:
   - Moving the input broker to the Host (change 8). The Harness keeps building the session input broker and now offers it as the named service `promptforge/input-broker`.
   - The inference broker trait, or routing it through host services (change 6).
   - Streaming, session removal, or tokio removal (changes 7 to 9).
-  - Per-run capability choice from Workshop's Run window checkboxes (`crates/workshop/ui/src/parts/run/run-rows.ts:133-140`).
+  - Per-run Plugin choice from Workshop's Run window checkboxes (`crates/workshop/ui/src/parts/run/run-rows.ts:133-140`).
 - Success criteria:
   - The 10 crate `AGENTS.md` files that the Technical Design lists for deletion are gone. Every other `AGENTS.md` holds only its listed rules.
-  - No `crates/harness-internal` crate builds a capability or depends on `reqwest` for web. `crates/harness-internal/{web,webfetch,web-search}` do not exist.
-  - `Service` no longer exists. Every capability need and every refusal names a service id.
+  - No `crates/harness-internal` crate builds a Plugin or depends on `reqwest` for web. `crates/harness-internal/{web,webfetch,web-search}` do not exist.
+  - `Service` no longer exists. Every Plugin need and every refusal names a service id.
   - Workshop registers `promptforge/user-input` and `promptforge/web` and supplies both web services, and a Workshop prompt that declares `promptforge/web` still searches and fetches.
 - Constraints:
   - `harness-web` depends on `harness` and `promptforge` plus third-party crates, never into `crates/harness-internal` (container privacy, `crates/build-xtask/src/product.rs:161-190`) and never on `harness-gateway-client`.
@@ -67,7 +67,7 @@ The Harness still builds the only outside-world capability itself: on every gate
 
 ## Functional Specification
 
-A Host builds a capability registry and a host-services map, then passes both to `Harness::new` with its recorder. Each run activates the prompt's declared capabilities against the Host's registry, with the Host's services plus the Harness's per-run input broker. A capability names the service ids it needs; a required capability whose service is missing refuses the run naming the id, and an optional one activates with a gap. Workshop wires the Gateway as the search provider and its server runtime as the tokio runtime.
+A Host builds a Plugin registry and a host-services map, then passes both to `Harness::new` with its recorder. Each run activates the prompt's declared Plugins against the Host's registry, with the Host's services plus the Harness's per-run input broker. A Plugin names the service ids it needs; a required Plugin whose service is missing refuses the run naming the id, and an optional one activates with a gap. Workshop wires the Gateway as the search provider and its server runtime as the tokio runtime.
 
 - Actors and workflows:
   - Workshop's `harness_for` (`crates/workshop/server/src/agents.rs:58-69`) builds the registry with `UserInput::new()` and `Web::new()`, builds `HostServices` with its Gateway search provider and runtime handle, and passes both to `Harness::new`.
@@ -78,12 +78,12 @@ A Host builds a capability registry and a host-services map, then passes both to
   - Search output is untrusted text holding compact JSON: `query`, then `results`, each with `title`, `url`, `description`, and `age`, `site_name`, and `extra_snippets` only when present, matching the Gateway's serialization (`crates/gateway/web-search/src/service.rs:113-140`). Fields the Gateway adds later are no longer passed through.
   - Fetch input and output are unchanged.
 - States and validation:
-  - A `ServiceId` is an id literal in the capability id grammar plus the provider's Rust type. `HostServices` refuses an id that does not parse and a second provider for an id.
+  - A `ServiceId` is an id literal in the Plugin id grammar plus the provider's Rust type. `HostServices` refuses an id that does not parse and a second provider for an id.
   - A provider counts as present only when its id and its type both match the need. A lookup through a key whose type differs from the provider's finds nothing, and `provides` reports it absent, so activation treats the service as missing.
-  - `promptforge/web` needs both `promptforge/search-provider` and `promptforge/tokio-runtime`. Required and either missing refuses the run. Optional and either missing activates with gaps and contributes no tools: activation still calls `create` for an optional capability with gaps (`crates/harness-internal/capabilities/src/activation.rs:191-204`), so `Web::create` itself returns no tools when either service is missing.
+  - `promptforge/web` needs both `promptforge/search-provider` and `promptforge/tokio-runtime`. Required and either missing refuses the run. Optional and either missing activates with gaps and contributes no tools: activation still calls `create` for an optional Plugin with gaps (`crates/harness-internal/plugins/src/activation.rs:191-204`), so `Web::create` itself returns no tools when either service is missing.
   - The search tool rejects a result with an empty `url` as a backend failure with today's message. The check moves from the HTTP code into the tool, so it applies to every provider.
 - Errors and recovery:
-  - A refusal for a missing service names the capability and the service id, for example `promptforge/user-input` needing `promptforge/input-broker`. This replaces today's free text "an input broker", so the notice line becomes "- promptforge/user-input needs promptforge/input-broker, and this host provides none".
+  - A refusal for a missing service names the Plugin and the service id, for example `promptforge/user-input` needing `promptforge/input-broker`. This replaces today's free text "an input broker", so the notice line becomes "- promptforge/user-input needs promptforge/input-broker, and this host provides none".
   - Search failures keep their tool error kinds and messages (`crates/harness-internal/web-search/src/web_search.rs:326-355`):
     - `web_search: request failed` is `Transport`, and timeouts use the same text.
     - `web_search: backend returned {code}: {body}` and `web_search: backend returned {code}, and its error body could not be read` are `Backend`.
@@ -91,7 +91,7 @@ A Host builds a capability registry and a host-services map, then passes both to
     - The provider reports the kind and the text after the `web_search: ` prefix, which the tool adds.
   - Workshop's search provider fails with `Transport` and the text `request failed` when no usable gateway is bound or its endpoint or key cannot be built. So no endpoint or key detail reaches the model. A launch under such a gateway is refused anyway.
 - Security and privacy behavior:
-  - The Gateway key stays inside the Host's search provider and `harness-gateway-client`. No capability or prompt sees it.
+  - The Gateway key stays inside the Host's search provider and `harness-gateway-client`. No Plugin or prompt sees it.
   - The fetch SSRF resolver, redirect policy, and byte caps stay in `harness-web`.
   - `GatewayEndpoint`'s setup errors stop echoing the URL, which today they do (`crates/harness-gateway-client/src/config.rs:158-164`). So a URL that embeds credentials reaches neither a log nor a message, for chat and search alike.
 - Acceptance criteria:
@@ -104,7 +104,7 @@ A Host builds a capability registry and a host-services map, then passes both to
 
 ## Technical Design
 
-Host services become a map from named ids to typed objects, owned by `harness-capabilities` and published through a new `harness::capability` facade module along with the capability-authoring types. The Harness takes the Host's registry and services at construction and stops building capabilities. A new root crate, `harness-web`, implements `promptforge/web` against the facade and defines its two service keys. `harness-gateway-client` gains the Gateway search client, and Workshop adapts it. Before any of that, every `AGENTS.md` is cut to the rules that no test or check enforces.
+Host services become a map from named ids to typed objects, owned by `harness-plugins` and published through a new `harness::plugin` facade module along with the Plugin-authoring types. The Harness takes the Host's registry and services at construction and stops building Plugins. A new root crate, `harness-web`, implements `promptforge/web` against the facade and defines its two service keys. `harness-gateway-client` gains the Gateway search client, and Workshop adapts it. Before any of that, every `AGENTS.md` is cut to the rules that no test or check enforces.
 
 - Architecture:
 
@@ -115,32 +115,32 @@ flowchart LR
     Workshop --> GwClient["harness-gateway-client"]
     HarnessWeb --> HarnessFacade
     HarnessFacade --> Sessions["harness-sessions"]
-    HarnessFacade --> Capabilities["harness-capabilities"]
-    Sessions --> Capabilities
+    HarnessFacade --> Plugins["harness-plugins"]
+    Sessions --> Plugins
     Sessions -->|"until change 6"| GwClient
     GwClient --> Facade["promptforge"]
     HarnessWeb --> Facade
 ```
 
 - Modules and interfaces:
-  - `harness-capabilities` (`crates/harness-internal/capabilities`):
-    - `ServiceId`: a `Copy` pair of the id literal (`&'static str`) and the provider's Rust type (held as `fn() -> TypeId`, so it builds in a `const`). The literal is a two-segment name in the capability id grammar: `namespace/name`, with lowercase ASCII letters, digits, `-`, `_`, and `.` (`crates/promptforge-internal/types/src/names.rs:1-8`, `:100-105`). Ids compare, hash, and `Display` by the literal. It is const because `Capability::needs()` returns a static slice, and `CapabilityId::parse` runs at run time over a `Vec<String>` (`names.rs:23-26`). So the grammar is checked by parsing through `promptforge::capabilities::CapabilityId::parse` (`crates/promptforge-internal/types/src/capabilities.rs:56`) in each key's unit test and in `HostServices::provide`, because the segment validator is private (`names.rs:106`).
+  - `harness-plugins` (`crates/harness-internal/plugins`):
+    - `ServiceId`: a `Copy` pair of the id literal (`&'static str`) and the provider's Rust type (held as `fn() -> TypeId`, so it builds in a `const`). The literal is a two-segment name in the Plugin id grammar: `namespace/name`, with lowercase ASCII letters, digits, `-`, `_`, and `.` (`crates/promptforge-internal/types/src/names.rs:1-8`, `:100-105`). Ids compare, hash, and `Display` by the literal. It is const because `Plugin::needs()` returns a static slice, and `PluginId::parse` runs at run time over a `Vec<String>` (`names.rs:23-26`). So the grammar is checked by parsing through `promptforge::plugins::PluginId::parse` (`crates/promptforge-internal/types/src/plugins.rs:56`) in each key's unit test and in `HostServices::provide`, because the segment validator is private (`names.rs:106`).
     - `ServiceKey<T: ?Sized + Send + Sync + 'static>`: `const fn new(&'static str)` binds one service id literal to the type its provider supplies, and `id()` returns its `ServiceId`. The defining crate declares each key once, and a unit test per key proves its literal parses.
     - `HostServices`: cloneable map of id to provider, recording each provider's type. `provide(&ServiceKey<T>, Arc<T>)` refuses an id that does not parse or a duplicate id with a `ServiceError`. `get(&ServiceKey<T>) -> Option<Arc<T>>` finds nothing when the stored type differs. `provides(&ServiceId) -> bool` is true only when the id is present and the stored type matches the id's type, so activation treats a wrong-typed provider as missing.
-    - `Capability::needs()` returns `&[ServiceId]`. `ServiceGap.service` becomes a `ServiceId`. `Service` and `Service::description` are deleted.
+    - `Plugin::needs()` returns `&[ServiceId]`. `ServiceGap.service` becomes a `ServiceId`. `Service` and `Service::description` are deleted.
     - `RunServices` holds `vfs`, `cancel`, and a `HostServices`, with `get` and `provides` delegating to it. `with_input` is replaced by inserting under `INPUT_BROKER`. If the Host's map already holds `promptforge/input-broker`, which only a second key with the same literal can do, the per-run insert replaces it, because the session's broker is the only input broker until change 8.
     - `INPUT_BROKER: ServiceKey<dyn InputBroker>` is `promptforge/input-broker`. `UserInput::needs()` returns it.
     - Activation (`src/activation.rs:185-217`) keeps its required and optional rules and passes the id text to `MissingService::new`. The engine is unchanged: `MissingService::service` is already a `String` (`crates/promptforge/public-api.txt:405`).
     - Today's `Service` users to convert:
-      - production: `src/capability.rs`, `src/user_input.rs`, `src/activation.rs`, `src/lib.rs`, and `crates/harness-internal/runner/src/prepare.rs:331-334` (`with_input`);
-      - tests: `tests/it/needs.rs`, `src/user_input-tests.rs`, `src/capability-tests.rs`, and `crates/harness-internal/runner/tests/it/prepare-input.rs`.
+      - production: `src/plugin.rs`, `src/user_input.rs`, `src/activation.rs`, `src/lib.rs`, and `crates/harness-internal/runner/src/prepare.rs:331-334` (`with_input`);
+      - tests: `tests/it/needs.rs`, `src/user_input-tests.rs`, `src/plugin-tests.rs`, and `crates/harness-internal/runner/tests/it/prepare-input.rs`.
   - `harness-runner`: `prepare::Services` (`crates/harness-internal/runner/src/prepare.rs:54-87`) gains `services: HostServices`, the Host's. Preparation clones it into each run's `RunServices` and inserts `Services.input`, when present, under `INPUT_BROKER` (`:331-334`).
   - `harness-sessions`:
-    - `Harness::new(config, recorder, capabilities: CapabilityRegistry, services: HostServices)` (today `crates/harness-internal/sessions/src/runtime.rs:141`). The Harness holds both and passes them to every run through `prepare::Services`.
+    - `Harness::new(config, recorder, plugins: PluginRegistry, services: HostServices)` (today `crates/harness-internal/sessions/src/runtime.rs:141`). The Harness holds both and passes them to every run through `prepare::Services`.
     - In the `Harness::new` step, `first_party_registry` (`src/environment.rs:104-131`) stops registering `UserInput`, which the Host now registers, and becomes a temporary built-in web. Each gateway generation's registry is the Host's registry plus the internal `Web`, when the gateway URL and key build it and the Host registered no `promptforge/web`. The built-in `chat` agent requires `promptforge/web` (`agents/chat.md:5-6`), so without this fallback every chat run would be refused until Workshop registers web.
-    - In the `harness-web` step, the fallback goes with the internal crates: `first_party_registry`, `GatewayResources.registry`, its supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`), its test uses (`src/environment-tests.rs:112`, `:117`), and the `harness-web` dependency. From then on the Harness builds no capability.
+    - In the `harness-web` step, the fallback goes with the internal crates: `first_party_registry`, `GatewayResources.registry`, its supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`), its test uses (`src/environment-tests.rs:112`, `:117`), and the `harness-web` dependency. From then on the Harness builds no Plugin.
     - In the `Harness::new` step Workshop's `harness_for` registers `UserInput` alone, and web still comes from the fallback.
-  - Facade `crates/harness`: a new `pub mod capability` with page `src/capability.md`, re-exporting `Capability`, `CapabilityError`, `CapabilityErrorKind`, `CapabilityId`, `CapabilityRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal until change 8.
+  - Facade `crates/harness`: a new `pub mod plugin` with page `src/capability.md`, re-exporting `Plugin`, `PluginError`, `PluginErrorKind`, `PluginId`, `PluginRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal until change 8.
   - `harness-gateway-client`: a `search` module exporting `GatewaySearch::new(GatewayEndpoint, SecretString)` and `GatewaySearch::search(&GatewaySearchRequest) -> Result<GatewaySearchResponse, GatewaySearchError>`.
     - It POSTs `{api_root}/tools/web_search` with the bearer key under the 30-second deadline (`REQUEST_TIMEOUT`, `crates/harness-internal/web-search/src/web_search.rs:36`, applied at `:136-147`). It bounds and escapes error bodies, and parses the response into its wire types, which mirror the Gateway's request and response.
     - The error carries the failure kind and today's text after the prefix: `request failed` and `reading response failed` (`Transport`, timeouts included), and `backend returned {code}: {body}`, `backend returned {code}, and its error body could not be read`, `response body exceeded {limit} bytes`, `response body was not valid UTF-8`, and `malformed search response` (`Backend`).
@@ -151,7 +151,7 @@ flowchart LR
   - `harness-web` (`crates/harness-web`, library `harness_web`):
     - `Web::new()` and `Web::with_fetch_config(FetchConfig)`, with `needs()` returning both service ids. `Web::create` reads both services with `get` and contributes no tools when either is missing.
     - The tests in `crates/harness-internal/web/src/lib.rs` move and adapt to services, except `construction_rejects_an_invalid_gateway_root_or_empty_token`, which retires because `Web::new` takes no gateway arguments.
-    - Dependencies: `harness`, `promptforge`, `async-trait` (because `Tool` is an `#[async_trait]` trait, `crates/harness-internal/capabilities/src/tool.rs:94-95`), and the third-party crates `webfetch` uses today, including `reqwest` with `gzip` and `brotli`, and `tokio`.
+    - Dependencies: `harness`, `promptforge`, `async-trait` (because `Tool` is an `#[async_trait]` trait, `crates/harness-internal/plugins/src/tool.rs:94-95`), and the third-party crates `webfetch` uses today, including `reqwest` with `gzip` and `brotli`, and `tokio`.
     - `SearchProvider`: an async trait, `search(SearchQuery) -> Result<SearchResults, SearchError>`.
       - `SearchQuery` holds the validated tool arguments: `query`, `count`, `freshness`, `country`, `search_lang`, `safesearch`, `include_domains`, and `exclude_domains` (`crates/harness-internal/web-search/src/web_search-request.rs:46-70`).
       - `SearchResults` holds `query` and `results`. Each `SearchResult` holds `title`, `url`, `description`, and the optional `age`, `site_name`, and `extra_snippets`.
@@ -210,14 +210,14 @@ flowchart LR
   - Lay out the moved files in `crates/harness-web/src/` and `crates/harness-gateway-client/src/` by the root flat-source-directory rule. A source subdirectory needs at least three files, and one or two related files sit beside their parent as `foo-bar.rs`, wired with `#[path]`.
   - Move into `crates/harness-web/src/`:
     - from `crates/harness-internal/webfetch/src/`: every file except `lib.rs`, merged;
-    - from `crates/harness-internal/web/src/lib.rs`: the capability;
+    - from `crates/harness-internal/web/src/lib.rs`: the Plugin;
     - from `crates/harness-internal/web-search/src/`: the tool, argument validation, and their tests.
   - Move the HTTP half of `crates/harness-internal/web-search/src/web_search.rs` and its mock-server tests (`web_search-tests.rs`, `web_search-tests-responses.rs`) into `crates/harness-gateway-client/src/search.rs` and sibling test files.
   - Delete `crates/harness-internal/{web,webfetch,web-search}`, including their `clippy.toml` files. In the same step, because the commit does not build or pass `cargo test -p build-xtask` otherwise:
     - Remove them from the root `Cargo.toml` `members` list. The `crates/*` glob already picks up `crates/harness-web`.
     - In `[workspace.dependencies]` (`Cargo.toml:49-51`), point `harness-web` at `crates/harness-web`, and remove `harness-webfetch` and `harness-web-search`.
     - Run `cargo hakari generate` and `cargo hakari manage-deps`, so the new crate gets its `workspace-hack` dependency.
-    - Rewrite `the_harness_crates_are_the_six_container_crates_and_the_facade` (`crates/build-xtask/src/harness_bans-tests.rs:152-178`). It reads the real workspace and asserts exactly seven harness crates, so it now expects `runner`, `capabilities`, `sessions`, and the facade, with its name and count message updated.
+    - Rewrite `the_harness_crates_are_the_six_container_crates_and_the_facade` (`crates/build-xtask/src/harness_bans-tests.rs:152-178`). It reads the real workspace and asserts exactly seven harness crates, so it now expects `runner`, `plugins`, `sessions`, and the facade, with its name and count message updated.
     - The `harness-web` dependency in `crates/harness-internal/sessions/Cargo.toml:32` is already gone, removed in the `Harness::new` step.
   - `harness-web` dev-dependencies for the moved fetch tests are `axum`, `flate2`, `futures-util`, and `tokio`, but not `harness-runner` (`crates/harness-internal/webfetch/Cargo.toml:33-41`). Its mock servers, today `spawn_server` and `spawn_recording_server` (`tool-tests.rs:316-320`, `:392-393`), switch to `tokio::spawn`.
   - After editing guide chapters 5, 12, and 13, regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide` (`crates/build-user-guide/src/main.rs:1-9`). No check catches a stale export.
@@ -237,11 +237,11 @@ flowchart LR
 
 ## Testing Plan
 
-Moved tests move with their code and pass in their new crates. Their assertions change only where an import or constructor changes, or where a search test splits between the tool and the Gateway client. New unit tests cover the service map, activation by service id, the web capability's both-or-neither rule, the search rendering, and fetch cancellation. Workshop's existing suites must pass with the Host-registered capabilities. The docs test checks the `AGENTS.md` trim, and the exit criteria run once at the end.
+Moved tests move with their code and pass in their new crates. Their assertions change only where an import or constructor changes, or where a search test splits between the tool and the Gateway client. New unit tests cover the service map, activation by service id, the web Plugin's both-or-neither rule, the search rendering, and fetch cancellation. Workshop's existing suites must pass with the Host-registered Plugins. The docs test checks the `AGENTS.md` trim, and the exit criteria run once at the end.
 
 - Unit:
-  - `harness-capabilities`:
-    - Each declared key's literal parses as a `CapabilityId`.
+  - `harness-plugins`:
+    - Each declared key's literal parses as a `PluginId`.
     - `HostServices`: provide and get, duplicate refusal, refusal of an id that does not parse, and a provider under the right id with the wrong type: `get` finds nothing and `provides` is false.
     - Activation by id: required missing refuses and names the id; optional missing records a `ServiceGap` with the id; a wrong-typed provider counts as missing in both cases.
     - `UserInput` needs `promptforge/input-broker`.
@@ -250,11 +250,11 @@ Moved tests move with their code and pass in their new crates. Their assertions 
     - Every moved webfetch test.
     - The search tool against a fake `SearchProvider`. Its tests cover:
       - argument messages unchanged, through the four argument tests that stay with the tool (`rejects_missing_query`, `rejects_empty_and_oversized_query`, `rejects_unknown_fields_and_bad_optional_types`, and `rejects_invalid_domain_lists`);
-      - the tool's identity, through `descriptor_is_stable_and_faithful` and `the_migrated_id_names_its_contributing_capability`, which move unchanged;
+      - the tool's identity, through `descriptor_is_stable_and_faithful` and `the_migrated_id_names_its_contributing_plugin`, which move unchanged;
       - rendering equal to the Gateway's serialization for the same results, and the output wrapped as untrusted;
       - an empty `url` rejected as `Backend`, with `success_body_with_empty_url_is_rejected` rewritten against the fake provider;
       - provider error kinds and messages mapped with the `web_search: ` prefix.
-    - Capability tests: `needs()` names both services, and `create` contributes no tools when either is missing. Refusal of a required capability is activation behavior, which `harness-web` cannot reach (`activate` is not on the facade), so the Workshop refusal test below pins it.
+    - Plugin tests: `needs()` names both services, and `create` contributes no tools when either is missing. Refusal of a required Plugin is activation behavior, which `harness-web` cannot reach (`activate` is not on the facade), so the Workshop refusal test below pins it.
     - A fetch whose call future is dropped aborts its spawned task.
   - `harness-gateway-client`: the moved mock-server tests run against `GatewaySearch`. They cover the auth header, URL, request body, deadline, status and body-read messages, and body bounding.
     - From `web_search-tests.rs`: `forwards_query_and_returns_untrusted_results` and `forwards_validated_optional_fields`, keeping only their request and parsed-response assertions. `debug_never_leaks_the_bearer_token` is retargeted at `GatewaySearch`.
@@ -299,19 +299,19 @@ Moved tests move with their code and pass in their new crates. Their assertions 
   - **Trim every `AGENTS.md` first, by one keep rule, and cut rather than fix.** Rationale: the code changes faster than the rule files, and stale files steer coding sessions toward the old design. The guarantees they held are pinned by tests or stated in `## Invariants` blocks. User's words: "I prefer to cut rather than fix (the AGENTS.md files)" and "cut cicerone and make the trim the first step of this plan. go through all AGENTS.md."
   - **Cut the gateway client's "one read loop" rule.** Its "no transport grows its own copy" clause would forbid the moved search readers, which differ from `read_body_capped` and `escape_controls` and must keep every message. User's choice over narrowing the rule or reusing the chat helpers.
   - **Keep the Workshop npm workspace rules.** One install with one lockfile, and an `eol=lf` line per member, pass the keep rule: no check enforces them, and breaking them is costly and not obvious from the code. So `crates/workshop/AGENTS.md` is cut, not deleted.
-  - **Cut the cicerone rule.** The trim removes root `AGENTS.md:98`, which required `tools/cicerone.md` update runs for facade pages, and no plan has to override it again. The new `harness::capability` module gets a hand-written `capability.md` and rustdoc, and the facade docs gate catches broken links. The tool itself stays in `tools/`.
-  - **Services are named, not keyed by type and not a closed enum.** Each service has a concrete string id in the capability id grammar, bound once to its provider type through a typed key, so a Host cannot register the wrong object under a name. User's words: "I thought services were keyed by a specific string? capabilities are not supposed to be fuzzy they are supposed to be concrete and named."
-  - **A `ServiceId` records the provider's type, and `provides` checks it.** Activation sees only the ids from `needs()` (`crates/harness-internal/capabilities/src/activation.rs:185-190`), so an id-only check would let a provider of the wrong type under the right id pass activation and fail later. With the type in the id, activation treats it as missing and the refusal names the id. User's choice over id-only activation with the failure surfacing in `create`.
-  - **Service keys and ids are const, and the grammar is checked by test and at `provide`.** `needs()` returns a static slice, and `CapabilityId::parse` cannot run in a const.
-  - **Service ids:** `promptforge/input-broker`, `promptforge/search-provider`, and `promptforge/tokio-runtime`. Rationale: the ids name the object supplied, and they differ from every capability id, so a refusal cannot confuse the two.
-  - **Each capability crate owns its service keys.** `harness-capabilities` owns `INPUT_BROKER`, and `harness-web` owns `SEARCH_PROVIDER` and `TOKIO_RUNTIME`. Rationale: the Harness core never names a provider type, and adding a service is no longer a Harness change.
-  - **One root crate, `harness-web`, registered by the Host.** It merges `web`, `webfetch`, and the search tool, builds on a new `harness::capability` module, and is registered by Workshop through `Harness::new`. The user chose this over keeping the bundle internal and re-exporting it. Rationale: the Harness stops depending on `reqwest` for web, which change 9 needs.
-  - **The Host registers every capability, including `promptforge/user-input`.** Rationale: the Host decides which capabilities exist. A Host with nobody to ask leaves user input unregistered, and its prompts that require it are refused as missing a capability. The Harness still supplies the input broker service until change 8.
+  - **Cut the cicerone rule.** The trim removes root `AGENTS.md:98`, which required `tools/cicerone.md` update runs for facade pages, and no plan has to override it again. The new `harness::plugin` module gets a hand-written `capability.md` and rustdoc, and the facade docs gate catches broken links. The tool itself stays in `tools/`.
+  - **Services are named, not keyed by type and not a closed enum.** Each service has a concrete string id in the Plugin id grammar, bound once to its provider type through a typed key, so a Host cannot register the wrong object under a name. User's words: "I thought services were keyed by a specific string? capabilities are not supposed to be fuzzy they are supposed to be concrete and named."
+  - **A `ServiceId` records the provider's type, and `provides` checks it.** Activation sees only the ids from `needs()` (`crates/harness-internal/plugins/src/activation.rs:185-190`), so an id-only check would let a provider of the wrong type under the right id pass activation and fail later. With the type in the id, activation treats it as missing and the refusal names the id. User's choice over id-only activation with the failure surfacing in `create`.
+  - **Service keys and ids are const, and the grammar is checked by test and at `provide`.** `needs()` returns a static slice, and `PluginId::parse` cannot run in a const.
+  - **Service ids:** `promptforge/input-broker`, `promptforge/search-provider`, and `promptforge/tokio-runtime`. Rationale: the ids name the object supplied, and they differ from every Plugin id, so a refusal cannot confuse the two.
+  - **Each Plugin crate owns its service keys.** `harness-plugins` owns `INPUT_BROKER`, and `harness-web` owns `SEARCH_PROVIDER` and `TOKIO_RUNTIME`. Rationale: the Harness core never names a provider type, and adding a service is no longer a Harness change.
+  - **One root crate, `harness-web`, registered by the Host.** It merges `web`, `webfetch`, and the search tool, builds on a new `harness::plugin` module, and is registered by Workshop through `Harness::new`. The user chose this over keeping the bundle internal and re-exporting it. Rationale: the Harness stops depending on `reqwest` for web, which change 9 needs.
+  - **The Host registers every Plugin, including `promptforge/user-input`.** Rationale: the Host decides which Plugins exist. A Host with nobody to ask leaves user input unregistered, and its prompts that require it are refused as missing a Plugin. The Harness still supplies the input broker service until change 8.
   - **`Harness::new` takes the registry and the services as arguments,** like the recorder, rather than through a builder. Rationale: one explicit way, and `HarnessConfig` derives `Eq`, so it cannot hold trait objects.
   - **Typed search results.** `harness-web` defines the provider's types, and the tool renders them back into the Gateway's JSON shape. The user chose this over passing the raw JSON through.
   - **Both or neither.** `promptforge/web` needs both services. The user chose this over contributing whichever tool has its service.
   - **Workshop adapts the Gateway search client.** `harness-gateway-client` cannot implement `SearchProvider`, because it would depend on `harness-web`, which depends on `harness`, which reaches `harness-sessions`, which depends on the client until change 6.
-  - **Fetch runs on the Host's runtime handle, with abort-on-drop.** Rationale: the capability stops assuming an ambient tokio runtime, and a cancelled run leaves no fetch running.
+  - **Fetch runs on the Host's runtime handle, with abort-on-drop.** Rationale: the Plugin stops assuming an ambient tokio runtime, and a cancelled run leaves no fetch running.
   - **The empty-`url` check moves into the search tool, and the 30-second deadline stays in the Gateway search client.** Rationale: the check is neutral, so it should apply to every provider. A deadline needs a timer, which the search tool would have only through the runtime service. `guide/src/language/13-web-fetch-and-search.md:535` then describes the Gateway provider that Workshop supplies.
   - **Workshop reads the runtime with `Handle::try_current()`, and its adapter reports every gateway setup failure as `request failed`.** Rationale: `harness_for` also runs in a synchronous unit test with no runtime. A setup failure is not a model failure, and the model needs only the transport kind.
   - **Retire one search constructor test, and retarget the other.** `GatewaySearch::new` takes an already validated endpoint and key, so the URL and key rules are tested once, in the client's `GatewayEndpoint` and `SecretString` tests. `constructor_errors_preserve_sources_without_leaking_secrets` moves to those types, because once `web-search/AGENTS.md` is gone it is the only record that setup errors echo no URL or key.
@@ -326,7 +326,7 @@ Moved tests move with their code and pass in their new crates. Their assertions 
   - Keeping the bundle in `crates/harness-internal` and re-exporting `Web`. Reason: `reqwest` and tokio stay in the Harness's dependencies and block change 9. Revisit never.
   - Passing the Gateway's raw JSON through the provider. Reason: it ties every provider to the Gateway's wire shape. Revisit if a provider needs fields the typed results drop.
   - Contributing whichever tool has its service. Reason: a research prompt wants both tools or neither. Revisit if a Host needs search without fetch.
-  - Defining `TOKIO_RUNTIME` in `harness-capabilities`. Reason: the Harness core would name a tokio type. Revisit when a second capability crate needs the runtime.
+  - Defining `TOKIO_RUNTIME` in `harness-plugins`. Reason: the Harness core would name a tokio type. Revisit when a second Plugin crate needs the runtime.
 - Assumptions, risks, and notes:
   - Assumption: the change-4 execution preferences hold. Six steps, the `AGENTS.md` trim being the first, each one tested commit. Each step runs only its touched crates' tests, and the full exit criteria run once on the final step. The workspace, product-rule, and hakari edits and Workshop's web wiring sit in the `harness-web` step, and the docs in the final step, because otherwise the `harness-web` commit would fail `cargo test -p build-xtask` and the built-in `chat` agent would lose web.
   - **A temporary built-in web bridges the `Harness::new` and `harness-web` steps.** The built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), so a commit where neither the Harness nor Workshop supplies web refuses every chat run (14 Workshop tests). The Harness keeps adding the internal `Web` when the Host registered none, and the `harness-web` step removes that fallback in the same commit where Workshop starts registering web. User's choice over making web optional in `chat.md` for three commits, or merging three steps into one.
@@ -337,10 +337,10 @@ Moved tests move with their code and pass in their new crates. Their assertions 
   - Note: docs to update.
     - `guide/src/language/13-web-fetch-and-search.md:79` says the Harness provides `promptforge/web` as a built-in.
     - `guide/src/language/05-lua-environment.md:727-746` quotes the old refusal line at `:733` and calls the service an input broker.
-    - `guide/src/language/12-tools.md:113` says a capability receives only the run's filesystem, its cancel signal, and an input broker.
-    - The module doc at `crates/harness-internal/capabilities/src/user_input.rs:93` quotes the old refusal line.
-    - `vibe/archdoc.md:10` lists first-party capabilities as a Harness duty.
-    - `crates/README.md` (its `harness-gateway-client` entry, `:17-19`; it has no web crate entries), the capabilities `README.md:9`, and `crates/harness-gateway-client/README.md`'s public-surface section describe the old ownership.
+    - `guide/src/language/12-tools.md:113` says a Plugin receives only the run's filesystem, its cancel signal, and an input broker.
+    - The module doc at `crates/harness-internal/plugins/src/user_input.rs:93` quotes the old refusal line.
+    - `vibe/archdoc.md:10` lists first-party Plugins as a Harness duty.
+    - `crates/README.md` (its `harness-gateway-client` entry, `:17-19`; it has no web crate entries), the plugins `README.md:9`, and `crates/harness-gateway-client/README.md`'s public-surface section describe the old ownership.
     - The root `AGENTS.md` lines that named the public Harness crates (`:66`, `:69`) are cut by the trim, so they need no update.
 
 ### Deferred and Out of Scope
@@ -351,7 +351,7 @@ Moved tests move with their code and pass in their new crates. Their assertions 
 - Deferred: `harness-gateway-client` implementing `SearchProvider` directly. Revisit after change 6, when `harness-sessions` stops depending on the client.
 - Deferred: adding `harness-web` to the docs site (`RUSTDOC_SITES` in `crates/build-xtask/src/site.rs`). Revisit with the client at change 6.
 - Deferred: trimming the narrative text in `## Invariants` blocks and the two `.cursor/rules` files by the same keep rule. Revisit when a refactor touches them.
-- Out of scope: per-run capability choice from Workshop's Run window, and any change to the Gateway's search endpoint.
+- Out of scope: per-run Plugin choice from Workshop's Run window, and any change to the Gateway's search endpoint.
 - Out of scope: removing `tools/cicerone.md` itself. Only the rule that required running it is cut.
 
 </decision-record>
@@ -371,7 +371,7 @@ Moved tests move with their code and pass in their new crates. Their assertions 
 - Directory map:
   - `crates/`: every Rust crate plus the TypeScript UI packages. The root holds the public crates (`promptforge`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`), the `shared-*` crates (`shared-error-source`, `shared-loopback`), the `build-*` tooling crates (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), and the `shared-ui` TypeScript package used by the gateway config UI.
   - `crates/promptforge-internal/`: private Engine crates `engine`, `lua`, `model-client`, `parser`, `types`, `vfs`.
-  - `crates/harness-internal/`: private Harness crates `runner`, `capabilities`, `sessions`, `web`, `webfetch`, `web-search`.
+  - `crates/harness-internal/`: private Harness crates `runner`, `plugins`, `sessions`, `web`, `webfetch`, `web-search`.
   - `crates/gateway/`: private gateway crates `app` (package `gateway`), `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api` as `gateway-stt`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: the desktop app (`desktop`, package `workshop`), `server`, `server-api`, and the subsystems `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, `workspace`, plus the npm workspaces `ui`, `look`, and `platform`.
   - `guide/`: user guide sources and books for the gateway, the prompt language, and Workshop, built by `cargo xtask site`.
@@ -415,7 +415,7 @@ Moved tests move with their code and pass in their new crates. Their assertions 
 Five components, in dependency order:
 
 1. Rule-file trim (step 1). It goes first so no later step reads a stale rule. The trim also cuts the gateway client's "one read loop" rule, which step 4's copied readers would otherwise break, and the cicerone rule, which step 3's new facade module would otherwise trigger.
-2. Host services (steps 2 and 3). It comes next because the `harness-web` capability and Workshop's wiring are written against `ServiceKey`, `HostServices`, the `harness::capability` module, and the new `Harness::new`.
+2. Host services (steps 2 and 3). It comes next because the `harness-web` Plugin and Workshop's wiring are written against `ServiceKey`, `HostServices`, the `harness::plugin` module, and the new `Harness::new`.
 3. Gateway search client (step 4). It depends only on the trim, so it can be built alongside component 2. It sits after component 2 because nothing there needs it, and before component 4, which does.
 4. `harness-web` crate and Workshop web wiring (step 5). It needs component 2's service types and facade module, and component 3's `GatewaySearch`. It deletes the internal web crates and the Harness's temporary built-in web, and in the same commit Workshop registers the root `Web` with its two services, so no commit leaves the built-in `chat` agent without `promptforge/web`.
 5. Docs and exit criteria (step 6). It comes last because it describes the finished wiring and runs the full exit criteria once.
@@ -451,26 +451,26 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 - Component: Host services
 - Depends on: step 1.
-- Piece: the service vocabulary in `harness-capabilities` and its one runner caller. Built before step 3 (sequential), because step 3's `Harness::new` and facade module name these types.
-- `crates/harness-internal/capabilities`:
+- Piece: the service vocabulary in `harness-plugins` and its one runner caller. Built before step 3 (sequential), because step 3's `Harness::new` and facade module name these types.
+- `crates/harness-internal/plugins`:
   - New `src/service.rs`, with tests in `src/service-tests.rs`, exported from `src/lib.rs`:
     - `ServiceId`: `Copy`; the id literal plus `fn() -> TypeId`; compares, hashes, and displays by the literal.
     - `ServiceKey<T: ?Sized + Send + Sync + 'static>`: `const fn new(&'static str)` and a `const fn id()`, so `needs()` can return a static slice.
-    - `HostServices`: `Clone`. `provide(&ServiceKey<T>, Arc<T>)` parses the literal through `promptforge::capabilities::CapabilityId::parse` and refuses an unparseable or duplicate id with a `ServiceError`. `get(&ServiceKey<T>)` and `provides(&ServiceId)` find nothing when the stored type differs.
+    - `HostServices`: `Clone`. `provide(&ServiceKey<T>, Arc<T>)` parses the literal through `promptforge::plugins::PluginId::parse` and refuses an unparseable or duplicate id with a `ServiceError`. `get(&ServiceKey<T>)` and `provides(&ServiceId)` find nothing when the stored type differs.
     - `ServiceError`.
-  - `src/capability.rs`: delete `Service` and `Service::description`. `Capability::needs()` returns `&[ServiceId]`, and `ServiceGap.service` becomes a `ServiceId`. `RunServices` holds `vfs`, `cancel`, and a `HostServices`, with `get` and `provides` delegating to it. `with_input` is replaced by an insert under `INPUT_BROKER` that replaces any existing provider. Fix the doctests that name `Service` (`:148`, `:241`).
+  - `src/plugin.rs`: delete `Service` and `Service::description`. `Plugin::needs()` returns `&[ServiceId]`, and `ServiceGap.service` becomes a `ServiceId`. `RunServices` holds `vfs`, `cancel`, and a `HostServices`, with `get` and `provides` delegating to it. `with_input` is replaced by an insert under `INPUT_BROKER` that replaces any existing provider. Fix the doctests that name `Service` (`:148`, `:241`).
   - `src/user_input.rs`: `INPUT_BROKER: ServiceKey<dyn InputBroker>` as `promptforge/input-broker`, and `UserInput::needs()` returns its id. Fix the `Service::Input` doc links and doctest (`:91`, `:160`, `:172`) and the quoted refusal line in the module doc (`:93`).
   - `src/activation.rs:185-217`: the same required and optional rules, checking `provides(&ServiceId)` and passing the id text to `MissingService::new`. The Engine is unchanged.
 - `crates/harness-internal/runner/src/prepare.rs:331-334`: build each run's `RunServices` with an empty `HostServices`, and insert `Services.input`, when present, under `INPUT_BROKER`. Step 3 swaps the empty map for the Host's.
 - Tests:
-  - New unit tests in `harness-capabilities`:
-    - `INPUT_BROKER`'s literal parses as a `CapabilityId`.
+  - New unit tests in `harness-plugins`:
+    - `INPUT_BROKER`'s literal parses as a `PluginId`.
     - `HostServices`: provide and get, duplicate refusal, unparseable-id refusal, and a provider under the right id with the wrong type, where `get` finds nothing and `provides` is false.
     - The `RunServices` input-broker insert replaces an existing provider.
     - Activation by id: required and missing refuses, naming the id; optional and missing records a `ServiceGap` with the id; a wrong-typed provider counts as missing in both cases.
     - `UserInput` needs `promptforge/input-broker`.
-  - Converted: `tests/it/needs.rs` (refusal text at `:144`, `:172`, `:190`), `src/user_input-tests.rs`, `src/capability-tests.rs`, and `crates/harness-internal/runner/tests/it/prepare-input.rs` (`:196`, `:221`, and the gap assertion at `:258`). The notice line becomes "- promptforge/user-input needs promptforge/input-broker, and this host provides none".
-  - Run `cargo nextest run --locked -p harness-capabilities -p harness-runner --all-features` and `cargo test --locked -p harness-capabilities -p harness-runner --all-features --doc`. Run `cargo clippy -p harness-capabilities -p harness-runner -p harness-sessions -p harness-web -p harness --all-targets --all-features -- -D warnings`, so every dependent still builds.
+  - Converted: `tests/it/needs.rs` (refusal text at `:144`, `:172`, `:190`), `src/user_input-tests.rs`, `src/plugin-tests.rs`, and `crates/harness-internal/runner/tests/it/prepare-input.rs` (`:196`, `:221`, and the gap assertion at `:258`). The notice line becomes "- promptforge/user-input needs promptforge/input-broker, and this host provides none".
+  - Run `cargo nextest run --locked -p harness-plugins -p harness-runner --all-features` and `cargo test --locked -p harness-plugins -p harness-runner --all-features --doc`. Run `cargo clippy -p harness-plugins -p harness-runner -p harness-sessions -p harness-web -p harness --all-targets --all-features -- -D warnings`, so every dependent still builds.
 
 </step-2>
 
@@ -482,20 +482,20 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 - Depends on: step 2.
 - Piece: the Host-supplied registry and services. Built after step 2 (sequential). `Harness::new`, its callers, and the facade module change in one commit, because the new signature breaks every caller until it can name the facade types.
 - `crates/harness-internal/sessions`:
-  - `src/runtime.rs:141`: `Harness::new(config, recorder, capabilities: CapabilityRegistry, services: HostServices)`. The Harness holds both and passes them to every run through `prepare::Services`. `src/session/run.rs:91-106` hands the Harness's registry to each run.
+  - `src/runtime.rs:141`: `Harness::new(config, recorder, plugins: PluginRegistry, services: HostServices)`. The Harness holds both and passes them to every run through `prepare::Services`. `src/session/run.rs:91-106` hands the Harness's registry to each run.
   - `src/environment.rs`: `first_party_registry` (`:104-131`) stops registering `UserInput` and becomes a temporary built-in web. Per gateway generation (`GatewayResources::build`, `:155-191`, called from `Bindings::set_gateway`, `:267-285`), the registry handed to runs is the Host's registry plus the internal `Web`, when the gateway URL and key build it and the Host's registry holds no `promptforge/web`. Step 5 deletes it.
   - Keep `GatewayResources.registry`, the supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`), and the `harness-web` dependency (`Cargo.toml:32`) until step 5. Update `src/environment-tests.rs` (`:112`, `:117`) to the new behavior.
 - `crates/harness-internal/runner/src/prepare.rs`: `Services` (`:54-87`) gains `services: HostServices`. Preparation clones it into each run's `RunServices` before inserting the input broker. Update the runner test helpers that build `Services`.
-- Facade `crates/harness`: `pub mod capability` in `src/lib.rs` with a hand-written page `src/capability.md`, re-exporting `Capability`, `CapabilityError`, `CapabilityErrorKind`, `CapabilityId`, `CapabilityRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal.
+- Facade `crates/harness`: `pub mod plugin` in `src/lib.rs` with a hand-written page `src/capability.md`, re-exporting `Plugin`, `PluginError`, `PluginErrorKind`, `PluginId`, `PluginRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal.
 - Every `Harness::new` call gains the two arguments:
   - `crates/workshop/server/src/agents.rs`: `harness_for` (`:58-69`) registers `UserInput::new()` alone and passes an empty `HostServices`.
   - `crates/harness/tests/suite/gateway.rs`, `crates/harness-internal/sessions/tests/it/session.rs` (`:63`, `:193`), and `session-infer.rs`.
   - The doc examples in `crates/harness/src/lib.md`, `record.md`, `vfs.md`, and `cancel.md`, and the prose there that describes `Harness::new`'s arguments (`lib.md:62`, `:136`, `:748`, `:756`; `record.md:7`, `:104`).
 - No web gap: the built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), and the built-in web keeps supplying it until step 5.
 - Tests:
-  - New, in `crates/harness-internal/runner/tests/it/`: a fixture capability needing a test-only service key activates when the Host's `HostServices` provides it, and records a gap when the Host does not. This proves the Host's map reaches each run.
-  - New, in `crates/harness-internal/sessions/tests/it/session.rs`: a Harness whose registry lacks `UserInput` refuses an agent requiring `promptforge/user-input` as a missing required capability.
-  - New, in `src/environment-tests.rs`: a Host registry without `promptforge/web` gains the built-in web when the gateway builds it, and keeps only the Host's capabilities when the gateway cannot build it.
+  - New, in `crates/harness-internal/runner/tests/it/`: a fixture Plugin needing a test-only service key activates when the Host's `HostServices` provides it, and records a gap when the Host does not. This proves the Host's map reaches each run.
+  - New, in `crates/harness-internal/sessions/tests/it/session.rs`: a Harness whose registry lacks `UserInput` refuses an agent requiring `promptforge/user-input` as a missing required Plugin.
+  - New, in `src/environment-tests.rs`: a Host registry without `promptforge/web` gains the built-in web when the gateway builds it, and keeps only the Host's Plugins when the gateway cannot build it.
   - The existing `harness-runner`, `harness-sessions`, `crates/harness/tests/suite`, and `workshop-server` suites pass with Host-supplied registries, including the Workshop tests that run the built-in `chat` agent.
   - Run `cargo nextest run --locked -p harness-runner -p harness-sessions -p harness --all-features`, `cargo test --locked -p harness-sessions -p harness --all-features --doc`, `cargo nextest run --locked -p workshop-server`, clippy on those crates (`workshop-server` without `--all-features`), `RUSTDOCFLAGS="-D warnings" cargo doc -p harness --no-deps`, and `cargo test -p build-xtask`.
 
@@ -531,7 +531,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 - Component: harness-web crate and Workshop web wiring
 - Depends on: steps 2, 3, and 4.
-- Pieces: the fetch tool, the search tool, the capability, the workspace and boundary rules, the removal of the Harness's built-in web, and Workshop's registration with its search-provider adapter. Built jointly in one commit: the new package takes over the name `harness-web` that the internal capability crate holds today (`Cargo.toml:49`), and `cargo test -p build-xtask` reads the real workspace, so the new crate, the deletions, and the rule changes only build and pass together. The built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), so the commit that removes the built-in web must also make Workshop supply it.
+- Pieces: the fetch tool, the search tool, the Plugin, the workspace and boundary rules, the removal of the Harness's built-in web, and Workshop's registration with its search-provider adapter. Built jointly in one commit: the new package takes over the name `harness-web` that the internal Plugin crate holds today (`Cargo.toml:49`), and `cargo test -p build-xtask` reads the real workspace, so the new crate, the deletions, and the rule changes only build and pass together. The built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), so the commit that removes the built-in web must also make Workshop supply it.
 - Crate `crates/harness-web`, library `harness_web`:
   - `Cargo.toml`: `[lints] workspace = true`. Dependencies are `harness`, `promptforge`, `async-trait`, and the third-party crates `webfetch` and `web-search` use today, including `reqwest` with `gzip` and `brotli`, `serde`, and `tokio`. Dev-dependencies are `axum`, `flate2`, `futures-util`, and `tokio`, not `harness-runner`. It never depends on a `crates/harness-internal` crate or on `harness-gateway-client`, and no `crates/harness-internal` crate depends on it. It gets no `AGENTS.md`.
   - `src/lib.rs`: a `//! ## Invariants` block naming the allowed and forbidden dependencies, and re-exports of `FetchConfig`, `FetchConfigBuilder`, and `ConfigError`. Every file stays at or under 500 lines, laid out by the flat-source-directory rule.
@@ -539,7 +539,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
   - Fetch: every file of `crates/harness-internal/webfetch/src/` except `lib.rs`, merged. The fetch tool spawns each request and its body read onto the `TOKIO_RUNTIME` handle and awaits the join handle, aborting the task when the call's future is dropped. Today that request is `self.http.get(...).send().await` (`tool.rs:278-280`). The `reqwest` client stays built once at construction (`tool.rs:60-72`) with DNS through the guarded resolver. The `User-Agent` `harness-webfetch/0.0`, the SSRF policy, redirects, and byte caps are unchanged. The test mock servers `spawn_server` and `spawn_recording_server` switch to `tokio::spawn`.
   - Search types: the `SearchProvider` async trait, `search(SearchQuery) -> Result<SearchResults, SearchError>`. `SearchQuery` holds the validated arguments from `web_search-request.rs:46-70`. `SearchResults` holds `query` and `results`. Each `SearchResult` holds `title`, `url`, `description`, and the optional `age`, `site_name`, and `extra_snippets`. `SearchError` holds a `Transport` or `Backend` kind, a message, and an optional boxed source.
   - Search tool: the tool half of `web_search.rs` (`:67-135` without the client, `:237-311`, argument parsing at `:316`, and the untrusted output at `:377`) and the argument rules in `web_search-request.rs`. It calls the provider, rejects an empty `url` as `Backend` with today's message, adds the `web_search: ` prefix, and attaches the provider error with `ToolError::with_source`. It renders compact JSON in the Gateway's field order and skip rules (`crates/gateway/web-search/src/service.rs:113-140`), wraps it as untrusted, and sets no deadline of its own.
-  - Capability: `Web::new()` and `Web::with_fetch_config(FetchConfig)`. `needs()` returns both service ids. `create` reads both with `get` and contributes no tools when either is missing.
+  - Plugin: `Web::new()` and `Web::with_fetch_config(FetchConfig)`. `needs()` returns both service ids. `create` reads both with `get` and contributes no tools when either is missing.
 - Delete `crates/harness-internal/{web,webfetch,web-search}`, including their `clippy.toml` files. This retires `construction_rejects_an_invalid_gateway_root_or_empty_token`, `constructor_rejects_bad_urls_credentials_query_and_empty_token`, and the unit tests in `endpoint.rs` and `secret.rs`, whose coverage step 4 confirmed.
 - Remove the Harness's built-in web from `crates/harness-internal/sessions`: delete `first_party_registry` (`src/environment.rs`) and `GatewayResources.registry`, so `GatewayResources::build` and `Bindings::set_gateway` keep only the binding and the model client; remove the supervisor plumbing (`src/supervisor.rs`, `gateway.registry()`) and the built-in web tests in `src/environment-tests.rs`; drop the `harness-web` dependency from `Cargo.toml`. Runs get the Harness's Host registry directly.
 - Workshop (`crates/workshop/server`):
@@ -552,7 +552,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 - Workspace and boundary rules:
   - Root `Cargo.toml`: remove the three crates from `members`; the `crates/*` glob picks up `crates/harness-web`. In `[workspace.dependencies]` (`:49-51`), point `harness-web` at `crates/harness-web` and remove `harness-webfetch` and `harness-web-search`.
   - Run `cargo hakari generate` and `cargo hakari manage-deps`, so the new crate gets its `workspace-hack` dependency.
-  - `crates/build-xtask/src/harness_bans-tests.rs:152-178`: rename `the_harness_crates_are_the_six_container_crates_and_the_facade` and make it expect `runner`, `capabilities`, `sessions`, and the facade, with its count message updated.
+  - `crates/build-xtask/src/harness_bans-tests.rs:152-178`: rename `the_harness_crates_are_the_six_container_crates_and_the_facade` and make it expect `runner`, `plugins`, `sessions`, and the facade, with its count message updated.
   - `crates/build-xtask/src/product.rs`: add `harness-web` to `PUBLIC_HARNESS` (`:143`), and update the violation text (`:239`) and the module doc (`:22`). Leave `container_named_exception` (`:285-290`) unchanged. Update the assertions that match the old violation text (`product/tests.rs:427`, `product/harness_tests.rs:125`, `:146`).
   - New fixtures in `crates/build-xtask/src/product/harness_tests.rs`: a workshop crate depending on `harness-web` passes, and `harness-web` depending into `crates/harness-internal` is reported.
 - Tests:
@@ -560,12 +560,12 @@ Each step is one commit holding its code and its tests. Each step runs only its 
   - New: a fetch whose call future is dropped aborts its spawned task.
   - The search tool against a fake `SearchProvider`:
     - The four argument tests, messages unchanged: `rejects_missing_query`, `rejects_empty_and_oversized_query`, `rejects_unknown_fields_and_bad_optional_types`, and `rejects_invalid_domain_lists`.
-    - `descriptor_is_stable_and_faithful` and `the_migrated_id_names_its_contributing_capability`, moved unchanged.
+    - `descriptor_is_stable_and_faithful` and `the_migrated_id_names_its_contributing_plugin`, moved unchanged.
     - Rendering equal to the Gateway's serialization for the same results, wrapped as untrusted. This holds the tool half of `forwards_query_and_returns_untrusted_results`.
     - `success_body_with_empty_url_is_rejected`, rewritten against the fake provider, rejects as `Backend`.
     - Provider error kinds and messages map with the `web_search: ` prefix, and the `ToolError` keeps the provider error as its source.
-  - Capability: the tests in `crates/harness-internal/web/src/lib.rs`, moved and adapted to services. `needs()` names both services, and `create` contributes no tools when either is missing.
-  - Each service key's literal parses as a `CapabilityId`.
+  - Plugin: the tests in `crates/harness-internal/web/src/lib.rs`, moved and adapted to services. `needs()` names both services, and `create` contributes no tools when either is missing.
+  - Each service key's literal parses as a `PluginId`.
   - New Workshop tests:
     - A prompt declaring `promptforge/web` prepares.
     - A Harness built without the search provider refuses a prompt requiring `promptforge/web`, naming `promptforge/search-provider`.
@@ -584,13 +584,13 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 - Pieces: the docs that describe the finished wiring, and the full exit criteria. Built jointly: the docs describe what step 5 wired, and the exit criteria run once here.
 - Docs:
   - `crates/README.md`: update the `harness-gateway-client` entry (`:17-19`) for the search client, and add a `harness-web` entry.
-  - `vibe/archdoc.md:10`: the Host registers every capability and supplies every service, and first-party capabilities are no longer a Harness duty.
+  - `vibe/archdoc.md:10`: the Host registers every Plugin and supplies every service, and first-party Plugins are no longer a Harness duty.
   - Guide chapter 5, `guide/src/language/05-lua-environment.md:727-746`: the refusal line at `:733` and the input broker named as the service `promptforge/input-broker`.
-  - Guide chapter 12, `12-tools.md:113`: what a capability receives.
+  - Guide chapter 12, `12-tools.md:113`: what a Plugin receives.
   - Guide chapter 13, `13-web-fetch-and-search.md`: `:79` drops the built-in claim, `:465-471` stops saying every field is kept, and `:535` describes the Gateway provider that Workshop supplies.
   - Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`.
-  - `crates/harness-internal/capabilities/README.md:9` and the public-surface section of `crates/harness-gateway-client/README.md`.
-  - The facade pages `crates/harness/src/capability.md` and `crates/harness/src/lib.md`: drop the temporary built-in web that step 3 described and step 5 removed, so they say the Host registers every capability, `promptforge/web` included.
+  - `crates/harness-internal/plugins/README.md:9` and the public-surface section of `crates/harness-gateway-client/README.md`.
+  - The facade pages `crates/harness/src/capability.md` and `crates/harness/src/lib.md`: drop the temporary built-in web that step 3 described and step 5 removed, so they say the Host registers every Plugin, `promptforge/web` included.
   - `crates/promptforge-internal/README.md:11`: stop pointing at the root `AGENTS.md` dev-dependency exception that step 1 cut.
 - Tests:
   - Exit criteria, run once here: every command in the Testing Plan's exit criteria, including `node --test crates/workshop/ui/test/docs-claims.mjs`; `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`; and a manual Workshop agent run of a prompt that declares `promptforge/web` that searches and fetches.

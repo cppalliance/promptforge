@@ -24,7 +24,7 @@ todos:
     content: Remove grep (VFS crate, facade re-exports, vfs.md, tests) and Environment::max_depth (engine, lib.md); re-bless listing
     status: pending
   - id: parser-frontmatter
-    content: "Parser frontmatter: duplicate-capability refusal; optional-capability slot refusal; guide text; regenerate the combined guide; tests"
+    content: "Parser frontmatter: duplicate-Plugin refusal; optional-Plugin slot refusal; guide text; regenerate the combined guide; tests"
     status: pending
   - id: parser-structure
     content: "Parser structure: span doc correction; column-0 frontmatter closer; container headings; structural error locations; tests"
@@ -95,8 +95,8 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - No author Lua outlives cancellation through an `xpcall` message handler or a table finalizer.
   - `HostBackend` content operations refuse a dangling symlink, so none creates a file outside the root.
   - Each of the three claims gaps conflicts in both operation orders.
-  - A frontmatter tool slot that names an optional capability is refused at parse time.
-  - A capability declared more than once under frontmatter `capabilities:` is refused at parse time.
+  - A frontmatter tool slot that names an optional Plugin is refused at parse time.
+  - A Plugin declared more than once under frontmatter `plugins:` is refused at parse time.
   - Harness-built completions and tool calls are validated.
   - Two dead public facade items leave: grep, and `Environment::max_depth`.
   - `ClientError` becomes `#[non_exhaustive]`.
@@ -113,8 +113,8 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - A looping `xpcall` handler around a looping body ends as `RunResult::Cancelled` once the cancel flag is set, and `setmetatable` refuses any metatable carrying `__gc`, so no author finalizer can run.
   - `append` through a dangling symlink inside a mounted real directory is refused, and no file appears at the link's target.
   - Each claims gap has a test with two unordered tasks, in both orders, that ends in a claims conflict.
-  - A prompt that binds a tool of an optional capability fails to parse with the message in Functional Specification.
-  - A prompt that lists one capability twice under `capabilities:` fails to parse with the message in Functional Specification.
+  - A prompt that binds a tool of an optional Plugin fails to parse with the message in Functional Specification.
+  - A prompt that lists one Plugin twice under `plugins:` fails to parse with the message in Functional Specification.
   - `from_result` and `from_parts` refuse the inputs listed in Functional Specification.
   - All six crates' `src/lib.rs` contain `//! ## Invariants`, and `cargo test -p build-xtask` passes.
   - Each crate's test count after its splits is no lower than before them, and the API listing diff contains only the changes File and public API changes names.
@@ -128,21 +128,21 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
 
 ## Functional Specification
 
-Authors see cancellation hold in two more constructs and two new refusals from `setmetatable`. A frontmatter tool slot that names an optional capability no longer parses. Hosts that mount `HostBackend` see dangling links refused, and Host implementers see validating constructors. Contributors see the ceiling check fail on oversized files. Everything else is internal.
+Authors see cancellation hold in two more constructs and two new refusals from `setmetatable`. A frontmatter tool slot that names an optional Plugin no longer parses. Hosts that mount `HostBackend` see dangling links refused, and Host implementers see validating constructors. Contributors see the ceiling check fail on oversized files. Everything else is internal.
 
 - Actors and workflows:
   - Prompt author:
     - `xpcall(f, handler)` still calls `handler` for ordinary failures. After cancellation, `handler` is not called and the run ends as interrupted.
     - `setmetatable(t, mt)` is refused when `mt` has a raw `__gc` field, for any table `t`. `setmetatable(_G, mt)` is also refused when `mt` has a raw `__mode` field.
-    - A `tools:` slot whose tool id's capability is declared `optional: true` under `capabilities:` fails parsing. The capability is `ToolId::capability()`, the id's first two segments. Declaring an optional capability without a tool slot is unchanged. Calling its tools by full id through `tools.call` when the capability is present is unchanged too (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`).
-    - A `capabilities:` list that names the same capability id more than once fails parsing. This holds whatever the `optional` flags are, and whichever entry form each uses.
+    - A `tools:` slot whose tool id's Plugin is declared `optional: true` under `plugins:` fails parsing. The Plugin is `ToolId::plugin()`, the id's first two segments. Declaring an optional Plugin without a tool slot is unchanged. Calling its tools by full id through `tools.call` when the Plugin is present is unchanged too (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`).
+    - A `plugins:` list that names the same Plugin id more than once fails parsing. This holds whatever the `optional` flags are, and whichever entry form each uses.
   - Host implementer: `Completion::from_result` and `ToolCall::from_parts` return a `Result`.
   - Host that mounts `HostBackend`: a content operation whose path passes through a dangling symlink is refused.
   - Contributor: `cargo test -p build-xtask` fails when a Rust file in one of the six crates exceeds 500 lines, with the check's existing message, `<path> has <n> lines, over the 500-line ceiling` (`crates/build-xtask/src/tidy.rs`, lines 190 to 193).
 - Inputs and outputs:
   - Messages:
-    - Optional-capability slot: `invalid frontmatter: tool alias '<alias>' names <tool id>, whose capability <capability> is declared optional; a tool slot requires its capability`.
-    - Duplicate capability: `invalid frontmatter: capability <capability> is declared more than once under capabilities`.
+    - Optional-Plugin slot: `invalid frontmatter: tool alias '<alias>' names <tool id>, whose Plugin <plugin> is declared optional; a tool slot requires its Plugin`.
+    - Duplicate Plugin: `invalid frontmatter: Plugin <plugin> is declared more than once under plugins`.
     - `__gc`: `setmetatable: finalizers (__gc) are not available in the sandbox`.
     - `__mode` on `_G`: `setmetatable: weak tables (__mode) are not available for _G`.
     - Dangling link: `VfsError::PermissionDenied` with reason `<path> passes through a dangling symbolic link`.
@@ -200,7 +200,7 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
       - share the VFS operation bodies with `run_store_op`;
       - additionally report lifecycle events, record store conflicts, and wrap `Error::store`.
     - `var.k = nil`: the `sys.rs` `__newindex` converts the value to JSON and back, then `raw_set`s it, so Lua nil round-trips to nil and removes the key. A test pins this. The code changes only if the test fails.
-    - Crate docs in `lib.rs` mention capability preludes, `input`, and `tasks`.
+    - Crate docs in `lib.rs` mention Plugin preludes, `input`, and `tasks`.
   - `promptforge-vfs` (`crates/promptforge-internal/vfs/src/`):
     - `host.rs`, `contain` (lines 130 to 159): inside the walk-up loop, before stepping to the parent, refuse when `ancestor.symlink_metadata().is_ok()` and `!ancestor.exists()`.
       - This covers every operation that follows links: `read`, `read_range`, `write`, `append`, `list`, `glob`, and `copy`.
@@ -221,12 +221,12 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
       - Subtree against parent listing. `record_subtree` (lines 921 to 930) never touches `tables.children`. `check_subtree` also conflicts with a listing of `parent_of(path)` (lines 968 to 978). `claim_list` (lines 680 to 709) also conflicts with a subtree claim whose root is a direct child of the listed directory, that is, `parent_of(subtree) == dir`. It must not use `subtree_covers(dir, subtree)`. That would also match a grandchild such as a recursive remove of `/a/b/c` against `list("/a")`, which does not change what `/a` lists, and would fail valid prompts with a false conflict. The existing check at lines 690 to 691 already covers subtrees that contain the listed directory.
       - Created ancestors. In `check_write` (lines 486 to 585), the `may_create` loop (lines 558 to 583) checks only `tables.paths`. It also checks `tables.children` for each created ancestor's parent, and `tables.patterns` through `pattern_matches_path` (lines 1043 to 1051) for each ancestor (`may_create` at lines 984 to 998). The leaf path already gets these checks (lines 523 to 541).
   - `promptforge-parser` (`crates/promptforge-internal/parser/src/`):
-    - Optional-capability slots: a new check sits beside `check_distinct_aliases` in `contract.rs` (lines 379 to 392) and is invoked from `parse.rs` next to the existing alias check (lines 93 to 94), after the frontmatter is decoded. For each `ToolSlot::Exact(id)`, find a `CapabilityDecl` whose id equals `id.capability()` and whose `is_optional()` is true. If one exists, return `Error::parse(ParseErrorKind::Frontmatter, message)`. `capabilities` is a `Vec<CapabilityDecl>` with no uniqueness check today (`build.rs`, lines 76 to 78).
-    - Duplicate capabilities: a second new check in the same place refuses a `capabilities:` list that names one capability id twice, with `ParseErrorKind::Frontmatter` and the message in Functional Specification. It runs before the optional-slot check, so a duplicate is reported as a duplicate.
-      - An entry is either a bare string or a map with a required `ref` and optional `optional` and `config` (`CapabilityDeclVisitor` in `contract.rs`, lines 150 to 274). Both forms decode through `parse_capability_id` into a `GlobalName`.
-      - Two entries are duplicates when their decoded ids are equal. `CapabilityId` and `GlobalName` equality is exact over the stored segments, with no normalization (`crates/promptforge-internal/types/src/capabilities.rs`, lines 32 to 66; `crates/promptforge-internal/types/src/names.rs`). Uppercase ids are already refused at parse, so a case-only difference cannot produce two distinct ids for one capability.
+    - Optional-Plugin slots: a new check sits beside `check_distinct_aliases` in `contract.rs` (lines 379 to 392) and is invoked from `parse.rs` next to the existing alias check (lines 93 to 94), after the frontmatter is decoded. For each `ToolSlot::Exact(id)`, find a `PluginDecl` whose id equals `id.plugin()` and whose `is_optional()` is true. If one exists, return `Error::parse(ParseErrorKind::Frontmatter, message)`. `plugins` is a `Vec<PluginDecl>` with no uniqueness check today (`build.rs`, lines 76 to 78).
+    - Duplicate Plugins: a second new check in the same place refuses a `plugins:` list that names one Plugin id twice, with `ParseErrorKind::Frontmatter` and the message in Functional Specification. It runs before the optional-slot check, so a duplicate is reported as a duplicate.
+      - An entry is either a bare string or a map with a required `ref` and optional `optional` and `config` (`PluginDeclVisitor` in `contract.rs`, lines 150 to 274). Both forms decode through `parse_plugin_id` into a `GlobalName`.
+      - Two entries are duplicates when their decoded ids are equal. `PluginId` and `GlobalName` equality is exact over the stored segments, with no normalization (`crates/promptforge-internal/types/src/plugins.rs`, lines 32 to 66; `crates/promptforge-internal/types/src/names.rs`). Uppercase ids are already refused at parse, so a case-only difference cannot produce two distinct ids for one Plugin.
       - Entries that differ only in `optional` or `config` are still duplicates.
-      - No prompt, agent program, guide example, or test fixture in the repository lists a capability twice. That was checked across `prompts/`, `local/`, `guide/src/`, and `crates/`, including `crates/harness-internal/sessions/agents/chat.md`, so nothing in the tree breaks. Nothing in `prompts/` or `local/` declares an optional capability. Guide examples and test fixtures that declare one bind no tool slot to it, so nothing in the tree breaks. The Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) is then correct as written and stays.
+      - No prompt, agent program, guide example, or test fixture in the repository lists a Plugin twice. That was checked across `prompts/`, `local/`, `guide/src/`, and `crates/`, including `crates/harness-internal/sessions/agents/chat.md`, so nothing in the tree breaks. Nothing in `prompts/` or `local/` declares an optional Plugin. Guide examples and test fixtures that declare one bind no tool slot to it, so nothing in the tree breaks. The Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) is then correct as written and stays.
     - Span documentation. The facade's `ParseError::span` doc (`crates/promptforge/src/lib.md`) and `error.rs` say the range is byte offsets in the source. It is relative to the document body after the frontmatter and a leading BOM, with CRLF normalized to LF. `line()` and `column()` locate the error in the original file (`with_prompt_context`, `error.rs` lines 104 to 114). Both docs say so. No code changes.
     - `build.rs`, `split_frontmatter` (line 281): the closer test `line.trim() == "---"` becomes `line.trim_end() == "---"`, so only a `---` at column 0 closes the frontmatter.
     - `build.rs`, `collect_headings` (lines 354 to 387): track nesting depth over `Tag::BlockQuote` and `Tag::Item` start and end events. Footnotes need no tracking: the parser runs `pulldown-cmark` with `Options::empty()` (`build.rs`, line 366), which leaves them off. A `Tag::Heading` inside either container is not a section boundary. Its text stays in the enclosing section's prose. No test, guide example, or in-tree prompt relies on the old behavior.
@@ -309,9 +309,9 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
     - the `max_depth` text in `lib.md` (line 398);
     - in `crates/promptforge/src/vfs.md`: the `GrepQuery`, `GrepResults`, and `GrepMatch` sections (from line 665), the `Access::grep` and `VfsAccess::grep` entries (lines 558 and 881), and the grep mentions at lines 379, 667, and 729.
   - Guide:
-    - `guide/src/language/12-tools.md`, in "Declaring capabilities" and "Tool slots and Tool objects": a tool slot requires its capability, and an optional capability cannot back one.
-    - `guide/src/language/02-file-structure.md`, "Frontmatter rules and errors": gains both new refusals, the optional-capability slot and the duplicate capability.
-    - `guide/src/language/12-tools.md`, "Declaring capabilities": also states that each capability is declared once.
+    - `guide/src/language/12-tools.md`, in "Declaring Plugins" and "Tool slots and Tool objects": a tool slot requires its Plugin, and an optional Plugin cannot back one.
+    - `guide/src/language/02-file-structure.md`, "Frontmatter rules and errors": gains both new refusals, the optional-Plugin slot and the duplicate Plugin.
+    - `guide/src/language/12-tools.md`, "Declaring Plugins": also states that each Plugin is declared once.
     - Regenerate the combined guide with `cargo run --locked -q -p build-user-guide`.
   - Crate docs: the six internal crates' `src/lib.rs` gain the marker section, and `crates/promptforge-internal/vfs/README.md` gains the dangling-link sentence.
   - Renamed: `crates/promptforge-internal/engine/src/fanout.rs` becomes `src/heading_address.rs`.
@@ -351,13 +351,13 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
     - A write that creates `/a/b/c` against `list("/a")` and against `glob("/a/*")`.
     - The same pairs with a join between the tasks do not conflict.
   - Parser, in `crates/promptforge-internal/parser/src/` (`contract/tests.rs` for the frontmatter checks, `tests.rs` for the rest):
-    - The optional-capability slot refusal, with its exact message.
-    - A prompt that declares an optional capability without a slot still parses.
+    - The optional-Plugin slot refusal, with its exact message.
+    - A prompt that declares an optional Plugin without a slot still parses.
     - An indented `---` inside a YAML block scalar does not close the frontmatter.
     - A heading inside a block quote or a list item is not a section, and its text stays in the enclosing section's prose.
     - The orphan heading, empty heading, and "`lua shared` outside H1" errors report a line.
-    - A capability listed twice is refused with the duplicate message: both entries plain, both optional, one of each, and two map entries that differ only in `config`.
-    - A list of distinct capabilities still parses.
+    - A Plugin listed twice is refused with the duplicate message: both entries plain, both optional, one of each, and two map entries that differ only in `config`.
+    - A list of distinct Plugins still parses.
   - Model client, in `crates/promptforge-internal/model-client/src/` (the stream tests in `client/stream-tests.rs`):
     - `from_parts` refuses a blank id, a blank name, and non-object arguments.
     - `from_result` refuses an empty tool-call batch and duplicate call ids, and accepts a text result.
@@ -373,7 +373,7 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
   - Engine:
     - The `entered` placeholder names the start section for a chain that starts past index 0.
     - The conflict line of `Requirements::notice` has its wording and position pinned (`crates/promptforge-internal/engine/src/execute/requirements-tests.rs`).
-    - A capability prelude global that collides with `tools`, `store`, or `models` is refused (`crates/promptforge-internal/lua/src/prelude-tests.rs`).
+    - A Plugin prelude global that collides with `tools`, `store`, or `models` is refused (`crates/promptforge-internal/lua/src/prelude-tests.rs`).
   - build-xtask: fixture manifests using each newly caught dependency table form are refused by the `promptforge-vfs` manifest test.
 - Integration and end-to-end:
   - The Engine tests that build completions move to the validating constructors: `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` (lines 28 and 37 to 38) and `crates/promptforge-internal/engine/src/execute/run/effect-tests.rs` (line 92).
@@ -405,8 +405,8 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Decisions:
   - Scope: every open defect of Critical or Important severity in the six crates, plus the low-severity items in the same code. The resulting list is exactly the set of changes under Technical Design. User's choice: "Every open Critical and Important finding (the 3 new ones, optional capability, VFS claim gaps, Lua var/proxy/infer/store, model-client constructors and ClientError, waker leak, parser spans, engine surface and test-support), plus the low items that sit in the same code (Recommended)".
   - Smallest change per finding, with anything larger put to the user. User's words: "make sure we are not building out too much for example for the frontmatter compliance, without direct input from me. I dont want a decision like \"require the capability\" to unexpectedly turn into writing a lot of code that assumes a lot of things."
-  - A tool slot may not name an optional capability, and it is refused at parse. User's choice: "Forbid it: a tool slot may not name an optional capability, refused at parse with a clear error". The whole implementation is one check beside `check_distinct_aliases` and its guide text.
-  - A capability declared more than once in frontmatter is a hard parse error, whatever its `optional` flags. User's words: "mentioning a capability twice in the front matter should be a hard fail error".
+  - A tool slot may not name an optional Plugin, and it is refused at parse. User's choice: "Forbid it: a tool slot may not name an optional capability, refused at parse with a clear error". The whole implementation is one check beside `check_distinct_aliases` and its guide text.
+  - A Plugin declared more than once in frontmatter is a hard parse error, whatever its `optional` flags. User's words: "mentioning a capability twice in the front matter should be a hard fail error".
   - The small, uncontroversial leftovers join the batch. User's words: "whatever is easy and uncontroversial to fix, yuo should fix".
   - The file splits and ceiling enforcement join this batch. User's words: "I want it all, in the plan we just made ... break the files up and turn on enforcement."
   - Each crate gains its marker in the change that brings its last file under the ceiling, so the check never fails the build on arrival.
@@ -435,10 +435,10 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Resolving a dangling link's target and containing it. Reason: more code for a case no production Host has. Revisit: if a Host needs appends through in-root dangling links.
   - A parameters-schema check in `ToolCatalog::new`. Reason: it needs a new public `ToolCatalogError` variant, and `tool_schema_new` already refuses a non-object schema when the tool is advertised. Revisit: if schema errors need to surface at assembly, as a user decision on the new variant.
   - One wire-name rule shared by `ToolCatalog::new` and `tool_schema_new`. Reason: `validate_identifier` (`crates/promptforge-internal/types/src/tools/ids.rs`, lines 194 to 216) has no caller besides the catalog's wire-name check (`tools/registry.rs`, line 62), so sharing the rule would delete it and `ToolIdError::reason` and leave `ToolIdErrorKind::Separator` produced by nothing. It would also make the catalog refuse wire names the facade documents as accepted ("Uppercase and other printable characters are accepted in a wire name", `crates/promptforge/src/tools.md`, line 373), a facade contract change. A name the catalog accepts but `tool_schema_new` refuses still fails when the tool is advertised. Revisit: if the Harness needs that failure at catalog assembly, as a documented contract change.
-  - Naming the rejected value in `ModelIdError`, `GlobalNameError`, and `CapabilityIdError`. Reason: the facade documents their `Display` text as a fixed prefix and reason (`crates/promptforge/src/model.md`, line 431; `crates/promptforge/src/capabilities.md`, lines 317 and 361), four facade doc examples assert it exactly (`model.md`, line 124; `capabilities.md`, lines 40, 127, and 131), and the guide quotes the parser message that wraps it (`guide/src/language/12-tools.md`, line 180). That parser message already names the id, so it would print it twice. Hosts calling `ModelId::new` hold their inputs. Revisit: if a Host reports an id error it cannot trace to its input.
+  - Naming the rejected value in `ModelIdError`, `GlobalNameError`, and `PluginIdError`. Reason: the facade documents their `Display` text as a fixed prefix and reason (`crates/promptforge/src/model.md`, line 431; `crates/promptforge/src/capabilities.md`, lines 317 and 361), four facade doc examples assert it exactly (`model.md`, line 124; `capabilities.md`, lines 40, 127, and 131), and the guide quotes the parser message that wraps it (`guide/src/language/12-tools.md`, line 180). That parser message already names the id, so it would print it twice. Hosts calling `ModelId::new` hold their inputs. Revisit: if a Host reports an id error it cannot trace to its input.
   - Making `Backend`'s body private behind a bounding constructor. Reason: the Harness already caps and escapes before building it (`crates/harness-internal/models/src/transport.rs`, lines 352 to 363), and the user chose `#[non_exhaustive]` only. Revisit: when an outside transport exists.
   - Fixing glob across nested mounts, or Windows aliasing, now. Reason: the user deferred both. Revisit: when a Host nests mounts or mounts `HostBackend` on Windows.
-  - Leaving the alias unbound with a warning for an optional-capability slot, or keeping the run-time refusal with better wording. Reason: the user chose a parse-time refusal. Revisit: if prompts need optional tools, as a new frontmatter form.
+  - Leaving the alias unbound with a warning for an optional-Plugin slot, or keeping the run-time refusal with better wording. Reason: the user chose a parse-time refusal. Revisit: if prompts need optional tools, as a new frontmatter form.
   - Removing the Engine's `test-support` feature and bench. Reason: the bench is the only benchmark of the model loop. Revisit: if the bench moves to the facade.
   - A separate later plan for the splits, adding all six markers first, or splitting before fixing. Reason: the user wants the splits in this batch; markers first would fail the build at once; and fixes mixed into moved code are hard to review. Revisit: never.
   - `impl Drop for Cancelled`, with a re-bless in the types change. Reason: it adds a public trait impl the user has not approved and a listing change outside File and public API changes, for no behavior the private field lacks. Revisit: if the user wants the impl public, add it to File and public API changes and re-bless in the types change.
@@ -497,7 +497,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Directory map:
   - `crates/`: every Rust crate and UI package. Its root is the public layer: the `promptforge` facade (`src/`, `tests/suite/`, `public-api.txt`), the `harness` facade, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS, not a crate), the `build-*` tooling crates, and `workspace-hack`.
   - `crates/promptforge-internal/`: a manifestless container holding `engine` (`src/execute/` with `run/`, `scheduler/`, and `tests/`, `src/test_support/` with `recording/`, `src/lua/`, `src/model/`, `src/lib.md` as the crate doc, `benches/`, `tests/prompts/`), `lua` (the section VM, the Lua shims `__impl_coro.lua`, `__impl_fanout.lua`, `__impl_messages.lua`, `__impl_store.lua`, `__impl_tasks.lua`, plus `protocol/` and `tools/`), `vfs` (a flat `src/`, std only), `model-client` (`client/`, `model/`), `types` (`tools/`), and `parser` (`contract/`). Each crate has `AGENTS.md`, `Cargo.toml`, and `README.md`; the container's `README.md` describes the six.
-  - `crates/harness-internal/`, `crates/workshop/`, and `crates/gateway/`: the other family containers (the Harness runner, models, capabilities, log, sessions, and web crates; the Workshop desktop app, server, and UI npm workspaces; the gateway app and its subsystems, including the nested `stt/`).
+  - `crates/harness-internal/`, `crates/workshop/`, and `crates/gateway/`: the other family containers (the Harness runner, models, plugins, log, sessions, and web crates; the Workshop desktop app, server, and UI npm workspaces; the gateway app and its subsystems, including the nested `stt/`).
   - `guide/`: user guide chapter sources (`src/language/` among them), mdBook books, and the combined `guide/promptforge-language-guide.md`. `prompts/`: sample prompts. `tools/`: Node and Python maintenance scripts.
   - `vibe/`: `archdoc.md`, dated plan and run records (`YYYY-MM-DD-N-slug.md`), reference notes, and a gitignored `scratch/`.
   - `.github/workflows/ci.yml` (jobs `fmt`, `clippy`, `test`, `docs`, `check-workshop`, `check-workshop-linux`, `ui`, `supply-chain`, `api-surface`, and the aggregate `ci-green`), `.githooks/`, `.config/nextest.toml`, `.cargo/config.toml`, and at the root `Cargo.toml` (an explicit container member list; `default-members` is the gateway app), `rust-toolchain.toml` (stable), `clippy.toml`, `rustfmt.toml`, and `deny.toml`.
@@ -650,7 +650,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Delete the Rust placeholder behind `models.infer`, under `crates/promptforge-internal/lua/src/`: the placeholder closure and `call_models_infer_hook` in `install_models` (`models.rs`, lines 57 to 72 and 351 to 354), `ModelsInferHook` (`models-userdata.rs`, lines 15 to 23), `clear_infer_hook` and its teardown call (`vm.rs`, lines 569 to 575 and 1052 to 1075), and `ModelsInferHook` in the shared re-export lines of `models.rs` (line 26) and `lib.rs` (line 57), which keep `LuaModelHandle`, and in the `vm.rs` import list (line 16). The shim `infer` in `__impl_coro.lua` (lines 101 to 117, assigned at lines 393 to 394) stays, so `models.infer` is unchanged for authors.
   - Remove the stale "infer hook" comments in `crates/promptforge-internal/engine/src/execute/tests/suite/exec_flow.rs`.
   - `lua/src/host.rs` (lines 641 to 643): the `run_store_op` doc stops calling it the single implementation. It says the direct closures (lines 470 to 678) run only during shared-library load, before `route_store_to_shims`, share its VFS operation bodies, and add lifecycle events, store-conflict recording, and `Error::store` wrapping. No code changes.
-  - `lua/src/lib.rs` crate docs: add capability preludes, `input`, and `tasks`.
+  - `lua/src/lib.rs` crate docs: add Plugin preludes, `input`, and `tasks`.
   - The `__newindex` in `lua/src/sys.rs` changes only if the `var.k = nil` test fails.
 - Tests:
   - `var.k = nil` removes `k` from `var` and from its snapshot. This pins the traced path, which already removes the key.
@@ -742,24 +742,24 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-8>
 
-### Step 8: Refuse duplicate capabilities and tool slots backed by optional capabilities [completed]
+### Step 8: Refuse duplicate Plugins and tool slots backed by optional Plugins [completed]
 
 - Component: Parser validation
 - Piece: the two frontmatter checks, the first of two pieces built sequentially. Both pieces edit `parse.rs`, and their tests sit in separate files (`contract/tests.rs` here, `tests.rs` in Step 9).
 - Todo: `parser-frontmatter`
 - Depends on: nothing
-- Read: Technical Design, the Optional-capability slots and Duplicate capabilities bullets and the Guide bullets under File and public API changes; Project Survey.
+- Read: Technical Design, the Optional-Plugin slots and Duplicate Plugins bullets and the Guide bullets under File and public API changes; Project Survey.
 - Build:
   - `crates/promptforge-internal/parser/src/contract.rs`: two new checks beside `check_distinct_aliases` (lines 379 to 392), each raising `Error::parse(ParseErrorKind::Frontmatter, message)`:
-    - the duplicate check refuses a `capabilities:` list whose decoded ids repeat, whatever each entry's form, `optional` flag, and `config`, with `invalid frontmatter: capability <capability> is declared more than once under capabilities`;
-    - the slot check looks up, for each `ToolSlot::Exact(id)`, a `CapabilityDecl` whose id equals `id.capability()` and whose `is_optional()` is true, and refuses with `invalid frontmatter: tool alias '<alias>' names <tool id>, whose capability <capability> is declared optional; a tool slot requires its capability`.
+    - the duplicate check refuses a `plugins:` list whose decoded ids repeat, whatever each entry's form, `optional` flag, and `config`, with `invalid frontmatter: Plugin <plugin> is declared more than once under plugins`;
+    - the slot check looks up, for each `ToolSlot::Exact(id)`, a `PluginDecl` whose id equals `id.plugin()` and whose `is_optional()` is true, and refuses with `invalid frontmatter: tool alias '<alias>' names <tool id>, whose Plugin <plugin> is declared optional; a tool slot requires its Plugin`.
   - `parser/src/parse.rs`: call the duplicate check, then the slot check, next to the existing alias check (lines 93 to 94), after the frontmatter is decoded.
-  - `guide/src/language/12-tools.md`: "Declaring capabilities" says each capability is declared once, and it and "Tool slots and Tool objects" say a tool slot requires its capability, so an optional capability cannot back one. `guide/src/language/02-file-structure.md`, "Frontmatter rules and errors", gains both refusals.
+  - `guide/src/language/12-tools.md`: "Declaring Plugins" says each Plugin is declared once, and it and "Tool slots and Tool objects" say a tool slot requires its Plugin, so an optional Plugin cannot back one. `guide/src/language/02-file-structure.md`, "Frontmatter rules and errors", gains both refusals.
   - Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`.
-  - Nothing in the tree lists a capability twice or binds a slot to an optional capability, so no prompt, fixture, or guide example changes, and the Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) stays.
+  - Nothing in the tree lists a Plugin twice or binds a slot to an optional Plugin, so no prompt, fixture, or guide example changes, and the Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) stays.
 - Tests, in `parser/src/contract/tests.rs`:
-  - the slot refusal with its exact message, and a prompt that declares an optional capability without a slot still parses;
-  - the duplicate refusal with its exact message for two plain entries, two optional ones, one of each, and two map entries that differ only in `config`; a duplicate that also backs a slot reports the duplicate; a list of distinct capabilities still parses.
+  - the slot refusal with its exact message, and a prompt that declares an optional Plugin without a slot still parses;
+  - the duplicate refusal with its exact message for two plain entries, two optional ones, one of each, and two map entries that differ only in `config`; a duplicate that also backs a slot reports the duplicate; a list of distinct Plugins still parses.
   - Focused command: `cargo nextest run --locked -p promptforge-parser --all-features contract`.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-parser --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`; `cargo run --locked -q -p build-user-guide`, then `git diff --exit-code -- guide/promptforge-language-guide.md`.
 - Verify: `promptforge-parser`, plus the component test pattern for `promptforge-engine`, whose suite parses every fixture prompt.
@@ -814,7 +814,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `Cargo.toml` (lines 31 to 37): the `test-support` comment says the feature exists only for `benches/models_loop.rs` (`required-features`, line 65).
 - Tests:
   - `src/execute/requirements-tests.rs`: the conflict line of `Requirements::notice` has its wording and position pinned.
-  - `crates/promptforge-internal/lua/src/prelude-tests.rs`: a capability prelude global that collides with `tools`, `store`, or `models` is refused.
+  - `crates/promptforge-internal/lua/src/prelude-tests.rs`: a Plugin prelude global that collides with `tools`, `store`, or `models` is refused.
   - Focused commands: `cargo nextest run --locked -p promptforge-engine --all-features requirements` and `cargo nextest run --locked -p promptforge-lua --all-features prelude`.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine -p promptforge-lua -p promptforge --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-engine` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo +nightly-2026-09-05 xtask api --check`.
 - Verify: `promptforge-engine`, whose `--all-targets` clippy run builds the bench, and `promptforge-lua`; the facade's clippy build, which compiles it against the narrowed Engine; the Engine's docs builds; `xtask api --check` with no listing change.

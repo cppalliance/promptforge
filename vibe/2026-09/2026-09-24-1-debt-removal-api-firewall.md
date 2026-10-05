@@ -6,7 +6,7 @@ todos:
     content: "Step 1 (chunk-names): repoint TASKS/FANOUT/MESSAGES chunk names to crates/promptforge-internal/lua/src/; content-match tests in coro-tests.rs and messages-tests.rs"
     status: pending
   - id: step-2
-    content: "Step 2 (test-support): harness-capabilities suite on a store-only Run::step/resume loop; Engine drive_tokio example on Engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
+    content: "Step 2 (test-support): harness-plugins suite on a store-only Run::step/resume loop; Engine drive_tokio example on Engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
     status: pending
   - id: step-3
     content: "Step 3 (doctest-cycle): doctest-only facade dev-dependency exception in AGENTS.md line 35; amend the six crate statements"
@@ -83,7 +83,7 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
 - Success criteria:
   - `rg -n "@crates/promptforge/lua" crates` returns nothing, and the chunk-name tests pass.
   - The re-blessed `crates/promptforge/public-api.txt` marks `VfsError` and every other non-exhaustive surface type and variant, and does not mark `Op` or `Verdict`. `AllowAll` renders as a unit struct, and `ExecId` renders with private fields. The set of listed items is unchanged.
-  - `rg -n "test-support|test_support" crates/promptforge` returns nothing, no manifest enables `promptforge/test-support`, `cargo xtask api` performs one rustdoc build, and the harness-capabilities activation suite passes with its test count unchanged.
+  - `rg -n "test-support|test_support" crates/promptforge` returns nothing, no manifest enables `promptforge/test-support`, `cargo xtask api` performs one rustdoc build, and the harness-plugins activation suite passes with its test count unchanged.
   - `AGENTS.md` states the doctest-only exception, and none of the six statements listed under `doctest-cycle` contradicts the manifests.
   - Every exit criterion in Testing Plan passes.
 - Constraints:
@@ -101,7 +101,7 @@ Behavior changes only where the debts touch observable output. That means traceb
   - Engine developers read Lua tracebacks. A frame from the tasks, fanout, or messages chunk names a file that exists and holds that chunk's source.
   - Reviewers read `crates/promptforge/public-api.txt` diffs. A change to a facade type's exhaustiveness, hidden fields, or kind appears there.
   - Contributors and agents read crate notes and `AGENTS.md` before adding dependencies. What they read matches the manifests.
-  - The harness-capabilities activation suite drives runs through a loop built only from items the facade exports for every dependent.
+  - The harness-plugins activation suite drives runs through a loop built only from items the facade exports for every dependent.
 - Inputs and outputs:
   - In tracebacks, chunk names render as `@crates/promptforge-internal/lua/src/__impl_coro.lua` (shim), `__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua` under that same directory.
   - `cargo +nightly-2026-09-05 xtask api --check` and `--bless` read one rustdoc JSON build of the facade with default features. They write or compare listing lines in this notation:
@@ -132,11 +132,11 @@ Behavior changes only where the debts touch observable output. That means traceb
 The four fixes are independent and touch different components. They overlap in only four shared files: `AGENTS.md`, `crates/promptforge-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. The facade's public interface shrinks: one Cargo feature and one feature-gated module go away, and nothing is added. `build-xtask`'s surface check drops to one build and renders three more facts per type line. The dependency graph keeps its doctest-only upward dev edges, which repository policy now names as an exception.
 
 - Architecture:
-  - Graph: the five internal crates keep their `promptforge` dev-dependency for doctests only, but the Engine's entry no longer enables `test-support`. `harness-capabilities` loses its facade dev-dependency; its normal `promptforge` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
+  - Graph: the five internal crates keep their `promptforge` dev-dependency for doctests only, but the Engine's entry no longer enables `test-support`. `harness-plugins` loses its facade dev-dependency; its normal `promptforge` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
   - The Engine keeps its own `test_support` module, gated by `#[cfg(any(test, feature = "test-support"))]` (`crates/promptforge-internal/engine/src/lib.rs` line 13). The `models_loop` bench keeps its own `required-features = ["test-support"]`.
 - Modules and interfaces:
   - `promptforge` (the facade) exports exactly the items in its re-blessed listing, all of them reachable with default features. Its `[features]` table disappears if it ends up empty.
-  - `harness-capabilities` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
+  - `harness-plugins` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
   - `build-xtask` `api` module: one rustdoc build with default features, so findings carry no per-build label. The listing notation is the one in Functional Specification, documented in the module docs of `crates/build-xtask/src/api.rs`.
   - `build-xtask` facade shape check: facade items may carry only doc attributes, alongside the existing rules on modules and single-item `pub use`.
   - Repository policy: `AGENTS.md` line 35 gains this exception text: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules." The six statements listed under `doctest-cycle` each name that exception and keep their meaning for every other dependency.
@@ -170,11 +170,11 @@ Each debt gets a check that fails while the debt exists and passes once it is go
       - unit, tuple, and struct variants, one of them non-exhaustive
     - Command: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
 - Integration and end-to-end:
-  - `test-support`: `cargo nextest run --locked -p harness-capabilities` passes with the same test count as before the change. `cargo test -p promptforge` with default features builds and runs the facade suite. `cargo test -p promptforge-engine --all-features --doc` passes the `drive_tokio` example.
+  - `test-support`: `cargo nextest run --locked -p harness-plugins` passes with the same test count as before the change. `cargo test -p promptforge` with default features builds and runs the facade suite. `cargo test -p promptforge-engine --all-features --doc` passes the `drive_tokio` example.
   - `listing-fidelity`: `cargo +nightly-2026-09-05 xtask api --bless`, then `cargo +nightly-2026-09-05 xtask api --check`, passes with one build. In the listing diff, only the new annotations change and the set of listed items is unchanged.
   - `doctest-cycle`: `cargo tree --workspace -e dev -i promptforge --locked --depth 1` lists the facade's direct dev-dependents.
     - Among them, the crates under `crates/promptforge-internal/` are exactly types, model-client, parser, store, and engine.
-    - The Harness crates it also lists are outside this check: `harness-log` stays, and `harness-capabilities` disappears once the test-support change removes its edge.
+    - The Harness crates it also lists are outside this check: `harness-log` stays, and `harness-plugins` disappears once the test-support change removes its edge.
     - Each of the six statements, and `AGENTS.md` line 35, agrees with that output.
 - Regression, security, and performance:
   - `listing-fidelity`: a check-mode fixture blesses a fixture facade, adds `#[non_exhaustive]` to a unit struct in it, and asserts that `--check` reports a difference.
@@ -360,8 +360,8 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Component: test-support
 - Component placement: second. It is the only component that changes the dependency graph, so `doctest-cycle` follows it and reviews the final graph. Its collapse edits to `crates/build-xtask/src/api.rs`, `crates/build-xtask/src/api/listing-tests.rs`, and `crates/build-xtask/src/api/fixture-test-support.rs` (sites listed below) land before `listing-fidelity` adds to those files. That keeps Step 2's line numbers exact, and the new listing fixtures get written once, against the single-build loader.
 - Pieces: two consumer pieces and one removal piece, built in that order within one commit. The removal comes last, because deleting the feature breaks any consumer still using it. The removal's own parts also break each other when split: `cargo xtask api` passes `test-support` to its second rustdoc build, which fails once the feature is gone, and the facade shape check's cfg allowance exists only for the module being deleted.
-- Before editing anything, record the test count from `cargo nextest run --locked -p harness-capabilities`.
-- Consumer piece 1, the harness-capabilities activation suite. `crates/harness/capabilities/tests/it/support.rs`:
+- Before editing anything, record the test count from `cargo nextest run --locked -p harness-plugins`.
+- Consumer piece 1, the harness-plugins activation suite. `crates/harness/capabilities/tests/it/support.rs`:
   - Add a private synchronous store-only loop over `Run::step` and `Run::resume`. On `Step::Pending` holding `Effect::Store`, it answers with `EffectAnswer::Store` from `vfs::perform_store_op`. On `Step::Done` it returns the `RunResult`. On any other effect it panics, naming the effect. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
   - Replace the `drive_tokio` call on line 78 with that loop, and make `run_activated` synchronous.
   - Remove the `promptforge::test_support` import on line 15. Rewrite the doc comment on lines 61-65 to describe the store-only loop and its panic instead of the Engine's tokio driver.
@@ -406,14 +406,14 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - `.github/workflows/ci.yml` line 144: the comment above the Facade docs job says the topic docs "must stand without the test-support module"; fix it so it states only that the facade docs build with default features.
 - `AGENTS.md` line 55 now reads "so the facade's docs build with default features", and line 56 drops "with and without `test-support`".
 - Verification:
-  - `cargo nextest run --locked -p harness-capabilities` passes with the recorded test count.
+  - `cargo nextest run --locked -p harness-plugins` passes with the recorded test count.
   - `cargo test -p promptforge-engine --all-features --doc` passes, including the `drive_tokio` example.
   - `cargo test -p build-xtask` passes, including the new `facade_shape-tests.rs` violation case.
   - `cargo test -p promptforge` builds and runs the facade suite with default features.
   - `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only` passes. The nightly-only fixtures in `load-tests.rs`, `listing-tests.rs`, and `listing-compact-tests.rs` call the new `report` signature.
   - `cargo +nightly-2026-09-05 xtask api --check` passes with one rustdoc build and no listing change.
   - `rg -n "test-support|test_support" crates/promptforge` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose. The workspace still resolves, which proves no manifest enables `promptforge/test-support`, because Cargo rejects a missing feature.
-- Commit: `support.rs`, `activation.rs`, `assembly.rs`, and the harness-capabilities manifest; `tokio_driver.rs` and the Engine manifest; the facade files, the build-xtask files, `ci.yml`, and `AGENTS.md`.
+- Commit: `support.rs`, `activation.rs`, `assembly.rs`, and the harness-plugins manifest; `tokio_driver.rs` and the Engine manifest; the facade files, the build-xtask files, `ci.yml`, and `AGENTS.md`.
 
 </step-2>
 
@@ -434,7 +434,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `crates/promptforge-internal/README.md` line 11
 - Confirm that the `promptforge` dev-dependency in `crates/promptforge-internal/engine/Cargo.toml` (line 53 at `9eac5f3b`, shifted after Step 2 shortened its comment) reads `promptforge.workspace = true` under a comment that gives only the doctest reason.
 - Unchanged: the five `promptforge` dev-dependencies (types line 24, model-client line 28, parser line 28, store line 23, engine line 53) and the per-item doc examples. Do not edit `vibe/2026-09-23-1-promptforge-api-firewall.md`, `vibe/archdoc.md`, or the out-of-scope "hidden seams" sentence on `crates/promptforge-internal/store/AGENTS.md` line 6. Add no structural check that the dev-dependency stays doctest-only.
-- Verification: run `cargo tree --workspace -e dev -i promptforge --locked --depth 1`. The crates under `crates/promptforge-internal/` in its output are exactly types, model-client, parser, store, and engine. It also lists `harness-log`, which is outside this check; `harness-capabilities` no longer appears after Step 2. Each of the six statements and `AGENTS.md` line 35 agrees with that output.
+- Verification: run `cargo tree --workspace -e dev -i promptforge --locked --depth 1`. The crates under `crates/promptforge-internal/` in its output are exactly types, model-client, parser, store, and engine. It also lists `harness-log`, which is outside this check; `harness-plugins` no longer appears after Step 2. Each of the six statements and `AGENTS.md` line 35 agrees with that output.
 - Commit: `AGENTS.md`, the five crate `AGENTS.md` files, and `crates/promptforge-internal/README.md`.
 
 </step-3>

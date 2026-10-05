@@ -18,7 +18,7 @@ todos:
     content: "InferenceBroker::chat drops its transitional OnDelta, and OnDelta leaves the runner and facade; StreamDelta leaves the Engine (bless public-api.txt) for harness-gateway-client with GatewayBroker::chat_streaming and routed-model labels; Workshop per-run broker streams through it with round ids; WorkshopBroker substitutes the current pick per round and warns when the pick's context window is smaller than the launch binding's"
     status: pending
   - id: drop-tokio
-    content: "Delete cancel.rs, harness::cancel and cancel.md, and the tokio and tokio-util deps of harness and every harness-internal crate; harness_bans becomes a dependency ban and the tokio clippy.toml entries go; the runner and capabilities Invariants name the ban"
+    content: "Delete cancel.rs, harness::cancel and cancel.md, and the tokio and tokio-util deps of harness and every harness-internal crate; harness_bans becomes a dependency ban and the tokio clippy.toml entries go; the runner and plugins Invariants name the ban"
     status: pending
   - id: docs
     content: Update archdoc, crates/README.md, crate READMEs, cicerone harness plan, Engine doc pages, and guide chapters; regenerate guide exports (the facade pages change in the Workshop and tokio steps so their doctests pass at every commit)
@@ -56,11 +56,11 @@ The Harness still serves Workshop's agent window. One long-lived Harness keeps a
   - Debt carried into this work, with ids from `vibe/2026-10-02-3-debt-removal.md`:
     - The built-in `chat` agent requires `promptforge/web`, which only `harness-web`, above the Harness, supplies (D1-1).
     - A recorder failure after `begin_run` drops the run from the session's `run_ids` and transcript (D1-5).
-    - `CapabilityRegistry` derives a `Clone` that nothing uses.
+    - `PluginRegistry` derives a `Clone` that nothing uses.
     - The Harness builds its own input broker per run and exposes `RunServices::insert_input_broker`, whose parameter type outside crates cannot name.
     - `harness-web` spawns fetches onto the Host's runtime without a tag.
 - Goals:
-  - The Host builds one Harness instance per run from its recorder, inference broker, timer, capability registry, and services, runs one prompt given as text over a VFS the Host supplies, and gets back a report holding the outcome and the declared output.
+  - The Host builds one Harness instance per run from its recorder, inference broker, timer, Plugin registry, and services, runs one prompt given as text over a VFS the Host supplies, and gets back a report holding the outcome and the declared output.
   - The Host can stop the work in flight and keep the run going, and can cancel the run.
   - Workshop owns conversations, reattach, input waits, agent discovery, the built-in `chat` agent, and failure reports.
   - The Host's broker can swap the model between rounds, and every record names the model the broker routed each round to.
@@ -96,7 +96,7 @@ The Harness still serves Workshop's agent window. One long-lived Harness keeps a
 A Host builds a Harness for each run, takes a control handle from it, and awaits the run future, which it may spawn on any executor. The Harness resolves the launch model through the broker, puts the input in place, prepares the prompt, writes every record to the Host's recorder, drives the run, and returns a report. Stop drops the work in flight and keeps the run; cancel ends it. Workshop keeps each conversation, its transcript, its questions to the operator, and its streamed pieces in a new Workshop crate, and its broker swaps models per round.
 
 - Actors and workflows:
-  - A Host calls `Harness::new(recorder, broker, timer, capabilities, services)`, then `harness.control()` for a cloneable `RunControl`, then awaits `harness.run(request)`. The run future is `Send`, so a Host may spawn it.
+  - A Host calls `Harness::new(recorder, broker, timer, plugins, services)`, then `harness.control()` for a cloneable `RunControl`, then awaits `harness.run(request)`. The run future is `Send`, so a Host may spawn it.
   - `RunRequest` holds the run's name, the prompt's source text, the argument text, the optional input text, the VFS, and a `HostSnapshot`. The name becomes every event's `execution` and the run metadata's `name`. The Harness parses the source text, records the parse events, and records a parse failure as a failed run.
   - The Harness resolves the launch model as today: the snapshot's selection in `broker.models()`, or with no selection the catalog's first model. It then puts the input in place at the prompt's declared `input:` path, prepares, records, drives the run, and reads the declared `output:` file.
   - Workshop launches an agent by name, a Workshop-only feature. Its agent menu (`crates/workshop/ui/src/parts/agent/agent-menu.ts`) lists the `.md` files in Workshop's own agents folder setting (`AgentsConfig.path`, `crates/workshop/support/src/config.rs:160`) plus the built-in `chat`. `workshop-agents` accepts only names the menu lists (the check `Harness::launch` makes today), reads the chosen file into text, mints a conversation id that becomes the run's name, and builds the run's pieces:
@@ -173,7 +173,7 @@ flowchart LR
 ```
 
 - Architecture:
-  - One Harness per run, and each run owns its state. A Host shares its recorder, broker, timer, and services behind `Arc`s and clones its `CapabilityRegistry` for each run, so the registry's `Clone` is used.
+  - One Harness per run, and each run owns its state. A Host shares its recorder, broker, timer, and services behind `Arc`s and clones its `PluginRegistry` for each run, so the registry's `Clone` is used.
   - The effect loop is one future:
     - Effects in flight sit in a `FuturesUnordered` as `Abortable` futures under `catch_unwind`, each keyed by its effect id, provenance, and whether it is a question to the operator.
     - The loop waits on the next answer, the Engine cancel handle's `cancelled()`, and the stop signal together, with runtime-agnostic combinators from `futures-util`.
@@ -186,14 +186,14 @@ flowchart LR
   - Harness, in `harness-runner` and re-exported from the facade:
 
     ```rust
-    pub struct Harness { /* recorder, broker, timer, capabilities, services, control */ }
+    pub struct Harness { /* recorder, broker, timer, plugins, services, control */ }
 
     impl Harness {
         pub fn new(
             recorder: Arc<dyn RunRecorder>,
             broker: Arc<dyn InferenceBroker>,
             timer: Arc<dyn Timer>,
-            capabilities: CapabilityRegistry,
+            plugins: PluginRegistry,
             services: HostServices,
         ) -> Harness;
         pub fn control(&self) -> RunControl;
@@ -268,9 +268,9 @@ flowchart LR
     - The conversation table, keyed by a Workshop-minted id.
     - A conversation's transcript, which numbers every event from zero and stamps `reply` from the event's round.
     - Conversation state (moved `SessionState`) and failure reports (moved `FailureKind` and `SessionFailure`), derived from `ModelTurnFailed` and `ToolCallFailed` events and the run report.
-    - The input broker (moved `WaitRegistry`, `WaitFrame`, `WaitError`, and `SessionInputBroker`, implementing `InputBroker`). `InputBroker::wait` is a plain async method over `std` types (`crates/harness-internal/capabilities/src/input.rs:40-46`).
+    - The input broker (moved `WaitRegistry`, `WaitFrame`, `WaitError`, and `SessionInputBroker`, implementing `InputBroker`). `InputBroker::wait` is a plain async method over `std` types (`crates/harness-internal/plugins/src/input.rs:40-46`).
       - Workshop clones its base `HostServices` for each run and calls `provide(&INPUT_BROKER, broker)` on the clone.
-      - `provide` refuses a duplicate (`crates/harness-internal/capabilities/src/service.rs:177-190`), and `insert` is crate-private, so the base services leave `INPUT_BROKER` for the per-run clone to fill.
+      - `provide` refuses a duplicate (`crates/harness-internal/plugins/src/service.rs:177-190`), and `insert` is crate-private, so the base services leave `INPUT_BROKER` for the per-run clone to fill.
     - Conversation channels that close when the conversation ends, so the status reporter, which ends when its channels close (`crates/workshop/server/src/agents/status.rs:44-58`), ends with it.
     - A recorder tee implementing `RunRecorder` over an inner `Arc<dyn RunRecorder>`. `workshop-server` passes `TursoRecorder` as the inner recorder and writes the run log's `agent` column, because `workshop-run-log` is a feature crate beside `workshop-agents`.
     - Discovery over the agents folder, and the built-in `agents/chat.md`.
@@ -288,12 +288,12 @@ flowchart LR
   - Delete `crates/harness-internal/sessions` and its workspace member. Move its surviving code and tests into `workshop-agents` or the runner as listed above.
   - Facade `crates/harness/src/lib.rs`:
     - Exports `Harness`, `RunControl`, `RunRequest`, `RunReport`, `HarnessError`, `HostSnapshot`, `CurrentModelError`, `OutputError`, `InferenceBroker`, `Timer`, `BoxFuture`, `display_chain`, and `USER_INPUT_ASK_TOOL`.
-    - `capability` adds `InputBroker`, `InputError`, and `INPUT_BROKER`.
+    - `plugin` adds `InputBroker`, `InputError`, and `INPUT_BROKER`.
     - `record` keeps its items, with `RunMeta`'s renamed fields.
     - `vfs` keeps its items: `Origin`, `VfsError`, and `VfsRef`.
     - The `cancel` module and `cancel.md` go.
-  - `crates/harness-internal/capabilities`: delete `RunServices::insert_input_broker`. A Host supplies its input broker through `HostServices` under `INPUT_BROKER`.
-  - Performer trait docs: `InferenceBroker` and `Timer` in the runner, and `Tool` (`crates/harness-internal/capabilities/src/tool.rs:87-93`) and `InputBroker` (`src/input.rs:33-38`) in capabilities, state that a performer must not block while polled. `Tool`'s "must not panic (a panic unwinds the run)" becomes "must not panic (a panic answers its effect `Dropped` and is logged)".
+  - `crates/harness-internal/plugins`: delete `RunServices::insert_input_broker`. A Host supplies its input broker through `HostServices` under `INPUT_BROKER`.
+  - Performer trait docs: `InferenceBroker` and `Timer` in the runner, and `Tool` (`crates/harness-internal/plugins/src/tool.rs:87-93`) and `InputBroker` (`src/input.rs:33-38`) in plugins, state that a performer must not block while polled. `Tool`'s "must not panic (a panic unwinds the run)" becomes "must not panic (a panic answers its effect `Dropped` and is logged)".
   - `crates/harness-internal/runner`: delete `src/spawn.rs`, `src/cancel.rs`, `TokioTimer`, `prepare_run` and its file read with `PrepareError::Read`, `Services.input`, `Services.on_delta`, `Services.agent`, the effect loop's answer channel and `Answering` guard, and the `tokio` and `tokio-util` dependencies. `Services.session_id` becomes `name`. Add `futures-util`.
   - `HarnessConfig`, `agents_path`, `Harness::discover`, and `LaunchRequest.agent` leave with `harness-sessions`. `RunRequest.source` is the Harness's one prompt input.
   - `promptforge` public API: the Engine items above, regenerated into `crates/promptforge/public-api.txt`.
@@ -522,7 +522,7 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
   - JS tests use `node:test`: Workshop UI in `crates/workshop/ui/test/*.mjs` and `src/**/*.test.mjs`, `look` and `platform` in `test/**/*.mjs`, config UI in `src/**/*.test.mjs`, and tool scripts beside their source as `tools/*.test.mjs`.
   - Structural checks live only in `build-xtask` and need explicit user approval to add.
 - Directory map:
-  - `crates/`: every Rust crate plus the TypeScript packages, grouped by family. `promptforge` (the Engine facade, with `public-api.txt`) and `promptforge-internal/` (engine, lua, parser, types, vfs, model-client). `harness`, `harness-gateway-client`, `harness-web`, and `harness-internal/` (runner, capabilities, sessions). `gateway/` (app binary and private crates, including `stt/` and `config-ui/` with its TS `ui/`), plus `gateway-api-types` and `gateway-api-discovery`. `workshop/` (Tauri `desktop`, `server`, `server-api` facade, tier crates, and the npm workspace `ui`, `look`, `platform`). `shared-error-source`, `shared-loopback`, and the `shared-ui` TS package. `build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda` (build tooling). `workspace-hack` (cargo-hakari).
+  - `crates/`: every Rust crate plus the TypeScript packages, grouped by family. `promptforge` (the Engine facade, with `public-api.txt`) and `promptforge-internal/` (engine, lua, parser, types, vfs, model-client). `harness`, `harness-gateway-client`, `harness-web`, and `harness-internal/` (runner, plugins, sessions). `gateway/` (app binary and private crates, including `stt/` and `config-ui/` with its TS `ui/`), plus `gateway-api-types` and `gateway-api-discovery`. `workshop/` (Tauri `desktop`, `server`, `server-api` facade, tier crates, and the npm workspace `ui`, `look`, `platform`). `shared-error-source`, `shared-loopback`, and the `shared-ui` TS package. `build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda` (build tooling). `workspace-hack` (cargo-hakari).
   - `guide/`: user guide books and site sources (built by `cargo xtask site`).
   - `prompts/`: example prompt programs.
   - `local/`: local gateway config, profiles, prompts, and STT fixtures for development runs.
@@ -605,7 +605,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 - Component: Per-run Harness
 - Depends on: step 1.
-- Pieces: the runner's per-run API and its effect loop, the Host-supplied input broker in capabilities, and `harness-sessions` rebuilt on both. Built jointly in one commit: `prepare` loses its file read and its input broker, `spawn.rs` goes, and `InferenceBroker::chat` changes, so `harness-sessions` and every broker break unless they change in the same commit. `Harness::new` takes its final shape here, once. The facade's exports stay those of `harness-sessions`, except that `HostSnapshot` now comes from the runner and `InferenceBroker::chat` gains its `Round`.
+- Pieces: the runner's per-run API and its effect loop, the Host-supplied input broker in plugins, and `harness-sessions` rebuilt on both. Built jointly in one commit: `prepare` loses its file read and its input broker, `spawn.rs` goes, and `InferenceBroker::chat` changes, so `harness-sessions` and every broker break unless they change in the same commit. `Harness::new` takes its final shape here, once. The facade's exports stay those of `harness-sessions`, except that `HostSnapshot` now comes from the runner and `InferenceBroker::chat` gains its `Round`.
 - `crates/harness-internal/runner`:
   - New `src/harness.rs`: `Harness` with `new`, `control`, and `run`, plus `RunRequest`, `RunReport`, and `HarnessError`, as the Technical Design writes them and `#[non_exhaustive]` where the crate's conventions call for it. `run`'s future is `Send`. It resolves the launch model as today, puts the input in place at the declared `input:` path, prepares from `RunRequest.source`, records, drives the run, and reads the declared `output:` file. `RunRequest.name` becomes every event's `execution`. A cancel during `models()` returns `Ok` with `run_id: None` and `Cancelled`. `DriveError::Stalled` (`src/effect_loop.rs:73`) becomes `HarnessError::Stalled`.
   - New `src/harness-control.rs`, wired from `harness.rs` with `#[path]`: `RunControl`, holding a clone of the run's Engine `CancelHandle` and a stop flag with a `futures-util` `AtomicWaker`. `stop_round` sets the flag and wakes the loop; `cancel` sets the Engine cancel flag.
@@ -625,11 +625,11 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - `src/lib.rs`: declare the new modules. The module doc (`:1-8`) and the spawn Invariant (`:19-23`) say the Harness polls every effect inside the run's future, uses `futures-util` for its async needs, and requires that performers not block while polled.
   - `clippy.toml`: the comment stops naming the `spawn` module. Its entries stay until step 7.
   - `Cargo.toml`: add `futures-util`. tokio stays only for `cancel.rs` until step 7, so trim its features to what `cancel.rs` uses. The description (`:9`) drops "on tokio" and the spawn wrapper.
-- `crates/harness-internal/capabilities`:
-  - `src/capability.rs`: delete `RunServices::insert_input_broker` (`:193-220`), so a run's input broker comes only from `HostServices` under `INPUT_BROKER`. Fix the docs that name it (`src/user_input.rs:43`, `:71`).
+- `crates/harness-internal/plugins`:
+  - `src/plugin.rs`: delete `RunServices::insert_input_broker` (`:193-220`), so a run's input broker comes only from `HostServices` under `INPUT_BROKER`. Fix the docs that name it (`src/user_input.rs:43`, `:71`).
   - `src/tool.rs:87-93` and `src/input.rs:33-38`: a performer must not block while polled. `Tool`'s "must not panic (a panic unwinds the run)" becomes "must not panic (a panic answers its effect `Dropped` and is logged)".
   - `src/lib.rs:30-32`: the spawn Invariant becomes the runner's new rule.
-  - `CapabilityRegistry` keeps its `Clone`, which each run's clone now uses.
+  - `PluginRegistry` keeps its `Clone`, which each run's clone now uses.
 - `crates/harness-internal/sessions`, rebuilt on the per-run Harness with its supervisor, relaunch, and facade exports kept:
   - New `src/spawn.rs`: `spawn_session` and `spawn_blocking_launch`, moved from the runner with their `#[expect(clippy::disallowed_methods)]`. This crate still spawns sessions and reads agent files on tokio until step 4 (`src/runtime.rs:22`, `:229`, `:241`), and its `clippy.toml` bans the raw calls. `src/input-tests.rs` (`:13`, `:188`, `:216`, `:240`) spawns through it.
   - `src/session/run.rs`: each run builds its own `Harness` from a recorder tee, a per-run broker, `TokioTimer`, a clone of the registry, and a per-run clone of the base services with the session's input broker supplied by `HostServices::provide(&INPUT_BROKER, ...)`. Its `RunRequest` holds the agent file's text as `source` and a `HostSnapshot` built from the bindings, so a revoke still reaches a relaunch.
@@ -654,10 +654,10 @@ Each step is one commit holding its code and its tests, and runs only its touche
     - a panicking broker answers `Dropped`, and a `Vfs` effect is answered inline as it is issued;
     - one run completes on the test's own thread under a thread-parking `block_on` written in the test, as `crates/promptforge/src/cancel.md:127-145` writes one, built on the workspace's existing dependencies.
   - Converted runner tests: `tests/it/support.rs`, `effect_loop.rs`, `effect_loop-broker.rs` (the broker receives each round's `Round`, origin `Chat` or `Infer`, and the Harness passes no `on_delta`), `effect_loop-recorder.rs`, `effect_loop-vfs.rs`, `performers.rs` (a scripted `Timer` in place of `TokioTimer`), and the five `prepare*.rs` files (source text in place of a prompt path).
-  - Capabilities: `src/user_input-tests.rs:56`, `src/capability-tests.rs:143-173`, and `tests/it/needs.rs:114` supply the broker through `HostServices::provide`.
+  - Plugins: `src/user_input-tests.rs:56`, `src/plugin-tests.rs:143-173`, and `tests/it/needs.rs:114` supply the broker through `HostServices::provide`.
   - `harness-sessions`: the suite passes, changed only where it built runs through `prepare_run` or read the delta sink (`tests/it/end_to_end.rs`, `tests/it/support.rs`) and for the broker signature.
   - Brokers and facade: `crates/harness/tests/suite/broker.rs`, `crates/harness-gateway-client/src/broker-tests.rs`, and `crates/workshop/server/src/agents/tests.rs` take the new parameter.
-  - Run `cargo nextest run --locked -p harness-runner -p harness-capabilities -p harness-sessions -p harness -p harness-gateway-client --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on them with `--all-targets --all-features -- -D warnings`, `cargo doc -p harness --no-deps`, and `cargo test -p build-xtask`.
+  - Run `cargo nextest run --locked -p harness-runner -p harness-plugins -p harness-sessions -p harness -p harness-gateway-client --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on them with `--all-targets --all-features -- -D warnings`, `cargo doc -p harness --no-deps`, and `cargo test -p build-xtask`.
   - Checkpoint: `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo nextest run --locked -p workshop-server --features headless` pass with test changes only for the `InferenceBroker` signature. Stop here until they pass.
 
 </step-2>
@@ -676,7 +676,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
     - the conversation table, keyed by a Workshop-minted id that becomes each run's name (from `src/runtime.rs`);
     - each conversation's state and failure reports (the moved `SessionState`, `FailureKind`, and `SessionFailure`), derived from recorded `ModelTurnFailed` and `ToolCallFailed` events and from the `RunReport`;
     - the transcript (from `src/session-transcript.rs`), numbering every event from zero and stamping `reply` from the event's `round` in place of `reply_stamp`;
-    - the input broker and its waits (the moved `WaitRegistry`, `WaitFrame`, `WaitError`, and `SessionInputBroker`, from `src/input.rs` and `src/input-tool.rs`), implementing `harness::capability::InputBroker`;
+    - the input broker and its waits (the moved `WaitRegistry`, `WaitFrame`, `WaitError`, and `SessionInputBroker`, from `src/input.rs` and `src/input-tool.rs`), implementing `harness::plugin::InputBroker`;
     - discovery over Workshop's agents folder (`AgentsConfig.path`, `crates/workshop/support/src/config.rs:160`), from `src/discovery.rs`, accepting only the names the agent menu lists, and the built-in `agents/chat.md`;
     - `TokioTimer`;
     - conversation channels that close when the conversation ends, so the status reporter, which ends when its channels close (`crates/workshop/server/src/agents/status.rs:44-58`), ends with it;
@@ -689,7 +689,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - `src/lib.rs`: the `Tier: server` Invariant (`:28-36`) adds `workshop-agents` to the feature crates, and the module doc (`:11-17`) names `workshop-agents` as the conversation layer.
   - `Cargo.toml`: depend on `workshop-agents`.
 - Facade `crates/harness`:
-  - `src/lib.rs`: export `Harness`, `RunControl`, `RunRequest`, `RunReport`, `HarnessError`, `HostSnapshot`, `CurrentModelError`, `OutputError`, `InferenceBroker`, `Timer`, `BoxFuture`, `display_chain`, `USER_INPUT_ASK_TOOL`, and, until step 5, `OnDelta`. `capability` adds `InputBroker`, `InputError`, and `INPUT_BROKER`. `record` and `vfs` keep their items, and `cancel` stays until step 7. `Cargo.toml` drops `harness-sessions`.
+  - `src/lib.rs`: export `Harness`, `RunControl`, `RunRequest`, `RunReport`, `HarnessError`, `HostSnapshot`, `CurrentModelError`, `OutputError`, `InferenceBroker`, `Timer`, `BoxFuture`, `display_chain`, `USER_INPUT_ASK_TOOL`, and, until step 5, `OnDelta`. `plugin` adds `InputBroker`, `InputError`, and `INPUT_BROKER`. `record` and `vfs` keep their items, and `cancel` stays until step 7. `Cargo.toml` drops `harness-sessions`.
   - `src/lib.md` tours: run a prompt; answer the operator by supplying an input broker; stop a round and cancel a run; stream from your own broker. `vfs.md`, `record.md`, and `capability.md` move to the per-run API. Each block has a hidden offline broker and a hidden tokio-backed `Timer`.
   - `src/cancel.md`: rewrite its hidden `desk` and its loop (`:16-90`) on the per-run API, because they build a session Harness, and point its run-stopping prose (`:7`, `:123`) at `RunControl`. Step 7 deletes the page.
   - `tests/suite/broker.rs` and `launch.rs` become per-run tests: a section's round reaches the broker with origin `Chat` and a nested infer round with `Infer`, and a run over a prompt string reports its output.
@@ -727,7 +727,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - `crates/harness-internal/runner/src/recorder.rs:117-119`: `RunMeta.session_id` becomes `name`, and `agent` goes. The Harness writes `RunRequest.name` there. Update `src/recorder-memory.rs` and the facade's `record.md`.
 - `crates/workshop/run-log`: the `session_id` column becomes `name` in the schema (`src/schema.rs:19-22`, `:48-50`, `:71-74`) and the reader (`src/read.rs:22-24`). The `agent` column stays: `TursoRecorder` gains a per-run handle that holds the launched agent and writes it on `begin_run`, and `workshop-server`'s launch passes that handle to the tee as its inner recorder.
 - `workshop-agents`: the tee stops filling `RunMeta.agent`.
-- `crates/build-xtask/src/harness_bans-tests.rs:152-174`: the live test expects `runner` and `capabilities` beside the facade, since it names `sessions` today and would fail here. Step 7 rewrites it for the new ban.
+- `crates/build-xtask/src/harness_bans-tests.rs:152-174`: the live test expects `runner` and `plugins` beside the facade, since it names `sessions` today and would fail here. Step 7 rewrites it for the new ban.
 - Run `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`.
 - Tests:
   - `crates/workshop/server/tests/it/agents/lifecycle.rs:229-231`: the meta assertions read `name` and the agent column Workshop wrote.
@@ -794,14 +794,14 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - `crates/harness-internal/capabilities/clippy.toml:11-13`: remove the tokio entries.
 - Facade `crates/harness`: delete the `cancel` module (`src/lib.rs:26-35`) and `src/cancel.md`, and fix every link to that page from `lib.md` and `record.md`.
 - `crates/build-xtask/src/harness_bans.rs`: replace the clippy-ban check with a ban on `tokio` and `tokio-util` as normal dependencies of `harness` and every `crates/harness-internal` crate, read from each `Cargo.toml`'s dependency tables. Rewrite the module doc (`:1-13`).
-- `## Invariants` in `crates/harness-internal/runner/src/lib.rs` and `crates/harness-internal/capabilities/src/lib.rs`: the no-runtime rule names the ban that enforces it.
+- `## Invariants` in `crates/harness-internal/runner/src/lib.rs` and `crates/harness-internal/plugins/src/lib.rs`: the no-runtime rule names the ban that enforces it.
 - Run `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`.
 - Tests:
   - `crates/build-xtask/src/harness_bans-tests.rs`: a fixture manifest with tokio as a normal dependency of a `harness-internal` crate is rejected, and one with tokio as a dev-dependency is accepted. The clippy fixtures go, and the live test (`:152-174`) checks the real crates under the new ban.
   - `rg -n '^tokio|^tokio-util' crates/harness/Cargo.toml crates/harness-internal --glob Cargo.toml` shows only `[dev-dependencies]` lines.
-  - For `harness`, `harness-runner`, and `harness-capabilities`, `cargo tree --locked -e normal -p <crate> --prune workspace-hack` lists no `tokio` or `tokio-util`. The prune is needed because `workspace-hack` lists tokio as a normal dependency (`crates/workspace-hack/Cargo.toml:67`) and every member depends on it.
+  - For `harness`, `harness-runner`, and `harness-plugins`, `cargo tree --locked -e normal -p <crate> --prune workspace-hack` lists no `tokio` or `tokio-util`. The prune is needed because `workspace-hack` lists tokio as a normal dependency (`crates/workspace-hack/Cargo.toml:67`) and every member depends on it.
   - Step 2's thread-parking `block_on` test still passes.
-  - Run `cargo nextest run --locked -p harness-runner -p harness-capabilities -p harness -p build-xtask --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on them, and `cargo doc -p harness --no-deps`.
+  - Run `cargo nextest run --locked -p harness-runner -p harness-plugins -p harness -p build-xtask --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on them, and `cargo doc -p harness --no-deps`.
 
 </step-7>
 
@@ -814,7 +814,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - Pieces: the docs that describe the finished wiring, and the exit criteria. Built jointly: the docs describe what steps 1 to 7 built, and the exit criteria run once here. The Engine and facade pages already changed with their items in steps 1, 2, 3, 5, and 7.
 - `vibe/archdoc.md`: the Harness bullet (`:10`) says the Harness runs one prompt per instance for a Host that supplies its recorder, broker, timer, registry, and services, polls every effect inside the run's future, and owns no runtime, sessions, supervisor, or transcripts. The workshop UI bullet (`:15`) says Workshop drives its agent conversations through `workshop-agents` over a per-run Harness.
 - `crates/README.md`: the `harness-gateway-client` entry (`:19`) names `chat_streaming`, `StreamDelta`, and routed-model labels.
-- Crate READMEs: `crates/harness-internal/runner/README.md` and `crates/harness-internal/capabilities/README.md` describe the per-run Harness, the Host-supplied timer and input broker, and the absence of a runtime. `crates/harness-gateway-client/README.md` describes streaming and labels. `crates/workshop/run-log/README.md` names the `name` column.
+- Crate READMEs: `crates/harness-internal/runner/README.md` and `crates/harness-internal/plugins/README.md` describe the per-run Harness, the Host-supplied timer and input broker, and the absence of a runtime. `crates/harness-gateway-client/README.md` describes streaming and labels. `crates/workshop/run-log/README.md` names the `name` column.
 - `tools/cicerone/plans/harness.md`: the concepts and tours that describe sessions, deltas, and relaunch (`:18-26`, `:38-76`, `:146-202`) describe the per-run API, `<page-cancel>` (`:112-142`) goes, and the inventory (`:88-104`) lists the facade's final exports.
 - Guide:
   - `guide/src/language/11-conversations.md:267`: the Host's broker streams a section's own rounds, a `models.infer` round reaches the broker marked as an infer round, and the Harness streams nothing.

@@ -93,7 +93,7 @@ The promptforge repository's Engine API is split between `promptforge-api-runtim
     All of these are in `AGENTS.md`.
   - Builds stay on the stable toolchain (`rust-toolchain.toml`). Nightly is used only to generate rustdoc JSON for the closure check.
 - Open questions:
-  - How can the need for `promptforge` to offer testing facilities to outside crates be eliminated, so the facade has no `test-support` feature at all? This does not block this plan, which keeps the forwarded `test-support` feature as the one temporary exception to zero surface growth for tests; the work is deferred (see Deferred and Out of Scope). Today the only outside user is `harness-capabilities`, whose integration tests enable `test-support` as a dev-dependency (`crates/harness/capabilities/Cargo.toml` line 27) and import `Performers` and `drive_tokio` (`crates/harness/capabilities/tests/it/support.rs` lines 14 and 78).
+  - How can the need for `promptforge` to offer testing facilities to outside crates be eliminated, so the facade has no `test-support` feature at all? This does not block this plan, which keeps the forwarded `test-support` feature as the one temporary exception to zero surface growth for tests; the work is deferred (see Deferred and Out of Scope). Today the only outside user is `harness-plugins`, whose integration tests enable `test-support` as a dev-dependency (`crates/harness/capabilities/Cargo.toml` line 27) and import `Performers` and `drive_tokio` (`crates/harness/capabilities/tests/it/support.rs` lines 14 and 78).
 
 ## Functional Specification
 
@@ -103,8 +103,8 @@ The Harness and Hosts depend on `promptforge` alone and read a module tree group
   - A Host developer adds the `promptforge` dependency, imports only `promptforge::` paths, and reads the docs from the `lib.md` table of contents down to module topic pages and then items.
   - An Engine contributor uses internal paths freely inside `crates/promptforge-internal/`. To expose something to dependents, they add a single-item `pub use` to the facade. That changes `public-api.txt`, so the change gets reviewed.
   - A transport implementer (today `crates/harness/models/src/transport.rs`) performs the I/O for a model round using `promptforge::transport`.
-  - A VFS backend author implements the `Vfs`, `VfsAccess`, and optionally `Policy` traits from `promptforge::vfs`, or reuses `MemoryBackend` and `HostBackend`, and mounts the result with `VfsRef::overlay` or `VfsRefBuilder`. Planned authors: the Workshop, mapping each open window, each running prompt, and each agent's database to a virtual file and serving a `/_promptforge/docs/` directory; and optional Harness capabilities, such as one that injects an `AGENTS.md` file. Today only the Harness names VFS items (`VfsRef` and `Access` in `crates/harness/runner`, `crates/harness/capabilities`, and `crates/harness/sessions`; `Origin` in the capabilities tests), and no Host implements a backend yet.
-  - Test code outside the Engine that needs the Engine's test drivers enables `promptforge`'s `test-support` feature through a dev-dependency. Today that is only the integration tests of `harness-capabilities`.
+  - A VFS backend author implements the `Vfs`, `VfsAccess`, and optionally `Policy` traits from `promptforge::vfs`, or reuses `MemoryBackend` and `HostBackend`, and mounts the result with `VfsRef::overlay` or `VfsRefBuilder`. Planned authors: the Workshop, mapping each open window, each running prompt, and each agent's database to a virtual file and serving a `/_promptforge/docs/` directory; and optional Harness Plugins, such as one that injects an `AGENTS.md` file. Today only the Harness names VFS items (`VfsRef` and `Access` in `crates/harness/runner`, `crates/harness/capabilities`, and `crates/harness/sessions`; `Origin` in the plugins tests), and no Host implements a backend yet.
+  - Test code outside the Engine that needs the Engine's test drivers enables `promptforge`'s `test-support` feature through a dev-dependency. Today that is only the integration tests of `harness-plugins`.
 - Inputs and outputs:
   - The facade's rendered docs: `target/doc/promptforge/`.
   - `crates/promptforge/public-api.txt`: one line per surface item, including the methods, fields, variants, and trait impls of every re-exported type.
@@ -121,7 +121,7 @@ The Harness and Hosts depend on `promptforge` alone and read a module tree group
   - A snapshot difference is fixed by reviewing it and running `cargo xtask api --bless`.
 - Security and privacy behavior:
   - Engine-only operations can't be reached from a dependent, because detail functions sit in modules the facade never re-exports.
-  - Dependents can no longer bypass validation through `ModelId::from_validated` (`crates/promptforge-api-types/src/models.rs` line 73), `CapabilityId::from_validated` (`crates/promptforge-api-types/src/capabilities.rs` line 74), or `ToolId::from_validated` (`crates/promptforge-api-types/src/tools/ids.rs` line 59), which today are public and only hidden from the docs.
+  - Dependents can no longer bypass validation through `ModelId::from_validated` (`crates/promptforge-api-types/src/models.rs` line 73), `PluginId::from_validated` (`crates/promptforge-api-types/src/capabilities.rs` line 74), or `ToolId::from_validated` (`crates/promptforge-api-types/src/tools/ids.rs` line 59), which today are public and only hidden from the docs.
   - The transport's credential and body-cap behavior is unchanged.
 - Acceptance criteria:
   - Every success criterion in Product Requirements holds.
@@ -173,10 +173,10 @@ The Engine becomes a set of private crates under `crates/promptforge-internal/`,
   - A plain merge of the runtime and types crates is impossible. `promptforge-lua`, `promptforge-parser`, and `promptforge-model-client` depend on the types crate (`crates/promptforge/lua/Cargo.toml` line 17, `crates/promptforge/parser/Cargo.toml` line 16, `crates/promptforge/model-client/Cargo.toml` line 19), and the runtime depends on all three (`crates/promptforge-api-runtime/Cargo.toml` lines 16-21), so a merge creates a cycle.
   - Every crate that runs prompts already compiles the whole Engine, so depending on the facade adds no weight:
     - `workshop-server` through `workshop-workspace` (`crates/workshop/workspace/Cargo.toml` line 22)
-    - `harness-web`, `harness-webfetch`, and `harness-web-search` through `harness-capabilities` (`crates/harness/capabilities/Cargo.toml` line 17)
+    - `harness-web`, `harness-webfetch`, and `harness-web-search` through `harness-plugins` (`crates/harness/capabilities/Cargo.toml` line 17)
     
     Of the crates that depend on `promptforge-api-types` without the runtime today, `harness-web`, `harness-webfetch`, `harness-web-search`, and `workshop-server` already compile the Engine through another crate. Only three newly compile it: `workshop-protocol` (`crates/workshop/protocol/Cargo.toml` line 12) and `workshop-gateway` (`crates/workshop/gateway/Cargo.toml` line 20), both linked only into `workshop-server`, and `harness-log`, whose use is a dev-dependency (`crates/harness/log/Cargo.toml` line 23), so only its tests pay. The user: "why not pull in the whole engine? You fucking need LUA to run prompts! It cannot be avoided!"
-  - The only outside users of `shared-vfs` are Harness crates (sessions, capabilities, models, runner, and web as a dev-dependency). All of them already depend on the Engine. The user: "harness needs the promptforge engine anyway, duh".
+  - The only outside users of `shared-vfs` are Harness crates (sessions, plugins, models, runner, and web as a dev-dependency). All of them already depend on the Engine. The user: "harness needs the promptforge engine anyway, duh".
 - Modules and interfaces:
   - Facade shape: `crates/promptforge/src/*.rs` contains only these:
     - grouping `pub mod` blocks with doc comments
@@ -187,7 +187,7 @@ The Engine becomes a set of private crates under `crates/promptforge-internal/`,
     It defines no items, and has no glob re-exports, module re-exports, or crate re-exports.
   - Facade module layout: role modules whose docs are curated topic pages. The proposal, to be adjusted by the surface audit:
     - the crate root: `Prompt`, `Run`, `Step`, `RunContext`, `Environment`, `RunResult`, and the errors those raise, such as `ParseError` and `RunError`
-    - modules `effect`, `event` (including `ReplyOrigin`), `ids`, `model`, `transport`, `tools`, `capabilities`, `vfs`, `cancel` (`CancelHandle`), `timestamp` (`Timestamp`), `metrics` (`CallMetrics`, `ClientTiming`, `LlamaTimings`, `ToolCallEvent`, `Usage`, `VllmMetrics`), and `input` (`InputError`, `InputOutcome`)
+    - modules `effect`, `event` (including `ReplyOrigin`), `ids`, `model`, `transport`, `tools`, `plugins`, `vfs`, `cancel` (`CancelHandle`), `timestamp` (`Timestamp`), `metrics` (`CallMetrics`, `ClientTiming`, `LlamaTimings`, `ToolCallEvent`, `Usage`, `VllmMetrics`), and `input` (`InputError`, `InputOutcome`)
     - `StreamDelta` is imported today from both `promptforge_api_types::wire` and `promptforge_api_runtime::model`; the audit gives it one home. The parser front-matter items dependents import through the runtime's `parser` module (`Frontmatter`, declarations, roles) also get a home from the audit.
     - Not in the surface, because nothing outside the Engine uses them: the `lifecycle` module (hidden today at `crates/promptforge-api-types/src/event.rs` line 57), `MaxToolIterations`, and `LuaProgram`.
 
@@ -226,7 +226,7 @@ The Engine becomes a set of private crates under `crates/promptforge-internal/`,
     - `ToolSchema::new`
     - the public fields of `ToolCall` and of the completion result (`result` through `response_body`)
     
-    All of these are in `crates/promptforge/model-client/src/client/wire.rs`. Also `ModelId::from_validated`, `CapabilityId::from_validated`, `ToolId::from_validated` (`crates/promptforge-api-types/src/tools/ids.rs` line 59), `Error::http` in `crates/promptforge/model-client/src/error.rs`, and `SharedSource::new` in `crates/promptforge/lua/src/error.rs`.
+    All of these are in `crates/promptforge/model-client/src/client/wire.rs`. Also `ModelId::from_validated`, `PluginId::from_validated`, `ToolId::from_validated` (`crates/promptforge-api-types/src/tools/ids.rs` line 59), `Error::http` in `crates/promptforge/model-client/src/error.rs`, and `SharedSource::new` in `crates/promptforge/lua/src/error.rs`.
   - Test helpers to gate: `for_test` (`crates/promptforge/lua/src/handles.rs` lines 85, 163), and `run_chunk`, `tool_bag_handles`, and `model_bag_handles` (`crates/promptforge/lua/src/vm.rs` lines 755, 900, 921).
   - Trait impls to check with the closure check: `impl From<Error> for RunError` and its reverse (`crates/promptforge-api-runtime/src/execute/error.rs` lines 209, 215), where `Error` is crate-private (`crates/promptforge-api-runtime/src/lib.rs` line 18). If the closure check flags them, convert them to detail functions.
   - `crates/build-xtask/Cargo.toml` gains `syn`, `rustdoc-types`, and `serde_json`. Today it depends on `anyhow`, `toml`, and `workspace-hack`, with `tempfile` as a dev-dependency (lines 9-15).
@@ -370,7 +370,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
   
   Revisit after this plan lands.
 - Deferred (pinned by the user): collapsing the Engine into a single crate, suggested by the reviewer Marcel. One crate would replace `detail` modules with `pub(crate)` fields and functions, most of the closure check with compiler lints (`private_interfaces`, `private_bounds`, and `unnameable_types`, whose stability on the pinned toolchain is unverified), and the custom snapshot with an off-the-shelf tool; it would give up crate-enforced internal boundaries and build parallelism, and it conflicts with the maximum-internal-structure decision. The user: "Let's put a pin in Marcel's advice". Revisit if the custom tooling, chiefly the nightly rustdoc JSON closure check, proves too costly to maintain.
-- Deferred: eliminating the need for `promptforge` to offer testing facilities to outside crates, so the facade drops its `test-support` feature and the second closure run. The one current user is the `harness-capabilities` integration suite (`crates/harness/capabilities/tests/it/support.rs` lines 14 and 78, importing `Performers` and `drive_tokio`); how to replace that use is the open question in Product Requirements. Offered the option of closing it in this plan by giving that suite a harness-side driver, the user kept it deferred: "no. we will deal with it later." Revisit after this plan lands, or sooner if another outside crate starts needing the Engine's test drivers.
+- Deferred: eliminating the need for `promptforge` to offer testing facilities to outside crates, so the facade drops its `test-support` feature and the second closure run. The one current user is the `harness-plugins` integration suite (`crates/harness/capabilities/tests/it/support.rs` lines 14 and 78, importing `Performers` and `drive_tokio`); how to replace that use is the open question in Product Requirements. Offered the option of closing it in this plan by giving that suite a harness-side driver, the user kept it deferred: "no. we will deal with it later." Revisit after this plan lands, or sooner if another outside crate starts needing the Engine's test drivers.
 - Out of scope: Papergate, which lives in the separate `wg21-paperflow` repository (paths in this item are relative to that repository's root). Its manifest path-depends on crates that no longer exist (`promptforge-core` and `promptforge-tool-picker`, `crates/papergate/Cargo.toml` lines 19-20), and it calls APIs that have been removed (`promptforge_core::execute::run`, `crates/papergate/src/app.rs` line 156). When migrated it will depend on `harness-api`, which exposes no Engine names today (`crates/harness-api/Cargo.toml` lines 18-22 list only `harness-runner` and `harness-sessions`), so it adds nothing to this plan's surface audit. The user: "papergate will use harness-api".
 - Out of scope: changes to `harness-api`. It is treated as complete as written, and a capability is added only when a Host such as Papergate needs it. The user: "assume that harness-api is correct as written, and that it is not missing a capability. when papergate comes knocking and needs something, only then will we add it."
 
@@ -412,7 +412,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 - Component boundaries:
   - Tier rule: shell to features to services to vocabulary, never upward. Dependency rules bind normal, dev, build, and target-specific dependencies. A crate in a family container may depend only on root crates and its own siblings.
   - PromptForge Engine: `promptforge-api-runtime` (parser plus the sans-I/O `Run` state machine) is the only outside crate allowed into `crates/promptforge/`, and with `promptforge-api-types` forms the family's public API. It depends on `promptforge-api-types`, `promptforge-lua`, `promptforge-parser`, `promptforge-store`, `promptforge-vfs`, `promptforge-model-client`, and `shared-vfs`. Internally `promptforge-parser` depends on `promptforge-lua` and `promptforge-api-types`; `promptforge-lua` on `promptforge-api-types`, `promptforge-model-client`, `promptforge-store`; `promptforge-store` on `promptforge-vfs` and `shared-vfs`; `promptforge-vfs` on `shared-vfs`; `promptforge-model-client` on `promptforge-api-types`. `promptforge-api-types` is wire vocabulary only and depends on `shared-vfs`. The family never depends on gateway, Harness, or workshop crates.
-  - Harness: `harness-api` is the only public crate and depends on `harness-runner` and `harness-sessions`. `harness-sessions` depends on runner, models, capabilities, log, and web; `harness-runner`, `harness-models`, and `harness-capabilities` depend on `promptforge-api-runtime`, `promptforge-api-types`, and `shared-vfs`. Harness may name the gateway public pair and shared crates, never workshop or private gateway crates.
+  - Harness: `harness-api` is the only public crate and depends on `harness-runner` and `harness-sessions`. `harness-sessions` depends on runner, models, plugins, log, and web; `harness-runner`, `harness-models`, and `harness-plugins` depend on `promptforge-api-runtime`, `promptforge-api-types`, and `shared-vfs`. Harness may name the gateway public pair and shared crates, never workshop or private gateway crates.
   - Gateway: public pair `gateway-api-types` (no internal dependencies) and `gateway-api-discovery` (depends on `shared-error-source`). Private crates stack upward, for example `gateway-protocol` on `gateway-config` and `gateway-api-types`, `gateway-routing` on config and protocol, with the `gateway` app on top. Gateway never depends on promptforge, Harness, or workshop crates.
   - Workshop: `workshop` shell depends on `workshop-server-api` (never `workshop-server` directly) and `gateway-api-discovery`; `workshop-server-api` re-exports `workshop-server`; `workshop-server` depends on `harness-api`, `promptforge-api-types`, `gateway-api-discovery`, `shared-loopback`, and its workshop-* siblings. Workshop never names private gateway crates or Harness internals.
   - Shared: `shared-vfs`, `shared-loopback`, and `shared-error-source` depend on no product crate.
@@ -494,12 +494,12 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 - `crates/promptforge/Cargo.toml`:
   - package `promptforge`, `publish = false`, workspace lints, and `workspace-hack`
   - a normal dependency on each defining crate the audit found. Today these are `promptforge-api-runtime`, `promptforge-api-types`, `shared-vfs`, `promptforge-lua`, `promptforge-parser`, `promptforge-store`, `promptforge-model-client`, and `promptforge-vfs`.
-  - `test-support = ["promptforge-api-runtime/test-support"]`, so `harness-capabilities` can migrate in Step 3. Step 4 retargets it to the Engine.
+  - `test-support = ["promptforge-api-runtime/test-support"]`, so `harness-plugins` can migrate in Step 3. Step 4 retargets it to the Engine.
   - root `Cargo.toml`: add `promptforge` to `[workspace.dependencies]`; the `crates/*` glob picks up the member
 - `crates/promptforge/src/lib.rs`:
   - `#![doc = include_str!("lib.md")]`
   - the root re-exports (`Prompt`, `Run`, `Step`, `RunContext`, `Environment`, `RunResult`, and the errors they raise, such as `ParseError` and `RunError`)
-  - one `pub mod` block per role, each with a one-line doc comment: `effect`, `event`, `ids`, `model`, `transport`, `tools`, `capabilities`, `vfs`, `cancel`, `timestamp`, `metrics`, `input`, adjusted by the audit
+  - one `pub mod` block per role, each with a one-line doc comment: `effect`, `event`, `ids`, `model`, `transport`, `tools`, `plugins`, `vfs`, `cancel`, `timestamp`, `metrics`, `input`, adjusted by the audit
   - every audited item re-exported once, as a single-item `pub use`
   - the test drivers the audit found, such as `Performers` and `drive_tokio`, under `#[cfg(feature = "test-support")]`
   - no item definitions, glob re-exports, module re-exports, or crate re-exports. The transport items keep the `#[doc(hidden)]` they have at their definitions until Step 9.
@@ -533,13 +533,13 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 - Piece: consumer migration. It comes after the facade crate, whose re-exports it imports, and before the relocation. It is one step because the two test partitions are the one test set that covers it.
 - Manifests: every dependency of every kind (normal, dev, build, target) on `promptforge-api-runtime`, `promptforge-api-types`, or `shared-vfs` becomes a dependency on `promptforge`, with its rationale comment updated. The crates, per the surface audit that Step 2 wrote to `C:/Users/Vinnie/cursor/cabinet/_scratch/vibe-coder-2026-09-23-1-promptforge-api-firewall/surface-audit.md`:
   - `harness-runner`, `harness-models`, `harness-sessions`, `harness-webfetch`, `harness-web-search`
-  - `harness-capabilities`: the normal dependency, plus a dev-dependency on `promptforge` with `features = ["test-support"]` that replaces today's runtime dev-dependency (`Cargo.toml` line 27)
+  - `harness-plugins`: the normal dependency, plus a dev-dependency on `promptforge` with `features = ["test-support"]` that replaces today's runtime dev-dependency (`Cargo.toml` line 27)
   - `harness-log`, which uses it as a dev-dependency
   - `harness-web`: its `shared-vfs` dev-dependency
   - `workshop-server`, `workshop-workspace`, `workshop-protocol`, `workshop-gateway`
   - any other crate the audit lists
 - Sources: every `use` and path in those crates' sources, tests, benches, and doc examples becomes the `promptforge::` path the audit assigned (about 60 files). This includes `crates/harness/models/src/transport.rs` lines 14-17, which move to `promptforge::transport`, and `crates/harness/capabilities/tests/it/support.rs` lines 14 and 78.
-- Outside tests the audit recorded as using an item nothing else justifies are rewritten to use only the facade's surface or their own crate's helpers, never by adding a re-export. The one exception is the forwarded `test-support` drivers (`Performers`, `drive_tokio`), which `harness-capabilities` keeps using until the deferred work removes them.
+- Outside tests the audit recorded as using an item nothing else justifies are rewritten to use only the facade's surface or their own crate's helpers, never by adding a re-export. The one exception is the forwarded `test-support` drivers (`Performers`, `drive_tokio`), which `harness-plugins` keeps using until the deferred work removes them.
 - Run `cargo hakari generate`.
 - Tests:
   - the standard gates, with both test counts at or above the baseline in `C:/Users/Vinnie/cursor/cabinet/_scratch/vibe-coder-2026-09-23-1-promptforge-api-firewall/baseline.md`
@@ -696,7 +696,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
     - `Message::from_validated_parts`, `assistant_tool_calls`, `content_value`, `raw_tool_calls`, and `ToolSchema::new` become free functions such as `detail::message_from_validated_parts`
     - `ToolCall` fields become private, with `detail` constructors and field access for the Engine. The public accessors `ToolCall::id`, `name`, and `arguments` stay unchanged.
     - completion result fields (`result` through `response_body`) become private with `detail` access, except fields the audit shows dependents read, which keep a public accessor
-  - types: `ModelId::from_validated` (`models.rs` line 73), `CapabilityId::from_validated` (`capabilities.rs` line 74), and `ToolId::from_validated` (`tools/ids.rs` line 59) become `detail::model_id_from_validated`, `detail::capability_id_from_validated`, and `detail::tool_id_from_validated`
+  - types: `ModelId::from_validated` (`models.rs` line 73), `PluginId::from_validated` (`capabilities.rs` line 74), and `ToolId::from_validated` (`tools/ids.rs` line 59) become `detail::model_id_from_validated`, `detail::plugin_id_from_validated`, and `detail::tool_id_from_validated`
   - model-client `error.rs`: `Error::http` becomes a `detail` function
   - lua `error.rs`: `SharedSource::new` becomes a `detail` function
   - vfs: `Access::spawn` and `Access::id` become `detail` functions, if the audit found no dependent use

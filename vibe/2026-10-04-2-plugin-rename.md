@@ -376,7 +376,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
 </step-2>
 <step-3>
 
-### Step 3: Sweep the plans and the guide
+### Step 3: Sweep the plans and the guide [completed]
 
 - Component: Plugin prose
 - This step edits prose only and has no failing-test-first shape. The checks below take that role.

@@ -103,7 +103,7 @@ Same file, other edits:
 Removed outright, because they define the Engine, Harness and Host relationship outside the root file or freeze today's session API into a rule:
 
 - `crates/harness-internal/sessions/AGENTS.md`: the "rebuilt when the gateway generation changes" bullet. In the intro, "the bindings a client pushes through the public API (gateway, chat catalog, host snapshot)" becomes "the bindings the Host pushes through the public API"; "The client that owns a socket" becomes "The Host that owns a socket".
-- `crates/harness-internal/sessions/src/lib.rs` Invariants: the pushed-bindings bullet ("the gateway, the chat catalog, the host snapshot") and the `LaunchOptions::vfs` "one client-built handle" bullet. Its last sentence, "It is the one place a capability provider crate is named, at registration", stays as its own bullet.
+- `crates/harness-internal/sessions/src/lib.rs` Invariants: the pushed-bindings bullet ("the gateway, the chat catalog, the host snapshot") and the `LaunchOptions::vfs` "one client-built handle" bullet. Its last sentence, "It is the one place a Plugin provider crate is named, at registration", stays as its own bullet.
 - `crates/workshop/server/AGENTS.md`: the whole "Agent sessions run in the harness..." bullet (the dependency rule it restates lives in the root Structure section). In the other bullets, "host-embeddable" becomes "embeddable", and "the host" and "host arguments" become "the embedding binary" and "its arguments".
 - `crates/workshop/server/src/lib.rs` Invariants: delete the "The harness reads the server's state as data pushed..." bullet; "and the harness keeps their table" is cut; the input-wait bullet becomes "Every unresolved wait that is dropped yields a cancelled frame, which the agent socket renders as `input_cancelled`."
 - `crates/workshop/server/Cargo.toml` lines 14 to 16: cut the list of pushed bindings.
@@ -220,8 +220,8 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 - Facade pages in `crates/promptforge/src/`: `lib.md` (20; mostly Harness; line 9 per 1.4), `capabilities.md` (3), `event.md` (5), `ids.md` (1 prose; lines 54 and 219 are doctest code), `metrics.md` (3; the link text `[host](crate)`), `model.md` (7; Harness 4, Host 3), `prompt.md` (1; Engine global), `transport.md` (1), `vfs.md` (about 12; real filesystem; the `## HostBackend` heading stays), `cancel.md` (1; see Appendix B, cancel).
 - `crates/promptforge/Cargo.toml` description; `tests/suite/{main,prepare,support}.rs` comments, where "Shared harness" and "shared harness code" become "shared test support" first.
 - `crates/promptforge-internal/README.md` (5); `engine/{README.md, AGENTS.md, Cargo.toml}` and `engine/src/lib.md` (8; "the harness is its production host").
-- `types/`: `AGENTS.md`, `README.md`, `Cargo.toml`, and `src/{lib, cancel, capabilities, detail, emitter, event, event-lifecycle, ids, models, timestamp, tools, tools/descriptor, tools/registry, untrusted, untrusted/tests, wire}.rs`. Nearly all Harness ("host-support" becomes "run-support", "host-drawn" becomes "Harness-drawn").
-- `parser/`: `AGENTS.md`, `Cargo.toml`, `src/{contract, contract/models, contract/tests, contract/tests-capabilities, detail, error, prompt}.rs`. Harness and Engine-global senses; the string "a host global" is code.
+- `types/`: `AGENTS.md`, `README.md`, `Cargo.toml`, and `src/{lib, cancel, plugins, detail, emitter, event, event-lifecycle, ids, models, timestamp, tools, tools/descriptor, tools/registry, untrusted, untrusted/tests, wire}.rs`. Nearly all Harness ("host-support" becomes "run-support", "host-drawn" becomes "Harness-drawn").
+- `parser/`: `AGENTS.md`, `Cargo.toml`, `src/{contract, contract/models, contract/tests, contract/tests-plugins, detail, error, prompt}.rs`. Harness and Engine-global senses; the string "a host global" is code.
 - `model-client/`: `AGENTS.md`, `Cargo.toml`, `src/{lib, client, client/read, client/stream, client/wire, client/wire-canned, detail, error, model, model/error, model/options}.rs`.
 - `vfs/`: `README.md` and `src/{detail, detail-tests, handle, handle/access, handle/scope, handle/store_view, handle/tests/claims, handle/tests/happens_before, handle/tests/sink, host, host/files, host/resolve, host/tests, host/tests/links, memory, memory-tests, observe, path, traits}.rs`. Real-filesystem sense; `path.rs` "Windows hosts" becomes "Windows machines".
 - No edits: `src/effect.md` (a text diagram), `src/lib.rs`, `public-api.txt`, `vfs/src/lib.rs`, `vfs/src/host/tests/semantics.rs`.
@@ -253,13 +253,13 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 
 - Most "host" here already means the application, because the Harness's public API is what the Host calls: capitalize it.
 - Facade pages: `crates/harness/src/lib.md` (about 45 hits; lines 19 and 255 become Harness; about 28 are doctest code), `cancel.md`, `log.md`, `vfs.md`; the `## HostSnapshot` heading stays. `crates/harness/Cargo.toml` comment (Host).
-- capabilities: `README.md` (line 5: the Harness puts the broker in `RunServices` when the Host has an operator), `src/lib.rs` (description: the Harness builds the registry and resolves each `ToolCall`), `src/{activation, capability, input, registry, user_input}.rs`, `tests/it/{activation, assembly, needs, preludes, support}.rs`.
+- plugins: `README.md` (line 5: the Harness puts the broker in `RunServices` when the Host has an operator), `src/lib.rs` (description: the Harness builds the registry and resolves each `ToolCall`), `src/{activation, plugin, input, registry, user_input}.rs`, `tests/it/{activation, assembly, needs, preludes, support}.rs`.
 - runner: `src/{lib, cancel, prepare, effect_loop, files, performers, performers-host, performers-tools}.rs`, `tests/it/{prepare, prepare-files, prepare-input, support, effect_loop}.rs`. `effect_loop.rs` is 457 lines; keep its line count.
 - sessions: `AGENTS.md`, `src/{lib, runtime, environment, session/files, session/run, transition}.rs`, `tests/it/session-files.rs`.
 - models: `AGENTS.md`, `README.md`, `src/{lib, transport, catalog}.rs`, `tests/it/end_to_end.rs`.
 - log: `src/{append, record}.rs`; the Turso uses of "engine" in `src/{error, append, read}.rs` become "the database".
-- web: `README.md` (the Host provides the gateway address and token, and the Harness passes them to the capability), `src/lib.rs` ("at host startup" becomes "at registration").
-- No edits: everything in `webfetch/src/` and `web-search/src/` (network sense), `models/src/config.rs`, `models/src/transport/tests/env.rs`, `sessions/src/{environment-tests, input-tests, session/supervisor}.rs`, `capabilities/src/{capability-tests, user_input-tests}.rs`, `crates/harness/src/lib.rs`, and the built-in `sessions/agents/chat.md` (no hits; it is code).
+- web: `README.md` (the Host provides the gateway address and token, and the Harness passes them to the Plugin), `src/lib.rs` ("at host startup" becomes "at registration").
+- No edits: everything in `webfetch/src/` and `web-search/src/` (network sense), `models/src/config.rs`, `models/src/transport/tests/env.rs`, `sessions/src/{environment-tests, input-tests, session/supervisor}.rs`, `plugins/src/{plugin-tests, user_input-tests}.rs`, `crates/harness/src/lib.rs`, and the built-in `sessions/agents/chat.md` (no hits; it is code).
 
 ### A6. Workshop (53 files, about 105 lines)
 
@@ -313,12 +313,12 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 
 ## Appendix B: resolved patterns (workers apply these, not their own guesses)
 
-Who does what today: the Harness prepares runs, draws each run's seed, start instant and name, stages the declared files, steps the run, performs every effect, streams deltas, writes the run log, logs capability warnings, owns the cancel flag, fetches the gateway's model list, and holds what the Host pushes. The Host builds the Harness, launches runs, pushes the gateway, model list, selection and workspace roots, supplies `ui()` data, presses Stop, answers input waits, and shows events. Classify by today's code, not the planned design.
+Who does what today: the Harness prepares runs, draws each run's seed, start instant and name, stages the declared files, steps the run, performs every effect, streams deltas, writes the run log, logs Plugin warnings, owns the cancel flag, fetches the gateway's model list, and holds what the Host pushes. The Host builds the Harness, launches runs, pushes the gateway, model list, selection and workspace roots, supplies `ui()` data, presses Stop, answers input waits, and shows events. Classify by today's code, not the planned design.
 
 - Cancel: the request (Stop, Ctrl-C, "when the host cancels a run") is the Host; setting the flag or ending the run is the Harness ("the Harness sets that flag when the Host cancels").
 - Model catalog: building it from `GET /v1/models` is the Harness; choosing, selecting, or showing a model is the Host ("the Harness fills every declared role with the model the Host chose").
 - Input: the input broker is "the part of the Host that carries a question to a person"; "`input.ask()` still asks the host, so the host sees every question" becomes "still asks the Harness, so the Host sees every question".
-- Web search: "The Host provides the gateway address and token; the Harness passes them to the capability when it registers it."
+- Web search: "The Host provides the gateway address and token; the Harness passes them to the Plugin when it registers it."
 - Credentials, server settings, and "gateway access disabled by the host": the Host.
 - "production host", "the engine's host", "host of the engine": rewrite to what the Harness does, for example "the Harness, the Engine's only production caller".
 - "test host" in Engine or Lua tests: "the Harness" or "this test's Harness", never "test harness".
@@ -327,7 +327,7 @@ Who does what today: the Harness prepares runs, draws each run's seed, start ins
 - "portable across hosts" (limits and ceilings): "portable wherever it runs".
 - "hosts can distinguish", "hosts can show", "hosts can filter": the Host.
 - "host developers", "embedding hosts", "a library a host embeds": people or programs building applications, so the Host.
-- "Host-primitive tools": "Harness-primitive tools". "addon host": "addon loader". "trusted-host callers": "trusted callers". "host bind": "catalog bind". "host publication": "gateway publication".
+- "Host-primitive tools": "Harness-primitive tools". "addon host": "Plugin loader". "trusted-host callers": "trusted callers". "host bind": "catalog bind". "host publication": "gateway publication".
 - Speech crates: "host capture policy" becomes "capture policy", "deterministic hosts" becomes "deterministic callers", "host facade" becomes "service facade", "the host can classify" becomes "the caller can classify".
 - VFS "host roots", "host folders", "host mount": "real directories" and "real mount". "the host OS": "the operating system". "Windows hosts": "Windows machines". "on this host" (keyboard platform in tests): "on this platform". The UNC "remote host": "remote server".
 - Chat box "host": "the part that embeds the chat box" (short form in code comments: "the owning part"). DOM "host element": "container element". Workshop server "the host": "the embedding binary".
@@ -335,7 +335,7 @@ Who does what today: the Harness prepares runs, draws each run's seed, start ins
 
 ## Appendix C: inventory for the follow-up rename PR
 
-Already correct under the definitions (keep): `HostSnapshot`, `set_host`, the `host` field and getter on the Harness bindings, Workshop's `host_snapshot`, and the tests named after them. The messages "User input is unavailable in this host; continue without it." (`harness-internal/capabilities/src/user_input.rs`, sent to models), "..., and this host provides none" (`promptforge-internal/engine/src/execute/requirements.rs`), and the test string "the host withdrew the wait" also keep their wording, because each means the application. The capitalization rule covers prose, not message text, so they stay as written, and prose that quotes them quotes them exactly.
+Already correct under the definitions (keep): `HostSnapshot`, `set_host`, the `host` field and getter on the Harness bindings, Workshop's `host_snapshot`, and the tests named after them. The messages "User input is unavailable in this host; continue without it." (`harness-internal/plugins/src/user_input.rs`, sent to models), "..., and this host provides none" (`promptforge-internal/engine/src/execute/requirements.rs`), and the test string "the host withdrew the wait" also keep their wording, because each means the application. The capitalization rule covers prose, not message text, so they stay as written, and prose that quotes them quotes them exactly.
 
 Rename (not the Host sense):
 
