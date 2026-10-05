@@ -3,9 +3,10 @@
 //! The `promptforge` facade never re-exports this module, so only Engine
 //! crates reach it: the Harness passes a run's capability through, and
 //! the Engine alone forks it for concurrent arms and for each tool call,
-//! joins those identities back on delivery or on the call's answer,
-//! derives the store view from a chain's access for store calls, and
-//! ends the run's scope when the run ends. The
+//! joins an arm's identity back on delivery, ends a tool call's identity
+//! when the call is answered or aborted, derives the store view from a
+//! chain's access for store calls, and ends the run's scope when the run
+//! ends. The
 //! Harness, holding the handle, acquires a store view in a scope of its own
 //! with [`VfsRef::acquire_store`](crate::VfsRef::acquire_store).
 

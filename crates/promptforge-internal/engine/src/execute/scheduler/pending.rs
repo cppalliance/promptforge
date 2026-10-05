@@ -64,7 +64,8 @@ pub(super) struct ToolCallContinuation {
     /// The model-issued call id, or `None` for a script call.
     pub(super) call_id: Option<String>,
     /// The call's own identity, forked from the chain's access at
-    /// dispatch. The answer joins it back into the chain.
+    /// dispatch. The answer, or the call's abort, ends it and joins it
+    /// back into the chain.
     pub(super) exec: ExecId,
 }
 

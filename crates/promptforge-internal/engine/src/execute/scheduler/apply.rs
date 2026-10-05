@@ -11,13 +11,14 @@
 //! operation's outcome. A timer's firing completes its
 //! slot and wakes the waiter instead of resuming a chain. A `Dropped`
 //! answer resumes the chain with the cancelled error, whatever it was
-//! parked on. A tool call's answer, of either kind, also joins the call's
-//! identity back into the chain.
+//! parked on. A tool call's answer, of either kind, also ends the call's
+//! identity: what the tool did is joined back into the chain, and the
+//! call's access refuses every later operation.
 
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{ToolError, ToolOutput};
-use promptforge_vfs::VfsError;
-use promptforge_vfs::detail::access_join;
+use promptforge_vfs::detail::{access_id, end_access};
+use promptforge_vfs::{ExecId, VfsError};
 
 use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
 use crate::execute::tools::accept_infer;
@@ -53,10 +54,10 @@ impl Scheduler {
     /// re-queues the chain. A timer's firing completes its slot and wakes
     /// its waiter instead. A `Dropped` answer is the Harness giving the
     /// effect up: the chain resumes with the cancelled error. Every answer
-    /// to a tool call, `Dropped` included, first joins the call's identity
-    /// into the parked chain's access, so whatever the tool did happens
-    /// before the chain's next step; a chain that no longer holds an
-    /// access needs no join.
+    /// to a tool call, `Dropped` included, first ends the call's identity
+    /// through [`Scheduler::end_tool_call`], so whatever the tool did
+    /// happens before the chain's next step and nothing it tries after is
+    /// admitted.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when no pending entry explains the id
@@ -73,10 +74,8 @@ impl Scheduler {
                 "an answer arrived for an effect the run did not issue or already answered",
             ));
         };
-        if let Continuation::ToolCall(call) = &resume
-            && let Ok(access) = self.chains[chain.index()].access()
-        {
-            access_join(access, call.exec);
+        if let Continuation::ToolCall(call) = &resume {
+            self.end_tool_call(chain, call.exec);
         }
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
@@ -111,6 +110,23 @@ impl Scheduler {
         };
         self.answer_inline(chain, answer);
         Ok(())
+    }
+
+    /// Ends `exec`, the identity of the tool call `chain` was parked on,
+    /// whether the call was answered or aborted: merges it into the
+    /// chain's access when the chain still holds one, and refuses every
+    /// later operation, spawn, or store view through the call's access.
+    /// A run whose scope has closed has already refused every access, so
+    /// there is nothing to end.
+    pub(super) fn end_tool_call(&self, chain: ChainIndex, exec: ExecId) {
+        let Some(scope) = &self.scope else {
+            return;
+        };
+        let owner = self.chains[chain.index()]
+            .access()
+            .ok()
+            .map(|access| access_id(access));
+        end_access(scope, owner, exec);
     }
 
     /// Applies a nested infer round's completion: the single-prose-round

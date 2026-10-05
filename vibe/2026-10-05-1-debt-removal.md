@@ -239,7 +239,7 @@ Each regression test must fail on `8f36fb553` before its fix lands. If one passe
 
 <step-2>
 
-### Step 2: End each tool call's identity when it is answered or aborted
+### Step 2: End each tool call's identity when it is answered or aborted [completed]
 
 - Component: Tool-call identity lifetime (D1-2, D1-3, D1-4)
 - Piece: the Engine wiring in `promptforge-engine`. It comes after Step 1 because it calls `detail::end_access`.

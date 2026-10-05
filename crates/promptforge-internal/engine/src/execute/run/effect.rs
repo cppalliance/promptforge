@@ -114,9 +114,10 @@ pub enum Effect {
         origin: ToolCallOrigin,
         /// The call's own identity, forked from the calling chain's
         /// access when the call is issued and joined back into it when the
-        /// answer is applied, so the chain's earlier work happens before
-        /// the tool's and the tool's before the chain's next step. It is
-        /// rooted at `/`. The caller must not use it after answering.
+        /// answer is applied or the call is aborted, so the chain's earlier
+        /// work happens before the tool's and the tool's before the chain's
+        /// next step. It is rooted at `/`. Once the answer is applied or the
+        /// call is aborted, every operation through it is refused.
         access: Arc<Access>,
     },
     /// One operation on the run's store view, issued for one of the eight
