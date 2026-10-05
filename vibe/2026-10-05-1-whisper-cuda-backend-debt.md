@@ -189,6 +189,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A Windows operator relying on a valid UUID under `auto` moves to the CPU build. The docs state the change and the `cuda` override.
   - The DB-2 tests rely on capturing tracing output in unit tests, which the gateway crate's logging tests already do.
   - The whisper CUDA backend plan, `vibe/2026-09-28-2-whisper-cuda-backend.md`, is still the active plan until its queue drain and close.
+  - Decided during the run: the Windows headless `gateway` clippy fails here with four errors from master's code. They are three `clippy::float_cmp` in `crates/gateway/app/src/tray/logic-tests.rs`, whose `#[expect]` attributes `2ea6bb6b` removed for Rust 1.99, while local clippy is 1.98. The fourth is `dead_code` for `realtime_upgrade_status` in `crates/gateway/app/src/boot-speech-tests.rs`, whose only caller is gated on `config-ui`. This plan touches neither file, so Step 2's check counts as passing when those four are the only errors. Falsifier: any error in a file this plan changes, or CI's clippy failing on pull request #91.
 
 ## Project survey
 
@@ -351,7 +352,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
     - `win_gateway.py hidden`, with `WIN_GATEWAY_LABEL=db1` so earlier logs stay, boots `b4938-windows-x86_64`, and every stop exits 0, the visible-GPU control stops included.
     - `win_gateway.py boots`, with the variable unset, still takes `b4938-windows-x86_64-cuda` on the RTX 3090s under `auto`.
 
-### Step 2: Key the speech retirement's warnings to speech's state and the time left
+### Step 2: Key the speech retirement's warnings to speech's state and the time left [completed]
 
 - In `crates/gateway/app/src/runner.rs`, `Gateway::serve`, under `#[cfg(feature = "stt")]`:
   - Before it spawns the retirement, it reads `speech.status().ready()`, which is true only while a runtime is published with admission open.
@@ -381,7 +382,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - `serve_retires_speech_before_it_returns` also asserts that a retirement that finishes logs no speech warning.
 - Checks:
   - In WSL through `bash vibe/scratch/wsl-cargo.sh`, `cargo test --locked -p gateway --lib drain_tests::` and `realtime_stt::` from `cargo test --locked -p gateway --test it --all-features` pass.
-  - With the Windows toolchain, `cargo clippy --locked -p gateway --no-default-features --features local,stt,web-search --all-targets -- -D warnings` passes.
+  - With the Windows toolchain, `cargo clippy --locked -p gateway --no-default-features --features local,stt,web-search --all-targets -- -D warnings` reports no error outside master's four pre-existing ones, as the Decision Record's notes state.
     - The all-features shape cannot run here, because the config UI's `node_modules` is a Linux install and the WSL toolchain has no clippy; CI's clippy job on pull request #91 covers it.
   - As the final step, it runs the exit criteria once, with both steps' changes in the tree:
     - `bash vibe/scratch/verify-final.sh` runs fmt, the workspace tests and doctests with all features, `cargo check -p gateway --no-default-features`, rustdoc with `-D warnings`, and `cargo test -p build-xtask` in WSL, then clippy for `gateway-local` and `cargo xtask site --books-only` with the Windows toolchain.
