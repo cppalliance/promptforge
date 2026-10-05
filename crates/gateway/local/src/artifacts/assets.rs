@@ -49,16 +49,24 @@ pub(super) struct CudaMachine {
 /// `gpu_count` GPUs. CUDA exposes only the devices listed before the first
 /// invalid entry, so a set value hides them all unless its first entry is a
 /// device index below `gpu_count` or a `GPU-` or `MIG-` identifier. The
-/// probe reads no UUIDs, so an identifier counts as visible without being
-/// matched: one that names no GPU, or an abbreviated one that names several,
-/// hides every GPU from CUDA but not here. An unset value hides none.
-pub(super) fn cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool {
+/// probe reads no UUIDs, so with `identifiers_visible` true this applies
+/// CUDA's rule and an identifier counts as visible without being matched:
+/// one that names no GPU, or an abbreviated one that names several, hides
+/// every GPU from CUDA but not here. With `identifiers_visible` false, an
+/// identifier the probe cannot match counts as hiding every GPU, so only a
+/// device index below `gpu_count` leaves one visible. An unset value hides
+/// none.
+fn cuda_visible_devices_hides_every_gpu(
+    value: Option<&str>,
+    gpu_count: usize,
+    identifiers_visible: bool,
+) -> bool {
     let Some(value) = value else {
         return false;
     };
     let first = value.split(',').next().unwrap_or_default().trim();
-    let visible = first.starts_with("GPU-")
-        || first.starts_with("MIG-")
+    let identifier = first.starts_with("GPU-") || first.starts_with("MIG-");
+    let visible = (identifiers_visible && identifier)
         || first.parse::<usize>().is_ok_and(|index| index < gpu_count);
     !visible
 }
@@ -67,7 +75,7 @@ pub(super) fn cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_coun
 /// its bytes hold the name followed by a NUL, so a longer version that
 /// shares the prefix, such as `GLIBCXX_3.4.300` for `GLIBCXX_3.4.30`, does
 /// not count.
-pub(super) fn libstdcxx_defines(library: &[u8], version: &str) -> bool {
+fn libstdcxx_defines(library: &[u8], version: &str) -> bool {
     let name = version.as_bytes();
     library
         .windows(name.len() + 1)
@@ -129,10 +137,10 @@ pub(super) struct ServerAsset<'a> {
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     arch: &'a str,
-    pub(super) backend: Option<WhisperBackend>,
-    pub(super) min_driver_major: Option<u64>,
-    pub(super) native_compute_caps: Option<&'a [(u64, u64)]>,
-    pub(super) min_glibcxx: Option<&'a str>,
+    backend: Option<WhisperBackend>,
+    min_driver_major: Option<u64>,
+    native_compute_caps: Option<&'a [(u64, u64)]>,
+    min_glibcxx: Option<&'a str>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,

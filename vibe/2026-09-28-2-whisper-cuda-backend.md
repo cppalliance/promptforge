@@ -67,7 +67,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A Linux x86-64 machine with an older or unreadable driver, or without an NVIDIA GPU, gets the CPU build under `auto`, as today.
   - A Windows x86-64 machine with an NVIDIA GPU on driver 580 or later, every GPU at compute capability 8.6, 8.9, 12.0, or 12.1, keeps the CUDA build under `auto`. A machine without an NVIDIA GPU, on an older driver, or with any other GPU, whose CPU has the x86 baseline, loads the CPU build and transcribes.
   - On Linux, `auto` takes the CUDA build only where the machine's `libstdc++.so.6` defines `GLIBCXX_3.4.30`, and the CPU build elsewhere.
-  - With `CUDA_VISIBLE_DEVICES` hiding every GPU by index or by an invalid first entry, `auto` takes the CPU build on both platforms, and a Windows gateway so configured exits 0 at a graceful stop after transcriptions. A `GPU-` or `MIG-` identifier counts as visible, because the probe reads no UUIDs.
+  - With `CUDA_VISIBLE_DEVICES` hiding every GPU by index or by an invalid first entry, `auto` takes the CPU build on both platforms, and a Windows gateway so configured exits 0 at a graceful stop after transcriptions. On Linux a `GPU-` or `MIG-` identifier counts as visible, because the probe reads no UUIDs; on Windows any first entry that is not a device index, an identifier included, counts as hiding every GPU, and an explicit `cuda` restores GPU decoding for a valid identifier.
   - A machine whose CPU lacks a baseline extension fails the speech load with an error naming the required and missing extensions, and the gateway keeps serving.
   - `cpu` and `cuda` force their build on both platforms.
   - The native fixtures pass on a Linux machine with an NVIDIA GPU without extra setup, and CI's native job still exercises the CUDA build.
@@ -115,7 +115,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - the driver meets the build's floor: 570 on Linux (CUDA 12.8) and 580 on Windows (CUDA 13). An unreadable version meets no floor.
     - On Windows, every GPU's compute capability is one the build has native code for: 8.6, 8.9, 12.0, or 12.1.
     - On Linux, the machine's `libstdc++.so.6` defines `GLIBCXX_3.4.30`.
-    - `CUDA_VISIBLE_DEVICES` leaves a GPU visible: it is unset, or its first entry is a device index below the GPU count or a `GPU-` or `MIG-` identifier. This follows CUDA's rule that only the devices before the first invalid entry are visible.
+    - `CUDA_VISIBLE_DEVICES` leaves a GPU visible: it is unset, or its first entry is a device index below the GPU count or, on Linux, a `GPU-` or `MIG-` identifier. This follows CUDA's rule that only the devices before the first invalid entry are visible. On Windows an identifier counts as hiding every GPU, because the probe reads no UUIDs to match it and only the Windows CUDA build crashes at a graceful stop after a CPU fallback.
   - On an x86 machine, every setting first requires the builds' shared CPU baseline, and a missing extension fails selection.
   - The probe and the other machine checks run only under `auto`, and only on those two platforms.
   - Every other platform has exactly one build, and every setting selects it. The setting is documented as consulted only on Windows x86-64 and Linux x86-64, as `[local] llama_backend` is documented as consulted only on Windows x86-64.
@@ -372,7 +372,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - Every GPU must be native, not just one, because whisper uses CUDA's device 0, whose fastest-first order need not match `nvidia-smi`'s.
     - The gate closes the Windows stop crash under `auto` for its likely cause, a driver older than 580, and for GPUs hidden from CUDA. Machines it turns away keep `cuda` as their override, as Linux sm_86 and sm_89 GPUs on drivers 525 to 569 do.
     - Linux `auto` requires the CUDA row's `GLIBCXX_3.4.30` in the machine's C++ runtime, so RHEL 9, its rebuilds, and Amazon Linux 2023 keep the CPU build they had before this work. The archive itself does not change, and the alternative of rebuilding it is rejected below.
-    - A `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, by CUDA's documented rule, because `nvidia-smi` ignores the variable. A first entry that is a `GPU-` or `MIG-` identifier counts as visible unmatched, since the probe reads no UUIDs; a stale identifier then leaves the CUDA build selected, which the docs state.
+    - A `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, by CUDA's documented rule, because `nvidia-smi` ignores the variable. The probe reads no UUIDs, so a first entry that is a `GPU-` or `MIG-` identifier cannot be matched. On Linux it counts as visible unmatched, and a stale identifier then leaves the CUDA build selected, which the docs state. On Windows it counts as hiding every GPU, because the Windows CUDA build's CPU fallback crashes at a graceful stop; an explicit `cuda` restores GPU decoding for a valid identifier.
   - A graceful stop aborts running decodes through whisper.cpp's own `abort_callback`.
     - It is fed by the runtime's admission epoch, the signal that already settles admitted requests at shutdown.
     - The speech engine worker's stopping flag cannot serve, because it is set only after the drain wait.
