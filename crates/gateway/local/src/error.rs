@@ -26,8 +26,8 @@ pub enum LocalError {
 
     /// The model's kind has no local `llama-server` launch mode.
     ///
-    /// Speech models configure through `kind = "speech"` but no local speech
-    /// runtime exists yet. A kind added to `ModelKind` after the launch-mode
+    /// Speech models configure through `kind = "speech"` but have no local
+    /// runtime. A kind added to `ModelKind` after the launch-mode
     /// mapping lands here too, failing loudly instead of launching as chat.
     #[error("local {kind} models are not yet supported")]
     UnsupportedKind {

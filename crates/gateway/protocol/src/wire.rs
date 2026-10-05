@@ -3,8 +3,8 @@
 //! These are the gateway's own view of the wire contract. The executor defines
 //! its own copies against the same JSON; the two are deliberately not shared,
 //! because JSON is the contract and each side's struct is shaped by its role.
-//! In v0 the message and choice payloads are kept as opaque JSON so everything
-//! the gateway does not route passes through untouched.
+//! The message and choice payloads are kept as opaque JSON so everything the
+//! gateway does not route passes through untouched.
 //!
 //! WIRE-005: the `object` discriminators are fixed `&'static str` literals
 //! (`"list"`, `"model"`), so they are already closed.

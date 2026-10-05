@@ -175,10 +175,6 @@ impl ServerConfig {
     /// server, loopback-adjusted: an unspecified bind IP (`0.0.0.0` or `::`)
     /// is not a reachable destination, so it becomes the matching loopback
     /// address; every other address is kept verbatim.
-    ///
-    /// This is how a gateway-served workshop derives its gateway `base_url` from
-    /// `[server]` at boot (paired with the same `api_key`), so no credential
-    /// or address is duplicated in `[workshop]`.
     #[must_use]
     pub fn client_url(&self) -> String {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

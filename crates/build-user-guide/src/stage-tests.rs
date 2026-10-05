@@ -2,7 +2,7 @@
 //! which must be set and name a directory; one flat tree per book with its
 //! config, back-link script, chapters, rendered overview, and SUMMARY, and
 //! each book's single-file export beside the trees; a relative output path,
-//! a broken SUMMARY link, and a stale `[workshop.stt]` claim are rejected;
+//! a broken SUMMARY link, and a `[workshop.stt]` claim are rejected;
 //! output is deterministic and the guide and docs trees are only read.
 
 use std::collections::BTreeMap;

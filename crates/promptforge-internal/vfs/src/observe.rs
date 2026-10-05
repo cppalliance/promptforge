@@ -7,9 +7,7 @@
 //! seam is fire-and-forget: no outcome flows back, and a policy-denied
 //! operation never fires. Claims still key on the internal
 //! [`ExecId`](crate::ExecId); the origin is observability, never
-//! identity. The deferred consumers - the bounded event log, the Lua
-//! pull query, and enrichment policies - subscribe through this seam in
-//! later steps.
+//! identity.
 
 use std::panic::Location;
 use std::sync::Arc;

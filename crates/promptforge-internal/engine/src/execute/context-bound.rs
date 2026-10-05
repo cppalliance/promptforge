@@ -72,8 +72,8 @@ fn keyword_name(keyword: ModelKeyword) -> &'static str {
         ModelKeyword::Small => "small",
         ModelKeyword::Creative => "creative",
         ModelKeyword::Chat => "chat",
-        // The vocabulary is closed today; a future keyword reports its
-        // debug spelling rather than breaking the fill.
+        // `ModelKeyword` is `#[non_exhaustive]`; an unlisted keyword
+        // reports as unknown rather than breaking the fill.
         _ => "unknown",
     }
 }

@@ -7,8 +7,8 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_from_h1_runs_the_target_as_a_contained_chain() {
-    // The control stubs are gone: H1 is section 0, so `call` resolves
-    // against the top-level sections exactly as in any section.
+    // H1 is section 0, so `call` resolves against the top-level sections
+    // exactly as in any section.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\nvar.answer = call('## Answer')\n```\n\n\

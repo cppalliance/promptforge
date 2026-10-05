@@ -179,7 +179,7 @@ fn precheck_boundary_admits_an_exact_fit() {
     let reason = precheck(&messages, window(122), reserve(122, Some(20)), None)
         .expect_err("one token under the count plus reserve refuses");
     assert_eq!(reason, OverflowReason::Precheck);
-    // With no reserve the old boundary stands: 103 admits, 102 refuses.
+    // With no reserve the boundary is the estimate alone: 103 admits, 102 refuses.
     precheck(&messages, window(103), 0, None).expect("an exact-fit estimate is admitted");
     precheck(&messages, window(102), 0, None).expect_err("one token under the estimate refuses");
 }

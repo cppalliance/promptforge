@@ -136,9 +136,9 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
-    // A compactor that returns a replacement instead of raising is the
-    // deferred framework's shape: the loop refuses it as a `lua`-kind error
-    // naming the deferral and the one shipped policy, and appends nothing.
+    // A compactor that returns a replacement instead of raising is refused:
+    // the loop raises a `lua`-kind error naming the one shipped policy, and
+    // appends nothing.
     let client = OverflowClient::default();
     let md = loop_prompt(
         "local msgs = messages.new()\n\

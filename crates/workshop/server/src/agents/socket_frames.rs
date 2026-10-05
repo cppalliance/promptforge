@@ -1,8 +1,7 @@
 //! The agent socket's framing helpers: the pure render functions that
 //! map the conversation's wait and delta vocabulary onto Workshop's wire
 //! shapes, and the durable-event framing that drains a conversation's
-//! transcript past the per-client cursor. Split out of the `socket`
-//! module.
+//! transcript past the per-client cursor.
 
 use axum::extract::ws::WebSocket;
 use promptforge::event::Event;

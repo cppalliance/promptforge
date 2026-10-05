@@ -107,11 +107,9 @@ async fn fanout_store_writes_persist_across_arms() {
     // Arm-scoped writes under happens-before: each arm writes only its
     // own path, so no two unordered identities ever claim one path, and
     // the parent's post-join glob sees the merged state because the
-    // fanout's join_any rounds join every arm before it returns. (The
-    // fixture's old ready-*.md rendezvous polled a live sibling's writes -
-    // precisely the cross-arm read-while-written pattern the claims model
-    // rejects - so it was removed; interleaving coverage lives in the
-    // scheduler's `fanout_arms_interleave_at_io_points_on_one_thread`.)
+    // fanout's join_any rounds join every arm before it returns.
+    // Interleaving coverage lives in the scheduler's
+    // `fanout_arms_interleave_at_io_points_on_one_thread`.
     let run = tokio::time::timeout(
         Duration::from_secs(30),
         run_fixture(

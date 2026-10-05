@@ -16,8 +16,8 @@ async fn run_with_gateway(
 }
 
 /// Runs a prompt with hand-filled model bindings and no prepare pass: the
-/// multi-model shape v1's trivial fill cannot produce (every role bound to
-/// the one current model), exercising the runtime's label resolution
+/// multi-model shape the trivial fill cannot produce (it binds every role
+/// to the one current model), exercising the runtime's label resolution
 /// directly. `bindings` pairs a declared role label with the gateway model
 /// id it resolves to.
 async fn run_with_bindings(

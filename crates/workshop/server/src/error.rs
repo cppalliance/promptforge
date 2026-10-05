@@ -1,12 +1,12 @@
 //! The opaque wire error every HTTP failure answers with.
 //!
 //! [`AppError`] is the boundary between the server's failures and the HTTP
-//! response: one variant per wire failure that exists today, each mapped
-//! to one status code by the central [`IntoResponse`] impl, so the same
-//! failure is built in one place no matter which handler hits it.
+//! response: one variant per wire failure, each mapped to one status
+//! code by the central [`IntoResponse`] impl, so the same failure is
+//! built in one place no matter which handler hits it.
 //! Conversions in are explicit - handler seams name a variant constructor;
-//! no `#[from]` derive exists on this side of the boundary. The extracted
-//! feature crates map their own error types at their own route boundaries
+//! no `#[from]` derive exists on this side of the boundary. The feature
+//! crates map their own error types at their own route boundaries
 //! (`workshop_workspace::WorkspaceError`, the sessions relay's gateway
 //! envelope); this server type covers the server's own routes.
 //! Internal failure detail (the source chain) reaches the response body in
@@ -32,8 +32,7 @@ use workshop_support::{LEAK_DETAIL, envelope_response, render_message};
 #[non_exhaustive]
 pub(crate) enum AppError {
     /// An attempted gateway call failed in transport. Transparent so the
-    /// wire message stays the [`GatewayError`]'s own summary line, as it
-    /// was before the error split.
+    /// wire message stays the [`GatewayError`]'s own summary line.
     #[error(transparent)]
     Gateway(GatewayError),
 
@@ -80,7 +79,7 @@ impl AppError {
             ParseErrorKind::Fence => "parse_fence",
             ParseErrorKind::List => "parse_list",
             ParseErrorKind::Lua => "parse_lua",
-            // A kind added after this route predates its wire code.
+            // Any other kind has no wire code of its own.
             _ => "parse_error",
         };
         let message = match error.line() {
@@ -214,8 +213,8 @@ mod tests {
     }
 
     /// Tests run under debug assertions, so the live envelope must
-    /// include the detail the debug side of the boundary promises - in
-    /// the exact pre-split message format.
+    /// include the detail the debug side of the boundary promises, in
+    /// the exact message format.
     #[cfg(debug_assertions)]
     #[tokio::test]
     async fn debug_builds_leak_detail_into_the_live_envelope() {

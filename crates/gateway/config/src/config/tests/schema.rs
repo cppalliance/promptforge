@@ -181,10 +181,10 @@ include = ["not-a-config-key.toml"]
     }
 }
 
-/// The format version this loader replaced. Spelled as a number so the
-/// repository-wide check that no `config-version` header at the previous
-/// value remains keeps passing while the tests still exercise a document
-/// written at that version.
+/// A `config-version` value the loader rejects with a hard break. Spelled as
+/// a number so the repository-wide check that no `config-version` header uses
+/// this value keeps passing while the tests still exercise a document written
+/// at it.
 const PREVIOUS_VERSION: u32 = 2;
 
 #[test]

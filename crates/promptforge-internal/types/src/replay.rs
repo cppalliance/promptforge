@@ -4,11 +4,9 @@
 //! A run is meant to be reproducible from its log: the same run inputs
 //! (seed, `started_at`, flags) and the same answers replayed in order
 //! produce the same effects and events, each keyed by its
-//! [`Provenance`](crate::ids::Provenance). Replay itself is
-//! not built yet; these types are defined now so the log schema and the run
-//! record have their columns from the first run written.
+//! [`Provenance`](crate::ids::Provenance).
 //!
-//! [`Flags`] is how a future Engine change that alters a recorded run's
+//! [`Flags`] is how an Engine change that alters a recorded run's
 //! behavior stays replayable: it runs the new behavior live and sets its
 //! flag, and a later replay honors the flag only if the original run
 //! recorded it. [`ReplayError`] keeps "the code under replay diverged" apart

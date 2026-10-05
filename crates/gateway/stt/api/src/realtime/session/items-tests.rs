@@ -48,8 +48,8 @@ fn session_with_audio(service: &crate::SpeechService, payload: &str, budget: usi
     session
 }
 
-/// Cancels the session's generation epoch the way production still can:
-/// closing the runtime's admission, as service shutdown does.
+/// Cancels the session's generation epoch by closing the runtime's
+/// admission, as service shutdown does.
 #[expect(
     clippy::expect_used,
     reason = "the session owns its generation in these fixtures"

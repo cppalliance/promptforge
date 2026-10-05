@@ -44,10 +44,9 @@ pub struct RunContext {
     /// Run identity, stamped on every report and event.
     pub(super) name: String,
     /// The run's seed: Harness-drawn, the source of the untrusted-envelope
-    /// nonce (and of every future in-run random choice).
+    /// nonce (and of every other in-run random choice).
     pub(super) seed: u64,
-    /// The behavior flags the run records; empty until an Engine change
-    /// gates itself behind one.
+    /// The behavior flags the run records; empty by default.
     flags: Flags,
     /// When the run began, as the Harness stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
@@ -59,8 +58,7 @@ pub struct RunContext {
     /// parse/run boundary.
     pub(super) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
-    /// Always 0 today - the sub-run adapter that increments it lands with
-    /// the deferred prompts-as-tools Plugin.
+    /// Nothing increments it, so it is always 0.
     depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
@@ -86,9 +84,7 @@ pub struct RunContext {
     pub(super) vfs: VfsRef,
     /// The run's current model: the Host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
-    /// which binds every declared role to it. Grows into a catalog or
-    /// policy in the deferred multi-model future - a field change, never
-    /// a signature change.
+    /// which binds every declared role to it.
     pub(super) model: Option<ModelDescriptor>,
     /// The run's model satisfaction, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s fill

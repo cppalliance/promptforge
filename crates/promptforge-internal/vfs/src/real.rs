@@ -1,4 +1,4 @@
-//! The real-filesystem backend, stage 1 (thin).
+//! The real-filesystem backend.
 //!
 //! [`RealBackend`] serves real directories behind the virtual
 //! namespace over direct `std::fs` calls. Two constructors:
@@ -15,9 +15,6 @@
 //! `copy`) follow links under the containment check, which denies a
 //! link that resolves outside the root and refuses a path that passes
 //! through a dangling link.
-//!
-//! Stage 2 hardening (the Bashkit RealFs resolver trio, symlink
-//! policies, Windows long paths and device names) is deferred.
 
 mod files;
 mod resolve;

@@ -146,7 +146,7 @@ fn completion_errors_preserve_their_causes_across_the_error_type_bridge() {
 
 #[test]
 fn frontmatter_locations_surface_through_the_run_error() {
-    // Step 6: the parser's surfaced YAML position crosses the error-type
+    // The parser's surfaced YAML position crosses the error-type
     // bridge and lands on `RunError::location` for navigation. A
     // frontmatter failure predates the prompt's name, so the path is
     // the placeholder the Host replaces with its own label for the source.
@@ -174,7 +174,7 @@ fn frontmatter_locations_surface_through_the_run_error() {
 
 #[test]
 fn structured_locations_include_the_prompt_name_through_the_run_error() {
-    // Step 6: a post-frontmatter parse failure reports the prompt's
+    // A post-frontmatter parse failure reports the prompt's
     // frontmatter name as the location's path, plus the offending
     // span's line and column.
     let source = "---\nname: dup\ndescription: d\n---\n\n# T\n\n## S\n\np\n\n## S\n\nq\n";
@@ -193,7 +193,7 @@ fn structured_locations_include_the_prompt_name_through_the_run_error() {
 
 #[test]
 fn internal_faults_report_the_rust_file_and_line() {
-    // Step 6: an internal invariant failure locates itself in the Rust
+    // An internal invariant failure locates itself in the Rust
     // source, captured at the construction site.
     let expected_line = line!() + 1;
     let run_error = crate::RunError::from(Error::internal("a test invariant"));
@@ -215,9 +215,8 @@ fn errors_without_a_location_return_none() {
 
 #[test]
 fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
-    // Step 10: the refusal notice is the whole Display - it may arrive
-    // as tool output when the prompt runs as a sub-run tool - and the
-    // kind classifies it for code. Retrying cannot help: the
+    // The refusal notice is the whole Display, and the kind classifies
+    // it for code. Retrying cannot help: the
     // environment, not the transport, is what falls short.
     let error = Error::RequirementsUnmet {
         notice: "the environment cannot satisfy this prompt:\n- role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000".to_owned(),

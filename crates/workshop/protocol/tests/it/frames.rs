@@ -1,7 +1,6 @@
-//! Per-frame wire-shape pins: each test asserts one frame against the
-//! exact JSON literal the pre-refactor code built with
-//! `serde_json::json!`, so a field rename, retype, or optionality change
-//! fails here before it reaches a socket.
+//! Per-frame wire-shape pins: each test asserts one frame against an
+//! exact `serde_json::json!` literal, so a field rename, retype, or
+//! optionality change fails here before it reaches a socket.
 
 use workshop_protocol::{
     Activity, CatalogPush, ErrorEnvelope, ErrorFrame, InputFrame, InputResponse, Severity,

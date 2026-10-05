@@ -1,11 +1,8 @@
 //! The shared error-source wrappers: one crate-owned newtype per
 //! third-party error a public error surface would otherwise name.
 //!
-//! Every product family had grown its own copy of the same newtype, so the
-//! same wrapper existed under the same name in crates that could not see
-//! each other. This crate depends on no workspace crate, which is what lets
-//! the workshop and gateway families both use it without a cross-family
-//! edge. Harness crates may not depend on it, because `promptforge` is
+//! This crate depends on no workspace crate, which is what lets the
+//! workshop and gateway families both use it without a cross-family edge. Harness crates may not depend on it, because `promptforge` is
 //! their only outside dependency.
 //!
 //! `#[error(transparent)]` delegates both `Display` and `source()` to the

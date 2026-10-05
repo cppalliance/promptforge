@@ -14,10 +14,9 @@ use serde_json::{Value, json};
 use super::super::support::{Recorder, context, parse_execution_fixture};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
-/// with [`RunErrorKind::Vfs`]: every run needs a declared store, and
-/// the defensive fallback overlay is gone. (`Environment::prepare` never
-/// replaces the handle, so the raw handle's declaration is what the run
-/// sees.)
+/// with [`RunErrorKind::Vfs`]: every run needs a declared store.
+/// (`Environment::prepare` never replaces the handle, so the raw handle's
+/// declaration is what the run sees.)
 #[tokio::test]
 async fn a_handle_without_a_declared_store_fails_the_run() {
     let md = flow_prompt!(

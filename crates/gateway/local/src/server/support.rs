@@ -73,8 +73,7 @@ const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 ///
 /// On Windows the child is created at `BELOW_NORMAL_PRIORITY_CLASS` so weight
 /// loading and inference yield CPU and I/O scheduling to interactive desktop
-/// processes. Non-Windows is a documented no-op: a `nice` port would need
-/// libc or `pre_exec` unsafe and is deferred.
+/// processes. Non-Windows is a documented no-op.
 ///
 /// When the request includes a `path_prefix`, the child's `PATH` is set to
 /// the prefix entries followed by the inherited ones. Only the child

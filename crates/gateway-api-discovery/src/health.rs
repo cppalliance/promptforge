@@ -2,10 +2,8 @@
 //! `std::net::TcpStream`, enough to read a status line, with no HTTP
 //! client dependency.
 //!
-//! Moved from the workshop shell's `health.rs`; the only change in the
-//! move is the `Host` header, which is now set to the bound loopback
-//! address instead of `localhost`, matching the gateway's loopback `Host`
-//! allowlist.
+//! The `Host` header is the bound loopback address, matching the gateway's
+//! loopback `Host` allowlist.
 
 use std::io::{Read, Write as _};
 use std::net::{SocketAddr, TcpStream};

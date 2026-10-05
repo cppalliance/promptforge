@@ -1,6 +1,5 @@
 //! Tests for the frontmatter contract keys: `plugins`, `tools`,
-//! `args`, and `models` (the frontmatter matrix from the plan's Testing
-//! Plan; structured error locations are a later step).
+//! `args`, and `models`.
 
 use std::num::NonZeroU32;
 
@@ -416,7 +415,7 @@ fn a_zero_min_context_is_rejected() {
 
 #[test]
 fn contract_errors_report_their_frontmatter_line_and_column() {
-    // Step 6: the retained serde_yaml_ng location surfaces on the parse
+    // The retained serde_yaml_ng location surfaces on the parse
     // error, so a rejection inside a contract key points at its own line
     // and column instead of being a bare message.
     let src = concat!(

@@ -173,8 +173,8 @@ fn env_vars(provider: &Provider) -> Vec<EnvVar> {
 
 /// The compiled-in model list for a Niche provider: one JSON file per
 /// provider in the repo, pulled in with `include_str!` and parsed as
-/// `Vec<ModelEntry>`. The Niche tier is empty in v1, so the only arm is
-/// the test fixture.
+/// `Vec<ModelEntry>`. The Niche tier is empty, so the only arm is the test
+/// fixture.
 fn static_json(name: &str) -> Option<&'static str> {
     match name {
         #[cfg(test)]

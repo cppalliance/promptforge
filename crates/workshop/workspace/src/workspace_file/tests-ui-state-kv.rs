@@ -1,6 +1,6 @@
 //! The three opaque ui-state kv keys: round trip through create, put,
-//! close, open; an old file reading all three as absent; and save-as
-//! leaving the new file's keys empty.
+//! close, open; a file with no ui-state rows reading all three as
+//! absent; and save-as leaving the new file's keys empty.
 
 use serde_json::json;
 use workshop_support::{STATE_BUCKET_VALUE_CAP, StateBucketValue};
@@ -178,7 +178,7 @@ async fn a_row_that_no_longer_parses_reads_as_none_beside_intact_rows() {
 async fn an_old_file_with_no_ui_state_rows_reads_all_three_as_none() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let path = dir.path().join("old.pfwork");
-    // A v1 file as an earlier build wrote it: stamp and window only.
+    // A v1 file holding only the stamp and the window row.
     let conn = open_database(&path).await.expect("seed database opens");
     conn.execute_batch(SCHEMA_V1)
         .await

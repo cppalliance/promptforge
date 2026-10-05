@@ -132,9 +132,9 @@ fn unknown_override_lists_the_loaded_catalog_profiles() {
 
 #[test]
 fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
-    // Existing configs include `[workshop]` from when the gateway served
-    // the workshop; they must keep parsing, with the warning discharging
-    // the no-silent-ignore rule for the now-inert serving fields.
+    // A config that includes `[workshop]` must parse, with the warning
+    // discharging the no-silent-ignore rule for the section's inert
+    // serving fields.
     let temp = tempfile::TempDir::new().expect("temp dir");
     let path = temp.path().join("gateway.toml");
     std::fs::write(

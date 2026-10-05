@@ -1,7 +1,5 @@
 //! Run-directory and gateway-discovery-file paths: the one place that knows
-//! the
-//! `<home>/.promptforge/run` layout, matching the profile convention in the
-//! workshop's `discover.rs`.
+//! the `<home>/.promptforge/run` layout.
 
 use std::path::{Path, PathBuf};
 

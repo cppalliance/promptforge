@@ -1,6 +1,5 @@
 //! Emulated tool-calling dialects: the Gemma3 `tool_code` content-fence
-//! protocol, ported from the PromptForge Engine's former
-//! `dialects::gemma3_tool_code`.
+//! protocol.
 //!
 //! Gemma has no native tool array, so a model configured with
 //! `tool_dialect = "gemma3_tool_code"` gets tool calling emulated at the

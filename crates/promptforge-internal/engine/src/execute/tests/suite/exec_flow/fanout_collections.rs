@@ -59,9 +59,9 @@ return r[1].text .. ',' .. r[2].text\n\
     assert_eq!(out, "alpha-done,beta-done");
 }
 
-/// A collection larger than the old default item cap (1024) runs through the
-/// prompt-level path: the parent's Lua builds the table,
-/// `collection_to_items` converts it, and `fanout` dispatches every member.
+/// A 1025-member collection runs through the prompt-level path: the
+/// parent's Lua builds the table, `collection_to_items` converts it, and
+/// `fanout` dispatches every member.
 /// The worker is pure Lua with an immediate return, so the run works
 /// without a client and stays fast.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

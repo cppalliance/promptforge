@@ -3,9 +3,9 @@
 
 use super::*;
 
-/// GATE 5 - stop. Current-chat behavior: the stop button kills
-/// generation mid-stream without an error, and the chat is immediately
-/// usable again with the conversation so far.
+/// GATE 5 - stop. The stop button kills generation mid-stream without
+/// an error, and the chat is immediately usable again with the
+/// conversation so far.
 #[tokio::test]
 async fn gate_cancel_mid_generation_returns_to_waiting_and_next_input_works() {
     let server = spawn_chat_server(&["test-model"]).await;

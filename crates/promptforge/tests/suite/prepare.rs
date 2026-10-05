@@ -305,8 +305,8 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     )
 }
 
-/// The step's first test: `prepare` fills a slot by identity against a
-/// catalog the Harness supplied directly - no registry, no activation, no
+/// `prepare` fills a slot by identity against a catalog the caller
+/// supplied directly - no registry, no activation, no
 /// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]

@@ -30,7 +30,7 @@ const ROUND_INSTRUCTION_CEILING: u64 = 300;
 /// draining notices, reading the answer, yielding the tool call, and
 /// appending the assistant and tool records is a few dozen instructions
 /// at the least. A round under this floor means the counted span is not
-/// the loop's work at all (the loop moved back into Rust, or the hook is
+/// the loop's work at all (the loop runs outside the shim, or the hook is
 /// not firing on the thread), and the test would otherwise pass while
 /// showing nothing about the quota.
 const ROUND_INSTRUCTION_FLOOR: u64 = 20;

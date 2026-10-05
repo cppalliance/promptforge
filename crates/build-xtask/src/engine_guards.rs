@@ -18,10 +18,9 @@ const ENGINE_ROOT_CRATES: [&str; 1] = ["promptforge"];
 /// The private container whose every member is an Engine crate.
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 
-/// The identifiers the sans-I/O Engine plan retired, and the names the
-/// terminology rename replaced. Live Engine source (outside
+/// The seed list for the retired-symbol scan. Live Engine source (outside
 /// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
-/// of them again.
+/// identifier on it.
 const RETIRED_SEEDS: [&str; 17] = [
     "install_agent_chat_shim",
     "EventsSnapshot",

@@ -156,10 +156,9 @@ pub(super) fn parse_execution_fixture(
 }
 
 /// An inline fixture that omits the required H1 title gets the shared
-/// `# Test prompt` heading the in-crate test support's `parse` injected
-/// before the moved cases were ported; a source that already carries an H1
-/// (every fixture file, and the cases that author their own title) is parsed
-/// as written.
+/// `# Test prompt` heading; a source that already carries an H1 (every
+/// fixture file, and the cases that author their own title) is parsed as
+/// written.
 fn with_test_title(source: &str) -> std::borrow::Cow<'_, str> {
     if source.lines().any(|line| line.starts_with("# ")) {
         std::borrow::Cow::Borrowed(source)

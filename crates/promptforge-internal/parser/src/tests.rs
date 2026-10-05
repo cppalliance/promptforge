@@ -32,7 +32,7 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
 
 #[test]
 fn frontmatter_syntax_errors_report_a_position_without_a_name() {
-    // Step 6: a malformed-YAML frontmatter surfaces the retained
+    // A malformed-YAML frontmatter surfaces the retained
     // serde_yaml_ng position (1-based, file-absolute); the failure predates
     // the prompt's name, so none is reported.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
@@ -48,7 +48,7 @@ fn frontmatter_syntax_errors_report_a_position_without_a_name() {
 
 #[test]
 fn structured_errors_report_the_prompt_name_and_source_position() {
-    // Step 6: a structured failure postdates the frontmatter, so the parse
+    // A structured failure postdates the frontmatter, so the parse
     // error reports the prompt's frontmatter name plus the offending
     // span's 1-based line and column, computed against the source.
     let src = concat!(

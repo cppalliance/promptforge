@@ -259,9 +259,7 @@ fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
 
 #[test]
 fn the_migrated_built_in_ids_parse() {
-    // The built-ins moved from 2-part server/name onto the global grammar:
-    // promptforge/web_fetch -> promptforge/web/fetch and
-    // promptforge/web_search -> promptforge/web/search.
+    // The built-in tool ids follow the 3-segment global grammar.
     assert!(ToolId::parse("promptforge/web/fetch").is_ok());
     assert!(ToolId::parse("promptforge/web/search").is_ok());
 }

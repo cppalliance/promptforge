@@ -1,9 +1,8 @@
-//! The Harness-drawn inputs on `RunContext` that replaced the Engine's own
-//! clock and RNG: `seed` (the untrusted-envelope nonce derives from it),
-//! `started_at` (rendered as `sys.when` for the H1 pass and every walked
-//! section alike), and `ui` (the snapshot the `ui()` global serves). Two
-//! runs under the same inputs agree byte for byte; `sys.now` no longer
-//! exists.
+//! The caller-drawn inputs on `RunContext`: `seed` (the untrusted-envelope
+//! nonce derives from it), `started_at` (rendered as `sys.when` for the H1
+//! pass and every walked section alike), and `ui` (the snapshot the `ui()`
+//! global serves). Two runs under the same inputs agree byte for byte, and
+//! `sys.now` is an unknown field.
 
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;

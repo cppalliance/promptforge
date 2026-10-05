@@ -20,7 +20,7 @@
 //! model identity/catalog vocabulary ([`model::ModelId`],
 //! [`model::ModelCatalog`], [`model::ModelDescriptor`],
 //! [`model::ThinkingMode`]) is canonical there too and re-exported through
-//! its historical `model` paths.
+//! the `model` paths.
 //!
 //! The OpenAI wire code (the request body builder, the SSE reassembly, the
 //! body and metadata parse, and the HTTP failure classifier) lives in

@@ -92,7 +92,7 @@ fn lua_prompt_form_after_prose_is_ordinary_prose() {
 fn shared_fence_markers_must_be_exact() {
     // Only the exact ```lua shared opener is reserved, so each near-miss
     // remains H1 prose.
-    // The removed ```lua prompt form is excluded because leading it is a
+    // The ```lua prompt form is excluded because leading it is a
     // targeted error, pinned by
     // `removed_lua_prompt_form_is_a_targeted_error_when_leading`.
     for near_miss in [

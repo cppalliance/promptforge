@@ -1,9 +1,7 @@
 //! The backend-facing side: the [`Upstream`] trait and its OpenAI passthrough.
 //!
-//! The trait is the seam where per-vendor translation will live. v0 ships one
-//! implementation, [`OpenAiUpstream`], which forwards the OpenAI shape
-//! unchanged. Adding an Anthropic or pack upstream later is a new implementation
-//! behind this same trait, with no change to routing or the request handler.
+//! This crate implements the trait once, as [`OpenAiUpstream`], which forwards
+//! the OpenAI shape unchanged.
 
 use async_trait::async_trait;
 use bytes::Bytes;

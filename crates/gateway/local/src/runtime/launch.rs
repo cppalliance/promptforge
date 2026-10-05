@@ -44,7 +44,7 @@ pub(super) fn resolve_admission(
 ///
 /// The mapping is side-effect-free, so a caller can preflight an unsupported
 /// kind before any provisioning side effect: a speech model has no local
-/// runtime yet, and a kind added to `ModelKind` after this mapping fails
+/// runtime, and a kind added to `ModelKind` after this mapping fails
 /// loudly instead of launching as a chat server.
 pub(super) fn serve_mode_for(kind: ModelKind) -> Result<ServeMode, LocalError> {
     match kind {

@@ -322,8 +322,8 @@ fn bare_namespaces_still_require_a_key() {
 
 #[test]
 fn reply_is_no_longer_a_namespace() {
-    // The reply register is removed: `{{ reply }}` resolves as a bare
-    // global like any other name, and is unset here.
+    // `{{ reply }}` resolves as a bare global like any other name, and is
+    // unset here.
     let e = err_of("{{ reply }}");
     assert_eq!(e.kind, SubstErrorKind::UnknownNamespace);
 }

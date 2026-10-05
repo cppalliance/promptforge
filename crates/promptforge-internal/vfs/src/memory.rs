@@ -1,7 +1,7 @@
 //! The generic in-memory backend.
 //!
-//! [`MemoryBackend`] implements the former MemStore semantics on the VFS
-//! trait surface: bytes keyed by canonical path, writes that materialize
+//! [`MemoryBackend`] implements the VFS trait surface in memory: bytes
+//! keyed by canonical path, writes that materialize
 //! their ancestor directories (no `mkdir` needed before a write), and
 //! strict removals (absent is `NotFound`; a non-empty directory without
 //! `recursive` is an error). `ExecId` attribution is accepted as a no-op:

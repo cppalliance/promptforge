@@ -47,7 +47,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// catalog names while the boot load is still downloading - receives a 503
 /// naming the active queue command rather than a bare 404, so the caller
 /// knows to retry once the command completes. With no command active the
-/// miss is [`GatewayError::UnknownModel`], as before the queue existed.
+/// miss is [`GatewayError::UnknownModel`].
 pub(crate) async fn resolve_routed_model(
     state: &AppState,
     name: &str,

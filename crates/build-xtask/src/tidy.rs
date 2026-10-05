@@ -107,8 +107,7 @@ fn packages(tiers: &[&[Tiered]]) -> Vec<&'static str> {
 
 /// Checks that tiered `workshop-*` crates depend only on lower tiers.
 ///
-/// Every tiered crate has landed, so a missing manifest is a violation,
-/// not a crate to skip.
+/// A missing manifest is a violation, not a crate to skip.
 #[must_use]
 fn tier_dependency_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();

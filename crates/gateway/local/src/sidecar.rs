@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 /// v2 stores the template and card as a single-line JSON object in a fenced
 /// block, so a `chat_template` that itself contains ``` fences or `##` headings
 /// round-trips losslessly (serde escapes newlines, so the fence close is
-/// unambiguous). v1 (delimiter-sensitive markdown) is still parsed for
-/// backward compatibility; unknown versions are rejected rather than mis-parsed.
+/// unambiguous). v1 (delimiter-sensitive markdown) is also parsed; unknown
+/// versions are rejected rather than mis-parsed.
 const SIDECAR_VERSION: u32 = 2;
 /// Byte ceiling for a local sidecar read (SIDECAR-003).
 const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
@@ -205,8 +205,8 @@ fn render_sidecar(meta: &SidecarMeta) -> String {
 
 /// Parses a sidecar markdown string into [`SidecarMeta`].
 ///
-/// Version-aware: v2 reads the single-line JSON body; v1 falls back to the
-/// legacy delimiter-based markdown; any other (unknown or missing) version is
+/// Version-aware: v2 reads the single-line JSON body; v1 reads the
+/// delimiter-based markdown; any other (unknown or missing) version is
 /// rejected - only the frontmatter `source`/`fetched` are kept and no
 /// template/card is trusted, rather than mis-parsing an unknown layout.
 fn parse_sidecar(text: &str) -> SidecarMeta {

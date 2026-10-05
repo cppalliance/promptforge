@@ -56,8 +56,8 @@ struct ContractKeys {
     map: &'static str,
     /// The key kind (`tool alias`), for error messages.
     what: &'static str,
-    /// A key that satisfies the grammar but is rejected because its
-    /// posture is deferred (the open toolset's `open`).
+    /// A key that satisfies the grammar but is rejected as reserved
+    /// (`open`).
     deferred: Option<&'static str>,
     /// Whether each key installs as a section VM global of its own name,
     /// so a reserved name ([`promptforge_lua::RESERVED_NAMES`]) is refused.
@@ -147,8 +147,8 @@ where
 /// (`namespace/plugin`).
 ///
 /// The grammar accepts two or three segments, so the arity check counts
-/// separators: exactly one `/` is two segments. A `@` version pin never
-/// gets that far - the charset rejects it (v1 is unversioned).
+/// separators: exactly one `/` is two segments. A `@` never gets that
+/// far - the charset rejects it.
 fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
     let name =
         GlobalName::parse(text).map_err(|error| format!("invalid Plugin id `{text}`: {error}"))?;

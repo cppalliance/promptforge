@@ -352,10 +352,10 @@ fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
 }
 
 /// The deprecation warning for a boot config with a `[workshop]`
-/// section, or `None` when the section is absent. The gateway no longer
-/// serves the workshop - the desktop shell embeds the workshop server
+/// section, or `None` when the section is absent. The gateway runs no
+/// workshop listener - the desktop shell embeds the workshop server
 /// itself - so the section's `bind` and `open_browser` settings do
-/// nothing. The section still parses so existing serving settings do not
+/// nothing. The section parses so a config that includes it does not
 /// break startup; the warning keeps those inert fields from being silently
 /// ignored.
 fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {

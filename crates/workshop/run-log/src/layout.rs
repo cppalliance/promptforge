@@ -3,7 +3,7 @@
 //!
 //! Recorded runs are disposable, so a change to the tables carries no
 //! migration. A file whose `layout` row names another version, or that
-//! predates the `layout` table, is renamed beside its path together with
+//! has no `layout` table, is renamed beside its path together with
 //! its write-ahead log, and a fresh file takes the path. Nothing is
 //! deleted.
 

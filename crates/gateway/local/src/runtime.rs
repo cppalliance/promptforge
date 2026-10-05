@@ -1,9 +1,9 @@
 //! Gateway-owned local generative inference via a managed `llama-server` child.
 //!
-//! In-process `llama-cpp-2` linking is deferred. Layer 2 provisions a pinned
-//! `llama-server` binary, downloads each configured GGUF into the operator
-//! cache, spawns one child per `[[local_model]]`, and registers each as a
-//! normal OpenAI-routed [`Model`](gateway_routing::Model).
+//! [`LocalRuntime`] provisions a pinned `llama-server` binary, downloads each
+//! configured GGUF into the operator cache, spawns one child per
+//! `[[local_model]]`, and registers each as a normal OpenAI-routed
+//! [`Model`](gateway_routing::Model).
 //! Dropping [`LocalRuntime`] kills the children.
 
 mod hf_sidecar;
@@ -181,8 +181,8 @@ impl LocalRuntime {
     /// already started are dropped with the in-progress outcome, so their
     /// processes die with it.
     ///
-    /// `interrupted` is the child-readiness poll's cancellation flag, which
-    /// predates the token and speaks `AtomicBool`: the async caller bridges
+    /// `interrupted` is the child-readiness poll's `AtomicBool` cancellation
+    /// flag: the async caller bridges
     /// the token onto it so one cancellation source stops a child that is
     /// still loading weights. This function is synchronous and CPU-quiet but
     /// blocking on I/O; async callers run it on `spawn_blocking`.
@@ -357,9 +357,8 @@ static STARTUP_INTERRUPT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 /// Returns the shared startup-interrupt flag, installing the single process-wide
 /// Ctrl-C watcher on first use.
 ///
-/// Earlier code armed a fresh OS thread and Tokio runtime on every
-/// [`LocalRuntime::start`], leaking both on each profile switch. One `OnceLock`
-/// watcher is installed once and its flag shared by every start.
+/// One `OnceLock` watcher is installed once and its flag shared by every
+/// [`LocalRuntime::start`].
 fn startup_interrupt_flag() -> Arc<AtomicBool> {
     STARTUP_INTERRUPT
         .get_or_init(|| {

@@ -194,8 +194,7 @@ context = 4096
 #[test]
 fn speech_kind_refuses_to_launch_as_chat() {
     // A speech model has no `llama-server` serve mode: `launch_options`
-    // errors rather than falling through to the chat default, which is
-    // what the wildcard arm did before the mapping went fallible.
+    // errors rather than falling through to the chat default.
     let config = Config::from_toml_str(
         r#"
 config-version = 0

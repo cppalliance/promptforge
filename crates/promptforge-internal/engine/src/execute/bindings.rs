@@ -163,9 +163,8 @@ mod tests {
 
     #[test]
     fn two_roles_bound_to_one_model_share_one_descriptor_entry() {
-        // v1's trivial fill: every role binds the same model, and the
-        // descriptor table holds it once - the seam a smarter fill grows
-        // into is visible in the shape, not the content.
+        // The trivial fill binds every role to the same model, and the
+        // descriptor table holds it once.
         let model = descriptor("current");
         let mut bindings = ModelBindings::default();
         bindings.bind("analyst", model.clone());

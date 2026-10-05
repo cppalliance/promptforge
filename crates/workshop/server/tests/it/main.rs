@@ -1,6 +1,6 @@
 //! Workshop server integration tests, one module per behavior area: the
 //! `/ws` socket and its heartbeat-driven frames, the `/agents/ws` socket
-//! and the built-in chat agent's parity gate, the realtime relay, the
+//! and the built-in chat agent's gate, the realtime relay, the
 //! heartbeat loop, boot composition, the user-state bucket, the
 //! workspace file across a graceful shutdown, and the workspace save
 //! deadline through the full router.

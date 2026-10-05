@@ -1,8 +1,8 @@
 //! The [`Caller`] extractor: what an authenticated handler knows about who
 //! is asking - the request headers and, when the server recorded one, the
-//! peer address. [`check_auth`] reads both, so a handler that once
-//! extracted a bare `HeaderMap` for auth now extracts a `Caller` and
-//! changes nothing else: the extractor derefs to the header map.
+//! peer address. [`check_auth`] reads both, and the extractor derefs to the
+//! header map, so a handler reads headers through a `Caller` as it would
+//! through a bare `HeaderMap`.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -92,7 +92,7 @@ where
 ///
 /// The rejection fires while the request parts are extracted, before any
 /// body extractor runs: an unauthenticated caller never makes the gateway
-/// parse a body, the ordering the speech route once arranged by hand.
+/// parse a body.
 pub(crate) struct AuthedCaller(Caller);
 
 impl Deref for AuthedCaller {

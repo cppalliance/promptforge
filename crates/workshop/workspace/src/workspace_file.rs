@@ -9,9 +9,7 @@
 //!
 //! Schema v1 holds three tables: `meta`, `grants`, and `kv`. The `kv`
 //! table holds the window geometry and the opaque ui-state values the
-//! SPA owns ([`ui_state_kv`]). These table names are reserved for
-//! follow-on projects and unused in v1: `agent_windows`, `run_presets`,
-//! `runs`, `run_events`, `agents`, `documents`.
+//! SPA owns ([`ui_state_kv`]).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

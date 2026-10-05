@@ -5,10 +5,9 @@ use super::*;
 
 #[test]
 fn a_loop_exceeding_the_old_instruction_budget_completes() {
-    // The instruction trip limit is gone: a block that runs far past the old
-    // ~1e7-instruction ceiling (10_000 instructions per hook firing, 1_000
-    // firings) completes instead of tripping a quota error. The hook still
-    // fires throughout, polling the cancel flag.
+    // No instruction ceiling applies: a long-running block completes
+    // instead of tripping a quota error. The hook fires throughout, polling
+    // the cancel flag.
     let out = run(
         "local n = 0\nfor i = 1, 8000000 do n = n + 1 end\nreturn n",
         "",
@@ -50,8 +49,8 @@ fn shared_replay_consumes_the_configured_log_budget() {
 
 #[test]
 fn the_memory_budget_error_stays_reachable() {
-    // The instruction trip limit is gone, but the heap ceiling still refuses
-    // a block that allocates past the memory budget `apply_lua_limits` set.
+    // The heap ceiling refuses a block that allocates past the memory budget
+    // `apply_lua_limits` set.
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
     vm.apply_lua_limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
         .expect("limits apply");

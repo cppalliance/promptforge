@@ -1,6 +1,6 @@
 //! One finite pipeline end to end through the unified prompt model: explicit
 //! lazy `prose`, `models.infer`, the Rust-backed `models.loop` with tool
-//! dispatch, `messages.new()` builders, the removed `reply` register, and
+//! dispatch, `messages.new()` builders, `reply` reading nil, and
 //! synchronous `call`, driven through the public `run` against a scripted
 //! gateway at `promptforge: 0`.
 

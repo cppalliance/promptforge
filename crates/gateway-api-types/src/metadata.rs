@@ -1,10 +1,9 @@
 //! Model-metadata vocabulary: what a model can do, independent of how the
 //! gateway reaches it.
 //!
-//! These types are the canonical home of the metadata hoisted from
-//! `gateway-config` (`Capabilities`, `ModelKind`, `ThinkingMode`) and
-//! `gateway-protocol` (`ModelInfo`); both crates re-export them at their
-//! old paths so downstream call sites compile unchanged.
+//! These types are the canonical home of the model metadata;
+//! `gateway-config` re-exports `Capabilities`, `ModelKind`, and
+//! `ThinkingMode`, and `gateway-protocol` re-exports `ModelInfo`.
 
 use std::fmt;
 
@@ -201,8 +200,7 @@ mod tests {
 
     #[test]
     fn model_kind_variants_use_catalog_spelling() {
-        // Catches a serde rename or Display regression on every variant,
-        // including the hoisted transcription/image/video extensions.
+        // Catches a serde rename or Display regression on every variant.
         for (kind, spelling) in [
             (ModelKind::Chat, "chat"),
             (ModelKind::Embedding, "embedding"),
@@ -220,7 +218,7 @@ mod tests {
 
     #[test]
     fn thinking_mode_uses_catalog_spelling() {
-        // Catches a serde rename regression on the hoisted ThinkingMode.
+        // Catches a serde rename regression on ThinkingMode.
         for (mode, spelling) in [
             (ThinkingMode::Never, "never"),
             (ThinkingMode::Always, "always"),

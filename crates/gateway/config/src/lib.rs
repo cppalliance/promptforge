@@ -1,6 +1,6 @@
 //! Configuration for the PromptForge inference gateway.
 //!
-//! This crate owns everything needed to turn one version-2 `gateway.toml`
+//! This crate owns everything needed to turn one `gateway.toml`
 //! plus its sibling profile state into a validated [`Config`]: TOML parsing,
 //! `${VAR}` interpolation, startup profile selection, and validation of every
 //! profile before any can run.

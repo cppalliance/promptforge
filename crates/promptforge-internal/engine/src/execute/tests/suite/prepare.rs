@@ -1,6 +1,6 @@
 //! Prepare-pass tests that reach engine-only items: the per-run store
 //! mount's claims isolation, and the Harness's prepare-run path refusing an
-//! unsatisfiable prompt with today's model-readable notice or running a
+//! unsatisfiable prompt with the model-readable notice or running a
 //! satisfiable one. The rest of the prepare suite runs against the
 //! `promptforge` facade.
 
@@ -109,8 +109,7 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     // The notice is written to be read by a model: it names the role,
-    // each failed check, and required versus actual - today's text,
-    // unchanged by the catalog moving to the Harness.
+    // each failed check, and required versus actual.
     assert!(
         notice.starts_with("the environment cannot satisfy this prompt:"),
         "the notice opens with the standing refusal line: {notice}"
@@ -235,8 +234,8 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// The step's second test: an unmet requirement found at prepare refuses
-/// the run with today's model-readable notice text, line for line.
+/// An unmet requirement found at prepare refuses the run with the
+/// model-readable notice text, line for line.
 #[tokio::test]
 async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");

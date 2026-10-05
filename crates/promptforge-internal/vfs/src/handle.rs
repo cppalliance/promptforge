@@ -62,7 +62,7 @@ pub(crate) use scope::Scope;
 
 /// One mounted filesystem instance: its backend and the ledger of who is
 /// touching what. The two are separately `Arc`-shareable so `overlay()`
-/// (a later step) can share the claims table while swapping the backend.
+/// can share the claims table while swapping the backend.
 struct Volume {
     backend: Arc<Mutex<Box<dyn Vfs>>>,
     claims: Arc<Claims>,

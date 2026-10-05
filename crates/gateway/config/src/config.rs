@@ -21,8 +21,7 @@ pub use companion::{
 };
 pub(crate) use imp::reject_profiles_directory;
 use interpolate::interpolate_value;
-// The canonical home of the model-metadata types is `gateway-api-types`;
-// these re-exports keep the old paths compiling unchanged.
+// The canonical home of the model-metadata types is `gateway-api-types`.
 pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
 pub use secret::Secret;
 use secret::de_secret;
@@ -110,7 +109,7 @@ pub struct Config {
     tools: Option<ToolsConfig>,
     /// Optional canonical speech pipeline tuning.
     stt: Option<SttPipelineConfig>,
-    /// Deprecated workshop serving settings retained for boot compatibility.
+    /// Optional `[workshop]` section, parsed but without effect.
     workshop: Option<WorkshopConfig>,
 }
 
@@ -374,7 +373,7 @@ pub struct ModelConfig {
     thinking: ThinkingMode,
     /// The string the backend knows this model by.
     upstream: String,
-    /// The endpoint ids serving this model (v0 uses the first).
+    /// The endpoint ids serving this model; the first one is used.
     endpoints: Vec<String>,
     /// A `max_tokens` default supplied when the caller omits one.
     #[serde(default)]

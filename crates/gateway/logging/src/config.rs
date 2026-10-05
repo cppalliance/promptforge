@@ -13,8 +13,8 @@ pub(crate) const SEGMENT_TRUNCATION_MARKER: &str = " [truncated]\n";
 
 /// Every memory, latency, and disk budget for the logging pipeline.
 ///
-/// Keeping these limits in one immutable value makes later queue, timeout,
-/// shutdown, and rotation work consume the same policy without adding
+/// Keeping these limits in one immutable value lets the queue, timeout,
+/// shutdown, and rotation code consume the same policy without adding
 /// configuration before logging is available.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LogLimits {

@@ -47,7 +47,8 @@ fn locate_dumpbin(
 }
 
 /// Enumerates the executable's PE import closure through dumpbin and
-/// returns the external DLL names, split by who provides them.
+/// returns the imported CUDA runtime DLL names and Windows system DLL
+/// names, each sorted. Every other import must appear in `bundled_names`.
 pub(super) fn inspect_closure(
     probe: &impl Probe,
     env: &impl Fn(&str) -> Option<String>,

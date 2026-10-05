@@ -60,7 +60,7 @@ async fn the_harness_client_serves_a_run_the_context_never_names() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
-    // H1 prose no longer drives inference: an unread buffer - even one
+    // H1 prose does not drive inference: an unread buffer - even one
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.

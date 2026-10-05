@@ -4,7 +4,7 @@
 //! Here the Harness draws the inputs the Engine refuses to draw itself:
 //! the run's seed from the OS CSPRNG and its `started_at` from the wall
 //! clock, both handed to the recorder when the run begins, before anything
-//! else, so the record can hand them back verbatim to a future replay. Then
+//! else, so the record holds them verbatim. Then
 //! the ceremony the Engine's `Environment` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real

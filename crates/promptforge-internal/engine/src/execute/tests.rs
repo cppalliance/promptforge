@@ -38,13 +38,10 @@ use self::context::*;
 use self::fixtures::*;
 use self::gateway::*;
 
-// --- Schema description overrides (ported from the deleted tool_bag.rs) ---
+// --- Schema description overrides ---
 //
-// `ToolBag::prepare` wrapped exactly this construction -
-// `current_tool_bindings` plus `prepare_scoped_tools` - so the schema-level
-// override coverage ports onto the prose path's scope building directly. The
-// bag's generation cache is deleted with the bag, so the cache test has no
-// behavior left to port; per-block scope rebuilds stay covered by the
+// These tests build the advertised scope through `current_tool_bindings`
+// plus `prepare_scoped_tools`. Per-block scope rebuilds are covered by the
 // tool-scoping and fanout-arm suites.
 
 /// The catalog text is advertised when no override exists at any layer, and a
@@ -114,7 +111,7 @@ fn tool_description_override_appears_in_model_schema() {
 }
 
 /// Precedence at the advertised schema: a `tools.add` override beats the
-/// `model_description` recorded by `tools.bind` / `tools.always`, which itself
+/// `model_description` recorded by `tools.always`, which itself
 /// beats the catalog text.
 #[test]
 fn bind_override_reaches_the_schema_and_add_beats_bind() {

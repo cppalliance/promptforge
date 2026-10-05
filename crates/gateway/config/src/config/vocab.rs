@@ -4,8 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// The wire protocol an endpoint speaks. v0 supports only the OpenAI shape;
-/// the Anthropic translation shim is deferred.
+/// The wire protocol an endpoint speaks. The OpenAI shape is the only one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -94,7 +93,7 @@ impl fmt::Display for ToolDialect {
     }
 }
 
-/// A web-search provider. v0 supports only Brave.
+/// A web-search provider. Brave is the only one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]

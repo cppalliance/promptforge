@@ -134,8 +134,7 @@ fn launch_args_emit_companions_in_pinned_order() {
 
 #[test]
 fn launch_args_omit_companions_when_unconfigured() {
-    // A model without companions emits exactly the pre-companion command line:
-    // no speculative or projector flag may appear.
+    // A model without companions emits no speculative or projector flag.
     let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &options(false));
     let rendered = display_invocation(Path::new("llama-server"), &args);
     assert!(!rendered.contains("--spec-draft-model"));

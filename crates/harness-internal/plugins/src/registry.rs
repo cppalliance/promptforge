@@ -3,9 +3,8 @@
 //! Linking a Plugin crate alone registers nothing: the Host builds one
 //! registry, registers each installed Plugin by hand, and hands it to
 //! the Harness, which passes it to [`activate`](crate::activate) for each
-//! run. v1 is
-//! unversioned - one Plugin per id - so a duplicate registration is
-//! rejected rather than shadowing the installed Plugin, and an id
+//! run. The registry holds one Plugin per id, so a duplicate registration
+//! is rejected rather than shadowing the installed Plugin, and an id
 //! differing from a registered id only by `-`/`_`/`.` punctuation is
 //! rejected as a normalization collision: punctuation twins would be
 //! indistinguishable to a model reading a catalog.

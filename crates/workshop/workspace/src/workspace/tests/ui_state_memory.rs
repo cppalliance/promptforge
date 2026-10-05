@@ -171,7 +171,7 @@ async fn open_reads_a_files_ui_state_into_memory_and_a_later_open_replaces_it() 
     let home = tempfile::TempDir::new().expect("tempdir");
     let full_path = home.path().join("full.pfwork");
     let empty_path = home.path().join("empty.pfwork");
-    // A file written through the storage layer alone, as Step 1 does.
+    // A file written through the storage layer alone.
     let file = WorkspaceFile::create(
         &full_path,
         &WorkspaceContents {

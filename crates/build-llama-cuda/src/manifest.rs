@@ -7,7 +7,7 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 /// Bundle format version embedded in every manifest. Version 2 bundles the
-/// CUDA runtime DLLs into the zip (version 1 kept them external).
+/// CUDA runtime DLLs into the zip.
 pub const BUNDLE_FORMAT_VERSION: u32 = 2;
 
 /// Linkage policy: project libraries static, CUDA runtime DLLs bundled, so

@@ -168,11 +168,11 @@ async fn wedge_http_connection(url: &str) -> tokio::net::TcpStream {
     wedged
 }
 
-/// The regression this step exists to prevent: a client that never
-/// closes its WebSocket must not park shutdown forever. The upgrade
-/// detaches the session from axum's graceful drain, so today this stop
-/// is even graceful; the assertion pins only the bound, which the
-/// watchdog keeps true however axum's connection tracking evolves.
+/// A client that never closes its WebSocket must not park shutdown
+/// forever. The upgrade detaches the session from axum's graceful
+/// drain, so today this stop is even graceful; the assertion pins only
+/// the bound, which the watchdog keeps true however axum's connection
+/// tracking evolves.
 #[tokio::test]
 async fn a_held_websocket_does_not_block_shutdown_past_the_grace_window() {
     let dir = tempfile::TempDir::new().expect("tempdir");

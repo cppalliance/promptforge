@@ -2,7 +2,7 @@
 //! per-feature routers into the workshop server.
 //!
 //! [`AppState`] delegates subsystem state to the [`Registry`]: each
-//! extracted subsystem owns its state behind a narrow handle registered
+//! subsystem owns its state behind a narrow handle registered
 //! there, and consumers fetch the handles through the registry's
 //! type-keyed state collection. The Harness every agent session runs in
 //! is registered the same way. What remains here is the server's own
@@ -345,7 +345,7 @@ pub enum StateError {
 }
 
 /// Returns the workshop server router with every route mounted: the
-/// server's own feature routers from `crate::routes`, plus the extracted
+/// server's own feature routers from `crate::routes`, plus the
 /// subsystems' routers merged from the registry's route vector in
 /// registration order - an empty vector is a graceful no-op. The API
 /// routes sit behind the

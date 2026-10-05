@@ -190,16 +190,16 @@ pub async fn read_completion_stream<S: ChunkSource>(
 }
 
 /// A duration as fractional milliseconds, rounded to a whole microsecond
-/// so the text the run log stores parses back exactly on replay.
+/// so the text the run log stores parses back exactly.
 fn duration_ms(duration: Duration) -> f64 {
     round_to_microsecond(duration.as_secs_f64() * 1000.0)
 }
 
 /// Rounds fractional-millisecond `ms` to the nearest whole microsecond.
 ///
-/// A run log stores a timing as JSON text and parses that text back for
-/// replay. A whole-microsecond value has a short decimal form the parser
-/// reproduces exactly, so a replayed timing equals the recorded one.
+/// A run log stores a timing as JSON text and parses that text back. A
+/// whole-microsecond value has a short decimal form the parser reproduces
+/// exactly, so the parsed timing equals the recorded one.
 fn round_to_microsecond(ms: f64) -> f64 {
     (ms * 1000.0).round() / 1000.0
 }

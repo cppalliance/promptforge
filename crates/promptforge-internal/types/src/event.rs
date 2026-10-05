@@ -331,8 +331,8 @@ events! {
             /// How the owner ended.
             reason: AbandonReason,
         },
-        /// Reserved for later use, to report an existing task revived
-        /// from its record.
+        /// Reports an existing task revived from its record. The Engine
+        /// never emits it.
         TaskResumed {
             /// The task's id.
             task: TaskId,
@@ -411,10 +411,9 @@ events! {
             /// The sentence the model reads.
             text: String,
         },
-        /// Reserved for later use, to report a task's own progress note,
-        /// set through `tasks.note`. The Engine stores the note on the
-        /// task's chain, and the task's owner reads it through
-        /// `task_status`.
+        /// Reports a task's own progress note, set through `tasks.note`.
+        /// The Engine never emits it: it stores the note on the task's
+        /// chain, and the task's owner reads it through `task_status`.
         TaskNote {
             /// The task that set the note.
             task: TaskId,

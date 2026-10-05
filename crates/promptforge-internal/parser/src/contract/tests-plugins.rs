@@ -14,7 +14,7 @@ fn a_plugin_id_must_have_exactly_two_segments() {
 
 #[test]
 fn an_at_sign_in_a_plugin_id_is_rejected() {
-    // v1 is unversioned: version pins are deferred, so `@` is a parse error.
+    // A Plugin id carries no version, so `@` is a parse error.
     let error = parse("name: x\ndescription: d\nplugins:\n  - promptforge/web@1\n")
         .expect_err("a `@` version pin must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
@@ -52,9 +52,8 @@ fn a_plugin_entry_must_be_a_string_or_a_ref_map() {
 
 #[test]
 fn a_map_valued_tool_slot_is_rejected_naming_the_exact_path_expectation() {
-    // Exact paths are the only slot form: the former fuzzy `{ want, optional }`
-    // map is no longer a slot, so it fails to parse rather than binding a
-    // picker that no longer exists.
+    // Exact paths are the only slot form, so a map-valued slot fails to
+    // parse.
     let error = parse(concat!(
         "name: x\ndescription: d\n",
         "tools:\n",
@@ -86,8 +85,7 @@ fn a_malformed_exact_tool_path_is_a_parse_error() {
 
 #[test]
 fn the_reserved_open_tool_slot_key_is_rejected() {
-    // The open Harness-offered posture is deferred, so `open` is reserved even
-    // though it satisfies the alias grammar.
+    // `open` is reserved even though it satisfies the alias grammar.
     let error = parse("name: x\ndescription: d\ntools:\n  open: true\n")
         .expect_err("the reserved `open` key must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);

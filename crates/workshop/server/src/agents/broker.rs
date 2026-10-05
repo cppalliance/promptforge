@@ -220,9 +220,8 @@ impl InferenceBroker for RunBroker {
             let (kind, content) = match piece {
                 StreamDelta::Text(text) => (DeltaKind::Text, text),
                 StreamDelta::Reasoning(text) => (DeltaKind::Reasoning, text),
-                // The enum is non-exhaustive across the crate seam; a
-                // future side channel has no delta kind yet and stays
-                // unshown.
+                // The enum is non-exhaustive across the crate seam; any
+                // other piece has no delta kind and stays unshown.
                 _ => return,
             };
             conversation.publish_delta(round.id, kind, content);

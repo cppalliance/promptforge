@@ -191,9 +191,7 @@ const SUBPRIME: &[(&str, &str, &str)] = &[
 const AGGREGATOR: &[(&str, &str, &str)] = &[("openrouter", "OpenRouter", "https://openrouter.ai")];
 
 /// The keyless providers settled in the decision record: fetched
-/// with no credential, so `key_env` must be `None`. Foundry joined
-/// them when its slice moved from the per-resource deployment list
-/// to the global catalog endpoint.
+/// with no credential, so `key_env` must be `None`.
 const KEYLESS: &[&str] = &["foundry", "nvidia", "openrouter"];
 
 /// The full decision record: `(name, display_name, base_url, tier)`.

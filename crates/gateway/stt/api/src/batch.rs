@@ -75,7 +75,7 @@ struct VerboseJsonTranscription {
     pub text: String,
     /// Clip-level segments when segment granularity was requested.
     pub segments: Vec<TranscriptionSegment>,
-    /// Word timestamps. The current engine produces segments only, so
+    /// Word timestamps. The speech engine produces segments only, so
     /// this array stays empty when word granularity is requested.
     pub words: Vec<serde_json::Value>,
 }
@@ -202,8 +202,8 @@ async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, Speec
                     });
                 }
             }
-            // OpenAI-compatible hints accepted by the dialect. The current
-            // English whisper workers already own their prompt policy.
+            // OpenAI-compatible hints accepted by the dialect. The English
+            // whisper workers own their prompt policy.
             "prompt" => {
                 let _ignored = field_text(field).await?;
             }

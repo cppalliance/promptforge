@@ -5,7 +5,8 @@
 //! the kind of any name by counting segments. A namespace is reverse-DNS
 //! (`org.rustalliance`) or the reserved first-party prefix `promptforge`.
 //! Segments are lowercase ASCII alphanumeric plus `-`, `_`, `.`, and
-//! comparison is case-sensitive. v1 is unversioned: a `@` is a parse error.
+//! comparison is case-sensitive. A name carries no version, so a `@` is a
+//! parse error.
 
 use std::fmt;
 
@@ -102,8 +103,8 @@ impl fmt::Display for GlobalName {
 ///
 /// A segment must be non-empty and contain only lowercase ASCII
 /// alphanumeric characters plus `-`, `_`, `.`. Anything else - including
-/// uppercase (comparison is case-sensitive), `@` (v1 is unversioned),
-/// control characters, and non-ASCII - is rejected.
+/// uppercase (comparison is case-sensitive), `@`, control characters, and
+/// non-ASCII - is rejected.
 fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
     if segment.is_empty() {
         return Err(GlobalNameError {

@@ -190,9 +190,7 @@ enum AgentEventKind {
 /// the kind-specific `content` string (a tool-call batch renders as the
 /// JSON array of its calls), and the model, tool-call id, finish reason,
 /// and metrics where the kind includes them. `content` and every other
-/// free-text field is untrusted model-, tool-, or user-authored data. An
-/// [`Event`] locates itself by its provenance (the task and sequence),
-/// which the wire does not yet expose.
+/// free-text field is untrusted model-, tool-, or user-authored data.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 struct AgentEvent {
@@ -306,8 +304,8 @@ fn render_tool_calls(calls: &[ToolCallEvent]) -> String {
 /// deltas away (see [`AgentDeltaFrame`]).
 ///
 /// Delivery: durable - `index` is the entry's position in the session's
-/// event log, the per-client cursor recovers everything past it on
-/// reconnect, and a future `replayFrom` cursor is stored in the same field.
+/// event log, and the per-client cursor recovers everything past it on
+/// reconnect.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(super) struct AgentEventFrame {
     #[serde(rename = "type")]

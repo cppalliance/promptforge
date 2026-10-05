@@ -77,8 +77,7 @@ fn a_break_resets_list_item_capture() {
 fn h1_break_resets_prose_and_shared_fence_below_stays_live() {
     // The H1 follows the same reset rule: Markdown above the break is
     // commentary excluded from the description, and a `lua shared` fence
-    // below the break is live because a break no longer makes anything
-    // reader-only.
+    // below the break is live because a break makes nothing reader-only.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua shared\nlocal shared = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
     let prompt = parse(src).unwrap();
     assert_eq!(
@@ -240,8 +239,8 @@ fn trailing_commentary_after_the_last_fence_is_inert() {
 
 #[test]
 fn prose_without_a_following_fence_is_not_an_error() {
-    // The dropped unpaired-prose error: prose with no Lua fence at all, and
-    // prose left pending at a section's end, both parse cleanly.
+    // Prose with no Lua fence at all, and prose left pending at a section's
+    // end, both parse cleanly.
     let prose_only = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nJust prose.\n";
     parse(prose_only).expect("prose without any fence must parse");
 

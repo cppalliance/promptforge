@@ -44,7 +44,7 @@ impl ModelConfig {
         &self.upstream
     }
 
-    /// Returns the endpoint ids serving this model (v0 uses the first).
+    /// Returns the endpoint ids serving this model; the first one is used.
     #[must_use]
     pub fn endpoints(&self) -> &[String] {
         &self.endpoints

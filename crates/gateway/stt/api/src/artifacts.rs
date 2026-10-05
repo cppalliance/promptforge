@@ -153,7 +153,7 @@ pub enum SpeechError {
         model: String,
     },
 
-    /// A future role reached a service that does not implement it.
+    /// A model role reached a service that does not implement it.
     #[non_exhaustive]
     #[error("model {model} has an unsupported role")]
     UnsupportedRole {

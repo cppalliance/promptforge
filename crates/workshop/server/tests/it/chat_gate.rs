@@ -1,7 +1,5 @@
-//! THE PARITY GATE: in-process tests over the SSE mock gateway, each
-//! pinned to a behavior the built-in `chat` agent must keep. The agent
-//! replaced the direct-to-gateway chat relay; these tests hold the parity
-//! the relay established.
+//! THE CHAT GATE: in-process tests over the SSE mock gateway, each
+//! pinned to a behavior the built-in `chat` agent must keep.
 //!
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -

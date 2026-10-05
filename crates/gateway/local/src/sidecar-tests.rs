@@ -72,7 +72,7 @@ fn unknown_version_is_rejected_not_misparsed() {
 
 #[test]
 fn v1_legacy_sidecar_still_parses() {
-    // Backward compatibility: a v1 markdown sidecar round-trips its template.
+    // A v1 markdown sidecar round-trips its template.
     let v1 = "---\nversion: 1\nsource: https://hf/x\n---\n\n## chat_template\n\n```jinja\n{{ bos }}\n```\n";
     let meta = parse_sidecar(v1);
     assert_eq!(meta.source.as_deref(), Some("https://hf/x"));
@@ -81,9 +81,8 @@ fn v1_legacy_sidecar_still_parses() {
 
 #[test]
 fn v2_round_trips_template_with_embedded_fences_and_headings() {
-    // SIDECAR-005: the previous delimiter-based format truncated a template
-    // that itself contained ``` fences or `##` headings. The v2 JSON body
-    // round-trips it losslessly.
+    // SIDECAR-005: the v2 JSON body round-trips a template that itself
+    // contains ``` fences or `##` headings losslessly.
     let hostile = SidecarMeta {
         source: Some("https://huggingface.co/x/y/resolve/main/m.gguf".to_owned()),
         fetched: Some("2026-08-10T00:00:00Z".to_owned()),

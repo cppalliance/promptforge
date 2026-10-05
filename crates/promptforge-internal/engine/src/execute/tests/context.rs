@@ -117,9 +117,9 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
 /// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts with their own `models.default` call (or the `models.bind`
-/// call the removal tests expect to fail) keep their shape and get only
-/// the role declaration.
+/// Prompts with their own `models.default` call (or a `models.bind` call,
+/// which the tests expect to fail) keep their shape and get only the role
+/// declaration.
 fn ensure_model_h1(md: &str) -> String {
     let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
@@ -182,8 +182,8 @@ pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
 }
 
 /// Owned run inputs a test supplies: the run name, the progress observer,
-/// and optional client/capture sinks. Mirrors the old borrowed `RunOptions`
-/// with owned `Arc` instrumentation so it can build a [`RunContext`].
+/// and optional client/capture sinks. The instrumentation is owned `Arc`s
+/// so it can build a [`RunContext`].
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
     pub(super) observer: Arc<dyn Observer>,
@@ -191,9 +191,9 @@ pub(super) struct RunOptions {
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
 }
 
-/// The test stand-in for the old `StoreRef::memory()`: a fresh default
-/// VFS handle (a memory store at `/`) whose `read`/`glob` helpers each go
-/// through a fresh, immediately dropped access and its store view. A
+/// The test store: a fresh default VFS handle (a memory store at `/`)
+/// whose `read`/`glob` helpers each go through a fresh, immediately
+/// dropped access and its store view. A
 /// short-lived access per call is what keeps seeding and post-run
 /// assertions conflict-free: each access is its own scope, and its claims
 /// die with it, so a held seeder access would meet the run's own scope as

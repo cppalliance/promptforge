@@ -58,6 +58,6 @@ pub struct Model {
     pub tool_dialect: String,
     /// The string the backend knows this model by.
     pub upstream_name: String,
-    /// The endpoint serving this model (v0 uses the first configured one).
+    /// The endpoint serving this model: the first configured one.
     pub endpoint: Arc<Endpoint>,
 }

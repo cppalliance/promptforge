@@ -228,7 +228,7 @@ fn resolve_with(
             Err(error) => {
                 tracing::warn!("could not resolve the gateway discovery file: {error}");
             }
-            // Absent, and any future resolution: nothing to attach to.
+            // Absent, or any other resolution: nothing to attach to.
             _ => {}
         }
     }

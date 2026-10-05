@@ -11,7 +11,7 @@ use crate::upstream::{OpenAiUpstream, Upstream};
 
 // The table-entry vocabulary (`Model`, `Endpoint`) and the dominion-queue
 // builder live in the routing crate, shared with the local inference crate;
-// these re-exports keep every `crate::routing::*` path resolving unchanged.
+// these re-exports make them reachable as `crate::routing::*`.
 pub(crate) use gateway_routing::{Endpoint, Model, dominion_queues};
 
 /// A resolved routing table. Cloning copies the two indexes of `Arc`

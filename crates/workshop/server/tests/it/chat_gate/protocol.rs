@@ -3,9 +3,9 @@
 
 use super::*;
 
-/// GATE 2 - live streaming. Current-chat behavior: while the model
-/// generates, the client sees answer text and reasoning arrive as live
-/// chunks, and the completed reply supersedes them under the same id.
+/// GATE 2 - live streaming. While the model generates, the client sees
+/// answer text and reasoning arrive as live chunks, and the completed
+/// reply supersedes them under the same id.
 #[tokio::test]
 async fn gate_streaming_delivers_text_and_reasoning_deltas_then_the_reply() {
     let server = spawn_chat_server(&["test-model"]).await;

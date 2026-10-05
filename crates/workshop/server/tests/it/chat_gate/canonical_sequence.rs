@@ -62,9 +62,9 @@ async fn gate_the_operators_message_frames_as_a_user_message_between_wait_frames
     socket.close().await;
 }
 
-/// GATE 1 - multi-turn history. Current-chat behavior: the conversation
-/// accumulates turn over turn, and what the user typed reaches the model
-/// byte-exact with no untrusted envelope around it.
+/// GATE 1 - multi-turn history. The conversation accumulates turn over
+/// turn, and what the user typed reaches the model byte-exact with no
+/// untrusted envelope around it.
 #[tokio::test]
 async fn gate_history_accumulates_across_three_turns_byte_exact() {
     let server = spawn_chat_server(&["test-model"]).await;

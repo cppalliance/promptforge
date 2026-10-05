@@ -81,7 +81,7 @@ async fn supported_major_zero_proceeds() {
 
 #[tokio::test]
 async fn unsupported_major_one_is_refused() {
-    // Major 1 is no longer implemented: the gate refuses it and names the
+    // Major 1 is unsupported: the gate refuses it and names the
     // declared version rather than silently degrading to major 0.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
@@ -93,7 +93,7 @@ async fn unsupported_major_one_is_refused() {
 
 #[tokio::test]
 async fn unsupported_major_is_refused() {
-    // A future major is refused, never silently degraded to major 0.
+    // Any major other than 0 is refused, never silently degraded to major 0.
     let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let err = run_offline(md)

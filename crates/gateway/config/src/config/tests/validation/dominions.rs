@@ -63,7 +63,7 @@ vram_gb = 14
     let model = &config.local_models[0];
     assert_eq!(model.dominion.as_deref(), Some("gpu0"));
     assert_eq!(model.parallel, 4);
-    // Integer TOML still parses into the f64 field (pre-existing configs).
+    // Integer TOML parses into the f64 field.
     assert_eq!(model.vram_gb, Some(14.0));
 }
 

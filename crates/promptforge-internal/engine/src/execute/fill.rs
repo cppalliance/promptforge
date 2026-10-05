@@ -30,8 +30,7 @@ pub(super) fn fill_tool_bindings(
     let mut bindings = ToolBindings::default();
     let slots = prompt.frontmatter().tools();
     for (alias, slot) in slots.iter() {
-        // The open Harness-offered posture is deferred; a posture this fill
-        // does not model leaves its alias unbound.
+        // A posture this fill does not model leaves its alias unbound.
         let ToolSlot::Exact(id) = slot else {
             continue;
         };
@@ -53,7 +52,7 @@ pub(super) fn fill_tool_bindings(
     bindings
 }
 
-/// v1's deliberately trivial fill: binds every declared role to the
+/// The trivial model fill: binds every declared role to the
 /// context's current model and checks each role's hard keywords and
 /// context minimum against its descriptor, reporting required versus
 /// actual into [`Requirements::unmet_requirements`]. With no current
@@ -111,8 +110,8 @@ fn thinking_name(thinking: ThinkingMode) -> &'static str {
         ThinkingMode::Never => "Never",
         ThinkingMode::Always => "Always",
         ThinkingMode::Switchable => "Switchable",
-        // The vocabulary is closed today; a future mode reports as
-        // unknown rather than breaking the report.
+        // `ThinkingMode` is `#[non_exhaustive]`; an unlisted mode reports
+        // as unknown rather than breaking the report.
         _ => "unknown",
     }
 }

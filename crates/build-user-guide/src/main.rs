@@ -74,7 +74,8 @@ fn main() {
     }
 }
 
-/// Rejects guide text that presents the removed legacy STT section as usable.
+/// Rejects guide text that names the `[workshop.stt]` section on a line that
+/// does not describe it as rejected.
 fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
     for (set, _) in BOOKS {
         let set_dir = src.join(set);

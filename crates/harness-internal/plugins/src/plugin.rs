@@ -1,16 +1,15 @@
 //! The Plugin activation contract.
 //!
 //! A Plugin is the activation unit: code that runs at run setup and
-//! makes services available to the run. Plugins ship in crates now, and as
-//! DLLs through an adapter later, and are identified by a 2-segment
-//! [`PluginId`] - kind is encoded by arity, so a Plugin id is
-//! `namespace/plugin` and every tool it contributes sits under
+//! makes services available to the run. Plugins ship in crates and are
+//! identified by a 2-segment [`PluginId`] - kind is encoded by arity, so a
+//! Plugin id is `namespace/plugin` and every tool it contributes sits under
 //! `namespace/plugin/name`. Before a run is prepared, the Harness activates
 //! each declared Plugin by calling [`Plugin::create`] with the
 //! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
-//! optional Lua prelude, and grows without redesign. An activation failure
-//! is a [`PluginError`]: a stable kind for code plus a message written
-//! to be read by a model, mirroring
+//! optional Lua prelude. An activation failure is a [`PluginError`]: a
+//! stable kind for code plus a message written to be read by a model,
+//! mirroring
 //! [`ToolError`](promptforge::tools::ToolError).
 
 use std::sync::Arc;

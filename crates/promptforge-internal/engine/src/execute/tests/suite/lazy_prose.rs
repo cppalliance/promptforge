@@ -1,4 +1,4 @@
-//! Lazy `prose` behavior and the `reply` register's removal: the pending
+//! Lazy `prose` behavior and section-boundary handoff: the pending
 //! Markdown buffer installs as a fresh read-only lazy `prose` template
 //! before each Lua coroutine starts, every `{{ }}` substitution evaluates
 //! once on the first runtime read and memoizes, unconsumed buffers discard
@@ -208,7 +208,7 @@ return 'ok'\n\
 
 #[tokio::test]
 async fn the_reply_register_is_gone_and_nothing_hands_off_at_fall_through() {
-    // `reply` is an ordinary global now: a write dies with the section VM,
+    // `reply` is an ordinary global: a write dies with the section VM,
     // and the next section sees nil - no register, no roll-forward.
     let md = prose_prompt!(
         "## First\n\n\

@@ -40,8 +40,7 @@
 //! the bearer key from every caller. When the listener is bound to
 //! loopback, every route additionally sits behind the shared
 //! `Host`-authority wall, which refuses requests whose `Host` is not the
-//! bound socket (the DNS-rebinding defense). In-process llama.cpp FFI and
-//! endpoint pinning are deferred.
+//! bound socket (the DNS-rebinding defense).
 //!
 //! ## Where new route code goes
 //!
@@ -110,14 +109,14 @@ mod tray;
 mod web_search;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
-// these crate-root imports keep every `crate::wire::*` and `crate::upstream::*`
-// path resolving unchanged.
+// these crate-root imports resolve every `crate::wire::*` and
+// `crate::upstream::*` path there.
 use gateway_protocol::{upstream, wire};
 // The dominion admission queues live in the routing crate; this crate-root
-// import keeps every `crate::queue::*` path resolving unchanged.
+// import resolves every `crate::queue::*` path there.
 use gateway_routing::queue;
 // Local inference lives in its own crate behind the `local` feature; this
-// crate-root import keeps every `crate::local::*` path resolving unchanged.
+// crate-root import resolves every `crate::local::*` path there.
 #[cfg(feature = "local")]
 use gateway_local as local;
 

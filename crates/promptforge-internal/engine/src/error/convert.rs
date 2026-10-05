@@ -255,8 +255,7 @@ impl Error {
     /// onto the variant its kind names, so a Lua-side raise classifies as
     /// the Rust-raised error it stands in for. A kind whose variant needs
     /// structure the table does not hold (the tool-scope errors, the task
-    /// errors, `internal`) keeps its message as a Lua failure; those
-    /// classifications arrive with the shims that raise them.
+    /// errors, `internal`) keeps its message as a Lua failure.
     fn from_raised(raised: promptforge_lua::Raised) -> Error {
         match raised.kind {
             promptforge_lua::ErrorKind::ToolLoopExhausted => Error::ToolLoopExhausted,

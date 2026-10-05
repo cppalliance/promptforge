@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use workshop_run_log::{RunLog, RunMeta, RunOutcome};
 
-/// The tables as the log wrote them before runs were named: a
-/// `session_id` column where `name` is now, and no `layout` table.
+/// An unstamped layout: a `session_id` column in place of `name`, and
+/// no `layout` table.
 const SESSION_LAYOUT: &str = "
 CREATE TABLE runs (
     run_id        INTEGER PRIMARY KEY,

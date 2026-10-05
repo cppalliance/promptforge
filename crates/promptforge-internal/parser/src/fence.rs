@@ -33,7 +33,7 @@ pub(super) enum RawBlock {
 /// `content` begins.
 ///
 /// # Errors
-/// Returns a fence-classified parse error for the removed `lua prompt` form or
+/// Returns a fence-classified parse error for a leading `lua prompt` fence or
 /// an unclosed fence, and a Lua compilation error for invalid Lua.
 pub(super) fn split_h1(
     content: &str,

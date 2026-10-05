@@ -81,15 +81,8 @@ pub(crate) enum Command {
     },
     /// Downloads and verifies one model into the artifact store. Spawning it
     /// into the routing table needs the model's full configuration, which
-    /// this command does not include; that arrives with the command's first
-    /// producer.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no producer exists yet; the config UI's model download wires it in a later step"
-        )
-    )]
+    /// this command does not include.
+    #[cfg_attr(not(test), expect(dead_code, reason = "only tests send this command"))]
     ProvisionModel {
         /// The model name, for status display and debounce.
         name: String,
@@ -100,13 +93,7 @@ pub(crate) enum Command {
     },
     /// Stops one local model's `llama-server` child and drops it from the
     /// routing table. Not debounced: unloads are fast and order-independent.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no producer exists yet; the admin queue routes wire it in a later step"
-        )
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "only tests send this command"))]
     UnloadModel {
         /// The model to stop.
         name: String,

@@ -62,7 +62,7 @@ pub(super) fn prepare_scoped_tools(
     let mut dispatch = BTreeMap::new();
     for binding in bindings {
         // Model-facing description precedence: `tools.add` override >
-        // `tools.bind`/`tools.always` override > the bound tool's catalog
+        // `tools.always` override > the bound tool's catalog
         // text. The first two layers are already folded together by
         // `binding_for_scope` (the H2 add runtime overwrites the frozen
         // binding's `model_description`); the catalog fallback is the

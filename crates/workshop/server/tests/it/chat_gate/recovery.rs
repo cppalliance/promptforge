@@ -65,9 +65,8 @@ async fn a_live_chat_wait_answers_on_the_replacement_port_and_key() {
     socket.close().await;
 }
 
-/// GATE 6 - error survival. Current-chat behavior: a failed completion
-/// surfaces an error to the operator and the chat keeps working - the
-/// behavior that replaces the relay's gateway-health short-circuit.
+/// GATE 6 - error survival. A failed completion surfaces an error to
+/// the operator and the chat keeps working.
 #[tokio::test]
 async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
     let server = spawn_chat_server(&["test-model"]).await;
@@ -105,7 +104,7 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
 
 /// GATE 7 - selection-loss recovery, unified-runtime semantics: the run's
 /// model is the dropdown selection bound at launch, so a selection that
-/// vanishes mid-turn no longer skips anything - the frozen binding drives
+/// vanishes mid-turn skips nothing - the frozen binding drives
 /// the raced turn to completion, and the same run keeps serving turns
 /// until a close ends it.
 #[tokio::test]

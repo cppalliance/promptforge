@@ -1,15 +1,13 @@
 //! Retired-symbol scan: a retired Engine symbol may not reappear in live
 //! Engine source.
 //!
-//! The sans-I/O Engine plan retires a set of identifiers (`Observer`,
-//! `GatewaySource`, `LuaFanoutResult`, ...). Once they are gone, this scan
-//! keeps them gone: it walks a source root, strips comments and string
-//! literals (a mention in prose or a message is not a reappearance), drops
-//! every item under `#[cfg(test)]` (inline modules, module files named by
-//! `mod name;` or `#[path = "..."]` under any visibility, and any other
-//! test-only item), skips `tests/` directories and any path component
-//! containing `test_support`, and reports whole-identifier matches against
-//! the seed list.
+//! The scan walks a source root, strips comments and string literals (a
+//! mention in prose or a message is not a reappearance), drops every item
+//! under `#[cfg(test)]` (inline modules, module files named by `mod name;`
+//! or `#[path = "..."]` under any visibility, and any other test-only
+//! item), skips `tests/` directories and any path component containing
+//! `test_support`, and reports whole-identifier matches against the seed
+//! list.
 //!
 //! A `.rs` file the scan cannot read is skipped rather than reported. The
 //! skip hides nothing: a module the compiler cannot read fails the build

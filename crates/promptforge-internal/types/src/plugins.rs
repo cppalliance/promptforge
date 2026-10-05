@@ -3,11 +3,10 @@
 //! the Engine.
 //!
 //! A Plugin is the activation unit: code that runs at run setup and
-//! makes services available to the run. Plugins ship in crates now, and as
-//! DLLs through an adapter later, and are identified by a 2-segment
-//! [`GlobalName`] - kind is encoded by arity, so a Plugin id is
-//! `namespace/plugin` and every tool it contributes sits under
-//! `namespace/plugin/name`. The Engine knows Plugins by identity alone:
+//! makes services available to the run. Plugins ship in crates and are
+//! identified by a 2-segment [`GlobalName`] - kind is encoded by arity, so
+//! a Plugin id is `namespace/plugin` and every tool it contributes sits
+//! under `namespace/plugin/name`. The Engine knows Plugins by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
 //! records the conflicts of the Plugin that contributed it. The

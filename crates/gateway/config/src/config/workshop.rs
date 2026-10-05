@@ -1,11 +1,5 @@
-//! Deprecated `[workshop]` serving settings retained so older boot
-//! configurations still parse.
-//!
-//! There is deliberately no `[workshop.gateway]` sub-table: the
-//! gateway derives the workshop's client URL from its own
-//! `[server]` bind ([`ServerConfig::client_url`](super::ServerConfig::client_url))
-//! and reuses the same api_key, so no credential is duplicated and none can
-//! drift.
+//! The `[workshop]` section. It parses, but the gateway runs no workshop
+//! listener, so its settings have no effect.
 
 use std::net::SocketAddr;
 
@@ -15,30 +9,27 @@ fn default_workshop_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7910))
 }
 
-/// The deprecated `[workshop]` serving section.
+/// The parsed `[workshop]` section, whose settings have no effect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WorkshopConfig {
-    /// The socket address the workshop listener binds. Defaults to
-    /// `127.0.0.1:7910`.
+    /// The configured `bind` socket address. Defaults to `127.0.0.1:7910`.
     #[serde(default = "default_workshop_bind")]
     bind: SocketAddr,
-    /// Whether the gateway opens the system browser at the workshop URL once
-    /// it is serving. Defaults to false.
+    /// The configured `open_browser` flag. Defaults to false.
     #[serde(default)]
     open_browser: bool,
 }
 
 impl WorkshopConfig {
-    /// Returns the socket address the workshop listener binds.
+    /// Returns the configured `bind` socket address.
     #[must_use]
     pub fn bind(&self) -> SocketAddr {
         self.bind
     }
 
-    /// Returns whether the gateway opens the system browser at the workshop
-    /// URL once it is serving.
+    /// Returns the configured `open_browser` flag.
     #[must_use]
     pub fn open_browser(&self) -> bool {
         self.open_browser

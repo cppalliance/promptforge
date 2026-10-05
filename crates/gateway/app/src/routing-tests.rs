@@ -262,9 +262,8 @@ fn merge_appends_after_existing_models() {
 
 #[tokio::test]
 async fn endpoints_on_one_dominion_share_one_limit() {
-    // The new behavior dominions introduce: two endpoints bound to one
-    // dominion compete for a single pool of slots. Filling the queue
-    // through one endpoint blocks the other.
+    // Two endpoints bound to one dominion compete for a single pool of
+    // slots. Filling the queue through one endpoint blocks the other.
     let toml = r#"
 config-version = 0
 

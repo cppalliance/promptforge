@@ -82,9 +82,8 @@ pub fn join_status(
     })
 }
 
-/// How often the heartbeat probes a reachable gateway. Hardcoded for
-/// now; a configuration knob may follow once someone needs one. Probes
-/// of an unreachable gateway follow the [`ReconnectBackoff`] instead.
+/// How often the heartbeat probes a reachable gateway. Probes of an
+/// unreachable gateway follow the [`ReconnectBackoff`] instead.
 pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Shared gateway reachability, written by the heartbeat and read by the

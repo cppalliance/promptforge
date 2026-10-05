@@ -36,7 +36,7 @@
 //!   tries again. A write the log refuses fails the run it belongs to; the
 //!   recorder never skips a record.
 //! - A file is written only in the layout this build stamps into its
-//!   `layout` table. A file in any other layout, or one that predates the
+//!   `layout` table. A file in any other layout, or one without the
 //!   table, is renamed aside with its write-ahead log and never written
 //!   into or deleted; recorded runs carry no migration.
 //! - The `agent` column is the Host's, not the Harness's: the

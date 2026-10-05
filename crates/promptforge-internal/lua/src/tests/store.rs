@@ -1,6 +1,6 @@
 //! The always-on `store` table: each operation's result, the line bounds
-//! of `read` and `read_numbered`, the removed operations, and writes seen
-//! through the shared handle.
+//! of `read` and `read_numbered`, the absent `inject` and `read_lines`
+//! operations, and writes seen through the shared handle.
 
 use super::*;
 

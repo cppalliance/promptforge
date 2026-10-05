@@ -13,8 +13,7 @@ use super::actor::Command;
 use super::{WorkspaceFile, WorkspaceFileError};
 use crate::error::WorkspaceError;
 
-/// The kv keys the workspace bucket accepts. Reserved and unused for
-/// now: `scroll`, `agent_sessions`.
+/// The kv keys the workspace bucket accepts.
 pub(crate) const UI_STATE_KEYS: [&str; 3] = ["layout", "tree", "closed_editors"];
 
 /// The ui-state map with every key present and no value: what a file

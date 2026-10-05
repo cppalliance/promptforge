@@ -113,14 +113,13 @@ enum ToolDto {
 
 impl ToolDto {
     /// Builds the DTO for the slot declared under `alias`, or `None` for
-    /// a posture this wire format predates.
+    /// a posture with no wire form.
     fn new(alias: &str, slot: &ToolSlot) -> Option<Self> {
         match slot {
             ToolSlot::Exact(id) => Some(Self::Exact {
                 alias: alias.to_owned(),
                 path: id.to_string(),
             }),
-            // The deferred open posture has no wire form yet.
             _ => None,
         }
     }
@@ -215,7 +214,7 @@ fn keyword_wire(keyword: ModelKeyword) -> &'static str {
         ModelKeyword::Small => "small",
         ModelKeyword::Creative => "creative",
         ModelKeyword::Chat => "chat",
-        // A keyword added after this DTO predates its wire form.
+        // Any other keyword has no wire form of its own.
         _ => "unknown",
     }
 }

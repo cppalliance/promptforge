@@ -65,7 +65,7 @@ impl WebSearchState {
     /// Builds web-search state from its configuration.
     #[must_use]
     pub fn new(cfg: &WebSearchConfig) -> WebSearchState {
-        // v0 supports only the Brave provider; the query path below is
+        // Brave is the only provider, and the query path below is
         // Brave-shaped. Reading the provider keeps the selection explicit.
         let gateway_config::SearchProvider::Brave = cfg.provider() else {
             unreachable!("SearchProvider is non_exhaustive; wire up new providers here")

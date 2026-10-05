@@ -269,8 +269,7 @@ sha256 = "{DIGEST}"
     ))
     .unwrap();
     assert!(replaced.local_models()[0].speculative().is_some());
-    // The pre-replacement entry, written before companions existed, still
-    // parses with both companions absent.
+    // An entry without companion tables parses with both companions absent.
     let legacy = parse("").unwrap();
     let model = &legacy.local_models()[0];
     assert!(model.speculative().is_none());

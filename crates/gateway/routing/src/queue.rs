@@ -15,8 +15,7 @@
 //! round-robin order keyed by the `X-PromptForge-Client` header. That header
 //! is self-asserted: a scheduling hint for trusted callers, not an
 //! authenticated identity. There is deliberately no discipline abstraction -
-//! per-client round-robin is the only discipline, and a future cost-based
-//! discipline (DRR, token costs) would be a change contained in this file.
+//! per-client round-robin is the only discipline.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};

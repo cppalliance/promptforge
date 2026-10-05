@@ -1,4 +1,4 @@
-//! Tests for the config validation rules that reject malformed or legacy sections.
+//! Tests for the config validation rules that reject malformed or unknown sections.
 
 use super::super::*;
 use super::SAMPLE;
@@ -67,8 +67,8 @@ fn secret_redacts() {
 
 #[test]
 fn rejects_legacy_queue_section() {
-    // The legacy `[queue]` section is gone (absorbed into `[[dominion]]`);
-    // `deny_unknown_fields` on the root DTO rejects it at parse time.
+    // `deny_unknown_fields` on the root DTO rejects a `[queue]` section at
+    // parse time.
     let toml = r#"
 config-version = 0
 [server]
@@ -105,8 +105,8 @@ concurrency = 4
 
 #[test]
 fn rejects_legacy_endpoint_concurrency_and_device() {
-    // `endpoint.concurrency`/`device` are gone: one way to cap is a dominion
-    // binding, so the legacy keys fail `deny_unknown_fields` at parse time.
+    // `endpoint.concurrency` and `endpoint.device` are unknown keys, so they
+    // fail `deny_unknown_fields` at parse time.
     for legacy_key in ["concurrency = 4", "device = \"runpod\""] {
         let toml = config_with_endpoint(&format!(
             r#"[[endpoint]]

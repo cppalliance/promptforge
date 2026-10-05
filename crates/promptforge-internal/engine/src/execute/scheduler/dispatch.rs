@@ -121,7 +121,7 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet, the store arm's error when the
+    /// no call surface produces, the store arm's error when the
     /// chain's access capability is gone, or the `local_tool_done` arm's
     /// error when no local tool call is open.
     pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {

@@ -226,9 +226,9 @@ pub enum LocalToolOutcome {
 impl Request {
     /// The typed protocol error for a received `mcp` request.
     ///
-    /// The `mcp` fields are reserved and no call surface produces the request
-    /// yet, so the driver never dispatches one; receiving it fails the chain
-    /// with this error rather than reaching an unimplemented path.
+    /// The `mcp` fields are reserved and no call surface produces the request,
+    /// so the driver never dispatches one; receiving it fails the chain with
+    /// this error rather than reaching an unimplemented path.
     #[must_use]
     pub fn mcp_reserved() -> Error {
         Error::Lua("mcp requests are reserved: no dispatcher exists yet".to_owned())

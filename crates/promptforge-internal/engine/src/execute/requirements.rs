@@ -114,9 +114,8 @@ impl Requirements {
     /// Returns the refusal notice, which explains what blocks the run.
     ///
     /// Each line names what is missing or falls short, with required versus
-    /// actual. The notice can arrive as tool output when the prompt runs as
-    /// a tool of another run, so it is written for a model to read:
-    /// concise, factual, and self-contained.
+    /// actual. The notice is written for a model to read: concise, factual,
+    /// and self-contained.
     #[must_use]
     pub fn notice(&self) -> String {
         // Writing to a String is infallible, so each `write!` result is

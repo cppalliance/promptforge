@@ -341,7 +341,7 @@ fn full_synthetic_build_produces_manifest_zip_and_checksum() {
     assert_eq!(manifest["toolkit_version"], "13.3");
     assert_eq!(manifest["architectures"], serde_json::json!(["120a-real"]));
     assert_eq!(manifest["linkage"], crate::manifest::LINKAGE_POLICY);
-    // cublas64_13.dll is bundled now; only the system DLL stays external.
+    // cublas64_13.dll is bundled; only the system DLL stays external.
     assert_eq!(
         manifest["external_dlls"],
         serde_json::json!(["KERNEL32.dll"])

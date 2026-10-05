@@ -10,9 +10,6 @@
 //! selected [`Compactor`] with the [`OverflowReason`]. `compactors.fail` is
 //! the only shipped policy and the omitted-compactor default; it always
 //! raises typed context exhaustion ([`Error::ContextExhausted`]).
-//! Replacement-returning custom callbacks, budget records, replacement
-//! validation, measurable progress, bounded retry, and in-place history
-//! replacement belong to the deferred compactor framework.
 //!
 //! The surface sits in this crate for the same reason the projection does:
 //! it owns the message records, the `chat` arm's precheck and overflow
@@ -31,8 +28,7 @@ use promptforge_model_client::detail::{message_content_value, message_raw_tool_c
 ///
 /// The reason is the whole active compactor contract: the invocation passes
 /// it to the selected policy, and `compactors.fail` raises it as typed
-/// context exhaustion. Budget records and richer detail belong to the
-/// deferred compactor framework.
+/// context exhaustion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverflowReason {
     /// The pre-dispatch estimate exceeds the model's context window; the
@@ -82,7 +78,6 @@ impl std::fmt::Display for OverflowReason {
 ///
 /// `Fail` is the only policy and the omitted-compactor default: invoked
 /// with the overflow reason, it always raises typed context exhaustion.
-/// Custom replacement callbacks belong to the deferred compactor framework.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Compactor {
     /// `compactors.fail`: always raises [`Error::ContextExhausted`].
@@ -92,9 +87,7 @@ pub enum Compactor {
 
 impl Compactor {
     /// Invokes the policy on one overflow. The only shipped policy always
-    /// fails, so the invocation is the typed exhaustion error itself; the
-    /// deferred framework generalizes this into a replacement-returning
-    /// callback.
+    /// fails, so the invocation is the typed exhaustion error itself.
     #[must_use]
     pub fn invoke(self, reason: OverflowReason) -> Error {
         match self {

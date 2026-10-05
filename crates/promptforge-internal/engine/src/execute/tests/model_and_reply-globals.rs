@@ -144,8 +144,8 @@ async fn reply_is_nil_in_first_section() {
 
 #[tokio::test]
 async fn reply_substitution_is_an_unknown_global_error() {
-    // The reply register is gone: `{{ reply }}` names no namespace and no
-    // bare global, so reading the prose fails at the read site.
+    // `{{ reply }}` names no namespace and no bare global, so reading the
+    // prose fails at the read site.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n{{ reply }}\n\n```lua\nreturn prose\n```\n";
     let err = run_offline(md)

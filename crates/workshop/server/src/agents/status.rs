@@ -66,8 +66,8 @@ async fn report(
 fn on_delta(delta: &Delta, push: &Push) {
     let activity = match delta.kind {
         DeltaKind::Reasoning => Activity::Thinking,
-        // `Text`, or a side channel the conversation's `#[non_exhaustive]`
-        // `DeltaKind` adds later: the agent is producing output.
+        // `Text`, or any other kind of the conversation's
+        // `#[non_exhaustive]` `DeltaKind`: the agent is producing output.
         _ => Activity::Generating,
     };
     push.push_activity("Streaming response...", "an agent response chunk", activity);

@@ -155,8 +155,7 @@ pub(crate) enum Error {
     /// the schema validation error as the private `#[source]` cause rather
     /// than flattening it into `detail`.
     ///
-    /// Constructed only by the tool-scope preparation, which is test-only
-    /// until the `models.loop` step rewires it.
+    /// Constructed only by the tool-scope preparation.
     #[error("model-facing schema build failure for tool alias {alias:?}")]
     #[non_exhaustive]
     BindSchema {
@@ -237,7 +236,7 @@ pub(crate) enum Error {
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,
-        /// Whether the name exists in the prompt-wide `tools.bind` map.
+        /// Whether the name is one of the prompt's bound tool slots.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,
@@ -279,8 +278,7 @@ pub(crate) enum Error {
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
     ///
-    /// The notice is the whole message, written to be read by a model: it
-    /// may arrive as tool output when the prompt runs as a sub-run tool.
+    /// The notice is the whole message, written to be read by a model.
     #[error("{notice}")]
     #[non_exhaustive]
     RequirementsUnmet {
