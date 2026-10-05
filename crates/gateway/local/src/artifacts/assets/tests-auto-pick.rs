@@ -14,12 +14,37 @@ fn cuda_visible_devices_hides_every_gpu_by_cudas_rule() {
         Some("GPU-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
         Some("MIG-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
     ] {
-        assert!(!cuda_visible_devices_hides_every_gpu(value, 2), "{value:?}");
+        assert!(
+            !cuda_visible_devices_hides_every_gpu(value, 2, true),
+            "{value:?}"
+        );
     }
     for value in ["", "-1", "2", "none", "-1,0", "2,0"] {
         assert!(
-            cuda_visible_devices_hides_every_gpu(Some(value), 2),
+            cuda_visible_devices_hides_every_gpu(Some(value), 2, true),
             "{value:?}"
+        );
+    }
+    for value in [
+        "GPU-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b",
+        "MIG-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b",
+        "GPU-",
+    ] {
+        assert!(
+            cuda_visible_devices_hides_every_gpu(Some(value), 2, false),
+            "{value:?} with identifiers not visible"
+        );
+    }
+    for value in [None, Some("0"), Some("1"), Some("1,0"), Some("0,-1")] {
+        assert!(
+            !cuda_visible_devices_hides_every_gpu(value, 2, false),
+            "{value:?} with identifiers not visible"
+        );
+    }
+    for value in ["", "-1", "2", "none"] {
+        assert!(
+            cuda_visible_devices_hides_every_gpu(Some(value), 2, false),
+            "{value:?} with identifiers not visible"
         );
     }
 }
@@ -212,7 +237,7 @@ fn gpus_hidden_from_cuda_select_the_cpu_whisper_build() {
                 "{os} with CUDA_VISIBLE_DEVICES={value:?}"
             );
         }
-        for value in ["0", "1", "1,0", "0,-1", "GPU-8f6e2c1a"] {
+        for value in ["0", "1", "1,0", "0,-1"] {
             assert_eq!(
                 auto_pick(os, &probe, Some(&visible(value))),
                 format!("{os}-x86_64-cuda"),
@@ -220,18 +245,31 @@ fn gpus_hidden_from_cuda_select_the_cpu_whisper_build() {
             );
         }
     }
+    for value in ["GPU-8f6e2c1a", "MIG-8f6e2c1a"] {
+        assert_eq!(
+            auto_pick("windows", &probe, Some(&visible(value))),
+            "windows-x86_64",
+            "windows with CUDA_VISIBLE_DEVICES={value:?}"
+        );
+        assert_eq!(
+            auto_pick("linux", &probe, Some(&visible(value))),
+            "linux-x86_64-cuda",
+            "linux with CUDA_VISIBLE_DEVICES={value:?}"
+        );
+    }
 }
 
 #[test]
 fn an_explicit_whisper_backend_ignores_the_probe() {
     // The drivers below each CUDA floor, a GPU without native code in the
-    // Windows build, GPUs hidden from CUDA, and a C++ runtime without the
-    // Linux build's version are included: an explicit `cuda` is honored
-    // there.
+    // Windows build, GPUs hidden from CUDA, a device identifier the probe
+    // cannot match, and a C++ runtime without the Linux build's version
+    // are included: an explicit `cuda` is honored there.
     let machines = [
         None,
         Some(cuda_ready()),
         Some(visible("-1")),
+        Some(visible("GPU-8f6e2c1a")),
         Some(runtime(None)),
         Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.29"])))),
     ];

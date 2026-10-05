@@ -13,8 +13,9 @@ use super::{
 /// lists no native compute capabilities or every probed GPU's is among
 /// them, and the row names no `min_glibcxx` or the machine's C++ runtime
 /// defines it. Anything else - including a failed probe, GPUs hidden from
-/// CUDA, an unreadable driver version under a floor, any GPU without native
-/// code, or no runtime read - gets the CPU build. A `None`
+/// CUDA, a Windows `CUDA_VISIBLE_DEVICES` whose first entry is a `GPU-` or
+/// `MIG-` identifier, an unreadable driver version under a floor, any GPU
+/// without native code, or no runtime read - gets the CPU build. A `None`
 /// `cuda_machine` counts as [`CudaMachine::default`].
 pub(super) fn auto_whisper_backend(
     os: &str,
@@ -27,9 +28,13 @@ pub(super) fn auto_whisper_backend(
     };
     let unread = CudaMachine::default();
     let machine = cuda_machine.unwrap_or(&unread);
+    // Only the Windows CUDA build crashes at a graceful stop after a CPU
+    // fallback, and the probe reads no UUIDs to match an identifier, so
+    // Windows counts an identifier as hiding every GPU.
     if cuda_visible_devices_hides_every_gpu(
         machine.visible_devices.as_deref(),
         probe.compute_caps.len(),
+        os != "windows",
     ) {
         return WhisperBackend::Cpu;
     }
