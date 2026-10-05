@@ -41,9 +41,10 @@ const GRACEFUL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// leftover work dies with the process. The command worker is joined and
 /// the speech service retired by `serve` under the one
 /// [`WORKER_JOIN_TIMEOUT`] deadline before this teardown runs, so a command
-/// body that ignored its token, or a speech retirement still draining, is
-/// already abandoned by then; an abandoned retirement is blocking-pool work
-/// this bound reaps.
+/// body that ignored its token, a speech retirement still draining, or a
+/// retirement left unawaited because the join spent the deadline is
+/// already abandoned by then; either retirement is blocking-pool work this
+/// bound reaps.
 const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long `serve` waits for the command worker after the queue closes.
@@ -51,9 +52,10 @@ const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// or spawn) would otherwise pin the join forever; after this bound the
 /// worker is abandoned and [`RUNTIME_SHUTDOWN_TIMEOUT`] reaps what is
 /// left. No command writes a state file, so the bound can never abandon a
-/// half-written one; only a download or a spawn can outlive it. The join's
-/// deadline also bounds the speech retirement that follows it, so the two
-/// waits together take at most this long.
+/// half-written one; only a download or a spawn can outlive it. The join
+/// and the speech retirement that follows it share this deadline, so the
+/// two waits together take at most this long, and a join that spends it
+/// leaves the retirement unawaited.
 const WORKER_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Options for running the gateway. Built by the binary from parsed args.
@@ -444,8 +446,11 @@ impl Gateway {
     /// Realtime sessions and aborts running decodes after their current
     /// encoder pass or decoder step, admitted speech work drains, and the
     /// speech engine's workers are joined, so a native decoder frees its
-    /// context before the process exits. A retirement still draining at
-    /// the deadline is abandoned the same way.
+    /// context before the process exits. The retirement finishes within
+    /// the deadline, is abandoned the same way when it is still draining at
+    /// the deadline, or runs on the blocking pool unawaited when the command
+    /// worker used the whole deadline; each of the last two logs one
+    /// warning when a speech runtime was published.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
@@ -523,18 +528,27 @@ impl Gateway {
         // workers free their native contexts while the process is still
         // whole: CUDA memory freed during process exit fails with "driver
         // shutting down". The retirement blocks until admitted speech work
-        // drains, so it runs on the blocking pool, and a drain still
-        // waiting at the deadline is abandoned to the runtime teardown
-        // bound like a stuck command.
+        // drains, so it runs on the blocking pool. Its status is read
+        // first, so a stop with nothing published logs no speech warning.
+        // It is spawned even when the join spent the whole deadline, so the
+        // runtime teardown bound can still finish it unawaited. With time
+        // left it is awaited until the deadline, and a drain still waiting
+        // then is abandoned to that bound like a stuck command.
         #[cfg(feature = "stt")]
-        if tokio::time::timeout_at(
-            deadline,
-            tokio::task::spawn_blocking(move || speech.shutdown()),
-        )
-        .await
-        .is_err()
         {
-            tracing::warn!("speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it");
+            let published = speech.status().ready();
+            let retirement = tokio::task::spawn_blocking(move || speech.shutdown());
+            if tokio::time::Instant::now() >= deadline {
+                if published {
+                    tracing::warn!(
+                        "speech retirement was not awaited: the command worker used the whole {WORKER_JOIN_TIMEOUT:?} deadline"
+                    );
+                }
+            } else if tokio::time::timeout_at(deadline, retirement).await.is_err() && published {
+                tracing::warn!(
+                    "speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it"
+                );
+            }
         }
         result
     }
@@ -579,6 +593,51 @@ mod drain_tests {
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
     use super::*;
+
+    /// A shared buffer that captures what `serve` logs, so tests can assert
+    /// on its shutdown warnings.
+    #[derive(Clone, Default)]
+    struct LogBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl LogBuffer {
+        fn contents(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().expect("log buffer")).into_owned()
+        }
+    }
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("log buffer").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+        type Writer = LogBuffer;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Installs a WARN-level subscriber writing to a fresh capture buffer
+    /// for the current thread. `#[tokio::test]`'s current-thread runtime
+    /// polls the spawned `serve` on this thread, so its warnings land in
+    /// the buffer.
+    fn capture_warnings() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+        let buffer = LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buffer.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+        (buffer, guard)
+    }
 
     /// A backend whose `/chat/completions` reports each arrival and then
     /// never answers, so a proxied chat request stays in flight at the
@@ -711,9 +770,11 @@ mod drain_tests {
 
     /// A command body that ignores its cancellation token cannot pin the
     /// exit: `serve` gives the worker join exactly [`WORKER_JOIN_TIMEOUT`],
-    /// then returns without it.
+    /// then returns without it. With nothing published, the spent deadline
+    /// leaves no speech warning behind.
     #[tokio::test]
     async fn serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound() {
+        let (logs, _guard) = capture_warnings();
         let config = Config::from_toml_str(
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
@@ -740,6 +801,15 @@ mod drain_tests {
             started.elapsed() >= WORKER_JOIN_TIMEOUT,
             "the worker is given the whole join bound: {:?}",
             started.elapsed()
+        );
+        let warnings = logs.contents();
+        assert!(
+            warnings.contains("the command worker did not stop within"),
+            "the abandoned worker's warning is captured: {warnings}"
+        );
+        assert!(
+            !warnings.contains("speech"),
+            "a speech-less gateway logs no speech warning: {warnings}"
         );
     }
 
@@ -793,10 +863,12 @@ mod drain_tests {
 
     /// A graceful stop retires the speech service before `serve` returns:
     /// admission closes and both speech engine workers are joined, so a
-    /// native decoder frees its context before the process exits.
+    /// native decoder frees its context before the process exits. A
+    /// retirement that finishes logs no speech warning.
     #[cfg(feature = "stt")]
     #[tokio::test]
     async fn serve_retires_speech_before_it_returns() {
+        let (logs, _guard) = capture_warnings();
         let (service, interim, final_decoder) = scripted_speech();
         assert!(
             service.status().ready(),
@@ -822,15 +894,22 @@ mod drain_tests {
             !service.status().ready(),
             "the retired service reports not ready"
         );
+        let warnings = logs.contents();
+        assert!(
+            !warnings.contains("speech"),
+            "a finished retirement logs no speech warning: {warnings}"
+        );
     }
 
     /// A speech retirement held open by a worker job cannot pin the exit:
     /// `serve` gives it the rest of the [`WORKER_JOIN_TIMEOUT`] deadline it
-    /// shares with the worker join, then returns without it, and the
-    /// abandoned retirement still joins the workers once the job ends.
+    /// shares with the worker join, then returns without it and says it
+    /// abandoned the retirement, and the abandoned retirement still joins
+    /// the workers once the job ends.
     #[cfg(feature = "stt")]
     #[tokio::test]
     async fn serve_abandons_a_speech_retirement_that_outlasts_the_join_bound() {
+        let (logs, _guard) = capture_warnings();
         let (service, interim, final_decoder) = scripted_speech();
         // The request that owns the job ends with this statement; the job's
         // own count holds the retirement in its drain wait.
@@ -856,6 +935,16 @@ mod drain_tests {
             !interim.worker_dropped() && !final_decoder.worker_dropped(),
             "the held job keeps the abandoned retirement waiting"
         );
+        let warnings = logs.contents();
+        assert_eq!(
+            warnings.matches("speech did not retire within").count(),
+            1,
+            "the draining retirement is reported abandoned once: {warnings}"
+        );
+        assert!(
+            !warnings.contains("was not awaited"),
+            "a retirement started with time left is awaited: {warnings}"
+        );
 
         drop(job);
         assert!(
@@ -870,13 +959,14 @@ mod drain_tests {
 
     /// The worker join and the speech retirement share one deadline: when
     /// a stuck command spends the whole [`WORKER_JOIN_TIMEOUT`] of it, a
-    /// retirement held open by a worker job is abandoned at once instead of
+    /// retirement held open by a worker job is left unawaited instead of
     /// getting a bound of its own, so `serve` returns after one join bound,
-    /// not two. The abandoned retirement still joins the workers once the
-    /// job ends.
+    /// not two, and says it did not await the retirement. The unawaited
+    /// retirement still joins the workers once the job ends.
     #[cfg(feature = "stt")]
     #[tokio::test]
     async fn serve_bounds_the_worker_join_and_the_speech_retirement_by_one_deadline() {
+        let (logs, _guard) = capture_warnings();
         let (service, interim, final_decoder) = scripted_speech();
         let job = gateway_stt::test_fixtures::generation_ownership(&service)
             .expect("the published runtime admits a request")
@@ -904,13 +994,70 @@ mod drain_tests {
         );
         assert!(
             !interim.worker_dropped() && !final_decoder.worker_dropped(),
-            "the held job keeps the abandoned retirement waiting"
+            "the held job keeps the unawaited retirement waiting"
+        );
+        let warnings = logs.contents();
+        assert_eq!(
+            warnings
+                .matches("speech retirement was not awaited")
+                .count(),
+            1,
+            "the unawaited retirement is reported once: {warnings}"
+        );
+        assert!(
+            !warnings.contains("speech did not retire"),
+            "a retirement with no time left is not reported abandoned: {warnings}"
         );
 
         drop(job);
         assert!(
             both_workers_drop(interim, final_decoder).await,
-            "the abandoned retirement joins both workers once the job ends"
+            "the unawaited retirement joins both workers once the job ends"
+        );
+    }
+
+    /// A stuck command that spends the whole shared deadline leaves no time
+    /// to await the speech retirement, so `serve` returns without it and
+    /// says so once; the retirement still runs on the blocking pool and
+    /// joins idle speech's workers.
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn serve_still_retires_idle_speech_after_a_stuck_command_spends_the_deadline() {
+        let (logs, _guard) = capture_warnings();
+        let (service, interim, final_decoder) = scripted_speech();
+        let gateway = speech_gateway(&service);
+        let mut parked = park_a_command(&gateway);
+        let (shutdown, serve) = serve_until_stopped(gateway).await;
+        tokio::time::timeout(Duration::from_secs(10), parked.recv())
+            .await
+            .expect("the worker picks up the command")
+            .expect("the command body reports it started");
+
+        let _ = shutdown.send(());
+        tokio::time::timeout(WORKER_JOIN_TIMEOUT * 3 / 2, serve)
+            .await
+            .expect("serve returns within one and a half join bounds")
+            .expect("the serve task did not panic")
+            .expect("serve returns Ok after abandoning the worker");
+        let warnings = logs.contents();
+        assert_eq!(
+            warnings
+                .matches("speech retirement was not awaited")
+                .count(),
+            1,
+            "the unawaited retirement is reported once: {warnings}"
+        );
+        assert!(
+            !warnings.contains("speech did not retire"),
+            "a retirement with no time left is not reported abandoned: {warnings}"
+        );
+        assert!(
+            both_workers_drop(interim, final_decoder).await,
+            "the unawaited retirement joins both idle workers"
+        );
+        assert!(
+            !service.status().ready(),
+            "the retired service reports not ready"
         );
     }
 }
