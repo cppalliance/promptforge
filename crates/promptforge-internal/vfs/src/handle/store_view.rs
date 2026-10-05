@@ -174,7 +174,7 @@ impl Access {
     /// # Errors
     /// Returns an error when the handle declares no store, or
     /// [`VfsError::PermissionDenied`], before any backend call, when the
-    /// run that owned this access has ended.
+    /// run or the tool call that owned this access has ended.
     pub(crate) fn store_view(&self) -> Result<Access, VfsError> {
         self.scope
             .refuse_if_closed(&self.root)
@@ -197,7 +197,9 @@ impl Access {
         // The view holds one more reference to the identity, like a
         // mount forward: the identity - and its scope - ends with its
         // last access, the view included.
-        self.scope.attach(self.id)?;
+        self.scope
+            .attach(self.id, &self.root)
+            .map_err(|err| self.relativize(err))?;
         let inner = match router.acquire(&AcquireContext::new(self.id, Arc::clone(&self.scope))) {
             Ok(inner) => inner,
             Err(err) => {

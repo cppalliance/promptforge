@@ -94,11 +94,26 @@ pub fn access_spawn(parent: &Access, origin: Origin) -> Result<Access, VfsError>
 /// included - happens before `owner`'s next step, so the owner's reads of
 /// the child's files no longer conflict. A child whose identity is still
 /// live (its last access not yet dropped) contributes its current clock;
-/// a child whose identity ended contributes its final clock, which the
-/// scope keeps for exactly this. Joining a timer's identity - one the
-/// Engine never spawned - is a no-op because no such identity exists.
+/// a child whose last access dropped contributes its final clock, which
+/// the scope keeps for exactly this. A child ended through [`end_access`]
+/// keeps no seen snapshot, so joining it again contributes only its own
+/// entry and fork chain. Joining a timer's identity - one the Engine
+/// never spawned - is a no-op because no such identity exists.
 pub fn access_join(owner: &Access, child: ExecId) {
     owner.join(child);
+}
+
+/// Ends `child`, the identity of one tool call, in the scope behind
+/// `scope`: merges its clock into `owner`'s, as [`access_join`] does,
+/// when `owner` is `Some`, and drops its seen snapshot. Every access
+/// still holding `child` - the tool's own, a store view derived from it -
+/// refuses its next operation, spawn, or store view with
+/// [`VfsError::PermissionDenied`] while the scope stays open. A no-op
+/// once every access in the scope has dropped.
+pub fn end_access(scope: &ScopeHandle, owner: Option<ExecId>, child: ExecId) {
+    if let Some(scope) = scope.0.upgrade() {
+        scope.end(owner, child);
+    }
 }
 
 /// The identity `access` was acquired or spawned under: how the Engine

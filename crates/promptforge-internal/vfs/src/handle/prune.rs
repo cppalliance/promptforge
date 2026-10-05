@@ -82,8 +82,9 @@ fn prune_dead_scopes(tables: &mut ClaimsTables) {
 /// of the scope, present or forked later, can race with a clock-0 epoch,
 /// but every other live scope still conflicts with it, including one
 /// that registers after the prune, so the region's claim is never lost
-/// while its scope lives. Pattern regions are exempt: they accumulate
-/// for the life of a run.
+/// while its scope lives. An identity whose tool call has ended claims
+/// nothing again, so it is not waited for. Pattern regions are exempt:
+/// they accumulate for the life of a run.
 fn prune_ordered_epochs(tables: &mut ClaimsTables) {
     // One view per live scope of its live identities' clocks, then
     // each epoch checked against it.
@@ -99,7 +100,7 @@ fn prune_ordered_epochs(tables: &mut ClaimsTables) {
         let views: Vec<View> = inner
             .identities
             .iter()
-            .filter(|(_, identity)| identity.refs > 0)
+            .filter(|(_, identity)| identity.refs > 0 && !identity.ended)
             .map(|(&id, identity)| View {
                 id,
                 own: identity.own,

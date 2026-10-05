@@ -148,7 +148,7 @@ impl Claims {
         path: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = scope.view(id, path)?;
         Self::check_write(&tables, scope, &view, path)?;
         Self::record_write(&mut tables, scope, &view, path);
         Self::finish_claim(scope, id, &mut tables, view.own, 1);
@@ -321,7 +321,7 @@ impl Claims {
         path: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = scope.view(id, path)?;
         Self::check_read(&tables, scope, &view, path)?;
         Self::record_read(&mut tables, scope, &view, path);
         Self::finish_claim(scope, id, &mut tables, view.own, 1);

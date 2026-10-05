@@ -39,7 +39,9 @@ pub(crate) struct Scope {
 pub(super) struct ScopeInner {
     /// One record per identity ever in the scope, keyed by its
     /// [`ExecId`]. A record whose refs hit zero stays: its clock is the
-    /// identity's final clock, which a late join still reads.
+    /// identity's final clock, which a late join still reads. An identity
+    /// ended through [`Scope::end`] keeps no seen snapshot, only its own
+    /// entry and fork record, so a later join of it merges just those.
     pub(super) identities: HashMap<ExecId, Identity>,
 }
 
@@ -61,6 +63,27 @@ pub(super) struct Identity {
     /// The accesses holding the identity, however many volumes they
     /// touch through a mounted-handle forward.
     pub(super) refs: usize,
+    /// Set by [`Scope::end`]: the tool call that owned the identity has
+    /// ended, so its every later operation, spawn, and store view is
+    /// refused while the scope stays open.
+    pub(super) ended: bool,
+}
+
+impl Identity {
+    /// Refuses an operation on `path` once the identity's tool call has
+    /// ended, before any claim or backend call.
+    fn refuse_if_ended(&self, path: &VfsPath) -> Result<(), VfsError> {
+        if self.ended {
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: format!(
+                    "the tool call that owned this access has ended, so {path} can no longer be \
+                     touched through it; finish every operation before the call answers"
+                ),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// One frozen fork snapshot: the identity forked from and the parent's
@@ -153,16 +176,18 @@ impl Scope {
     }
 
     /// Adds one access's reference to `id`: the identity registers fresh
-    /// on its first access, and a mounted-handle forward of an existing
-    /// identity joins its scope with one more reference.
+    /// on its first access, and a mounted-handle forward or a store view
+    /// of an existing identity joins its scope with one more reference.
     ///
     /// # Errors
-    /// Returns [`VfsError::PermissionDenied`] when the scope is closed.
-    pub(super) fn attach(&self, id: ExecId) -> Result<(), VfsError> {
-        self.refuse_if_closed(&VfsPath::root())?;
+    /// Returns [`VfsError::PermissionDenied`], naming `path`, when the
+    /// scope is closed or `id`'s tool call has ended.
+    pub(super) fn attach(&self, id: ExecId, path: &VfsPath) -> Result<(), VfsError> {
+        self.refuse_if_closed(path)?;
         let mut inner = self.lock();
         match inner.identities.entry(id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get().refuse_if_ended(path)?;
                 entry.get_mut().refs += 1;
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -176,6 +201,7 @@ impl Scope {
                     forked: None,
                     own: 1,
                     refs: 1,
+                    ended: false,
                 });
                 self.live.fetch_add(1, Ordering::AcqRel);
             }
@@ -187,12 +213,22 @@ impl Scope {
     /// snapshot read-only and records the parent's entry as one frozen
     /// fork step, and the parent's entry advances, so the parent's
     /// later accesses are not ordered before the child's.
-    pub(super) fn fork(&self, parent: ExecId, child: ExecId) {
+    ///
+    /// # Errors
+    /// Returns [`VfsError::PermissionDenied`], naming `path`, when
+    /// `parent`'s tool call has ended.
+    pub(super) fn fork(
+        &self,
+        parent: ExecId,
+        child: ExecId,
+        path: &VfsPath,
+    ) -> Result<(), VfsError> {
         let mut inner = self.lock();
         let parent_identity = inner
             .identities
             .get_mut(&parent)
             .unwrap_or_else(|| panic!("a live access's identity is registered"));
+        parent_identity.refuse_if_ended(path)?;
         // The child's own entry starts at 1, as an attach's does: its
         // first epoch must outrank every sibling's blank slot.
         let child_identity = Identity {
@@ -204,15 +240,18 @@ impl Scope {
             })),
             own: 1,
             refs: 1,
+            ended: false,
         };
         parent_identity.own += 1;
         inner.identities.insert(child, child_identity);
         self.live.fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
 
-    /// Drops one access's reference to `id`; at zero the identity ends
-    /// and, when it was the scope's last, the scope ends with it. The
-    /// identity's record stays: its clock is its final clock.
+    /// Drops one access's reference to `id`; at zero the identity stops
+    /// counting as live and, when it was the scope's last, the scope ends
+    /// with it. The identity's record stays with its final clock, which
+    /// holds no seen snapshot once [`Scope::end`] has ended it.
     pub(super) fn release(&self, id: ExecId) {
         let mut inner = self.lock();
         if let Some(identity) = inner.identities.get_mut(&id) {
@@ -228,8 +267,65 @@ impl Scope {
     /// a join after the scope purged it, when no live access could still
     /// join, so it merges nothing.
     pub(super) fn join(&self, owner: ExecId, child: ExecId) {
+        self.lock().merge(owner, child);
+    }
+
+    /// Ends `child`, the identity of one tool call: merges its clock into
+    /// `owner`'s, as [`Scope::join`] does, when `owner` is `Some`, then
+    /// drops its seen snapshot. Its own entry and fork record stay, since
+    /// they describe what the child already did. One lock acquisition, so
+    /// no operation for `child` is admitted after this returns.
+    pub(crate) fn end(&self, owner: Option<ExecId>, child: ExecId) {
         let mut inner = self.lock();
-        let Some(child_identity) = inner.identities.get(&child) else {
+        let Some(child_identity) = inner.identities.get_mut(&child) else {
+            return;
+        };
+        child_identity.ended = true;
+        if let Some(owner) = owner {
+            inner.merge(owner, child);
+        }
+        if let Some(child_identity) = inner.identities.get_mut(&child) {
+            child_identity.seen = Arc::default();
+        }
+    }
+
+    /// The identity's happens-before view, taken together so one claim
+    /// checks and records against one epoch. Every operation is admitted
+    /// here, so the ended check shares this lock with [`Scope::end`].
+    ///
+    /// # Errors
+    /// Returns [`VfsError::PermissionDenied`], naming `path`, when `id`'s
+    /// tool call has ended.
+    pub(super) fn view(&self, id: ExecId, path: &VfsPath) -> Result<View, VfsError> {
+        let inner = self.lock();
+        let identity = inner
+            .identities
+            .get(&id)
+            .unwrap_or_else(|| panic!("a live access's identity is registered"));
+        identity.refuse_if_ended(path)?;
+        Ok(View {
+            id,
+            own: identity.own,
+            seen: Arc::clone(&identity.seen),
+            forked: identity.forked.clone(),
+        })
+    }
+
+    /// Advances `id`'s own entry past its recorded epoch, so its next
+    /// access records a fresh one.
+    pub(super) fn advance(&self, id: ExecId, tick: u64) {
+        let mut inner = self.lock();
+        if let Some(identity) = inner.identities.get_mut(&id) {
+            identity.own = identity.own.max(tick + 1);
+        }
+    }
+}
+
+impl ScopeInner {
+    /// The join's merge, under the caller's lock: `child`'s own entry,
+    /// frozen fork chain, and seen map, into `owner`'s seen map.
+    fn merge(&mut self, owner: ExecId, child: ExecId) {
+        let Some(child_identity) = self.identities.get(&child) else {
             return;
         };
         let child_view = View {
@@ -238,7 +334,7 @@ impl Scope {
             seen: Arc::clone(&child_identity.seen),
             forked: child_identity.forked.clone(),
         };
-        let Some(owner_identity) = inner.identities.get_mut(&owner) else {
+        let Some(owner_identity) = self.identities.get_mut(&owner) else {
             return;
         };
         let owner_seen = Arc::make_mut(&mut owner_identity.seen);
@@ -264,31 +360,6 @@ impl Scope {
             if other_clock > *slot {
                 *slot = other_clock;
             }
-        }
-    }
-
-    /// The identity's happens-before view, taken together so one claim
-    /// checks and records against one epoch.
-    pub(super) fn view(&self, id: ExecId) -> View {
-        let inner = self.lock();
-        let identity = inner
-            .identities
-            .get(&id)
-            .unwrap_or_else(|| panic!("a live access's identity is registered"));
-        View {
-            id,
-            own: identity.own,
-            seen: Arc::clone(&identity.seen),
-            forked: identity.forked.clone(),
-        }
-    }
-
-    /// Advances `id`'s own entry past its recorded epoch, so its next
-    /// access records a fresh one.
-    pub(super) fn advance(&self, id: ExecId, tick: u64) {
-        let mut inner = self.lock();
-        if let Some(identity) = inner.identities.get_mut(&id) {
-            identity.own = identity.own.max(tick + 1);
         }
     }
 }

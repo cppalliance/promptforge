@@ -260,7 +260,7 @@ impl VfsRef {
     /// tables. A closed scope is refused before either.
     fn join_scope(&self, cx: &AcquireContext) -> Result<Arc<Scope>, VfsError> {
         let scope = Arc::clone(cx.scope());
-        scope.attach(cx.id())?;
+        scope.attach(cx.id(), &VfsPath::root())?;
         self.volume.claims.register_scope(&scope);
         Ok(scope)
     }

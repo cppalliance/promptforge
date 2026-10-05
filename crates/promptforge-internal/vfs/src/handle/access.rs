@@ -30,7 +30,8 @@ impl Access {
     /// this capability's own clock entry, which orders nothing new: its
     /// later accesses are merely no longer ordered before a child that
     /// never ran. Returns [`VfsError::PermissionDenied`], before the
-    /// fork, when the run that owned this capability has ended.
+    /// fork, when the run or the tool call that owned this capability
+    /// has ended.
     ///
     /// Crate-internal: backs [`crate::detail::access_spawn`].
     pub(crate) fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
@@ -40,7 +41,9 @@ impl Access {
         let id = ExecId::vend();
         // The fork comes first so a wrapped handle acquiring the child
         // finds it already registered in the scope.
-        self.scope.fork(self.id, id);
+        self.scope
+            .fork(self.id, id, &self.root)
+            .map_err(|err| self.relativize(err))?;
         let inner = match self
             .backend()
             .acquire(&AcquireContext::new(id, Arc::clone(&self.scope)))
@@ -94,8 +97,9 @@ impl Access {
 
     /// The claims-table half of one operation: refuses once the run that
     /// owned this access has ended, runs `claim` against this access's
-    /// identity and scope, and re-spells a store view's error paths into
-    /// the caller's logical form.
+    /// identity and scope - whose view refuses once the tool call that
+    /// owned the identity has ended - and re-spells a store view's error
+    /// paths into the caller's logical form.
     pub(super) fn admit(
         &self,
         claim: impl FnOnce(&Claims, &Arc<Scope>, ExecId, &VfsPath) -> Result<(), VfsError>,
