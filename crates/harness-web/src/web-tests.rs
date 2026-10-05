@@ -26,8 +26,8 @@ impl SearchProvider for NoResults {
     }
 }
 
-/// Run services over a default VFS and `cancel`, holding the search
-/// provider and this runtime's handle as each flag says.
+/// Run services over `cancel`, holding the search provider and this
+/// runtime's handle as each flag says.
 fn services_with(provider: bool, runtime: bool, cancel: CancelHandle) -> RunServices {
     let mut host = HostServices::new();
     if provider {

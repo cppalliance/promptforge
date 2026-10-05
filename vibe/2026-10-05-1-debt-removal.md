@@ -274,7 +274,7 @@ Each regression test must fail on `8f36fb553` before its fix lands. If one passe
 
 <step-4>
 
-### Step 4: Fix the stale harness-web test comment and run the exit gates
+### Step 4: Fix the stale harness-web test comment and run the exit gates [completed]
 
 - Component: harness-web comment fix (D1-13)
 - Component order: last. It is the smallest change, and its own check (the docs and clippy gates) is part of the full exit run that closes the plan.
