@@ -260,7 +260,7 @@ Each regression test must fail on `8f36fb553` before its fix lands. If one passe
 
 <step-3>
 
-### Step 3: Redact the gateway key in Workshop config Debug output
+### Step 3: Redact the gateway key in Workshop config Debug output [completed]
 
 - Component: Workshop gateway key redaction (D1-16)
 - Component order: second. It shares no code with the other two. It comes after the larger Engine change and before the comment fix, which closes the plan with the full gates.

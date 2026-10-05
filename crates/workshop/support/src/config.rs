@@ -112,7 +112,7 @@ impl Config {
 
 /// Gateway connection settings: where the gateway listens and how to
 /// authenticate to it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct GatewayConfig {
     /// Base URL of the gateway, for example `http://127.0.0.1:8081`. Empty
     /// leaves the endpoint to resolution: it attaches through the gateway
@@ -120,6 +120,16 @@ pub struct GatewayConfig {
     pub base_url: String,
     /// Bearer key for the gateway API; supports `${VAR}` interpolation.
     pub api_key: String,
+}
+
+// Manual so the bearer key is never written to logs.
+impl std::fmt::Debug for GatewayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GatewayConfig")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
 }
 
 /// HTTP server settings.
