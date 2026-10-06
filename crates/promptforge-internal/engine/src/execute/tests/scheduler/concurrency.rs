@@ -13,18 +13,18 @@ use std::time::Duration;
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// Builds the run context and its observing Harness under the given limits.
+/// Builds the run context and its observing fixture under the given limits.
 fn limited_context(
     prompt: &Prompt,
     store: &TestStore,
     limits: RunLimits,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHarness) {
+) -> (RunState, RunFixture) {
     scheduler_context_from(
         prompt,
         store,
         &test_context(EXECUTION).limits(limits),
-        RunHarness::new().observer(observer),
+        RunFixture::new().observer(observer),
     )
 }
 
@@ -34,8 +34,8 @@ fn ceiling(n: usize) -> RunLimits {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tasks_concurrency_clamps_to_the_harness_ceiling_and_reads_the_effective_limit_back() {
-    // The main walk's parent is the Harness's ceiling of 4: asking for 16
+async fn tasks_concurrency_clamps_to_the_callers_ceiling_and_reads_the_effective_limit_back() {
+    // The main walk's parent is the caller's ceiling of 4: asking for 16
     // clamps to 4, a later 2 lowers it, the no-argument form reads the
     // current limit back, and a later 4 climbs back to the parent's
     // limit - the setter is `min(n, parent)`, never an error.
@@ -50,13 +50,13 @@ async fn tasks_concurrency_clamps_to_the_harness_ceiling_and_reads_the_effective
         return a .. '|' .. b .. '|' .. c .. '|' .. d\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the run completes");
@@ -93,13 +93,13 @@ async fn tasks_concurrency_rejects_an_argument_that_is_not_a_positive_whole_numb
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the caught refusals end the run normally");
@@ -123,13 +123,13 @@ async fn tasks_concurrency_accepts_a_whole_number_float_as_a_limit() {
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the run completes");
@@ -169,13 +169,13 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(Recorder::default());
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");
@@ -230,13 +230,13 @@ async fn a_start_event_reports_the_spawning_section_not_the_admission_time_one()
         return 'done'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the run completes");
@@ -294,13 +294,13 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
         return models.infer('S' .. sys.index)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");
@@ -354,13 +354,13 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         return a .. b\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(8),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the limited fanout completes");
@@ -400,7 +400,7 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         return item .. sys.index\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = limited_context(
+    let (ctx, fixture) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
@@ -408,7 +408,7 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
     );
     let out = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, harness, None).drive(),
+        TokioDriver::new(&ctx, fixture, None).drive(),
     )
     .await
     .expect("the nested fanout must not deadlock");

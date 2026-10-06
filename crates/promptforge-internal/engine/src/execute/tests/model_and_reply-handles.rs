@@ -39,8 +39,8 @@ async fn run_with_bindings(
             ),
         );
     }
-    let harness = RunHarness::new().client(gateway_client(gateway));
-    match crate::test_support::run_harness(&prompt, "", ctx, harness).await {
+    let fixture = RunFixture::new().client(gateway_client(gateway));
+    match crate::test_support::run_prepared(&prompt, "", ctx, fixture).await {
         RunResult::Ok(out) => Ok(out),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
@@ -203,7 +203,7 @@ async fn models_infer_without_use_or_default_errors() {
             ThinkingMode::Switchable,
         ),
     );
-    let error = match crate::test_support::run_harness(&prompt, "", ctx, RunHarness::new()).await {
+    let error = match crate::test_support::run_prepared(&prompt, "", ctx, RunFixture::new()).await {
         RunResult::Failure(error) => error,
         other => panic!("models.infer with no current model must fail: {other:?}"),
     };

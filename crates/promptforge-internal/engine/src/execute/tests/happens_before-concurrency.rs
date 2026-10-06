@@ -1,7 +1,7 @@
 //! The concurrency traces: 6, nested tasks that join transitively,
 //! run within the limits, and do not deadlock at a ceiling of 1; and
 //! 12, an arm's `tasks.concurrency` limit gating its fanout within the
-//! Harness's ceiling, and its clamping to that ceiling.
+//! caller's ceiling, and its clamping to that ceiling.
 
 use super::*;
 
@@ -35,7 +35,7 @@ const TRACE_6: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 
 /// Trace 12: concurrency. An arm calls `tasks.concurrency(2)` and then
 /// runs a fanout of 10; at most 2 of its sub-tasks run at once, and the
-/// whole run never exceeds the Harness's ceiling of 8. Each sub-task makes
+/// whole run never exceeds the caller's ceiling of 8. Each sub-task makes
 /// one model round and returns its collection index, so the result is
 /// the indexes in order in every interleaving - the arm's two-at-a-time
 /// admission order is spawn order, while the model replies themselves
@@ -64,7 +64,7 @@ const TRACE_12: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
     return tostring(sys.index)\n\
     ```\n";
 
-/// Trace 12's clamp: `tasks.concurrency(16)` under the Harness's ceiling of 4
+/// Trace 12's clamp: `tasks.concurrency(16)` under the caller's ceiling of 4
 /// returns 4 - the clamp keeps prompts portable wherever they run,
 /// including where the ceiling is tighter.
 const TRACE_12_CLAMP: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -72,7 +72,7 @@ const TRACE_12_CLAMP: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\
     ## Main\n\n\
     ```lua\n\
     local n = tasks.concurrency(16)\n\
-    assert(n == 4, 'clamped to the Harness ceiling of 4, got ' .. n)\n\
+    assert(n == 4, 'clamped to the run ceiling of 4, got ' .. n)\n\
     return 'clamped:' .. n\n\
     ```\n";
 
@@ -82,11 +82,11 @@ fn serial_results_limited(prompt: &Prompt, store: &TestStore, limits: RunLimits)
     BATCHINGS
         .into_iter()
         .map(|batching| {
-            let (state, _harness) = scheduler_context_from(
+            let (state, _fixture) = scheduler_context_from(
                 prompt,
                 store,
                 &test_context(EXECUTION).limits(limits),
-                RunHarness::new(),
+                RunFixture::new(),
             );
             drive_batched(Run::from_state(state), batching).result
         })
@@ -104,13 +104,13 @@ async fn tokio_results_limited(
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
-        let (ctx, harness) = scheduler_context_from(
+        let (ctx, fixture) = scheduler_context_from(
             prompt,
             store,
             &test_context(EXECUTION).limits(limits),
-            RunHarness::new().observer(Arc::new(NullObserver::default())),
+            RunFixture::new().observer(Arc::new(NullObserver::default())),
         );
-        let mut driver = TokioDriver::new(&ctx, harness, client());
+        let mut driver = TokioDriver::new(&ctx, fixture, client());
         driver.set_shuffle_for_test(seed);
         results.push(driver.drive().await);
     }
@@ -123,8 +123,8 @@ fn ceiling_one() -> RunLimits {
     RunLimits::new().max_concurrency(std::num::NonZeroUsize::new(1).expect("1 is non-zero"))
 }
 
-/// Trace 12's ceiling: the Harness's 8-wide default, which the whole run
-/// must never exceed.
+/// Trace 12's ceiling: 8 admitted tasks, which the whole run must never
+/// exceed.
 fn ceiling_eight() -> RunLimits {
     RunLimits::new().max_concurrency(std::num::NonZeroUsize::new(8).expect("8 is non-zero"))
 }
@@ -152,7 +152,7 @@ async fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
     // The result is the indexes in collection order in every
     // interleaving, and at no point do more than the arm's 2 sub-tasks
     // run at once (the arm itself is the third live task, within the
-    // Harness's ceiling of 8). The exact two-at-a-time request order is
+    // caller's ceiling of 8). The exact two-at-a-time request order is
     // pinned separately, under a deterministic driver, in the
     // concurrency suite.
     let prompt = parse(TRACE_12);
@@ -184,8 +184,8 @@ async fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tasks_concurrency_clamps_to_the_harness_ceiling() {
-    // Trace 12's clamp: under the Harness's ceiling of 4, asking for 16
+async fn tasks_concurrency_clamps_to_the_callers_ceiling() {
+    // Trace 12's clamp: under the caller's ceiling of 4, asking for 16
     // yields the effective limit 4, so a prompt stays portable wherever it
     // runs, including where the ceiling is tighter.
     let prompt = parse(TRACE_12_CLAMP);

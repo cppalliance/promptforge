@@ -22,7 +22,7 @@ fn assert_source_survives_run_error(error: Error) {
 fn context_exhaustion_maps_from_lua_and_classifies() {
     // The compactor's typed exhaustion crosses the crate seam
     // variant-for-variant and classifies as its own run-error kind, so a
-    // Host can distinguish context exhaustion from a transport failure.
+    // caller can distinguish context exhaustion from a transport failure.
     let lua_error = LuaError::ContextExhausted {
         reason: promptforge_lua::OverflowReason::Provider,
     };
@@ -149,7 +149,7 @@ fn frontmatter_locations_surface_through_the_run_error() {
     // The parser's surfaced YAML position crosses the error-type
     // bridge and lands on `RunError::location` for navigation. A
     // frontmatter failure predates the prompt's name, so the path is
-    // the placeholder the Host replaces with its own label for the source.
+    // the placeholder a caller replaces with its own label for the source.
     let source = concat!(
         "---\n",
         "name: x\n",
@@ -232,7 +232,7 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
 #[test]
 fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
     // The run's own model-set mutex failing is not a model failure: it
-    // keeps the Lua mapping it always had, and a Host never sees it as a
+    // keeps the Lua mapping it always had, and a caller never sees it as a
     // retryable completion kind.
     use crate::model::{ModelSet, ModelView};
     use std::sync::{Arc, Mutex};

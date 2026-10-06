@@ -179,9 +179,9 @@ async fn drive(
     let gateway = ScriptedChat::new(replies);
     let prompt = parse(md);
     let recorder = Arc::new(TurnRecorder::default());
-    let (ctx, harness) =
+    let (ctx, fixture) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the batch runs to the final reply");

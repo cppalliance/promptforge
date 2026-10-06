@@ -20,8 +20,8 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("an over-window request must exhaust the context");
@@ -53,8 +53,8 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
          return tostring(err)",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -78,8 +78,8 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("a provider context rejection must exhaust the context");
@@ -115,8 +115,8 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
          return table.concat(out, '|')",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -154,8 +154,8 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
          return err.kind .. '|' .. tostring(err)",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness.client(client.clone()), None)
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -186,9 +186,9 @@ async fn cancel_during_a_looping_compactor_returns_promptly() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
 
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -210,7 +210,7 @@ async fn cancel_during_a_looping_compactor_returns_promptly() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag() {
+async fn a_compactors_own_string_raise_reaches_the_caller_with_the_reason_tag() {
     // An author compactor's own untyped raise is re-raised as the value it
     // raised: a bare string passes through the normalizer untouched and
     // fails the section as the ordinary Lua runtime error holding the
@@ -223,8 +223,8 @@ async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag()
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness.client(client.clone()), None)
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
         .drive()
         .await
         .expect_err("the compactor's own raise fails the section");

@@ -22,8 +22,8 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
         return models.infer('inner ask')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the gate scenario runs end to end on one thread");
@@ -58,8 +58,8 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         ## Only\n\n\
         ```lua\nreturn models.infer('hang')\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -98,8 +98,8 @@ async fn call_depth_cap_reads_the_chain_field() {
         ## Beta\n\n\
         ```lua\nreturn call('## Alpha')\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -123,8 +123,8 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("an explicit infer of the prose runs through the scheduler");
@@ -154,8 +154,8 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
         return 'caught: ' .. tostring(err)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the dispatch failure is catchable");

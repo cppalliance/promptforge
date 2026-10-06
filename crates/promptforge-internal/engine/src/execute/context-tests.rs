@@ -97,7 +97,7 @@ fn the_root_task_sequence_starts_where_the_context_says() {
     assert_eq!(
         events[0].provenance().seq,
         5,
-        "the root task's first stamp continues past the Harness's parse events"
+        "the root task's first stamp continues past the caller's parse events"
     );
 }
 

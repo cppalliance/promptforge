@@ -5,7 +5,7 @@ use super::*;
 
 use crate::RunErrorKind;
 use crate::test_support::recording::Observer;
-use crate::test_support::{RunHarness, TestToolTable, run_with_harness};
+use crate::test_support::{RunFixture, TestToolTable, run_with_fixture};
 use crate::{Environment, RunResult};
 use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
 use promptforge_vfs::VfsRef;
@@ -91,7 +91,7 @@ async fn default_environment_runs_a_plugin_free_prompt() {
 async fn default_run_context_store_handle_declares_a_fresh_store() {
     // `RunContext` absorbs the filesystem handle with a `VfsRef::default()`
     // (a fresh memory store at `/`) default: a store-using run needs no
-    // Harness-supplied handle.
+    // caller-supplied handle.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## First\n\n```lua\nstore.write('default.txt', 'stock')\n```\n\n\
@@ -124,12 +124,12 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     let catalog = table
         .catalog()
         .expect("the fixture tools have legal wire names and distinct ids");
-    let RunResult::Failure(error) = run_with_harness(
+    let RunResult::Failure(error) = run_with_fixture(
         &Environment::new().tools(catalog),
         &prompt,
         "",
         context(EXECUTION),
-        RunHarness::new().tools(table),
+        RunFixture::new().tools(table),
     )
     .await
     else {
@@ -157,7 +157,7 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
     let env = Environment::new();
     let RunResult::Failure(error) =
-        run_with_harness(&env, &prompt, "", context(EXECUTION), RunHarness::new()).await
+        run_with_fixture(&env, &prompt, "", context(EXECUTION), RunFixture::new()).await
     else {
         panic!("a models.bind call must fail");
     };

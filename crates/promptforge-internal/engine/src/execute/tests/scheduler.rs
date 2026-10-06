@@ -30,39 +30,39 @@ fn writer_models() -> ModelSet {
     }
 }
 
-/// Builds the run context and its silent Harness for a scheduler test: the
+/// Builds the run context and its silent fixture for a scheduler test: the
 /// parsed prompt, an empty shared library, and the model set pre-filled.
-fn scheduler_context(prompt: &Prompt) -> (RunState, RunHarness) {
+fn scheduler_context(prompt: &Prompt) -> (RunState, RunFixture) {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
-/// Builds the run context and its observing Harness on the given store and
+/// Builds the run context and its observing fixture on the given store and
 /// observer, so a walk test can inspect the store's contents and the
 /// observation stream afterward.
 pub(super) fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHarness) {
+) -> (RunState, RunFixture) {
     scheduler_context_from(
         prompt,
         store,
         &test_context(EXECUTION),
-        RunHarness::new().observer(observer),
+        RunFixture::new().observer(observer),
     )
 }
 
-/// Builds the run context from a finished `RunContext` and its `RunHarness` on
+/// Builds the run context from a finished `RunContext` and its `RunFixture` on
 /// the given store: the parsed prompt, an empty shared library, and the
 /// model set pre-filled. Every scheduler-side context builder routes through
 /// here so a test that needs an observer, limits, or both composes the
-/// `RunContext` and the `RunHarness` itself.
+/// `RunContext` and the `RunFixture` itself.
 pub(super) fn scheduler_context_from(
     prompt: &Prompt,
     store: &TestStore,
     run_context: &RunContext,
-    harness: RunHarness,
-) -> (RunState, RunHarness) {
+    fixture: RunFixture,
+) -> (RunState, RunFixture) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -73,7 +73,7 @@ pub(super) fn scheduler_context_from(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = writer_models();
-    (ctx, harness)
+    (ctx, fixture)
 }
 
 /// The prompt in each gateway request, in arrival order.

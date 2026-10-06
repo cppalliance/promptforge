@@ -282,9 +282,9 @@ return item\n\
 }
 
 /// A store function the shared library captured at load time reaches the
-/// Harness as an `Effect::Vfs` when called after load, like `store.*` does.
+/// caller as an `Effect::Vfs` when called after load, like `store.*` does.
 #[test]
-fn a_captured_store_function_called_after_load_reaches_the_harness_as_a_store_effect() {
+fn a_captured_store_function_called_after_load_reaches_the_caller_as_a_store_effect() {
     use super::super::super::context::{parse, test_context};
     use super::super::super::serial_driver::perform_locally;
     use crate::{Effect, EffectRecord, Run};
@@ -317,6 +317,6 @@ return 'saved'\n\
             record,
             EffectRecord::Vfs { op: VfsOp::Write { path, .. } } if path == "note.txt"
         )),
-        "the captured write is performed by the Harness: {records:?}"
+        "the captured write is performed by the test driver: {records:?}"
     );
 }

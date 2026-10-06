@@ -80,7 +80,7 @@ fn use_access(access: &Access, args: &Value) -> std::result::Result<ToolOutput, 
 enum Reply {
     /// The call's own output.
     Output,
-    /// `Dropped`, as a Harness that gave the call up would answer.
+    /// `Dropped`, as a caller that gave the call up would answer.
     Dropped,
 }
 
@@ -106,7 +106,7 @@ impl Identities {
 /// A run over `md` with the files tool as its catalog.
 fn files_run(md: &str) -> Run {
     let prompt = parse(md);
-    let (state, _harness) = model_task_context_with(
+    let (state, _fixture) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(FilesTool),

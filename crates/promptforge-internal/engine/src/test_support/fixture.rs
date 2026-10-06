@@ -1,17 +1,16 @@
-//! The suites' Harness bundle: [`RunHarness`], the resources the suites hand the
+//! The suites' fixture bundle: [`RunFixture`], the resources the suites hand the
 //! tokio test driver.
 //!
 //! A [`Run`](crate::execute::Run) issues effects and reports events as
 //! values; it holds no client, no tool implementation, and no sink. Those
-//! belong to whoever performs the effects. `RunHarness` is that bundle for
+//! belong to whoever performs the effects. `RunFixture` is that bundle for
 //! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
 //! [`TestToolTable`] a `ToolCall` effect's id resolves in, and the
 //! observer and capture the run's events are replayed onto.
-//! [`performers`](RunHarness::performers) and
-//! [`sink`](RunHarness::sink) turn the bundle into what
+//! [`performers`](RunFixture::performers) and
+//! [`sink`](RunFixture::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
-//! effects and answers; the Harness builds its own [`Performers`] and
-//! sink in production, and activates its own Plugins.
+//! effects and answers.
 
 use std::fmt;
 use std::sync::Arc;
@@ -27,10 +26,9 @@ use crate::execute::RunLimits;
 use crate::execute::{Effect, EffectAnswer};
 use crate::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
 
-/// What the test driver performs a `Chat` round on: a stand-in for the
-/// Harness's model client, which the Engine never holds and this crate
-/// never names. The suites' implementation answers each round from a
-/// script, in process.
+/// What the test driver performs a `Chat` round on: a stand-in for a
+/// production model client, which the Engine never holds. The suites'
+/// implementation answers each round from a script, in process.
 pub trait ChatClient: Send + Sync {
     /// Performs one round: sends `messages` (with `tools` advertised when
     /// non-empty) under `options`, bounded by `limits`' request timeout
@@ -47,7 +45,7 @@ pub trait ChatClient: Send + Sync {
 /// The suites' resources for one run driven by the tokio test driver.
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct RunHarness {
+pub struct RunFixture {
     /// The progress observer every drained event is replayed onto.
     observer: Arc<dyn Observer>,
     /// The opt-in raw request/response capture.
@@ -59,12 +57,12 @@ pub struct RunHarness {
     tools: TestToolTable,
 }
 
-impl RunHarness {
+impl RunFixture {
     /// Builds the silent bundle: a null observer, no capture, no client,
     /// and no tools.
     #[must_use]
-    pub fn new() -> RunHarness {
-        RunHarness {
+    pub fn new() -> RunFixture {
+        RunFixture {
             observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
@@ -74,7 +72,7 @@ impl RunHarness {
 
     /// Sets the progress observer the run's events are replayed onto.
     #[must_use]
-    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunHarness {
+    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunFixture {
         self.observer = observer;
         self
     }
@@ -84,7 +82,7 @@ impl RunHarness {
     /// ([`RunContext::report_debug`](crate::execute::RunContext::report_debug)).
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunHarness {
+    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunFixture {
         self.debug = Some(debug);
         self
     }
@@ -92,7 +90,7 @@ impl RunHarness {
     /// Sets the chat client `Chat` effects are performed with; without one
     /// every round fails with the disabled-gateway error.
     #[must_use]
-    pub fn client(mut self, client: impl ChatClient + 'static) -> RunHarness {
+    pub fn client(mut self, client: impl ChatClient + 'static) -> RunFixture {
         self.client = Some(Arc::new(client));
         self
     }
@@ -100,10 +98,9 @@ impl RunHarness {
     /// Sets the implementations `ToolCall` effects resolve their ids in.
     /// The catalog the Engine binds against is the caller's to install on
     /// the [`Environment`](crate::execute::Environment) (see
-    /// [`TestToolTable::catalog`]); in production the Harness assembles
-    /// both from its activated Plugins.
+    /// [`TestToolTable::catalog`]).
     #[must_use]
-    pub fn tools(mut self, tools: TestToolTable) -> RunHarness {
+    pub fn tools(mut self, tools: TestToolTable) -> RunFixture {
         self.tools = tools;
         self
     }
@@ -145,9 +142,8 @@ impl RunHarness {
                     return EffectAnswer::Dropped;
                 };
                 // Resolved by the stable identity against the suites'
-                // fixture table, as the Harness resolves it against its
-                // activated Plugins; the alias is the record's, not
-                // the resolver's.
+                // fixture table; the alias is the record's, not the
+                // resolver's.
                 let Some(tool) = tools.get(&tool) else {
                     return refuse_tool_call();
                 };
@@ -172,15 +168,15 @@ impl RunHarness {
     }
 }
 
-impl Default for RunHarness {
-    fn default() -> RunHarness {
-        RunHarness::new()
+impl Default for RunFixture {
+    fn default() -> RunFixture {
+        RunFixture::new()
     }
 }
 
-impl fmt::Debug for RunHarness {
+impl fmt::Debug for RunFixture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunHarness")
+        f.debug_struct("RunFixture")
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())

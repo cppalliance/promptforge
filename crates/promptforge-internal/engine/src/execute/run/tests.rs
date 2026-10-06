@@ -1,7 +1,7 @@
 //! The effect record: every effect kind projects onto a record that
 //! round-trips through serde, and the projection drops exactly the live
-//! handles. Then the run's Harness boundary: `Done` waits on outstanding
-//! effects, a drop is an answer, and the run is `Send`.
+//! handles. Then the run's boundary with its caller: `Done` waits on
+//! outstanding effects, a drop is an answer, and the run is `Send`.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use crate::model::ModelBinding;
 #[path = "tests-drops.rs"]
 mod drops;
 
-/// A context for the run `run-test` under fixed Harness inputs; nothing here
+/// A context for the run `run-test` under fixed caller inputs; nothing here
 /// reads the seed or `sys.when`.
 fn run_context() -> RunContext {
     RunContext::new(
@@ -249,8 +249,9 @@ const fn assert_send<T: Send>() {}
 
 #[test]
 fn a_run_is_send() {
-    // The Harness boundary: one caller at a time, and the thread may change
-    // between calls, so the run (its Lua VMs included) must cross threads.
+    // The boundary with the caller: one caller at a time, and the thread
+    // may change between calls, so the run (its Lua VMs included) must
+    // cross threads.
     assert_send::<Run>();
 }
 
@@ -265,7 +266,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
         matches!(effect, Effect::Vfs { .. }),
         "the store call is one store effect: {effect:?}"
     );
-    // The Host cancels while the store operation is out. The next step
+    // The run is cancelled while the store operation is out. The next step
     // tears the run down and reports its end, but the effect still owes
     // its answer, so `Done` waits.
     run.cancel();
@@ -314,7 +315,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
     let (id, _) = only_effect(run.step());
     run.cancel();
     assert!(matches!(run.step(), Step::Pending { .. }));
-    // The Harness performed the operation before it learned of the cancel:
+    // The caller performed the operation before it learned of the cancel:
     // its answer is the effect's one answer, discarded rather than applied.
     run.resume(
         id,
@@ -338,7 +339,7 @@ fn an_answer_for_an_unissued_effect_is_an_internal_error() {
     let (id, _) = only_effect(run.step());
     run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
     // The unknown id ended the run; the real effect is now an orphan whose
-    // answer the Harness still owes.
+    // answer the caller still owes.
     let Step::Pending { events, .. } = run.step() else {
         panic!("the run waits for the orphan's answer");
     };
@@ -398,7 +399,7 @@ fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
 }
 
 #[test]
-fn a_context_without_a_harness_handle_shares_its_one_flag_with_prepare_and_the_run() {
+fn a_context_without_a_caller_handle_shares_its_one_flag_with_prepare_and_the_run() {
     let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\nreturn 'x'\n```\n";
     let prompt = Prompt::parse(source, "run-test")
         .0
@@ -436,7 +437,7 @@ fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
     );
     assert!(
         run.decided(),
-        "the run is decided before Done, so the Harness can drop what it holds"
+        "the run is decided before Done, so the caller can drop what it holds"
     );
     run.resume(id, EffectAnswer::Dropped);
     assert!(matches!(run.step(), Step::Done { .. }));

@@ -1,4 +1,4 @@
-//! Tests for the preflight report's missing Host services.
+//! Tests for the preflight report's missing services.
 
 use promptforge_types::plugins::PluginId;
 

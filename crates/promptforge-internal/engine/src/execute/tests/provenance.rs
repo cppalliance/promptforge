@@ -70,13 +70,13 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         return models.infer(item)\n\
         ```\n";
     let prompt = parse(md);
-    let (mut ctx, harness) = scheduler_context_on(
+    let (mut ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the fanout completes");
@@ -145,13 +145,13 @@ async fn a_call_child_reports_under_its_callers_task() {
         ## Inner\n\n\
         ```lua\nlog('inner ran')\nreturn 'hello'\n```\n";
     let prompt = parse(md);
-    let (mut ctx, harness) = scheduler_context_on(
+    let (mut ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the call completes");
@@ -182,9 +182,9 @@ async fn a_call_child_reports_under_its_callers_task() {
 }
 
 #[tokio::test]
-async fn the_run_forwards_every_buffered_event_to_the_harness_observer_in_order() {
+async fn the_run_forwards_every_buffered_event_to_the_callers_observer_in_order() {
     // The adapter path end to end: a two-section run through `execute::run`
-    // reaches the Harness's observer with the exact sequence of the buffered
+    // reaches the caller's observer with the exact sequence of the buffered
     // events, run boundaries included.
     let (result, records) = run_recorded(TWO_SECTIONS).await;
     assert_eq!(result.unwrap(), "second");

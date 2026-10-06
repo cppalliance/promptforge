@@ -82,7 +82,7 @@ pub(super) fn text_of(result: RunResult) -> String {
 /// `chat` round in order.
 pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
-    let (state, _harness) = model_task_context_with(
+    let (state, _fixture) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(SlowTool),
@@ -104,11 +104,11 @@ fn echo_chat(effect: &Effect) -> EffectAnswer {
 /// suites build one.
 fn model_run(md: &str) -> Run {
     let prompt = parse(md);
-    let (state, _harness) = scheduler_context_from(
+    let (state, _fixture) = scheduler_context_from(
         &prompt,
         &TestStore::new(),
         &test_context(EXECUTION),
-        RunHarness::new(),
+        RunFixture::new(),
     );
     Run::from_state(state)
 }
@@ -349,7 +349,7 @@ fn two_runs_under_the_same_context_and_answers_are_identical() {
 
 #[test]
 fn answers_one_per_step_all_at_once_and_reversed_produce_the_same_per_task_record() {
-    // The batching-pairing property: however the Harness paces and orders
+    // The batching-pairing property: however the caller paces and orders
     // its answers, each task's effects and events - and the text with its
     // `sys.id`s - are the same. Only the interleaving across tasks may
     // differ, so the comparison is per task.
@@ -390,7 +390,7 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
         return models.infer('child work')\n\
         ```\n";
     let prompt = parse(md);
-    let (state, _harness) = model_task_context_with(
+    let (state, _fixture) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(SlowTool),

@@ -37,8 +37,8 @@ Ask again.\n\n\
             ThinkingMode::Switchable,
         ),
     );
-    let harness = RunHarness::new().client(gateway_client(&gateway));
-    let out = match crate::test_support::run_harness(&prompt, "", ctx, harness).await {
+    let fixture = RunFixture::new().client(gateway_client(&gateway));
+    let out = match crate::test_support::run_prepared(&prompt, "", ctx, fixture).await {
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
     };

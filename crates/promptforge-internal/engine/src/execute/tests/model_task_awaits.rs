@@ -41,12 +41,12 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, harness) = model_task_context_with(
+    let (ctx, fixture) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("a pending notice answers the call without a wait")
@@ -92,12 +92,12 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, harness) = model_task_context_with(
+    let (ctx, fixture) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[Duration::from_millis(300)]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")

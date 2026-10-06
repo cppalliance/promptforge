@@ -1,7 +1,6 @@
 //! The suites' chat client: a scripted model played in process.
 //!
-//! The Engine emits each round as a `Chat` effect; the Harness performs it
-//! with its own gateway client, and this crate may not name a Harness crate.
+//! The Engine emits each round as a `Chat` effect for the caller to perform.
 //! [`ScriptedChat`] answers each round from a fixed script instead, with
 //! no HTTP and no wire code, and records what every round carried so a
 //! suite asserts on the effect rather than on a request body. The answers

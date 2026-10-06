@@ -1,4 +1,4 @@
-//! A `Chat`, `ToolCall`, or `Timer` effect the Harness drops while the
+//! A `Chat`, `ToolCall`, or `Timer` effect the caller drops while the
 //! run's cancel flag is clear: the chain resumes with the cancelled error,
 //! which a `pcall` catches so the run continues, and which ends the run
 //! `Cancelled` when nothing catches it. A `Chat` drop is covered for both

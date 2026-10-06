@@ -1,15 +1,11 @@
-//! The suites' stand-in for the Harness's tool implementations:
-//! [`TestTool`], and the [`TestToolTable`] a `ToolCall` effect's id
-//! resolves in.
+//! The suites' fixture tool implementations: [`TestTool`], and the
+//! [`TestToolTable`] a `ToolCall` effect's id resolves in.
 //!
-//! The Engine holds no implementation and names no implementation trait;
-//! the production trait (`Tool`) is the Harness's, in
-//! `harness-plugins`, and a `promptforge-*` crate never depends on a
-//! Harness crate. The suites still need something to perform a `ToolCall`
-//! effect with, so these are the test doubles: the same method shapes as
-//! the Harness's trait (so a fixture reads like a production tool), built
-//! into the [`Performers`] the tokio test driver takes by
-//! [`RunHarness`](super::RunHarness). Nothing here reaches the Engine.
+//! The Engine holds no implementation and names no implementation trait,
+//! but the suites still need something to perform a `ToolCall` effect
+//! with. These are the test doubles, shaped like a production tool and
+//! built into the [`Performers`] the tokio test driver takes by
+//! [`RunFixture`](super::RunFixture). Nothing here reaches the Engine.
 //!
 //! The async methods are declared in the boxed form
 //! `#[async_trait::async_trait]` expands an `async fn` to, so a suite
@@ -33,10 +29,9 @@ use promptforge_types::tools::{
 /// expands an `async fn` impl.
 type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// A fixture tool the tokio test driver dispatches a `ToolCall` effect to:
-/// the suites' stand-in for the Harness's `Tool`.
+/// A fixture tool the tokio test driver dispatches a `ToolCall` effect to.
 ///
-/// The surface is the Harness trait's: a stable [`id`](TestTool::id), a
+/// The surface: a stable [`id`](TestTool::id), a
 /// transport [`wire_name`](TestTool::wire_name), a model-facing
 /// [`description`](TestTool::description), a JSON-Schema
 /// [`parameters_schema`](TestTool::parameters_schema), the
@@ -73,9 +68,8 @@ pub trait TestTool: Send + Sync {
         .structured(self.structured_output())
     }
 
-    /// Performs one call with `args`, as the Harness's tool performer
-    /// would. The future resolves to the tool's output or its own
-    /// model-safe [`ToolError`].
+    /// Performs one call with `args`. The future resolves to the tool's
+    /// output or its own model-safe [`ToolError`].
     fn call<'life0, 'async_trait>(
         &'life0 self,
         args: serde_json::Value,

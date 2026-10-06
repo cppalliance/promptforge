@@ -1,4 +1,4 @@
-//! Run-level termination and the tasks it strands: when the Host cancels a
+//! Run-level termination and the tasks it strands: when the caller cancels a
 //! run while an author-spawned task is parked on a model round, the run's
 //! end settles that task - one `TaskAbandoned` with `run_terminated`,
 //! observed before the run's own `RUN_FAILED` boundary - so the
@@ -37,7 +37,7 @@ const PARKED_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
 /// Steps `run` until its first chat round is outstanding, cancels it
 /// there, answers the orphaned effects so the run can report `Done`, and
 /// returns the result. Every step's events are replayed onto `recorder`
-/// in order, as the Harness replays them onto its observer.
+/// in order.
 fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResult {
     let mut cancelled = false;
     loop {
@@ -77,7 +77,7 @@ fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResul
 #[test]
 fn cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_ends() {
     let prompt = parse(PARKED_CHILD);
-    let (ctx, _harness) = scheduler_context_on(
+    let (ctx, _fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
@@ -88,7 +88,7 @@ fn cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_end
 
     assert!(
         matches!(result, RunResult::Cancelled),
-        "the host's cancel ends the run as cancelled: {result:?}"
+        "the test driver's cancel ends the run as cancelled: {result:?}"
     );
     let records = recorder.records();
     let child: TaskId = "0.0".parse().expect("a task id parses");

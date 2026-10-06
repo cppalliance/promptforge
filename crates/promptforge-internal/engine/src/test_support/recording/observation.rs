@@ -159,37 +159,37 @@ pub enum Observation {
     ModelCatalogValidationSucceeded,
     /// Live-catalog model binding validation failed.
     ModelCatalogValidationFailed,
-    /// A harness-mediated store write succeeded.
+    /// An effect-mediated store write succeeded.
     VfsWriteSucceeded,
-    /// A harness-mediated store write failed.
+    /// An effect-mediated store write failed.
     VfsWriteFailed,
-    /// A harness-mediated store append succeeded.
+    /// An effect-mediated store append succeeded.
     VfsAppendSucceeded,
-    /// A harness-mediated store append failed.
+    /// An effect-mediated store append failed.
     VfsAppendFailed,
-    /// A harness-mediated store read (verbatim) succeeded.
+    /// An effect-mediated store read (verbatim) succeeded.
     VfsReadSucceeded,
-    /// A harness-mediated store read (verbatim) failed.
+    /// An effect-mediated store read (verbatim) failed.
     VfsReadFailed,
-    /// A harness-mediated store read_numbered succeeded.
+    /// An effect-mediated store read_numbered succeeded.
     VfsReadNumberedSucceeded,
-    /// A harness-mediated store read_numbered failed.
+    /// An effect-mediated store read_numbered failed.
     VfsReadNumberedFailed,
-    /// A harness-mediated store replacement succeeded.
+    /// An effect-mediated store replacement succeeded.
     VfsReplaceSucceeded,
-    /// A harness-mediated store replacement failed.
+    /// An effect-mediated store replacement failed.
     VfsReplaceFailed,
-    /// A harness-mediated store deletion succeeded.
+    /// An effect-mediated store deletion succeeded.
     VfsDeleteSucceeded,
-    /// A harness-mediated store deletion failed.
+    /// An effect-mediated store deletion failed.
     VfsDeleteFailed,
-    /// A harness-mediated store glob succeeded.
+    /// An effect-mediated store glob succeeded.
     VfsGlobSucceeded,
-    /// A harness-mediated store glob failed.
+    /// An effect-mediated store glob failed.
     VfsGlobFailed,
-    /// A harness-mediated store existence check succeeded.
+    /// An effect-mediated store existence check succeeded.
     VfsExistsSucceeded,
-    /// A harness-mediated store existence check failed.
+    /// An effect-mediated store existence check failed.
     VfsExistsFailed,
     /// A task chain was started; the payload is its spawn seeds.
     TaskStarted {

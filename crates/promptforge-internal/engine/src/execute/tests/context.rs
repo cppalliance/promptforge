@@ -21,7 +21,7 @@ pub(super) fn fresh_access() -> Arc<Access> {
 
 pub(super) const EXECUTION: &str = "execute-test";
 
-/// The fixed Harness inputs every test run shares: a seed and a start instant
+/// The fixed caller inputs every test run shares: a seed and a start instant
 /// a test that does not care about them never has to choose. The tests of
 /// the inputs themselves (`run_inputs`) build their contexts directly.
 pub(super) const TEST_SEED: u64 = 1;
@@ -235,22 +235,22 @@ impl TestStore {
     }
 }
 
-/// Builds a [`RunContext`] and its [`RunHarness`] from the test-local
+/// Builds a [`RunContext`] and its [`RunFixture`] from the test-local
 /// [`RunOptions`], for the tests that call [`Environment::run`] directly.
 /// The context sets the test model as the current selection, so prepare's
 /// trivial fill binds every declared role to it; the observer, client, and
-/// capture go on the Harness the driver performs and reports through.
-pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHarness) {
+/// capture go on the fixture the test driver performs and reports through.
+pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunFixture) {
     let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
-    let mut harness = RunHarness::new().observer(opts.observer);
+    let mut fixture = RunFixture::new().observer(opts.observer);
     if let Some(client) = opts.client {
-        harness = harness.client(client);
+        fixture = fixture.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        harness = harness.debug(debug);
+        fixture = fixture.debug(debug);
     }
-    (ctx, harness)
+    (ctx, fixture)
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -307,69 +307,68 @@ pub(super) async fn run(
     opts: RunOptions,
 ) -> Result<String> {
     let mut env = Environment::new();
-    let mut harness = RunHarness::new().observer(opts.observer);
+    let mut fixture = RunFixture::new().observer(opts.observer);
     // The test store's handle is the run's whole filesystem: the context
     // takes it as given, so post-run assertions read what the run
     // actually wrote.
     let mut ctx = test_context(opts.execution).vfs(store.vfs());
     if !tools.is_empty() {
-        // The Harness pattern with tools: the fixtures' descriptors form the
-        // catalog the run binds its frontmatter slots against, and the
-        // implementations go to the Harness's tool table the driver's tool
-        // performer resolves a `ToolCall` effect in - the two halves a
-        // Harness assembles from its activated Plugins.
+        // With tools: the fixtures' descriptors form the catalog the run
+        // binds its frontmatter slots against, and the implementations go
+        // to the tool table the test driver's tool performer resolves a
+        // `ToolCall` effect in.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
-        harness = harness.tools(table);
+        fixture = fixture.tools(table);
     }
-    // The Harness pattern: the context holds the current model, and
+    // The context holds the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
         ctx = ctx.model(model.clone());
     }
     if let Some(client) = opts.client {
-        harness = harness.client(client);
+        fixture = fixture.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        harness = harness.debug(debug);
+        fixture = fixture.debug(debug);
     }
-    match crate::test_support::run_with_harness(&env, &test.prompt, args, ctx, harness).await {
+    match crate::test_support::run_with_fixture(&env, &test.prompt, args, ctx, fixture).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
 }
 
-/// The test-support driver ([`crate::test_support::run_with_harness`]) with the
-/// context and Harness [`to_context`] assembled (observer, client, capture).
+/// The test-support driver ([`crate::test_support::run_with_fixture`]) with the
+/// context and fixture [`to_context`] assembled (observer, client, capture).
 pub(super) async fn env_run(
     env: &Environment,
     prompt: &Prompt,
     args: &str,
-    prepared: (RunContext, RunHarness),
+    prepared: (RunContext, RunFixture),
 ) -> RunResult {
-    let (ctx, harness) = prepared;
-    crate::test_support::run_with_harness(env, prompt, args, ctx, harness).await
+    let (ctx, fixture) = prepared;
+    crate::test_support::run_with_fixture(env, prompt, args, ctx, fixture).await
 }
 
 /// Runs a fixture offline through the test-support driver
-/// ([`crate::test_support::run_with_harness`]) with a caller-customized
-/// [`RunContext`] and [`RunHarness`], returning the typed [`RunError`]
+/// ([`crate::test_support::run_with_fixture`]) with a caller-customized
+/// [`RunContext`] and [`RunFixture`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
 pub(super) async fn run_with_context(
     test: &TestPrompt,
-    configure: impl FnOnce(RunContext, RunHarness) -> (RunContext, RunHarness),
+    configure: impl FnOnce(RunContext, RunFixture) -> (RunContext, RunFixture),
 ) -> std::result::Result<String, RunError> {
     let env = Environment::new();
-    let (mut ctx, harness) = configure(test_context(EXECUTION), RunHarness::new());
+    let (mut ctx, fixture) = configure(test_context(EXECUTION), RunFixture::new());
     ctx = ctx.vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
     {
         ctx = ctx.model(model.clone());
     }
-    match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness).await {
+    match crate::test_support::run_with_fixture(&env, &test.prompt, "", ctx, fixture).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),

@@ -24,8 +24,8 @@ async fn a_round_advertises_the_section_scope_with_local_tools() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section scope includes local tools");

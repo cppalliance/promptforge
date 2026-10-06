@@ -47,8 +47,8 @@ async fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_round
     let prompt = parse(&loop_prompt(&format!(
         "{INFER_THEN_LOOP} .. '|' .. models.infer('third')"
     )));
-    let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let rounds = driver.record_rounds_for_test();
     let out = driver.drive().await.expect("every round completes");
     assert_eq!(out, "a|b|c");
@@ -67,7 +67,7 @@ async fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_round
 #[test]
 fn a_rounds_thinking_reply_and_tool_call_events_hold_the_id_its_chat_effect_held() {
     let prompt = parse(&loop_prompt(INFER_THEN_LOOP));
-    let (state, _harness) = loop_context(&prompt, echo_tools());
+    let (state, _fixture) = loop_context(&prompt, echo_tools());
     let call = ToolCall::from_parts("call_1", "echo", json!({ "value": "hi" }))
         .expect("a scripted call is whole");
     let mut answers = vec![

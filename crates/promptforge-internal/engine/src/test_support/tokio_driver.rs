@@ -31,7 +31,7 @@
 //! determinism suites sweep across seeds. The performers all post
 //! independently of the run, so the hold cannot deadlock.
 //!
-//! This driver plays the Harness's part in tests: the Engine's own suites
+//! This driver is the caller in tests: the Engine's own suites
 //! drive runs through it, and a companion crate's suite enables the
 //! `test-support` feature for it. In production the Harness steps the run.
 
@@ -54,7 +54,7 @@ use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
 #[cfg(test)]
 use crate::execute::{EffectRecord, Round};
 #[cfg(test)]
-use crate::test_support::RunHarness;
+use crate::test_support::RunFixture;
 
 #[cfg(test)]
 use crate::execute::context::RunState;
@@ -132,27 +132,27 @@ pub(crate) struct TokioDriver<'a> {
 
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
-    /// and replaying its events through the `harness` the suite assembled
+    /// and replaying its events through the `fixture` the suite assembled
     /// itself. The bundle supplies the observer, chat client, tools, and
     /// debug capture; `client` is the run's scripted model when
     /// the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
-        harness: RunHarness,
+        fixture: RunFixture,
         client: Option<ScriptedChat>,
     ) -> TokioDriver<'static> {
-        let mut harness = harness;
+        let mut fixture = fixture;
         if let Some(client) = client {
-            harness = harness.client(client);
+            fixture = fixture.client(client);
         }
         let run = Run::from_state(state.clone());
         let cancel = run.cancel_handle();
         let limits = state.limits();
         TokioDriver::over(
             run,
-            harness.performers(limits),
-            harness.boxed_sink(),
+            fixture.performers(limits),
+            fixture.boxed_sink(),
             cancel,
         )
     }
@@ -331,10 +331,9 @@ impl<'a> TokioDriver<'a> {
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&access, op);
-                    // Hygiene only, as in the Harness's inline Vfs answer:
-                    // the run ends its scope at `Done`, so a post-run
-                    // fresh-scope read never meets the run's claims
-                    // however long the view is held.
+                    // Hygiene only: the run ends its scope at `Done`, so
+                    // a post-run fresh-scope read never meets the run's
+                    // claims however long the view is held.
                     drop(access);
                     post(&tx, id, EffectAnswer::Vfs(result));
                 })

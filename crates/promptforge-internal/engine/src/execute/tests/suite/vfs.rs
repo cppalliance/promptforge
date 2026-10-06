@@ -1,11 +1,11 @@
-//! The executor's `VfsRef` contract with the Harness: an end-to-end run
-//! over the prepared handle, and the seed-run-extract round trip a Host
-//! like papergate drives with no real files - prepare, seed the
-//! declared input through the run's handle, run, extract the declared
-//! output, and charge a missing output to the prompt's promise as an
-//! explicit contract error. Then the run-bounded scope: a run's `Done`,
-//! or its drop before `Done`, ends its scope however long the Harness holds
-//! the store views it was handed.
+//! The executor's `VfsRef` contract with its caller: an end-to-end run
+//! over the prepared handle, and the seed-run-extract round trip a caller
+//! drives with no real files - prepare, seed the declared input through
+//! the run's handle, run, extract the declared output, and charge a
+//! missing output to the prompt's promise as an explicit contract error.
+//! Then the run-bounded scope: a run's `Done`, or its drop before `Done`,
+//! ends its scope however long the caller holds the store views it was
+//! handed.
 
 use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 const ROUND_TRIP: &str = concat!(
     "---\n",
-    "name: papergate-round-trip\n",
+    "name: round-trip\n",
     "description: Seed, run, extract\n",
     "promptforge: 0\n",
     "input:\n",
@@ -42,7 +42,7 @@ const ROUND_TRIP: &str = concat!(
 
 const MISSING_OUTPUT: &str = concat!(
     "---\n",
-    "name: papergate-missing-output\n",
+    "name: missing-output\n",
     "description: Never writes its promised report\n",
     "promptforge: 0\n",
     "input:\n",
@@ -61,7 +61,7 @@ const MISSING_OUTPUT: &str = concat!(
 );
 
 /// The store view derived from a fresh access on the run's handle: the
-/// Harness's seeding and extraction half of the seed-run-extract round trip.
+/// caller's seeding and extraction half of the seed-run-extract round trip.
 fn fresh_store_view(vfs: &VfsRef, origin: &str) -> Access {
     let access = vfs
         .acquire(Origin::new(origin))
@@ -69,9 +69,9 @@ fn fresh_store_view(vfs: &VfsRef, origin: &str) -> Access {
     promptforge_vfs::detail::store_view(&access).expect("the handle declares a store")
 }
 
-/// The Host's extraction rule (pattern: papergate's app.rs): a
-/// declared output the run did not leave behind is an explicit contract
-/// error naming the prompt's promise, never a bare not-found.
+/// The test's extraction rule: a declared output the run did not leave
+/// behind is an explicit contract error naming the prompt's promise, never
+/// a bare not-found.
 fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, String> {
     let output = prompt
         .frontmatter()
@@ -91,7 +91,7 @@ fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, St
 
 /// Seeds the prompt's declared input through the run's prepared handle.
 /// The seeding access drops here - its scope ends - so the run's own
-/// scope never meets the Harness's.
+/// scope never meets the caller's.
 fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
     let input = prompt
         .frontmatter()
@@ -103,7 +103,7 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
 }
 
 /// Prepares a fixture run and returns the run's handle (for seeding
-/// before and extraction after) plus the pending run: the Harness's
+/// before and extraction after) plus the pending run: the test's
 /// seed-run-extract sequence is prepare, seed through the handle, drive,
 /// extract through the handle.
 fn offline_run(
@@ -115,7 +115,7 @@ fn offline_run(
 ) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();
-    let (ctx, harness, vfs) = prepare_run(
+    let (ctx, fixture, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -123,7 +123,7 @@ fn offline_run(
             observer: recorder,
         },
     );
-    let run = async move { drive(&prompt, "", ctx, harness).await };
+    let run = async move { drive(&prompt, "", ctx, fixture).await };
     (vfs, run)
 }
 
@@ -145,7 +145,7 @@ return store.read('handoff.txt')\n\
 ```\n";
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let (ctx, harness, vfs) = prepare_run(
+    let (ctx, fixture, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -153,7 +153,7 @@ return store.read('handoff.txt')\n\
             observer: recorder,
         },
     );
-    let result = drive(&prompt, "", ctx, harness)
+    let result = drive(&prompt, "", ctx, fixture)
         .await
         .expect("the run threads the prepared handle through both sections");
     assert_eq!(result, "across the reset");
@@ -168,11 +168,11 @@ return store.read('handoff.txt')\n\
 }
 
 #[tokio::test]
-async fn a_host_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
+async fn a_caller_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         ROUND_TRIP,
-        "papergate-round-trip",
+        "round-trip",
         "vfs-round-trip",
         recorder.as_ref(),
     );
@@ -191,14 +191,14 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         MISSING_OUTPUT,
-        "papergate-missing-output",
+        "missing-output",
         "vfs-missing-output",
         recorder.as_ref(),
     );
     let (vfs, run) = offline_run(&prompt, "vfs-missing-output");
     seed_declared_input(&vfs, &prompt, "the paper body");
     // The executor does not enforce the declaration; the run succeeds and
-    // the Harness's extraction is where the broken promise surfaces.
+    // the caller's extraction is where the broken promise surfaces.
     let result = run.await.expect("the run itself succeeds");
     assert_eq!(result, "read: the paper body");
     let store = fresh_store_view(&vfs, "missing-output extraction");
@@ -250,7 +250,7 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // identical.
     const FANOUT_STORE_WRITES: &str =
         include_str!("../../../../tests/prompts/execution/fanout-store-writes.md");
-    // Both arms drive the raw Harness-supplied handle contract (no prepare
+    // Both arms drive the raw caller-supplied handle contract (no prepare
     // pass), so the caller's own backend serves the declared store in each.
     let memory = run_fixture(
         FANOUT_STORE_WRITES,
@@ -348,7 +348,7 @@ fn drive_holding_effects(vfs: &VfsRef) -> (Run, RunResult, Vec<Effect>) {
 }
 
 #[test]
-fn a_run_ends_its_scope_at_done_while_the_harness_still_holds_its_store_views()
+fn a_run_ends_its_scope_at_done_while_the_caller_still_holds_its_store_views()
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, result, held) = drive_holding_effects(&vfs);
@@ -359,10 +359,10 @@ fn a_run_ends_its_scope_at_done_while_the_harness_still_holds_its_store_views()
     assert!(
         held.iter()
             .any(|effect| matches!(effect, Effect::Vfs { .. })),
-        "the Harness holds the run's store views past Done: {held:?}"
+        "the test driver holds the run's store views past Done: {held:?}"
     );
     // A fresh scope reads the run's write without a conflict: the run's
-    // scope ended at Done, not when the run or the Harness's views dropped.
+    // scope ended at Done, not when the run or the test driver's views dropped.
     let fresh = vfs.acquire(Origin::new("after done"))?;
     assert_eq!(fresh.read("/kept.txt")?, b"from the run");
     drop(held);
@@ -393,7 +393,7 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 }
 
 #[test]
-fn dropping_a_run_before_done_ends_its_scope_while_the_harness_still_holds_its_store_views()
+fn dropping_a_run_before_done_ends_its_scope_while_the_caller_still_holds_its_store_views()
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let mut run = held_store_run(&vfs);
@@ -408,7 +408,7 @@ fn dropping_a_run_before_done_ends_its_scope_while_the_harness_still_holds_its_s
     held.extend(effects.into_iter().map(|(_, _, effect)| effect));
     drop(run);
     // A fresh scope reads the dropped run's write without a conflict,
-    // though the Harness still holds every store view the run handed out.
+    // though the test driver still holds every store view the run handed out.
     let fresh = vfs.acquire(Origin::new("after drop"))?;
     assert_eq!(fresh.read("/kept.txt")?, b"from the run");
     drop(held);

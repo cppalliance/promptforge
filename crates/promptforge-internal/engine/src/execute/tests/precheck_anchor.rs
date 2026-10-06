@@ -45,8 +45,8 @@ fn reply_with_usage(
 async fn run_rounds(lua: &str, replies: Vec<ScriptedReply>) -> (String, ScriptedChat) {
     let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(lua));
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");
@@ -186,7 +186,7 @@ async fn a_merged_history_falls_back_to_the_estimate() {
 async fn run_rounds_with_twin(lua: &str, replies: Vec<ScriptedReply>) -> (String, ScriptedChat) {
     let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(lua));
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
     {
         let shared = ctx.model_set();
         let mut models = shared.lock().expect("the model set mutex is not poisoned");
@@ -204,7 +204,7 @@ async fn run_rounds_with_twin(lua: &str, replies: Vec<ScriptedReply>) -> (String
         );
         models.bindings.push(twin);
     }
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");
@@ -331,7 +331,7 @@ async fn a_return_to_the_first_model_uses_the_estimate() {
 async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedChat) {
     let gateway = ScriptedChat::new(vec![resp_text("ok")]);
     let prompt = parse(&loop_prompt(lua));
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
     {
         let shared = ctx.model_set();
         let mut models = shared.lock().expect("the model set mutex is not poisoned");
@@ -343,7 +343,7 @@ async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedCha
             });
         }
     }
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");

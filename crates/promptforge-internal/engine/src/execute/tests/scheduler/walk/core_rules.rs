@@ -17,8 +17,8 @@ async fn sections_run_in_fall_through_order() {
         ## Second\n\n\
         ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the walk falls through in document order");
@@ -35,8 +35,8 @@ async fn generic_result_when_nothing_produced() {
         ## Only\n\n\
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the empty walk completes");
@@ -55,8 +55,8 @@ async fn sys_id_increments_per_section() {
         ## Second\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("each section entry takes the next id");
@@ -91,8 +91,8 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
         return 's2-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the chain must run the addressed off-walk target and fall through");
@@ -115,8 +115,8 @@ async fn var_persists_across_sections_in_fall_through() {
         ## C\n\n\
         ```lua\nreturn var.from_a .. var.from_b\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("var must persist across the walk");
@@ -144,8 +144,8 @@ async fn call_clones_var_in_and_discards_child_writes() {
         return 'sub saw ' .. var.shared\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("call must clone var in and discard child writes");
@@ -182,8 +182,8 @@ async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("a call chain must take ids nested under its own chain");
@@ -207,8 +207,8 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         ## Sub\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("re-entering a section must take a fresh id");
@@ -228,8 +228,8 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
         ## Two\n\n\
         ```lua\nreturn 'two-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the walk completes both sections");

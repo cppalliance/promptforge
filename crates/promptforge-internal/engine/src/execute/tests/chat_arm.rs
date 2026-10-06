@@ -151,12 +151,12 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("one text round ends the loop");
@@ -205,12 +205,12 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the tool round and the closing reply run");
@@ -247,12 +247,12 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -277,9 +277,9 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) =
+    let (ctx, fixture) =
         loop_context_observed(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("an uncaught out-of-scope call fails the section");
@@ -313,12 +313,12 @@ async fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_repl
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -351,12 +351,12 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
          {compacting_loop}"
     ));
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the compactor's raise is pcall-able");
@@ -377,12 +377,12 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
     ));
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, harness) = loop_context_observed(
+    let (ctx, fixture) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness.client(client.clone()), None)
+    let out = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
         .drive()
         .await
         .expect("the compactor's raise is pcall-able");

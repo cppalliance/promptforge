@@ -19,7 +19,7 @@ use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
 use crate::test_support::scripted_chat::{ScriptedCall, ScriptedChat, ScriptedReply};
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{RunHarness, TestTool, TestToolTable};
+use crate::test_support::{RunFixture, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
@@ -231,7 +231,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_context(&fixture(md), |ctx, harness| (ctx.cancel(handle), harness))
+    let error = run_with_context(&fixture(md), |ctx, fixture| (ctx.cancel(handle), fixture))
         .await
         .expect_err("a pre-cancelled handle must fail the run");
     assert!(
@@ -283,9 +283,9 @@ fn tool_turn_nonces(bodies: &[ScriptedCall]) -> Vec<String> {
 #[tokio::test]
 async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // The nonce is the run seed's: two runs of the same prompt under
-    // different Harness-drawn seeds wrap the same untrusted tool result under
+    // different caller-drawn seeds wrap the same untrusted tool result under
     // different nonces, so an envelope's tag stays unguessable from one run
-    // to the next as long as the Harness draws each seed afresh. (Under one
+    // to the next as long as the caller draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
@@ -298,11 +298,11 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
         let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
         let env = Environment::new().tools(catalog);
         let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
-        let harness = RunHarness::new().tools(table);
+        let fixture = RunFixture::new().tools(table);
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let out = match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness)
+        let out = match crate::test_support::run_with_fixture(&env, &test.prompt, "", ctx, fixture)
             .await
         {
             RunResult::Ok(out) => out,

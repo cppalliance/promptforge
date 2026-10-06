@@ -73,12 +73,12 @@ async fn spawn_returns_to_its_caller_before_the_child_runs() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the spawner's return ends the run");
@@ -109,12 +109,12 @@ async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     scheduler.drive().await.expect("the run completes");
 
     assert_eq!(
@@ -156,12 +156,12 @@ async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let out = scheduler
         .drive()
         .await
@@ -196,12 +196,12 @@ async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    TokioDriver::new(&ctx, harness, None)
+    TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the run completes");
@@ -239,12 +239,12 @@ async fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
         "return 'unused'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the caught errors end the run normally");
@@ -278,7 +278,7 @@ async fn spawn_shares_calls_depth_cap() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -288,7 +288,7 @@ async fn spawn_shares_calls_depth_cap() {
     // blocking pool's answer order: the run ends `done` or `tasks_live`.
     // Either way the whole spawn cascade and the one refusal ran before
     // any answer arrived, which is what this test measures.
-    let outcome = TokioDriver::new(&ctx, harness, None).drive().await;
+    let outcome = TokioDriver::new(&ctx, fixture, None).drive().await;
     assert!(
         matches!(outcome, Ok(_) | Err(Error::TasksLive { .. })),
         "unexpected outcome: {outcome:?}"
@@ -323,12 +323,12 @@ async fn spawn_rejects_a_list_section_target_with_the_worker_message() {
         - a\n\
         - b\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the caught error ends the run normally");

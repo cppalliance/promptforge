@@ -54,7 +54,7 @@ fn two_runs_with_the_same_seed_and_started_at_produce_identical_nonces_and_sys_w
     );
     assert!(
         first.starts_with(&format!("{STARTED_AT_RFC3339}|")),
-        "sys.when is the host's started_at rendered as RFC 3339: {first}"
+        "sys.when is the context's started_at rendered as RFC 3339: {first}"
     );
     assert_eq!(
         nonce_in(&first).len(),
@@ -96,7 +96,7 @@ fn the_h1_pass_reads_the_same_sys_when_as_the_walk() {
 
 #[test]
 fn sys_when_is_timestamp_to_rfc3339_for_any_started_at() {
-    // Whatever instant the Harness stamps, `sys.when` is that value's own
+    // Whatever instant the caller stamps, `sys.when` is that value's own
     // rendering: here one on a whole second, so the fraction is omitted,
     // which the millisecond fixture above cannot show.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -121,15 +121,15 @@ fn sys_when_is_timestamp_to_rfc3339_for_any_started_at() {
 #[test]
 fn the_context_holds_the_flags_and_starts_them_empty() {
     // `Flags` is a run input like the seed: empty from `new`, kept
-    // verbatim when the Harness sets it (a replay hands back the recorded
-    // set), and readable beside the other inputs.
+    // verbatim when the caller sets it, and readable beside the other
+    // inputs.
     let fresh = test_context(EXECUTION);
     assert_eq!(fresh.run_flags(), Flags::EMPTY);
     assert!(fresh.run_flags().is_empty(), "no flag is set by default");
 
     let recorded = Flags::from_bits(0b101);
     let ctx = RunContext::new(EXECUTION, 42, STARTED_AT).flags(recorded);
-    assert_eq!(ctx.run_flags(), recorded, "the host's flags are kept");
+    assert_eq!(ctx.run_flags(), recorded, "the caller's flags are kept");
     assert_eq!(ctx.seed(), 42);
     assert_eq!(ctx.started_at(), STARTED_AT);
 }

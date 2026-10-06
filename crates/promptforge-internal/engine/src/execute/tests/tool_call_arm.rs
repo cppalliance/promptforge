@@ -68,7 +68,7 @@ fn tool_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHarness) {
+) -> (RunState, RunFixture) {
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -79,11 +79,11 @@ fn tool_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let harness = tools
+    let fixture = tools
         .into()
-        .install(&ctx, RunHarness::new().observer(observer));
+        .install(&ctx, RunFixture::new().observer(observer));
     ctx.expose_raw_shims_for_test();
-    (ctx, harness)
+    (ctx, fixture)
 }
 
 /// The tool set with the always-failing fixture bound as `fail` and in
@@ -115,12 +115,12 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, harness) = tool_context(
+    let (ctx, fixture) = tool_context(
         &prompt,
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("a model-issued call never raises for the tool's own failure");
@@ -156,12 +156,12 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, harness) = tool_context(
+    let (ctx, fixture) = tool_context(
         &prompt,
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -181,9 +181,9 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_bound_alias_with_no_implementation_in_the_harness_table_resumes_as_a_tool_error() {
+async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_as_a_tool_error() {
     // The binding names an identity the Engine advertises and journals,
-    // but the Harness's tool table holds nothing under it: the performer
+    // but the test driver's tool table holds nothing under it: the performer
     // answers the effect with the error instead of a call, and a script
     // call raises it at the call site.
     let md = arm_prompt(
@@ -194,12 +194,12 @@ async fn a_bound_alias_with_no_implementation_in_the_harness_table_resumes_as_a_
     let prompt = parse(&md);
     let (binding, _unregistered) = fixture_binding("echo", "echo capability", Arc::new(EchoTool));
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, harness) = tool_context(
+    let (ctx, fixture) = tool_context(
         &prompt,
         ToolSet::for_test(vec![binding], vec!["echo".to_owned()]),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the missing implementation is pcall-able");
@@ -208,8 +208,8 @@ async fn a_bound_alias_with_no_implementation_in_the_harness_table_resumes_as_a_
         "the missing implementation reads as kind `tool`, got: {out}"
     );
     assert!(
-        out.contains("no implementation in the Harness's table"),
-        "the raised message names the Harness's table, got: {out}"
+        out.contains("no implementation in the test driver's tool table"),
+        "the raised message names the test driver's tool table, got: {out}"
     );
     let lines = recorder.lines();
     assert!(
@@ -243,12 +243,12 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, harness) = tool_context(
+    let (ctx, fixture) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("each refusal is pcall-able");

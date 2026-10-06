@@ -39,10 +39,10 @@ fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
     ))
 }
 
-/// Prepares `prompt` against a catalog of `tools`, as the Harness does, and
-/// builds the run state over the prepared context with the loop models
-/// pre-filled, beside the Harness that holds the implementations.
-fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, RunHarness) {
+/// Prepares `prompt` against a catalog of `tools` and builds the run state
+/// over the prepared context with the loop models pre-filled, beside the
+/// fixture that holds the implementations.
+fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, RunFixture) {
     let (catalog, table) = fixture_tools(tools);
     let (prepared, requirements) = Environment::new()
         .tools(catalog)
@@ -61,7 +61,7 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    (ctx, RunHarness::new().tools(table))
+    (ctx, RunFixture::new().tools(table))
 }
 
 /// The echo fixture and a second tool the prompts never alias.
@@ -82,8 +82,8 @@ async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_ful
         "",
         "return tools.call('tests/tools/echo', { value = 'hi' })",
     );
-    let (ctx, harness) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler
         .drive()
@@ -117,8 +117,8 @@ async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alia
          models.loop(after)\n\
          return 'ok'",
     );
-    let (ctx, harness) = catalog_context(&prompt, &echo_and_concrete());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both rounds complete");
     assert_eq!(out, "ok");
@@ -147,8 +147,8 @@ async fn tools_add_and_tools_always_reject_a_full_id_as_an_invalid_alias() {
          assert(not add_ok and not always_ok, 'a full id is not an alias')\n\
          return tostring(add_err) .. '\\n' .. tostring(always_err)",
     );
-    let (ctx, harness) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("both refusals are pcall-able");
@@ -175,8 +175,8 @@ async fn no_global_is_bound_under_a_full_id() {
          table.sort(slashed)\n\
          return type(echo) .. '|' .. table.concat(slashed, ',')",
     );
-    let (ctx, harness) = catalog_context(&prompt, &echo_and_concrete());
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the section runs");
@@ -194,8 +194,8 @@ async fn a_frontmatter_bound_tool_issues_the_same_effect_by_alias_and_by_full_id
         "return tools.call('echo', { value = 'hi' }) .. '|' .. \
          tools.call('tests/tools/echo', { value = 'hi' })",
     );
-    let (ctx, harness) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls reach the tool");
     assert_eq!(out, "echoed: hi|echoed: hi");
@@ -217,8 +217,8 @@ async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
         "  echo: tests/tools/echo\n",
         "return tools.call('tests/tools/missing', {})",
     );
-    let (ctx, harness) = catalog_context(&prompt, &echo_and_concrete());
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let error = scheduler
         .drive()
@@ -252,9 +252,9 @@ async fn a_model_issued_call_never_resolves_a_full_id() {
          assert(not ok, 'a model-issued full-id call is refused')\n\
          return err.kind .. ':' .. err.name",
     );
-    let (mut ctx, harness) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let (mut ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
     ctx.expose_raw_shims_for_test();
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the refusal is pcall-able");
     assert_eq!(out, "unbound_tool:tests/tools/echo");

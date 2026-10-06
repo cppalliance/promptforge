@@ -17,7 +17,7 @@ pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 /// spawns the future, so it must be `Send` and own what it needs.
 pub type Performer = Box<dyn FnMut(Effect) -> BoxFuture<EffectAnswer> + Send>;
 
-/// The caller-supplied performers, one per effect kind the Harness performs.
+/// The caller-supplied performers, one per effect kind the caller performs.
 ///
 /// A struct of boxed async closures, so a caller supplies behavior
 /// without implementing anything from this module. The
@@ -57,7 +57,7 @@ fn refuse_chat() -> EffectAnswer {
 /// The `ToolCall` refusal: the id resolves to no implementation.
 pub(crate) fn refuse_tool_call() -> EffectAnswer {
     EffectAnswer::ToolCall(Err(ToolError::message(
-        "the tool the call names has no implementation in the Harness's table",
+        "the tool the call names has no implementation in the test driver's tool table",
     )))
 }
 

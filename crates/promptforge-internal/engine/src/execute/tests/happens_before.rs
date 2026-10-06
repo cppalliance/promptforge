@@ -9,7 +9,7 @@
 //! pipeline patterns from the plan's Functional Specification - live
 //! here, and so do the two concurrency traces: 6 (nested tasks, run
 //! within the limits, no deadlock at a ceiling of 1) and 12 (an arm's
-//! `tasks.concurrency` limit and its clamping to the Harness's ceiling).
+//! `tasks.concurrency` limit and its clamping to the caller's ceiling).
 //! Trace 2 stays in the fanout suites, which pin the unconditional
 //! conflict directly. The only outcomes that may differ between
 //! interleavings are the ones the plan admits as recorded nondeterminism:
@@ -249,8 +249,8 @@ fn serial_results(prompt: &Prompt, store: &TestStore) -> Vec<RunResult> {
     BATCHINGS
         .into_iter()
         .map(|batching| {
-            let (state, _harness) =
-                scheduler_context_from(prompt, store, &test_context(EXECUTION), RunHarness::new());
+            let (state, _fixture) =
+                scheduler_context_from(prompt, store, &test_context(EXECUTION), RunFixture::new());
             drive_batched(Run::from_state(state), batching).result
         })
         .collect()
@@ -288,8 +288,8 @@ async fn tokio_results(
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
-        let (ctx, harness) = scheduler_context_on(prompt, store, Arc::new(NullObserver::default()));
-        let mut driver = TokioDriver::new(&ctx, harness, client());
+        let (ctx, fixture) = scheduler_context_on(prompt, store, Arc::new(NullObserver::default()));
+        let mut driver = TokioDriver::new(&ctx, fixture, client());
         driver.set_shuffle_for_test(seed);
         results.push(driver.drive().await);
     }

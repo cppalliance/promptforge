@@ -7,13 +7,13 @@ use super::*;
 
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope includes them
-/// without an H1 pass; the implementations go to the Harness's tool table.
+/// without an H1 pass; the implementations go to the test driver's tool table.
 fn arm_tool_set(
     ctx: &RunState,
-    harness: RunHarness,
+    fixture: RunFixture,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> RunHarness {
-    arm_tools(ctx, harness, bindings)
+) -> RunFixture {
+    arm_tools(ctx, fixture, bindings)
 }
 
 /// Arms the run's shared tool set with `bindings` and exactly `always` as
@@ -21,11 +21,11 @@ fn arm_tool_set(
 /// without entering any section's effective scope.
 fn arm_tool_set_scoped(
     ctx: &RunState,
-    harness: RunHarness,
+    fixture: RunFixture,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
-) -> RunHarness {
-    arm_tools_scoped(ctx, harness, bindings, always)
+) -> RunFixture {
+    arm_tools_scoped(ctx, fixture, bindings, always)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -42,13 +42,13 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the script dispatch succeeds");
@@ -68,13 +68,13 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
         return tools.call(echo, { value = 'hi' })\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the handle-form dispatch succeeds");
@@ -91,13 +91,13 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
         ## Only\n\n\
         ```lua\nreturn tools.call('missing', {})\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let error = TokioDriver::new(&ctx, harness, None)
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("an unbound alias fails the block");
@@ -125,14 +125,14 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set_scoped(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set_scoped(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
         Vec::new(),
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("a bound but unscoped alias dispatches for a script");
@@ -187,11 +187,11 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
         ## Only\n\n\
         ```lua\nreturn tools.call('slow', {})\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
+    let (ctx, fixture) = scheduler_context(&prompt);
     let started = Arc::new(AtomicUsize::new(0));
-    let harness = arm_tool_set(
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding(
             "slow",
             "slow tool",
@@ -200,7 +200,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
             }),
         )],
     );
-    let mut driver = TokioDriver::new(&ctx, harness, None);
+    let mut driver = TokioDriver::new(&ctx, fixture, None);
     let canceller = driver.cancel_handle();
     let observed = Arc::clone(&started);
     tokio::spawn(async move {
@@ -239,17 +239,17 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
         ## Only\n\n\
         ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding(
             "fetch",
             "untrusted echo tool",
             Arc::new(UntrustedEchoTool),
         )],
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the untrusted dispatch succeeds");
@@ -273,7 +273,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         return r.text .. '|' .. tostring(#r.images)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
+    let (ctx, fixture) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -283,8 +283,8 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let harness = arm_tool_set(&ctx, harness, vec![binding]);
-    let out = TokioDriver::new(&ctx, harness, None)
+    let fixture = arm_tool_set(&ctx, fixture, vec![binding]);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the structured dispatch succeeds");
@@ -298,7 +298,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
+    let (ctx, fixture) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -308,8 +308,8 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let harness = arm_tool_set(&ctx, harness, vec![binding]);
-    let error = TokioDriver::new(&ctx, harness, None)
+    let fixture = arm_tool_set(&ctx, fixture, vec![binding]);
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("invalid structured output fails the call");
@@ -335,7 +335,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
+    let (ctx, fixture) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -345,8 +345,8 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let harness = arm_tool_set(&ctx, harness, vec![binding]);
-    let error = TokioDriver::new(&ctx, harness, None)
+    let fixture = arm_tool_set(&ctx, fixture, vec![binding]);
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("untrusted structured output fails the call");
@@ -374,13 +374,13 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("infer after a script dispatch still resolves the model");
@@ -396,13 +396,13 @@ async fn a_document_prompt_without_tools_call_is_unaffected() {
         ## Only\n\n\
         ```lua\nreturn 'plain'\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let harness = arm_tool_set(
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let fixture = arm_tool_set(
         &ctx,
-        harness,
+        fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, harness, None)
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("a prompt that never calls tools.call is unchanged");

@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::parser::Prompt;
 use crate::test_support::recording::{Observation, Observer};
-use crate::test_support::{RunHarness, TestTool, run_harness};
+use crate::test_support::{RunFixture, TestTool, run_prepared};
 use crate::{Environment, RunContext, RunError, RunResult};
 use promptforge_types::timestamp::Timestamp;
 use promptforge_vfs::{Origin, VfsError, VfsRef};
 
-/// A [`RunContext`] for the run `name` under the fixed Harness inputs every
-/// fixture shares: the Engine takes its seed and clock from the Harness, and
+/// A [`RunContext`] for the run `name` under the fixed caller inputs every
+/// fixture shares: the Engine takes its seed and clock from its caller, and
 /// no fixture here asserts on the nonce or `sys.when`.
 pub(super) fn context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
@@ -40,7 +40,7 @@ impl Record {
 }
 
 /// Owned run inputs a fixture supplies: the run name and an `Arc` observer
-/// so the offline `run` helper can build the [`RunHarness`] that holds the
+/// so the offline `run` helper can build the [`RunFixture`] that holds the
 /// observer. These fixtures never reach a model, so no client or debug
 /// sink is configured.
 pub(super) struct RunOptions {
@@ -49,23 +49,23 @@ pub(super) struct RunOptions {
 }
 
 impl RunOptions {
-    /// The Harness side of the fixture run: the observer alone.
-    fn harness(self) -> RunHarness {
-        RunHarness::new().observer(self.observer)
+    /// The test driver's side of the fixture run: the observer alone.
+    fn fixture(self) -> RunFixture {
+        RunFixture::new().observer(self.observer)
     }
 }
 
 /// Prepares a fixture run against the default environment and returns the
-/// prepared context, the Harness that holds the observer, and the run's own VFS
-/// handle - the prepared router - for seeding before the run and
-/// extraction after. The fixture tools are accepted for signature parity
+/// prepared context, the [`RunFixture`] that holds the observer, and the
+/// run's own VFS handle - the prepared router - for seeding before the run
+/// and extraction after. The fixture tools are accepted for signature parity
 /// only; contributing them to a run takes a Plugin and a declared
 /// slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,
     tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
-) -> (RunContext, RunHarness, VfsRef) {
+) -> (RunContext, RunFixture, VfsRef) {
     let _ = tools;
     let env = Environment::new();
     let execution = opts.execution;
@@ -75,7 +75,7 @@ pub(super) fn prepare_run(
         "fixture prompts declare no Plugins or model roles: {requirements:?}"
     );
     let vfs = ctx.vfs_handle().clone();
-    (ctx, opts.harness(), vfs)
+    (ctx, opts.fixture(), vfs)
 }
 
 /// Drives a prepared context to its result through the tokio test driver.
@@ -83,9 +83,9 @@ pub(super) async fn drive(
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
-    harness: RunHarness,
+    fixture: RunFixture,
 ) -> Result<String, RunError> {
-    match run_harness(prompt, args, ctx, harness).await {
+    match run_prepared(prompt, args, ctx, fixture).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
         RunResult::Failure(error) => Err(error),
@@ -99,12 +99,12 @@ pub(super) async fn run(
     tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let (ctx, harness, _vfs) = prepare_run(prompt, tools, opts);
-    drive(prompt, args, ctx, harness).await
+    let (ctx, fixture, _vfs) = prepare_run(prompt, tools, opts);
+    drive(prompt, args, ctx, fixture).await
 }
 
 /// Runs `prompt` over a caller-built handle with no prepare pass: the raw
-/// Harness-supplied handle contract, for tests of custom store backends (a
+/// caller-supplied handle contract, for tests of custom store backends (a
 /// gated store mount or one on a real directory, which the prepare pass
 /// would replace with the run's own fresh store).
 async fn run_unprepared(
@@ -114,7 +114,7 @@ async fn run_unprepared(
     opts: RunOptions,
 ) -> Result<String, RunError> {
     let execution = opts.execution;
-    drive(prompt, args, context(execution).vfs(vfs), opts.harness()).await
+    drive(prompt, args, context(execution).vfs(vfs), opts.fixture()).await
 }
 
 /// A synchronized observer shared by concurrent fixture runs.
@@ -191,7 +191,7 @@ pub(super) struct FixtureRun {
 /// Parses `source` and runs it offline with `args` and no tools, returning
 /// the result together with the recorder and store the caller asserts on.
 /// With `vfs` absent the run goes through prepare and the store is the
-/// prepared router's handle; an explicit `vfs` is the raw Harness-supplied
+/// prepared router's handle; an explicit `vfs` is the raw caller-supplied
 /// handle contract - no prepare pass, the run uses the handle as-is.
 pub(super) async fn run_fixture(
     source: &str,
@@ -215,7 +215,7 @@ pub(super) async fn run_fixture(
         .await;
         (result, vfs)
     } else {
-        let (ctx, harness, vfs) = prepare_run(
+        let (ctx, fixture, vfs) = prepare_run(
             &prompt,
             &[],
             RunOptions {
@@ -223,7 +223,7 @@ pub(super) async fn run_fixture(
                 observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         );
-        let result = drive(&prompt, args, ctx, harness).await;
+        let result = drive(&prompt, args, ctx, fixture).await;
         (result, vfs)
     };
     FixtureRun {

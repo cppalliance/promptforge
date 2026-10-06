@@ -26,14 +26,14 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_harness_client_serves_a_run_the_context_never_names() {
-    // The context is the Engine's input; the client lives on the Harness's
-    // `RunHarness`, and `Environment::run` performs the run's completions
+async fn the_callers_client_serves_a_run_the_context_never_names() {
+    // The context is the Engine's input; the client lives on the test's
+    // `RunFixture`, and `Environment::run` performs the run's completions
     // with it. Nothing about the gateway crosses the Engine's boundary.
     let gateway = ScriptedChat::new(vec![resp_text("canned answer")]);
 
-    let source = "---\nname: harness-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Harness Client\n\n\
+    let source = "---\nname: caller-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Caller Client\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
@@ -42,19 +42,19 @@ async fn the_harness_client_serves_a_run_the_context_never_names() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let harness = RunHarness::new().client(gateway_client(&gateway));
-    let (ctx, _harness) = to_context(silent());
+    let fixture = RunFixture::new().client(gateway_client(&gateway));
+    let (ctx, _fixture) = to_context(silent());
     let RunResult::Ok(out) =
-        crate::test_support::run_with_harness(&env, &prompt, "", ctx, harness).await
+        crate::test_support::run_with_fixture(&env, &prompt, "", ctx, fixture).await
     else {
-        panic!("the Harness's client must serve the run");
+        panic!("the fixture's client must serve the run");
     };
 
     assert_eq!(out, "canned answer");
     assert_eq!(
         gateway.call_count(),
         1,
-        "the completion must have gone to the Harness's client"
+        "the completion must have gone to the fixture's client"
     );
 }
 
@@ -126,7 +126,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
-    let (ctx, _harness) = to_context(silent());
+    let (ctx, _fixture) = to_context(silent());
     let (ctx, requirements) = env.prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
@@ -134,7 +134,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
     );
     let store = TestStore::from_vfs(ctx.vfs_handle().clone());
     let RunResult::Ok(out) =
-        crate::test_support::run_harness(&prompt, "load-time args", ctx, RunHarness::new()).await
+        crate::test_support::run_prepared(&prompt, "load-time args", ctx, RunFixture::new()).await
     else {
         panic!("top-level shared Engine calls must succeed");
     };
@@ -175,8 +175,9 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
-    // The Harness pattern: the fixture Plugin is activated into the
-    // catalog and the Harness's tool table; the run's tool slot fills by id.
+    // The fixture tools' descriptors go into the catalog and their
+    // implementations into the test driver's tool table; the run's tool
+    // slot fills by id.
     let out = super::run(
         &TestPrompt {
             prompt,
@@ -323,10 +324,10 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
     let ctx = test_context(EXECUTION)
         .model(test_model_catalog().models()[0].clone())
         .cancel(cancel);
-    let harness = RunHarness::new()
+    let fixture = RunFixture::new()
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .client(gateway_client(&gateway));
-    let result = env_run(&env, &prompt, "", (ctx, harness)).await;
+    let result = env_run(&env, &prompt, "", (ctx, fixture)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"

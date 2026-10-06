@@ -23,12 +23,12 @@ async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId,
     let md = owner_prompt("", &loop_owner(owner_tail), child_body);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, harness) = model_task_context_with(
+    let (ctx, fixture) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the owner ends clean");
@@ -94,12 +94,12 @@ async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, harness) = model_task_context_with(
+    let (ctx, fixture) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a model task the walk's end strands is abandoned, never leaked");
@@ -147,7 +147,7 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
         loop_owner("")
     );
     let prompt = parse(&md);
-    let (state, _harness) = model_task_context_with(
+    let (state, _fixture) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(SlowTool),
@@ -212,12 +212,12 @@ async fn a_model_issued_cancel_queues_no_notice() {
     let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, harness) = model_task_context_with(
+    let (ctx, fixture) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the cancel leaves nothing live");

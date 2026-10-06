@@ -19,9 +19,10 @@ use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
 
 /// Builds a section VM through the real setup path with every conditional
-/// Engine global bound: a Host-state snapshot (`ui`), a collection member
-/// (`item`), a non-nil `argv` (writable as in the H1 pass, or frozen as in
-/// every other section), and a block's lazy `prose`.
+/// Engine global bound: a caller-supplied application-state snapshot
+/// (`ui`), a collection member (`item`), a non-nil `argv` (writable as in
+/// the H1 pass, or frozen as in every other section), and a block's lazy
+/// `prose`.
 fn fully_bound_vm(argv_writable: bool) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(

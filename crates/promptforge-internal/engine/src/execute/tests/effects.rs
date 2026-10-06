@@ -30,15 +30,15 @@ fn assert_round_trips(records: &[EffectRecord]) {
     }
 }
 
-/// Builds the run context and its Harness for an effect test: the parsed
+/// Builds the run context and its fixture for an effect test: the parsed
 /// prompt, an empty shared library, and the shared model and tool sets
 /// pre-filled (the scheduler tests bypass the live H1 pass that would fill
-/// them), under the given Harness.
+/// them), under the given fixture.
 fn effect_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
-    harness: RunHarness,
-) -> (RunState, RunHarness) {
+    fixture: RunFixture,
+) -> (RunState, RunFixture) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -49,8 +49,8 @@ fn effect_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let harness = tools.into().install(&ctx, harness);
-    (ctx, harness)
+    let fixture = tools.into().install(&ctx, fixture);
+    (ctx, fixture)
 }
 
 /// The origin of a call made by `caller` in `section` of the test run.
@@ -66,8 +66,8 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
 async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     let gateway = ScriptedChat::new(vec![resp_text("answer")]);
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
@@ -101,8 +101,8 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = effect_context(&prompt, echo_tools(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "done");
@@ -136,8 +136,8 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
     let prompt = parse(&loop_prompt("return tools.call('echo', { value = 'hi' })"));
-    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = effect_context(&prompt, echo_tools(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the call completes");
     assert_eq!(out, "echoed: hi");
@@ -162,8 +162,8 @@ async fn a_script_tool_call_records_the_section_that_made_it() {
          ## First\n\n```lua\ntools.call('echo', { value = 'a' })\n```\n\n\
          ## Second\n\n```lua\nreturn tools.call('echo', { value = 'b' })\n```\n",
     );
-    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = effect_context(&prompt, echo_tools(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls complete");
     assert_eq!(out, "echoed: b");
@@ -193,8 +193,8 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
         "store.write('notes.md', 'kept')\n\
          return store.read('notes.md')",
     ));
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the store ops complete");
     assert_eq!(out, "kept");
@@ -235,12 +235,12 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
         ## Child\n\n\
         ```lua\nreturn 'quick'\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(
+    let (ctx, fixture) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, None);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the wait completes");
     assert_eq!(out, "quick");
@@ -263,8 +263,8 @@ async fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "answer");
@@ -282,8 +282,8 @@ async fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
 async fn a_nested_infer_round_is_the_runs_first_with_the_infer_origin() {
     let gateway = ScriptedChat::new(vec![resp_text("answer")]);
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");

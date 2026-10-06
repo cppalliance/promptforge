@@ -43,7 +43,7 @@ pub(super) fn loop_models() -> ModelSet {
     }
 }
 
-/// Builds the run context and its observing Harness for a loop test: the
+/// Builds the run context and its observing fixture for a loop test: the
 /// parsed prompt, an empty shared library, and the shared model and tool
 /// sets pre-filled (the scheduler tests bypass the live H1 pass that would
 /// fill them).
@@ -51,7 +51,7 @@ pub(super) fn loop_context_observed(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHarness) {
+) -> (RunState, RunFixture) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -62,17 +62,17 @@ pub(super) fn loop_context_observed(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let harness = tools
+    let fixture = tools
         .into()
-        .install(&ctx, RunHarness::new().observer(observer));
-    (ctx, harness)
+        .install(&ctx, RunFixture::new().observer(observer));
+    (ctx, fixture)
 }
 
 /// [`loop_context_observed`] under the null observer.
 pub(super) fn loop_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
-) -> (RunState, RunHarness) {
+) -> (RunState, RunFixture) {
     loop_context_observed(prompt, tools, Arc::new(NullObserver::default()))
 }
 
@@ -133,8 +133,8 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a tool-free loop runs to its terminal turn");
@@ -174,8 +174,8 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop repeats until terminal text");
@@ -213,8 +213,8 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
          return msgs[#msgs].content",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the replayed tool-call turn must be accepted");
@@ -266,8 +266,8 @@ async fn models_loop_dispatches_local_and_bound_tools() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop routes local and bound tools");
@@ -308,8 +308,8 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
         )],
         Vec::new(),
     );
-    let (ctx, harness) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("each call reads the current scope");
@@ -345,8 +345,8 @@ async fn models_loop_with_a_leading_handle_runs_on_its_frozen_binding() {
          return msgs[2].content .. '|' .. msgs[4].content",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("an explicit handle runs at any point in the section");
@@ -400,8 +400,8 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a two-call batch appends atomically");

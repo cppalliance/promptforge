@@ -29,8 +29,8 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
         return first\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -70,8 +70,8 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -115,11 +115,11 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
         return a .. b\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_with_limits(
+    let (ctx, fixture) = scheduler_context_with_limits(
         &prompt,
         RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the ceilinged fanout completes on the scheduler");
@@ -159,8 +159,8 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -210,9 +210,9 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
+    let (ctx, fixture) = scheduler_context(&prompt);
     promptforge_lua::reset_section_vm_peak();
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a collection over the ceiling width completes");

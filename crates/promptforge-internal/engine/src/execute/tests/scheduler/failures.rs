@@ -29,8 +29,8 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("concurrent appends to one path must boom");
@@ -69,8 +69,8 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("an arm rewriting its own path must succeed");
@@ -98,8 +98,8 @@ async fn sequential_fanouts_may_write_one_path() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, harness, None)
+    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("a sequential fanout may write the same path");
@@ -128,14 +128,14 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_from(
+    let (ctx, fixture) = scheduler_context_from(
         &prompt,
         &store,
         &test_context(EXECUTION)
             .limits(RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero"))),
-        RunHarness::new().observer(recorder.clone()),
+        RunFixture::new().observer(recorder.clone()),
     );
-    let error = TokioDriver::new(&ctx, harness, None)
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect_err("a fatal arm must fail the whole fanout");
@@ -192,10 +192,10 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway))).drive(),
+        TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -271,8 +271,8 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the caught fanout failure lets the caller continue");
@@ -309,8 +309,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ### Worker\n\n\
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -386,8 +386,8 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         ### Worker\n\n\
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
     scheduler.set_max_chains_for_test(2);
@@ -438,7 +438,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
 #[tokio::test(flavor = "current_thread")]
 async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // An answer arriving for an id the run never issued (and that is not an
-    // orphan) means the Harness lost track of its effects: the run must fail
+    // orphan) means the caller lost track of its effects: the run must fail
     // with Error::Internal rather than silently discard the answer. Only an
     // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
@@ -449,8 +449,8 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
     let prompt = parse(md);
-    let (ctx, harness) = scheduler_context(&prompt);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     // Handed to the run before the drive: the phantom answer lands ahead
     // of the real infer's, on a run that has issued nothing.
     scheduler
