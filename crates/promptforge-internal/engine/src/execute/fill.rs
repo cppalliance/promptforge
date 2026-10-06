@@ -1,5 +1,5 @@
 //! Prepare's fill functions: tool slot filling by identity against the
-//! Harness-supplied catalog, and the trivial model fill.
+//! caller-supplied catalog, and the trivial model fill.
 
 use promptforge_parser::{ModelKeyword, ToolSlot};
 
@@ -10,7 +10,7 @@ use crate::tools::ToolCatalog;
 use super::bindings::{ModelBindings, ToolBindings};
 use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 
-/// Fills the prompt's declared tool slots against the Harness-supplied
+/// Fills the prompt's declared tool slots against the caller-supplied
 /// catalog, journaling every fill into the returned bindings.
 ///
 /// Exact slots fill by identity: an exact path's first two segments name

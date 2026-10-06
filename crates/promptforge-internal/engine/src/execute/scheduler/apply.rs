@@ -1,7 +1,7 @@
 //! Answer application: the one path every performed effect's answer takes
 //! back into the scheduler.
 //!
-//! The Harness hands back a raw [`EffectAnswer`] - a completion, a tool's own
+//! The caller hands back a raw [`EffectAnswer`] - a completion, a tool's own
 //! output, a store outcome, a timer's firing - and knows nothing of what
 //! the parked chain asked for. `apply_answer` pairs the answer with the
 //! effect's [`Continuation`] and turns it into the chain's protocol
@@ -52,7 +52,7 @@ impl Scheduler {
     /// entry, turns the raw answer into the parked chain's protocol answer
     /// under the effect's continuation (emitting the round's events), and
     /// re-queues the chain. A timer's firing completes its slot and wakes
-    /// its waiter instead. A `Dropped` answer is the Harness giving the
+    /// its waiter instead. A `Dropped` answer is the caller giving the
     /// effect up: the chain resumes with the cancelled error. Every answer
     /// to a tool call, `Dropped` included, first ends the call's identity
     /// through [`Scheduler::end_tool_call`], so whatever the tool did
@@ -61,7 +61,7 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when no pending entry explains the id
-    /// (the caller has already ruled out an orphan, so the Harness answered
+    /// (`resume` has already ruled out an orphan, so the caller answered
     /// an effect the run never issued or answered one twice - which fails
     /// loudly), or when the answer's kind does not match the effect's.
     /// Returns [`Error::Determinism`] when a store answer reports a
@@ -230,7 +230,7 @@ impl Scheduler {
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
-    /// `Cancelled`. While the run's cancel flag is clear, the Harness gave
+    /// `Cancelled`. While the run's cancel flag is clear, the caller gave
     /// up the timeout and the run goes on, so the chain parked on the
     /// timer leaves its wait with the cancelled error, as a dropped `Chat`
     /// or `ToolCall` does: a timed `tasks.join` or `tasks.join_any` raises

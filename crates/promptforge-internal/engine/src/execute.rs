@@ -1,6 +1,6 @@
 //! Section lifecycle execution and fall-through.
 //!
-//! The public design - the section walk, the Harness loop, reporting,
+//! The public design - the section walk, the caller's step loop, reporting,
 //! tool binding, and running without a runtime - is documented on the
 //! `promptforge` facade's crate page and its role modules.
 //!
@@ -13,17 +13,17 @@
 //! - `config` - the public [`RunContext`] and [`RunLimits`].
 //! - `context` - the ambient `RunState` run state.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
-//!   against the caller's catalog; Plugin activation itself is the
-//!   Harness's, in `harness-plugins`.
+//!   against the caller's catalog. Plugin activation itself is the
+//!   Harness's job.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's tool- and model-slot fill functions.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
 //!   boundary.
 //! - `requirements` - the preflight [`Requirements`] report.
-//! - `run` - the Harness boundary: the `Run` state machine with its `step`,
-//!   `resume`, and `cancel`, the `Step` it returns, and the effect vocabulary
-//!   (the `Effect` a leaf arm issues, its serializable `EffectRecord`, and the
-//!   `EffectAnswer` the Harness returns).
+//! - `run` - the boundary with the caller: the `Run` state machine with its
+//!   `step`, `resume`, and `cancel`, the `Step` it returns, and the effect
+//!   vocabulary (the `Effect` a leaf arm issues, its serializable
+//!   `EffectRecord`, and the `EffectAnswer` the caller returns).
 //! - `scheduler` - the chain scheduler driving the coroutine protocol:
 //!   the live H1 pass, the walk, call chains, fanout, and the `chat` and
 //!   `tool_call` rounds the section-visible `models.loop` shim yields.

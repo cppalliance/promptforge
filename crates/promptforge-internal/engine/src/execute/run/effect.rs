@@ -1,10 +1,10 @@
-//! Effects as values: what the Engine asks the Harness to perform, and what
-//! the Harness answers with.
+//! Effects as values: what the Engine asks its caller to perform, and what
+//! the caller answers with.
 //!
 //! A leaf request a section VM yields - a model round, a bound tool call,
 //! a store operation, a timer - is not performed where it is dispatched.
 //! The arm builds an [`Effect`], a plain description of the work, and the
-//! run returns it from `step` for the Harness to perform; the Harness's
+//! run returns it from `step` for the caller to perform; the caller's
 //! [`EffectAnswer`] comes back through `resume` keyed by the effect's
 //! [`EffectId`], and the scheduler applies it on the caller's thread,
 //! emitting the round's events there. The Engine thus decides *what* to do

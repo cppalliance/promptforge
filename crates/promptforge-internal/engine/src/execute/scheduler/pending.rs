@@ -1,5 +1,5 @@
 //! The pending table's entry: what a parked chain asked for, in the terms
-//! `apply_answer` needs to turn the Harness's raw [`EffectAnswer`] into the
+//! `apply_answer` needs to turn the caller's raw [`EffectAnswer`] into the
 //! chain's protocol [`Answer`] and emit the round's events. The effect
 //! itself holds none of this: it describes the work, the continuation
 //! describes what the work means to the chain.

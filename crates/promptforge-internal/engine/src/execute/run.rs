@@ -1,6 +1,6 @@
-//! The run: the Engine's Harness boundary, four methods exchanging effects and
-//! events as values. The Harness loop is documented on the `promptforge`
-//! facade's crate page and its `effect` and `cancel` modules.
+//! The run: the Engine's boundary with its caller, four methods exchanging
+//! effects and events as values. The caller's loop is documented on the
+//! `promptforge` facade's crate page and its `effect` and `cancel` modules.
 //!
 //! The effect vocabulary itself - [`Effect`] and its [`Round`], its
 //! serializable [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is
@@ -223,7 +223,7 @@ impl Run {
     }
 }
 
-/// Assembles the run state from the Harness's context, checking the version
+/// Assembles the run state from the caller's context, checking the version
 /// gate, the shared library, and the declared store in that order.
 ///
 /// # Errors

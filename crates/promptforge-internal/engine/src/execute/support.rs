@@ -102,7 +102,7 @@ pub(super) fn report_model_turn(
     let finish_reason = completion.finish_reason().map(str::to_owned);
     if emitter.captures_debug() {
         // A completion no broker attached a raw exchange to still reports
-        // its pair, with `null` bodies, so a Host pairs every round.
+        // its pair, with `null` bodies, so the caller can pair every round.
         let (request, response) = completion
             .raw()
             .map_or((serde_json::Value::Null, serde_json::Value::Null), |raw| {
@@ -129,7 +129,7 @@ pub(super) fn report_model_turn(
             }
         });
     }
-    // The content reports every Host transcript is built from: the
+    // The content reports a transcript is built from: the
     // thinking side channel first, then the reply, each with the round,
     // the model, and the metrics.
     if let Some(thinking) = &thinking {

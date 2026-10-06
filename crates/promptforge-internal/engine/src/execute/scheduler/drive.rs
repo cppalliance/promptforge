@@ -1,11 +1,12 @@
 //! The run-level step: `resume -> match request -> dispatch -> resume with
-//! answer`, run until no chain can proceed without a Harness answer. The step
-//! starts the run's first chain on its first call, drains the ready queue,
-//! and returns the effects the drain issued with the events it reported.
+//! answer`, run until no chain can proceed without an answer from the
+//! caller. The step starts the run's first chain on its first call, drains
+//! the ready queue, and returns the effects the drain issued with the
+//! events it reported.
 //! An empty ready queue with an empty pending table and no queued chain
 //! that can be admitted is a stall, which fails loudly rather than hangs.
 //! The run's `Done` is withheld until
-//! every issued effect has its answer, so every effect the Harness was
+//! every issued effect has its answer, so every effect the caller was
 //! handed has exactly one answer.
 
 use crate::execute::RunResult;
@@ -159,12 +160,12 @@ impl Scheduler {
     /// Decides the run: settles every live task exactly once (each
     /// reports `TaskAbandoned` - with `RunTerminated` for a task the run's
     /// end stranded directly, `OwnerAborted` for one nested under it and
-    /// ended through `abort_subtree` - so a task stranded by a Host cancel
+    /// ended through `abort_subtree` - so a task stranded by a run cancel
     /// or a fatal answer keeps the one-terminal contract; a run that ended
     /// well has none left, its root chain having settled its own), tears
     /// every chain down (the suspended chains' frames
     /// drop unarmed - no `SECTION_FINISHED` - and every effect still out
-    /// with the Harness becomes an orphan the Harness still answers), reports
+    /// with the caller becomes an orphan the caller still answers), reports
     /// the run's end boundary after every task terminal, and holds
     /// `result` until the orphans are answered. A second decision keeps
     /// the first: the outcome that ended the run is the record.

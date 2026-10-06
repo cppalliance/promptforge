@@ -251,11 +251,11 @@ impl Scheduler {
 
     /// Dispatches a `concurrency` request: with a limit, the chain's
     /// effective admission limit becomes the limit clamped to the
-    /// parent's (the Harness's ceiling for the root, the enclosing chain's
-    /// current limit otherwise), so a prompt stays portable wherever it runs,
-    /// tighter ceilings included; without one, the effective limit is read
-    /// back. The clamp never preempts a task already running - the limit
-    /// gates admissions from here on only.
+    /// parent's (the caller's `RunLimits` ceiling for the root, the
+    /// enclosing chain's current limit otherwise), so a prompt stays
+    /// portable wherever it runs, tighter ceilings included; without one,
+    /// the effective limit is read back. The clamp never preempts a task
+    /// already running - the limit gates admissions from here on only.
     pub(super) fn dispatch_concurrency(&mut self, id: ChainIndex, limit: Option<u64>) {
         let effective = if let Some(limit) = limit {
             let parent_limit = match self.enclosing(id) {

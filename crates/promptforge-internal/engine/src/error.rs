@@ -274,7 +274,7 @@ pub(crate) enum Error {
     UnsupportedVersion(u32),
 
     /// The environment cannot satisfy the prompt: a required Plugin is
-    /// missing, a required Plugin needs a Host service this Host lacks,
+    /// missing, a required Plugin needs a service that was not provided,
     /// two declared Plugins conflict, the filled model
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
@@ -321,7 +321,7 @@ pub(crate) enum Error {
     },
 
     /// A Lua resource quota (log events, log bytes, or instructions) was
-    /// exhausted. This stable typed variant lets the Host tell quota
+    /// exhausted. This stable typed variant lets the caller tell quota
     /// exhaustion apart from an authoring error.
     #[error("lua {resource} quota exceeded")]
     #[non_exhaustive]

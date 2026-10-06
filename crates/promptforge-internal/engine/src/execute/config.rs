@@ -43,48 +43,45 @@ use super::bindings::{ModelBindings, ToolBindings};
 pub struct RunContext {
     /// Run identity, stamped on every report and event.
     pub(super) name: String,
-    /// The run's seed: Harness-drawn, the source of the untrusted-envelope
-    /// nonce (and of every other in-run random choice).
+    /// The run's seed, as the caller supplied it: the source of the
+    /// untrusted-envelope nonce (and of every other in-run random choice).
     pub(super) seed: u64,
     /// The behavior flags the run records; empty by default.
     flags: Flags,
-    /// When the run began, as the Harness stamped it: rendered as `sys.when`
+    /// When the run began, as the caller stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
     pub(super) started_at: Timestamp,
     /// Where the root task's provenance sequence starts: 0 by default. When
-    /// the Harness logged the prompt's parse events (stamped under task `0`
-    /// from zero) ahead of the run, it passes their count, so the run's root
-    /// task continues the sequence and `(task, seq)` is unique across the
-    /// parse/run boundary.
+    /// the caller puts the prompt's parse events (stamped under task `0`
+    /// from zero) in the same stream ahead of the run, it passes their
+    /// count, so the run's root task continues the sequence and
+    /// `(task, seq)` is unique across the parse/run boundary.
     pub(super) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
     /// Nothing increments it, so it is always 0.
     depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
-    /// bodies already travel in the `Chat` effect and its answer, so the
-    /// Harness's effect log has them, and the events serve a Harness that
-    /// wants the pair in the event stream too.
+    /// bodies already travel in the `Chat` effect and its answer, and the
+    /// events serve a caller that wants the pair in the event stream too.
     pub(super) report_debug: DebugMode,
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
-    /// flag reaches them all; the Harness hands the same flag to the
-    /// Plugins it activates.
+    /// flag reaches them all.
     pub(super) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
-    /// The Host-state snapshot the `ui()` global serves, taken by the Host
-    /// at run start; its presence also turns on the raw-model-id
+    /// The application-state snapshot the `ui()` global serves, taken by
+    /// the caller at run start; its presence also turns on the raw-model-id
     /// `models.get` fallback.
     pub(super) ui: Option<serde_json::Value>,
     /// The run's whole filesystem: real directories and the declared
-    /// store. The default is a fresh memory store at `/`; the Harness
-    /// mounts the run's real directories and declared store and sets the
-    /// handle with [`vfs`](RunContext::vfs).
+    /// store. The default is a fresh memory store at `/`; the caller
+    /// replaces it with [`vfs`](RunContext::vfs).
     pub(super) vfs: VfsRef,
-    /// The run's current model: the Host's selection (in Workshop, the
-    /// dropdown), set before prepare. Input to prepare's fill function,
-    /// which binds every declared role to it.
+    /// The run's current model, which the caller chooses, set before
+    /// prepare. Input to prepare's fill function, which binds every
+    /// declared role to it.
     pub(super) model: Option<ModelDescriptor>,
     /// The run's model satisfaction, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s fill

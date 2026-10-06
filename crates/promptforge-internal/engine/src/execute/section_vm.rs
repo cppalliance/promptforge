@@ -79,8 +79,8 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's resolved per-section tool-loop cap, captured by the
     /// `models.loop` shim as its round cap.
     pub(crate) max_tool_iterations: usize,
-    /// The run's Host-state snapshot, when the Host supplied one: its
-    /// presence gives the section VM the `ui()` global and the
+    /// The run's application-state snapshot, when the caller supplied one:
+    /// its presence gives the section VM the `ui()` global and the
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
     /// so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,

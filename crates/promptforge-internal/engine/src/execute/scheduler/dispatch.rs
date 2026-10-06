@@ -2,7 +2,7 @@
 //! suspended chain. Every leaf arm builds its [`Effect`] and issues it
 //! through the scheduler's one `issue` path; the arm performs nothing and
 //! emits nothing for the answer, which `apply_answer` handles when it
-//! lands. Every store operation is a leaf yield, handed to the Harness
+//! lands. Every store operation is a leaf yield, handed to the caller
 //! uniformly for all backends - no inline fast path - so interleaving
 //! behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
@@ -245,7 +245,7 @@ impl Scheduler {
             )?
         };
         // A nested infer round consumes only the accumulated completion;
-        // its `Infer` origin tells the Harness its live deltas have no
+        // its `Infer` origin tells the caller its live deltas have no
         // consumer.
         let round = self.number_round(ReplyOrigin::Infer);
         let effect = Effect::Chat {
@@ -261,7 +261,7 @@ impl Scheduler {
 
     /// Dispatches a `store` request: derives the store view from the
     /// chain's access capability and issues the operation through it as a
-    /// `Vfs` effect for the Harness to perform, parking the chain in the
+    /// `Vfs` effect for the caller to perform, parking the chain in the
     /// pending table exactly as a leaf I/O round does. Every store
     /// operation takes this yield path uniformly (memory mounts and real
     /// files alike, with no inline fast path) so interleaving behavior never

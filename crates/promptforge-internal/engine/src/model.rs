@@ -1,16 +1,15 @@
-//! The model vocabulary the Harness exchanges with a run: what a `Chat` effect
+//! The model vocabulary a caller exchanges with a run: what a `Chat` effect
 //! includes ([`Message`], [`ToolSchema`], [`CompletionOptions`],
 //! [`ModelBinding`]) and what its answer returns ([`Completion`],
 //! [`CompletionResult`], [`CompletionError`]), plus the prompt-local
 //! binding vocabulary ([`ModelSet`], [`ModelView`], [`ModelInvocation`])
-//! and the catalog identity the Harness resolves selections against
+//! and the catalog identity model selections resolve against
 //! ([`ModelCatalog`](promptforge_types::models::ModelCatalog), [`ModelDescriptor`], [`ModelId`]).
 //!
-//! The Harness builds a [`ModelCatalog`](promptforge_types::models::ModelCatalog) from the gateway's `GET /v1/models`
-//! (or a pinned offline entry). H1 `models.default` parks a declared role
-//! as the prompt-wide default; H2 `models.use` selects at most one binding
-//! per section. Model-facing sections with neither fail with a
-//! model-binding failure surfaced through [`crate::RunError`].
+//! H1 `models.default` parks a declared role as the prompt-wide default;
+//! H2 `models.use` selects at most one binding per section. Model-facing
+//! sections with neither fail with a model-binding failure surfaced
+//! through [`crate::RunError`].
 //!
 //! The implementation sits in the private `promptforge-model-client` crate
 //! and is re-exported here. The transport codec a round's performer runs

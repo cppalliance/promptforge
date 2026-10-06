@@ -27,9 +27,9 @@ use super::requirements::Requirements;
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// The tools a run may bind, as descriptors: assembled by the Harness from
-    /// its activated Plugins. The default is empty, so every exact
-    /// slot's Plugin is reported missing.
+    /// The tools a run may bind, as descriptors, as the caller set them
+    /// with [`tools`](Environment::tools). The default is empty, so every
+    /// exact slot's Plugin is reported missing.
     tools: ToolCatalog,
     /// The Lua source the caller's activated Plugins contributed, in
     /// install order: every section VM of a run installs each one before

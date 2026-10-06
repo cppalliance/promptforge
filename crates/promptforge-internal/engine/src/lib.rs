@@ -4,7 +4,7 @@
 //! A run executes the Lua under the `#` title once, then walks the sections
 //! top to bottom. It issues every model round, tool call, store operation,
 //! and timer as an [`Effect`] the Harness performs and answers, and reports
-//! every boundary as an event the Harness records. Other crates reach these
+//! every boundary as an event returned from `step`. Other crates reach these
 //! items through the `promptforge` facade.
 //!
 //! ## Invariants

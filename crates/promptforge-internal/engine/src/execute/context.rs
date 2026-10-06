@@ -65,7 +65,7 @@ pub(crate) struct RunState {
     limits: RunLimits,
     /// The run's event buffer, shared by every chain's emitter, spawned
     /// task chains' included, and drained once per `step` into the batch
-    /// handed to the Harness.
+    /// returned to the caller.
     events: EventSink,
     /// This context's task-scoped emitter: the root task's at
     /// construction, a spawned chain's own after [`with_task`](Self::with_task).
@@ -113,8 +113,9 @@ pub(crate) struct RunState {
     /// The run's `started_at` rendered as RFC 3339, stamped into every
     /// section's `sys.when`, the H1 pass included.
     when: Arc<str>,
-    /// The run's Host-state snapshot; its presence gives every section VM
-    /// the `ui()` global and the raw-model-id `models.get` fallback.
+    /// The run's application-state snapshot; its presence gives every
+    /// section VM the `ui()` global and the raw-model-id `models.get`
+    /// fallback.
     ui: Option<Arc<serde_json::Value>>,
     /// The run's Plugin preludes, in install order: every section VM
     /// installs each one before the shared library replays.
@@ -153,8 +154,9 @@ impl RunState {
         let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
         let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
-        // The root task's counter starts where the Harness says: past the
-        // parse events it logged ahead of the run, or at zero.
+        // The root task's counter starts at the context's `provenance_start`:
+        // past any parse events the caller put in the stream ahead of the
+        // run, or at zero.
         let events = EventSink::seeded(ctx.provenance_start);
         // The root chain - the main walk - is task `0`.
         let emitter = Arc::new(Emitter::new(
@@ -269,7 +271,7 @@ impl RunState {
 
     /// Drains the run's event buffer: every event pushed since the last
     /// drain, in push order. The run's `step` calls this once per step and
-    /// hands the batch to the Harness.
+    /// returns the batch to the caller.
     pub(super) fn take_events(&self) -> Vec<Event> {
         let events = self.events.take();
         #[cfg(test)]

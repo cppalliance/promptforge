@@ -278,13 +278,13 @@ impl Scheduler {
     }
 
     /// Orphans one in-flight leaf effect whose chain is going away: the
-    /// pending entry leaves, and the id is recorded so the Harness's answer,
+    /// pending entry leaves, and the id is recorded so the caller's answer,
     /// when it arrives, is discarded rather than failing the run. A tool
     /// call's identity ends here as its answer would end it, so what the
     /// tool already did is joined into the parked chain and anything it
-    /// tries later is refused. The Harness still owes the answer: `Done`
+    /// tries later is refused. The caller still owes the answer: `Done`
     /// waits for every issued effect, so the run ends only once the
-    /// Harness has answered all of them.
+    /// caller has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
         if let Some(Pending {
             chain,

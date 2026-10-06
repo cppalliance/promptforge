@@ -218,7 +218,7 @@ impl Scheduler {
 
     /// Ends every live task in the arena because the run itself is ending:
     /// the whole-run counterpart of the per-owner chain-end rule, so a
-    /// task stranded by a Host cancel or a fatal answer still receives its
+    /// task stranded by a run cancel or a fatal answer still receives its
     /// one terminal before the run's end boundary. Each live slot's owner
     /// is passed to [`abandon_owned_tasks`](Self::abandon_owned_tasks)
     /// with `reason`, in ascending arena order. No slot reports twice:
