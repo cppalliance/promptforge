@@ -147,7 +147,7 @@ pub(crate) type FreeState = unsafe extern "C" fn(*mut State);
 
 /// `ggml_abort_callback` from the pinned b4938 ggml.h. whisper calls it after
 /// each encoder pass and decoder step, and a true return ends the pass.
-pub(crate) type AbortCallback = Option<extern "C" fn(*mut c_void) -> bool>;
+type AbortCallback = Option<extern "C" fn(*mut c_void) -> bool>;
 
 /// `ggml_log_callback` from the pinned b4938 ggml.h. The level is a C
 /// `enum ggml_log_level`, which the ABI passes as `c_int`.
