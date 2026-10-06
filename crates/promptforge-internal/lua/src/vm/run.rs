@@ -355,8 +355,8 @@ pub(crate) struct LuaOutcome {
 
 /// Runs a section's Lua chunk with `args` and `sys` exposed, a writable `var`
 /// table available, and a `store` table backed by `store`, returning the
-/// chunk's return value and the final `var`. Harness-mediated store operations
-/// report safe outcomes through `emitter` under `section`.
+/// chunk's return value and the final `var`. Store operations report safe
+/// outcomes through `emitter` under `section`.
 /// `log(message)` reports constrained author checkpoints through the same
 /// emitter; direct `print` is unavailable.
 ///

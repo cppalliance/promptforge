@@ -1,12 +1,12 @@
 //! The Engine's event vocabulary: everything a run reports, as values.
 //!
 //! An [`Event`] is one thing that happened during a run, returned to the
-//! Harness from `Run::step` beside the effects the run wants performed. It is
+//! caller from `Run::step` beside the effects the run wants performed. It is
 //! the one report-only vocabulary: lifecycle boundaries, content the model,
 //! tools, and user produced, and the opt-in debug capture, in one
 //! serializable enum. The Engine emits through an
-//! [`Emitter`](crate::emitter::Emitter), the Harness appends to its log, and
-//! nothing is ever read back into the Engine by this path: recording every
+//! [`Emitter`](crate::emitter::Emitter), the caller receives it from `step`,
+//! and nothing is ever read back into the Engine by this path: recording every
 //! event or dropping them all leaves a run's outputs, errors, and ordering
 //! unchanged. The payload-free lifecycle variants have named constructors
 //! in [`lifecycle`] for the Engine's emit sites.
@@ -14,9 +14,8 @@
 //! Every variant includes three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
 //! or agent name), and `provenance` (the [`Provenance`] replay key: the
-//! nearest enclosing task and the item's position within it). The Harness
-//! writes `task_id` and `task_seq` for every record from `provenance` alone,
-//! without inspecting the payload.
+//! nearest enclosing task and the item's position within it). A caller can
+//! key every event by `provenance` alone, without inspecting the payload.
 //!
 //! # Sensitivity
 //! Lifecycle variants have no payload beyond their coordinates, and the
@@ -25,8 +24,8 @@
 //! `ModelMetadataDegraded`, whose message may quote values from a
 //! backend's response. Content variants hold model-, tool-, or
 //! user-authored text; task variants hold the author's spawn seeds; debug
-//! variants hold the verbatim request and response bodies. A Harness or
-//! Host that persists or forwards events must treat all of it as untrusted.
+//! variants hold the verbatim request and response bodies. A caller that
+//! persists or forwards events must treat all of it as untrusted.
 //!
 //! # Serialized form
 //! One event serializes to one JSON object tagged by `kind` (the variant

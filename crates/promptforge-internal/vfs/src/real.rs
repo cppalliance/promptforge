@@ -37,7 +37,7 @@ use resolve::{
 };
 
 /// Maps an I/O failure to the error kind the trait surface promises.
-/// Each `path` field holds the canonical path alone, so a Harness reading
+/// Each `path` field holds the canonical path alone, so a caller reading
 /// the field per its documented contract gets a path, never the OS
 /// error's text; the kind carries the OS failure, and only
 /// `PermissionDenied` keeps the extra text in `reason`.

@@ -1,4 +1,4 @@
-//! The greeter: one Harness loop that parses a prompt, prepares it with a
+//! The greeter: one caller loop that parses a prompt, prepares it with a
 //! canned model and a shout tool, steps the run, answers every effect it
 //! hands back, logs every event, and prints the result.
 //!

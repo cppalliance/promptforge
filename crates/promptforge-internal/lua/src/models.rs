@@ -28,8 +28,7 @@ pub(crate) use userdata::LuaModelHandle;
 
 /// The context window a raw gateway-id binding records: catalog metadata
 /// the hack never sees, so a conservative default keeps the compactor
-/// precheck safe rather than refusing the model. Mirrors the Workshop's
-/// own catalog fallback.
+/// precheck safe rather than refusing the model.
 const RAW_ID_CONTEXT: NonZeroU32 = match NonZeroU32::new(8192) {
     Some(value) => value,
     None => unreachable!(),
@@ -231,8 +230,8 @@ impl ModelRuntime {
 /// different label errors. There is no `models.bind`: binding is the
 /// frontmatter's, and an unknown label is a hard error.
 ///
-/// `raw_ids` is the raw-model-id fallback, on whenever the Host passes a
-/// Host-state snapshot (`RunContext::ui`): when set, `models.get` resolves
+/// `raw_ids` is the raw-model-id fallback, on whenever the caller passes an
+/// application-state snapshot (`RunContext::ui`): when set, `models.get` resolves
 /// an undeclared alias as a raw gateway catalog model id, so the built-in
 /// chat prompt can run `models.get(ui().selected_model)` without declaring
 /// its model. Unset, an undeclared alias is the usual error.
@@ -315,7 +314,7 @@ pub(crate) fn install_models(
             if let Some(binding) = lock_models(&frozen)?.binding(&alias).cloned() {
                 return Ok(LuaModelHandle::from_binding(&binding));
             }
-            // The raw-model-id fallback: with the Host's raw-id opt-in, an
+            // The raw-model-id fallback: with the raw-id opt-in on, an
             // undeclared alias resolves as a raw gateway catalog model id
             // under the fallback context window. The alias grammar does not
             // apply - gateway ids include `/`, `.`, and `:` - so the id's own

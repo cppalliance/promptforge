@@ -1,4 +1,4 @@
-//! The Harness-supplied [`ToolCatalog`] of tool descriptors and the catalog's
+//! The caller-supplied [`ToolCatalog`] of tool descriptors and the catalog's
 //! construction error.
 
 use std::sync::Arc;

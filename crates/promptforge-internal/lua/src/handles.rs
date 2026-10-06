@@ -7,14 +7,13 @@ use super::{Error, Json, Mutex, Result, ToolId, Value};
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
-/// Declared on the binding, not the tool implementation, so the Harness decides
-/// per binding how scripts receive the output. Every existing tool is
-/// [`Plain`](ToolOutputKind::Plain); the model tool loop never consults the
-/// kind (its results are always added to the conversation as text).
+/// Declared on the binding (from the descriptor's `structured_output`), not
+/// the tool implementation, so the caller's tool catalog decides how scripts
+/// receive the output. The model tool loop never consults the kind (its
+/// results are always added to the conversation as text).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ToolOutputKind {
-    /// The output text resumes as a Lua string - every existing tool,
-    /// unchanged behavior.
+    /// The output text resumes as a Lua string.
     #[default]
     Plain,
     /// The output text is JSON, parsed at dispatch and resumed as a Lua
@@ -28,7 +27,7 @@ pub enum ToolOutputKind {
 ///
 /// Run-time execution (schema preparation, script dispatch) reads the
 /// binding alone; a call is issued as an effect naming the identity, and
-/// the Harness resolves the implementation against its own tool table.
+/// performing it is the Harness's job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolBinding {
     /// The exact prompt-local alias.

@@ -98,9 +98,9 @@ pub struct SectionVm {
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
-    /// The raw-model-id fallback, on whenever the Host passes a Host-state
-    /// snapshot (`RunContext::ui`): when set, `models.get` resolves an
-    /// undeclared alias as a raw gateway catalog model id. Set by
+    /// The raw-model-id fallback, on whenever the caller passes an
+    /// application-state snapshot (`RunContext::ui`): when set, `models.get`
+    /// resolves an undeclared alias as a raw gateway catalog model id. Set by
     /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before Engine
     /// injection; unset everywhere else.
     raw_model_ids: bool,
@@ -115,7 +115,7 @@ pub struct SectionVm {
 /// Test-support only: a per-thread tally of live section VMs.
 ///
 /// The Engine's scheduler suite drives one run on the test's own thread
-/// (the tokio driver is `current_thread`), and Rust's test harness gives
+/// (the tokio driver is `current_thread`), and Rust's built-in test harness gives
 /// each test its own thread, so thread-locals keep concurrent tests
 /// independent. A test resets the peak, drives a run, and reads back the
 /// most VMs alive at any moment.
@@ -341,8 +341,8 @@ impl SectionVm {
         self.instruction_budget.set_cancel(cancel);
     }
 
-    /// Opts the VM into the raw-model-id fallback, on whenever the Host
-    /// passes a Host-state snapshot (`RunContext::ui`): `models.get`
+    /// Opts the VM into the raw-model-id fallback, on whenever the caller
+    /// passes an application-state snapshot (`RunContext::ui`): `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
     ///
     /// Must be called before [`inject_values_with_var`](Self::inject_values_with_var),

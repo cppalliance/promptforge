@@ -3,7 +3,7 @@
 //! [`untrusted`] wraps untrusted external data in a nonce-guarded envelope
 //! and [`cancel`] is the polled `AtomicBool` cancellation tree the Engine
 //! observes. [`event`] is the value form of a run's reports, the
-//! [`Event`](event::Event) enum the Harness appends to its log, with the
+//! [`Event`](event::Event) enum a run returns from `step`, with the
 //! payload-free boundaries' constructors in [`event::lifecycle`];
 //! [`emitter`] is the provenance-stamping [`Emitter`](emitter::Emitter)
 //! every Engine crate reports through and the [`EventSink`](emitter::EventSink)
@@ -14,10 +14,9 @@
 //! caller-provided [`ToolCatalog`](tools::ToolCatalog), trusted output, and
 //! the model-safe tool error, and [`plugins`] is the Plugin
 //! identity vocabulary, the [`PluginId`](plugins::PluginId) a
-//! prompt declares and a tool id sits under. The implementation traits
-//! behind them (`Tool`, `Plugin`) are the Harness's, in
-//! `harness-plugins`; the Engine issues effects naming ids and never
-//! holds an implementation. [`ids`] is the hierarchical, deterministic
+//! prompt declares and a tool id sits under. Implementing tools and
+//! Plugins is the Harness's job; the Engine issues effects naming ids and
+//! never holds an implementation. [`ids`] is the hierarchical, deterministic
 //! identity of a run's chains and tasks and the [`Provenance`](ids::Provenance)
 //! replay key stamped on every effect and event; [`timestamp`] is the UTC
 //! instant a run starts from, rendered over std alone; and [`replay`] holds

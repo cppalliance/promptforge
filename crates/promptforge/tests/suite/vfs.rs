@@ -65,7 +65,7 @@ fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> Result<
     assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
 
     mode.set(Mode::Ask);
-    let store = vfs.acquire_store(Origin::new("host"))?;
+    let store = vfs.acquire_store(Origin::new("caller"))?;
     let second = VfsOp::Write {
         path: "note.md".to_owned(),
         contents: "changed".to_owned(),

@@ -7,7 +7,7 @@
 //! slot backed by an optional Plugin, the closed model-keyword
 //! vocabulary, arg name and type sanity - and exposes the FULL declaration
 //! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
-//! against the Harness's environment is prepare's job, never the parser's.
+//! against the caller's environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
 //! Plugin and tool-slot shapes plus the map deserializer all four keys

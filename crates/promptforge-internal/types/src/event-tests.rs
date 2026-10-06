@@ -370,9 +370,10 @@ fn a_reply_without_origin_reads_back_as_chat() {
 
 #[test]
 fn a_serialized_event_is_tagged_by_kind_with_its_coordinates_beside_the_payload() {
-    // The tag and the three coordinates are the log schema the Harness
-    // writes `task_id` and `task_seq` from without inspecting the payload;
-    // renaming any of them breaks every log written before it.
+    // The tag and the three coordinates are the serialized form's stable
+    // keys: a caller can key an event by them without inspecting the
+    // payload, and renaming any of them breaks every event serialized
+    // before it.
     let event = Event::VfsWriteSucceeded {
         execution: "run-1".to_owned(),
         section: "Gather".to_owned(),

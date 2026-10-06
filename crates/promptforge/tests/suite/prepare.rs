@@ -1,15 +1,13 @@
 //! Prepare-pass integration tests: real-file claims through a shared base
-//! VFS, slot filling by identity against the Harness-supplied catalog, and
+//! VFS, slot filling by identity against the caller-supplied catalog, and
 //! model satisfaction - the trivial fill binding every declared role to
 //! the context's current model, and the hard-keyword and context-minimum
 //! checks against its descriptor. The store-mount isolation case and the
-//! prepare-run refusals drive the Harness in `promptforge-engine`'s test
-//! support, so they sit in that crate's own suite.
+//! prepare-run refusals drive the run fixture in `promptforge-engine`'s
+//! test support, so they sit in that crate's own suite.
 //!
-//! Plugin activation - resolving a prompt's declarations against a
-//! registry, conflict checking, and catalog assembly - is the Harness's,
-//! and its suite lives with it in `harness-plugins`; the Engine's
-//! prepare only ever sees the catalog the Harness hands it.
+//! Plugin activation is the Harness's job, not the Engine's; the Engine's
+//! prepare only ever sees the catalog its caller hands it.
 
 use std::num::NonZeroU32;
 
@@ -68,8 +66,8 @@ impl Drop for TempDir {
 #[test]
 fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
     let temp = TempDir::new("shared-base");
-    // The Host's handle: its base at `/` beside a declared store at
-    // `/my/store` - the plan's Host shape - shared by every run.
+    // The caller's handle: a real base at `/` beside a declared store at
+    // `/my/store`, shared by every run.
     let vfs = VfsRef::builder()
         .mount(
             "/",
@@ -164,12 +162,12 @@ const DECLARES_NO_THINKING: &str = concat!(
     "```\n",
 );
 
-/// Builds the Host's one current model with the given context window and
-/// thinking capability.
+/// Builds the context's one current model with the given context window
+/// and thinking capability.
 fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway("current").expect("the id is valid"),
-        "The host's current model",
+        "The current model",
         NonZeroU32::new(context).expect("the context window is non-zero"),
         thinking,
     )
@@ -258,7 +256,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 }
 
 // ToolBindings and slot filling: exact slots fill by identity against
-// the Harness-supplied catalog (an exact path's first two segments name its
+// the caller-supplied catalog (an exact path's first two segments name its
 // Plugin, so a slot whose Plugin contributed nothing to the
 // catalog is reported as missing), with every fill journaled into the
 // run's tool bindings as descriptors, never implementations.
@@ -294,7 +292,7 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// A Harness-supplied descriptor for one `promptforge/web` tool.
+/// A caller-supplied descriptor for one `promptforge/web` tool.
 fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     let id = ToolId::parse(id).expect("the fixture tool id is valid");
     ToolDescriptor::new(
@@ -310,7 +308,7 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 /// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]
-fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
+fn prepare_fills_a_slot_by_id_against_a_caller_supplied_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let descriptor = ToolDescriptor::new(
@@ -335,7 +333,7 @@ fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
     assert_eq!(bindings.resolve("fetch"), Some(&descriptor));
     assert_eq!(bindings.tool(&id), Some(&descriptor));
     assert!(bindings.resolve("undeclared").is_none());
-    // The context's catalog is the environment's, so the Harness can read
+    // The context's catalog is the environment's, so the caller can read
     // back what the run was prepared against.
     assert_eq!(ctx.tools().tools(), [descriptor]);
 }

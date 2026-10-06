@@ -1,10 +1,10 @@
-//! Completions built without a transport: what a Harness that ran no HTTP
-//! hands the Engine - a test performer playing the model from a script, a
-//! replay answering from its record. The wire types are `#[non_exhaustive]`
-//! so their shape can grow without breaking readers; these constructors
-//! are the one way to build them from outside the crate, and they refuse
-//! the tool-call shapes the wire decoder refuses, so a Harness-built tool call
-//! has the shape a decoded one has.
+//! Completions built without a transport: what a caller that ran no HTTP
+//! hands the Engine, such as a test performer playing the model from a
+//! script. The wire types are `#[non_exhaustive]` so their shape can grow
+//! without breaking readers; these constructors are the one way to build
+//! them from outside the crate, and they refuse the tool-call shapes the
+//! wire decoder refuses, so a hand-built tool call has the shape a decoded
+//! one has.
 
 use std::collections::HashSet;
 

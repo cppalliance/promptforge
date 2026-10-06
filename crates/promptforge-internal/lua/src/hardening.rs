@@ -62,7 +62,7 @@ function table.concat(list, sep, i, j)
     if ty == "string" or ty == "number" then
       parts[#parts + 1] = v
     elseif ty == "userdata" then
-      -- Host userdata with __tostring. mlua metatables are not readable
+      -- Engine userdata with __tostring. mlua metatables are not readable
       -- via getmetatable, so type-gate here.
       parts[#parts + 1] = tostring(v)
     elseif ty == "table" and renders(v) then

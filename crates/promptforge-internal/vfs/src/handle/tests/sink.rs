@@ -84,7 +84,7 @@ fn a_policy_denied_operation_never_fires_the_sink() -> Result<(), VfsError> {
             .is_empty(),
         "a denied operation fired the sink"
     );
-    // The Host flips the policy mid-run; the admitted write fires.
+    // The caller flips the policy mid-run; the admitted write fires.
     *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
     access.write("/f.txt", b"x")?;
     assert_eq!(

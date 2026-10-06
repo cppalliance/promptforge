@@ -104,7 +104,7 @@ fn drive(
             } => {
                 assert!(
                     !batch.is_empty() || run.decided(),
-                    "the run waits on an effect this Harness holds"
+                    "the run waits on an effect this test driver holds"
                 );
                 events.extend(reported);
                 for (id, provenance, effect) in batch {

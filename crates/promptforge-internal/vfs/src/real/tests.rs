@@ -208,7 +208,7 @@ fn map_io_reports_the_canonical_path_not_the_os_sentence() {
     use std::io::ErrorKind;
     // The kind carries the OS failure; the `path` field holds the
     // canonical path alone, as the field's documented contract
-    // promises, so a Harness reading it gets a path, never OS text.
+    // promises, so a caller reading it gets a path, never OS text.
     let cases = [
         (ErrorKind::NotFound, "not found: /x"),
         (ErrorKind::AlreadyExists, "already exists: /x"),

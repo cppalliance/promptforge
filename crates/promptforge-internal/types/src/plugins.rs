@@ -9,10 +9,8 @@
 //! under `namespace/plugin/name`. The Engine knows Plugins by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
-//! records the conflicts of the Plugin that contributed it. The
-//! activation contract - the `Plugin` trait, the services it is handed,
-//! and the contribution it returns - is the Harness's, in
-//! `harness-plugins`; the Engine never activates anything.
+//! records the conflicts of the Plugin that contributed it. Activating a
+//! Plugin is the Harness's job; the Engine never activates anything.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;

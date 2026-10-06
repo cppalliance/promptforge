@@ -4,8 +4,7 @@
 //! calls in one turn must have distinct ids, and a turn with no product is
 //! an `EmptyReply`-kind failure. The validating constructors in
 //! `client/wire-canned.rs` run these checks, so a completion a wire decoder
-//! built and one a Harness built by hand are judged alike. Parsing a
-//! provider's wire body lives in `harness-gateway-client`, not here.
+//! built and one a caller built by hand are judged alike.
 
 use std::collections::HashSet;
 

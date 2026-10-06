@@ -1,13 +1,13 @@
 //! Operations on [`Access`] that only the Engine performs.
 //!
 //! The `promptforge` facade never re-exports this module, so only Engine
-//! crates reach it: the Harness passes a run's capability through, and
+//! crates reach it: the caller passes a run's capability through, and
 //! the Engine alone forks it for concurrent arms and for each tool call,
 //! joins an arm's identity back on delivery, ends a tool call's identity
 //! when the call is answered or aborted, derives the store view from a
 //! chain's access for store calls, and ends the run's scope when the run
 //! ends. The
-//! Harness, holding the handle, acquires a store view in a scope of its own
+//! caller, holding the handle, acquires a store view in a scope of its own
 //! with [`VfsRef::acquire_store`](crate::VfsRef::acquire_store).
 
 use std::fmt;
@@ -36,7 +36,7 @@ pub fn scope_handle(access: &Access) -> ScopeHandle {
 }
 
 /// Ends the scope behind `scope`: its claims stop conflicting at once,
-/// and every access still held in it - a store view the Harness kept past the
+/// and every access still held in it - a store view the caller kept past the
 /// run, a forwarded mount session - refuses its next operation, spawn,
 /// or store view with [`VfsError::PermissionDenied`]. Idempotent, and a
 /// no-op once every access in the scope has dropped.

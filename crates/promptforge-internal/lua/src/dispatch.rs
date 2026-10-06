@@ -28,7 +28,8 @@ use crate::{ToolBinding, ToolCallCounts};
 /// because it owns the model-issued call id the script path lacks. The
 /// script report's `tool_call_id` is therefore empty. The chain and depth
 /// are not part of the report: the emitter
-/// stamps every event with its provenance, which is what the Host groups by.
+/// stamps every event with its provenance, which already names the task the
+/// event belongs to.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptReport {
     /// The section's completed model-turn count at dispatch.
@@ -39,8 +40,8 @@ pub struct ScriptReport {
 /// script coordinates plus the call id the model issued.
 ///
 /// [`prepare_model_dispatch`] fires the `ToolResult` event under
-/// `call_id`, so a Host transcript correlates the result with the
-/// assistant tool-call record that requested it.
+/// `call_id`, so the result correlates with the assistant tool-call record
+/// that requested it.
 #[derive(Debug, Clone)]
 pub struct ModelReport {
     /// The turn the call fired in.
@@ -96,9 +97,9 @@ impl ToolDispatch {
 /// fires no content event here: the loop reports the returned
 /// [`ToolDispatch`] under the model-issued call id.
 ///
-/// `call_result` is the tool's own answer, however the Harness obtained it.
-/// Nothing here awaits, so the Harness performs the call on its own
-/// executor and the Engine applies these rules when the answer arrives.
+/// `call_result` is the tool's own answer, however the caller obtained it.
+/// Nothing here awaits: the Harness performs the call, and the Engine
+/// applies these rules when the answer arrives.
 ///
 /// # Errors
 /// Returns [`Error::Tool`] when `call_result` is the tool's failure (its
@@ -153,8 +154,8 @@ pub fn prepare_dispatch(
 /// nonce-wrapped as untrusted - so the model reads the failure and the
 /// round continues; `prepare_dispatch` has already fired the failed
 /// observation. The counts increment and every other dispatch failure
-/// still propagate. Nothing here awaits, so the Harness performs the call
-/// on its own executor and the Engine applies these rules to the answer.
+/// still propagate. Nothing here awaits: the Harness performs the call, and
+/// the Engine applies these rules to the answer.
 ///
 /// # Errors
 /// Returns the counts' own error when `binding`'s alias was never seeded.

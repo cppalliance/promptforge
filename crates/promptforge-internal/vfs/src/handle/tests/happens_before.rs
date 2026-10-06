@@ -188,7 +188,7 @@ fn a_task_forked_after_a_write_reads_it_and_one_forked_before_conflicts() -> Res
 
 #[test]
 fn a_seeding_scope_and_the_runs_scope_do_not_conflict() -> Result<(), VfsError> {
-    // Harness seeding and the run are separate scopes: the seeding
+    // A seeding scope and the run's scope are separate: the seeding
     // scope ends with its access, so the run reads freely.
     let vfs = handle(&StubFs::default());
     let seeding = vfs.acquire(test_origin())?;

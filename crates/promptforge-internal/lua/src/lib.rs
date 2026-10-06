@@ -6,7 +6,7 @@
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
 //! files; and an every-Nth-instruction hook polls the run's cancel flag, so
-//! even an unbounded loop aborts promptly once the Host cancels.
+//! even an unbounded loop aborts promptly once the run is cancelled.
 //! Direct `print` and `warn` are unavailable. A persistent `log(message)`
 //! callback accepts one bounded, single-line UTF-8 string and reports it
 //! through the run's emitter as an `Event::Lua` checkpoint.

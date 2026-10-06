@@ -15,7 +15,7 @@ thiserror.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The property tests' adversarial content and Harness-style random seeds;
+# The property tests' adversarial content and random run seeds;
 # the Engine itself reads no RNG.
 rand.workspace = true
 # The reference the std-only `Timestamp::to_rfc3339` formatter is checked

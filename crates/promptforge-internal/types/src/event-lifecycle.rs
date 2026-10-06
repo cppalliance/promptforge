@@ -7,7 +7,7 @@
 //! boundary cannot gain a constant without gaining a variant.
 //!
 //! An emit-site vocabulary for the Engine crates; the facade does not
-//! re-export it. The Harness reads the events themselves.
+//! re-export it. The caller reads the events themselves.
 
 use super::Event;
 use crate::ids::Provenance;

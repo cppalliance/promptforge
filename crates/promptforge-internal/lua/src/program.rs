@@ -287,7 +287,8 @@ pub(crate) fn map_chunk_line_to_absolute(
     result.push_str(rest);
 
     if let Some(absolute) = first_absolute {
-        // Leading tag the Host can show next to the file name: `briefer.md:51: ...`
+        // Leading `location:line:` tag naming the prompt file and its
+        // absolute line: `briefer.md:51: ...`
         format!("{location}:{absolute}: {result}")
     } else {
         result

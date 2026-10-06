@@ -6,9 +6,8 @@
 //! answer ([`client::Message`], [`client::ToolSchema`],
 //! [`client::Completion`]), with the validating constructors that run the
 //! neutral reply checks on every completion. [`model`] holds the catalog
-//! and prompt-local binding vocabulary: [`model::ModelCatalog`] built from
-//! the gateway's `GET /v1/models`, the validated [`model::ModelId`]
-//! identity, and the
+//! and prompt-local binding vocabulary: the [`model::ModelCatalog`] the
+//! caller supplies, the validated [`model::ModelId`] identity, and the
 //! [`model::ModelBinding`]/[`model::ModelSet`]/[`model::ModelView`] types
 //! model selections resolve and freeze through, with
 //! [`model::CompletionError`] as the failure a round reports.
@@ -22,10 +21,6 @@
 //! [`model::ThinkingMode`]) is canonical there too and re-exported through
 //! the `model` paths.
 //!
-//! The OpenAI wire code (the request body builder, the SSE reassembly, the
-//! body and metadata parse, and the HTTP failure classifier) lives in
-//! `harness-gateway-client`, which reaches this vocabulary through the
-//! `promptforge` facade.
 //! This crate contains no HTTP, no wire parsing, no prompt parser, no Lua
 //! runtime, and no executor.
 //!

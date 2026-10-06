@@ -1,6 +1,7 @@
 //! The parsed prompt tree: [`Prompt`], its [`Section`]s, and their
-//! [`Block`]s. Hosts read a prompt's title and frontmatter; the tree below
-//! them is the Engine's, reached through [`crate::detail`].
+//! [`Block`]s. Code outside the Engine reads a prompt's title and
+//! frontmatter; the tree below them is the Engine's, reached through
+//! [`crate::detail`].
 //!
 //! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.

@@ -32,8 +32,8 @@ impl Counter {
 }
 
 /// Compile-time proof that a handle can cross thread boundaries and live for
-/// the whole program: the Harness moves one into every performer task, and
-/// the Engine keeps one in `RunContext` while `Run` itself is `Send`.
+/// the whole program: a caller may move clones onto other threads, and the
+/// Engine keeps one in `RunContext` while `Run` itself is `Send`.
 const fn _assert_auto_traits() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     assert_send_sync_static::<CancelHandle>();
@@ -129,7 +129,7 @@ fn a_child_of_a_cancelled_parent_is_born_cancelled() {
 
 #[test]
 fn a_cancel_on_one_thread_is_observed_on_another() {
-    // The Harness cancels from its supervisor while the Engine polls the
+    // The caller cancels from one thread while the Engine polls the
     // flag from whichever thread `step` happens to run on.
     let parent = CancelHandle::new();
     let child = parent.child();

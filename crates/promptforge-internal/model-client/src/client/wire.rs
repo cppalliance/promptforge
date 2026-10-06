@@ -1,5 +1,5 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
-//! tool calls, and completion results. The constructors a Harness that
+//! tool calls, and completion results. The constructors a caller that
 //! ran no transport builds a completion from sit in the `canned` sibling.
 
 #[path = "wire-canned.rs"]
@@ -173,7 +173,7 @@ pub struct ToolCall {
     /// The name of the tool to invoke.
     pub(super) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
-    /// crate-private: the Harness inspects arguments through
+    /// crate-private: the caller inspects arguments through
     /// [`ToolCall::arguments`].
     pub(crate) arguments: Value,
 }

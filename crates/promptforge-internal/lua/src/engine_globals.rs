@@ -108,18 +108,19 @@ pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
 
 /// `ui()` snapshot conversion: a JSON null field reads as nil in author
 /// code, never as the userdata NULL sentinel the serde bridge defaults
-/// to - an unset Host field must simply be absent.
+/// to - an unset snapshot field must simply be absent.
 const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
     .serialize_none_to_null(false)
     .serialize_unit_to_null(false);
 
 /// Installs `ui()` as a persistent global valid for the section's whole
-/// lifecycle: each call converts the Host's `snapshot` afresh into a new
+/// lifecycle: each call converts the run's `snapshot` afresh into a new
 /// table, JSON nulls reading as nil, so author code that mutates one
 /// result never sees the mutation on the next call. The snapshot is the
-/// Host state as the Host captured it at run start; a change on the Host
-/// takes effect on the next run. A run whose Host supplies no snapshot
-/// never installs the global, so `ui` is absent there - not stubbed.
+/// application state the caller passed to `RunContext::ui` at run start;
+/// a later change takes effect on the next run. A run started without a
+/// snapshot never installs the global, so `ui` is absent there - not
+/// stubbed.
 ///
 /// The snapshot arrives shared: one run installs it into every section VM
 /// it starts, and the closure serializes through the `Arc`, so no VM holds

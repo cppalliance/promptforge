@@ -1,4 +1,4 @@
-//! Answering every kind of effect: the order a Harness answers one batch
+//! Answering every kind of effect: the order a caller answers one batch
 //! in does not change the result, and every effect and answer record
 //! logs as a JSON line that parses back into its record type.
 

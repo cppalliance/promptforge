@@ -461,10 +461,10 @@ fn acquire_store_is_a_scope_of_its_own() -> Result<(), VfsError> {
     let vfs = stock();
     let (_access, run_view) = chain(&vfs);
     run_view.write("claimed.md", b"run")?;
-    // The Harness's view is a second scope: the live run's claim conflicts.
-    let harness = vfs.acquire_store(Origin::new("acquire_store test"))?;
+    // The caller's view is a second scope: the live run's claim conflicts.
+    let caller_view = vfs.acquire_store(Origin::new("acquire_store test"))?;
     assert!(matches!(
-        harness.write("claimed.md", b"harness"),
+        caller_view.write("claimed.md", b"caller"),
         Err(VfsError::Conflict { .. })
     ));
     Ok(())

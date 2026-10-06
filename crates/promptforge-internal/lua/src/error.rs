@@ -96,7 +96,7 @@ pub enum Error {
     },
 
     /// An Engine quota on Lua (log events, log bytes, or instructions) was
-    /// exhausted. A stable typed error rather than a bare `Lua(String)` so the Host
+    /// exhausted. A stable typed error rather than a bare `Lua(String)` so the caller
     /// can distinguish quota exhaustion from an authoring error.
     #[error("lua {resource} quota exceeded")]
     LuaQuota {
@@ -108,7 +108,7 @@ pub enum Error {
     /// overflowed the context window (the pre-dispatch precheck or a
     /// provider rejection) and the policy - `compactors.fail`, the only
     /// shipped one - does not compact. A stable typed error rather than a
-    /// bare [`Error::Lua`] so the Host and `pcall` sites can distinguish
+    /// bare [`Error::Lua`] so the caller and `pcall` sites can distinguish
     /// context exhaustion from an authoring error.
     #[error("context exhausted: {reason}")]
     ContextExhausted {

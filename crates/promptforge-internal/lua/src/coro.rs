@@ -62,7 +62,7 @@ const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 
 /// The registry key for the shim's model-issued `tool_call` form, stashed
-/// by the prelude install so a test's Harness can install it as
+/// by the prelude install so a test driver can install it as
 /// `tools.call_as_model` and drive the driver's `call_id` path from a
 /// fixture section. The registry is Rust-side only: in production the
 /// loop shim reaches the function directly inside the prelude chunk, and
@@ -399,7 +399,7 @@ pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
 /// VM whose shim prelude already ran, so a fixture section can yield a
 /// `tool_call` with a `call_id` straight at the driver's dispatch arm.
 ///
-/// A test's Harness is the only caller, so the install exists only under the
+/// A test driver is the only caller, so the install exists only under the
 /// `test-support` feature: in production the loop shim reaches the
 /// function directly inside the prelude chunk, and `tools.call_as_model`
 /// never exists in any VM - not stubbed, simply absent.
@@ -423,10 +423,9 @@ pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
 /// dispatchers to the shims too, so a store function the shared library
 /// captured before this call (`local write = store.write`) yields as well.
 /// Every store operation, through whichever reference the prompt holds,
-/// then suspends the block as a leaf yield the driver answers against the
-/// sync VFS via the blocking pool - uniformly for all backends, with no
-/// inline fast path, so interleaving behavior never depends on which
-/// backend serves the mount. The Harness performs each one as an
+/// then suspends the block as a leaf yield - uniformly for all backends,
+/// with no inline fast path, so interleaving behavior never depends on
+/// which backend serves the mount. The Harness performs each one as an
 /// `Effect::Vfs`, and a claims-model conflict through any of them ends
 /// the run with a determinism violation that `pcall` cannot catch.
 ///

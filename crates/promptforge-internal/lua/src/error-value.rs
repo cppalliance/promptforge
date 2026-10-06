@@ -63,7 +63,7 @@ pub enum ErrorKind {
     TaskConsumed,
     /// A section ended while author-origin tasks it owns were still live.
     TasksLive,
-    /// The Host cancelled the run.
+    /// The run was cancelled.
     Cancelled,
     /// A store operation's own failure; includes `reason` and the
     /// [`VfsError`](promptforge_vfs::VfsError) variant's fields.

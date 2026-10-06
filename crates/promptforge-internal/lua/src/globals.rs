@@ -128,7 +128,8 @@ fn refusal(lua: &Lua, message: &'static str) -> Result<Function> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reserved {
     /// A global the Engine installs: on every section VM, or only on some
-    /// (`ui` with a Host-state snapshot, `item` in a spawned chain).
+    /// (`ui` when the run has an application-state snapshot, `item` in a
+    /// spawned chain).
     EngineGlobal,
     /// A Lua standard-library global the sandbox keeps.
     LuaGlobal,

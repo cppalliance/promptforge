@@ -2,17 +2,14 @@
 //!
 //! The Engine is a pure state machine, so it polls a flag between chain
 //! steps and from the Lua instruction hook rather than awaiting a
-//! cancellation; when the Host cancels, the Harness sets that flag from
-//! whichever thread it likes. [`CancelHandle`] is that flag, arranged as a
-//! tree so a run-level cancel reaches every task while one task can be
-//! cancelled without touching its siblings or its owner.
+//! cancellation; the caller sets that flag from whichever thread it likes.
+//! [`CancelHandle`] is that flag, arranged as a tree so a run-level cancel
+//! reaches every task while one task can be cancelled without touching its
+//! siblings or its owner.
 //!
-//! This is the handle the Engine's `RunContext` holds and the one
-//! `RunServices` hands a Plugin; a Host stops a run through
-//! `harness::RunControl::cancel`, which sets this flag. A Harness that
-//! steps the Engine and must wait on the flag itself awaits
-//! [`CancelHandle::cancelled`], a std-only future the cancel itself wakes,
-//! in place of a timer that polls the flag.
+//! This is the handle the Engine's `RunContext` holds. A caller that must
+//! wait on the flag itself awaits [`CancelHandle::cancelled`], a std-only
+//! future the cancel itself wakes, in place of a timer that polls the flag.
 
 use std::fmt;
 use std::future::Future;

@@ -56,8 +56,8 @@ const NONCE_DOMAIN: &[u8] = b"promptforge.guard-nonce.v1";
 /// A run's guard-tag nonce.
 ///
 /// Constructed by [`GuardNonce::from_seed`], which derives the value from
-/// a run's Harness-drawn seed so a replayed run wraps identically; the Engine
-/// itself reads no RNG. The wrapped hex string is a private field so no
+/// the run's seed, so a run given the same seed wraps identically; the
+/// Engine itself reads no RNG. The wrapped hex string is a private field so no
 /// caller can substitute an arbitrary, low-entropy, or reused nonce: one
 /// value is minted at run start and shared by every [`GuardNonce::wrap`]
 /// in the run.
@@ -77,8 +77,9 @@ impl GuardNonce {
     /// silently. It is one-way: the nonce appears in every envelope the
     /// model sees, but it does not give back the seed, and finding the
     /// seed from a nonce means searching all 2^64 seeds. The nonce's
-    /// unpredictability is the seed's: the Harness draws it from a CSPRNG (64
-    /// bits, still far beyond any guessing margin fetched content has).
+    /// unpredictability is the seed's, so the caller must draw the seed from
+    /// a CSPRNG (64 bits, still far beyond any guessing margin fetched
+    /// content has).
     #[must_use]
     pub fn from_seed(seed: u64) -> GuardNonce {
         let digest = Sha256::new()

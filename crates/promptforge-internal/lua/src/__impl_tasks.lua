@@ -240,7 +240,7 @@ end
 
 -- tasks.concurrency(limit?): set the chain's admission limit for the
 -- tasks it spawns from here on (clamped to the parent chain's limit, or
--- the Harness's ceiling for the main walk), or read the effective limit
+-- the run's concurrency ceiling for the main walk), or read the effective limit
 -- back with no argument. Never preempts a running task: the limit gates
 -- future admissions only. The argument must be a positive whole number.
 local function tasks_concurrency(limit)

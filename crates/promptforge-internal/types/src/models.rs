@@ -1,9 +1,8 @@
 //! Public model vocabulary: stable identity, catalog, and descriptor.
 //!
-//! The Harness builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
-//! pinned offline entry) and names catalog entries by their validated
-//! [`ModelId`]. These types are the shared vocabulary every promptforge
-//! crate, the Harness, and the Host may name, with no transport, binding,
+//! The caller supplies a [`ModelCatalog`], and catalog entries are named by
+//! their validated [`ModelId`]. These types are the shared vocabulary every
+//! promptforge crate and every caller may name, with no transport, binding,
 //! or invocation machinery.
 
 use std::num::NonZeroU32;

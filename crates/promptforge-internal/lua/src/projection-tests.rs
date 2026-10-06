@@ -237,8 +237,8 @@ fn a_complete_tool_exchange_projects_verbatim() {
 #[test]
 fn a_two_call_assistant_turn_renders_the_openai_wire_shape() {
     // The bug report's captured shape: a replayed assistant turn carrying
-    // two calls must be the OpenAI function-call shape, the exact inverse
-    // of the reply parser in `harness-gateway-client`. Arguments are
+    // two calls must be the OpenAI function-call shape, the same shape an
+    // OpenAI-compatible reply carries its tool calls in. Arguments are
     // asserted by re-decoding the wire string, never by raw string
     // equality, so a future `preserve_order` feature cannot make this
     // brittle.
