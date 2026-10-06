@@ -29,8 +29,9 @@ pub(super) fn auto_whisper_backend(
     let unread = CudaMachine::default();
     let machine = cuda_machine.unwrap_or(&unread);
     // Only the Windows CUDA build crashes at a graceful stop after a CPU
-    // fallback, and the probe reads no UUIDs to match an identifier, so
-    // Windows counts an identifier as hiding every GPU.
+    // fallback (https://github.com/ggml-org/whisper.cpp/issues/2373), and
+    // the probe reads no UUIDs to match an identifier, so Windows counts an
+    // identifier as hiding every GPU.
     if cuda_visible_devices_hides_every_gpu(
         machine.visible_devices.as_deref(),
         probe.compute_caps.len(),
