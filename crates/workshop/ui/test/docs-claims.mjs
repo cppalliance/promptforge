@@ -123,3 +123,45 @@ test("rulebooks use Engine, Harness, Host, and Plugin as the root AGENTS.md defi
   }
   assert.deepEqual(offenders, [], "rulebook lines break the root AGENTS.md Definitions");
 });
+
+// Guard for the Engine rule in the root AGENTS.md: the promptforge crates call
+// the code that steps a run "the caller". Coding sessions read Engine prose,
+// strings, and code names as design decisions, so naming the Host, a Host
+// application, or a Harness crate, type, or internal there steers them to build
+// against the wrong component. Every line of every text file is scanned, code
+// and strings included. The plain word "Harness" stays allowed for statements
+// that a responsibility belongs to the Harness, which the AGENTS.md rule
+// governs; a pattern cannot tell those apart.
+const ENGINE_ROOTS = ["crates/promptforge", "crates/promptforge-internal"];
+const ENGINE_TEXT = /\.(rs|md|lua|toml|txt)$/;
+// Externally defined senses that keep a lowercase "harness".
+const ENGINE_HARNESS_ALLOWED = /harness = false|test harness/g;
+const ENGINE_RULES = [
+  [/(?<![A-Za-z])host(s|ed|ing)?(?![A-Za-z])/i, 'names the Host: Engine crates say "the caller" or "application state"'],
+  [/\b(workshop|papergate)\b/i, "names a Host application"],
+  [/(?<![A-Za-z])harness(?![A-Za-z])/, 'lowercase "harness": a Harness crate, type path, or code name'],
+  [/Harness-/, '"Harness-" compound: Engine crates say "caller-supplied" and the like'],
+  [/RunHarness/, "the old test-bundle name: the fixture is RunFixture"],
+];
+
+test("Engine crates name the caller, never the Host or the Harness's crates and types", async () => {
+  const offenders = [];
+  for (const root of ENGINE_ROOTS) {
+    for await (const full of walk(path.join(repoRoot, root))) {
+      if (!ENGINE_TEXT.test(full)) {
+        continue;
+      }
+      const file = path.relative(repoRoot, full).split(path.sep).join("/");
+      const lines = (await readFile(full, "utf8")).split("\n");
+      for (const [index, text] of lines.entries()) {
+        const scanned = text.replace(ENGINE_HARNESS_ALLOWED, " ");
+        for (const [pattern, reason] of ENGINE_RULES) {
+          if (pattern.test(scanned)) {
+            offenders.push(`${file}:${index + 1}: ${text.trim()} (${reason})`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], "Engine crate lines break the root AGENTS.md Engine rule");
+});

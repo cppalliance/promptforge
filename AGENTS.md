@@ -20,7 +20,7 @@ Four words have exactly one meaning each, everywhere in this repository: code co
   - the part's own name for a program or UI part that embeds another, such as "the desktop app" or "the container element"
   - "run", "serve", "embed", or "hold" for the verb
 - "Engine", "Harness", and "Plugin" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness, a Tauri or ProseMirror plugin. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
-- Engine docs call the code that steps a run and answers its effects "the caller", and never name the Harness or the `harness` crates.
+- Engine crates (`crates/promptforge` and `crates/promptforge-internal`: docs, comments, tests, strings, and code names) call the code that steps a run and answers its effects "the caller", and never mention the Host or a Host application. They name the Harness only to say that a responsibility belongs to it, never how the Harness performs it or which of its crates or types does. `crates/workshop/ui/test/docs-claims.mjs` enforces the parts a scan can see.
 - Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host and target vocabulary and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
 - Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Code names follow the same terms.
 - Quotations of people stay verbatim.
