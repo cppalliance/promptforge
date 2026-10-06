@@ -61,7 +61,7 @@ fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
     let (ctx, requirements) = Environment::new().tools(catalog()).prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
-        "the runner fixture prompt declares nothing the host must supply: {requirements:?}"
+        "the runner fixture prompt declares nothing the environment must supply: {requirements:?}"
     );
     Run::new(prompt, "", ctx)
 }

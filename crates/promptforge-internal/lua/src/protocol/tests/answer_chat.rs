@@ -309,7 +309,10 @@ fn an_err_chat_answer_round_trips_and_retains_the_typed_error() {
     assert!(!ok);
     let (kind, message) = failure_parts(&lua, result);
     assert_eq!(kind, "cancelled");
-    assert_eq!(message, "interrupted by Ctrl-C");
+    assert_eq!(
+        message,
+        "interrupted: the run was cancelled or this call was stopped"
+    );
 }
 
 #[test]

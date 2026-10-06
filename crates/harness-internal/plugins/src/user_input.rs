@@ -57,8 +57,8 @@
 //!   Plugin's [`needs`](Plugin::needs) names
 //!   [`INPUT_BROKER`], so activation never calls
 //!   [`create`](Plugin::create) and the refusal notice holds the line
-//!   "- promptforge/user-input needs promptforge/input-broker, and this
-//!   host provides none".
+//!   "- promptforge/user-input needs promptforge/input-broker, and the
+//!   environment provides none".
 //! - An optional declaration activates anyway, and the activation
 //!   records a [`ServiceGap`](crate::ServiceGap). `input.connected()`
 //!   returns `false`. Each `input.ask()` still issues the tool call, so

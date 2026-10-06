@@ -105,7 +105,7 @@ async fn a_plugin_whose_service_the_host_lacks_is_refused_naming_the_service() {
     assert!(
         error
             .to_string()
-            .contains("- tests/greeter needs tests/greeting, and this host provides none"),
+            .contains("- tests/greeter needs tests/greeting, and the environment provides none"),
         "the notice names the Plugin and the missing service: {error}"
     );
     assert!(greetings.is_empty(), "the Plugin never activated");

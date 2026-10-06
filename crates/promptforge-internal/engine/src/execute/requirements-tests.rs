@@ -91,7 +91,7 @@ fn the_notice_names_the_plugin_and_the_service_it_lacks() {
     assert_eq!(
         requirements.notice(),
         "the environment cannot satisfy this prompt:\n\
-         - promptforge/user-input needs an input broker, and this host provides none"
+         - promptforge/user-input needs an input broker, and the environment provides none"
     );
 }
 
@@ -106,7 +106,7 @@ fn the_notice_lists_missing_services_after_missing_plugins() {
         requirements.notice(),
         "the environment cannot satisfy this prompt:\n\
          - missing required Plugin: promptforge/web\n\
-         - promptforge/user-input needs an input broker, and this host provides none"
+         - promptforge/user-input needs an input broker, and the environment provides none"
     );
 }
 
@@ -131,7 +131,7 @@ fn the_notice_lists_a_conflict_after_missing_services_and_before_unmet_requireme
         requirements.notice(),
         "the environment cannot satisfy this prompt:\n\
          - missing required Plugin: promptforge/web\n\
-         - promptforge/user-input needs an input broker, and this host provides none\n\
+         - promptforge/user-input needs an input broker, and the environment provides none\n\
          - conflicting Plugins: promptforge/bashkit and promptforge/terminal cannot be \
          activated together; declare one or the other\n\
          - role 'writer': requires a context of at least 200000 tokens; \

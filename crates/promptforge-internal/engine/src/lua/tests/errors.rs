@@ -294,7 +294,7 @@ fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
     ));
     let cancelled = promptforge_lua::Raised {
         kind: ErrorKind::Cancelled,
-        message: "interrupted by Ctrl-C".to_owned(),
+        message: "interrupted: the run was cancelled or this call was stopped".to_owned(),
         fields: std::collections::BTreeMap::new(),
     };
     assert!(matches!(

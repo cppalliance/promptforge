@@ -94,8 +94,9 @@ pub(crate) enum Error {
     #[error(transparent)]
     Completion(crate::model::CompletionError),
 
-    /// The Host cancelled the run (for example Ctrl-C during fanout).
-    #[error("interrupted by Ctrl-C")]
+    /// The run was cancelled, or the caller dropped a call the run was
+    /// waiting on.
+    #[error("interrupted: the run was cancelled or this call was stopped")]
     Interrupted,
 
     /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a

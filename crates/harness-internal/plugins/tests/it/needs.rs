@@ -187,7 +187,7 @@ fn the_run_path_refuses_a_required_plugin_whose_service_is_missing() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - acme/asker needs promptforge/input-broker, and this host provides none"
+         - acme/asker needs promptforge/input-broker, and the environment provides none"
     );
     assert_eq!(creates.load(Ordering::SeqCst), 0);
 }

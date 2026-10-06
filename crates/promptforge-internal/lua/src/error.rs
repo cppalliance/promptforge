@@ -116,8 +116,9 @@ pub enum Error {
         reason: crate::compactors::OverflowReason,
     },
 
-    /// The Host cancelled the run (for example Ctrl-C during fanout).
-    #[error("interrupted by Ctrl-C")]
+    /// The run was cancelled, or the caller dropped a call the run was
+    /// waiting on.
+    #[error("interrupted: the run was cancelled or this call was stopped")]
     Interrupted,
 
     /// A dispatched tool's own failure, retaining the tool's typed error as

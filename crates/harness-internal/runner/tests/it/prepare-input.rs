@@ -198,7 +198,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert!(
         error.to_string().contains(
-            "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
+            "- promptforge/user-input needs promptforge/input-broker, and the environment provides none"
         ),
         "the notice names the Plugin and the missing service: {error}"
     );
@@ -222,7 +222,7 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
     let notice = error.to_string();
     assert!(
         notice.contains(
-            "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
+            "- promptforge/user-input needs promptforge/input-broker, and the environment provides none"
         ),
         "the notice names the Plugin and the missing service: {notice}"
     );

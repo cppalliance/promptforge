@@ -54,7 +54,7 @@ pub(super) fn model_task_context_with(
         .prepare(prompt, test_context(EXECUTION));
     assert!(
         requirements.is_satisfied(),
-        "the model-task prompt declares nothing the host must supply: {requirements:?}"
+        "the model-task prompt declares nothing the environment must supply: {requirements:?}"
     );
     let fixture = RunFixture::new().observer(observer).tools(table);
     let ctx = RunState::new(

@@ -128,7 +128,7 @@ impl Requirements {
         for missing in &self.missing_services {
             let _ = write!(
                 notice,
-                "\n- {} needs {}, and this host provides none",
+                "\n- {} needs {}, and the environment provides none",
                 missing.plugin, missing.service
             );
         }
