@@ -5,9 +5,6 @@ use gateway_config::WhisperBackend;
 use super::{ArchiveKind, ArchiveRef, WhisperAsset};
 
 pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
-    // The sha256 pin is filled in once the whisper-lib-b4938 release holds
-    // the archive; until then the row is fail-closed (the pin can never
-    // match, so the download is refused rather than trusted).
     WhisperAsset {
         os: "windows",
         arch: "x86_64",
@@ -19,7 +16,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
             url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64.zip",
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            sha256: "39f2c4e4e2660f8d1df35cac5a9da187b4bfda1463b597f4b55bdb984fd634bb",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "whisper.dll",
@@ -94,9 +91,6 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         },
         library_name: "libwhisper.so",
     },
-    // The sha256 pin is filled in once the whisper-lib-b4938 release holds
-    // the archive; until then the row is fail-closed (the pin can never
-    // match, so the download is refused rather than trusted).
     WhisperAsset {
         os: "linux",
         arch: "x86_64",
@@ -112,7 +106,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
             url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64-cuda.zip",
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            sha256: "d1e7eba5d486652718c3cc4572f57497eab33dfafc66dcb83583c01f93dac863",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.so",
