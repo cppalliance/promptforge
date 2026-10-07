@@ -22,6 +22,9 @@ use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine, Tra
 use gateway_whisper_ffi::WhisperError;
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
+/// The interim role decodes with timestamp tokens, which drop the comma
+/// after "for you".
+const JFK_INTERIM_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you ask what you can do for your country.";
 const UNPROMPTED_CLIP_TRANSCRIPT: &str = "country can do for you.";
 const GLOSSARY_CLIP_TRANSCRIPT: &str = "One tree can do for you.";
 const CONDITIONING_TRANSCRIPT: &str = "And so my fellow Americans asked";
@@ -102,8 +105,12 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             "",
         ))
         .await
-        .expect("interim decode succeeds");
-    assert_eq!(interim, JFK_TRANSCRIPT, "interim decode policy stays fixed");
+        .expect("interim decode succeeds")
+        .into_text();
+    assert_eq!(
+        interim, JFK_INTERIM_TRANSCRIPT,
+        "interim decode policy stays fixed"
+    );
 
     let unprompted_clip = unprompted
         .decode(request(
@@ -113,7 +120,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             "",
         ))
         .await
-        .expect("unprompted final decode succeeds");
+        .expect("unprompted final decode succeeds")
+        .into_text();
     assert_eq!(unprompted_clip, UNPROMPTED_CLIP_TRANSCRIPT);
 
     let conditioning_transcript = unprompted
@@ -124,7 +132,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             "",
         ))
         .await
-        .expect("conditioning decode succeeds");
+        .expect("conditioning decode succeeds")
+        .into_text();
     let conditioned_clip = unprompted
         .decode(request(
             DecodeMode::Final,
@@ -133,7 +142,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             conditioning_transcript.clone(),
         ))
         .await
-        .expect("transcript-conditioned final decode succeeds");
+        .expect("transcript-conditioned final decode succeeds")
+        .into_text();
     assert_eq!(conditioning_transcript, CONDITIONING_TRANSCRIPT);
     assert_eq!(conditioned_clip, CONDITIONED_CLIP_TRANSCRIPT);
     assert_ne!(conditioned_clip, unprompted_clip);
@@ -147,7 +157,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             "",
         ))
         .await
-        .expect("the glossary-conditioned segment decodes");
+        .expect("the glossary-conditioned segment decodes")
+        .into_text();
     let silent_tail = glossary_prompted
         .decode(request(
             DecodeMode::Final,
@@ -156,7 +167,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
             glossary_clip.clone(),
         ))
         .await
-        .expect("the silent tail decodes");
+        .expect("the silent tail decodes")
+        .into_text();
     assert!(silent_tail.is_empty(), "silence remains gated");
     assert_eq!(glossary_clip, GLOSSARY_CLIP_TRANSCRIPT);
     assert_ne!(glossary_clip, unprompted_clip);
@@ -226,7 +238,8 @@ async fn one_final_job_cannot_change_another_jobs_history() {
             "",
         ))
         .await
-        .expect("history source succeeds");
+        .expect("history source succeeds")
+        .into_text();
     let conditioned = engine
         .decode(request(
             DecodeMode::Final,
@@ -306,6 +319,75 @@ async fn configured_model_branches_write_their_load_text_then_release_the_activi
     engine.shutdown().expect("the engine shuts down");
 }
 
+#[tokio::test]
+#[ignore = "requires packaged whisper, model, and audio fixtures"]
+async fn interim_word_ends_rise_inside_their_window_one_per_word() {
+    let _guard = NATIVE_TEST.lock().await;
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
+    let engine = engine(library, model.clone(), Some(model));
+    let samples = jfk_samples();
+    let windows = [
+        ("the whole clip", 0..samples.len()),
+        ("the opening words", 0..40 * SAMPLES_PER_TENTH),
+        (
+            "a window opening mid-speech",
+            30 * SAMPLES_PER_TENTH..samples.len(),
+        ),
+    ];
+    for (name, range) in windows {
+        let window = u64::try_from(range.len()).expect("the window length fits u64");
+        let output = engine
+            .decode(request(
+                DecodeMode::Interim,
+                samples[range].to_vec(),
+                Vec::new(),
+                "",
+            ))
+            .await
+            .expect("interim decode succeeds");
+        let ends = output.word_ends();
+        assert_eq!(
+            ends.len(),
+            output.text().split_whitespace().count(),
+            "{name} has one end per word of {:?}: {ends:?}",
+            output.text()
+        );
+        assert!(!ends.is_empty(), "{name} decodes words");
+        assert!(
+            ends.is_sorted(),
+            "{name}'s word ends never fall back: {ends:?}"
+        );
+        assert!(
+            ends.iter().all(|&end| end > 0 && end <= window),
+            "{name}'s word ends lie inside its {window} samples: {ends:?}"
+        );
+        assert!(
+            ends.first().is_some_and(|&first| first < window / 2),
+            "{name}'s first word ends in the first half of its window: {ends:?}"
+        );
+        assert!(
+            ends.last().is_some_and(|&last| last > window / 2),
+            "{name}'s last word ends in the second half of its window: {ends:?}"
+        );
+    }
+
+    let accurate = engine
+        .decode(request(DecodeMode::Final, samples, Vec::new(), ""))
+        .await
+        .expect("final decode succeeds");
+    assert_eq!(accurate.text(), JFK_TRANSCRIPT);
+    assert!(
+        accurate.word_ends().is_empty(),
+        "the final role requests no timestamps"
+    );
+    engine.shutdown().expect("the engine shuts down");
+}
+
 fn whisper_source(error: &TranscribeError) -> Option<&WhisperError> {
     error.source()?.downcast_ref::<WhisperError>()
 }
@@ -347,7 +429,8 @@ async fn a_decode_ends_when_its_cancellation_flag_is_set() {
                 .with_cancellation(Arc::clone(&unset)),
         )
         .await
-        .expect("a decode whose flag stays unset transcribes");
+        .expect("a decode whose flag stays unset transcribes")
+        .into_text();
     assert_eq!(
         text, JFK_TRANSCRIPT,
         "an unset flag leaves the decode whole"

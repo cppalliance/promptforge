@@ -9,6 +9,7 @@ fn start_decode(
         engine
             .decode(request(DecodeMode::Interim, vec![0.25], Vec::new(), ""))
             .await
+            .map(crate::DecodeOutput::into_text)
     })
 }
 

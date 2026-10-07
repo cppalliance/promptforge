@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gateway_stt_engine::{
-    DecodeMode, DecodeRequest, EnginePolicy, ModelFactory, SttEngine, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, EnginePolicy, ModelFactory, SttEngine, TranscribeError,
 };
 
 use crate::admission::AdmissionGate;
@@ -135,7 +135,10 @@ impl SpeechRuntime {
         self.engine.interval()
     }
 
-    pub(super) async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    pub(super) async fn decode(
+        &self,
+        request: DecodeRequest,
+    ) -> Result<DecodeOutput, TranscribeError> {
         self.engine.decode(request).await
     }
 }

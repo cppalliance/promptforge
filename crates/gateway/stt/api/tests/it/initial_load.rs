@@ -16,7 +16,9 @@ use gateway_stt::test_fixtures::{
     ScriptedDecoder, ScriptedModelFactory, generation_ownership, load_scripted_initial,
     load_scripted_initial_with_cancellation, scripted_service,
 };
-use gateway_stt_engine::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
+use gateway_stt_engine::{
+    DecodeMode, DecodeOutput, DecodeRequest, Decoder, ModelFactory, TranscribeError,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::common::transcribe_batch;
@@ -191,8 +193,8 @@ impl ModelFactory for CancelDuringBuild {
 struct TrackedDecoder(Arc<AtomicBool>);
 
 impl Decoder for TrackedDecoder {
-    fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
-        Ok(String::new())
+    fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
+        Ok(DecodeOutput::default())
     }
 }
 

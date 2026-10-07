@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gateway_stt_engine::{DecodeRequest, TranscribeError};
+use gateway_stt_engine::{DecodeOutput, DecodeRequest, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::generation::GenerationLease;
@@ -184,7 +184,7 @@ pub(super) fn spawn_final_pipeline(
                 if !engine.has_final_pass() {
                     return None;
                 }
-                Some(engine.decode(request).await)
+                Some(engine.decode(request).await.map(DecodeOutput::into_text))
             }
         },
     ));

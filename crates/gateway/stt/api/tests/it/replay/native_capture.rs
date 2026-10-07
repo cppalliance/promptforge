@@ -22,7 +22,7 @@ use gateway_stt::test_fixtures::{
 };
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::{
-    DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -78,11 +78,11 @@ struct RecordingDecoder {
 }
 
 impl Decoder for RecordingDecoder {
-    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         let mode = request.mode();
         let samples = u64::try_from(request.samples().len()).unwrap_or(u64::MAX);
         let started = Instant::now();
-        let text = self.inner.decode(request)?;
+        let output = self.inner.decode(request)?;
         let wall = started.elapsed();
         self.decodes
             .lock()
@@ -90,10 +90,10 @@ impl Decoder for RecordingDecoder {
             .push(Decode {
                 mode,
                 samples,
-                text: text.clone(),
+                text: output.text().to_owned(),
                 wall,
             });
-        Ok(text)
+        Ok(output)
     }
 }
 

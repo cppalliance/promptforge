@@ -586,15 +586,15 @@ flowchart TD
 
 <step-13>
 
-### Step 13: Interim word end times through the speech engine
+### Step 13: Interim word end times through the speech engine [completed]
 
 - Component: Timestamped window
 - Piece: word end times
 - Changes:
   - `crates/gateway/stt/engine/src/decoder.rs`: `Decoder::decode` returns a `DecodeOutput` holding the text plus per-word end offsets in samples from the request start, empty when the role did not request timestamps. Update `worker.rs`, `engine.rs`, the scripted doubles in `crates/gateway/stt/engine/src/test_fixtures.rs` and `test_fixtures/scenarios.rs`, and every other `Decoder` implementor (seven at plan time, including `WhisperDecoder` and the `gateway-stt` test-fixture decoders).
-  - `crates/gateway/stt/backend-whisper/src/profile.rs` and `model.rs`: enable token timestamps on the interim role and build word end times from the Step 8 token getters by merging subword tokens into whitespace-delimited words. If token times come back empty while `no_timestamps` is set, set `no_timestamps` to false for the interim role only.
+  - `crates/gateway/stt/backend-whisper/src/profile.rs` and `model.rs`: enable token timestamps on the interim role and build word end times from the Step 8 token getters by merging subword tokens into whitespace-delimited words. If token times come back empty while `no_timestamps` is set, set `no_timestamps` to false for the interim role only. Resolved during the run: at `b4938` token times are empty with `no_timestamps` set, so the interim role turns it off. That drops the comma after "for you" from the interim `jfk.wav` text, which is accepted because agreement compares normalized tokens; the final role keeps `no_timestamps` and its transcript is unchanged. Pin the interim-role `jfk.wav` transcript in its own constant rather than changing the final-role one.
   - `crates/gateway/stt/api` session and take path: carry word ends with the transcript into `next_window_snapshot`, unused until Step 14.
-- Tests: `crates/gateway/stt/engine/tests/engine_contract.rs` and the `miri_` tests pass with the new type; word-merge unit tests in `backend-whisper`; an ignored native test that `jfk.wav` interim word ends are monotonic and inside the window; the `jfk.wav` transcript contract is unchanged.
+- Tests: `crates/gateway/stt/engine/tests/engine_contract.rs` and the `miri_` tests pass with the new type; word-merge unit tests in `backend-whisper`; an ignored native test that `jfk.wav` interim word ends are monotonic and inside the window; the final-role `jfk.wav` transcript contract is unchanged, and the interim-role transcript is pinned separately.
 - Commit: `Carry interim word end times through the speech engine`
 
 </step-13>

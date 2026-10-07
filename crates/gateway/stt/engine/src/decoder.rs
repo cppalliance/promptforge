@@ -162,15 +162,67 @@ impl DecodeRequest {
     }
 }
 
+/// One decode's transcript and, when its role requested them, where each of
+/// its words ends.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct DecodeOutput {
+    text: String,
+    word_ends: Vec<u64>,
+}
+
+impl DecodeOutput {
+    /// A transcript without word end times.
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            word_ends: Vec::new(),
+        }
+    }
+
+    /// `text` with `word_ends`, which are kept only when they hold exactly
+    /// one end per whitespace-delimited word of `text`.
+    #[must_use]
+    pub fn with_word_ends(text: impl Into<String>, mut word_ends: Vec<u64>) -> Self {
+        let text = text.into();
+        if word_ends.len() != text.split_whitespace().count() {
+            word_ends.clear();
+        }
+        Self { text, word_ends }
+    }
+
+    /// The decoded transcript.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The end of each whitespace-delimited word of [`Self::text`], in
+    /// samples from the request's first sample; empty when the decode
+    /// produced no word timing.
+    #[must_use]
+    pub fn word_ends(&self) -> &[u64] {
+        &self.word_ends
+    }
+
+    /// The decoded transcript, dropping any word end times.
+    #[must_use]
+    pub fn into_text(self) -> String {
+        self.text
+    }
+}
+
 /// One backend decoder confined to a transcription worker thread.
 ///
 /// Implementations must not retain request state between calls.
 pub trait Decoder {
-    /// Decodes one owned worker job.
+    /// Decodes one owned worker job into its transcript and any word end
+    /// times its role requested.
     ///
     /// # Errors
     /// Returns a backend-translated transcription failure.
-    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError>;
+    fn decode(&mut self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError>;
 }
 
 /// Constructs backend decoders on the worker threads that own them.
@@ -189,10 +241,38 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
 
-    use super::{DecodeMode, DecodeRequest};
+    use super::{DecodeMode, DecodeOutput, DecodeRequest};
 
     fn final_request() -> DecodeRequest {
         DecodeRequest::new(DecodeMode::Final, vec![1.0], Vec::new(), String::new())
+    }
+
+    #[test]
+    fn miri_word_ends_are_kept_only_as_one_end_per_whitespace_delimited_word() {
+        let timed = DecodeOutput::with_word_ends(" ask  not, ", vec![4_000, 9_600]);
+        assert_eq!(timed.text(), " ask  not, ");
+        assert_eq!(timed.word_ends(), [4_000, 9_600]);
+        assert_eq!(timed.into_text(), " ask  not, ");
+
+        assert!(DecodeOutput::new("ask not").word_ends().is_empty());
+        assert!(
+            DecodeOutput::with_word_ends("ask not", vec![4_000])
+                .word_ends()
+                .is_empty(),
+            "too few ends are dropped"
+        );
+        assert!(
+            DecodeOutput::with_word_ends("ask", vec![4_000, 9_600])
+                .word_ends()
+                .is_empty(),
+            "too many ends are dropped"
+        );
+        assert!(
+            DecodeOutput::with_word_ends("", vec![4_000])
+                .word_ends()
+                .is_empty(),
+            "an emptied transcript drops its ends"
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Public engine construction and decode regressions.
 
 use gateway_stt_engine::{
-    DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, SttEngine, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, Decoder, EnginePolicy, ModelFactory, SttEngine,
+    TranscribeError,
 };
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -122,8 +123,8 @@ struct InterimDropProbe {
 }
 
 impl Decoder for InterimDropProbe {
-    fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
-        Ok(String::new())
+    fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
+        Ok(DecodeOutput::default())
     }
 }
 
@@ -186,7 +187,7 @@ struct FailingDecoder {
 }
 
 impl Decoder for FailingDecoder {
-    fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         assert!(
             self.events
                 .send(WorkerEvent::Decoded {
@@ -236,4 +237,44 @@ async fn decode_failure_reaches_the_caller_on_the_decoder_owner_thread() {
         current, created,
         "decode execution stays on the decoder's owning worker"
     );
+}
+
+const TIMED_TEXT: &str = "ask not, what";
+const TIMED_ENDS: [u64; 3] = [4_000, 9_600, 16_000];
+
+#[derive(Debug)]
+struct TimedFactory;
+
+impl ModelFactory for TimedFactory {
+    fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+        Ok((mode == DecodeMode::Interim).then(|| Box::new(TimedDecoder) as Box<dyn Decoder>))
+    }
+}
+
+struct TimedDecoder;
+
+impl Decoder for TimedDecoder {
+    fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
+        Ok(DecodeOutput::with_word_ends(
+            TIMED_TEXT,
+            TIMED_ENDS.to_vec(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn decoded_word_ends_reach_the_caller_with_their_transcript() {
+    let engine = SttEngine::new(TimedFactory, policy()).expect("timed decoder loads");
+    let output = engine
+        .decode(DecodeRequest::new(
+            DecodeMode::Interim,
+            vec![0.25; EnginePolicy::SAMPLE_RATE],
+            Vec::new(),
+            String::new(),
+        ))
+        .await
+        .expect("timed decode succeeds");
+    assert_eq!(output.text(), TIMED_TEXT);
+    assert_eq!(output.word_ends(), TIMED_ENDS);
+    engine.shutdown().expect("the engine shuts down");
 }

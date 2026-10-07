@@ -135,7 +135,8 @@ async fn transcribe(
             String::new(),
         ))
         .await
-        .map_err(SpeechError::Inference)?;
+        .map_err(SpeechError::Inference)?
+        .into_text();
     Ok(axum::Json(response(form, text, duration)).into_response())
 }
 

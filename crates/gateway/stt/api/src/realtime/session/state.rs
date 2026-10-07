@@ -8,7 +8,7 @@ use crate::realtime::registry::SessionRegistration;
 use crate::realtime::result_mailbox::{MailboxError, ResultMailbox};
 use crate::realtime::wire::{EffectiveSession, IdGenerator};
 use crate::take::{InterimSnapshot, TakeFailure};
-use gateway_stt_engine::TranscribeError;
+use gateway_stt_engine::{DecodeOutput, TranscribeError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -27,7 +27,7 @@ pub(super) enum InterimTaskOutput {
         segment_start: u64,
         audio_start: u64,
         audio_end: u64,
-        transcript: Result<String, TranscribeError>,
+        transcript: Result<DecodeOutput, TranscribeError>,
     },
 }
 #[derive(Debug, thiserror::Error)]

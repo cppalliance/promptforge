@@ -12,7 +12,7 @@ pub mod test_fixtures;
 mod translation;
 mod worker;
 
-pub use decoder::{DecodeMode, DecodeRequest, Decoder, ModelFactory};
+pub use decoder::{DecodeMode, DecodeOutput, DecodeRequest, Decoder, ModelFactory};
 pub use engine::SttEngine;
 pub use error::TranscribeError;
 pub use policy::EnginePolicy;

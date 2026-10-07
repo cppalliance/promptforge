@@ -60,7 +60,8 @@ async fn scripted_roles_capture_requests_on_their_creation_threads() {
                 "",
             ))
             .await
-            .expect("interim succeeds"),
+            .expect("interim succeeds")
+            .into_text(),
         "interim"
     );
     assert_eq!(
@@ -72,7 +73,8 @@ async fn scripted_roles_capture_requests_on_their_creation_threads() {
                 "history",
             ))
             .await
-            .expect("final succeeds"),
+            .expect("final succeeds")
+            .into_text(),
         "final"
     );
     assert!(engine.gpu_transcription_available());

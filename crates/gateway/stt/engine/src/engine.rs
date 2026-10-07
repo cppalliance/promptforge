@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::startup;
 use crate::worker::{FINAL_JOB_CAPACITY, INTERIM_JOB_CAPACITY, Transcriber};
-use crate::{DecodeMode, DecodeRequest, EnginePolicy, ModelFactory, TranscribeError};
+use crate::{DecodeMode, DecodeOutput, DecodeRequest, EnginePolicy, ModelFactory, TranscribeError};
 
 /// The STT engine: one required interim worker and one optional final worker.
 #[derive(Debug)]
@@ -142,7 +142,7 @@ impl SttEngine {
     /// # Errors
     /// Returns a decoder failure, [`TranscribeError::WorkerGone`], or an
     /// invalid-configuration error when a final worker was not configured.
-    pub async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    pub async fn decode(&self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         match request.mode() {
             DecodeMode::Interim => self.transcriber.transcribe(request).await,
             DecodeMode::Final => match &self.final_pass {
@@ -328,7 +328,7 @@ mod tests {
     struct ParkDecoder(Arc<ParkState>);
 
     impl Decoder for ParkDecoder {
-        fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
+        fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
             let mut phase = self.0.phase.lock().unwrap_or_else(PoisonError::into_inner);
             *phase = ParkPhase::Entered;
             self.0.changed.notify_all();
@@ -338,7 +338,7 @@ mod tests {
                     .wait_while(phase, |phase| *phase != ParkPhase::Released)
                     .unwrap_or_else(PoisonError::into_inner),
             );
-            Ok("parked".to_owned())
+            Ok(DecodeOutput::new("parked"))
         }
     }
 

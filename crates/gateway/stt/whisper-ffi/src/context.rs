@@ -290,6 +290,41 @@ impl WhisperState {
         })
     }
 
+    /// Copies one token's text from the most recent pass.
+    ///
+    /// whisper names every special token, such as a timestamp, `[_..._]`.
+    ///
+    /// # Errors
+    /// Returns [`WhisperError::InvalidSegment`] or
+    /// [`WhisperError::InvalidToken`] when either index is outside the latest
+    /// result, or [`WhisperError::NullTokenText`] when whisper returns a null
+    /// pointer for a valid index.
+    pub fn token_text(&self, segment: c_int, token: c_int) -> Result<String, WhisperError> {
+        self.check_token(segment, token)?;
+        // SAFETY: the context and state pointers are live and paired, and
+        // segment and token are range checked against the state's most recent
+        // result, which whisper indexes without checking.
+        let text = unsafe {
+            (self
+                .context
+                .library
+                .functions
+                .full_get_token_text_from_state)(
+                self.context.pointer.as_ptr(),
+                self.pointer.as_ptr(),
+                segment,
+                token,
+            )
+        };
+        let Some(text) = NonNull::new(text.cast_mut()) else {
+            return Err(WhisperError::NullTokenText { segment, token });
+        };
+        // SAFETY: whisper returns a null-terminated string from the context's
+        // vocabulary, which self.context keeps live while it is copied.
+        let text = unsafe { CStr::from_ptr(text.as_ptr()) };
+        Ok(text.to_string_lossy().into_owned())
+    }
+
     /// Returns whisper's probability for one token of the most recent pass.
     ///
     /// # Errors
@@ -325,7 +360,7 @@ impl WhisperState {
         Ok(())
     }
 
-    fn token_data(&self, segment: c_int, token: c_int) -> Result<raw::TokenData, WhisperError> {
+    fn check_token(&self, segment: c_int, token: c_int) -> Result<(), WhisperError> {
         let count = self.token_count(segment)?;
         if token < 0 || token >= count {
             return Err(WhisperError::InvalidToken {
@@ -334,6 +369,11 @@ impl WhisperState {
                 count,
             });
         }
+        Ok(())
+    }
+
+    fn token_data(&self, segment: c_int, token: c_int) -> Result<raw::TokenData, WhisperError> {
+        self.check_token(segment, token)?;
         // SAFETY: the state pointer is live, and segment and token are range
         // checked against the state's most recent result.
         Ok(unsafe {

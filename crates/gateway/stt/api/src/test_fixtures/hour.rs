@@ -4,7 +4,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use gateway_stt_engine::{
-    DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 
 use crate::realtime::UncommittedInput;
@@ -192,7 +192,7 @@ struct HourSimulationDecoder {
 }
 
 impl Decoder for HourSimulationDecoder {
-    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         let (start, end) = marked_window(request.samples())?;
         match self.mode {
             DecodeMode::Interim => {
@@ -200,7 +200,7 @@ impl Decoder for HourSimulationDecoder {
                 state.interim_decodes += 1;
                 let end_second = end / EnginePolicy::SAMPLE_RATE as u64;
                 let index = end_second.saturating_sub(4) / FINAL_STRIDE_SECONDS as u64;
-                Ok(format!("live region {index:04}"))
+                Ok(DecodeOutput::new(format!("live region {index:04}")))
             }
             DecodeMode::Final => {
                 let mut state = self.probe.state();
@@ -228,7 +228,7 @@ impl Decoder for HourSimulationDecoder {
                     .map_err(|_| marker_error("marker start does not fit fixture text"))?;
                 let end_second = usize::try_from(end / EnginePolicy::SAMPLE_RATE as u64)
                     .map_err(|_| marker_error("marker end does not fit fixture text"))?;
-                Ok(timeline_text(start_second, end_second))
+                Ok(DecodeOutput::new(timeline_text(start_second, end_second)))
             }
             _ => unreachable!("the hour simulation scripts only interim and final decodes"),
         }

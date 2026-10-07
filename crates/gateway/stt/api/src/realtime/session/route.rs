@@ -106,14 +106,17 @@ impl Session {
             return Ok(None);
         }
         let transcript = transcript.map_err(SessionError::Inference)?;
-        if transcript.is_empty() {
+        if transcript.text().is_empty() {
             return Ok(None);
         }
         let include_hypothesis = input.snapshot().include_hypothesis();
-        let update =
-            input
-                .take()
-                .next_window_snapshot(&transcript, segment_start, audio_start, audio_end);
+        let update = input.take().next_window_snapshot(
+            transcript.text(),
+            transcript.word_ends(),
+            segment_start,
+            audio_start,
+            audio_end,
+        );
         if !include_hypothesis {
             if let Some(snapshot) = update {
                 let committed = snapshot.committed();

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use gateway_progress::Activity;
 use gateway_stt_engine::{
-    DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 use gateway_whisper_ffi::{
     FullParams, SamplingStrategy, WhisperContext, WhisperError, WhisperLibrary, WhisperState,
@@ -19,6 +19,7 @@ use crate::profile::{RoleProfile, available_cores};
 use crate::prompt::{
     GLOSSARY_TOKEN_BUDGET, MAX_PROMPT_TOKENS, final_prompt, fit_glossary, sanitize_prompt,
 };
+use crate::words::pass_word_ends;
 
 const PREWARM_CHUNK: usize = 4 * 1024 * 1024;
 
@@ -120,13 +121,13 @@ impl WhisperDecoder {
 }
 
 impl Decoder for WhisperDecoder {
-    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         let final_pass = request.mode() == DecodeMode::Final;
         if final_pass
             && (request.samples().len() < EnginePolicy::MIN_WINDOW_SAMPLES
                 || EnginePolicy::is_silence(request.samples()))
         {
-            return Ok(String::new());
+            return Ok(DecodeOutput::default());
         }
         let glossary_budget = if final_pass {
             GLOSSARY_TOKEN_BUDGET
@@ -150,7 +151,16 @@ impl Decoder for WhisperDecoder {
             &self.profile,
             request.cancellation(),
         )?;
-        guard_role(request.mode(), text, || token_stats(&self.state)).map_err(inference_error)
+        let word_ends = if self.profile.token_timestamps {
+            pass_word_ends(&self.state, request.samples().len()).map_err(inference_error)?
+        } else {
+            Vec::new()
+        };
+        let text = guard_role(request.mode(), text, || token_stats(&self.state))
+            .map_err(inference_error)?;
+        // A guard that drops or collapses words leaves the ends unmatched,
+        // and the output drops them.
+        Ok(DecodeOutput::with_word_ends(text, word_ends))
     }
 }
 

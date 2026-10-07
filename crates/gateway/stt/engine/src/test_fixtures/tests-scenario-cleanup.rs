@@ -36,7 +36,8 @@ async fn run_blocked_decode(decoder: &ScriptedDecoder, engine: &Arc<SttEngine>, 
             .await
             .expect("released decode completes")
             .expect("decode task joins")
-            .expect("scripted decode succeeds"),
+            .expect("scripted decode succeeds")
+            .into_text(),
         transcript
     );
 }

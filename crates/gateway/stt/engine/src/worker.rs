@@ -4,14 +4,16 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 
-use crate::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
+use crate::{DecodeMode, DecodeOutput, DecodeRequest, Decoder, ModelFactory, TranscribeError};
 
 pub(crate) const INTERIM_JOB_CAPACITY: usize = 8;
 pub(crate) const FINAL_JOB_CAPACITY: usize = 8;
 
+type DecodeResult = Result<DecodeOutput, TranscribeError>;
+
 struct Job {
     request: DecodeRequest,
-    reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
+    reply: tokio::sync::oneshot::Sender<DecodeResult>,
     lifetime_guard: Option<Arc<dyn Send + Sync>>,
 }
 
@@ -63,8 +65,7 @@ impl Transcriber {
     fn submit(
         &self,
         mut request: DecodeRequest,
-    ) -> Result<tokio::sync::oneshot::Receiver<Result<String, TranscribeError>>, TranscribeError>
-    {
+    ) -> Result<tokio::sync::oneshot::Receiver<DecodeResult>, TranscribeError> {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
         let lifetime_guard = request.take_lifetime_guard();
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -84,10 +85,7 @@ impl Transcriber {
         Ok(reply_rx)
     }
 
-    pub(super) async fn transcribe(
-        &self,
-        request: DecodeRequest,
-    ) -> Result<String, TranscribeError> {
+    pub(super) async fn transcribe(&self, request: DecodeRequest) -> DecodeResult {
         let reply_rx = self.submit(request)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }

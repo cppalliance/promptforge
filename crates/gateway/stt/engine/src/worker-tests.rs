@@ -71,7 +71,7 @@ impl ModelFactory for ParkFactory {
 struct ParkDecoder(ParkControl);
 
 impl crate::Decoder for ParkDecoder {
-    fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, _request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         let (state, changed) = &*self.0.state;
         let mut state = state
             .lock()
@@ -86,7 +86,7 @@ impl crate::Decoder for ParkDecoder {
         }
         state.phase = ParkPhase::Finished;
         changed.notify_all();
-        Ok("scripted".to_owned())
+        Ok(DecodeOutput::new("scripted"))
     }
 }
 
@@ -148,7 +148,7 @@ fn assert_queue_boundary(mode: DecodeMode, capacity: usize) {
             .blocking_recv()
             .expect("worker replies")
             .expect("decode succeeds"),
-        "scripted"
+        DecodeOutput::new("scripted")
     );
     worker.shutdown().expect("worker joins");
     assert_eq!(control.calls(), 1, "cancelled queued jobs never decode");
@@ -215,7 +215,7 @@ fn cancellation_while_running_discards_only_that_reply() {
         next.blocking_recv()
             .expect("worker replies")
             .expect("decode succeeds"),
-        "scripted"
+        DecodeOutput::new("scripted")
     );
     worker.shutdown().expect("worker joins");
     assert_eq!(control.calls(), 2);

@@ -26,6 +26,11 @@ pub(crate) struct RoleProfile {
     pub(crate) audio_ctx: Option<c_int>,
     pub(crate) max_tokens: Option<c_int>,
     pub(crate) n_threads: c_int,
+    /// Whether each pass times its tokens, which word end times need.
+    ///
+    /// b4938 times no tokens while `no_timestamps` is set, so a timed pass
+    /// also clears it.
+    pub(crate) token_timestamps: bool,
 }
 
 impl RoleProfile {
@@ -38,6 +43,7 @@ impl RoleProfile {
             audio_ctx: interim_audio_ctx(window_seconds),
             max_tokens: Some(c_int::try_from(max_tokens).unwrap_or(c_int::MAX)),
             n_threads: decode_threads(cores),
+            token_timestamps: true,
         }
     }
 
@@ -49,6 +55,7 @@ impl RoleProfile {
             audio_ctx: None,
             max_tokens: None,
             n_threads: decode_threads(cores),
+            token_timestamps: false,
         }
     }
 
@@ -63,6 +70,10 @@ impl RoleProfile {
         }
         if let Some(value) = self.max_tokens {
             params.set_max_tokens(value);
+        }
+        if self.token_timestamps {
+            params.set_token_timestamps(true);
+            params.set_no_timestamps(false);
         }
     }
 }
@@ -126,6 +137,8 @@ mod tests {
         expected.set_temperature_inc(0.0);
         expected.set_audio_ctx(896);
         expected.set_max_tokens(60);
+        expected.set_token_timestamps(true);
+        expected.set_no_timestamps(false);
         assert_applies_as(RoleProfile::interim(15, 8), &expected);
     }
 
@@ -202,9 +215,16 @@ mod tests {
                 audio_ctx: Some(896),
                 max_tokens: Some(60),
                 n_threads: 4,
+                token_timestamps: true,
             }
         );
         assert_eq!(RoleProfile::interim(12, 2).n_threads, 1);
+    }
+
+    #[test]
+    fn only_the_interim_role_requests_token_timestamps() {
+        assert!(RoleProfile::interim(15, 8).token_timestamps);
+        assert!(!RoleProfile::final_pass(8).token_timestamps);
     }
 
     #[test]
@@ -227,6 +247,7 @@ mod tests {
                 audio_ctx: None,
                 max_tokens: None,
                 n_threads: 4,
+                token_timestamps: false,
             }
         );
         assert_eq!(RoleProfile::final_pass(32).n_threads, 4);

@@ -16,7 +16,7 @@ fn accepted_from_snapshot(
     text: &str,
     committed_samples: u64,
 ) -> Vec<AcceptedHypothesis> {
-    take.next_window_snapshot(text, range.start, range.start, range.end)
+    take.next_window_snapshot(text, &[], range.start, range.start, range.end)
         .expect("the production window snapshot is accepted");
     TakeState::lock(&take.whole_window).accepted_hypotheses(committed_samples)
 }

@@ -7,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
-use crate::{DecodeRequest, Decoder, TranscribeError};
+use crate::{DecodeOutput, DecodeRequest, Decoder, TranscribeError};
 
 #[derive(Debug)]
 enum ScriptedOutcome {
@@ -272,7 +272,7 @@ impl ScriptedDecoder {
 struct WorkerDecoder(ScriptedDecoder);
 
 impl Decoder for WorkerDecoder {
-    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    fn decode(&mut self, request: DecodeRequest) -> Result<DecodeOutput, TranscribeError> {
         let (state, changed) = &*self.0.shared;
         let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
         state.requests.push(request.clone());
@@ -301,12 +301,12 @@ impl Decoder for WorkerDecoder {
             state.park = ParkState::Ready;
         }
         let outcome = match state.outcomes.pop_front() {
-            Some(ScriptedOutcome::Text(text)) => Ok(text),
+            Some(ScriptedOutcome::Text(text)) => Ok(DecodeOutput::new(text)),
             Some(ScriptedOutcome::Error(message)) => {
                 Err(TranscribeError::inference(std::io::Error::other(message)))
             }
             Some(ScriptedOutcome::Panic) => panic!("scripted decoder panic"),
-            None => Ok(String::new()),
+            None => Ok(DecodeOutput::default()),
         };
         state.completed += 1;
         changed.notify_all();

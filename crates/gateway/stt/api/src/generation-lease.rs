@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gateway_stt_engine::{DecodeMode, DecodeRequest, TranscribeError};
+use gateway_stt_engine::{DecodeMode, DecodeOutput, DecodeRequest, TranscribeError};
 
 use crate::admission::{AdmissionLease, JobLease, SessionEpoch};
 
@@ -81,7 +81,10 @@ impl GenerationLease {
         })
     }
 
-    pub(crate) async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
+    pub(crate) async fn decode(
+        &self,
+        request: DecodeRequest,
+    ) -> Result<DecodeOutput, TranscribeError> {
         let job = self.own_job().ok_or_else(generation_unavailable)?;
         let epoch = self.epoch().clone();
         let request = request.with_cancellation(epoch.cancellation_flag());

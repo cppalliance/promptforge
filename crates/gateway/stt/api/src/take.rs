@@ -149,9 +149,12 @@ impl Take {
         self.state.finalized()
     }
 
+    /// `_word_ends` holds where each word of `hypothesis` ends, in samples
+    /// from `window_start`, or nothing when the decode timed no words.
     pub(crate) fn next_window_snapshot(
         &self,
         hypothesis: &str,
+        _word_ends: &[u64],
         segment_start: u64,
         window_start: u64,
         window_end: u64,

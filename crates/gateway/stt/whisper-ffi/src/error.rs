@@ -101,6 +101,16 @@ pub enum WhisperError {
         segment: c_int,
     },
 
+    /// whisper.cpp returned a null string for a valid token.
+    #[non_exhaustive]
+    #[error("whisper returned no text for token {token} in segment {segment}")]
+    NullTokenText {
+        /// Segment index passed to whisper.cpp.
+        segment: c_int,
+        /// Token index passed to whisper.cpp.
+        token: c_int,
+    },
+
     /// A segment index falls outside the latest decoding result.
     #[non_exhaustive]
     #[error("whisper segment {segment} is outside 0..{count}")]

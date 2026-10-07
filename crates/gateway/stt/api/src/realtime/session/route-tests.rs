@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use base64::Engine as _;
+use gateway_stt_engine::DecodeOutput;
 
 use super::{InterimTaskOutput, Session, sample_millis};
 use crate::realtime::registry::SessionRegistry;
@@ -59,7 +60,7 @@ fn accept(
             segment_start: 0,
             audio_start: window.start,
             audio_end: window.end,
-            transcript: Ok(transcript.to_owned()),
+            transcript: Ok(DecodeOutput::new(transcript)),
         })
         .expect("interim is accepted")
         .map(|event| {

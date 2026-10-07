@@ -164,6 +164,8 @@ pub(crate) type FullGetSegmentTextFromState =
 pub(crate) type FullGetSegmentNoSpeechProbFromState =
     unsafe extern "C" fn(*mut State, c_int) -> f32;
 pub(crate) type FullNTokensFromState = unsafe extern "C" fn(*mut State, c_int) -> c_int;
+pub(crate) type FullGetTokenTextFromState =
+    unsafe extern "C" fn(*mut Context, *mut State, c_int, c_int) -> *const c_char;
 pub(crate) type FullGetTokenDataFromState =
     unsafe extern "C" fn(*mut State, c_int, c_int) -> TokenData;
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;

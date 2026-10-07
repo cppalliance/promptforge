@@ -229,6 +229,31 @@ mod tests {
         });
     }
 
+    /// whisper names every special token `[_..._]` and leaves them out of
+    /// segment text when `print_special` is off.
+    fn assert_token_texts_spell_their_segment(
+        state: &WhisperState,
+        segment: std::ffi::c_int,
+        count: std::ffi::c_int,
+    ) {
+        let spelled = (0..count)
+            .map(|token| state.token_text(segment, token).expect("token is in range"))
+            .filter(|text| !text.starts_with("[_"))
+            .collect::<String>();
+        assert_eq!(
+            spelled,
+            state.segment_text(segment).expect("segment is in range"),
+            "the segment's ordinary token texts spell its text"
+        );
+        assert!(
+            matches!(
+                state.token_text(segment, count),
+                Err(WhisperError::InvalidToken { .. })
+            ),
+            "token text past the segment is rejected"
+        );
+    }
+
     #[test]
     #[ignore = "requires packaged whisper, model, and audio fixtures"]
     fn packaged_runtime_reports_token_probabilities_and_spans() {
@@ -293,6 +318,7 @@ mod tests {
                 ),
                 "a token past the segment is rejected"
             );
+            assert_token_texts_spell_their_segment(&state, segment, count);
         }
         assert!(tokens > 20, "JFK decodes to {tokens} tokens");
         assert!(
