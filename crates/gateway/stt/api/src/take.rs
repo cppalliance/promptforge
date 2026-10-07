@@ -151,7 +151,9 @@ impl Take {
     }
 
     /// `_word_ends` holds where each word of `hypothesis` ends, in samples
-    /// from `window_start`, or nothing when the decode timed no words. The
+    /// from `window_start`, or nothing when the decode timed no words. A tail
+    /// the fast pass repeated from the silence after speech is cut first, and
+    /// a hypothesis left empty changes nothing, like an empty decode. The
     /// finalized range comes from the same live prefix as the snapshot's
     /// finalized part. An accepted hypothesis also tells the segmenter
     /// whether it ends a sentence.
@@ -164,13 +166,24 @@ impl Take {
         window_end: u64,
     ) -> Option<(InterimSnapshot, FinalizedRange)> {
         let live_prefix = self.state.live_prefix_snapshot();
-        let update = TakeState::lock(&self.whole_window).try_next(
+        let speech = TakeState::lock(&self.state.segmenter).speech_before(window_end);
+        let mut window = TakeState::lock(&self.whole_window);
+        let spoken = speech.map_or_else(
+            || hypothesis.into(),
+            |speech| window.spoken(&live_prefix, window_start, hypothesis, speech),
+        );
+        let hypothesis = spoken.text();
+        if hypothesis.is_empty() {
+            return None;
+        }
+        let update = window.try_next(
             &live_prefix,
             segment_start,
             window_start,
             window_end,
-            hypothesis,
+            spoken,
         );
+        drop(window);
         let Ok(snapshot) = update else {
             self.state.record_failure(TakeFailure::HypothesisCapacity);
             return None;
@@ -347,6 +360,31 @@ mod tests {
         take.next_window_snapshot("What your country can do.", &[], 16_000, 16_000, 32_000)
             .expect("the open segment's hypothesis is accepted");
         assert!(sentence_end_hinted(&take));
+    }
+
+    fn hear(take: &Take, samples: Vec<f32>) {
+        take.append(samples).expect("audio appends");
+        let buffer = super::TakeState::lock(&take.state.buffer);
+        let mut segmenter = super::TakeState::lock(&take.state.segmenter);
+        while segmenter.poll(buffer.samples(), buffer.origin()).is_some() {}
+    }
+
+    #[test]
+    fn a_repeat_decoded_from_silence_is_cut_before_it_shows_or_clears_the_sentence_end() {
+        let take = Take::without_final(Vec::new());
+        hear(&take, vec![0.5; 24_000]);
+        take.next_window_snapshot("create a plan.", &[], 0, 0, 24_000)
+            .expect("the sentence is accepted");
+        hear(&take, vec![0.0; 8_000]);
+
+        let (snapshot, _) = take
+            .next_window_snapshot("create a plan. Create a", &[], 0, 0, 32_000)
+            .expect("the hypothesis less its repeat is accepted");
+        assert_eq!(snapshot.into_parts().0, "create a plan.");
+        assert!(
+            sentence_end_hinted(&take),
+            "the sentence still ends, so the segment closes after the short silence"
+        );
     }
 
     #[test]

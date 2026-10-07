@@ -111,6 +111,21 @@
     "upsr": 0.1,
     "upwr": 0.3333333333333333
   },
+  "scripted-trailing-echo-same-pass": {
+    "agreed_shrink_events": 0,
+    "changed_pairs": 1,
+    "changed_words": 5,
+    "commit_lag_ms": 713.3333333333334,
+    "completed_words": 15,
+    "lag_sum_ms": 10700.0,
+    "lag_words": 15,
+    "latency_sum_ms": 4860.0,
+    "latency_words": 15,
+    "pairs": 10,
+    "partial_latency_ms": 324.0,
+    "upsr": 0.1,
+    "upwr": 0.3333333333333333
+  },
   "ui": {
     "jfk-native": {
       "changed_pairs": 13,
@@ -161,6 +176,14 @@
       "upwr": 1.3333333333333333
     },
     "scripted-trailing-echo": {
+      "changed_pairs": 1,
+      "changed_words": 4,
+      "completed_words": 15,
+      "pairs": 10,
+      "upsr": 0.1,
+      "upwr": 0.26666666666666666
+    },
+    "scripted-trailing-echo-same-pass": {
       "changed_pairs": 1,
       "changed_words": 4,
       "completed_words": 15,

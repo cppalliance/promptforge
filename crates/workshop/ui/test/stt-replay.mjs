@@ -285,6 +285,15 @@ test("a final shows no tentative echo of the words it covers", () => {
   );
 });
 
+test("a repeat decoded from trailing silence never renders, before or after its final", () => {
+  for (const name of ["scripted-trailing-echo", "scripted-trailing-echo-same-pass"]) {
+    const echoes = render(readJson(`${name}${SNAPSHOTS_SUFFIX}`)).filter((text) =>
+      text.includes("plan. I want"),
+    );
+    assert.deepEqual(echoes, [], `${name} renders the echo`);
+  }
+});
+
 test("rendered UPWR and UPSR count earlier editor words after the exact common prefix", () => {
   assert.deepEqual(
     renderedMetrics(["ask not", "Ask not what", "Ask not, what your", "Ask not, what your country"]),

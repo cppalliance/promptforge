@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 
 use gateway_stt_engine::EnginePolicy;
 
+use super::Spoken;
 use crate::take::agreement::{matching_token_prefix_end, normalized_token, token_spans};
 
 /// Hypotheses that must carry a token at the same position before it is agreed.
@@ -88,6 +89,17 @@ impl Agreement {
         self.agreed_end
     }
 
+    /// For each leading word of `words` that earlier hypotheses decoded at
+    /// the same position, the window end of the first one that did.
+    pub(super) fn first_seen(&self, words: &[String]) -> Vec<u64> {
+        self.tokens
+            .iter()
+            .zip(words)
+            .take_while(|(token, word)| token.normalized == **word)
+            .map(|(token, _)| token.first_end)
+            .collect()
+    }
+
     /// Revises `active`, whose agreed prefix this agreement tracks, with
     /// `replacement`, the hypothesis rebased onto `active` and decoded through
     /// sample `audio_end`. Returns the new active text, or `None` when the
@@ -95,11 +107,12 @@ impl Agreement {
     ///
     /// Evidence starts after the agreed prefix, or after the aligned cut when
     /// the replacement disputes it, so a position always names the same place
-    /// after agreed text.
+    /// after agreed text. A hypothesis with a cut tail heard past its last
+    /// word, so that word does not wait for a later hypothesis.
     pub(super) fn revise(
         &mut self,
         active: &str,
-        hypothesis: &str,
+        hypothesis: Spoken<'_>,
         replacement: &str,
         audio_end: u64,
     ) -> Option<String> {
@@ -111,7 +124,7 @@ impl Agreement {
             .take_while(|(_, _, end)| *end <= prefix_end)
             .count()
             == self.agreed;
-        let similarity = similarity_tokens(hypothesis);
+        let similarity = similarity_tokens(hypothesis.text());
         match self.held.take() {
             Some(held) if similar(&similarity, &held) => self.remember(held),
             _ if !extends
@@ -147,7 +160,12 @@ impl Agreement {
         let punctuated_end = spans.last().is_some_and(|(token, _, _)| {
             token.ends_with(|character: char| !character.is_alphanumeric())
         });
-        self.observe(&normalized[cut..], punctuated_end, audio_end);
+        self.observe(
+            &normalized[cut..],
+            punctuated_end,
+            hypothesis.cut(),
+            audio_end,
+        );
         let first = self.agreed;
         while self
             .tokens
@@ -164,28 +182,35 @@ impl Agreement {
 
     /// Records `tentative`, the hypothesis tokens after the cut, at the
     /// positions after agreed text; `punctuated_end` says whether the last of
-    /// them ends in punctuation.
-    fn observe(&mut self, tentative: &[String], punctuated_end: bool, audio_end: u64) {
+    /// them ends in punctuation, and `continued` whether the decode heard
+    /// past it.
+    fn observe(
+        &mut self,
+        tentative: &[String],
+        punctuated_end: bool,
+        continued: bool,
+        audio_end: u64,
+    ) {
         let agreed = self.agreed;
         let end = agreed + tentative.len();
         self.tokens.truncate(end);
         for (position, normalized) in (agreed..).zip(tentative) {
-            let last = position + 1 == end;
+            let waits = position + 1 == end && !continued;
             match self.tokens.get_mut(position) {
                 Some(token) if token.normalized == *normalized => {
                     token.observations = token.observations.saturating_add(1);
                     token.latest_end = token.latest_end.max(audio_end);
                     token.awaits_continuation =
-                        last && (punctuated_end || token.awaits_continuation);
+                        waits && (punctuated_end || token.awaits_continuation);
                 }
                 Some(token) => {
                     *token =
-                        TokenEvidence::new(normalized.clone(), audio_end, last && punctuated_end);
+                        TokenEvidence::new(normalized.clone(), audio_end, waits && punctuated_end);
                 }
                 None => self.tokens.push(TokenEvidence::new(
                     normalized.clone(),
                     audio_end,
-                    last && punctuated_end,
+                    waits && punctuated_end,
                 )),
             }
         }

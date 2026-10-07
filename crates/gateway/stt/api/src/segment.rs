@@ -17,7 +17,7 @@ mod boundary;
 mod endpoint;
 
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
-use endpoint::{Closed, EndpointState, Rule, Scan};
+use endpoint::{Closed, EndpointState, HANGOVER_SAMPLES, Rule, Scan};
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
 pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
@@ -44,6 +44,29 @@ pub(crate) struct Segmenter {
     /// Start of the segment whose latest accepted interim text ends a
     /// sentence, if one does.
     sentence_end: Option<u64>,
+    /// End of the latest scanned frame the energy gate read as speech.
+    speech_end: u64,
+}
+
+/// What the energy gate heard before some sample: where its last speech
+/// frame ended, with speech scanned after that sample counting as reaching it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SpeechBefore {
+    speech_end: u64,
+}
+
+impl SpeechBefore {
+    #[cfg(test)]
+    pub(crate) const fn for_test(speech_end: u64) -> Self {
+        Self { speech_end }
+    }
+
+    /// An upper bound on the speech heard after `since`, past the hangover
+    /// that the trailing sound of a word ending at `since` may spill over.
+    pub(crate) const fn after(self, since: u64) -> u64 {
+        self.speech_end
+            .saturating_sub(since.saturating_add(HANGOVER_SAMPLES))
+    }
 }
 
 impl Segmenter {
@@ -84,6 +107,14 @@ impl Segmenter {
         self.sentence_end == Some(self.endpoint.consumed)
     }
 
+    /// What the energy gate heard before `end`, or `None` while a whole
+    /// frame before `end` is unscanned.
+    pub(crate) fn speech_before(&self, end: u64) -> Option<SpeechBefore> {
+        (self.cursor.saturating_add(FRAME_SAMPLES as u64) >= end).then(|| SpeechBefore {
+            speech_end: self.speech_end.min(end),
+        })
+    }
+
     /// Stops the next segment from overlapping the forced stride that ended
     /// at `end`, whose audio was released without a final decode.
     pub(crate) fn forget_forced_predecessor(&mut self, end: u64) {
@@ -109,10 +140,16 @@ impl Segmenter {
             let frame = usize::try_from(self.cursor - buffer_origin)
                 .ok()
                 .and_then(|start| buffer.get(start..start.checked_add(FRAME_SAMPLES)?));
+            let silent = frame.map(EnginePolicy::is_silence);
+            if silent == Some(false) {
+                self.speech_end = self
+                    .speech_end
+                    .max(self.cursor.saturating_add(FRAME_SAMPLES as u64));
+            }
             let scan = Scan {
                 cursor: self.cursor,
                 received,
-                silent: frame.map(EnginePolicy::is_silence),
+                silent,
                 sentence_end: self.ends_sentence(),
             };
             let advance = endpoint::endpoint(self.endpoint, scan)?;

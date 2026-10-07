@@ -51,44 +51,44 @@
       "audio_end_ms": 3500
     },
     {
-      "at_ms": 4650,
+      "at_ms": 4450,
       "revision": 6,
-      "transcript": "Okay listen up this is what I want. I want you to",
+      "transcript": "Okay listen up this is what I want. I want you",
       "finalized": "Okay listen up this is what I want.",
       "agreed": "",
-      "tentative": " I want you to",
+      "tentative": " I want you",
       "audio_start_ms": 3100,
-      "audio_end_ms": 4500
+      "audio_end_ms": 4300
     },
     {
-      "at_ms": 5150,
+      "at_ms": 4950,
       "revision": 7,
       "transcript": "Okay listen up this is what I want. I want you to create",
       "finalized": "Okay listen up this is what I want.",
-      "agreed": " I want you to",
-      "tentative": " create",
+      "agreed": " I want you",
+      "tentative": " to create",
       "audio_start_ms": 3100,
-      "audio_end_ms": 5000
+      "audio_end_ms": 4800
     },
     {
-      "at_ms": 5650,
+      "at_ms": 5450,
       "revision": 8,
-      "transcript": "Okay listen up this is what I want. I want you to create a plan.",
+      "transcript": "Okay listen up this is what I want. I want you to create a",
       "finalized": "Okay listen up this is what I want.",
       "agreed": " I want you to create",
-      "tentative": " a plan.",
+      "tentative": " a",
       "audio_start_ms": 3100,
-      "audio_end_ms": 5500
+      "audio_end_ms": 5300
     },
     {
-      "at_ms": 6150,
+      "at_ms": 5950,
       "revision": 9,
       "transcript": "Okay listen up this is what I want. I want you to create a plan.",
       "finalized": "Okay listen up this is what I want.",
-      "agreed": " I want you to create a plan.",
-      "tentative": "",
+      "agreed": " I want you to create a",
+      "tentative": " plan.",
       "audio_start_ms": 3100,
-      "audio_end_ms": 6000
+      "audio_end_ms": 5800
     },
     {
       "at_ms": 6800,
@@ -97,8 +97,8 @@
       "finalized": "Okay listen up this is what I want. I want you to create a plan.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 6000,
-      "audio_end_ms": 6000
+      "audio_start_ms": 5800,
+      "audio_end_ms": 5800
     }
   ],
   "completed": "Okay listen up this is what I want. I want you to create a plan."

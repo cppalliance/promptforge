@@ -110,7 +110,7 @@ fn every_forced_stride_keeps_the_complete_visible_prefix() {
                 pending_end,
                 pending_end,
                 pending_end + 16_000,
-                &format!("tail stride {stride}"),
+                format!("tail stride {stride}").as_str(),
             )
             .expect("stride remains within capacity")
             .expect("each stride emits one complete snapshot");

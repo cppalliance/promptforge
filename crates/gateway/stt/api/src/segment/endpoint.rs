@@ -29,7 +29,7 @@ const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
 
 /// Closing silence kept at the end of a segment: 100 ms, so a trailing
 /// consonant the energy gate reads as silence still reaches the final pass.
-const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
+pub(super) const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
 
 /// Audio kept before a segment's first speech frame: 0.5 s, so a soft onset
 /// the energy gate misses still reaches the final pass.

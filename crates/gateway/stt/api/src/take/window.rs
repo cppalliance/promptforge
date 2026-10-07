@@ -7,8 +7,12 @@ use super::interim::InterimSnapshot;
 use super::live_prefix::LivePrefixSnapshot;
 use super::text::append_transcript;
 
+mod echo;
 mod evidence;
 
+use crate::segment::SpeechBefore;
+use echo::MAX_REPEATED_RUN_WORDS;
+use echo::Spoken;
 use evidence::{Agreement, covering_prefix};
 
 const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
@@ -112,14 +116,63 @@ impl WholeWindowState {
         .unwrap_or(None)
     }
 
-    pub(super) fn try_next(
+    /// `hypothesis` less a tail it repeats from the silence after speech, as
+    /// `echo` defines one. Words of the active text it re-decodes carry their
+    /// first-seen evidence; text shown before its window counts as words
+    /// before it.
+    pub(super) fn spoken<'hypothesis>(
+        &self,
+        live_prefix: &LivePrefixSnapshot,
+        window_start: u64,
+        hypothesis: &'hypothesis str,
+        speech: SpeechBefore,
+    ) -> Spoken<'hypothesis> {
+        let coverage_end = live_prefix.coverage_end();
+        let active_start = self
+            .active_range
+            .as_ref()
+            .filter(|_| !self.active.is_empty())
+            .map(|range| range.start);
+        let earlier_active = active_start
+            .filter(|start| *start < window_start && *start >= coverage_end)
+            .map(|_| self.active.as_str());
+        let before = [live_prefix.finalized()]
+            .into_iter()
+            .chain(live_prefix.pending_forced().map(|(text, _)| text))
+            .chain(
+                self.pending
+                    .iter()
+                    .filter(|accepted| accepted.range.start >= coverage_end)
+                    .map(AcceptedHypothesis::text),
+            )
+            .chain(earlier_active)
+            .flat_map(token_spans)
+            .map(|(token, _, _)| token)
+            .collect::<Vec<_>>();
+        let before = &before[before.len().saturating_sub(MAX_REPEATED_RUN_WORDS)..];
+        let seen = if active_start == Some(window_start) {
+            let words = token_spans(hypothesis)
+                .into_iter()
+                .map(|(token, _, _)| normalized_token(token))
+                .collect::<Vec<_>>();
+            self.agreement.first_seen(&words)
+        } else {
+            Vec::new()
+        };
+        let end = echo::spoken_end(hypothesis, before, &seen, window_start, speech);
+        Spoken::new(hypothesis, end)
+    }
+
+    pub(super) fn try_next<'hypothesis>(
         &mut self,
         live_prefix: &LivePrefixSnapshot,
         segment_start: u64,
         window_start: u64,
         window_end: u64,
-        hypothesis: &str,
+        hypothesis: impl Into<Spoken<'hypothesis>>,
     ) -> Result<Option<InterimSnapshot>, AcceptedHypothesisCapacity> {
+        let spoken = hypothesis.into();
+        let hypothesis = spoken.text();
         // A window that starts inside settled or pending forced text was
         // decoded before that final landed, so its words would show again.
         if window_start < live_prefix.text_end() {
@@ -175,9 +228,9 @@ impl WholeWindowState {
         if self.active.is_empty() {
             self.agreement = Agreement::default();
         }
-        let Some(active) =
-            self.agreement
-                .revise(&self.active, hypothesis, &replacement, window_end)
+        let Some(active) = self
+            .agreement
+            .revise(&self.active, spoken, &replacement, window_end)
         else {
             return Ok(None);
         };

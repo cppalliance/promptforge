@@ -1,0 +1,18 @@
+{
+  "speech_samples": [[0, 48000], [64320, 88320]],
+  "ticks": [
+    {"at_ms": 1150, "audio_start_ms": 0, "audio_end_ms": 1000, "transcript": "Okay listen up"},
+    {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "Okay listen up this is"},
+    {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Okay listen up this is what I want."},
+    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "Okay listen up this is what I want."},
+    {"at_ms": 4450, "audio_start_ms": 3100, "audio_end_ms": 4300, "transcript": "I want you"},
+    {"at_ms": 4950, "audio_start_ms": 3100, "audio_end_ms": 4800, "transcript": "I want you to create"},
+    {"at_ms": 5450, "audio_start_ms": 3100, "audio_end_ms": 5300, "transcript": "I want you to create a"},
+    {"at_ms": 5950, "audio_start_ms": 3100, "audio_end_ms": 5800, "transcript": "I want you to create a plan. I want you to create"}
+  ],
+  "finals": [
+    {"at_ms": 4200, "sample_start": 0, "sample_end": 49600, "text": "Okay listen up this is what I want."},
+    {"at_ms": 6800, "sample_start": 56320, "sample_end": 89920, "text": "I want you to create a plan."},
+    {"at_ms": 9000, "sample_start": 89920, "sample_end": 144000, "text": ""}
+  ]
+}

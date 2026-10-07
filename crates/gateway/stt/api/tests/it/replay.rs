@@ -8,6 +8,7 @@
 
 mod metrics;
 mod native_capture;
+mod repeats;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

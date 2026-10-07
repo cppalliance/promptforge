@@ -98,8 +98,8 @@
   },
   "scripted-trailing-echo": {
     "agreed_shrink_events": 0,
-    "changed_pairs": 1,
-    "changed_words": 5,
+    "changed_pairs": 0,
+    "changed_words": 0,
     "commit_lag_ms": 690.0,
     "completed_words": 15,
     "lag_sum_ms": 10350.0,
@@ -108,8 +108,23 @@
     "latency_words": 15,
     "pairs": 10,
     "partial_latency_ms": 350.6666666666667,
-    "upsr": 0.1,
-    "upwr": 0.3333333333333333
+    "upsr": 0.0,
+    "upwr": 0.0
+  },
+  "scripted-trailing-echo-same-pass": {
+    "agreed_shrink_events": 0,
+    "changed_pairs": 0,
+    "changed_words": 0,
+    "commit_lag_ms": 713.3333333333334,
+    "completed_words": 15,
+    "lag_sum_ms": 10700.0,
+    "lag_words": 15,
+    "latency_sum_ms": 4860.0,
+    "latency_words": 15,
+    "pairs": 10,
+    "partial_latency_ms": 324.0,
+    "upsr": 0.0,
+    "upwr": 0.0
   },
   "ui": {
     "jfk-native": {
@@ -160,13 +175,21 @@
       "upsr": 0.1111111111111111,
       "upwr": 0.8666666666666667
     },
-    "scripted-trailing-echo": {
-      "changed_pairs": 1,
-      "changed_words": 4,
+    "scripted-trailing-echo-same-pass": {
+      "changed_pairs": 0,
+      "changed_words": 0,
       "completed_words": 15,
       "pairs": 10,
-      "upsr": 0.1,
-      "upwr": 0.26666666666666666
+      "upsr": 0,
+      "upwr": 0
+    },
+    "scripted-trailing-echo": {
+      "changed_pairs": 0,
+      "changed_words": 0,
+      "completed_words": 15,
+      "pairs": 10,
+      "upsr": 0,
+      "upwr": 0
     }
   }
 }
