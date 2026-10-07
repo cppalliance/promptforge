@@ -435,7 +435,7 @@ flowchart TD
 
 <step-3>
 
-### Step 3: Verify the whisper FFI layout against b4938
+### Step 3: Verify the whisper FFI layout against b4938 [completed]
 
 - Component: Groundwork
 - Piece: FFI layout check
