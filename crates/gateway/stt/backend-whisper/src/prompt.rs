@@ -3,7 +3,7 @@
 use gateway_whisper_ffi::WhisperContext;
 
 const MAX_PROMPT_CHARS: usize = 800;
-const MAX_PROMPT_TOKENS: usize = 224;
+pub(crate) const MAX_PROMPT_TOKENS: usize = 224;
 pub(crate) const GLOSSARY_TOKEN_BUDGET: usize = MAX_PROMPT_TOKENS / 2;
 
 fn tail_chars(text: &str, max: usize) -> &str {

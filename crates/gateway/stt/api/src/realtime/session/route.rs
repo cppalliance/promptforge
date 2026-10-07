@@ -126,13 +126,16 @@ impl Session {
             }
             return Ok(None);
         }
-        self.hypothesis_revision = self
-            .hypothesis_revision
-            .checked_add(1)
-            .ok_or(SessionError::EpochExhausted)?;
         let Some(snapshot) = update else {
             return Ok(None);
         };
+        if self.last_hypothesis.as_ref() != Some(&snapshot) {
+            self.hypothesis_revision = self
+                .hypothesis_revision
+                .checked_add(1)
+                .ok_or(SessionError::EpochExhausted)?;
+            self.last_hypothesis = Some(snapshot.clone());
+        }
         Ok(Some(ServerEvent::hypothesis(
             self.ids.event(),
             input.item_id().to_owned(),
@@ -145,6 +148,7 @@ impl Session {
 
     pub(crate) fn take_pending_interim(&mut self, item_id: &str) -> Vec<ServerEvent> {
         self.hypothesis_revision = 0;
+        self.last_hypothesis = None;
         self.standard_interim_committed.clear();
         self.pending_interim
             .drain(..)

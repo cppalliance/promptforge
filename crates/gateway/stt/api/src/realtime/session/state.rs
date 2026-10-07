@@ -7,7 +7,7 @@ use crate::realtime::item::{CommittedItem, FinalizationError};
 use crate::realtime::registry::SessionRegistration;
 use crate::realtime::result_mailbox::{MailboxError, ResultMailbox};
 use crate::realtime::wire::{EffectiveSession, IdGenerator};
-use crate::take::TakeFailure;
+use crate::take::{InterimSnapshot, TakeFailure};
 use gateway_stt_engine::TranscribeError;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,6 +86,7 @@ pub(crate) struct Session {
     pub(super) pending_interim: Vec<String>,
     pub(super) standard_interim_committed: String,
     pub(super) hypothesis_revision: u64,
+    pub(super) last_hypothesis: Option<InterimSnapshot>,
     pub(super) results: ResultMailbox,
 }
 
@@ -113,6 +114,7 @@ impl Session {
             pending_interim: Vec::new(),
             standard_interim_committed: String::new(),
             hypothesis_revision: 0,
+            last_hypothesis: None,
             results: ResultMailbox::default(),
         }
     }

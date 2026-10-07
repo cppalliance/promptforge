@@ -14,9 +14,10 @@ use gateway_whisper_ffi::{
 };
 
 use crate::WhisperConfig;
-use crate::prompt::{GLOSSARY_TOKEN_BUDGET, final_prompt, fit_glossary, sanitize_prompt};
+use crate::prompt::{
+    GLOSSARY_TOKEN_BUDGET, MAX_PROMPT_TOKENS, final_prompt, fit_glossary, sanitize_prompt,
+};
 
-const MAX_PROMPT_TOKENS: usize = 224;
 const PREWARM_CHUNK: usize = 4 * 1024 * 1024;
 
 /// Factory for safe Whisper decoders backed by provisioned runtime artifacts.

@@ -23,10 +23,10 @@ const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
 const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
 pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 
-/// Silence must persist this long after speech to close a segment: 700 ms,
+/// Silence must persist this long after speech to close a segment: 2 s,
 /// long enough to survive sentence-internal pauses and natural breathing
-/// gaps (~2 s), short enough that the final pass starts well before the
-/// user stops talking.
+/// gaps, short enough that the final pass starts well before the user stops
+/// talking.
 const MIN_SILENCE_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 2;
 
 /// Speech shorter than 250 ms is discarded as a click or cough rather than

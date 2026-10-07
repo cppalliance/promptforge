@@ -74,6 +74,7 @@ impl Session {
         self.pending_interim.clear();
         self.standard_interim_committed.clear();
         self.hypothesis_revision = 0;
+        self.last_hypothesis = None;
         Ok(())
     }
 
