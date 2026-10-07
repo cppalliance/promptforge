@@ -5,7 +5,10 @@
 // indicator is hidden from assistive tech, `dispose` removes the element,
 // and a duplicate id throws. The bar owns no LED and no recording port:
 // every indicator belongs to the feature that registers it. A synthetic
-// "probe" indicator runs through every color and back to off.
+// "probe" indicator runs through every color and back to off. Non-LED
+// slots get a button host ordered among the LEDs by the same rule and
+// sharing their id space; the handle labels it, a click runs `activate`,
+// and `dispose` removes it and stops activating.
 // Bundles the TS modules with esbuild and drives them against jsdom built
 // from the real index.html.
 // Run: node --test test/status-indicators.mjs
@@ -156,6 +159,90 @@ const watched = bar.register({ id: "watched", name: "Watched", order: 0 });
 bar.render({ type: "status", label: "x", description: "", severity: "info", activity: "generating", busy: false });
 check("render no longer lights an indicator", litColors(byId("watched")).length === 0);
 watched.dispose();
+
+// Non-LED slots stand in the same group as the LEDs.
+const everything = () =>
+  [...window.document.querySelectorAll(".status-bar__indicators > *")].map((el) => el.dataset.indicator);
+const anyById = (id) => window.document.querySelector(`.status-bar__indicators > [data-indicator="${id}"]`);
+const right = bar.register({ id: "led-right", name: "Right LED", order: 1 });
+const left = bar.register({ id: "led-left", name: "Left LED", order: -2 });
+let activations = 0;
+const meter = bar.registerSlot({
+  id: "meter",
+  name: "Meter",
+  order: 0,
+  activate: () => {
+    activations += 1;
+  },
+});
+const meterEl = anyById("meter");
+check(
+  `a slot orders among the LEDs (got ${everything().join(",")})`,
+  everything().join(",") === "led-left,meter,led-right",
+);
+check("a slot's host is a plain button", meterEl?.tagName === "BUTTON" && meterEl.type === "button");
+check("the handle exposes the slot's host element", meter.element === meterEl);
+check("a slot is not an LED", !meterEl.classList.contains("status-bar__led"));
+const tie = bar.register({ id: "led-tie", name: "Tie LED", order: 0 });
+check(
+  `an LED tying a slot's order lands after it (got ${everything().join(",")})`,
+  everything().join(",") === "led-left,meter,led-tie,led-right",
+);
+tie.dispose();
+
+// Slots and LEDs share one id space.
+const throws = (register) => {
+  try {
+    register();
+    return false;
+  } catch {
+    return true;
+  }
+};
+check(
+  "a slot reusing an LED's id throws",
+  throws(() => bar.registerSlot({ id: "led-left", name: "Again", order: 3, activate() {} })),
+);
+check("an LED reusing a slot's id throws", throws(() => bar.register({ id: "meter", name: "Again", order: 3 })));
+check(
+  "a slot reusing a slot's id throws",
+  throws(() => bar.registerSlot({ id: "meter", name: "Again", order: 3, activate() {} })),
+);
+check(
+  `rejected duplicates leave the group as it was (got ${everything().join(",")})`,
+  everything().join(",") === "led-left,meter,led-right" && anyById("meter") === meterEl,
+);
+
+// The label and tooltip.
+check("a slot's name becomes its aria-label", meterEl.getAttribute("aria-label") === "Meter");
+check("a slot starts with no title", meterEl.title === "");
+meter.setTooltip("Dictating to Owner A");
+check("a slot tooltip sets title", meterEl.title === "Dictating to Owner A");
+check(
+  "a slot tooltip joins the accessible label",
+  meterEl.getAttribute("aria-label").startsWith("Meter") &&
+    meterEl.getAttribute("aria-label").includes("Dictating to Owner A"),
+);
+meter.setTooltip();
+check("clearing a slot tooltip clears title", meterEl.title === "");
+check("clearing a slot tooltip restores the plain label", meterEl.getAttribute("aria-label") === "Meter");
+
+// Activation.
+meterEl.click();
+check(`a click runs activate once (ran ${activations})`, activations === 1);
+
+// Disposal.
+meter.dispose();
+check("dispose removes the slot", anyById("meter") === null);
+meterEl.click();
+check(`a disposed slot no longer activates (ran ${activations})`, activations === 1);
+meter.dispose();
+const reborn = bar.registerSlot({ id: "meter", name: "Meter again", order: 0, activate() {} });
+meter.dispose();
+check("a stale handle's dispose leaves a re-registered slot alone", anyById("meter") === reborn.element);
+reborn.dispose();
+left.dispose();
+right.dispose();
 
 bar.dispose();
 

@@ -34,6 +34,7 @@ import { ClosedEditors } from "./parts/editor/closed-editors";
 import { EditorSettingsService } from "./parts/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./parts/gateway/gateway-config-bridge";
 import { ActivityIndicator } from "./parts/status/activity-indicator";
+import { MicMeter } from "./parts/status/mic-meter";
 import { StatusBar } from "./parts/status/status-bar";
 import { UpdateView } from "./parts/chrome/update-view";
 import { setupWindowChrome } from "./parts/chrome/window-chrome";
@@ -192,6 +193,9 @@ const sttStatus: SttStatus = {
 registerService(STT_STATUS, () => sttStatus);
 registerService(MODEL_SERVICE, () => modelService);
 registerService(SPEECH_CAPTURE, () => speechCapture);
+// The mic meter stands left of the recording LED and follows the same
+// shared capture the dictation surfaces take turns owning.
+disposables.add(new MicMeter(statusBar, speechCapture));
 
 // The focus-tracking and editor-settings services resolve at boot so the
 // inputFocus/editorTextFocus/textInputFocus and config.editor.* context

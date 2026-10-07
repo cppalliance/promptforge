@@ -243,6 +243,13 @@
   --led-lens-highlight: #F0F0F02E;
   --led-lens-shadow: #00000073;
 
+  /* Status bar mic meter */
+  --meter-height: 12px; /* a full-scale bar */
+  --meter-bar-width: 2px; /* also the diameter of a silent or idle bar's dot */
+  --meter-bar-gap: 1px;
+  --meter-live: var(--led-green);
+  --meter-idle: var(--text-tertiary);
+
   /* Window title bar (custom Windows chrome) */
   --titlebar-height: 35px;
   --titlebar-bg: #141414;

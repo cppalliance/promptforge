@@ -483,7 +483,7 @@ flowchart TD
 
 <step-9>
 
-### Step 9: Status bar mic meter
+### Step 9: Status bar mic meter [completed]
 
 - Component: Mic meter
 - Piece: status bar meter

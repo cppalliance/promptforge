@@ -1,5 +1,6 @@
-// The recording LED and activity LED stand in one indicators group beside
-// the barberpole, never behind it: a busy frame shows the barberpole
+// The mic meter, recording LED, and activity LED stand in one indicators
+// group beside the barberpole, never behind it: the bar reads barberpole,
+// meter, recording LED, activity LED; a busy frame shows the barberpole
 // and leaves the group and both LEDs visible, the barberpole precedes the
 // group in DOM order, and a non-busy frame hides the barberpole alone.
 // Run: node test/barberpole-beside-indicators.mjs (after `npm run build`).
@@ -24,6 +25,13 @@ await bootWorkbench("the barberpole shows beside the recording and activity LEDs
   const following = barberpoleEl.compareDocumentPosition(indicatorsEl);
   if ((following & barberpoleEl.DOCUMENT_POSITION_FOLLOWING) === 0) {
     failures.push("the barberpole does not precede the indicators group in DOM order");
+  }
+  if (barberpoleEl.nextElementSibling?.firstElementChild !== indicatorsEl) {
+    failures.push("something sits between the barberpole and the indicators group");
+  }
+  const reading = [...indicatorsEl.children].map((el) => el.dataset.indicator).join(",");
+  if (reading !== "mic-meter,recording,activity") {
+    failures.push(`the indicators group reads ${reading}, not mic-meter,recording,activity`);
   }
 
   emitStatus({

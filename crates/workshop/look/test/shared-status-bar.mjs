@@ -1,10 +1,11 @@
 // Unit test for the shared status bar view (status-bar.ts): the
 // barberpole beside the consumer's indicators group (setBusy shows and
 // hides the barberpole, the group stays visible throughout and keeps its
-// contents, the barberpole precedes the group in DOM order), the text
-// region's label, tooltip, and error styling, and the extras region the
-// consumers fill. Bundles the module with esbuild and drives it against
-// jsdom.
+// contents, the barberpole precedes the group in DOM order), the reading
+// order the workshop's fill gives the right group (barberpole, meter,
+// record LED, inference LED), the text region's label, tooltip, and
+// error styling, and the extras region the consumers fill. Bundles the
+// module with esbuild and drives it against jsdom.
 // Run: node test/shared-status-bar.mjs (from crates/workshop/look).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +94,31 @@ check("setBusy(false) leaves the indicators group visible", view.indicators.hidd
 check("the group still holds the consumer's LED", view.indicators.contains(led));
 check("the view exposes no renderSlot", typeof view.renderSlot === "undefined");
 check("the view exposes no progress element", typeof view.progress === "undefined");
+
+// --- Reading order ----------------------------------------------------------------
+
+// The workshop's fill: a meter button, then the record and inference LEDs.
+const meter = window.document.createElement("button");
+meter.className = "status-bar__item status-bar__meter";
+const record = window.document.createElement("span");
+record.className = "status-bar__led";
+const inference = window.document.createElement("span");
+inference.className = "status-bar__led";
+view.indicators.replaceChildren(meter, record, inference);
+const right = view.element.querySelector(".status-bar__right");
+const reading = () => [...right.querySelectorAll(".status-bar__barberpole, .status-bar__indicators > *")];
+const expected = [view.barberpole, meter, record, inference];
+const readsInOrder = () =>
+  reading().length === expected.length && reading().every((el, index) => el === expected[index]);
+check("the right group reads barberpole, meter, record LED, inference LED", readsInOrder());
+check(
+  "nothing sits between the barberpole and the indicators group",
+  view.barberpole.nextElementSibling?.firstElementChild === view.indicators,
+);
+view.setBusy(true);
+check("a busy bar keeps the reading order", readsInOrder());
+view.setBusy(false);
+check("an idle bar keeps the reading order", readsInOrder());
 
 // --- The text region --------------------------------------------------------------
 

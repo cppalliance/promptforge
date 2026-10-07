@@ -1,8 +1,9 @@
 /* Styles for status-bar.ts, which imports this file; esbuild bundles it
    into the consuming UI's app.css. Themed values come from the :root
    tokens in tokens.css. Styles the bar itself, the text/extras/right
-   regions, the busy barberpole, and the generic status LED primitive
-   (idle lens, lit modifiers, and the pulse/decay transitions). Rules
+   regions, the busy barberpole, the generic status LED primitive
+   (idle lens, lit modifiers, and the pulse/decay transitions), the
+   button host for non-LED items, and the level meter bars. Rules
    live in the components layer so a consumer's own rules override
    these. */
 
@@ -183,5 +184,47 @@
 			0 0 calc(var(--led-glow-radius) / 2) var(--led-red),
 			0 0 var(--led-glow-radius) var(--led-red),
 			0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-red) 55%, transparent);
+	}
+
+	/* A non-LED item standing among the LEDs: a bare button the owner
+	   draws into. Hover takes the hover background; focus follows the
+	   consuming UI's convention. */
+	.status-bar__item {
+		display: inline-flex;
+		align-items: center;
+		height: var(--height-xs);
+		padding: 0 var(--space-1);
+		border: none;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.status-bar__item:hover {
+		background: var(--bg-hover);
+	}
+
+	/* The level meter: a row of rounded bars centered on one line. Each
+	   bar's --level (0 to 1, set per frame) sets its height between a dot
+	   and the full meter height. Live bars take the meter color; idle,
+	   they rest as dim dots. */
+	.status-bar__meter {
+		gap: var(--meter-bar-gap);
+	}
+
+	.status-bar__meter-bar {
+		flex: none;
+		width: var(--meter-bar-width);
+		height: calc(
+			var(--meter-bar-width) + var(--level, 0) * (var(--meter-height) - var(--meter-bar-width))
+		);
+		border-radius: calc(var(--meter-bar-width) / 2);
+		background: var(--meter-live);
+	}
+
+	.status-bar__meter--idle .status-bar__meter-bar {
+		background: var(--meter-idle);
 	}
 }
