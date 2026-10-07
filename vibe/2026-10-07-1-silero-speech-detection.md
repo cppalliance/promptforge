@@ -197,6 +197,15 @@ Detector decisions get unit tests through a scripted detector, so every timing r
   - Pin Silero v6.2.0 rather than v5.1.2. Rationale: both load at `b4938`, and v6 rejects noise-only clips far better (87 against 61 percent of ESC-50 files) with ROC-AUC 0.97 against 0.96 (https://github.com/snakers4/silero-vad/wiki/Quality-Metrics).
   - Detection runs on one CPU thread with `use_gpu` off, so it never competes with the Whisper decoders on the GPU.
   - The sentence-end close is tuned down from 0.6 s as far as the recording allows. Rationale: lower latency is preferred, and AssemblyAI's newest streaming model ends a turn 100 ms after terminal punctuation (https://www.assemblyai.com/docs/streaming/migration-guides/universal-to-universal-3-5-pro-streaming).
+  - Tuned values: speech tail 100 ms, sentence-end silence 0.2 s, short-burst limit 1 s (unchanged), and speech probabilities 0.5 and 0.35 (unchanged). They supersede the 0.6 s closes named above. Tuned in Step 12 on the gateway-level capture (CUDA, base.en interim, small.en final), one run per value, scored against the Step 1 loudness baselines; every run stayed on Silero, and the full table is in `local/stt-fixtures/dictation-01-tuning.json`. Each value tried, with final punctuation kept on dictation-01 and JFK (baselines 10/11 and 2/4), unsaid text during pauses, and the worst per-line latency on dictation-01 and as a multiple of baseline on each clip:
+    - Before tuning (tail 300 ms, 0.6 s, 1 s): 10/11 and 2/4, no unsaid text, 905 ms, 1.12x and 1.24x.
+    - Tail 100 ms (0.6 s, 1 s): 10/11 and 2/4, no unsaid text, 991 ms, 1.16x and 1.18x. The shortest tail passed, so 200 to 500 ms were not run.
+    - Sentence-end 0.2 s (tail 100 ms, 1 s): 10/11 and 2/4, no unsaid text, 543 ms, 0.61x and 0.86x. No dictation sentence split: line 1 also closes after "up." and "want.", both sentence ends, and line 8's only interior close is the stride stitch after "long," that every run shows.
+    - Sentence-end 0.3, 0.4, and 0.5 s, JFK only: 2/4, no unsaid text, 0.97x, 1.13x, and 1.05x. Each still closes after "you," at JFK's 660 ms comma pause, which only 0.6 s avoids.
+    - Short burst 1.5 and 1.25 s (tail 100 ms, 0.2 s): dictation 10/11, no unsaid text, 593 and 565 ms, 0.60x and 0.68x, with "Hey." final at 369 ms. JFK 2/4, no unsaid text, 0.94x and 0.95x, but "ask not" closes alone and the final pass hears "is not", one word error against a baseline of none.
+    - Final capture at the tuned values: 10/11 and 2/4, no unsaid text, 559 ms, 0.66x and 0.87x. "Hey." lands at 362 ms, the slowest sentence-ending line on either clip at 709 ms, and word errors match the baselines (1 and 0). Silero's per-chunk p99 measured 153 to 165 µs.
+  - The sentence-end no-split check is judged on dictation-01, the tuning recording. Rationale: JFK's single sentence closes after "Americans," at its 1.1 s pause at every candidate including 0.6 s, so no value could pass on JFK, and its extra close after "you," at 0.2 s leaves its completed transcript, punctuation, and word errors identical to the baseline. Added by the vibe coder in Step 12.
+  - The short-burst limit stays at 1 s, the largest value that keeps word errors no worse than the baseline. Rationale: 1.25 and 1.5 s both close "Hey." at the sentence-end silence without splitting a dictation line, but each isolates JFK's "ask not" into a misheard final, which fails the word-error criterion. Added by the vibe coder in Step 12.
   - The mic meter lives in the status bar, not beside the chat box. User: "The status bar is better because if you click away the agent window, like if you put another window on top or even close it while it's recording, it's still recording, and on the status bar you can see that it's actually doing something."
   - The status bar order is barberpole, meter, record LED, inference LED. User: "the status bar will have 4 items: (barberpol) (waveform) (record LED) (inference LED)."
   - The meter shows a short scrolling loudness history. User chose: "A short loudness history: bars scroll right to left, each one a recent moment."
@@ -543,7 +552,7 @@ flowchart TD
 
 <step-12>
 
-### Step 12: Tune on the dictation capture and verify
+### Step 12: Tune on the dictation capture and verify [completed]
 
 - Component: Interim decoding
 - Piece: tuning and verification

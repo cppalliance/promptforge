@@ -41,24 +41,14 @@
       "audio_end_ms": 2500
     },
     {
-      "at_ms": 3150,
-      "revision": 4,
-      "transcript": "We choose to go to the moon",
-      "finalized": "",
-      "agreed": "We choose to go to the",
-      "tentative": " moon",
-      "audio_start_ms": 0,
-      "audio_end_ms": 2700
-    },
-    {
       "at_ms": 4800,
       "revision": 5,
       "transcript": "We chose to go to the moon",
       "finalized": "We chose to go to the moon",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 2700,
-      "audio_end_ms": 2700
+      "audio_start_ms": 2500,
+      "audio_end_ms": 2500
     },
     {
       "at_ms": 6050,

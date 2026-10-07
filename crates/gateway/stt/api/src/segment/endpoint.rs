@@ -23,9 +23,9 @@ use super::FRAME_SAMPLES;
 const MIN_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 2) as u64;
 
 /// Silence that closes a segment whose latest accepted interim text ends in
-/// sentence-final punctuation: 0.6 s, so a finished sentence reaches the final
+/// sentence-final punctuation: 0.2 s, so a finished sentence reaches the final
 /// pass without waiting out the pause allowance for a sentence still going.
-const SENTENCE_END_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 3 / 5) as u64;
+const SENTENCE_END_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 5) as u64;
 
 /// Speech runs shorter than this close after [`SENTENCE_END_SILENCE_SAMPLES`]
 /// even without the sentence-end hint: 1 s, so a lone word or a short reply
@@ -247,19 +247,19 @@ mod tests {
     }
 
     #[test]
-    fn a_sentence_end_hint_closes_once_a_frame_reaches_six_tenths_of_a_second() {
+    fn a_sentence_end_hint_closes_once_a_frame_reaches_two_tenths_of_a_second() {
         let state = speaking(0, Some(38_400), 0);
         let hinted = |cursor| Scan {
             sentence_end: true,
             ..scan(cursor, true)
         };
-        let short = endpoint(state, hinted(38_400 + 9_600 - FRAME - 1));
+        let short = endpoint(state, hinted(38_400 + 3_200 - FRAME - 1));
         assert_eq!(short.and_then(|advance| advance.closed), None);
-        let closing = closed(endpoint(state, hinted(38_400 + 9_600 - FRAME)));
+        let closing = closed(endpoint(state, hinted(38_400 + 3_200 - FRAME)));
         assert_eq!(closing.rule, Rule::Silence);
         assert_eq!(closing.speech, 0..38_400);
         assert_eq!(closing.segment, 0..40_000);
-        let unhinted = endpoint(state, scan(38_400 + 9_600 - FRAME, true));
+        let unhinted = endpoint(state, scan(38_400 + 3_200 - FRAME, true));
         assert_eq!(
             unhinted.and_then(|advance| advance.closed),
             None,
@@ -268,11 +268,11 @@ mod tests {
     }
 
     #[test]
-    fn a_burst_under_one_second_closes_once_a_frame_reaches_six_tenths_of_a_second() {
+    fn a_burst_under_one_second_closes_once_a_frame_reaches_two_tenths_of_a_second() {
         let state = speaking(0, Some(15_999), 0);
-        let short = endpoint(state, scan(15_999 + 9_600 - FRAME - 1, true));
+        let short = endpoint(state, scan(15_999 + 3_200 - FRAME - 1, true));
         assert_eq!(short.and_then(|advance| advance.closed), None);
-        let closing = closed(endpoint(state, scan(15_999 + 9_600 - FRAME, true)));
+        let closing = closed(endpoint(state, scan(15_999 + 3_200 - FRAME, true)));
         assert_eq!(closing.rule, Rule::Silence);
         assert_eq!(closing.speech, 0..15_999);
         assert_eq!(closing.segment, 0..17_599);
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn a_burst_of_one_second_waits_for_two_seconds_of_silence() {
         let state = speaking(0, Some(16_000), 0);
-        let paused = endpoint(state, scan(16_000 + 9_600 - FRAME, true));
+        let paused = endpoint(state, scan(16_000 + 3_200 - FRAME, true));
         assert_eq!(
             paused.and_then(|advance| advance.closed),
             None,
@@ -294,16 +294,16 @@ mod tests {
     }
 
     #[test]
-    fn a_sentence_end_hint_closes_bursts_on_both_sides_of_the_limit_at_six_tenths_of_a_second() {
+    fn a_sentence_end_hint_closes_bursts_on_both_sides_of_the_limit_at_two_tenths_of_a_second() {
         for run in [15_999, 16_000] {
             let state = speaking(0, Some(run), 0);
             let hinted = |cursor| Scan {
                 sentence_end: true,
                 ..scan(cursor, true)
             };
-            let short = endpoint(state, hinted(run + 9_600 - FRAME - 1));
+            let short = endpoint(state, hinted(run + 3_200 - FRAME - 1));
             assert_eq!(short.and_then(|advance| advance.closed), None);
-            let closing = closed(endpoint(state, hinted(run + 9_600 - FRAME)));
+            let closing = closed(endpoint(state, hinted(run + 3_200 - FRAME)));
             assert_eq!(closing.speech, 0..run);
         }
     }
@@ -353,7 +353,7 @@ mod tests {
             silence_begin: Some(168_448),
             ..stride
         };
-        let breath = endpoint(paused, scan(168_448 + 9_600 - FRAME, true));
+        let breath = endpoint(paused, scan(168_448 + 3_200 - FRAME, true));
         assert_eq!(
             breath.and_then(|advance| advance.closed),
             None,
@@ -374,12 +374,12 @@ mod tests {
         assert_eq!(closing.speech, 160_256..168_448);
         let hinted = Scan {
             sentence_end: true,
-            ..scan(168_448 + 9_600 - FRAME, true)
+            ..scan(168_448 + 3_200 - FRAME, true)
         };
         assert_eq!(
             closed(endpoint(paused, hinted)).speech,
             160_256..168_448,
-            "a sentence-end hint still closes at six tenths of a second"
+            "a sentence-end hint still closes at two tenths of a second"
         );
     }
 

@@ -9,7 +9,7 @@ use gateway_stt_engine::DecodeRequest;
 use tokio::sync::mpsc;
 
 use super::{FINAL_SEGMENT_CAPACITY, FinalPipeline, run_final_pipeline};
-use crate::take::Take;
+use crate::take::{SPEECH_TAIL_SAMPLES, Take};
 
 /// Appends `samples` of loud speech or digital silence and submits whatever
 /// segments they close.
@@ -57,10 +57,10 @@ async fn a_click_keeps_its_accepted_text_when_decoded_speech_follows() {
 
     hear(&take, false, 16_384);
     hear(&take, true, 3_584);
-    hear(&take, false, 4_800);
-    take.next_window_snapshot("Hey.", &[], 0, 0, 24_768)
+    hear(&take, false, 3_072);
+    take.next_window_snapshot("Hey.", &[], 0, 0, 19_968 + SPEECH_TAIL_SAMPLES)
         .expect("the word is accepted from a window that ends in its closing silence");
-    hear(&take, false, 4_928);
+    hear(&take, false, 512);
     settle(&take).await;
     let consumed = take.consumed();
     assert_eq!(
@@ -74,7 +74,7 @@ async fn a_click_keeps_its_accepted_text_when_decoded_speech_follows() {
     );
 
     hear(&take, true, 16_000);
-    take.next_window_snapshot("The commit rule.", &[], consumed, consumed, 45_696)
+    take.next_window_snapshot("The commit rule.", &[], consumed, consumed, 39_552)
         .expect("the next sentence is accepted");
     let completed = take
         .finalization()

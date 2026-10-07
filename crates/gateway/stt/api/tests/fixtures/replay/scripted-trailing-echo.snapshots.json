@@ -38,7 +38,7 @@
       "agreed": "Okay listen up this is",
       "tentative": " what I want.",
       "audio_start_ms": 0,
-      "audio_end_ms": 3308
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 4200,
@@ -47,8 +47,8 @@
       "finalized": "Okay listen up this is what I want.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 3308,
-      "audio_end_ms": 3308
+      "audio_start_ms": 3108,
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 4650,
@@ -88,7 +88,7 @@
       "agreed": " I want you to create",
       "tentative": " a plan.",
       "audio_start_ms": 3108,
-      "audio_end_ms": 5836
+      "audio_end_ms": 5636
     },
     {
       "at_ms": 6800,
@@ -97,8 +97,8 @@
       "finalized": "Okay listen up this is what I want. I want you to create a plan.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 5836,
-      "audio_end_ms": 5836
+      "audio_start_ms": 5636,
+      "audio_end_ms": 5636
     }
   ],
   "completed": "Okay listen up this is what I want. I want you to create a plan."

@@ -147,8 +147,8 @@ async fn interim_decodes_follow_speech_through_its_tail_stop_in_silence_and_resu
     );
     assert_eq!(gated.tick(at(40)).await, Some(window_to(at(40))));
     assert_eq!(
-        gated.tick(at(44)).await,
-        Some(window_to(at(44))),
+        gated.tick(at(40) + SPEECH_TAIL_SAMPLES / 2).await,
+        Some(window_to(at(40) + SPEECH_TAIL_SAMPLES / 2)),
         "a window ends at the buffer end while the speech tail is still arriving"
     );
     assert_eq!(

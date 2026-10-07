@@ -5,7 +5,6 @@
     {"at_ms": 1650, "audio_start_ms": 0, "audio_end_ms": 1500, "transcript": "We choose to go"},
     {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "We choose to go to the"},
     {"at_ms": 2650, "audio_start_ms": 0, "audio_end_ms": 2500, "transcript": "We choose to go to the moon"},
-    {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 2700, "transcript": "We choose to go to the moon"},
     {"at_ms": 6050, "audio_start_ms": 2500, "audio_end_ms": 5900, "transcript": "and do"},
     {"at_ms": 6650, "audio_start_ms": 2500, "audio_end_ms": 6500, "transcript": "and do the other"},
     {"at_ms": 7150, "audio_start_ms": 2500, "audio_end_ms": 7000, "transcript": "and do the other things"},

@@ -8,9 +8,9 @@ use super::pcm::RetainedPcm;
 use super::{Take, TakeState};
 use crate::audio::AudioError;
 
-/// Silence an interim window keeps after the last speech, 300 ms: long
+/// Silence an interim window keeps after the last speech, 100 ms: long
 /// enough for whisper to end a sentence with its punctuation.
-pub(crate) const SPEECH_TAIL_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 3 / 10) as u64;
+pub(crate) const SPEECH_TAIL_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
 
 #[derive(Debug)]
 pub(crate) struct InterimAudioWindow {

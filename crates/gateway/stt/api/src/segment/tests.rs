@@ -253,20 +253,20 @@ fn natural_segment_ends_a_hangover_past_the_silence_and_closes_after_two_seconds
 }
 
 #[test]
-fn a_sentence_end_hint_closes_a_segment_after_six_tenths_of_a_second() {
+fn a_sentence_end_hint_closes_a_segment_after_two_tenths_of_a_second() {
     let (mut unhinted, _) = scripted(&[(0, 38_400)]);
     assert_eq!(
-        hear(&mut unhinted, 48_128),
+        hear(&mut unhinted, 41_984),
         None,
-        "without the hint 0.6 s of silence is a pause"
+        "without the hint 0.2 s of silence is a pause"
     );
     let (mut segmenter, _) = scripted(&[(0, 38_400)]);
     segmenter.set_sentence_end(0, true);
-    assert_eq!(hear(&mut segmenter, 48_127), None);
+    assert_eq!(hear(&mut segmenter, 41_983), None);
     assert_eq!(
-        hear(&mut segmenter, 48_128),
+        hear(&mut segmenter, 41_984),
         Some(SegmentOutcome::Decode(0..40_000)),
-        "silence from 38,400 closes once a frame reaches 0.6 s past it"
+        "silence from 38,400 closes once a frame reaches 0.2 s past it"
     );
 }
 
@@ -384,11 +384,11 @@ fn the_click_rule_skips_runs_under_250_ms_measured_without_padding() {
 #[test]
 fn a_click_closes_at_the_sentence_end_silence_and_is_still_skipped() {
     let (mut segmenter, _) = scripted(&[(24_576, 28_160)]);
-    assert_eq!(hear(&mut segmenter, 37_887), None);
+    assert_eq!(hear(&mut segmenter, 31_743), None);
     assert_eq!(
-        hear(&mut segmenter, 37_888),
+        hear(&mut segmenter, 31_744),
         Some(SegmentOutcome::Skipped(16_576..29_760)),
-        "a 224 ms run closes once a frame reaches 0.6 s of silence and is still a click"
+        "a 224 ms run closes once a frame reaches 0.2 s of silence and is still a click"
     );
 }
 
@@ -401,7 +401,7 @@ fn a_silence_close_proves_only_the_frames_it_decided_on_silent() {
     );
     assert_eq!(
         segmenter.scanned(),
-        37_888,
+        31_744,
         "the frame that reached the closing silence ends the proven-silent span, \
          though later speech is already classified"
     );

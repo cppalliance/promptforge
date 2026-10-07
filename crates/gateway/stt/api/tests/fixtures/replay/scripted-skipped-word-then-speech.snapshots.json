@@ -38,7 +38,7 @@
       "agreed": "Okay listen",
       "tentative": " up.",
       "audio_start_ms": 0,
-      "audio_end_ms": 3308
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 4200,
@@ -47,8 +47,8 @@
       "finalized": "Okay, listen up.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 3308,
-      "audio_end_ms": 3308
+      "audio_start_ms": 3108,
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 7550,
@@ -58,7 +58,7 @@
       "agreed": "",
       "tentative": " Hey.",
       "audio_start_ms": 3108,
-      "audio_end_ms": 7500
+      "audio_end_ms": 7300
     },
     {
       "at_ms": 7850,
@@ -68,7 +68,7 @@
       "agreed": "",
       "tentative": " Hey.",
       "audio_start_ms": 3108,
-      "audio_end_ms": 7532
+      "audio_end_ms": 7332
     },
     {
       "at_ms": 8100,
@@ -77,8 +77,8 @@
       "finalized": "Okay, listen up. Hey.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 7532,
-      "audio_end_ms": 7532
+      "audio_start_ms": 7332,
+      "audio_end_ms": 7332
     },
     {
       "at_ms": 11150,

@@ -7,9 +7,9 @@
     {"at_ms": 2650, "audio_start_ms": 0, "audio_end_ms": 2500, "transcript": "ask not what your country can do"},
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Ask not what your country can do for you."},
     {"at_ms": 3650, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "Ask not what your country can do for you"},
-    {"at_ms": 3950, "audio_start_ms": 0, "audio_end_ms": 3800, "transcript": "Ask not what your country can do for you."}
+    {"at_ms": 3950, "audio_start_ms": 0, "audio_end_ms": 3716, "transcript": "Ask not what your country can do for you."}
   ],
   "finals": [
-    {"at_ms": 4300, "sample_start": 0, "sample_end": 62400, "text": "Ask not what your country can do for you."}
+    {"at_ms": 4300, "sample_start": 0, "sample_end": 60800, "text": "Ask not what your country can do for you."}
   ]
 }

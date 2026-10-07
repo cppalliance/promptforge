@@ -6,9 +6,9 @@
     {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "Why is this"},
     {"at_ms": 2650, "audio_start_ms": 0, "audio_end_ms": 2500, "transcript": "Why is this the"},
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Why is that the way"},
-    {"at_ms": 3350, "audio_start_ms": 0, "audio_end_ms": 3200, "transcript": "Why is that the way?"}
+    {"at_ms": 3350, "audio_start_ms": 0, "audio_end_ms": 3108, "transcript": "Why is that the way?"}
   ],
   "finals": [
-    {"at_ms": 3700, "sample_start": 0, "sample_end": 52800, "text": "Why is that the way?"}
+    {"at_ms": 3700, "sample_start": 0, "sample_end": 51200, "text": "Why is that the way?"}
   ]
 }

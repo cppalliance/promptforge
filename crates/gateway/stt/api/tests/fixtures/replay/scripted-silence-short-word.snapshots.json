@@ -58,7 +58,7 @@
       "agreed": "About one tick faster than the plans 0.6",
       "tentative": " seconds.",
       "audio_start_ms": 0,
-      "audio_end_ms": 3308
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 4200,
@@ -67,8 +67,8 @@
       "finalized": "About one tick faster than the plan's 0.6 seconds.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 3308,
-      "audio_end_ms": 3308
+      "audio_start_ms": 3108,
+      "audio_end_ms": 3108
     },
     {
       "at_ms": 8350,
@@ -88,7 +88,7 @@
       "agreed": "",
       "tentative": " Hey.",
       "audio_start_ms": 3108,
-      "audio_end_ms": 8800
+      "audio_end_ms": 8700
     },
     {
       "at_ms": 9150,
@@ -98,7 +98,7 @@
       "agreed": "",
       "tentative": " Hey.",
       "audio_start_ms": 3108,
-      "audio_end_ms": 8940
+      "audio_end_ms": 8740
     },
     {
       "at_ms": 9800,
@@ -107,8 +107,8 @@
       "finalized": "About one tick faster than the plan's 0.6 seconds. Hey.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 8940,
-      "audio_end_ms": 8940
+      "audio_start_ms": 8740,
+      "audio_end_ms": 8740
     }
   ],
   "completed": "About one tick faster than the plan's 0.6 seconds. Hey."

@@ -28,8 +28,8 @@ const SAMPLES_PER_MS: usize = 16;
 /// 100 ms after speech for a trailing consonant, so a line counts as covered
 /// when speech starts or ends this close to its edges.
 const EDGE_SLACK: usize = 100 * SAMPLES_PER_MS;
-/// A gap shorter than the segmenter's 0.6 s sentence-end silence never
-/// closes a segment, so it does not break a line's cover.
+/// A gap shorter than 0.6 s is a breath or a sentence break within a line,
+/// so it does not break the line's cover.
 const BRIDGED_GAP: usize = 600 * SAMPLES_PER_MS;
 /// A pause at least this long holds no speech decision past
 /// [`PAUSE_SPILL`] from either of its edges.
