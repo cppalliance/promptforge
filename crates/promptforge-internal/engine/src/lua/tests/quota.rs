@@ -50,6 +50,7 @@ fn tool_call_round() -> Answer<Error> {
             id: "call_1".to_owned(),
             name: "echo".to_owned(),
             arguments: json!({ "value": "hi" }),
+            tool: None,
         }]),
         finish_reason: Some("tool_calls".to_owned()),
         model: "test-model".to_owned(),

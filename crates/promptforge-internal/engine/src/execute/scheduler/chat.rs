@@ -367,6 +367,10 @@ impl ArrivedRound {
                 id: call.id().to_owned(),
                 name: call.name().to_owned(),
                 arguments: tool_call_arguments(call).clone(),
+                tool: match advertised.get(call.name()) {
+                    Some(DispatchTarget::Bound(tool)) => Some(tool.clone()),
+                    _ => None,
+                },
             })
             .collect();
         self.emitter

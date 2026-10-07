@@ -20,8 +20,8 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 /// slot whose Plugin DID contribute to the catalog but not the named
 /// tool - the contribution was rejected at assembly, or the Plugin
 /// never offered that name - is not a missing Plugin: installing
-/// changes nothing. It is warned and left unfilled, and advertising the
-/// unfilled alias fails at run time.
+/// changes nothing. The tool lands in [`Requirements::missing_tools`]
+/// instead, and the run fails until the prompt or the Plugin changes.
 pub(super) fn fill_tool_bindings(
     prompt: &Prompt,
     catalog: &ToolCatalog,
@@ -40,12 +40,11 @@ pub(super) fn fill_tool_bindings(
         }
         let plugin = id.plugin();
         let plugin_present = catalog.tools().iter().any(|tool| plugin.contains(&tool.id));
-        // A Plugin that contributed to the catalog but not this tool
-        // (the contribution was rejected at assembly or never made) is not
-        // missing: reporting it would fail the run unsatisfiably, since
-        // installing it changes nothing. The alias stays unbound instead,
-        // and advertising it fails at run time with the alias named.
-        if !plugin_present && !requirements.missing_required.contains(&plugin) {
+        if plugin_present {
+            if !requirements.missing_tools.contains(id) {
+                requirements.missing_tools.push(id.clone());
+            }
+        } else if !requirements.missing_required.contains(&plugin) {
             requirements.missing_required.push(plugin);
         }
     }

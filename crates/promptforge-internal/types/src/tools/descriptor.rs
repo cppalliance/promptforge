@@ -9,8 +9,8 @@ use super::ids::ToolId;
 /// A tool described as data.
 ///
 /// A descriptor holds the tool's stable id, its wire name, the description
-/// the model reads, its parameter schema, and whether its output is
-/// structured.
+/// the model reads, its parameter schema, whether its output is
+/// structured, and whether a stop leaves its calls running.
 ///
 /// The caller collects the descriptors of its activated Plugins into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay in the
@@ -35,10 +35,17 @@ pub struct ToolDescriptor {
     /// script that calls the tool receives the output as data. Otherwise the
     /// script receives it as a string.
     pub structured_output: bool,
+    /// Whether a stop leaves the tool's calls in flight. A stop cancels
+    /// every other call in flight and lets the run go on; a cancel still
+    /// ends this one. A question to the operator sets it, so the question
+    /// stays open. A descriptor serialized without the field reads as
+    /// `false`.
+    #[serde(default)]
+    pub survives_stop: bool,
 }
 
 impl ToolDescriptor {
-    /// Builds a descriptor with plain-text output.
+    /// Builds a descriptor with plain-text output that a stop reaches.
     #[must_use]
     pub fn new(
         id: ToolId,
@@ -52,6 +59,7 @@ impl ToolDescriptor {
             description: description.into(),
             parameters_schema,
             structured_output: false,
+            survives_stop: false,
         }
     }
 
@@ -60,6 +68,14 @@ impl ToolDescriptor {
     #[must_use]
     pub fn structured(mut self, structured: bool) -> ToolDescriptor {
         self.structured_output = structured;
+        self
+    }
+
+    /// Sets whether a stop leaves the tool's calls in flight (`true`) or
+    /// drops them (`false`).
+    #[must_use]
+    pub fn survives_stop(mut self, survives: bool) -> ToolDescriptor {
+        self.survives_stop = survives;
         self
     }
 }

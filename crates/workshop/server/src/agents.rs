@@ -45,8 +45,9 @@ use std::sync::Arc;
 use harness::plugin::{HostServices, PluginRegistry, UserInput};
 use harness::record::RunId;
 use harness::vfs::VfsRef;
-use harness::{Harness, RunRequest};
+use harness::{Harness, RunRequest, USER_INPUT_ASK_TOOL};
 use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
+use promptforge::tools::ToolId;
 use workshop_agents::{
     Conversation, ConversationId, Conversations, LaunchError, TokioTimer, discover_agents,
     load_agent,
@@ -125,6 +126,9 @@ struct Inner {
     broker: WorkshopBroker,
     /// The Plugins every run resolves its declarations against.
     plugins: PluginRegistry,
+    /// The ask tool's id, which a script's ask result is recognized by;
+    /// `None` only if the id fails to parse.
+    ask: Option<ToolId>,
     /// The services every run's clone starts from.
     services: HostServices,
     /// The running conversations.
@@ -155,6 +159,7 @@ impl AgentSessions {
                 )),
                 broker: WorkshopBroker::new(registry.clone()),
                 plugins: plugins(),
+                ask: ToolId::parse(USER_INPUT_ASK_TOOL).ok(),
                 services: services(&registry),
                 conversations: Conversations::new(),
                 registry,
@@ -245,6 +250,11 @@ impl AgentSessions {
             self.inner.plugins.clone(),
             conversation.services(&self.inner.services),
         )
+    }
+
+    /// The ask tool's id, which a socket frames a script's ask result by.
+    fn ask(&self) -> Option<ToolId> {
+        self.inner.ask.clone()
     }
 
     /// The running conversation with this id, when one exists: how a

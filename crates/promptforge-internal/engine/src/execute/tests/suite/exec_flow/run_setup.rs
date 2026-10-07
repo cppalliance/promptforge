@@ -105,11 +105,10 @@ async fn default_run_context_store_handle_declares_a_fresh_store() {
 }
 
 #[tokio::test]
-async fn advertising_an_unfilled_slot_fails_at_run_time() {
-    // An exact slot whose Plugin is active but contributed no such tool
-    // stays unfilled at prepare (the Plugin is not missing, so the run is
-    // not refused); advertising the alias in a section is the run-time error
-    // prepare promised.
+async fn a_slot_its_present_plugin_does_not_offer_refuses_the_run() {
+    // An exact slot whose Plugin is active but contributed no such tool is
+    // a missing tool, not a missing Plugin: prepare refuses the run before
+    // any section advertises the alias.
     let md = concat!(
         "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  search: tools/search\n---\n\n",
         "# Test prompt\n\n\
@@ -118,7 +117,7 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
     // The catalog holds the Plugin's `echo`, never `search`: the slot's
-    // Plugin is present, so the slot is unfilled, not missing.
+    // Plugin is present, so the tool is missing, not the Plugin.
     let tool: Arc<dyn TestTool> = Arc::new(EchoTool);
     let table = TestToolTable::from_tools(&[tool]);
     let catalog = table
@@ -133,13 +132,14 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     )
     .await
     else {
-        panic!("advertising an unfilled alias must fail");
+        panic!("a slot naming a tool its Plugin does not offer must refuse the run");
     };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet, "{error}");
     assert!(
         error
             .to_string()
-            .contains("tools.add alias \"search\" is not a bound tool slot"),
-        "the failure names the unfilled alias: {error}"
+            .contains("- missing tool: tools/search; tools does not offer it"),
+        "the refusal names the missing tool and its Plugin: {error}"
     );
 }
 
@@ -169,8 +169,8 @@ async fn models_bind_is_gone_from_the_lua_surface() {
 }
 
 /// The fixture Plugin's `echo` tool, present so a prompt's `search` slot
-/// is unfilled rather than its Plugin missing. The implementation is never
-/// called by the unfilled-slot case.
+/// is a missing tool rather than its Plugin missing. The implementation is
+/// never called by the missing-tool case.
 struct EchoTool;
 
 #[async_trait::async_trait]

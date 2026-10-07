@@ -37,6 +37,7 @@
 #[non_exhaustive] pub struct promptforge::RunContext { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::RunError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::RunLimits { /* private fields */ }
+#[non_exhaustive] pub struct promptforge::UnavailablePlugin { .. }
 #[non_exhaustive] pub struct promptforge::UnmetRequirement { .. }
 #[non_exhaustive] pub struct promptforge::model::Completion { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::CompletionError { /* private fields */ }
@@ -88,6 +89,7 @@ auto promptforge::RunLimits: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSaf
 auto promptforge::RunResult: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::SourceLocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Step: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::UnavailablePlugin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::UnmetRequirement: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::cancel::CancelHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::cancel::Cancelled: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -208,6 +210,7 @@ derives promptforge::RunLimits: Clone, Copy, Debug, Default
 derives promptforge::RunResult: Debug
 derives promptforge::SourceLocation: Clone, Debug, Eq, PartialEq
 derives promptforge::Step: Debug
+derives promptforge::UnavailablePlugin: Clone, Debug, Eq, PartialEq
 derives promptforge::UnmetRequirement: Clone, Debug, Eq, PartialEq
 derives promptforge::cancel::CancelHandle: Clone, Debug, Default
 derives promptforge::cancel::Cancelled: Debug
@@ -455,6 +458,7 @@ pub fn promptforge::RunLimits::request_timeout(self, value: core::time::Duration
 pub fn promptforge::RunLimits::response_bytes(&self) -> core::num::nonzero::NonZeroU64
 pub fn promptforge::RunLimits::timeout(&self) -> core::time::Duration
 pub fn promptforge::RunLimits::tool_iterations(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::UnavailablePlugin::new(plugin: promptforge::plugins::PluginId, reason: impl core::convert::Into<alloc::string::String>) -> promptforge::UnavailablePlugin
 pub fn promptforge::cancel::CancelHandle::cancel(&self)
 pub fn promptforge::cancel::CancelHandle::cancelled(&self) -> promptforge::cancel::Cancelled
 pub fn promptforge::cancel::CancelHandle::child(&self) -> promptforge::cancel::CancelHandle
@@ -611,6 +615,7 @@ pub fn promptforge::tools::ToolCatalogError::duplicate_id(&self) -> core::option
 pub fn promptforge::tools::ToolCatalogError::kind(&self) -> promptforge::tools::ToolCatalogErrorKind
 pub fn promptforge::tools::ToolDescriptor::new(id: promptforge::tools::ToolId, wire_name: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolDescriptor::structured(self, structured: bool) -> promptforge::tools::ToolDescriptor
+pub fn promptforge::tools::ToolDescriptor::survives_stop(self, survives: bool) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolError::is_cancelled(&self) -> bool
 pub fn promptforge::tools::ToolError::is_retryable(&self) -> bool
 pub fn promptforge::tools::ToolError::kind(&self) -> promptforge::tools::ToolErrorKind
@@ -716,6 +721,8 @@ pub promptforge::RequirementCheck::ContextMinimum
 pub promptforge::RequirementCheck::HardKeyword
 pub promptforge::Requirements::missing_required: alloc::vec::Vec<promptforge::plugins::PluginId>
 pub promptforge::Requirements::missing_services: alloc::vec::Vec<promptforge::MissingService>
+pub promptforge::Requirements::missing_tools: alloc::vec::Vec<promptforge::tools::ToolId>
+pub promptforge::Requirements::unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>
 pub promptforge::Requirements::unmet_requirements: alloc::vec::Vec<promptforge::UnmetRequirement>
 pub promptforge::RunErrorKind::Binding
 pub promptforge::RunErrorKind::Cancelled
@@ -746,6 +753,8 @@ pub promptforge::Step::Done::result: promptforge::RunResult
 pub promptforge::Step::Pending { .. }
 pub promptforge::Step::Pending::effects: alloc::vec::Vec<(promptforge::effect::EffectId, promptforge::ids::Provenance, promptforge::effect::Effect)>
 pub promptforge::Step::Pending::events: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::UnavailablePlugin::plugin: promptforge::plugins::PluginId
+pub promptforge::UnavailablePlugin::reason: alloc::string::String
 pub promptforge::UnmetRequirement::actual: alloc::string::String
 pub promptforge::UnmetRequirement::check: promptforge::RequirementCheck
 pub promptforge::UnmetRequirement::required: alloc::string::String
@@ -1043,6 +1052,7 @@ pub promptforge::event::Event::ToolResult::content: alloc::string::String
 pub promptforge::event::Event::ToolResult::execution: alloc::string::String
 pub promptforge::event::Event::ToolResult::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::ToolResult::section: alloc::string::String
+pub promptforge::event::Event::ToolResult::tool: core::option::Option<promptforge::tools::ToolId>
 pub promptforge::event::Event::ToolResult::tool_call_id: alloc::string::String
 pub promptforge::event::Event::ToolResult::trusted: bool
 pub promptforge::event::Event::ToolResult::turn: u32
@@ -1151,6 +1161,7 @@ pub promptforge::metrics::LlamaTimings::prompt_per_second: f64
 pub promptforge::metrics::ToolCallEvent::arguments: serde_json::value::Value
 pub promptforge::metrics::ToolCallEvent::id: alloc::string::String
 pub promptforge::metrics::ToolCallEvent::name: alloc::string::String
+pub promptforge::metrics::ToolCallEvent::tool: core::option::Option<promptforge::tools::ToolId>
 pub promptforge::metrics::Usage::cached_tokens: core::option::Option<u32>
 pub promptforge::metrics::Usage::completion_tokens: u32
 pub promptforge::metrics::Usage::prompt_tokens: u32
@@ -1216,6 +1227,7 @@ pub promptforge::tools::ToolDescriptor::description: alloc::string::String
 pub promptforge::tools::ToolDescriptor::id: promptforge::tools::ToolId
 pub promptforge::tools::ToolDescriptor::parameters_schema: serde_json::value::Value
 pub promptforge::tools::ToolDescriptor::structured_output: bool
+pub promptforge::tools::ToolDescriptor::survives_stop: bool
 pub promptforge::tools::ToolDescriptor::wire_name: alloc::string::String
 pub promptforge::tools::ToolErrorKind::Backend
 pub promptforge::tools::ToolErrorKind::Cancelled

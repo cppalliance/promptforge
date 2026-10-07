@@ -115,6 +115,16 @@ fn the_ask_tool_sits_under_its_full_id_with_an_empty_schema_and_plain_output() {
     assert!(!tool.structured_output(), "the answer is plain text");
 }
 
+#[test]
+fn the_ask_tools_descriptor_survives_a_stop() {
+    let descriptor = ask_tool(&headless()).descriptor();
+    assert!(
+        descriptor.survives_stop,
+        "a stop leaves the question to the operator open"
+    );
+    assert!(!descriptor.structured_output);
+}
+
 #[tokio::test]
 async fn the_ask_tool_returns_the_brokers_text_trusted_and_byte_exact() {
     let typed = "  two lines\nwith\ttabs and trailing space  ";

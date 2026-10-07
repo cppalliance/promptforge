@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::{DebugMode, Emitter, EventSink};
 use crate::event::{Event, lifecycle};
 use crate::ids::{AbandonReason, ChainId, Provenance, RoundId, TaskId, TaskOrigin};
-use crate::tools::OutputTrust;
+use crate::tools::{OutputTrust, ToolId};
 
 fn root() -> TaskId {
     TaskId::from(ChainId::root())
@@ -151,13 +151,22 @@ fn payload_variants_cross_field_for_field() {
 fn content_reports_land_in_the_buffer_in_order() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    walk.tool_result("Chat", 3, "call_1", "echo", "out", OutputTrust::Trusted);
+    let echo = ToolId::parse("tools/echo").expect("a valid tool id");
+    walk.tool_result(
+        "Chat",
+        3,
+        "call_1",
+        "echo",
+        Some(&echo),
+        "out",
+        OutputTrust::Trusted,
+    );
     walk.thinking("Chat", 3, RoundId::new(2), "m", "hmm");
     let events = sink.take();
     assert!(matches!(
         &events[0],
-        Event::ToolResult { turn: 3, tool_call_id, alias, content, trusted: true, .. }
-            if tool_call_id == "call_1" && alias == "echo" && content == "out"
+        Event::ToolResult { turn: 3, tool_call_id, alias, tool: Some(tool), content, trusted: true, .. }
+            if tool_call_id == "call_1" && alias == "echo" && *tool == echo && content == "out"
     ));
     assert!(matches!(
         &events[1],
@@ -175,6 +184,7 @@ fn an_untrusted_tool_result_reports_the_event_with_trusted_false() {
         2,
         "call_9",
         "fetch",
+        None,
         "<html>",
         OutputTrust::Untrusted,
     );
@@ -190,6 +200,7 @@ fn an_untrusted_tool_result_reports_the_event_with_trusted_false() {
             turn: 2,
             tool_call_id: "call_9".to_owned(),
             alias: "fetch".to_owned(),
+            tool: None,
             content: "<html>".to_owned(),
             trusted: false,
         }],

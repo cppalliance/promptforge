@@ -22,6 +22,7 @@ pub use promptforge_engine::RunLimits;
 pub use promptforge_engine::RunResult;
 pub use promptforge_engine::SourceLocation;
 pub use promptforge_engine::Step;
+pub use promptforge_engine::UnavailablePlugin;
 pub use promptforge_engine::UnmetRequirement;
 pub use promptforge_parser::ParseError;
 pub use promptforge_parser::ParseErrorKind;

@@ -8,17 +8,20 @@
 //! This module holds vocabulary only: the implementation-free
 //! [`ToolDescriptor`] and the caller-supplied [`ToolCatalog`] of descriptors,
 //! trusted output ([`ToolOutput`], [`OutputTrust`]), the model-safe
-//! [`ToolError`], and the contract errors. The tool implementation behind a
-//! descriptor is the Harness's; the prompt parser and the executor sit in
-//! their own crates and depend on `promptforge-types`.
+//! [`ToolError`], a call's [`ToolCallOrigin`], and the contract errors. The
+//! tool implementation behind a descriptor is the Harness's; the prompt
+//! parser and the executor sit in their own crates and depend on
+//! `promptforge-types`.
 
 mod descriptor;
 mod ids;
+mod origin;
 mod output;
 mod registry;
 
 pub use descriptor::ToolDescriptor;
 pub use ids::{ToolId, ToolIdError, ToolIdErrorKind};
+pub use origin::{ToolCallOrigin, ToolCaller};
 pub use output::{OutputTrust, ToolError, ToolErrorKind, ToolOutput};
 pub use registry::{ToolCatalog, ToolCatalogError, ToolCatalogErrorKind};
 

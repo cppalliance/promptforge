@@ -166,7 +166,10 @@ impl PluginIdError {
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
 /// call the Plugin's own tools through `tools.call`. The Engine runs
 /// the source knowing only the Plugin's id, which names the prelude in
-/// tracebacks and error messages.
+/// tracebacks and error messages. The chunk receives the Plugin's local
+/// name as `...`, so `local plugin = ...` lets it call
+/// `tools.call(plugin .. "/ask")` whatever name the Plugin was installed
+/// under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prelude {
     /// The Plugin that contributed the source.

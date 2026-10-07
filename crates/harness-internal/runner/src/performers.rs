@@ -94,6 +94,11 @@ pub trait ToolPerformer: Send + Sync {
         origin: ToolCallOrigin,
         args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
+
+    /// Whether a stop leaves a call to `tool` in flight: its descriptor's
+    /// `survives_stop` flag. A stop drops every other call in flight; a
+    /// cancel drops this one too.
+    fn survives_stop(&self, tool: &ToolId) -> bool;
 }
 
 /// The Host's clock, which performs each `Timer` effect as one sleep.

@@ -7,9 +7,15 @@ use super::ReplyOrigin;
 use super::lifecycle::{self, Lifecycle};
 use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
+use crate::tools::ToolId;
 
 fn task(path: &str) -> TaskId {
     path.parse().expect("a task id parses")
+}
+
+/// The bound tool the content samples' `read_file` alias resolves to.
+fn read_tool() -> ToolId {
+    ToolId::parse("files/read").expect("a valid tool id")
 }
 
 fn provenance(path: &str, seq: u32) -> Provenance {
@@ -238,6 +244,7 @@ fn content_samples() -> Vec<Event> {
                 id: "call_1".to_owned(),
                 name: "read_file".to_owned(),
                 arguments: json!({ "path": "notes.txt" }),
+                tool: Some(read_tool()),
             }],
         },
         Event::ToolResult {
@@ -247,6 +254,7 @@ fn content_samples() -> Vec<Event> {
             turn: 2,
             tool_call_id: "call_1".to_owned(),
             alias: "read_file".to_owned(),
+            tool: Some(read_tool()),
             content: "file contents".to_owned(),
             trusted: false,
         },
@@ -366,6 +374,19 @@ fn a_reply_without_origin_reads_back_as_chat() {
         Event::AssistantReply { origin, .. } => assert_eq!(origin, ReplyOrigin::Chat),
         other => panic!("expected an assistant reply, got {other:?}"),
     }
+}
+
+#[test]
+fn a_tool_result_without_a_bound_tool_keeps_its_logged_shape() {
+    // A result logged before `tool` existed reads back with none, and a
+    // result with none writes the line it always did.
+    let line = r#"{"kind":"tool_result","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":5},"turn":2,"tool_call_id":"","alias":"ask","content":"hi","trusted":true}"#;
+    let event: Event = serde_json::from_str(line).expect("an older tool result parses");
+    assert!(matches!(&event, Event::ToolResult { tool: None, .. }));
+    assert_eq!(
+        serde_json::to_string(&event).expect("an event serializes"),
+        line
+    );
 }
 
 #[test]

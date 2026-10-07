@@ -1,8 +1,8 @@
 //! Plugin preludes: the Lua source an activated Plugin contributes,
 //! installed into every section VM before the shared library replays.
 //!
-//! A prelude runs once per VM as a main chunk, in an environment table of
-//! its own. That table's metatable `__index` is a lookup table of the base
+//! A prelude runs once per VM as a main chunk whose `...` is its Plugin's
+//! local name, in an environment table of its own. That table's metatable `__index` is a lookup table of the base
 //! functions that survive hardening, the `string`, `table`, and `math`
 //! libraries, `tools`, `store`, `untrusted`, and a view of `var` that is
 //! read-only at every depth, each read from `_G` when the prelude installs. Reading them then means
@@ -53,7 +53,9 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 ///
 /// Each prelude loads from source under the chunk name
 /// `@plugin:<id>` in its own restricted environment (see the module
-/// docs). The globals it defines must not collide with a reserved name
+/// docs), and runs with the Plugin's id as its one chunk argument, so
+/// `local plugin = ...` reads the name the Plugin was installed under.
+/// The globals it defines must not collide with a reserved name
 /// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, with
 /// `aliases` (the prompt's frontmatter tool and model aliases, which
 /// install as globals after the shared replay), or with an earlier
@@ -80,7 +82,7 @@ pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Re
             .set_name(format!("@plugin:{plugin}"))
             .set_mode(ChunkMode::Text)
             .set_environment(env.clone())
-            .exec()
+            .call::<()>(plugin.to_string())
             .map_err(|error| load_failure(plugin, error))?;
         let defined = defined_globals(plugin, &env)?;
         for name in defined.keys() {

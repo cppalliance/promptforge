@@ -110,6 +110,48 @@ fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
 }
 
 #[test]
+fn a_descriptor_logged_without_survives_stop_reads_as_not_surviving() {
+    let wire = r#"{"id":"web/fetch","wire_name":"fetch","description":"d",
+        "parameters_schema":{"type":"object"},"structured_output":false}"#;
+    let descriptor: ToolDescriptor =
+        serde_json::from_str(wire).expect("a descriptor from before the flag deserializes");
+    assert!(
+        !descriptor.survives_stop,
+        "an absent flag reads as false, so a stop still reaches the call"
+    );
+}
+
+#[test]
+fn survives_stop_sets_the_flag_and_round_trips_through_serde() {
+    assert!(
+        !inspect_descriptor().survives_stop,
+        "a new descriptor does not survive a stop"
+    );
+    let descriptor = inspect_descriptor().survives_stop(true);
+    assert!(descriptor.survives_stop);
+    let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
+    let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
+    assert_eq!(back, descriptor);
+}
+
+#[test]
+fn a_tool_call_origin_keeps_its_logged_shape() {
+    use super::{ToolCallOrigin, ToolCaller};
+    let origin = ToolCallOrigin {
+        execution: "run-1".to_owned(),
+        section: "Chat".to_owned(),
+        caller: ToolCaller::Model,
+    };
+    let line = r#"{"execution":"run-1","section":"Chat","caller":"model"}"#;
+    assert_eq!(
+        serde_json::to_string(&origin).expect("the origin serializes"),
+        line
+    );
+    let back: ToolCallOrigin = serde_json::from_str(line).expect("the origin deserializes");
+    assert_eq!(back, origin);
+}
+
+#[test]
 fn catalog_lookup_uses_stable_identity_not_wire_name() {
     let catalog = ToolCatalog::new(&[inspect_descriptor()]).expect("unique catalog");
 

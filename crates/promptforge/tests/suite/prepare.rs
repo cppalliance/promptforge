@@ -354,22 +354,30 @@ fn an_exact_slot_whose_plugin_is_inactive_is_reported() {
 }
 
 #[test]
-fn an_exact_slot_absent_from_an_active_plugin_is_not_reported_missing() {
+fn an_exact_slot_absent_from_a_present_plugin_is_reported_as_a_missing_tool() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    // The Plugin is present in the catalog but contributed a different
-    // tool: the slot's Plugin is not missing, so the run must not fail
-    // unsatisfiably - installing changes nothing.
+    // The Plugin is present in the catalog but offers a different tool:
+    // the Plugin is not missing, the tool is.
     let catalog = ToolCatalog::new(&[web_descriptor("web/search", "Search the web")])
         .expect("the catalog builds");
     let env = Environment::new().tools(catalog);
     let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
     assert!(
         requirements.missing_required.is_empty(),
-        "an active Plugin is never reported missing: {:?}",
+        "a present Plugin is never reported missing: {:?}",
         requirements.missing_required
     );
-    assert!(requirements.is_satisfied());
-    // The alias stays unbound; advertising it fails at run time with the
-    // alias named. The Engine reaches no logger, so nothing else records it.
+    assert_eq!(
+        requirements.missing_tools,
+        [ToolId::parse("web/fetch").expect("the id is valid")]
+    );
+    assert!(!requirements.is_satisfied());
+    assert!(
+        requirements
+            .notice()
+            .contains("- missing tool: web/fetch; web does not offer it"),
+        "{}",
+        requirements.notice()
+    );
     assert!(ctx.tool_bindings().is_empty());
 }

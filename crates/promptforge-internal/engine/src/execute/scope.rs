@@ -7,6 +7,7 @@ use crate::model::ToolSchema;
 use crate::{Error, Result};
 use promptforge_model_client::detail::{tool_schema_name, tool_schema_new};
 use promptforge_types::event::lifecycle;
+use promptforge_types::tools::ToolId;
 
 use promptforge_types::emitter::Emitter;
 
@@ -14,14 +15,15 @@ use promptforge_types::emitter::Emitter;
 ///
 /// Produced by [`prepare_scoped_tools`] and recorded on the chain as the
 /// round's advertised scope: the `chat` arm gates the model's requested
-/// names against the map's keys, and the `tool_call` arm the loop shim
-/// then yields resolves each name itself - a bound alias against the run's
-/// tool catalog, a local alias against the section VM's handlers - so the
-/// map holds only the kind.
+/// names against the map's keys and names a bound alias's tool in the
+/// batch it reports, and the `tool_call` arm the loop shim then yields
+/// resolves each name itself - a bound alias against the run's tool
+/// catalog, a local alias against the section VM's handlers.
 #[derive(Debug, Clone)]
 pub(super) enum DispatchTarget {
-    /// A bound live tool, resolved against the run's tool catalog.
-    Bound,
+    /// A bound live tool, resolved against the run's tool catalog: the
+    /// identity its binding holds.
+    Bound(ToolId),
     /// A Lua-local tool, answered by the section VM's handler.
     Local,
     /// One of the model's task built-ins (`task`, `task_cancel`,
@@ -85,7 +87,10 @@ pub(super) fn prepare_scoped_tools(
             source: Box::new(error),
         })?;
         schemas.push(schema);
-        dispatch.insert(binding.alias().to_owned(), DispatchTarget::Bound);
+        dispatch.insert(
+            binding.alias().to_owned(),
+            DispatchTarget::Bound(binding.id().clone()),
+        );
     }
     // Local tools are prompt-author Lua functions with no live implementation;
     // the `tool_call` arm answers their calls on the section VM. The alias

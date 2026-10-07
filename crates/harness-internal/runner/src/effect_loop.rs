@@ -21,7 +21,7 @@
 //! a Host raises through [`RunControl::stop_round`](crate::RunControl::stop_round),
 //! and the next effect to land. A cancel cancels the run, aborts every
 //! effect in flight, answers each `Dropped`, and steps the run to `Done`. A
-//! stop aborts every effect in flight except the questions to the operator
+//! stop aborts every effect in flight except tool calls that survive stops
 //! and answers each `Dropped`, leaving the cancel flag clear, so the run
 //! decides what a dropped call means: a `pcall` catches it, and an uncaught
 //! one ends the run cancelled. The loop also looks for a stop before it
@@ -47,7 +47,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 
-use harness_plugins::USER_INPUT_ASK_TOOL;
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
 use promptforge::event::Event;
@@ -105,7 +104,7 @@ pub async fn drive_run(
 }
 
 /// Drives `run` as [`drive_run`] does, and also drops the effects in
-/// flight, questions to the operator excepted, each time `stop` is raised.
+/// flight, tool calls that survive stops excepted, each time `stop` is raised.
 pub(crate) async fn drive(
     run: Run,
     performers: Performers,
@@ -234,13 +233,13 @@ impl Driver {
         }
     }
 
-    /// Acts on a raised stop: drops whatever is in flight but the
-    /// questions to the operator, which may be nothing, then lowers the
+    /// Acts on a raised stop: drops whatever is in flight but the tool
+    /// calls that survive stops, which may be nothing, then lowers the
     /// stop. Returns whether it answered any effect, since each answer
     /// resumes a chain the run must step.
     async fn act_on_stop(&mut self) -> Result<bool, RecorderError> {
         let owed = self.flights.len();
-        self.drop_in_flight(Reach::AllButQuestions).await?;
+        self.drop_in_flight(Reach::AllButSurvivors).await?;
         self.stop.lower();
         Ok(self.flights.len() < owed)
     }
@@ -322,7 +321,7 @@ impl Driver {
         provenance: &Provenance,
         effect: Effect,
     ) -> Option<(Arc<Access>, VfsOp)> {
-        let (answer, question): (BoxFuture<EffectAnswer>, bool) = match effect {
+        let (answer, survives_stop): (BoxFuture<EffectAnswer>, bool) = match effect {
             Effect::Chat {
                 binding,
                 messages,
@@ -344,12 +343,12 @@ impl Driver {
                 origin,
                 access,
             } => {
-                let question = tool.to_string() == USER_INPUT_ASK_TOOL;
+                let survives_stop = self.performers.tool.survives_stop(&tool);
                 let performer = Arc::clone(&self.performers.tool);
                 let call = async move {
                     EffectAnswer::ToolCall(performer.call(tool, alias, access, origin, args).await)
                 };
-                (Box::pin(call), question)
+                (Box::pin(call), survives_stop)
             }
             Effect::Vfs { access, op } => return Some((access, op)),
             Effect::Timer { seconds } => {
@@ -361,7 +360,8 @@ impl Driver {
                 (Box::pin(sleep), false)
             }
         };
-        self.flights.start(id, provenance.clone(), question, answer);
+        self.flights
+            .start(id, provenance.clone(), survives_stop, answer);
         None
     }
 

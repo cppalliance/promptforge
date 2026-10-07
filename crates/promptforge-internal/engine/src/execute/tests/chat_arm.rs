@@ -91,8 +91,13 @@ impl Observer for RoundRecorder {
         calls: &[ToolCallEvent],
     ) {
         let names: Vec<&str> = calls.iter().map(|call| call.name.as_str()).collect();
+        let tools: Vec<Option<String>> = calls
+            .iter()
+            .map(|call| call.tool.as_ref().map(ToString::to_string))
+            .collect();
         self.push(format!(
-            "{section}: tool_calls chain={chain_id} depth={depth} turn={turn} model={model} calls={names:?}"
+            "{section}: tool_calls chain={chain_id} depth={depth} turn={turn} model={model} \
+             calls={names:?} tools={tools:?}"
         ));
     }
 
@@ -230,6 +235,48 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
     assert!(
         batch < result,
         "the arm reports the batch unexecuted, then the shim dispatches it: {lines:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one() {
+    let gateway = ScriptedChat::new(vec![
+        ScriptedReply::ToolCalls {
+            model: MOCK_MODEL.to_owned(),
+            calls: vec![
+                scripted_call("call_1", "grab", "{\"value\":\"x\"}"),
+                scripted_call("call_2", "echo", "{\"value\":\"y\"}"),
+            ],
+        },
+        resp_text("done"),
+    ]);
+    let md = loop_prompt(
+        "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+           return 'grabbed ' .. args.value\n\
+         end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('use both tools')\n\
+         models.loop(msgs)\n\
+         return 'ok'",
+    );
+    let prompt = parse(&md);
+    let recorder = Arc::new(RoundRecorder::default());
+    let (ctx, fixture) = loop_context_observed(
+        &prompt,
+        echo_tools(),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
+        .drive()
+        .await
+        .expect("the batch and the closing reply run");
+    assert_eq!(out, "ok");
+    let lines = recorder.lines();
+    assert!(
+        lines.iter().any(
+            |line| line.ends_with(r#"calls=["grab", "echo"] tools=[None, Some("tools/echo")]"#)
+        ),
+        "the bound alias names its tool and the local one names none: {lines:?}"
     );
 }
 

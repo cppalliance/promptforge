@@ -3,7 +3,7 @@
 //!
 //! Every future sits in one `FuturesUnordered` as an `Abortable` future
 //! under `catch_unwind`, keyed by its effect id, the provenance the effect
-//! was issued under, and whether it is a question to the operator. A
+//! was issued under, and whether it is a tool call that survives stops. A
 //! future that lands yields its effect's answer, and one that panics
 //! yields `Dropped` with the panic logged. An aborted future leaves the
 //! keyed set at once, since the loop answers its effect as it aborts it,
@@ -32,8 +32,8 @@ type Landing = (EffectId, Result<std::thread::Result<EffectAnswer>, Aborted>);
 pub(super) enum Reach {
     /// Every effect in flight: a cancel.
     All,
-    /// Every effect but the questions to the operator: a stop.
-    AllButQuestions,
+    /// Every effect but the tool calls that survive stops: a stop.
+    AllButSurvivors,
 }
 
 /// One effect in flight: what the loop needs to answer or drop it.
@@ -42,8 +42,9 @@ struct InFlight {
     provenance: Provenance,
     /// Aborts the effect's future.
     abort: AbortHandle,
-    /// Whether the effect asks the operator, which a stop leaves alone.
-    question: bool,
+    /// Whether the effect is a tool call that survives stops, which a
+    /// stop leaves alone.
+    survives_stop: bool,
 }
 
 /// The effects in flight and their futures.
@@ -75,12 +76,12 @@ impl Flights {
     /// Puts `answer`, the performer future of effect `id`, in flight under
     /// `provenance`, inside a span that records the effect id, the task
     /// path, and the task-local sequence, so a run's effects trace as a
-    /// group. `question` marks a question to the operator.
+    /// group. `survives_stop` marks a tool call that survives stops.
     pub(super) fn start(
         &mut self,
         id: EffectId,
         provenance: Provenance,
-        question: bool,
+        survives_stop: bool,
         answer: BoxFuture<EffectAnswer>,
     ) {
         let span = tracing::info_span!(
@@ -98,7 +99,7 @@ impl Flights {
             InFlight {
                 provenance,
                 abort,
-                question,
+                survives_stop,
             },
         );
     }
@@ -154,7 +155,7 @@ impl Flights {
             .iter()
             .filter(|(_, in_flight)| match reach {
                 Reach::All => true,
-                Reach::AllButQuestions => !in_flight.question,
+                Reach::AllButSurvivors => !in_flight.survives_stop,
             })
             .map(|(id, _)| *id)
             .collect();

@@ -129,6 +129,10 @@ impl ToolPerformer for Unused {
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         unreachable!("this test issues no ToolCall effect")
     }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
+    }
 }
 
 impl Timer for Unused {
@@ -163,6 +167,10 @@ impl ToolPerformer for TextTool {
         let text = self.0;
         Box::pin(async move { Ok(ToolOutput::trusted(text)) })
     }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
+    }
 }
 
 /// Stays pending forever: the tool call that never returns.
@@ -178,6 +186,10 @@ impl ToolPerformer for PendingTool {
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::pending())
+    }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
     }
 }
 
@@ -199,6 +211,10 @@ impl ToolPerformer for PanickingTool {
                 panic!("the tool performer panics instead of answering")
             },
         ))
+    }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
     }
 }
 
@@ -227,6 +243,10 @@ impl ToolPerformer for ClosingTool {
                 .expect("the open run ends");
             Ok(ToolOutput::trusted("late"))
         })
+    }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
     }
 }
 
@@ -361,6 +381,10 @@ impl ToolPerformer for GatedTool {
                 .forget();
             Ok(ToolOutput::trusted("opened"))
         })
+    }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
     }
 }
 

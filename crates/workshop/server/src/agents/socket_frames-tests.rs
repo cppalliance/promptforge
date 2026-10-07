@@ -5,6 +5,7 @@
 
 use promptforge::event::Event;
 use promptforge::ids::{ChainId, Provenance, TaskId};
+use promptforge::tools::ToolId;
 use workshop_agents::{Delta, SessionEvent, WaitFrame};
 use workshop_protocol::InputFrame;
 
@@ -74,6 +75,11 @@ fn provenance() -> Provenance {
     }
 }
 
+/// The ask tool's id, which a script's ask result is recognized by.
+fn ask() -> ToolId {
+    ToolId::parse(harness::USER_INPUT_ASK_TOOL).expect("the ask tool id parses")
+}
+
 /// The operator's message as a script's ask result, which has a wire
 /// shape.
 fn operator_message(text: &str) -> Event {
@@ -84,6 +90,7 @@ fn operator_message(text: &str) -> Event {
         turn: 0,
         tool_call_id: String::new(),
         alias: harness::USER_INPUT_ASK_TOOL.to_owned(),
+        tool: Some(ask()),
         content: text.to_owned(),
         trusted: true,
     }
@@ -100,7 +107,7 @@ fn entry(index: u64, reply: Option<u64>, event: &Event) -> SessionEvent {
 
 /// The frame `event` renders at wire index `index`.
 fn frame(index: u64, reply: Option<u64>, event: &Event) -> AgentEventFrame {
-    AgentEventFrame::new(index, reply, event).expect("an operator message frames")
+    AgentEventFrame::new(index, reply, event, Some(&ask())).expect("an operator message frames")
 }
 
 #[test]
@@ -123,10 +130,11 @@ fn framed_entries_take_gap_free_wire_indices_past_unframed_ones() {
         entry(3, Some(1), &again),
     ];
     let (mut cursor, mut framed) = (0, 0);
+    let ask = ask();
 
     let rendered: Vec<_> = entries
         .iter()
-        .map(|entry| advance(&mut cursor, &mut framed, entry))
+        .map(|entry| advance(&mut cursor, &mut framed, Some(&ask), entry))
         .collect();
 
     assert_eq!(
@@ -150,6 +158,7 @@ fn an_entry_below_the_cursor_moves_neither_cursor() {
     let replayed = advance(
         &mut cursor,
         &mut framed,
+        Some(&ask()),
         &entry(4, None, &operator_message("seen")),
     );
 
@@ -162,7 +171,12 @@ fn a_live_entry_past_a_gap_moves_the_cursor_beyond_it() {
     let late = operator_message("late");
     let (mut cursor, mut framed) = (2, 1);
 
-    let live = advance(&mut cursor, &mut framed, &entry(6, None, &late));
+    let live = advance(
+        &mut cursor,
+        &mut framed,
+        Some(&ask()),
+        &entry(6, None, &late),
+    );
 
     assert_eq!(
         live,

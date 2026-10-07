@@ -31,7 +31,7 @@ use crate::event::ReplyOrigin;
 use crate::event::lifecycle::Lifecycle;
 use crate::ids::{ChainId, Provenance, RoundId, TaskId};
 use crate::metrics::{CallMetrics, ToolCallEvent};
-use crate::tools::OutputTrust;
+use crate::tools::{OutputTrust, ToolId};
 
 #[cfg(test)]
 #[path = "emitter-tests.rs"]
@@ -312,15 +312,21 @@ impl Emitter {
         });
     }
 
-    /// Reports the result of one dispatched tool call. The event records
-    /// `trust` as its `trusted` flag: `true` only for
-    /// [`OutputTrust::Trusted`].
+    /// Reports the result of one dispatched tool call. `tool` is the bound
+    /// tool `alias` resolved to, or `None` for a Lua-local tool or a task
+    /// built-in. The event records `trust` as its `trusted` flag: `true`
+    /// only for [`OutputTrust::Trusted`].
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the result report names its full run coordinates, including the alias and the tool it resolved to, in one call"
+    )]
     pub fn tool_result(
         &self,
         section: &str,
         turn: u32,
         tool_call_id: &str,
         alias: &str,
+        tool: Option<&ToolId>,
         content: &str,
         trust: OutputTrust,
     ) {
@@ -333,6 +339,7 @@ impl Emitter {
                 turn,
                 tool_call_id: tool_call_id.to_owned(),
                 alias: alias.to_owned(),
+                tool: tool.cloned(),
                 content: content.to_owned(),
                 trusted,
             }

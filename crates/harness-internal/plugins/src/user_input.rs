@@ -70,7 +70,8 @@
 //!
 //! Cancelling the run drops the ask tool's pending wait, and the
 //! [`InputBroker`] contract says a dropped wait must not leave the
-//! operator prompting against it.
+//! operator prompting against it. A stop leaves the wait open, because
+//! the ask tool's descriptor survives stops.
 //!
 //! # Prompt-side rules
 //!
@@ -90,7 +91,7 @@
 use std::sync::Arc;
 
 use promptforge::plugins::PluginId;
-use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge::tools::{ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::input::{InputBroker, InputError};
 use crate::plugin::{Contribution, Plugin, PluginError, RunServices};
@@ -228,6 +229,19 @@ impl Tool for Ask {
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({ "type": "object", "properties": {} })
+    }
+
+    /// The ask tool's descriptor, marked to survive a stop, so a stop
+    /// leaves the question to the operator open.
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor::new(
+            self.id(),
+            self.wire_name(),
+            self.description(),
+            self.parameters_schema(),
+        )
+        .structured(self.structured_output())
+        .survives_stop(true)
     }
 
     async fn call(

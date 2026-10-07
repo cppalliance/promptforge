@@ -1152,7 +1152,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-3>
 
-### Step 3: survives_stop, event tool ids, and refusal fields
+### Step 3: survives_stop, event tool ids, and refusal fields [completed]
 
 - Component: Engine additive Plugin surface
 - Placement: third. `HostContext`'s stop path, Workshop's ask framing, and the fill and refusal lines need these Engine fields before step 5. It comes after the removals so its API review sees only additions.

@@ -261,6 +261,7 @@ impl Scheduler {
                     call.report.turn,
                     call.call_id.as_deref().unwrap_or(""),
                     &call.alias,
+                    None,
                     &text,
                     OutputTrust::Trusted,
                 );

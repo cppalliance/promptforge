@@ -70,4 +70,10 @@ impl ToolPerformer for ActivatedTools {
                 .await
         })
     }
+
+    fn survives_stop(&self, tool: &ToolId) -> bool {
+        self.table
+            .get(tool)
+            .is_some_and(|implementation| implementation.descriptor().survives_stop)
+    }
 }

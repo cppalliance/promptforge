@@ -140,7 +140,15 @@ pub fn prepare_dispatch(
         _ => (nonce.wrap(output.text()), OutputTrust::Untrusted),
     };
     if let Some(report) = script {
-        emitter.tool_result(section, report.turn, "", binding.alias(), &content, trust);
+        emitter.tool_result(
+            section,
+            report.turn,
+            "",
+            binding.alias(),
+            Some(binding.id()),
+            &content,
+            trust,
+        );
     }
     Ok(ToolDispatch { content, trust })
 }
@@ -182,6 +190,7 @@ pub fn prepare_model_dispatch(
         report.script.turn,
         &report.call_id,
         binding.alias(),
+        Some(binding.id()),
         &outcome.content,
         outcome.trust,
     );

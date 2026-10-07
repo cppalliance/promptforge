@@ -187,6 +187,26 @@ fn a_non_table_global_installs_as_it_is() {
 }
 
 #[test]
+fn a_prelude_receives_its_plugins_name_as_its_chunk_argument() {
+    let vm = section_vm();
+    install_preludes(
+        vm.lua(),
+        &[
+            prelude("kit", "local plugin = ...\nkit_name = plugin"),
+            prelude("other-kit", "other_name = ..."),
+        ],
+        &[],
+    )
+    .expect("the preludes install");
+    let (kit, other): (String, String) = eval(&vm, "return kit_name, other_name");
+    assert_eq!(
+        (kit.as_str(), other.as_str()),
+        ("kit", "other-kit"),
+        "each prelude reads its own Plugin's local name from `...`"
+    );
+}
+
+#[test]
 fn a_prelude_that_assigns_no_global_installs_nothing() {
     let vm = section_vm();
     let before = global_names(&vm);

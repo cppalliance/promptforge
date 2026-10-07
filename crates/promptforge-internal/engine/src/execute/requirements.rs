@@ -1,6 +1,7 @@
 //! The preflight report: [`Requirements`].
 
 use promptforge_types::plugins::PluginId;
+use promptforge_types::tools::ToolId;
 
 #[cfg(test)]
 #[path = "requirements-tests.rs"]
@@ -25,9 +26,9 @@ pub struct Requirements {
     /// The required Plugins that the run lacks.
     ///
     /// Plugin activation adds a Plugin that is missing from the
-    /// registry or that fails to activate. `Environment::prepare` adds the
-    /// Plugin of an exact tool slot when that Plugin is absent
-    /// from the tool catalog. The run fails until every one is satisfied.
+    /// registry. `Environment::prepare` adds the Plugin of an exact tool
+    /// slot when that Plugin is absent from the tool catalog. The run
+    /// fails until every one is satisfied.
     pub missing_required: Vec<PluginId>,
     /// The required Plugins that are registered but need a service
     /// the application lacks.
@@ -36,49 +37,56 @@ pub struct Requirements {
     /// Plugin activation adds these and skips each such Plugin.
     /// The run fails until the application provides the service.
     pub missing_services: Vec<MissingService>,
+    /// The required Plugins that are installed but cannot serve, each
+    /// with the reason, such as a failure to build.
+    ///
+    /// Plugin activation adds these. The run fails until the Plugin can
+    /// serve.
+    pub unavailable: Vec<UnavailablePlugin>,
+    /// The tools the prompt's slots name that their Plugin, present in the
+    /// catalog, does not offer.
+    ///
+    /// `Environment::prepare` adds these. Installing the Plugin changes
+    /// nothing, so the run fails until the prompt or the Plugin changes.
+    pub missing_tools: Vec<ToolId>,
 }
 
 impl Requirements {
     /// Returns whether the report lets the run proceed.
     ///
-    /// That holds when every model requirement is met and every required
-    /// Plugin is present and has the services it needs.
+    /// That holds when every model requirement is met, every required
+    /// Plugin is present, can serve, and has the services it needs, and
+    /// every slotted tool is offered.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
             && self.missing_required.is_empty()
             && self.missing_services.is_empty()
+            && self.unavailable.is_empty()
+            && self.missing_tools.is_empty()
     }
 
     /// Adds the entries of `other` to this report.
     ///
     /// Use it to combine the Plugin activation report with the report
     /// from `Environment::prepare`, so that one refusal names every gap.
-    /// The merge skips a Plugin already reported missing and a service
-    /// already reported missing for the same Plugin.
+    /// The merge skips an entry the report already holds.
     ///
     /// The merge drops the `missing_required` entry of a Plugin that
-    /// lacks a service. That entry can come only from the tool slot check
-    /// in `Environment::prepare`. That check finds an exact slot whose
-    /// Plugin is absent from the catalog, because activation skipped
-    /// the Plugin for the missing service. The service entry already
-    /// names the real cause.
+    /// lacks a service or is unavailable. That entry can come only from
+    /// the tool slot check in `Environment::prepare`. That check finds an
+    /// exact slot whose Plugin is absent from the catalog, because
+    /// activation skipped the Plugin. The service or unavailable entry
+    /// already names the real cause.
     pub fn merge(&mut self, other: Requirements) {
-        for id in other.missing_required {
-            if !self.missing_required.contains(&id) {
-                self.missing_required.push(id);
-            }
-        }
-        for missing in other.missing_services {
-            if !self.missing_services.contains(&missing) {
-                self.missing_services.push(missing);
-            }
-        }
+        push_new(&mut self.missing_required, other.missing_required);
+        push_new(&mut self.missing_services, other.missing_services);
+        push_new(&mut self.unavailable, other.unavailable);
+        push_new(&mut self.missing_tools, other.missing_tools);
+        let (services, unavailable) = (&self.missing_services, &self.unavailable);
         self.missing_required.retain(|id| {
-            !self
-                .missing_services
-                .iter()
-                .any(|missing| missing.plugin == *id)
+            !services.iter().any(|missing| missing.plugin == *id)
+                && !unavailable.iter().any(|entry| entry.plugin == *id)
         });
         self.unmet_requirements.extend(other.unmet_requirements);
     }
@@ -120,6 +128,20 @@ impl Requirements {
                 missing.plugin, missing.service
             );
         }
+        for entry in &self.unavailable {
+            let _ = write!(
+                notice,
+                "\n- {} is unavailable: {}",
+                entry.plugin, entry.reason
+            );
+        }
+        for tool in &self.missing_tools {
+            let _ = write!(
+                notice,
+                "\n- missing tool: {tool}; {} does not offer it",
+                tool.plugin()
+            );
+        }
         for unmet in &self.unmet_requirements {
             let line = match unmet.check {
                 RequirementCheck::ContextMinimum => format!(
@@ -136,6 +158,39 @@ impl Requirements {
             let _ = write!(notice, "\n- {line}");
         }
         notice
+    }
+}
+
+/// Appends each entry of `incoming` that `entries` does not already hold.
+fn push_new<T: PartialEq>(entries: &mut Vec<T>, incoming: Vec<T>) {
+    for entry in incoming {
+        if !entries.contains(&entry) {
+            entries.push(entry);
+        }
+    }
+}
+
+/// A required Plugin that is installed but cannot serve, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnavailablePlugin {
+    /// The installed, required Plugin.
+    pub plugin: PluginId,
+    /// Why it cannot serve, written for the model that reads the refusal.
+    pub reason: String,
+}
+
+impl UnavailablePlugin {
+    /// Creates an entry stating that `plugin` cannot serve, because of
+    /// `reason`.
+    ///
+    /// Only Plugin activation reports these.
+    #[must_use]
+    pub fn new(plugin: PluginId, reason: impl Into<String>) -> UnavailablePlugin {
+        UnavailablePlugin {
+            plugin,
+            reason: reason.into(),
+        }
     }
 }
 

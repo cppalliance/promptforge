@@ -270,6 +270,7 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
         id: id.to_owned(),
         name: "echo".to_owned(),
         arguments: json!({ "value": id }),
+        tool: None,
     };
     let round = ChatResult {
         overflow: false,

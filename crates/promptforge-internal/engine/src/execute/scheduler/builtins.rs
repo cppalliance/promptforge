@@ -217,6 +217,7 @@ impl Scheduler {
             turn,
             call_id,
             name,
+            None,
             &answer.text,
             OutputTrust::Trusted,
         );

@@ -145,6 +145,7 @@ fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
                 turn,
                 tool_call_id,
                 alias,
+                tool,
                 content,
                 ..
             } => {
@@ -153,14 +154,21 @@ fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
                 } else {
                     "script"
                 };
-                transcript.push(format!("{alias} for the {caller}: {content}"));
+                let tool = tool
+                    .as_ref()
+                    .map_or("no tool".to_owned(), ToString::to_string);
+                transcript.push(format!("{alias} ({tool}) for the {caller}: {content}"));
             }
             _ => {}
         }
     }
     assert_eq!(
         transcript,
-        ["Infer reply: hi there", "shout for the script: HI THERE"]
+        [
+            "Infer reply: hi there",
+            "shout (example/text/shout) for the script: HI THERE"
+        ],
+        "a bound tool's result names the tool its alias resolved to"
     );
     Ok(())
 }

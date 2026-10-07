@@ -12,16 +12,23 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One tool call requested by the model: its id, name, and raw arguments.
+use crate::tools::ToolId;
+
+/// One tool call requested by the model: its id, name, raw arguments, and
+/// the bound tool the name resolved to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallEvent {
     /// The provider-issued tool-call id. Providers recycle ids like
     /// `call_1` across rounds, so consumers scope the id by turn.
     pub id: String,
-    /// The tool name the model called.
+    /// The tool name the model called: the prompt's alias, such as `fetch`.
     pub name: String,
     /// The call arguments exactly as the model produced them.
     pub arguments: serde_json::Value,
+    /// The bound tool `name` resolved to; `None` for a Lua-local tool, a
+    /// task built-in, or a name outside the round's scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolId>,
 }
 
 /// Everything measured about one model call, grouped by the source that
@@ -185,7 +192,27 @@ mod tests {
             id: "call_1".to_owned(),
             name: "read_file".to_owned(),
             arguments: json!({ "path": "notes.txt", "lines": 3 }),
+            tool: None,
         });
+        round_trips(&ToolCallEvent {
+            id: "call_1".to_owned(),
+            name: "fetch".to_owned(),
+            arguments: json!({}),
+            tool: Some(ToolId::parse("web/fetch").expect("a valid tool id")),
+        });
+    }
+
+    #[test]
+    fn a_tool_call_without_a_bound_tool_keeps_its_logged_shape() {
+        // A call logged before the field existed reads back with no tool,
+        // and a call with none writes the same line it always did.
+        let line = r#"{"id":"call_1","name":"fetch","arguments":{}}"#;
+        let call: ToolCallEvent = serde_json::from_str(line).expect("an older call deserializes");
+        assert_eq!(call.tool, None);
+        assert_eq!(
+            serde_json::to_string(&call).expect("the call serializes"),
+            line
+        );
     }
 
     #[test]

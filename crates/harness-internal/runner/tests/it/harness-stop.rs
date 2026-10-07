@@ -3,7 +3,8 @@
 //! flag clear, so a `pcall` keeps the run alive while an uncaught drop
 //! ends it `Cancelled`; a prompt shaped like `chat` returns to its
 //! question after a stop during a tool call; and a stop leaves a question
-//! to the operator open, while a cancel drops it.
+//! to the operator, or any call whose descriptor survives stops, open,
+//! while a cancel drops it.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -19,6 +20,7 @@ use super::{
 };
 use crate::scripted::{
     Held, HeldTimer, MODEL, Operator, ScriptedBroker, held_broker, hold_registry, reply,
+    surviving_hold_registry,
 };
 
 /// A main section parked under a `pcall` on a 30-second timed wait over
@@ -66,6 +68,11 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
 const ASKS: &str = "---\nname: asks\ndescription: d\npromptforge: 0\n\
     plugins:\n  - user-input\n---\n\n\
     # Asks\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
+
+/// A prompt that returns what the held tool answers.
+const HOLDS: &str = "---\nname: holds\ndescription: d\npromptforge: 0\n\
+    plugins:\n  - harness\n---\n\n\
+    # Holds\n\n## Only\n\n```lua\nreturn tools.call('harness/hold')\n```\n";
 
 #[tokio::test]
 async fn a_stop_drops_a_chat_round_a_tool_call_and_a_timer_and_a_pcall_keeps_the_run_alive() {
@@ -276,6 +283,39 @@ async fn a_stop_leaves_a_question_to_the_operator_open() {
     let records = recorder.records(report.run_id.expect("the run began"));
     assert_eq!(answers_to(&records, "ToolCall").len(), 1);
     assert_ne!(answers_to(&records, "ToolCall")[0], json!("Dropped"));
+}
+
+#[tokio::test]
+async fn a_stop_leaves_any_tool_call_whose_descriptor_survives_stops_in_flight() {
+    let tool = Arc::new(Held::default());
+    let recorder = Arc::new(MemoryRecorder::new());
+    let harness = Harness::new(
+        recorder.clone(),
+        Arc::new(ScriptedBroker::replying()),
+        Arc::new(PendingTimer::default()),
+        surviving_hold_registry(&tool),
+        HostServices::new(),
+    );
+    let watched = Arc::clone(&tool);
+
+    let report = run_beside(harness, request(HOLDS), |control| async move {
+        until("the held call is in flight", || watched.started() == 1).await;
+        control.stop_round();
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            watched.dropped(),
+            0,
+            "the stop left the surviving call in flight"
+        );
+        control.cancel();
+    })
+    .await
+    .expect("the run reaches an outcome");
+
+    assert_eq!(report.outcome, RunOutcome::Cancelled);
+    assert_eq!(tool.dropped(), 1, "the cancel tore the surviving call down");
 }
 
 #[tokio::test]

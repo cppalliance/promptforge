@@ -4,7 +4,7 @@
 
 use harness_plugins::{PluginId, PluginRegistry};
 use promptforge::cancel::CancelHandle;
-use promptforge::{Environment, RunErrorKind, RunResult};
+use promptforge::{Environment, RunErrorKind, RunResult, UnavailablePlugin};
 
 use super::support::{Fixture, captured_logs, context, parse, prepare_activated, run_activated};
 
@@ -90,9 +90,9 @@ fn a_required_activation_failure_is_logged_and_reported() {
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let logs = captured_logs(|| {
-        // A present-but-failing required Plugin leaves the run
-        // without something the prompt declared: it is reported like an
-        // absent one, and the failure is also a log line.
+        // A present-but-failing required Plugin leaves the run without
+        // something the prompt declared: it is reported unavailable with
+        // its failure as the reason, and the failure is also a log line.
         let (_ctx, requirements, _) = prepare_activated(
             Environment::new(),
             Some(&registry),
@@ -100,8 +100,16 @@ fn a_required_activation_failure_is_logged_and_reported() {
             context("prepare-failing"),
         );
         assert_eq!(
-            requirements.missing_required,
-            [PluginId::parse("web").expect("the id is valid")]
+            requirements.unavailable,
+            [UnavailablePlugin::new(
+                PluginId::parse("web").expect("the id is valid"),
+                "the fixture cannot activate"
+            )]
+        );
+        assert!(
+            requirements.missing_required.is_empty(),
+            "an installed Plugin is not missing: {:?}",
+            requirements.missing_required
         );
         assert!(!requirements.is_satisfied());
     });
@@ -142,8 +150,12 @@ fn the_run_path_refuses_a_declared_plugin_whose_activation_fails() {
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
-        notice.contains("missing required Plugin: web"),
-        "the notice names the Plugin: {notice}"
+        notice.contains("- web is unavailable: the fixture cannot activate"),
+        "the notice names the Plugin and why it is unavailable: {notice}"
+    );
+    assert!(
+        !notice.contains("missing required Plugin"),
+        "an installed Plugin is not reported missing: {notice}"
     );
 }
 

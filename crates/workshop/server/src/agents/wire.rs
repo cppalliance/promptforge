@@ -36,9 +36,9 @@
 //! SPA suite's `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift
 //! on either side fails that side's tests.
 
-use harness::USER_INPUT_ASK_TOOL;
 use promptforge::event::Event;
 use promptforge::metrics::{CallMetrics, ToolCallEvent};
+use promptforge::tools::ToolId;
 use serde::{Deserialize, Serialize};
 
 /// A session request the client sends: `launch`, `attach`, or `cancel`.
@@ -220,11 +220,11 @@ struct AgentEvent {
 impl AgentEvent {
     /// Projects one Engine event onto the wire shape, or `None` for a
     /// variant the transcript does not render (lifecycle, task, and debug
-    /// events). A script's call to the ask tool, [`USER_INPUT_ASK_TOOL`],
-    /// frames as the operator's `user_message`, because its result is the
-    /// text the operator typed.
+    /// events). A script's call to the ask tool, whose id is `ask`, frames
+    /// as the operator's `user_message`, because its result is the text
+    /// the operator typed.
     #[must_use]
-    fn from_event(event: &Event) -> Option<Self> {
+    fn from_event(event: &Event, ask: Option<&ToolId>) -> Option<Self> {
         let base = |kind: AgentEventKind, turn: u32, content: String| AgentEvent {
             kind,
             section: event.section().to_owned(),
@@ -269,10 +269,10 @@ impl AgentEvent {
             // answers its own tool call and stays a tool result.
             Event::ToolResult {
                 tool_call_id,
-                alias,
+                tool: Some(tool),
                 content,
                 ..
-            } if tool_call_id.is_empty() && alias == USER_INPUT_ASK_TOOL => {
+            } if tool_call_id.is_empty() && ask == Some(tool) => {
                 base(AgentEventKind::UserInput, 0, content.clone())
             }
             Event::ToolResult {
@@ -322,14 +322,20 @@ pub(super) struct AgentEventFrame {
 
 impl AgentEventFrame {
     /// Builds the frame for the entry at `index`, or `None` when `event`
-    /// is a variant the transcript does not render.
+    /// is a variant the transcript does not render. `ask` is the ask
+    /// tool's id, which a script's ask result is recognized by.
     #[must_use]
-    pub(super) fn new(index: u64, reply: Option<u64>, event: &Event) -> Option<Self> {
+    pub(super) fn new(
+        index: u64,
+        reply: Option<u64>,
+        event: &Event,
+        ask: Option<&ToolId>,
+    ) -> Option<Self> {
         Some(Self {
             kind: "agent_event",
             index,
             reply,
-            event: AgentEvent::from_event(event)?,
+            event: AgentEvent::from_event(event, ask)?,
         })
     }
 }

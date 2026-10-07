@@ -19,7 +19,7 @@ use std::sync::Arc;
 use promptforge::Prompt;
 use promptforge::plugins::{PluginId, Prelude};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::{MissingService, Requirements};
+use promptforge::{MissingService, Requirements, UnavailablePlugin};
 
 use crate::plugin::{Contribution, RunServices};
 use crate::registry::PluginRegistry;
@@ -90,7 +90,7 @@ pub struct Activation {
     /// Plugin that does not activate contributes none.
     pub preludes: Vec<Prelude>,
     /// What activation could not satisfy: the declared Plugins that
-    /// are absent or failed to activate, and the declared Plugins that
+    /// are absent, the ones that failed to activate, and the ones that
     /// need a run service this Host does not provide. Merged into the
     /// prepare report through [`Requirements::merge`] so one refusal names
     /// every gap.
@@ -111,8 +111,8 @@ pub struct Activation {
 /// missing service. Each remaining Plugin is activated with `services`
 /// (the run's cancellation handle and the services it has); an
 /// activation failure is logged, the Plugin contributes nothing, and it
-/// lands in [`Requirements::missing_required`], since the run cannot have
-/// what the prompt declared.
+/// lands in [`Requirements::unavailable`] with the failure as its reason,
+/// since the run cannot have what the prompt declared.
 ///
 /// The activated contributions are assembled into the catalog in
 /// declaration order, with tool prefix-containment enforced at assembly: a
@@ -164,10 +164,9 @@ pub fn activate(
                     %error,
                     "Plugin activation failed; it contributes nothing to the run"
                 );
-                // A declared Plugin that cannot activate leaves the run
-                // without something the prompt declared: report it like an
-                // absent one so the run fails until satisfied.
-                requirements.missing_required.push(id.clone());
+                requirements
+                    .unavailable
+                    .push(UnavailablePlugin::new(id.clone(), error.to_string()));
             }
         }
     }

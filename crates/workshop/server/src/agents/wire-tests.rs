@@ -11,6 +11,7 @@ use promptforge::ids::{ChainId, Provenance, RoundId, TaskId};
 use promptforge::metrics::{
     CallMetrics, ClientTiming, LlamaTimings, ToolCallEvent, Usage, VllmMetrics,
 };
+use promptforge::tools::ToolId;
 use workshop_protocol::{InputFrame, InputResponse};
 
 use super::*;
@@ -32,11 +33,16 @@ fn provenance() -> Provenance {
     }
 }
 
+/// The ask tool's id, which Workshop recognizes a script's ask by.
+fn ask() -> ToolId {
+    ToolId::parse(harness::USER_INPUT_ASK_TOOL).expect("the ask tool id parses")
+}
+
 /// The operator's message in the `chat` section, as a script's ask
 /// result: the fixture's `agent_event_minimal` entry as the Engine event
 /// it projects from.
 fn operator_message(text: &str) -> Event {
-    tool_result("", harness::USER_INPUT_ASK_TOOL, text)
+    tool_result("", "ask", Some(ask()), text)
 }
 
 /// The fixture's `agent_event_stamped` entry as the Engine event it
@@ -117,7 +123,10 @@ fn an_agent_session_frame_serializes_its_id_and_agent() {
 #[test]
 fn an_agent_event_frame_has_its_log_index_and_optional_reply_id() {
     let event = operator_message("hi");
-    let plain = wire(&AgentEventFrame::new(3, None, &event).expect("an operator message frames"));
+    let ask = ask();
+    let plain = wire(
+        &AgentEventFrame::new(3, None, &event, Some(&ask)).expect("an operator message frames"),
+    );
     assert_eq!(plain["type"], "agent_event");
     assert_eq!(plain["index"], 3, "the frame reports the entry's log index");
     assert!(
@@ -131,8 +140,9 @@ fn an_agent_event_frame_has_its_log_index_and_optional_reply_id() {
         }),
         "the entry serializes in its ACP-labelled wire shape"
     );
-    let stamped =
-        wire(&AgentEventFrame::new(4, Some(1), &event).expect("an operator message frames"));
+    let stamped = wire(
+        &AgentEventFrame::new(4, Some(1), &event, Some(&ask)).expect("an operator message frames"),
+    );
     assert_eq!(
         stamped["reply"], 1,
         "a superseding event is stamped with the same reply id as its deltas"
@@ -152,9 +162,11 @@ fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
             id: "call_1".to_owned(),
             name: "read_file".to_owned(),
             arguments: serde_json::json!({ "path": "notes.txt" }),
+            tool: None,
         }],
     };
-    let frame = wire(&AgentEventFrame::new(0, Some(0), &batch).expect("a tool-call batch frames"));
+    let frame =
+        wire(&AgentEventFrame::new(0, Some(0), &batch, None).expect("a tool-call batch frames"));
     assert_eq!(frame["event"]["kind"], "tool_call");
     assert_eq!(
         frame["event"]["content"],
@@ -169,7 +181,7 @@ fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
         provenance: provenance(),
     };
     assert!(
-        AgentEventFrame::new(1, None, &lifecycle).is_none(),
+        AgentEventFrame::new(1, None, &lifecycle, None).is_none(),
         "a lifecycle event has no wire label and never frames"
     );
 }
@@ -186,7 +198,7 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
         text: "weighing the options".to_owned(),
     };
     let thought =
-        wire(&AgentEventFrame::new(5, Some(2), &thinking).expect("a thinking event frames"));
+        wire(&AgentEventFrame::new(5, Some(2), &thinking, None).expect("a thinking event frames"));
     assert_eq!(
         thought["event"],
         serde_json::json!({
@@ -203,10 +215,12 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
         turn: 2,
         tool_call_id: "call_7".to_owned(),
         alias: "read_file".to_owned(),
+        tool: None,
         content: "the file's text".to_owned(),
         trusted: false,
     };
-    let update = wire(&AgentEventFrame::new(6, None, &result).expect("a tool-result event frames"));
+    let update =
+        wire(&AgentEventFrame::new(6, None, &result, None).expect("a tool-result event frames"));
     assert_eq!(
         update["event"],
         serde_json::json!({
@@ -218,8 +232,9 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
 }
 
 /// A trusted tool result in the `chat` section on turn 2, answering
-/// `tool_call_id` (empty for a script's call) under `alias`.
-fn tool_result(tool_call_id: &str, alias: &str, content: &str) -> Event {
+/// `tool_call_id` (empty for a script's call) under `alias`, bound to
+/// `tool`.
+fn tool_result(tool_call_id: &str, alias: &str, tool: Option<ToolId>, content: &str) -> Event {
     Event::ToolResult {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
@@ -227,15 +242,25 @@ fn tool_result(tool_call_id: &str, alias: &str, content: &str) -> Event {
         turn: 2,
         tool_call_id: tool_call_id.to_owned(),
         alias: alias.to_owned(),
+        tool,
         content: content.to_owned(),
         trusted: true,
     }
 }
 
+/// The wire kind `event` frames as under the ask tool id `ask`.
+fn kind_under(event: &Event, ask: Option<&ToolId>) -> serde_json::Value {
+    wire(&AgentEventFrame::new(0, None, event, ask).expect("a tool result frames"))["event"]["kind"]
+        .clone()
+}
+
 #[test]
 fn a_script_side_ask_result_frames_as_the_operators_message() {
-    let ask = tool_result("", harness::USER_INPUT_ASK_TOOL, "two words");
-    let frame = wire(&AgentEventFrame::new(7, None, &ask).expect("a script-side ask frames"));
+    let ask = ask();
+    let result = tool_result("", "ask", Some(ask.clone()), "two words");
+    let frame = wire(
+        &AgentEventFrame::new(7, None, &result, Some(&ask)).expect("a script-side ask frames"),
+    );
     assert_eq!(
         frame["event"],
         serde_json::json!({
@@ -246,9 +271,31 @@ fn a_script_side_ask_result_frames_as_the_operators_message() {
 }
 
 #[test]
+fn a_scripts_ask_is_recognized_by_its_tool_whatever_its_alias() {
+    let ask = ask();
+    let renamed = tool_result("", "question", Some(ask.clone()), "hi");
+    assert_eq!(kind_under(&renamed, Some(&ask)), "user_message");
+    let unbound = tool_result("", harness::USER_INPUT_ASK_TOOL, None, "hi");
+    let elsewhere = ToolId::parse("asker/ask").expect("a valid tool id");
+    let fetch = ToolId::parse("web/fetch").expect("a valid tool id");
+    let other = tool_result("", "fetch", Some(fetch), "the page");
+    for (event, ask, why) in [
+        (&unbound, Some(&ask), "a result with no tool is not the ask"),
+        (&renamed, Some(&elsewhere), "another tool id is not the ask"),
+        (&renamed, None, "a Host without the ask frames none"),
+        (&other, Some(&ask), "only the ask is the operator's message"),
+    ] {
+        assert_eq!(kind_under(event, ask), "tool_call_update", "{why}");
+    }
+}
+
+#[test]
 fn a_model_issued_ask_result_stays_a_tool_call_update() {
-    let ask = tool_result("call_9", harness::USER_INPUT_ASK_TOOL, "two words");
-    let frame = wire(&AgentEventFrame::new(8, None, &ask).expect("a model-issued ask frames"));
+    let ask = ask();
+    let result = tool_result("call_9", "ask", Some(ask.clone()), "two words");
+    let frame = wire(
+        &AgentEventFrame::new(8, None, &result, Some(&ask)).expect("a model-issued ask frames"),
+    );
     assert_eq!(
         frame["event"],
         serde_json::json!({
@@ -256,17 +303,6 @@ fn a_model_issued_ask_result_stays_a_tool_call_update() {
             "content": "two words", "tool_call_id": "call_9",
         }),
         "a model's ask answers the model's own tool call, so it stays a tool call update"
-    );
-}
-
-#[test]
-fn a_scripts_call_to_another_tool_stays_a_tool_call_update() {
-    let fetch = tool_result("", "fetch", "the page");
-    let frame =
-        wire(&AgentEventFrame::new(9, None, &fetch).expect("a script's tool result frames"));
-    assert_eq!(
-        frame["event"]["kind"], "tool_call_update",
-        "only the ask tool's result is the operator's message"
     );
 }
 
@@ -394,12 +430,23 @@ fn server_to_client_agent_frames_match_the_shared_fixture() {
     assert_eq!(wire(&agents), fixture["agents"]);
     let session = AgentSessionFrame::new("a1b2".to_owned(), "chat".to_owned());
     assert_eq!(wire(&session), fixture["agent_session"]);
+    let ask = Some(ask());
     assert_eq!(
-        wire(&AgentEventFrame::new(3, None, &operator_message("hi"))),
+        wire(&AgentEventFrame::new(
+            3,
+            None,
+            &operator_message("hi"),
+            ask.as_ref()
+        )),
         fixture["agent_event_minimal"]
     );
     assert_eq!(
-        wire(&AgentEventFrame::new(4, Some(1), &stamped_fixture_event())),
+        wire(&AgentEventFrame::new(
+            4,
+            Some(1),
+            &stamped_fixture_event(),
+            ask.as_ref()
+        )),
         fixture["agent_event_stamped"],
         "the event serializes in its wire shape, metrics and all"
     );

@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent};
+use crate::tools::ToolId;
 
 #[path = "event-lifecycle.rs"]
 pub mod lifecycle;
@@ -391,6 +392,10 @@ events! {
             tool_call_id: String,
             /// The alias the call named.
             alias: String,
+            /// The bound tool `alias` resolved to; `None` for a Lua-local
+            /// tool, a task built-in, or an event logged before the field.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            tool: Option<ToolId>,
             /// The tool's output: untrusted unless `trusted`.
             content: String,
             /// Whether the dispatch treated the tool as trusted (its output

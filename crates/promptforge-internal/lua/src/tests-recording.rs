@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_types::event::Event;
+use promptforge_types::tools::ToolId;
 
 /// One event folded to what a suite compares: a payload-free boundary by
 /// its serialized `kind`, the author's `log` checkpoint with its message,
@@ -205,6 +206,17 @@ impl Recorder {
                     content.clone(),
                     *trusted,
                 )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The tool each `ToolResult` content report names, in order.
+    pub(crate) fn tool_result_tools(&self) -> Vec<Option<ToolId>> {
+        self.events()
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolResult { tool, .. } => Some(tool.clone()),
                 _ => None,
             })
             .collect()

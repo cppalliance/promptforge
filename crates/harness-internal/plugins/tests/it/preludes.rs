@@ -7,6 +7,7 @@ use std::sync::Arc;
 use harness_plugins::{
     Activation, Contribution, Plugin, PluginError, PluginId, PluginRegistry, RunServices, activate,
 };
+use promptforge::UnavailablePlugin;
 use promptforge::cancel::CancelHandle;
 use promptforge::plugins::Prelude;
 
@@ -127,7 +128,13 @@ fn a_plugin_whose_create_fails_contributes_no_prelude() {
             Preluder::new("alpha", Some("alpha = {}")),
         ],
     );
-    assert_eq!(activation.requirements.missing_required, [id("broken")]);
+    assert_eq!(
+        activation.requirements.unavailable,
+        [UnavailablePlugin::new(
+            id("broken"),
+            "the fixture cannot activate"
+        )]
+    );
     assert_eq!(
         activation.preludes,
         [Prelude::new(id("alpha"), "alpha = {}")]

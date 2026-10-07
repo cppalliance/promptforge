@@ -93,13 +93,12 @@ impl Environment {
     /// filesystem, including its real directories and the declared store.
     ///
     /// Tool slots fill against the catalog. An exact slot fills by
-    /// identity, and the first two segments of its path name its
-    /// Plugin. If that Plugin is absent from the catalog, the
-    /// Plugin is listed in [`Requirements::missing_required`]. If the
-    /// Plugin is in the catalog but the named tool is absent, the slot
-    /// stays empty and the report omits it. Advertising the slot's alias
-    /// fails at run time. Every fill is recorded in the context's tool
-    /// bindings. Plugin resolution and activation happen in the caller
+    /// identity, and the first segment of its path names its Plugin. If
+    /// that Plugin is absent from the catalog, the Plugin is listed in
+    /// [`Requirements::missing_required`]. If the Plugin is in the catalog
+    /// but the named tool is absent, the tool is listed in
+    /// [`Requirements::missing_tools`]. Every fill is recorded in the
+    /// context's tool bindings. Plugin resolution and activation happen in the caller
     /// before `prepare`, and the caller
     /// merges that report into the one `prepare` returns.
     ///

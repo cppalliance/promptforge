@@ -5,6 +5,7 @@
 
 use axum::extract::ws::WebSocket;
 use promptforge::event::Event;
+use promptforge::tools::ToolId;
 use workshop_agents::{Delta, DeltaKind, SessionEvent, WaitFrame};
 use workshop_protocol::InputFrame;
 
@@ -58,17 +59,24 @@ pub(super) async fn frame_entry(
     entry: &SessionEvent,
     socket: &mut WebSocket,
 ) -> bool {
-    match advance(&mut attached.cursor, &mut attached.framed, entry) {
+    let ask = attached.ask.as_ref();
+    match advance(&mut attached.cursor, &mut attached.framed, ask, entry) {
         Some(frame) => send_frame(socket, &frame).await,
         None => true,
     }
 }
 
 /// Moves the transcript `cursor` past `entry` and returns the entry's
-/// frame, stamped with the wire index `framed` and advancing it. An entry
-/// below the cursor was already read and moves neither; an entry with no
-/// wire shape moves only the cursor.
-fn advance(cursor: &mut u64, framed: &mut u64, entry: &SessionEvent) -> Option<AgentEventFrame> {
+/// frame, stamped with the wire index `framed` and advancing it, with a
+/// script's result from the `ask` tool framed as the operator's message.
+/// An entry below the cursor was already read and moves neither; an entry
+/// with no wire shape moves only the cursor.
+fn advance(
+    cursor: &mut u64,
+    framed: &mut u64,
+    ask: Option<&ToolId>,
+    entry: &SessionEvent,
+) -> Option<AgentEventFrame> {
     if entry.index < *cursor {
         return None;
     }
@@ -76,7 +84,7 @@ fn advance(cursor: &mut u64, framed: &mut u64, entry: &SessionEvent) -> Option<A
     // A stored payload this build cannot read has no wire shape either;
     // the transcript's index sequence stays whole.
     let event = serde_json::from_value::<Event>(entry.event.clone()).ok()?;
-    let frame = AgentEventFrame::new(*framed, entry.reply, &event)?;
+    let frame = AgentEventFrame::new(*framed, entry.reply, &event, ask)?;
     *framed += 1;
     Some(frame)
 }

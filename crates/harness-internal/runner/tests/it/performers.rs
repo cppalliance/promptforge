@@ -117,6 +117,10 @@ impl ToolPerformer for DelayedTool {
             Ok(ToolOutput::trusted(text))
         })
     }
+
+    fn survives_stop(&self, _tool: &ToolId) -> bool {
+        false
+    }
 }
 
 /// The final text of a completed run.

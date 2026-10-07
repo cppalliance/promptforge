@@ -28,6 +28,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use harness::display_chain;
+use promptforge::tools::ToolId;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -55,11 +56,15 @@ pub(super) async fn upgrade(
     ws.on_upgrade(move |socket| run_socket(socket, state))
 }
 
-/// The attachment state of one socket: the conversation it serves and
-/// the per-client cursors deriving durable-frame indices.
+/// The attachment state of one socket: the conversation it serves, the
+/// ask tool's id, and the per-client cursors deriving durable-frame
+/// indices.
 pub(super) struct Attached {
     /// The conversation this socket serves.
     pub(super) conversation: Conversation,
+    /// The ask tool's id, which a script's ask result is recognized by;
+    /// `None` when the launcher has no ask tool.
+    pub(super) ask: Option<ToolId>,
     /// The next transcript index to consider; everything below it has
     /// been read (framed or skipped) for this client already.
     pub(super) cursor: u64,
@@ -386,7 +391,7 @@ async fn handle_open(
             return true;
         }
     };
-    attach(conversation, attached, subscriptions, socket).await
+    attach(conversation, agents.ask(), attached, subscriptions, socket).await
 }
 
 /// The text of the error frame reporting a refused launch: the refusal
@@ -398,13 +403,15 @@ fn refusal_text(refusal: &LaunchRefusal) -> String {
     display_chain(refusal)
 }
 
-/// Attaches the socket to `conversation`: subscribes the four channels
+/// Attaches the socket to `conversation`, framing a script's result from
+/// the `ask` tool as the operator's message: subscribes the four channels
 /// (before the replay, so nothing lands between them unseen),
 /// acknowledges with the session frame, replays the conversation's
 /// transcript from index zero, and re-announces unresolved waits. A
 /// `false` return means the client is gone.
 async fn attach(
     conversation: Conversation,
+    ask: Option<ToolId>,
     attached: &mut Option<Attached>,
     (events_rx, deltas_rx, input_rx, errors_rx): Subscriptions<'_>,
     socket: &mut WebSocket,
@@ -419,6 +426,7 @@ async fn attach(
     );
     let mut state = Attached {
         conversation,
+        ask,
         cursor: 0,
         framed: 0,
     };

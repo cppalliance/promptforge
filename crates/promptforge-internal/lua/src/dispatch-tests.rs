@@ -88,6 +88,11 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
         )],
         "a script-initiated preparation fires ToolResult with the wrapped text"
     );
+    assert_eq!(
+        recorder.tool_result_tools(),
+        vec![Some(echo_tool().id)],
+        "the script's result names the tool its alias is bound to"
+    );
 }
 
 #[test]
@@ -185,5 +190,10 @@ fn a_model_issued_dispatch_reports_its_result_under_the_call_id() {
             "echoed: hi".to_owned(),
             true,
         )],
+    );
+    assert_eq!(
+        recorder.tool_result_tools(),
+        vec![Some(echo_tool().id)],
+        "the model's result names the tool its alias is bound to"
     );
 }

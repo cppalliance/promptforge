@@ -7,7 +7,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use promptforge::effect::{AnswerRecord, Effect, EffectAnswer, EffectRecord};
+use promptforge::effect::{
+    AnswerRecord, Effect, EffectAnswer, EffectRecord, ToolCallOrigin, ToolCaller,
+};
 use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
@@ -124,6 +126,33 @@ fn answering_a_batch_in_reverse_gives_the_same_result_as_issue_order() -> Result
     let text = drive(prepared_run()?, true)?;
     assert_eq!(text, drive(prepared_run()?, false)?);
     assert_eq!(text, "hi there / HI THERE");
+    Ok(())
+}
+
+#[test]
+fn a_tool_calls_origin_is_named_at_promptforge_effect() -> Result<(), Box<dyn Error>> {
+    let mut run = prepared_run()?;
+    let origin = loop {
+        let Step::Pending { effects, .. } = run.step() else {
+            return Err("the greeter calls its shout tool before it ends".into());
+        };
+        let mut called = None;
+        for (id, _provenance, effect) in effects {
+            if let Effect::ToolCall { origin, .. } = &effect {
+                called = Some(origin.clone());
+            }
+            run.resume(id, answer(effect));
+        }
+        if let Some(origin) = called {
+            break origin;
+        }
+    };
+    let expected = ToolCallOrigin {
+        execution: "greeter".to_owned(),
+        section: "Shout".to_owned(),
+        caller: ToolCaller::Script,
+    };
+    assert_eq!(origin, expected);
     Ok(())
 }
 

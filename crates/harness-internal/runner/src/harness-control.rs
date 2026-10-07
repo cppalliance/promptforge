@@ -35,12 +35,13 @@ impl RunControl {
         }
     }
 
-    /// Drops the effects in flight, except questions to the operator, and
-    /// lets the run go on.
+    /// Drops the effects in flight, except tool calls that survive stops,
+    /// and lets the run go on.
     ///
-    /// A question to the operator is a call to the
-    /// `user-input/ask` tool. Every other effect in flight is
-    /// aborted and answered `Dropped`. The run's cancel flag stays clear.
+    /// A call survives a stop when its tool's descriptor sets
+    /// `survives_stop`, as the question to the operator does. Every other
+    /// effect in flight is aborted and answered `Dropped`. The run's cancel
+    /// flag stays clear.
     /// A `pcall` around a dropped call catches its cancelled error.
     /// Otherwise, the error ends the run cancelled.
     ///
@@ -54,7 +55,7 @@ impl RunControl {
 
     /// Cancels the run.
     ///
-    /// Every effect in flight, questions to the operator included, is
+    /// Every effect in flight, tool calls that survive stops included, is
     /// answered `Dropped`, and the run ends cancelled. A cancel raised
     /// before the run begins ends the run before it reaches the recorder.
     /// Calling `cancel` more than once is the same as calling it once.

@@ -18,7 +18,7 @@ use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, CompletionResult, Message,
     ModelBinding, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
-use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -193,10 +193,12 @@ pub(crate) fn held_broker(held: &Arc<Held>) -> ScriptedBroker {
 }
 
 /// The fixture Plugin `harness`, contributing the one tool
-/// `harness/hold`, whose every call is held.
+/// `harness/hold`, whose every call is held, and which a stop leaves in
+/// flight when `survives_stop` is set.
 struct HoldPlugin {
     id: PluginId,
     held: Arc<Held>,
+    survives_stop: bool,
 }
 
 impl Plugin for HoldPlugin {
@@ -217,6 +219,7 @@ impl Plugin for HoldPlugin {
             tools: vec![Arc::new(HoldTool {
                 id: ToolId::parse("harness/hold").unwrap(),
                 held: Arc::clone(&self.held),
+                survives_stop: self.survives_stop,
             })],
             prelude: None,
         })
@@ -227,6 +230,7 @@ impl Plugin for HoldPlugin {
 struct HoldTool {
     id: ToolId,
     held: Arc<Held>,
+    survives_stop: bool,
 }
 
 #[async_trait::async_trait]
@@ -251,6 +255,16 @@ impl Tool for HoldTool {
         json!({ "type": "object", "properties": {} })
     }
 
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor::new(
+            self.id(),
+            self.wire_name(),
+            self.description(),
+            self.parameters_schema(),
+        )
+        .survives_stop(self.survives_stop)
+    }
+
     async fn call(&self, _cx: ToolContext<'_>, _args: Value) -> Result<ToolOutput, ToolError> {
         self.held.hold().await
     }
@@ -258,11 +272,22 @@ impl Tool for HoldTool {
 
 /// A registry holding the hold Plugin over `held`.
 pub(crate) fn hold_registry(held: &Arc<Held>) -> PluginRegistry {
+    registry_holding(held, false)
+}
+
+/// A registry holding the hold Plugin over `held`, its tool marked to
+/// survive a stop.
+pub(crate) fn surviving_hold_registry(held: &Arc<Held>) -> PluginRegistry {
+    registry_holding(held, true)
+}
+
+fn registry_holding(held: &Arc<Held>, survives_stop: bool) -> PluginRegistry {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(HoldPlugin {
             id: PluginId::parse("harness").unwrap(),
             held: Arc::clone(held),
+            survives_stop,
         }))
         .unwrap();
     registry
