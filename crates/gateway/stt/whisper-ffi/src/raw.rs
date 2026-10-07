@@ -32,7 +32,7 @@ struct Aheads {
 #[repr(C)]
 pub(crate) struct ContextParams {
     use_gpu: bool,
-    flash_attn: bool,
+    pub(crate) flash_attn: bool,
     gpu_device: c_int,
     dtw_token_timestamps: bool,
     dtw_aheads_preset: c_int,
@@ -129,6 +129,26 @@ pub(crate) struct FullParams {
     vad_params: VadParams,
 }
 
+/// `whisper_token_data`, returned by value from
+/// `whisper_full_get_token_data_from_state`.
+///
+/// `t0` and `t1` are centiseconds and stay at whisper's `-1` unless the pass
+/// set `token_timestamps`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct TokenData {
+    id: c_int,
+    tid: c_int,
+    pub(crate) p: f32,
+    plog: f32,
+    pt: f32,
+    ptsum: f32,
+    pub(crate) t0: i64,
+    pub(crate) t1: i64,
+    t_dtw: i64,
+    vlen: f32,
+}
+
 pub(crate) type ContextDefaultParams = unsafe extern "C" fn() -> ContextParams;
 pub(crate) type InitFromFileWithParams =
     unsafe extern "C" fn(*const c_char, ContextParams) -> *mut Context;
@@ -141,6 +161,11 @@ pub(crate) type FullWithState =
 pub(crate) type FullNSegmentsFromState = unsafe extern "C" fn(*mut State) -> c_int;
 pub(crate) type FullGetSegmentTextFromState =
     unsafe extern "C" fn(*mut State, c_int) -> *const c_char;
+pub(crate) type FullGetSegmentNoSpeechProbFromState =
+    unsafe extern "C" fn(*mut State, c_int) -> f32;
+pub(crate) type FullNTokensFromState = unsafe extern "C" fn(*mut State, c_int) -> c_int;
+pub(crate) type FullGetTokenDataFromState =
+    unsafe extern "C" fn(*mut State, c_int, c_int) -> TokenData;
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;
 pub(crate) type Free = unsafe extern "C" fn(*mut Context);
 pub(crate) type FreeState = unsafe extern "C" fn(*mut State);

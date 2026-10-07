@@ -111,6 +111,18 @@ pub enum WhisperError {
         count: c_int,
     },
 
+    /// A token index falls outside its segment in the latest decoding result.
+    #[non_exhaustive]
+    #[error("whisper token {token} is outside 0..{count} in segment {segment}")]
+    InvalidToken {
+        /// Segment index requested by the caller.
+        segment: c_int,
+        /// Token index requested by the caller.
+        token: c_int,
+        /// Number of tokens in the segment.
+        count: c_int,
+    },
+
     /// whisper.cpp returned no system-information string.
     #[error("whisper returned no system information")]
     NullSystemInfo,

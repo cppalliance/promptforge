@@ -12,6 +12,9 @@ thiserror.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true
 
+[dev-dependencies]
+hound.workspace = true
+
 [build-dependencies]
 build-ceiling.workspace = true
 

@@ -91,7 +91,7 @@ A word moves through three states: tentative (latest fast-pass guess), agreed (s
   - Output for opted-in clients: the existing hypothesis event (`event_id`, `item_id`, `content_index`, `revision`, `transcript`, `finalized`, `agreed`, `tentative`, `audio_start_ms`, `audio_end_ms`, per `crates/gateway/stt/api/src/realtime/wire/server.rs:86-110,183-195`), plus `finalized_through_ms` (audio milliseconds covered by finalized text) and `finalized_seq` (count of final outcomes applied to the item) only when a second include token is negotiated.
   - Output for plain clients: live append-only deltas during the take, built from finalized text plus agreed text minus its last 2 words, instead of deltas queued until commit (`crates/gateway/stt/api/src/realtime/session/route.rs:23-31,112-155`). `completed` is unchanged and remains the authoritative text.
 - States and validation:
-  - Tentative to agreed: a word's normalized form (alphanumeric characters only, lowercased, the rule `equivalent_token` uses at `crates/gateway/stt/api/src/take/agreement.rs:42`) matches at the same position in at least 2 fast passes whose audio end positions differ by at least 0.6 s. Both thresholds are named constants tuned with the speech-sandbox.
+  - Tentative to agreed: a word's normalized form (alphanumeric characters only, lowercased, the rule `equivalent_token` uses at `crates/gateway/stt/api/src/take/agreement.rs:42`) matches at the same position in at least 2 fast passes whose audio end positions differ by at least 0.5 s. Both thresholds are named constants tuned with the speech-sandbox.
   - Agreed never shrinks within a window. A hypothesis that neither extends the agreed prefix nor reaches 0.35 normalized-token similarity with any of the last 5 hypotheses is held as an outlier and adopted only when the next hypothesis is similar to it.
   - Agreed to finalized: when a final lands for a sample range, its text is authoritative for that range. The bounded token alignment maps the final's last word onto the previously displayed text; displayed words after that point stay as agreed or tentative when at least 2 normalized tokens before them match the final's tail, capped at 5 words, until the next fast pass re-derives them. Without that anchor they are dropped.
   - Revision increments only when an emitted snapshot differs from the last emitted one.
@@ -153,6 +153,7 @@ flowchart LR
     - The replay test regenerates golden snapshots and `metrics.json` when `PROMPTFORGE_REPLAY_UPDATE=1` is set; every behavior step commits its regenerated snapshots and metrics, so the history carries the numbers. `baseline.json` never changes after it is recorded.
     - Metrics, over one take's interim snapshots and its final transcript: UPWR is the count of displayed words a later snapshot changes or removes, divided by the final transcript's word count; UPSR is the fraction of snapshots that change or remove at least one previously displayed word; partial latency is the mean delay from a word's audio end to its first appearance; commit lag is the mean delay from a word's first appearance to agreed; agreed-shrink events count snapshots whose agreed text does not extend the previous agreed text within the same window; interim decode time is wall time per interim decode on the native path.
     - Thresholds the replay test enforces against `baseline.json`: UPWR never above baseline; partial latency and commit lag at most 110 percent of baseline unless a step states otherwise; agreed-shrink events zero once the commit rule lands.
+    - Lower latency is always preferred. When a setting trades latency against stability, choose the lowest-latency value that still meets the step's stability gates; the 110 percent ceiling is a guardrail, not a budget to spend.
   - Plain clients: deltas arrive during the take instead of only at commit; `completed` is unchanged.
   - No config schema change is required; if per-role decode settings are exposed, their defaults reproduce the values above.
 - Data, persistence, failure, security, and privacy constraints:
@@ -206,6 +207,7 @@ Characterization tests pin today's behavior before anything changes, then each b
   - Word end times cross the speech engine through a new `Decoder::decode` return type carrying the text plus per-word end offsets in samples from the request start, empty when the role did not request timestamps. Rationale: the engine stays backend-neutral, and scripted and native decoders share one path to the take's window trimming.
   - Speech-sandbox metrics live in the repository: a fixed `baseline.json` and a regenerated `metrics.json` committed with each behavior step. Rationale: the evidence for every threshold decision survives in git history instead of a chat or scratch log.
   - The interim hallucination veto runs in `backend-whisper` and turns a vetoed decode into an empty transcript. Rationale: token statistics stay inside the backend instead of crossing the engine boundary, and the session already discards empty interim transcripts before agreement.
+  - Lower latency is always preferred over higher latency; tunables take the lowest-latency value that meets their stability gates, and the commit rule's evidence spread starts at 0.5 s instead of 0.6 s. User: "does it need to be said that I prefer lower latency to higher latency?"
 - Rejected alternatives:
   - Never rewrite committed text (transcribe.cpp's finalize rule). Reason: discards `small.en` corrections on text the user already sees. Revisit if the speech-sandbox shows aligned rewrite raises UPWR above baseline.
   - Adopting Silero VAD immediately. Reason: the subject recorded it as too heavy (`crates/gateway/stt/api/src/segment.rs:8-10`) and no reference publishes per-frame cost. Revisit after the cheap endpointing changes, with a measured CPU cost.
@@ -219,7 +221,7 @@ Characterization tests pin today's behavior before anything changes, then each b
   - Token timestamp accuracy on `base.en` and its interaction with `single_segment` are unmeasured; the timestamp work is medium confidence.
   - Too small an `audio_ctx` truncates audio; the formula keeps a floor of 512 and a margin of 128.
   - Prompts can be re-emitted as hallucinations, and a glossary prompt has been reported to cause hallucination; the interim prompt change ships only if the speech-sandbox shows less flicker and no re-emission.
-  - The evidence thresholds (2 observations, 0.6 s) mean a word typically needs three 500 ms ticks to agree; the speech-sandbox commit-lag number decides whether to relax them.
+  - The evidence thresholds (2 observations, 0.5 s) let a word agree after two consecutive 500 ms ticks, the lowest spread that still requires two distinct passes; the earlier 0.6 s value needed three ticks and was dropped for latency.
   - How the session reacts to `TranscribeError::Overloaded` today was not established; the degrade work starts by reading it.
   - The dictation target is read-only while any take exists (`crates/workshop/ui/src/parts/take/take-registry.ts:164-169`, `crates/workshop/ui/src/parts/stt/realtime-stt.ts:109-118`), so caret preservation during a take is not needed.
   - The workshop uses CodeMirror 6 for its file editor, but dictation writes into the TipTap/ProseMirror chat box, so decorations and undo grouping use ProseMirror's mechanisms (a decoration plugin, and `addToHistory: false` transaction metadata).
@@ -511,7 +513,7 @@ flowchart TD
 
 <step-8>
 
-### Step 8: FFI decode parameters and token data
+### Step 8: FFI decode parameters and token data [completed]
 
 - Component: Decode tuning
 - Piece: FFI surface
@@ -560,8 +562,8 @@ flowchart TD
 - Piece: commit rule
 - Changes:
   - `crates/gateway/stt/api/src/take/agreement.rs`: a prefix comparison that uses the `equivalent_token` normalization instead of exact equality.
-  - `crates/gateway/stt/api/src/take/window.rs`: per-token evidence (normalized form, observation count, first and latest audio end) in a new child file; with `window-tests.rs` and `window-tests-live-prefix.rs` that is a third child, so convert `window` to a `take/window/` directory. Named constants: `MIN_AGREEMENT_OBSERVATIONS = 2`, a minimum audio-end spread of 0.6 s in samples, `OUTLIER_SIMILARITY = 0.35`, `OUTLIER_HISTORY = 5`. A token becomes agreed when its normalized form matches at the same position in at least `MIN_AGREEMENT_OBSERVATIONS` hypotheses whose audio ends differ by at least the spread; agreed never shrinks within a window; a hypothesis that neither extends agreed nor reaches the similarity threshold with any of the last 5 hypotheses is held and adopted only when the next hypothesis is similar to it.
-- Tests: flip the Step 4 shrink and punctuation characterization tests; window tests show a punctuation or case flip neither blocks nor reverses an agreed word, agreed never shrinks across a scripted sequence, promotion needs 2 observations 0.6 s apart, and an outlier is held then adopted or dropped. Speech-sandbox: regenerate snapshots and `metrics.json`; agreed-shrink events are zero on every fixture and UPWR is below the baseline. If commit lag exceeds 110 percent of baseline, lower the spread to 0.5 s; if it still does, return blocked with the measured numbers.
+  - `crates/gateway/stt/api/src/take/window.rs`: per-token evidence (normalized form, observation count, first and latest audio end) in a new child file; with `window-tests.rs` and `window-tests-live-prefix.rs` that is a third child, so convert `window` to a `take/window/` directory. Named constants: `MIN_AGREEMENT_OBSERVATIONS = 2`, a minimum audio-end spread of 0.5 s in samples, `OUTLIER_SIMILARITY = 0.35`, `OUTLIER_HISTORY = 5`. A token becomes agreed when its normalized form matches at the same position in at least `MIN_AGREEMENT_OBSERVATIONS` hypotheses whose audio ends differ by at least the spread; agreed never shrinks within a window; a hypothesis that neither extends agreed nor reaches the similarity threshold with any of the last 5 hypotheses is held and adopted only when the next hypothesis is similar to it.
+- Tests: flip the Step 4 shrink and punctuation characterization tests; window tests show a punctuation or case flip neither blocks nor reverses an agreed word, agreed never shrinks across a scripted sequence, promotion needs 2 observations 0.5 s apart, and an outlier is held then adopted or dropped. Speech-sandbox: regenerate snapshots and `metrics.json`; agreed-shrink events are zero on every fixture and UPWR is below the baseline. If commit lag exceeds 110 percent of baseline, return blocked with the measured numbers.
 - Commit: `Agree on normalized tokens with evidence and never shrink`
 
 </step-11>

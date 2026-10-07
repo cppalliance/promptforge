@@ -21,6 +21,9 @@ pub(crate) struct Functions {
     pub(crate) full_with_state: raw::FullWithState,
     pub(crate) full_n_segments_from_state: raw::FullNSegmentsFromState,
     pub(crate) full_get_segment_text_from_state: raw::FullGetSegmentTextFromState,
+    pub(crate) full_get_segment_no_speech_prob_from_state: raw::FullGetSegmentNoSpeechProbFromState,
+    pub(crate) full_n_tokens_from_state: raw::FullNTokensFromState,
+    pub(crate) full_get_token_data_from_state: raw::FullGetTokenDataFromState,
     print_system_info: raw::PrintSystemInfo,
     pub(crate) free: raw::Free,
     pub(crate) free_state: raw::FreeState,
@@ -61,6 +64,21 @@ impl Functions {
                 library,
                 b"whisper_full_get_segment_text_from_state\0",
                 "whisper_full_get_segment_text_from_state",
+            )?,
+            full_get_segment_no_speech_prob_from_state: load_symbol(
+                library,
+                b"whisper_full_get_segment_no_speech_prob_from_state\0",
+                "whisper_full_get_segment_no_speech_prob_from_state",
+            )?,
+            full_n_tokens_from_state: load_symbol(
+                library,
+                b"whisper_full_n_tokens_from_state\0",
+                "whisper_full_n_tokens_from_state",
+            )?,
+            full_get_token_data_from_state: load_symbol(
+                library,
+                b"whisper_full_get_token_data_from_state\0",
+                "whisper_full_get_token_data_from_state",
             )?,
             print_system_info: load_symbol(
                 library,

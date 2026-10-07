@@ -50,6 +50,14 @@ pub struct FullParams {
     print_timestamps: Option<bool>,
     suppress_blank: Option<bool>,
     suppress_nst: Option<bool>,
+    temperature_inc: Option<f32>,
+    audio_ctx: Option<c_int>,
+    max_tokens: Option<c_int>,
+    n_threads: Option<c_int>,
+    token_timestamps: Option<bool>,
+    entropy_thold: Option<f32>,
+    logprob_thold: Option<f32>,
+    no_speech_thold: Option<f32>,
     abort_flag: Option<Arc<AtomicBool>>,
 }
 
@@ -71,6 +79,14 @@ impl FullParams {
             print_timestamps: None,
             suppress_blank: None,
             suppress_nst: None,
+            temperature_inc: None,
+            audio_ctx: None,
+            max_tokens: None,
+            n_threads: None,
+            token_timestamps: None,
+            entropy_thold: None,
+            logprob_thold: None,
+            no_speech_thold: None,
             abort_flag: None,
         }
     }
@@ -142,6 +158,51 @@ impl FullParams {
         self.suppress_nst = Some(value);
     }
 
+    /// Sets the temperature step for fallback retries; zero or below
+    /// disables the fallback.
+    pub fn set_temperature_inc(&mut self, value: f32) {
+        self.temperature_inc = Some(value);
+    }
+
+    /// Sets the encoder's audio context in frames; zero keeps the model's
+    /// full 1500-frame context, and a value above it fails the pass.
+    pub fn set_audio_ctx(&mut self, value: c_int) {
+        self.audio_ctx = Some(value);
+    }
+
+    /// Sets the most text tokens per segment; zero leaves it unlimited.
+    pub fn set_max_tokens(&mut self, value: c_int) {
+        self.max_tokens = Some(value);
+    }
+
+    /// Sets the CPU thread count for the pass.
+    pub fn set_n_threads(&mut self, value: c_int) {
+        self.n_threads = Some(value);
+    }
+
+    /// Sets whether whisper computes per-token timestamps.
+    pub fn set_token_timestamps(&mut self, value: bool) {
+        self.token_timestamps = Some(value);
+    }
+
+    /// Sets the token-entropy threshold below which a decode counts as
+    /// repetitive and falls back to the next temperature.
+    pub fn set_entropy_thold(&mut self, value: f32) {
+        self.entropy_thold = Some(value);
+    }
+
+    /// Sets the mean log-probability threshold below which a decode falls
+    /// back to the next temperature.
+    pub fn set_logprob_thold(&mut self, value: f32) {
+        self.logprob_thold = Some(value);
+    }
+
+    /// Sets the no-speech probability above which, together with a failed
+    /// log-probability check, whisper treats the window as silence.
+    pub fn set_no_speech_thold(&mut self, value: f32) {
+        self.no_speech_thold = Some(value);
+    }
+
     /// Sets the explicit decoder-conditioning prompt.
     ///
     /// # Errors
@@ -185,16 +246,24 @@ impl FullParams {
             .initial_prompt
             .as_ref()
             .map_or(ptr::null(), |value| value.as_ptr());
-        apply_bool(&mut native.translate, self.translate);
-        apply_bool(&mut native.no_context, self.no_context);
-        apply_bool(&mut native.single_segment, self.single_segment);
-        apply_bool(&mut native.no_timestamps, self.no_timestamps);
-        apply_bool(&mut native.print_special, self.print_special);
-        apply_bool(&mut native.print_progress, self.print_progress);
-        apply_bool(&mut native.print_realtime, self.print_realtime);
-        apply_bool(&mut native.print_timestamps, self.print_timestamps);
-        apply_bool(&mut native.suppress_blank, self.suppress_blank);
-        apply_bool(&mut native.suppress_nst, self.suppress_nst);
+        apply_value(&mut native.translate, self.translate);
+        apply_value(&mut native.no_context, self.no_context);
+        apply_value(&mut native.single_segment, self.single_segment);
+        apply_value(&mut native.no_timestamps, self.no_timestamps);
+        apply_value(&mut native.print_special, self.print_special);
+        apply_value(&mut native.print_progress, self.print_progress);
+        apply_value(&mut native.print_realtime, self.print_realtime);
+        apply_value(&mut native.print_timestamps, self.print_timestamps);
+        apply_value(&mut native.suppress_blank, self.suppress_blank);
+        apply_value(&mut native.suppress_nst, self.suppress_nst);
+        apply_value(&mut native.temperature_inc, self.temperature_inc);
+        apply_value(&mut native.audio_ctx, self.audio_ctx);
+        apply_value(&mut native.max_tokens, self.max_tokens);
+        apply_value(&mut native.n_threads, self.n_threads);
+        apply_value(&mut native.token_timestamps, self.token_timestamps);
+        apply_value(&mut native.entropy_thold, self.entropy_thold);
+        apply_value(&mut native.logprob_thold, self.logprob_thold);
+        apply_value(&mut native.no_speech_thold, self.no_speech_thold);
         if let Some(flag) = &self.abort_flag {
             native.abort_callback = Some(abort_requested);
             native.abort_callback_user_data = Arc::as_ptr(flag).cast_mut().cast();
@@ -220,7 +289,7 @@ extern "C" fn abort_requested(data: *mut c_void) -> bool {
     flag.load(Ordering::Acquire)
 }
 
-fn apply_bool(target: &mut bool, value: Option<bool>) {
+fn apply_value<T: Copy>(target: &mut T, value: Option<T>) {
     if let Some(value) = value {
         *target = value;
     }
@@ -240,6 +309,67 @@ mod tests {
         // pointer, nullable function pointer, or a struct of those, and
         // all-zero bytes are a valid value of each.
         unsafe { std::mem::zeroed() }
+    }
+
+    /// Native parameters with the decode members at whisper's b4938 defaults.
+    fn default_native() -> raw::FullParams {
+        let mut native = null_native();
+        native.n_threads = 4;
+        native.temperature_inc = 0.2;
+        native.entropy_thold = 2.4;
+        native.logprob_thold = -1.0;
+        native.no_speech_thold = 0.6;
+        native
+    }
+
+    #[test]
+    fn each_decode_setter_lands_in_its_native_member() {
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_temperature_inc(0.0);
+        params.set_audio_ctx(768);
+        params.set_max_tokens(44);
+        params.set_n_threads(2);
+        params.set_token_timestamps(true);
+        params.set_entropy_thold(2.8);
+        params.set_logprob_thold(-0.5);
+        params.set_no_speech_thold(0.3);
+        let mut native = default_native();
+        params.apply(&mut native);
+        assert_eq!(native.temperature_inc.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(native.audio_ctx, 768);
+        assert_eq!(native.max_tokens, 44);
+        assert_eq!(native.n_threads, 2);
+        assert!(native.token_timestamps);
+        assert_eq!(native.entropy_thold.to_bits(), 2.8_f32.to_bits());
+        assert_eq!(native.logprob_thold.to_bits(), (-0.5_f32).to_bits());
+        assert_eq!(native.no_speech_thold.to_bits(), 0.3_f32.to_bits());
+    }
+
+    #[test]
+    fn unset_decode_setters_keep_whisper_defaults() {
+        let mut native = default_native();
+        FullParams::new(SamplingStrategy::Greedy { best_of: 1 }).apply(&mut native);
+        let defaults = default_native();
+        assert_eq!(
+            native.temperature_inc.to_bits(),
+            defaults.temperature_inc.to_bits()
+        );
+        assert_eq!(native.audio_ctx, defaults.audio_ctx);
+        assert_eq!(native.max_tokens, defaults.max_tokens);
+        assert_eq!(native.n_threads, defaults.n_threads);
+        assert_eq!(native.token_timestamps, defaults.token_timestamps);
+        assert_eq!(
+            native.entropy_thold.to_bits(),
+            defaults.entropy_thold.to_bits()
+        );
+        assert_eq!(
+            native.logprob_thold.to_bits(),
+            defaults.logprob_thold.to_bits()
+        );
+        assert_eq!(
+            native.no_speech_thold.to_bits(),
+            defaults.no_speech_thold.to_bits()
+        );
     }
 
     #[test]
