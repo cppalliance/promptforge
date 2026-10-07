@@ -382,6 +382,17 @@ fn the_click_rule_skips_runs_under_250_ms_measured_without_padding() {
 }
 
 #[test]
+fn a_click_closes_at_the_sentence_end_silence_and_is_still_skipped() {
+    let (mut segmenter, _) = scripted(&[(24_576, 28_160)]);
+    assert_eq!(hear(&mut segmenter, 37_887), None);
+    assert_eq!(
+        hear(&mut segmenter, 37_888),
+        Some(SegmentOutcome::Skipped(16_576..29_760)),
+        "a 224 ms run closes once a frame reaches 0.6 s of silence and is still a click"
+    );
+}
+
+#[test]
 fn a_silence_close_proves_only_the_frames_it_decided_on_silent() {
     let (mut segmenter, _) = scripted(&[(24_576, 28_160), (61_440, 99_840)]);
     assert_eq!(
@@ -390,8 +401,8 @@ fn a_silence_close_proves_only_the_frames_it_decided_on_silent() {
     );
     assert_eq!(
         segmenter.scanned(),
-        60_416,
-        "the frame that reached two seconds of silence ends the proven-silent span, \
+        37_888,
+        "the frame that reached the closing silence ends the proven-silent span, \
          though later speech is already classified"
     );
 }

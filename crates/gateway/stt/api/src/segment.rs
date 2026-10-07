@@ -15,7 +15,7 @@ mod boundary;
 mod endpoint;
 
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
-use endpoint::{Closed, EndpointState, HANGOVER_SAMPLES, Rule, Scan};
+use endpoint::{Closed, EndpointState, HANGOVER_SAMPLES, Rule, SHORT_BURST_SAMPLES, Scan};
 
 /// Analysis frame length: one detector chunk, 32 ms at 16 kHz.
 pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::DETECTOR_CHUNK_SAMPLES;
@@ -24,6 +24,8 @@ pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 /// Speech shorter than 250 ms is discarded as a click or cough rather than
 /// transcribed, where whisper would hallucinate a word for it.
 const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
+
+const _: () = assert!(SHORT_BURST_SAMPLES > MIN_SPEECH_SAMPLES as u64);
 
 /// Incremental speech segmenter over one take's PCM buffer.
 ///

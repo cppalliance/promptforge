@@ -529,7 +529,7 @@ flowchart TD
 
 <step-11>
 
-### Step 11: Short-burst close
+### Step 11: Short-burst close [completed]
 
 - Component: Interim decoding
 - Piece: short-burst close

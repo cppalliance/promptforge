@@ -3,8 +3,10 @@
 //! Three rules decide timing: silence with no tracked speech never opens a
 //! segment, silence after speech closes it once the silence lasts
 //! [`MIN_SILENCE_SAMPLES`] (or [`SENTENCE_END_SILENCE_SAMPLES`] when the take
-//! hints that the speech ends a sentence), and speech closes at the forced
-//! stride [`FORCED_STRIDE_SAMPLES`] after its onset. Closing timing is
+//! hints that the speech ends a sentence or a speech run that does not
+//! continue a stride is shorter than [`SHORT_BURST_SAMPLES`]), and speech
+//! closes at the forced stride [`FORCED_STRIDE_SAMPLES`] after its onset.
+//! Closing timing is
 //! measured on the detector's speech run; the finalized segment adds a
 //! pre-roll before the run and a hangover after it.
 
@@ -24,6 +26,13 @@ const MIN_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 2) as u64;
 /// sentence-final punctuation: 0.6 s, so a finished sentence reaches the final
 /// pass without waiting out the pause allowance for a sentence still going.
 const SENTENCE_END_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 3 / 5) as u64;
+
+/// Speech runs shorter than this close after [`SENTENCE_END_SILENCE_SAMPLES`]
+/// even without the sentence-end hint: 1 s, so a lone word or a short reply
+/// reaches the final pass without waiting out the pause allowance for a
+/// sentence still going. A run that continues through a stride is the tail
+/// of a longer utterance, so it keeps that allowance however short it is.
+pub(super) const SHORT_BURST_SAMPLES: u64 = EnginePolicy::SAMPLE_RATE as u64;
 
 /// Speech runs this long before a stride closes it: 10 s rounded up to whole
 /// frames (313 frames, 10.016 s), so a stride ends on the frame grid and
@@ -52,6 +61,9 @@ pub(super) struct EndpointState {
     /// End of the last completed segment: everything before this index has
     /// been handed to the final pass (or discarded as a click).
     pub(super) consumed: u64,
+    /// Whether the tracked speech run began where a stride cut speech that
+    /// was still going.
+    pub(super) continues_stride: bool,
 }
 
 impl EndpointState {
@@ -109,11 +121,13 @@ pub(super) fn endpoint(state: EndpointState, scan: Scan) -> Option<Advance> {
     if let Some(onset) = state.speech_start {
         let stride_end = onset.checked_add(FORCED_STRIDE_SAMPLES)?;
         if stride_end <= scan.received && frame_end > stride_end {
+            let continues = state.silence_begin.is_none();
             return Some(Advance {
                 state: EndpointState {
-                    speech_start: state.silence_begin.is_none().then_some(stride_end),
+                    speech_start: continues.then_some(stride_end),
                     silence_begin: None,
                     consumed: stride_end,
+                    continues_stride: continues,
                 },
                 cursor: stride_end,
                 closed: Some(Closed {
@@ -138,7 +152,8 @@ pub(super) fn endpoint(state: EndpointState, scan: Scan) -> Option<Advance> {
         }
         (Some(onset), true) => {
             let begin = *next.silence_begin.get_or_insert(scan.cursor);
-            let closing = if scan.sentence_end {
+            let short_burst = !state.continues_stride && begin - onset < SHORT_BURST_SAMPLES;
+            let closing = if scan.sentence_end || short_burst {
                 SENTENCE_END_SILENCE_SAMPLES
             } else {
                 MIN_SILENCE_SAMPLES
@@ -149,6 +164,7 @@ pub(super) fn endpoint(state: EndpointState, scan: Scan) -> Option<Advance> {
                     speech_start: None,
                     silence_begin: None,
                     consumed: end,
+                    continues_stride: false,
                 };
                 Closed {
                     rule: Rule::Silence,
@@ -185,6 +201,7 @@ mod tests {
             speech_start: Some(onset),
             silence_begin,
             consumed,
+            continues_stride: false,
         }
     }
 
@@ -251,6 +268,47 @@ mod tests {
     }
 
     #[test]
+    fn a_burst_under_one_second_closes_once_a_frame_reaches_six_tenths_of_a_second() {
+        let state = speaking(0, Some(15_999), 0);
+        let short = endpoint(state, scan(15_999 + 9_600 - FRAME - 1, true));
+        assert_eq!(short.and_then(|advance| advance.closed), None);
+        let closing = closed(endpoint(state, scan(15_999 + 9_600 - FRAME, true)));
+        assert_eq!(closing.rule, Rule::Silence);
+        assert_eq!(closing.speech, 0..15_999);
+        assert_eq!(closing.segment, 0..17_599);
+    }
+
+    #[test]
+    fn a_burst_of_one_second_waits_for_two_seconds_of_silence() {
+        let state = speaking(0, Some(16_000), 0);
+        let paused = endpoint(state, scan(16_000 + 9_600 - FRAME, true));
+        assert_eq!(
+            paused.and_then(|advance| advance.closed),
+            None,
+            "a run at the limit is not a short burst"
+        );
+        let short = endpoint(state, scan(16_000 + 32_000 - FRAME - 1, true));
+        assert_eq!(short.and_then(|advance| advance.closed), None);
+        let closing = closed(endpoint(state, scan(16_000 + 32_000 - FRAME, true)));
+        assert_eq!(closing.speech, 0..16_000);
+    }
+
+    #[test]
+    fn a_sentence_end_hint_closes_bursts_on_both_sides_of_the_limit_at_six_tenths_of_a_second() {
+        for run in [15_999, 16_000] {
+            let state = speaking(0, Some(run), 0);
+            let hinted = |cursor| Scan {
+                sentence_end: true,
+                ..scan(cursor, true)
+            };
+            let short = endpoint(state, hinted(run + 9_600 - FRAME - 1));
+            assert_eq!(short.and_then(|advance| advance.closed), None);
+            let closing = closed(endpoint(state, hinted(run + 9_600 - FRAME)));
+            assert_eq!(closing.speech, 0..run);
+        }
+    }
+
+    #[test]
     fn speech_closes_at_the_forced_stride_once_its_audio_arrives() {
         let state = speaking(1_024, None, 0);
         let waiting = Scan {
@@ -271,7 +329,10 @@ mod tests {
         assert_eq!(advance.cursor, 161_280);
         assert_eq!(
             advance.state,
-            speaking(161_280, None, 161_280),
+            EndpointState {
+                continues_stride: true,
+                ..speaking(161_280, None, 161_280)
+            },
             "speech continuing through the stride opens the next run at its end"
         );
         let stride = advance.closed.expect("the stride closes a segment");
@@ -280,6 +341,45 @@ mod tests {
             stride.speech,
             1_024..161_280,
             "the stride is 313 whole frames, 10.016 s"
+        );
+    }
+
+    #[test]
+    fn a_short_pause_right_after_a_stride_waits_for_two_seconds_of_silence() {
+        let stride = endpoint(speaking(0, None, 0), scan(160_256, false))
+            .expect("the stride closes")
+            .state;
+        let paused = EndpointState {
+            silence_begin: Some(168_448),
+            ..stride
+        };
+        let breath = endpoint(paused, scan(168_448 + 9_600 - FRAME, true));
+        assert_eq!(
+            breath.and_then(|advance| advance.closed),
+            None,
+            "half a second of speech past the stride continues a longer run"
+        );
+        let short = endpoint(paused, scan(168_448 + 32_000 - FRAME - 1, true));
+        assert_eq!(short.and_then(|advance| advance.closed), None);
+        let advance = endpoint(paused, scan(168_448 + 32_000 - FRAME, true));
+        assert_eq!(
+            advance.as_ref().map(|advance| advance.state),
+            Some(EndpointState {
+                consumed: 168_448 + HANGOVER_SAMPLES,
+                ..EndpointState::default()
+            }),
+            "the next run starts as a fresh burst"
+        );
+        let closing = closed(advance);
+        assert_eq!(closing.speech, 160_256..168_448);
+        let hinted = Scan {
+            sentence_end: true,
+            ..scan(168_448 + 9_600 - FRAME, true)
+        };
+        assert_eq!(
+            closed(endpoint(paused, hinted)).speech,
+            160_256..168_448,
+            "a sentence-end hint still closes at six tenths of a second"
         );
     }
 
