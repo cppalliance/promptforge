@@ -6,6 +6,7 @@
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
@@ -123,6 +124,11 @@ fn within<'a>(probabilities: &'a [f32], span: &Range<usize>) -> &'a [f32] {
     let first = span.start.div_ceil(CHUNK).min(probabilities.len());
     let end = (span.end / CHUNK).clamp(first, probabilities.len());
     &probabilities[first..end]
+}
+
+/// The nearest-rank `percent` percentile of ascending `sorted`.
+fn percentile(sorted: &[Duration], percent: usize) -> Duration {
+    sorted[(sorted.len() * percent).div_ceil(100).saturating_sub(1)]
 }
 
 #[test]
@@ -252,5 +258,48 @@ fn detection_logs_reach_tracing_only_at_trace() {
     assert_eq!(
         traced, 9,
         "four lines per call plus `chunk_len`: {events:?}"
+    );
+}
+
+/// Run alone on `dictation-01.wav`. Above 1 ms at p99, detection no longer
+/// fits inline on the session task.
+#[test]
+#[ignore = "requires packaged whisper, Silero model, and audio fixtures"]
+fn per_chunk_detection_stays_within_one_millisecond_at_p99() {
+    const WARM_UP_CHUNKS: usize = 64;
+    const BUDGET: Duration = Duration::from_millis(1);
+    let library = library();
+    // Production routes the per-call log lines through the tracing bridge;
+    // whisper's default handler writes them to stderr instead.
+    library.set_log_callback();
+    let mut vad = silero(&library);
+    let samples = fixture().samples;
+    let chunks = samples.as_chunks::<CHUNK>().0;
+    for chunk in chunks.iter().take(WARM_UP_CHUNKS) {
+        vad.detect_chunk(chunk).expect("a whole chunk classifies");
+    }
+    vad.reset();
+    let mut costs = chunks
+        .iter()
+        .map(|chunk| {
+            let start = Instant::now();
+            vad.detect_chunk(chunk).expect("a whole chunk classifies");
+            start.elapsed()
+        })
+        .collect::<Vec<_>>();
+    costs.sort_unstable();
+    let p50 = percentile(&costs, 50);
+    let p99 = percentile(&costs, 99);
+    println!(
+        "Silero cost per chunk over {} chunks on one CPU thread: p50 {p50:?}, p99 {p99:?}, max {:?}; {}",
+        costs.len(),
+        costs.last().expect("the fixture has chunks"),
+        library
+            .system_info()
+            .expect("system information is exported"),
+    );
+    assert!(
+        p99 <= BUDGET,
+        "p99 {p99:?} exceeds {BUDGET:?} (p50 {p50:?})"
     );
 }

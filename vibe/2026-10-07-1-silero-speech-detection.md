@@ -202,6 +202,7 @@ Detector decisions get unit tests through a scripted detector, so every timing r
   - The meter shows a short scrolling loudness history. User chose: "A short loudness history: bars scroll right to left, each one a recent moment."
   - The meter's tooltip names the receiving agent and a click reveals it. User chose: "Tooltip names the receiving agent, and clicking the meter jumps to that agent."
   - The meter reads the PCM chunks the capture service already emits instead of adding an `AnalyserNode`, because a history of 100 ms moments needs no finer timing.
+  - Silero detection runs inline on the session task. Rationale: single 512-sample `detect_chunk` calls measured p50 131 to 132 µs and p99 140 to 158 µs over three runs of 2,198 chunks of `dictation-01.wav` (slowest call 741 µs), about six times under the 1 ms budget. Measured on an AMD Ryzen Threadripper PRO 9995WX (AVX2), Windows build 26200, whisper.cpp `b4938` CUDA DLL with VAD forced to one CPU thread, unoptimized test profile, tracing log bridge installed. Slower CPUs are unmeasured.
 - Rejected alternatives:
   - The `whisper_full` VAD flag on interim decodes. Reason: it strips the trailing pause Whisper needs for punctuation, reruns detection on every call, and does not touch endpointing. Revisit if the standalone detector leaves invented text inside decoded windows.
   - WebRTC VAD. Reason: best MCC of 0.41 (https://arxiv.org/abs/2601.17270), and it accepted every noise-only ESC-50 file as speech (https://github.com/snakers4/silero-vad/wiki/Quality-Metrics).
@@ -362,7 +363,7 @@ flowchart TD
 
 <step-3>
 
-### Step 3: Measure Silero cost per chunk
+### Step 3: Measure Silero cost per chunk [completed]
 
 - Component: Silero bindings
 - Piece: cost measurement
