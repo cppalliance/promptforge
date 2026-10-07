@@ -1,0 +1,18 @@
+{
+  "window_seconds": 4,
+  "speech_samples": [[0, 134400]],
+  "ticks": [
+    {"at_ms": 1150, "audio_start_ms": 0, "audio_end_ms": 1000, "transcript": "And so"},
+    {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "And so my fellow"},
+    {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "And so my fellow Americans"},
+    {"at_ms": 4150, "audio_start_ms": 0, "audio_end_ms": 4000, "transcript": "And so my fellow Americans, ask not"},
+    {"at_ms": 5150, "audio_start_ms": 1000, "audio_end_ms": 5000, "transcript": "my fellow Americans, ask not what your"},
+    {"at_ms": 6150, "audio_start_ms": 2000, "audio_end_ms": 6000, "transcript": "Americans ask not what your country can"},
+    {"at_ms": 7150, "audio_start_ms": 3000, "audio_end_ms": 7000, "transcript": "ask not what your country can do for"},
+    {"at_ms": 8150, "audio_start_ms": 4000, "audio_end_ms": 8000, "transcript": "what your country can do for you,"},
+    {"at_ms": 8750, "audio_start_ms": 4600, "audio_end_ms": 8600, "transcript": "your country can do for you, ask"}
+  ],
+  "finals": [
+    {"at_ms": 9100, "sample_start": 0, "sample_end": 139200, "text": "And so, my fellow Americans, ask not what your country can do for you, ask"}
+  ]
+}

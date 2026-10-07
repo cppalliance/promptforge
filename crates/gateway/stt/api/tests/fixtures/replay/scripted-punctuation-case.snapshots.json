@@ -1,0 +1,75 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "ask not",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "ask not",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 1650,
+      "revision": 2,
+      "transcript": "Ask not what",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "Ask not what",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500
+    },
+    {
+      "at_ms": 2150,
+      "revision": 3,
+      "transcript": "Ask not, what your country",
+      "finalized": "",
+      "agreed": "Ask",
+      "tentative": " not, what your country",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 2650,
+      "revision": 4,
+      "transcript": "ask not what your country can do",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "ask not what your country can do",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500
+    },
+    {
+      "at_ms": 3150,
+      "revision": 5,
+      "transcript": "Ask not what your country can do for you.",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "Ask not what your country can do for you.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3650,
+      "revision": 6,
+      "transcript": "Ask not what your country can do for you",
+      "finalized": "",
+      "agreed": "Ask not what your country can do for",
+      "tentative": " you",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 3950,
+      "revision": 7,
+      "transcript": "Ask not what your country can do for you.",
+      "finalized": "",
+      "agreed": "Ask not what your country can do for",
+      "tentative": " you.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3800
+    }
+  ],
+  "completed": "Ask not what your country can do for you."
+}

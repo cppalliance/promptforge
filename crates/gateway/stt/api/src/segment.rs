@@ -19,7 +19,7 @@ mod boundary;
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
-const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
+pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
 const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
 pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 

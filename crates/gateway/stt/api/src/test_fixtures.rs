@@ -15,6 +15,8 @@ mod hour;
 #[cfg(feature = "test-fixtures")]
 pub mod native;
 #[cfg(feature = "test-fixtures")]
+mod replay;
+#[cfg(feature = "test-fixtures")]
 mod segment;
 #[cfg(feature = "test-fixtures")]
 mod session;
@@ -35,6 +37,10 @@ pub use hour::{
 };
 #[cfg(all(test, not(miri)))]
 pub(crate) use native::{jfk_samples, require_model};
+#[cfg(feature = "test-fixtures")]
+pub use replay::{
+    ReplayError, ReplayFinal, ReplayOutcome, ReplayScript, ReplaySnapshot, ReplayTake, ReplayTick,
+};
 #[cfg(feature = "test-fixtures")]
 pub use segment::segment_ranges;
 

@@ -467,7 +467,7 @@ flowchart TD
 
 <step-5>
 
-### Step 5: Rust speech-sandbox with scripted baseline
+### Step 5: Rust speech-sandbox with scripted baseline [completed]
 
 - Component: Speech-sandbox
 - Piece: Rust replay and metrics

@@ -17,4 +17,6 @@ mod realtime_forced_windows;
 #[cfg(not(miri))]
 mod realtime_session;
 #[cfg(not(miri))]
+mod replay;
+#[cfg(not(miri))]
 mod service;

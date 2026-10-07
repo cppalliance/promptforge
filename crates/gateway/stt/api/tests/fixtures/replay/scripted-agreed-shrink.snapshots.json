@@ -1,0 +1,65 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "Why is it",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "Why is it",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 1650,
+      "revision": 2,
+      "transcript": "Why is it",
+      "finalized": "",
+      "agreed": "Why is it",
+      "tentative": "",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500
+    },
+    {
+      "at_ms": 2150,
+      "revision": 3,
+      "transcript": "Why is this",
+      "finalized": "",
+      "agreed": "Why is",
+      "tentative": " this",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 2650,
+      "revision": 4,
+      "transcript": "Why is this the",
+      "finalized": "",
+      "agreed": "Why is this",
+      "tentative": " the",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500
+    },
+    {
+      "at_ms": 3150,
+      "revision": 5,
+      "transcript": "Why is that the way",
+      "finalized": "",
+      "agreed": "Why is",
+      "tentative": " that the way",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3350,
+      "revision": 6,
+      "transcript": "Why is that the way?",
+      "finalized": "",
+      "agreed": "Why is that the",
+      "tentative": " way?",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3200
+    }
+  ],
+  "completed": "Why is that the way?"
+}

@@ -1,0 +1,115 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "We choose",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "We choose",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 1650,
+      "revision": 2,
+      "transcript": "We choose to go",
+      "finalized": "",
+      "agreed": "We choose",
+      "tentative": " to go",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500
+    },
+    {
+      "at_ms": 2150,
+      "revision": 3,
+      "transcript": "We choose to go to the",
+      "finalized": "",
+      "agreed": "We choose to go",
+      "tentative": " to the",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 2650,
+      "revision": 4,
+      "transcript": "We choose to go to the moon",
+      "finalized": "",
+      "agreed": "We choose to go to the",
+      "tentative": " moon",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500
+    },
+    {
+      "at_ms": 3150,
+      "revision": 5,
+      "transcript": "We choose to go to the moon",
+      "finalized": "",
+      "agreed": "We choose to go to the moon",
+      "tentative": "",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3650,
+      "revision": 5,
+      "transcript": "We choose to go to the moon",
+      "finalized": "",
+      "agreed": "We choose to go to the moon",
+      "tentative": "",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 4150,
+      "revision": 5,
+      "transcript": "We choose to go to the moon",
+      "finalized": "",
+      "agreed": "We choose to go to the moon",
+      "tentative": "",
+      "audio_start_ms": 0,
+      "audio_end_ms": 4000
+    },
+    {
+      "at_ms": 6050,
+      "revision": 6,
+      "transcript": "We chose to go to the moon and do",
+      "finalized": "We chose to go to the moon",
+      "agreed": "",
+      "tentative": " and do",
+      "audio_start_ms": 2400,
+      "audio_end_ms": 5900
+    },
+    {
+      "at_ms": 6650,
+      "revision": 7,
+      "transcript": "We chose to go to the moon and do the other",
+      "finalized": "We chose to go to the moon",
+      "agreed": " and do",
+      "tentative": " the other",
+      "audio_start_ms": 2400,
+      "audio_end_ms": 6500
+    },
+    {
+      "at_ms": 7150,
+      "revision": 8,
+      "transcript": "We chose to go to the moon and do the other things",
+      "finalized": "We chose to go to the moon",
+      "agreed": " and do the other",
+      "tentative": " things",
+      "audio_start_ms": 2400,
+      "audio_end_ms": 7000
+    },
+    {
+      "at_ms": 7750,
+      "revision": 9,
+      "transcript": "We chose to go to the moon and do the other things",
+      "finalized": "We chose to go to the moon",
+      "agreed": " and do the other things",
+      "tentative": "",
+      "audio_start_ms": 2400,
+      "audio_end_ms": 7600
+    }
+  ],
+  "completed": "We chose to go to the moon and do the other things"
+}
