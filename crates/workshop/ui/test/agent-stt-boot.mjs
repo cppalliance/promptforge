@@ -5,7 +5,9 @@
 // owns the recording LED and hands it to dictation through STT_STATUS
 // (src/services/stt-status.ts), registered before the layout boots: an
 // agent panel restored from a saved layout lights the LED too, and so
-// does a second agent panel opened beside the first. The behaviors
+// does a second agent panel opened beside the first. A dictating panel's
+// capture presence reads its own dock panel: the live tab title for its
+// label, and its `agent` or `agent:<instance>` id for its reveal. The behaviors
 // themselves are pinned by test/agent-stt.mjs against the view; this
 // proves the composition root wires the view to the bar.
 //
@@ -274,6 +276,99 @@ const scenarios = {
       await sleep(20);
       await recordOnce(ctx, mic, "the second agent panel");
       await closePanel(ctx, second, mic, "the second agent panel");
+    }),
+
+  // The dictating panel's capture presence reads the dock panel that hosts
+  // it: the label follows the live tab title, and reveal reactivates that
+  // panel - `agent` for the boot-time singleton, which carries no instance
+  // param, and `agent:<instance>` for an opened one - without opening another.
+  presence: () =>
+    bootWorkbench("a dictating agent panel's presence names its tab and reveals its own panel", async (ctx) => {
+      const { agentPanel, document, emitAgent, sockets, resolveService, sleep, failures } = ctx;
+      const dock = resolveService("workshop.dock");
+      const capture = resolveService("workshop.speechCapture");
+      const first = dock.getPanel("agent");
+
+      emitAgent({ type: "agent_session", session: "s1", agent: "chat" });
+      const firstMic = agentPanel.querySelector(".ws-agent-session__mic");
+      if (!firstMic) {
+        failures.push("the boot agent session mounted no mic");
+        return;
+      }
+      await sleep(20);
+      emitAgent({ type: "input_required", token: "tok-boot" });
+      const firstTake = await startTake(ctx, firstMic);
+      if (!firstTake) {
+        failures.push("a take on the boot agent panel did not light the recording LED");
+        return;
+      }
+      first.api.setTitle("Boot session");
+      if (capture.presence?.label() !== "Boot session (chat)") {
+        failures.push(`the boot panel's presence did not read its tab title (got "${capture.presence?.label()}")`);
+      }
+
+      const second = dock.addPanel({
+        id: "agent:a",
+        component: "agent",
+        title: "Agent Session",
+        params: { instance: "a" },
+        position: { referenceGroup: first.group.id },
+      });
+      const agentSockets = () => sockets.filter((socket) => socket.url.endsWith("/agents/ws"));
+      if (!(await poll(sleep, () => agentSockets().length === 2 && agentSockets()[1].readyState === 1))) {
+        failures.push("the instance panel opened no session socket of its own");
+        return;
+      }
+      const panelCount = dock.panels.length;
+      if (dock.activePanel?.id !== "agent:a") {
+        failures.push(`the opened instance panel was not active before the reveal (got ${dock.activePanel?.id})`);
+      }
+      capture.presence?.reveal();
+      if (dock.activePanel?.id !== "agent" || dock.panels.length !== panelCount) {
+        failures.push(
+          `the boot panel's reveal did not reactivate the singleton (active ${dock.activePanel?.id}, ${dock.panels.length} panels)`,
+        );
+      }
+      firstTake.onclose?.();
+      if (!(await poll(sleep, () => capture.presence === null))) {
+        failures.push("ending the boot panel's take did not clear the presence");
+      }
+
+      emitAgent({ type: "agent_session", session: "s2", agent: "chat" });
+      second.api.setActive();
+      const secondMic = [...document.querySelectorAll("#dock .ws-agent-session__mic")].find(
+        (candidate) => !agentPanel.contains(candidate),
+      );
+      if (!secondMic) {
+        failures.push("the instance agent session mounted no mic");
+        return;
+      }
+      await sleep(20);
+      emitAgent({ type: "input_required", token: "tok-a" });
+      if (!(await startTake(ctx, secondMic))) {
+        failures.push("a take on the instance panel did not light the recording LED");
+        return;
+      }
+      second.api.setTitle("Session A");
+      if (capture.presence?.label() !== "Session A (chat)") {
+        failures.push(`the instance panel's presence did not read its tab title (got "${capture.presence?.label()}")`);
+      }
+      first.api.setActive();
+      if (dock.activePanel?.id !== "agent") {
+        failures.push(`the boot panel was not active before the instance reveal (got ${dock.activePanel?.id})`);
+      }
+      capture.presence?.reveal();
+      if (dock.activePanel?.id !== "agent:a" || dock.panels.length !== panelCount) {
+        failures.push(
+          `the instance panel's reveal did not reactivate agent:a (active ${dock.activePanel?.id}, ${dock.panels.length} panels)`,
+        );
+      }
+
+      await closePanel(ctx, second, secondMic, "the instance agent panel");
+      if (!(await poll(sleep, () => capture.presence === null))) {
+        failures.push("closing the dictating instance panel did not clear the presence");
+      }
+      await closePanel(ctx, first, firstMic, "the boot agent panel");
     }),
 };
 

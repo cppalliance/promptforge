@@ -463,7 +463,7 @@ flowchart TD
 
 <step-8>
 
-### Step 8: Capture owner presence and level stream
+### Step 8: Capture owner presence and level stream [completed]
 
 - Component: Mic meter
 - Piece: capture owner and level

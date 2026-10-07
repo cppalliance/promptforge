@@ -4,6 +4,7 @@
 // Closing the panel disposes the tree and closes its socket; every new
 // panel gets a fresh socket and therefore a fresh server session.
 
+import type { GroupPanelPartInitParameters } from "dockview";
 import { WorkshopPart } from "@workshop/platform/workshop-part";
 import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
@@ -21,6 +22,8 @@ const SILENT_STATUS: SttStatus = {
 };
 
 export class AgentPanel extends WorkshopPart {
+  private instance: string | undefined;
+
   constructor(
     private readonly status: SttStatus = SILENT_STATUS,
     private readonly modelService?: ModelService,
@@ -30,11 +33,20 @@ export class AgentPanel extends WorkshopPart {
     this.element.className = "ws-agent-panel";
   }
 
+  override init(parameters: GroupPanelPartInitParameters): void {
+    const instance = parameters.params?.instance;
+    this.instance = typeof instance === "string" ? instance : undefined;
+    super.init(parameters);
+  }
+
   protected create(parent: HTMLElement): void {
     const socket = this._register(new AgentSocket());
     const service = this._register(new AgentSessionService(socket));
     const view = this._register(
-      new AgentSessionView(service, this.status, this.modelService, this.speechCapture),
+      new AgentSessionView(service, this.status, this.modelService, this.speechCapture, {
+        instance: this.instance,
+        title: () => this.panelApi?.title,
+      }),
     );
     parent.appendChild(view.element);
     this._register(

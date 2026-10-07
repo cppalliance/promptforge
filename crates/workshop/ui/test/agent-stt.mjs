@@ -87,6 +87,9 @@ const bundle = await esbuild.build({
       export { AgentSessionService } from "./src/services/agent-session.ts";
       export { SpeechCaptureService } from "./src/services/speech-capture.ts";
       export { AgentSessionView } from "./src/parts/agent/agent-session-view.ts";
+      // The agent panel type, so a presence's reveal resolves the real panel id.
+      import "./src/parts/agent/agent.contribution.ts";
+      export { initZones } from "./src/parts/layout/zones.ts";
       export { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
       export { getService } from "@workshop/platform/service-registry";
     `,
@@ -308,6 +311,7 @@ const {
   AgentSessionService,
   AgentSessionView,
   SpeechCaptureService,
+  initZones,
   TEXT_CONTROL_SERVICE,
   getService,
 } = await import(pathToFileURL(bundlePath).href);
@@ -397,11 +401,11 @@ function makeStatus() {
 }
 
 // Mounts a view over a fresh service and negotiated Realtime socket.
-async function setup(speechCapture) {
+async function setup(speechCapture, host) {
   const status = makeStatus();
   const wire = makeWire();
   const service = new AgentSessionService(wire);
-  const view = new AgentSessionView(service, status, undefined, speechCapture);
+  const view = new AgentSessionView(service, status, undefined, speechCapture, host);
   window.document.body.appendChild(view.element);
   const realtime = await negotiateLatestRealtime();
   const mic = view.element.querySelector(".ws-agent-session__mic");
@@ -1704,6 +1708,94 @@ await assertNoLeaks(lifecycle, async () => {
     a.dispose();
     b.dispose();
     capture.dispose();
+  }
+
+  // --- Presence and level: the status bar's view of who is dictating -------
+
+  {
+    let emitAudio = null;
+    const capture = new SpeechCaptureService({
+      async open(onAudio) {
+        emitAudio = onAudio;
+        return {
+          clear() {},
+          async stop() {},
+          dispose() {},
+        };
+      },
+    });
+    // A dock stand-in where every panel id reads as open, so openInZone
+    // takes its reopen path and records the id it activated.
+    const activated = [];
+    const noEvent = () => ({ dispose() {} });
+    const zones = initZones({
+      onDidMovePanel: noEvent,
+      onDidLayoutChange: noEvent,
+      onWillMutateLayout: noEvent,
+      onDidMutateLayout: noEvent,
+      getPanel: (id) => ({ id, api: { setActive: () => activated.push(id) } }),
+    });
+    const levels = [];
+    const levelSubscription = capture.onLevel((level) => levels.push(level));
+    let titleA = "Agent Session";
+    const a = await setup(capture, { instance: "a", title: () => titleA });
+    const b = await setup(capture, { instance: "b", title: () => "Agent Session" });
+    const cleanup = () => {
+      a.dispose();
+      b.dispose();
+      levelSubscription.dispose();
+      capture.dispose();
+      zones.dispose();
+    };
+    a.wire.fire.session("session-a");
+    a.wire.fire.inputRequired("wait-a");
+    b.wire.fire.inputRequired("wait-b");
+    check("no presence before any take", capture.presence === null);
+    if ((await a.startTake()) === null) {
+      failures.push("presence: the dictating view's take did not start");
+      cleanup();
+      return;
+    }
+
+    check(
+      "the dictating view's label names its agent and session title",
+      capture.presence?.label() === "Agent Session (chat)",
+    );
+    titleA = "Renamed session";
+    check(
+      "the label is read on each call, so a rename shows",
+      capture.presence?.label() === "Renamed session (chat)",
+    );
+    capture.presence?.reveal();
+    check(
+      "reveal opens the dictating view's own panel instance",
+      isDeepStrictEqual(activated, ["agent:a"]),
+    );
+
+    // The second view becomes the active one: focused and pressed.
+    b.input.focus();
+    b.mic.click();
+    await waitFor(() => b.status.local.length > 0);
+    const before = levels.length;
+    emitAudio(new ArrayBuffer(960));
+    emitAudio(Int16Array.from({ length: 480 }, (_, index) => (index % 2 === 0 ? 20_000 : -20_000)).buffer);
+    check(
+      "level events keep flowing while a second agent view is active",
+      levels.length === before + 2 && levels.at(-1) > levels.at(-2),
+    );
+    check(
+      "the active second view does not take the presence",
+      capture.presence?.label() === "Renamed session (chat)",
+    );
+
+    a.dispose();
+    await waitFor(() => capture.presence === null && !capture.recording);
+    check(
+      "closing the dictating panel stops capture and clears presence",
+      !capture.recording && capture.owner === null && capture.presence === null,
+    );
+    check("the other view's mic reopens", b.mic.getAttribute("data-mic") === "idle");
+    cleanup();
   }
 });
 

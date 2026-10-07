@@ -31,15 +31,33 @@ import type {
 } from "../../services/agent-session";
 import type { ModelService } from "../../services/model-service";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
-import { SpeechCaptureService } from "../../services/speech-capture";
+import {
+  SpeechCaptureService,
+  type SpeechCapturePresence,
+} from "../../services/speech-capture";
 import type { SttStatus } from "../../services/stt-status";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
 import { ChatBox } from "../chatbox/chat-box";
 import type { ChatBoxEvent, ChatBoxProps } from "../chatbox/types";
+import { openInZone } from "../layout/zones";
 import { ToolCallCard } from "./tool-call-card";
 import { setupStt, type SttHandle } from "../stt/stt";
+
+const SESSION_LABEL = "Agent session";
+
+/**
+ * The panel hosting a session view, as dictation's capture presence names
+ * and reveals it. A view built without one reveals the boot-time
+ * singleton and names itself by its section label.
+ */
+export interface AgentSessionHost {
+  /** The panel's `instance` param; undefined for the boot-time singleton. */
+  readonly instance: string | undefined;
+  /** The panel's current tab title, read on every call. */
+  title(): string | undefined;
+}
 
 /** One painted feed row, kept for the identity diff. */
 interface RenderedRow {
@@ -180,7 +198,9 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
  * action blocked until its current selection is non-empty. A send
  * answers the wait through the service and clears the box on success.
  * The status sink receives dictation's local messages, selection
- * blockers, and recording LED state.
+ * blockers, and recording LED state. While this view dictates, the
+ * capture service names it by its session title and agent, and reveals
+ * it by reopening its host panel.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
@@ -198,11 +218,12 @@ export class AgentSessionView extends Disposable {
     private readonly status: SttStatus,
     private readonly modelService?: ModelService,
     speechCapture?: SpeechCaptureService,
+    host?: AgentSessionHost,
   ) {
     super();
     this.element = document.createElement("section");
     this.element.className = "ws-agent-session";
-    this.element.setAttribute("aria-label", "Agent session");
+    this.element.setAttribute("aria-label", SESSION_LABEL);
 
     this.feed = document.createElement("ol");
     this.feed.className = "ws-agent-session__feed";
@@ -254,13 +275,24 @@ export class AgentSessionView extends Disposable {
     // Production injects the composition root's capture service; isolated
     // views own a fallback for tests and previews.
     const capture = speechCapture ?? new SpeechCaptureService();
+    const presence: SpeechCapturePresence = {
+      label: () => {
+        const title = host?.title() ?? SESSION_LABEL;
+        const agent = this.service.session?.agent;
+        return agent === undefined ? title : `${title} (${agent})`;
+      },
+      reveal: () => {
+        const instance = host?.instance;
+        openInZone("agent", instance === undefined ? {} : { instance });
+      },
+    };
     this.stt = this._register(
       setupStt({ input: chatBox, liveRegionHost: this.element }, status, () => {
         if (this.service.pendingInputToken === null) {
           return "The agent isn't asking for input; the mic opens when it does.";
         }
         return null;
-      }, capture),
+      }, capture, presence),
     );
     if (speechCapture === undefined) {
       this._register(capture);

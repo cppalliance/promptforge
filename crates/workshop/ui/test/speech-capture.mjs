@@ -30,6 +30,19 @@ const { lifecycle, SpeechCaptureService } = await import(
 // ownership tests can act as a second window.
 const a = Symbol("owner-a");
 const b = Symbol("owner-b");
+const presenceA = { label: () => "Owner A", reveal() {} };
+const presenceB = { label: () => "Owner B", reveal() {} };
+
+// Little-endian PCM16 bytes for the fake worklet's emit().
+function pcm16(samples) {
+  const view = new DataView(new ArrayBuffer(samples.length * 2));
+  samples.forEach((sample, index) => view.setInt16(index * 2, sample, true));
+  return [...new Uint8Array(view.buffer)];
+}
+
+function square(amplitude, length = 480) {
+  return pcm16(Array.from({ length }, (_, index) => (index % 2 === 0 ? amplitude : -amplitude)));
+}
 
 function installBrowser(options = {}) {
   const resources = {
@@ -204,7 +217,7 @@ test("the default backend owns the complete 24 kHz capture lifecycle", async () 
       const audio = [];
       service.onAudio((chunk) => audio.push(...new Uint8Array(chunk)));
 
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       assert.equal(service.recording, true);
       assert.deepEqual(resources.constraints, [
         {
@@ -228,7 +241,7 @@ test("the default backend owns the complete 24 kHz capture lifecycle", async () 
       assert.deepEqual(audio, [1, 2, 255]);
       assert.deepEqual(service.clear(a), { ok: true, kind: "cleared" });
       assert.deepEqual(resources.nodes[0].messages, [{ type: "clear" }]);
-      assert.deepEqual(await service.start(a), {
+      assert.deepEqual(await service.start(a, presenceA), {
         ok: false,
         kind: "start-failed",
         message: "speech capture is already active",
@@ -252,6 +265,86 @@ test("the default backend owns the complete 24 kHz capture lifecycle", async () 
   });
 });
 
+test("every emitted chunk fires one level; silence reads near 0 and full scale near 1", async () => {
+  await assertNoLeaks(lifecycle, async () => {
+    await withBrowser({}, async (resources) => {
+      const service = new SpeechCaptureService();
+      let chunks = 0;
+      const levels = [];
+      service.onAudio(() => {
+        chunks += 1;
+      });
+      service.onLevel((level) => levels.push(level));
+
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
+      const node = resources.nodes[0];
+      node.emit(pcm16(new Array(480).fill(0)));
+      node.emit(square(32_767));
+      node.emit(square(1_036));
+      node.emit([1, 2, 255]);
+      node.emit([]);
+
+      assert.equal(chunks, 5);
+      assert.equal(levels.length, chunks, "one level per emitted chunk");
+      assert.ok(levels[0] < 0.01, `silence reads near 0, got ${levels[0]}`);
+      assert.ok(levels[1] > 0.95, `full scale reads near 1, got ${levels[1]}`);
+      assert.ok(
+        levels[2] > 0.2 && levels[2] < 0.8,
+        `a -30 dBFS chunk reads mid-scale on a logarithmic scale, got ${levels[2]}`,
+      );
+      assert.ok(
+        levels.every((level) => Number.isFinite(level) && level >= 0 && level <= 1),
+        `odd-length and empty chunks still read within 0 to 1, got ${levels}`,
+      );
+
+      assert.deepEqual(await service.stop(a), { ok: true, kind: "stopped" });
+      service.dispose();
+    });
+  });
+});
+
+test("presence is set on start, cleared on release, and never set by a busy or failed start", async () => {
+  await assertNoLeaks(lifecycle, async () => {
+    await withBrowser({}, async () => {
+      const service = new SpeechCaptureService();
+      const seen = [];
+      const subscription = service.onOwnerChange(() => seen.push(service.presence));
+      assert.equal(service.presence, null);
+
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
+      assert.equal(service.presence, presenceA);
+      assert.equal((await service.start(b, presenceB)).kind, "busy");
+      assert.equal(service.presence, presenceA, "a busy start never replaces the owner's presence");
+      assert.deepEqual(await service.stop(b), { ok: true, kind: "stopped" });
+      assert.equal(service.presence, presenceA, "a non-owner's stop leaves the presence");
+
+      assert.deepEqual(await service.stop(a), { ok: true, kind: "stopped" });
+      assert.equal(service.presence, null, "presence releases with the take");
+
+      assert.deepEqual(await service.start(b, presenceB), { ok: true, kind: "started" });
+      assert.equal(service.presence, presenceB);
+      service.dispose();
+      assert.equal(service.presence, null, "disposal clears presence with the owner");
+      assert.deepEqual(
+        seen,
+        [presenceA, null, presenceB, null],
+        "every owner change already reads the matching presence",
+      );
+      subscription.dispose();
+    });
+
+    await withBrowser(
+      { mediaError: new DOMException("microphone denied", "NotAllowedError") },
+      async () => {
+        const service = new SpeechCaptureService();
+        assert.equal((await service.start(a, presenceA)).kind, "permission-denied");
+        assert.equal(service.presence, null, "a failed start sets no presence");
+        service.dispose();
+      },
+    );
+  });
+});
+
 test("one owner token holds the microphone; another is told busy and cannot stop or clear it", async () => {
   await assertNoLeaks(lifecycle, async () => {
     await withBrowser({}, async (resources) => {
@@ -260,18 +353,18 @@ test("one owner token holds the microphone; another is told busy and cannot stop
       const subscription = service.onOwnerChange((owner) => owners.push(owner));
       assert.equal(service.owner, null);
 
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       assert.equal(service.owner, a, "the starting token owns the live take");
       assert.deepEqual(owners, [a]);
 
-      assert.deepEqual(await service.start(b), {
+      assert.deepEqual(await service.start(b, presenceB), {
         ok: false,
         kind: "busy",
         message: "speech capture is held by another owner",
         recoverable: true,
       });
       assert.deepEqual(
-        await service.start(a),
+        await service.start(a, presenceA),
         {
           ok: false,
           kind: "start-failed",
@@ -292,7 +385,7 @@ test("one owner token holds the microphone; another is told busy and cannot stop
       assert.equal(service.owner, null, "ownership releases with the take");
       assert.deepEqual(owners, [a, null]);
 
-      assert.deepEqual(await service.start(b), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(b, presenceB), { ok: true, kind: "started" });
       assert.equal(service.owner, b, "a released microphone accepts the next owner");
       service.dispose();
       assert.equal(service.owner, null);
@@ -309,11 +402,11 @@ test("a second owner's start during the owner's flush is start-failed, not busy"
       const owners = [];
       const subscription = service.onOwnerChange((owner) => owners.push(owner));
 
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       const stopping = service.stop(a);
       assert.equal(service.owner, a, "the flush still belongs to the owner");
       assert.deepEqual(
-        await service.start(b),
+        await service.start(b, presenceB),
         {
           ok: false,
           kind: "start-failed",
@@ -322,7 +415,7 @@ test("a second owner's start during the owner's flush is start-failed, not busy"
         },
         "the closing window is a transient, so the second owner is not told busy",
       );
-      assert.deepEqual(await service.start(a), {
+      assert.deepEqual(await service.start(a, presenceA), {
         ok: false,
         kind: "start-failed",
         message: "speech capture is already active",
@@ -334,7 +427,7 @@ test("a second owner's start during the owner's flush is start-failed, not busy"
       assert.equal(service.owner, null);
       assert.deepEqual(owners, [a, null]);
 
-      assert.deepEqual(await service.start(b), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(b, presenceB), { ok: true, kind: "started" });
       assert.equal(service.owner, b, "the second owner's retry succeeds once the flush ends");
       service.dispose();
       subscription.dispose();
@@ -350,7 +443,7 @@ test("the default backend classifies permission, device, and graph start failure
     ]) {
       await withBrowser({ mediaError }, async (resources) => {
         const service = new SpeechCaptureService();
-        assert.deepEqual(await service.start(a), {
+        assert.deepEqual(await service.start(a, presenceA), {
           ok: false,
           kind,
           message: mediaError.message,
@@ -370,7 +463,7 @@ test("the default backend classifies permission, device, and graph start failure
       { moduleError: new Error("worklet load failed") },
       async (resources) => {
         const service = new SpeechCaptureService();
-        assert.deepEqual(await service.start(a), {
+        assert.deepEqual(await service.start(a, presenceA), {
           ok: false,
           kind: "start-failed",
           message: "worklet load failed",
@@ -390,7 +483,7 @@ test("the default backend classifies permission, device, and graph start failure
 
     await withBrowser({ contextSampleRate: 48_000 }, async (resources) => {
       const service = new SpeechCaptureService();
-      assert.deepEqual(await service.start(a), {
+      assert.deepEqual(await service.start(a, presenceA), {
         ok: false,
         kind: "start-failed",
         message: "browser opened audio at 48000 Hz instead of 24000 Hz",
@@ -410,7 +503,7 @@ test("stop and disposal release every production graph resource", async () => {
   await assertNoLeaks(lifecycle, async () => {
     await withBrowser({ closeError: new Error("context close failed") }, async (resources) => {
       const service = new SpeechCaptureService();
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       assert.deepEqual(await service.stop(a), {
         ok: false,
         kind: "stop-failed",
@@ -433,7 +526,7 @@ test("stop and disposal release every production graph resource", async () => {
       { postMessageError: new Error("worklet port failed") },
       async (resources) => {
         const service = new SpeechCaptureService();
-        assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+        assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
         assert.deepEqual(await service.stop(a), {
           ok: false,
           kind: "stop-failed",
@@ -458,7 +551,7 @@ test("stop and disposal release every production graph resource", async () => {
       },
       async () => {
         const service = new SpeechCaptureService();
-        assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+        assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
         assert.deepEqual(service.clear(a), {
           ok: false,
           kind: "clear-failed",
@@ -473,7 +566,7 @@ test("stop and disposal release every production graph resource", async () => {
 
     await withBrowser({ autoFlush: false }, async (resources) => {
       const service = new SpeechCaptureService();
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       const stopping = service.stop(a);
       service.dispose();
       assert.deepEqual(await stopping, {
@@ -493,7 +586,7 @@ test("stop and disposal release every production graph resource", async () => {
 
     await withBrowser({}, async (resources) => {
       const service = new SpeechCaptureService();
-      assert.deepEqual(await service.start(a), { ok: true, kind: "started" });
+      assert.deepEqual(await service.start(a, presenceA), { ok: true, kind: "started" });
       service.dispose();
       service.dispose();
       assert.equal(service.recording, false);
@@ -518,7 +611,7 @@ test("disposal during production start rejects the take and leaks no graph", asy
   await assertNoLeaks(lifecycle, async () => {
     await withBrowser({ mediaPromise }, async (resources) => {
       const service = new SpeechCaptureService();
-      const starting = service.start(a);
+      const starting = service.start(a, presenceA);
       await Promise.resolve();
       service.dispose();
       resolveMedia(resources.stream);

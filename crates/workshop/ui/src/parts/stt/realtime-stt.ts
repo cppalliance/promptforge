@@ -5,6 +5,7 @@ import {
   SpeechCaptureService,
   type SpeechCaptureFailure,
   type SpeechCaptureOutcome,
+  type SpeechCapturePresence,
 } from "../../services/speech-capture";
 import type { SttStatus } from "../../services/stt-status";
 import type {
@@ -58,13 +59,16 @@ function mountLiveRegion(host: HTMLElement): HTMLElement {
  * sentences without leaving the editor. Each instance holds its own owner
  * token for the shared capture service: it streams only audio it owns,
  * and a press while another instance owns the microphone is refused with
- * a reason rather than stealing the take.
+ * a reason rather than stealing the take. Its creator's `presence` goes
+ * with each start, naming and revealing the surface that holds the
+ * microphone.
  */
 export function setupStt(
   elements: SttElements,
   status: SttStatus,
   blocked: SttBlocker,
   capture: SpeechCaptureService,
+  presence: SpeechCapturePresence,
   providedRealtime?: RealtimeTranscriptionService,
 ): SttHandle {
   const { input, liveRegionHost } = elements;
@@ -313,7 +317,7 @@ export function setupStt(
     }
     const generation = realtime.generation;
     captureGeneration = generation;
-    const outcome = await capture.start(owner);
+    const outcome = await capture.start(owner, presence);
     if (!outcome.ok) {
       status.showLocal(captureFailureLabel(outcome), "error");
       return;

@@ -43,6 +43,7 @@ const {
 const client = JSON.parse(await readFile(path.join(fixtures, "client-events.json"), "utf8"));
 const server = JSON.parse(await readFile(path.join(fixtures, "server-events.json"), "utf8"));
 globalThis.location = new URL("http://127.0.0.1:7910/");
+const presence = { label: () => "Dictation test", reveal() {} };
 
 function timelineText(start, end) {
   return Array.from({ length: end - start }, (_, index) =>
@@ -178,6 +179,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -259,6 +261,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -385,6 +388,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -621,6 +625,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -762,6 +767,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -842,6 +848,7 @@ await assertNoLeaks(lifecycle, async () => {
       status,
       () => null,
       capture,
+      presence,
       realtime,
     );
 
@@ -927,8 +934,8 @@ await assertNoLeaks(lifecycle, async () => {
     });
     const statusA = makeStatus();
     const statusB = makeStatus();
-    const sttA = setupStt({ input: textareaSttTarget(textareaA) }, statusA, () => null, capture, realtimeA);
-    const sttB = setupStt({ input: textareaSttTarget(textareaB) }, statusB, () => null, capture, realtimeB);
+    const sttA = setupStt({ input: textareaSttTarget(textareaA) }, statusA, () => null, capture, presence, realtimeA);
+    const sttB = setupStt({ input: textareaSttTarget(textareaB) }, statusB, () => null, capture, presence, realtimeB);
     const statesB = [];
     const subscription = sttB.onState((state) => statesB.push(state));
     assert.equal(sttA.state, "idle");
