@@ -8,8 +8,9 @@ use serde_json::Value;
 
 use super::client::parse_client_event;
 use super::vocabulary::{
-    AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, HYPOTHESIS_INCLUDE, MODEL, OptionalNullable,
-    RequiredNullable, SESSION_OBJECT, SESSION_TYPE, deserialize_required_nullable,
+    AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, HYPOTHESIS_INCLUDE,
+    HYPOTHESIS_RANGES_INCLUDE, HypothesisInclude, MODEL, OptionalNullable, RequiredNullable,
+    SESSION_OBJECT, SESSION_TYPE, deserialize_present, deserialize_required_nullable,
 };
 
 #[path = "server-events.rs"]
@@ -90,11 +91,14 @@ impl EffectiveSession {
             if let Some(prompt) = patch.prompt {
                 candidate.audio.input.transcription.prompt = prompt;
             }
-            if let Some(include) = patch.include_hypothesis {
-                candidate.include = if include {
-                    vec![HYPOTHESIS_INCLUDE.to_owned()]
-                } else {
-                    Vec::new()
+            if let Some(include) = patch.include {
+                candidate.include = match include {
+                    HypothesisInclude::Off => Vec::new(),
+                    HypothesisInclude::Snapshots => vec![HYPOTHESIS_INCLUDE.to_owned()],
+                    HypothesisInclude::Ranges => vec![
+                        HYPOTHESIS_INCLUDE.to_owned(),
+                        HYPOTHESIS_RANGES_INCLUDE.to_owned(),
+                    ],
                 };
             }
             *self = candidate;
@@ -110,6 +114,20 @@ impl EffectiveSession {
         !self.include.is_empty()
     }
 
+    pub(in crate::realtime) fn hypothesis_include(&self) -> HypothesisInclude {
+        if self.include.is_empty() {
+            HypothesisInclude::Off
+        } else if self
+            .include
+            .iter()
+            .any(|value| value == HYPOTHESIS_RANGES_INCLUDE)
+        {
+            HypothesisInclude::Ranges
+        } else {
+            HypothesisInclude::Snapshots
+        }
+    }
+
     #[cfg(test)]
     fn validate(&self) -> anyhow::Result<()> {
         if self.id.is_empty()
@@ -120,8 +138,14 @@ impl EffectiveSession {
             || self.audio.input.transcription.model != MODEL
             || !self.audio.input.noise_reduction.is_null()
             || !self.audio.input.turn_detection.is_null()
-            || !(self.include.is_empty()
-                || matches!(self.include.as_slice(), [value] if value == HYPOTHESIS_INCLUDE))
+            || !matches!(
+                self.include
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [] | [HYPOTHESIS_INCLUDE] | [HYPOTHESIS_INCLUDE, HYPOTHESIS_RANGES_INCLUDE]
+            )
         {
             return Err(anyhow!("invalid effective transcription session"));
         }
@@ -192,9 +216,27 @@ pub(crate) enum ServerEvent {
         tentative: String,
         audio_start_ms: u64,
         audio_end_ms: u64,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_present"
+        )]
+        finalized_through_ms: Option<u64>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_present"
+        )]
+        finalized_seq: Option<u64>,
     },
     #[serde(rename = "error")]
     Error { event_id: String, error: WireError },
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(in crate::realtime) struct HypothesisRanges {
+    pub(in crate::realtime) finalized_through_ms: u64,
+    pub(in crate::realtime) finalized_seq: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -337,6 +379,13 @@ impl ServerEvent {
                 || audio_start_ms > audio_end_ms =>
             {
                 Err(anyhow!("invalid hypothesis snapshot"))
+            }
+            Self::TranscriptionHypothesis {
+                finalized_through_ms,
+                finalized_seq,
+                ..
+            } if finalized_through_ms.is_some() != finalized_seq.is_some() => {
+                Err(anyhow!("hypothesis range fields must appear together"))
             }
             _ => Ok(()),
         }

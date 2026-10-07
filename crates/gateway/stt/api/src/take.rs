@@ -23,7 +23,7 @@ mod window;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, spawn_final_pipeline};
-pub(crate) use interim::InterimSnapshot;
+pub(crate) use interim::{FinalizedRange, InterimSnapshot};
 #[cfg(test)]
 use pcm::PcmBudgetProbe;
 use pcm::RetainedPcm;
@@ -150,7 +150,9 @@ impl Take {
     }
 
     /// `_word_ends` holds where each word of `hypothesis` ends, in samples
-    /// from `window_start`, or nothing when the decode timed no words.
+    /// from `window_start`, or nothing when the decode timed no words. The
+    /// finalized range comes from the same live prefix as the snapshot's
+    /// finalized part.
     pub(crate) fn next_window_snapshot(
         &self,
         hypothesis: &str,
@@ -158,7 +160,7 @@ impl Take {
         segment_start: u64,
         window_start: u64,
         window_end: u64,
-    ) -> Option<InterimSnapshot> {
+    ) -> Option<(InterimSnapshot, FinalizedRange)> {
         let live_prefix = self.state.live_prefix_snapshot();
         let update = TakeState::lock(&self.whole_window).try_next(
             &live_prefix,
@@ -168,7 +170,7 @@ impl Take {
             hypothesis,
         );
         if let Ok(snapshot) = update {
-            snapshot
+            snapshot.map(|snapshot| (snapshot, live_prefix.finalized_range()))
         } else {
             self.state.record_failure(TakeFailure::HypothesisCapacity);
             None
@@ -178,6 +180,11 @@ impl Take {
     #[cfg(test)]
     fn record_finalized(&self, result: Result<String, TranscribeError>) {
         self.state.record_finalized(result, None);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_finalized_through(&self, text: &str, samples: Option<u64>) {
+        self.state.record_finalized(Ok(text.to_owned()), samples);
     }
 
     pub(crate) fn record_failure(&self, failure: TakeFailure) {

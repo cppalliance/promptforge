@@ -1,4 +1,13 @@
-//! Interim transcript snapshot split into finalized, agreed, and tentative parts.
+//! Interim transcript snapshot split into finalized, agreed, and tentative
+//! parts, and the finalized range behind its finalized part.
+
+/// Absolute sample watermark of finalized text and the count of final
+/// outcomes applied to the take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FinalizedRange {
+    pub(crate) through_samples: u64,
+    pub(crate) seq: u64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InterimSnapshot {

@@ -10,6 +10,7 @@ use crate::realtime::input::{InputSnapshot, UncommittedInput};
 use crate::realtime::item::FinalizationError;
 use crate::realtime::registry::SessionRegistry;
 use crate::realtime::session::{Session, SessionError};
+use crate::realtime::wire::HypothesisInclude;
 use crate::test_fixtures::scripted_service;
 
 const WAIT: Duration = Duration::from_secs(1);
@@ -38,7 +39,7 @@ fn session_with_audio(service: &crate::SpeechService, payload: &str, budget: usi
     session.input = Some(
         UncommittedInput::first_append_with_pcm_limit(
             "item_pcm_budget".to_owned(),
-            InputSnapshot::new(String::new(), true),
+            InputSnapshot::new(String::new(), HypothesisInclude::Snapshots),
             Some(engine),
             payload,
             budget,

@@ -23,6 +23,7 @@ struct FinalizedState {
     text: String,
     failure: Option<Arc<TakeFailure>>,
     samples: u64,
+    applied_outcomes: u64,
     outcomes: Vec<FinalRangeOutcome>,
     pending_forced: Option<PendingForced>,
     /// Displayed words after the latest natural final's last word, live only
@@ -123,6 +124,7 @@ impl TakeState {
         LivePrefixSnapshot::new(
             state.text.clone(),
             state.samples,
+            state.applied_outcomes,
             state
                 .pending_forced
                 .as_ref()
@@ -145,6 +147,7 @@ impl TakeState {
                 if let Some(samples) = samples {
                     state.samples = samples;
                 }
+                state.applied_outcomes = state.applied_outcomes.saturating_add(1);
             }
             Err(error) if state.failure.is_none() => {
                 state.failure = Some(Arc::new(TakeFailure::from(error)));
@@ -180,6 +183,9 @@ impl TakeState {
                 };
                 record_forced_outcome(&mut state, boundary, text, accepted);
             }
+        }
+        if state.failure.is_none() {
+            state.applied_outcomes = state.applied_outcomes.saturating_add(1);
         }
     }
 

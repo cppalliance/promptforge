@@ -1,14 +1,19 @@
-//! Tests for sample-to-millisecond conversion at the u64 boundary and for
-//! hypothesis revisions that advance only when the emitted snapshot changes.
+//! Tests for sample-to-millisecond conversion at the u64 boundary, for
+//! hypothesis revisions that advance only when the emitted snapshot changes,
+//! and for negotiated finalized range fields.
 
 use std::ops::Range;
 
 use base64::Engine as _;
 use gateway_stt_engine::DecodeOutput;
+use serde_json::Value;
 
 use super::{InterimTaskOutput, Session, sample_millis};
 use crate::realtime::registry::SessionRegistry;
 use crate::realtime::session::InterimEpoch;
+
+const HYPOTHESIS: &str = "item.input_audio_transcription.hypothesis";
+const RANGES: &str = "item.input_audio_transcription.hypothesis.ranges";
 
 #[test]
 fn sample_milliseconds_are_exact_across_the_prior_multiplication_overflow() {
@@ -25,7 +30,7 @@ fn append_committable(session: &mut Session) {
         .expect("committable audio appends");
 }
 
-fn hypothesis_session() -> Session {
+fn session_including(include: &[&str]) -> Session {
     let registration = SessionRegistry::default()
         .register()
         .expect("session registers");
@@ -36,7 +41,7 @@ fn hypothesis_session() -> Session {
                 "type": "session.update",
                 "session": {
                     "type": "transcription",
-                    "include": ["item.input_audio_transcription.hypothesis"]
+                    "include": include
                 }
             })
             .to_string(),
@@ -46,12 +51,16 @@ fn hypothesis_session() -> Session {
     session
 }
 
-fn accept(
+fn hypothesis_session() -> Session {
+    session_including(&[HYPOTHESIS])
+}
+
+fn accept_event(
     session: &mut Session,
     epoch: InterimEpoch,
     window: Range<u64>,
     transcript: &str,
-) -> Option<u64> {
+) -> Option<Value> {
     let item_id = session.input().expect("input exists").item_id().to_owned();
     session
         .accept_scheduled_interim(InterimTaskOutput::Decode {
@@ -63,11 +72,20 @@ fn accept(
             transcript: Ok(DecodeOutput::new(transcript)),
         })
         .expect("interim is accepted")
-        .map(|event| {
-            serde_json::to_value(event).expect("hypothesis serializes")["revision"]
-                .as_u64()
-                .expect("hypothesis carries a revision")
-        })
+        .map(|event| serde_json::to_value(event).expect("hypothesis serializes"))
+}
+
+fn accept(
+    session: &mut Session,
+    epoch: InterimEpoch,
+    window: Range<u64>,
+    transcript: &str,
+) -> Option<u64> {
+    accept_event(session, epoch, window, transcript).map(|event| {
+        event["revision"]
+            .as_u64()
+            .expect("hypothesis carries a revision")
+    })
 }
 
 #[test]
@@ -134,4 +152,53 @@ fn a_new_input_after_clear_or_commit_starts_again_at_revision_one() {
         accept(&mut session, epoch, 0..16_000, "alpha beta"),
         Some(1)
     );
+}
+
+#[test]
+fn range_fields_appear_only_for_a_ranges_input_and_report_the_finalized_text() {
+    let mut base = hypothesis_session();
+    let epoch = base.begin_interim().expect("epoch begins");
+    let event = accept_event(&mut base, epoch, 0..16_000, "alpha beta")
+        .expect("base hypothesis is emitted");
+    assert!(event.get("finalized_through_ms").is_none());
+    assert!(event.get("finalized_seq").is_none());
+
+    let mut ranges = session_including(&[HYPOTHESIS, RANGES]);
+    ranges
+        .input()
+        .expect("input exists")
+        .take()
+        .record_finalized_through("ask not", Some(16_000));
+    let epoch = ranges.begin_interim().expect("epoch begins");
+    let event = accept_event(&mut ranges, epoch, 16_000..32_000, "what you")
+        .expect("ranges hypothesis is emitted");
+    assert_eq!(event["finalized"], "ask not");
+    assert_eq!(event["finalized_through_ms"], 1_000);
+    assert_eq!(event["finalized_seq"], 1);
+}
+
+#[test]
+fn only_a_ranges_session_advances_the_revision_for_a_range_only_change() {
+    for (include, expected) in [(&[HYPOTHESIS][..], 2), (&[HYPOTHESIS, RANGES][..], 3)] {
+        let mut session = session_including(include);
+        let epoch = session.begin_interim().expect("epoch begins");
+        assert_eq!(
+            accept(&mut session, epoch, 0..16_000, "alpha beta"),
+            Some(1)
+        );
+        assert_eq!(
+            accept(&mut session, epoch, 0..24_000, "alpha beta"),
+            Some(2)
+        );
+        session
+            .input()
+            .expect("input exists")
+            .take()
+            .record_finalized_through("", None);
+        assert_eq!(
+            accept(&mut session, epoch, 0..32_000, "alpha beta"),
+            Some(expected),
+            "{include:?}"
+        );
+    }
 }

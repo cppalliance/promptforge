@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+use super::interim::FinalizedRange;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingForcedSnapshot {
     text: String,
@@ -34,6 +36,7 @@ impl AnchoredSuffix {
 pub(super) struct LivePrefixSnapshot {
     finalized: String,
     finalized_samples: u64,
+    applied_outcomes: u64,
     pending_forced: Option<PendingForcedSnapshot>,
     anchored: Option<AnchoredSuffix>,
 }
@@ -42,12 +45,14 @@ impl LivePrefixSnapshot {
     pub(super) fn new(
         finalized: String,
         finalized_samples: u64,
+        applied_outcomes: u64,
         pending_forced: Option<(String, Range<u64>)>,
         anchored: Option<AnchoredSuffix>,
     ) -> Self {
         Self {
             finalized,
             finalized_samples,
+            applied_outcomes,
             pending_forced: pending_forced
                 .map(|(text, range)| PendingForcedSnapshot { text, range }),
             anchored,
@@ -56,6 +61,13 @@ impl LivePrefixSnapshot {
 
     pub(super) fn finalized(&self) -> &str {
         &self.finalized
+    }
+
+    pub(super) const fn finalized_range(&self) -> FinalizedRange {
+        FinalizedRange {
+            through_samples: self.finalized_samples,
+            seq: self.applied_outcomes,
+        }
     }
 
     /// Displayed words the latest natural final left after its last word.
@@ -89,6 +101,7 @@ impl LivePrefixSnapshot {
         Self::new(
             finalized.to_owned(),
             finalized_samples,
+            0,
             pending_forced.map(|(text, range)| (text.to_owned(), range)),
             None,
         )

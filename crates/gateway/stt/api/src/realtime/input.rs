@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::wire::HypothesisInclude;
 use crate::audio::{AudioBuffer, AudioError};
 use crate::generation::GenerationLease;
 use crate::take::{Take, TakeFailure};
@@ -15,17 +16,17 @@ pub(crate) struct InputSnapshot {
     rate: u32,
     model: &'static str,
     prompt: String,
-    include_hypothesis: bool,
+    include: HypothesisInclude,
 }
 
 impl InputSnapshot {
-    pub(crate) fn new(prompt: String, include_hypothesis: bool) -> Self {
+    pub(crate) fn new(prompt: String, include: HypothesisInclude) -> Self {
         Self {
             format: INPUT_FORMAT,
             rate: INPUT_RATE,
             model: INPUT_MODEL,
             prompt,
-            include_hypothesis,
+            include,
         }
     }
 
@@ -50,7 +51,11 @@ impl InputSnapshot {
     }
 
     pub(crate) const fn include_hypothesis(&self) -> bool {
-        self.include_hypothesis
+        !matches!(self.include, HypothesisInclude::Off)
+    }
+
+    pub(crate) const fn include_ranges(&self) -> bool {
+        matches!(self.include, HypothesisInclude::Ranges)
     }
 }
 
@@ -205,7 +210,7 @@ impl UncommittedInput {
 mod tests {
     use base64::Engine as _;
 
-    use super::{InputSnapshot, UncommittedInput};
+    use super::{HypothesisInclude, InputSnapshot, UncommittedInput};
 
     fn encoded(samples: &[i16]) -> String {
         let bytes = samples
@@ -216,7 +221,7 @@ mod tests {
     }
 
     fn snapshot(prompt: &str) -> InputSnapshot {
-        InputSnapshot::new(prompt.to_owned(), true)
+        InputSnapshot::new(prompt.to_owned(), HypothesisInclude::Snapshots)
     }
 
     #[test]

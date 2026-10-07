@@ -1,7 +1,8 @@
 //! Constructors building server events from session and item outcomes.
 
 use super::{
-    ConversationItem, DurationUsage, EffectiveSession, InputAudioContent, ServerEvent, WireError,
+    ConversationItem, DurationUsage, EffectiveSession, HypothesisRanges, InputAudioContent,
+    ServerEvent, WireError,
 };
 use crate::realtime::result_mailbox::{ItemFailure, ItemResult};
 use crate::realtime::wire::vocabulary::{OptionalNullable, RequiredNullable};
@@ -32,6 +33,7 @@ impl ServerEvent {
         snapshot: InterimSnapshot,
         audio_start_ms: u64,
         audio_end_ms: u64,
+        ranges: Option<HypothesisRanges>,
     ) -> Self {
         let (transcript, finalized, agreed, tentative) = snapshot.into_parts();
         Self::TranscriptionHypothesis {
@@ -45,6 +47,8 @@ impl ServerEvent {
             tentative,
             audio_start_ms,
             audio_end_ms,
+            finalized_through_ms: ranges.map(|ranges| ranges.finalized_through_ms),
+            finalized_seq: ranges.map(|ranges| ranges.finalized_seq),
         }
     }
 
@@ -101,6 +105,8 @@ impl ServerEvent {
                 transcript,
                 audio_start_ms: 0,
                 audio_end_ms: 0,
+                finalized_through_ms: None,
+                finalized_seq: None,
             },
             ItemResult::Completed {
                 item_id,

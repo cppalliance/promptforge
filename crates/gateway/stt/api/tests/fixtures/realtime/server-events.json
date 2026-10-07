@@ -149,5 +149,20 @@
     "tentative": "ld",
     "audio_start_ms": 0,
     "audio_end_ms": 1250
+  },
+  "transcription_hypothesis_ranges": {
+    "event_id": "evt_transcription_hypothesis_ranges",
+    "type": "conversation.item.input_audio_transcription.hypothesis",
+    "item_id": "item_alpha",
+    "content_index": 0,
+    "revision": 3,
+    "transcript": "Hello, world",
+    "finalized": "Hello",
+    "agreed": ", wor",
+    "tentative": "ld",
+    "audio_start_ms": 0,
+    "audio_end_ms": 1250,
+    "finalized_through_ms": 400,
+    "finalized_seq": 1
   }
 }

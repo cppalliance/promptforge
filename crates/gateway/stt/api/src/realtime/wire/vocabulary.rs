@@ -13,6 +13,16 @@ pub(super) const AUDIO_TYPE: &str = "audio/pcm";
 pub(super) const AUDIO_RATE: u32 = 24_000;
 pub(super) const MODEL: &str = "realtime-transcribe";
 pub(super) const HYPOTHESIS_INCLUDE: &str = "item.input_audio_transcription.hypothesis";
+pub(super) const HYPOTHESIS_RANGES_INCLUDE: &str =
+    "item.input_audio_transcription.hypothesis.ranges";
+
+/// The hypothesis event shape a session negotiated through `session.include`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum HypothesisInclude {
+    Off,
+    Snapshots,
+    Ranges,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(in crate::realtime) enum ClientEvent {
@@ -35,7 +45,7 @@ pub(in crate::realtime) enum ClientEvent {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(in crate::realtime) struct SessionPatch {
     pub(super) prompt: Option<String>,
-    pub(super) include_hypothesis: Option<bool>,
+    pub(super) include: Option<HypothesisInclude>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -182,6 +192,15 @@ where
     T: Deserialize<'de>,
 {
     RequiredNullable::deserialize(deserializer)
+}
+
+/// Reads an optional field that may be omitted but is never `null`.
+pub(super) fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Default)]

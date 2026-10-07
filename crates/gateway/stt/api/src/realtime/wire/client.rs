@@ -3,8 +3,8 @@
 use serde_json::{Map, Value};
 
 use super::vocabulary::{
-    AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, Correlation, HYPOTHESIS_INCLUDE, MODEL,
-    SESSION_TYPE, SessionPatch,
+    AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, Correlation, HYPOTHESIS_INCLUDE,
+    HYPOTHESIS_RANGES_INCLUDE, HypothesisInclude, MODEL, SESSION_TYPE, SessionPatch,
 };
 
 pub(in crate::realtime) fn parse_client_event(text: &str) -> Result<ClientEvent, ClientError> {
@@ -178,16 +178,13 @@ fn parse_update(
         Some(audio) => parse_audio(audio, correlation)?,
         None => None,
     };
-    let include_hypothesis = match session.get("include") {
+    let include = match session.get("include") {
         Some(include) => Some(parse_include(include, correlation)?),
         None => None,
     };
     Ok(ClientEvent::SessionUpdate {
         event_id: client_id(correlation),
-        patch: SessionPatch {
-            prompt,
-            include_hypothesis,
-        },
+        patch: SessionPatch { prompt, include },
     })
 }
 
@@ -337,7 +334,10 @@ fn parse_transcription(
     }
 }
 
-fn parse_include(value: &Value, correlation: &Correlation) -> Result<bool, ClientError> {
+fn parse_include(
+    value: &Value,
+    correlation: &Correlation,
+) -> Result<HypothesisInclude, ClientError> {
     let values = value.as_array().ok_or_else(|| {
         ClientError::new(
             "invalid_include",
@@ -346,19 +346,31 @@ fn parse_include(value: &Value, correlation: &Correlation) -> Result<bool, Clien
             correlation.clone(),
         )
     })?;
-    if values.is_empty() {
-        return Ok(false);
-    }
-    if values.len() == 1 && values[0].as_str() == Some(HYPOTHESIS_INCLUDE) {
-        return Ok(true);
-    }
-    let unsupported = values
-        .iter()
-        .find_map(Value::as_str)
-        .unwrap_or("<non-string>");
+    let tokens = values.iter().map(Value::as_str).collect::<Vec<_>>();
+    let message = match tokens.as_slice() {
+        [] => return Ok(HypothesisInclude::Off),
+        [Some(HYPOTHESIS_INCLUDE)] => return Ok(HypothesisInclude::Snapshots),
+        [Some(HYPOTHESIS_INCLUDE), Some(HYPOTHESIS_RANGES_INCLUDE)]
+        | [Some(HYPOTHESIS_RANGES_INCLUDE), Some(HYPOTHESIS_INCLUDE)] => {
+            return Ok(HypothesisInclude::Ranges);
+        }
+        [Some(HYPOTHESIS_RANGES_INCLUDE)] => {
+            format!("Include value {HYPOTHESIS_RANGES_INCLUDE} requires {HYPOTHESIS_INCLUDE}")
+        }
+        _ => match tokens
+            .iter()
+            .find(|token| !matches!(token, Some(HYPOTHESIS_INCLUDE | HYPOTHESIS_RANGES_INCLUDE)))
+        {
+            Some(token) => format!(
+                "Unsupported include value {}",
+                token.unwrap_or("<non-string>")
+            ),
+            None => "session.include repeats an include value".to_owned(),
+        },
+    };
     Err(ClientError::new(
         "unsupported_include",
-        format!("Unsupported include value {unsupported}"),
+        message,
         Some("session.include"),
         correlation.clone(),
     ))

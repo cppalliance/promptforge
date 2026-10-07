@@ -22,6 +22,7 @@ const CLIENT_CASES: &[&str] = &[
     "input_audio_buffer_clear",
     "input_audio_buffer_commit",
     "session_update",
+    "session_update_ranges",
 ];
 
 const SERVER_CASES: &[&str] = &[
@@ -37,6 +38,7 @@ const SERVER_CASES: &[&str] = &[
     "transcription_delta",
     "transcription_failed",
     "transcription_hypothesis",
+    "transcription_hypothesis_ranges",
 ];
 
 #[test]
@@ -118,10 +120,25 @@ fn canonical_realtime_events_are_complete_strict_and_round_trip() {
         "session_update.session.audio.input",
     );
 
+    let ranges_update = object(
+        &clients["session_update_ranges"]["session"],
+        "session_update_ranges.session",
+    );
+    assert_exact_keys(
+        ranges_update,
+        &["include", "type"],
+        "session_update_ranges.session",
+    );
+
     let sessions = fixture("effective-sessions.json");
-    assert_exact_cases(&sessions, &["default", "updated"], "effective sessions");
+    assert_exact_cases(
+        &sessions,
+        &["default", "ranges", "updated"],
+        "effective sessions",
+    );
     assert_session(&sessions["default"], "default session");
     assert_session(&sessions["updated"], "updated session");
+    assert_session(&sessions["ranges"], "ranges session");
 
     let servers = fixture("server-events.json");
     assert_exact_cases(&servers, SERVER_CASES, "server event cases");
@@ -176,6 +193,17 @@ fn canonical_realtime_events_are_complete_strict_and_round_trip() {
         .as_u64()
         .expect("hypothesis end is unsigned");
     assert!(start <= end, "hypothesis span is half-open and ordered");
+
+    let mut extended = object(&servers["transcription_hypothesis_ranges"], "ranges").clone();
+    let mut base = hypothesis.clone();
+    for field in ["event_id", "finalized_through_ms", "finalized_seq"] {
+        extended.remove(field);
+        base.remove(field);
+    }
+    assert_eq!(
+        extended, base,
+        "the ranges hypothesis is the base hypothesis plus the two range fields"
+    );
 
     let mut server_ids = HashSet::new();
     for event in servers.values() {

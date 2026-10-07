@@ -2,6 +2,7 @@
 
 use super::super::TakeState;
 use crate::segment::ForcedBoundary;
+use crate::take::FinalizedRange;
 use crate::take::final_outcome::FinalRangeOutcome;
 use crate::take::window::ShownHypotheses;
 
@@ -101,4 +102,53 @@ fn estimated_reconciliation_replaces_the_prior_live_prefix() {
         Some(("unrelated revision", 32_000..320_000))
     );
     assert!(state.pending_failure().is_none());
+}
+
+#[test]
+fn the_live_prefix_counts_applied_final_outcomes_beside_the_finalized_watermark() {
+    let state = TakeState::default();
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(0..16_000, "alpha".to_owned()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    assert_eq!(
+        state.live_prefix_snapshot().finalized_range(),
+        FinalizedRange {
+            through_samples: 16_000,
+            seq: 1
+        }
+    );
+
+    state.record_final_outcome(
+        FinalRangeOutcome::forced(
+            ForcedBoundary::first(16_000..176_000),
+            "beta gamma".to_owned(),
+        ),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    assert_eq!(
+        state.live_prefix_snapshot().finalized_range(),
+        FinalizedRange {
+            through_samples: 16_000,
+            seq: 2
+        },
+        "pending forced text counts as applied without moving the finalized watermark"
+    );
+
+    state.record_final_outcome(
+        FinalRangeOutcome::forced(ForcedBoundary::first(176_000..336_000), "delta".to_owned()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    assert!(state.pending_failure().is_some());
+    assert_eq!(
+        state.live_prefix_snapshot().finalized_range(),
+        FinalizedRange {
+            through_samples: 16_000,
+            seq: 2
+        },
+        "a rejected outcome is not counted"
+    );
 }

@@ -20,6 +20,8 @@ const WIRE_INVALID_CASES: &[&str] = &[
     "missing_session_type",
     "non_null_noise_reduction",
     "non_null_turn_detection",
+    "ranges_include_without_hypothesis",
+    "repeated_include",
     "session_audio_unknown_field",
     "session_input_unknown_field",
     "session_transcription_unknown_field",
@@ -155,6 +157,64 @@ fn mixed_valid_and_invalid_session_updates_change_no_effective_state() {
         effective, before,
         "valid include must not apply when prompt is invalid"
     );
+}
+
+#[test]
+fn ranges_include_extends_the_hypothesis_include_in_either_order() {
+    let clients = fixture("client-events.json");
+    let sessions = fixture("effective-sessions.json");
+    let mut effective = EffectiveSession::new("sess_canonical".to_owned());
+    effective
+        .apply_update_text(&clients["session_update_ranges"].to_string())
+        .unwrap_or_else(|error| panic!("ranges update applies: {error:?}"));
+    assert_eq!(
+        serde_json::to_value(&effective)
+            .unwrap_or_else(|error| panic!("ranges session serializes: {error}")),
+        sessions["ranges"]
+    );
+
+    let mut reversed = clients["session_update_ranges"].clone();
+    reversed["session"]["include"] = serde_json::json!([
+        "item.input_audio_transcription.hypothesis.ranges",
+        "item.input_audio_transcription.hypothesis"
+    ]);
+    let mut reversed_effective = EffectiveSession::new("sess_canonical".to_owned());
+    reversed_effective
+        .apply_update_text(&reversed.to_string())
+        .unwrap_or_else(|error| panic!("reversed ranges update applies: {error:?}"));
+    assert_eq!(reversed_effective, effective);
+
+    effective
+        .apply_update_text(&clients["session_update"].to_string())
+        .unwrap_or_else(|error| panic!("base update applies: {error:?}"));
+    assert_eq!(
+        serde_json::to_value(&effective)
+            .unwrap_or_else(|error| panic!("updated session serializes: {error}")),
+        sessions["updated"],
+        "the base token alone drops the ranges extension"
+    );
+}
+
+#[test]
+fn hypothesis_range_fields_appear_together_and_are_never_null() {
+    let servers = fixture("server-events.json");
+    let ranges = &servers["transcription_hypothesis_ranges"];
+    for field in ["finalized_through_ms", "finalized_seq"] {
+        let mut lone = ranges.clone();
+        lone.as_object_mut()
+            .unwrap_or_else(|| panic!("ranges hypothesis is an object"))
+            .remove(field);
+        assert!(
+            ServerEvent::from_value(lone).is_err(),
+            "the other range field cannot appear without {field}"
+        );
+        let mut null = ranges.clone();
+        null[field] = Value::Null;
+        assert!(
+            ServerEvent::from_value(null).is_err(),
+            "{field} is a number when present"
+        );
+    }
 }
 
 #[test]

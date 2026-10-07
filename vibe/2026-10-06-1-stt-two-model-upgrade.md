@@ -620,7 +620,7 @@ flowchart TD
 
 <step-15>
 
-### Step 15: Negotiate finalized range fields on hypothesis events
+### Step 15: Negotiate finalized range fields on hypothesis events [completed]
 
 - Component: Live rendering
 - Piece: server wire
@@ -628,7 +628,7 @@ flowchart TD
   - `crates/gateway/stt/api/src/realtime/route.rs:279-291` and `realtime/wire/client.rs:181-184,340-364`: accept `item.input_audio_transcription.hypothesis.ranges` only together with the base hypothesis token, frozen at first append like the base token.
   - `crates/gateway/stt/api/src/realtime/session.rs:40-46,300-325`: carry the negotiated flag. The file is 496 lines; first move its inline tests (from line 258) into the `realtime/session/` directory.
   - `crates/gateway/stt/api/src/realtime/wire/server.rs:86-110,183-195`: add `finalized_through_ms` and `finalized_seq` to hypothesis events only when negotiated, sourced from the take's finalized state. Keep the file under the ceiling, using `wire/server-events.rs` if needed.
-- Tests: `realtime/wire/tests.rs`; fixtures `tests/fixtures/realtime/client-events.json`, `effective-sessions.json`, `server-events.json`, `valid-sequences.json`, and `invalid-sequences.json` show the extended fields only with both tokens, the ranges token alone rejected, and existing sessions unchanged.
+- Tests: `realtime/wire/tests.rs`; fixtures `tests/fixtures/realtime/client-events.json`, `effective-sessions.json`, `server-events.json`, `valid-sequences.json`, and `invalid-sequences.json` show the extended fields only with both tokens, the ranges token alone rejected, and existing sessions unchanged. Every suite stays green in this commit: `crates/workshop/ui/test/realtime-wire-fixtures.mjs` asserts that the Workshop decoder, which does not request the ranges token until Step 17, rejects the shared fixture events that carry range fields.
 - Commit: `Negotiate finalized range fields on hypothesis events`
 
 </step-15>

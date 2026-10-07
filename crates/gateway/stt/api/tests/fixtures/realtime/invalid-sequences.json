@@ -125,6 +125,18 @@
     "effective_session_after": "default",
     "keeps_connection_usable": true
   },
+  "ranges_include_without_hypothesis": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "include": ["item.input_audio_transcription.hypothesis.ranges"] }, "event_id": "client_ranges_alone" } },
+    "expected_error": { "event_id": "evt_ranges_alone", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_include", "message": "Include value item.input_audio_transcription.hypothesis.ranges requires item.input_audio_transcription.hypothesis", "param": "session.include", "event_id": "client_ranges_alone" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "repeated_include": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "include": ["item.input_audio_transcription.hypothesis", "item.input_audio_transcription.hypothesis"] }, "event_id": "client_repeated_include" } },
+    "expected_error": { "event_id": "evt_repeated_include", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_include", "message": "session.include repeats an include value", "param": "session.include", "event_id": "client_repeated_include" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
   "result_queue_overload": {
     "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_result_overload" }, "setup": { "buffered_audio_ms": 100, "result_queue_occupancy": 16 } },
     "expected_error": { "event_id": "evt_result_overload", "type": "error", "error": { "type": "overload_error", "code": "result_queue_overload", "message": "The session result queue is full", "param": null, "event_id": "client_result_overload" } },

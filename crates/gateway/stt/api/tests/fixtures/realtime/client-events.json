@@ -33,5 +33,16 @@
       ]
     },
     "event_id": "client_update_1"
+  },
+  "session_update_ranges": {
+    "type": "session.update",
+    "session": {
+      "type": "transcription",
+      "include": [
+        "item.input_audio_transcription.hypothesis",
+        "item.input_audio_transcription.hypothesis.ranges"
+      ]
+    },
+    "event_id": "client_update_ranges"
   }
 }

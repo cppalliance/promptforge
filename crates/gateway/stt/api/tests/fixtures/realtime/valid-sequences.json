@@ -71,6 +71,21 @@
       "completion is authoritative"
     ]
   },
+  "hypothesis_ranges_negotiation": {
+    "events": [
+      { "direction": "client", "message": { "event_id": "client_hypothesis_ranges", "type": "session.update", "session": { "type": "transcription", "include": ["item.input_audio_transcription.hypothesis", "item.input_audio_transcription.hypothesis.ranges"] } } },
+      { "direction": "server", "message": { "event_id": "evt_hypothesis_ranges_updated", "type": "session.updated", "session": { "id": "sess_hypothesis_ranges", "object": "realtime.transcription_session", "type": "transcription", "audio": { "input": { "format": { "type": "audio/pcm", "rate": 24000 }, "noise_reduction": null, "transcription": { "model": "realtime-transcribe", "prompt": "" }, "turn_detection": null } }, "include": ["item.input_audio_transcription.hypothesis", "item.input_audio_transcription.hypothesis.ranges"] } } },
+      { "direction": "client", "message": { "type": "input_audio_buffer.append", "audio": "AAABAP//" } },
+      { "direction": "server", "message": { "event_id": "evt_hypothesis_ranges_1", "type": "conversation.item.input_audio_transcription.hypothesis", "item_id": "item_hypothesis_ranges", "content_index": 0, "revision": 1, "transcript": "Hello", "finalized": "", "agreed": "Hel", "tentative": "lo", "audio_start_ms": 0, "audio_end_ms": 250, "finalized_through_ms": 0, "finalized_seq": 0 } },
+      { "direction": "server", "message": { "event_id": "evt_hypothesis_ranges_2", "type": "conversation.item.input_audio_transcription.hypothesis", "item_id": "item_hypothesis_ranges", "content_index": 0, "revision": 2, "transcript": "Hello!", "finalized": "Hello", "agreed": "", "tentative": "!", "audio_start_ms": 0, "audio_end_ms": 300, "finalized_through_ms": 250, "finalized_seq": 1 } },
+      { "direction": "server", "message": { "event_id": "evt_hypothesis_ranges_done", "type": "conversation.item.input_audio_transcription.completed", "item_id": "item_hypothesis_ranges", "content_index": 0, "transcript": "Hello!", "usage": { "type": "duration", "seconds": 0.25 } } }
+    ],
+    "invariants": [
+      "range fields appear only when both include tokens are negotiated",
+      "the extended event is the base hypothesis event plus finalized_through_ms and finalized_seq",
+      "finalized_seq counts the final outcomes applied to the item"
+    ]
+  },
   "producer_hypothesis_ownership": {
     "events": [
       { "direction": "client", "message": { "event_id": "client_producer_hypothesis", "type": "session.update", "session": { "type": "transcription", "include": ["item.input_audio_transcription.hypothesis"] } } },

@@ -3,7 +3,7 @@
 use super::{Session, SessionError};
 use crate::realtime::result_mailbox::{ItemResult, SESSION_RESULT_CAPACITY};
 use crate::realtime::session::state::InterimTaskOutput;
-use crate::realtime::wire::ServerEvent;
+use crate::realtime::wire::{HypothesisRanges, ServerEvent};
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
 impl Session {
     pub(crate) fn created_event(&self) -> ServerEvent {
@@ -110,6 +110,7 @@ impl Session {
             return Ok(None);
         }
         let include_hypothesis = input.snapshot().include_hypothesis();
+        let include_ranges = input.snapshot().include_ranges();
         let update = input.take().next_window_snapshot(
             transcript.text(),
             transcript.word_ends(),
@@ -118,7 +119,7 @@ impl Session {
             audio_end,
         );
         if !include_hypothesis {
-            if let Some(snapshot) = update {
+            if let Some((snapshot, _)) = update {
                 let committed = snapshot.committed();
                 if let Some(delta) = committed.strip_prefix(&self.standard_interim_committed) {
                     if !delta.is_empty() {
@@ -129,16 +130,24 @@ impl Session {
             }
             return Ok(None);
         }
-        let Some(snapshot) = update else {
+        let Some((snapshot, finalized)) = update else {
             return Ok(None);
         };
-        if self.last_hypothesis.as_ref() != Some(&snapshot) {
+        let shown = (
+            snapshot,
+            include_ranges.then(|| HypothesisRanges {
+                finalized_through_ms: sample_millis(finalized.through_samples),
+                finalized_seq: finalized.seq,
+            }),
+        );
+        if self.last_hypothesis.as_ref() != Some(&shown) {
             self.hypothesis_revision = self
                 .hypothesis_revision
                 .checked_add(1)
                 .ok_or(SessionError::EpochExhausted)?;
-            self.last_hypothesis = Some(snapshot.clone());
+            self.last_hypothesis = Some(shown.clone());
         }
+        let (snapshot, ranges) = shown;
         Ok(Some(ServerEvent::hypothesis(
             self.ids.event(),
             input.item_id().to_owned(),
@@ -146,6 +155,7 @@ impl Session {
             snapshot,
             sample_millis(audio_start),
             sample_millis(audio_end),
+            ranges,
         )))
     }
 
