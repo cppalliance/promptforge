@@ -678,7 +678,7 @@ flowchart TD
 
 <step-19>
 
-### Step 19: Undo grouping, live region, and socket-loss keep
+### Step 19: Undo grouping, live region, and socket-loss keep [completed]
 
 - Component: Live rendering
 - Piece: workshop UI

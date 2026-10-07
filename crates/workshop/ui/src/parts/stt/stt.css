@@ -4,5 +4,15 @@
    does the .ws-stt-tentative mark on a take's tentative words. The
    .ws-stt-input--recording mark that a take leaves on its target is
    unstyled today: the chat box frame's border tracks :focus-within, and
-   a textarea target (textareaSttTarget) is unstyled. Dictation
-   currently defines no classes here. */
+   a textarea target (textareaSttTarget) is unstyled. */
+
+/* The dictation live region: read by assistive tech, invisible on screen. */
+.ws-stt-live {
+  position: absolute;
+  width: var(--ws-size-1);
+  height: var(--ws-size-1);
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

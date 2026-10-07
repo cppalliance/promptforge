@@ -6,8 +6,11 @@
 // setupStt's press() through the box's mic-press event, and dictation's
 // state comes back as the box's mic prop. It pins local gating and
 // status, replacement snapshots, authoritative completion, overlapping
-// items, clear, second take, recoverable failure, disposal, and - over
-// one shared capture service with two views - microphone exclusivity.
+// items, clear, second take, recoverable failure, socket loss keeping
+// finalized text, the live region's sentence announcements, a dictation
+// undoing as one step that brings back a pill it replaced, disposal, and
+// - over one shared capture service with two views - microphone
+// exclusivity.
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -84,6 +87,8 @@ const bundle = await esbuild.build({
       export { AgentSessionService } from "./src/services/agent-session.ts";
       export { SpeechCaptureService } from "./src/services/speech-capture.ts";
       export { AgentSessionView } from "./src/parts/agent/agent-session-view.ts";
+      export { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
+      export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",
@@ -297,8 +302,15 @@ globalThis.WebSocket = FakeWebSocket;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-agent-stt-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, Emitter, AgentSessionService, AgentSessionView, SpeechCaptureService } =
-  await import(pathToFileURL(bundlePath).href);
+const {
+  lifecycle,
+  Emitter,
+  AgentSessionService,
+  AgentSessionView,
+  SpeechCaptureService,
+  TEXT_CONTROL_SERVICE,
+  getService,
+} = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -1054,6 +1066,74 @@ await assertNoLeaks(lifecycle, async () => {
     dispose();
   }
 
+  // --- The live region hears sentences; a dictation is one undo step ----------
+
+  {
+    const { wire, view, input, startTake, dispose } = await setup();
+    wire.fire.inputRequired("tok");
+    input.setText("Note");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("live region: the mic click did not open a Realtime socket");
+      dispose();
+      return;
+    }
+    const region = view.element.querySelector(".ws-stt-live");
+    check(
+      "dictation mounts a polite live region",
+      region?.getAttribute("aria-live") === "polite" && region.textContent === "",
+    );
+    socket.message({ type: "interim", committed: "Ask not", tentative: "what." });
+    check("a sentence that is not yet stable is not announced", region?.textContent === "");
+    socket.message({ type: "interim", committed: "Ask not what. Ask", tentative: "" });
+    check("a finished stable sentence is announced", region?.textContent === "Ask not what.");
+    socket.message({ type: "interim", committed: "Ask not what. Ask what", tentative: "you" });
+    check("an announced sentence is not repeated", region?.textContent === "Ask not what.");
+    socket.message({ type: "final", text: "Ask not what. Ask what you can do." });
+    check(
+      "a completed take announces the rest it had not announced",
+      region?.textContent === "Ask what you can do.",
+    );
+    check("the dictation lands", input.getText() === "Note Ask not what. Ask what you can do.");
+    // The landed final focuses the box; Tiptap defers the DOM focus a frame.
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    const textControls = getService(TEXT_CONTROL_SERVICE);
+    check("the focused box routes undo", textControls.active?.kind === "prosemirror");
+    textControls.undo();
+    check(
+      "one undo removes the whole dictation, interim writes included",
+      input.getText() === "Note",
+    );
+    dispose();
+    check("disposing the view removes the live region", region?.parentElement === null);
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await setup();
+    wire.fire.inputRequired("tok");
+    input.setText("see ");
+    input.insertMention({ id: "src/main.ts", label: "main.ts", kind: "file", data: null });
+    const before = JSON.stringify(input.serialize().doc);
+    // ProseMirror positions: "see " spans 1..5, the pill 5..6, its trailing space 6..7.
+    input.setSelection(5, 7);
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("pill undo: the mic click did not open a Realtime socket");
+      dispose();
+      return;
+    }
+    socket.message({ type: "interim", committed: "spoken", tentative: "" });
+    socket.message({ type: "final", text: "spoken words" });
+    check("a dictation replaces a selected pill", input.getText() === "see spoken words");
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    getService(TEXT_CONTROL_SERVICE).undo();
+    check(
+      "one undo brings back the pill the dictation replaced, not its text",
+      JSON.stringify(input.serialize().doc) === before,
+    );
+    dispose();
+  }
+
   // --- The input is read-only for the take's duration ------------------------
 
   {
@@ -1126,12 +1206,12 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok3");
     input.setText("typed ");
     socket = await startTake();
-    socket?.message({ type: "interim", committed: "lost", tentative: "" });
+    socket?.message({ type: "interim", committed: "kept", tentative: "dropped words" });
     mic.click();
     socket?.close();
     check(
-      "a socket dropping in the stop window lifts the take lock and reverts to the pre-take text",
-      editable() && input.getText() === "typed ",
+      "a socket dropping in the stop window lifts the take lock and keeps the finalized text",
+      editable() && !recording() && input.getText() === "typed kept",
     );
     check(
       "a socket dropping in the stop window says so on the status bar",
@@ -1480,7 +1560,7 @@ await assertNoLeaks(lifecycle, async () => {
     first.message(producerHypothesis("reused_item", "old socket words"));
     check("the first socket owns its provisional text", input.getText() === "old socket words");
     first.close();
-    check("closing the first socket rolls its text back", input.getText() === "");
+    check("closing the first socket keeps its finalized text", input.getText() === "old socket words");
 
     await sleep(1_050);
     const secondCreated = await waitFor(
@@ -1504,17 +1584,20 @@ await assertNoLeaks(lifecycle, async () => {
     second.message(producerHypothesis("reused_item", "fresh socket words"));
     check(
       "the second socket immediately reuses the same item ID",
-      input.getText() === "fresh socket words",
+      input.getText() === "old socket words fresh socket words",
     );
     first.dispatch("message", {
       data: JSON.stringify(producerCompletion("reused_item", "STALE FINAL")),
     });
     check(
       "a late first-socket callback cannot rewrite the fresh take",
-      input.getText() === "fresh socket words",
+      input.getText() === "old socket words fresh socket words",
     );
     second.message(producerCompletion("reused_item", "fresh final"));
-    check("the second socket completion remains authoritative", input.getText() === "fresh final");
+    check(
+      "the second socket completion remains authoritative",
+      input.getText() === "old socket words fresh final",
+    );
     dispose();
   }
 

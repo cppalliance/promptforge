@@ -21,7 +21,8 @@ import "./chat-box.css";
 
 import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
-import { redoDepth, undoDepth } from "@tiptap/pm/history";
+import { closeHistory, redoDepth, undoDepth } from "@tiptap/pm/history";
+import { Slice } from "@tiptap/pm/model";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { EditorState } from "@tiptap/pm/state";
 import { Disposable, type IDisposable, toDisposable } from "@workshop/platform/lifecycle";
@@ -133,7 +134,8 @@ function micTitle(mic: ResolvedDynamicProps["mic"]): string {
  *
  * The handle is a structural superset of dictation's input target:
  * dictation splices the transcript in through insertionContext and
- * replaceRange, parks the cursor at a take's end through setSelection,
+ * replaceRange, puts a take's captured selection back through
+ * restoreRange, parks the cursor at a take's end through setSelection,
  * styles a take's tentative words through setTentativeRange, and holds
  * the box with setReadOnly. Offsets are ProseMirror positions.
  */
@@ -480,13 +482,17 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.editor.commands.setTextSelection(this.editor.state.doc.content.size - 1);
   }
 
-  /** Captures the ProseMirror selection and its target-owned insertion policy. */
+  /**
+   * Captures the ProseMirror selection, its content as slice JSON for
+   * restoreRange, and its target-owned insertion policy.
+   */
   insertionContext(): ReturnType<ChatBoxHandle["insertionContext"]> {
     const { from, to } = this.editor.state.selection;
     const document = this.editor.state.doc;
     return {
       range: { start: from, end: to },
       original: document.textBetween(from, to, "\n", "\n"),
+      content: document.slice(from, to).toJSON(),
       compositionPrefix:
         from === to &&
         to === document.content.size - 1 &&
@@ -504,28 +510,63 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   /**
    * Replaces [from, to] with plain text and leaves the cursor after the
    * inserted text. Newlines insert hard breaks, so the inserted text
-   * occupies exactly text.length positions.
+   * occupies exactly text.length positions. A transient replace stays out
+   * of the undo history; any other replace is its own undo step, never
+   * merged with an adjacent edit made just before or after it.
    */
-  replaceRange(from: number, to: number, text: string): void {
+  replaceRange(
+    from: number,
+    to: number,
+    text: string,
+    options: { readonly transient?: boolean } = {},
+  ): void {
+    const transient = options.transient === true;
+    const chain = this.editor.chain().command(({ tr }) => {
+      if (transient) {
+        tr.setMeta("addToHistory", false);
+      } else {
+        closeHistory(tr);
+      }
+      return true;
+    });
     if (text === "") {
-      this.editor.chain().deleteRange({ from, to }).setTextSelection(from).run();
-      return;
-    }
-    const content: JSONContent[] = [];
-    const lines = text.split("\n");
-    for (let index = 0; index < lines.length; index++) {
-      if (index > 0) {
-        content.push({ type: "hardBreak" });
+      chain.deleteRange({ from, to }).setTextSelection(from).run();
+    } else {
+      const content: JSONContent[] = [];
+      const lines = text.split("\n");
+      for (let index = 0; index < lines.length; index++) {
+        if (index > 0) {
+          content.push({ type: "hardBreak" });
+        }
+        const line = lines[index];
+        if (line !== undefined && line !== "") {
+          content.push({ type: "text", text: line });
+        }
       }
-      const line = lines[index];
-      if (line !== undefined && line !== "") {
-        content.push({ type: "text", text: line });
-      }
+      chain
+        .insertContentAt({ from, to }, content)
+        .setTextSelection(from + text.length)
+        .run();
     }
+    if (!transient) {
+      this.editor.view.dispatch(closeHistory(this.editor.state.tr));
+    }
+  }
+
+  /**
+   * Replaces [from, to] with slice JSON an earlier insertionContext
+   * captured, outside the undo history, and leaves the cursor after it,
+   * so paragraph breaks and pills return exactly.
+   */
+  restoreRange(from: number, to: number, content: unknown): void {
+    const slice = Slice.fromJSON(this.editor.schema, content);
     this.editor
       .chain()
-      .insertContentAt({ from, to }, content)
-      .setTextSelection(from + text.length)
+      .command(({ tr }) => {
+        tr.setMeta("addToHistory", false).replace(from, to, slice);
+        return true;
+      })
+      .setTextSelection(from + slice.size)
       .run();
   }
 

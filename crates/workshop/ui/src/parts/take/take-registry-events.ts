@@ -7,10 +7,13 @@
 // reordered snapshot never replaces newer text. A hypothesis renders its
 // finalized and agreed parts whole and its tentative part less the last
 // whole word, which waits for the next update or `completed`; what shows
-// of the tentative part is marked as the take's tentative tail. A failed
-// transcription keeps the visible text; service errors and connection
-// loss roll takes back. Status labels are local wording: server error
-// text never reaches the status bar.
+// of the tentative part is marked as the take's tentative tail. Each
+// newly finished stable sentence is announced once, and `completed`
+// announces whatever of the final transcript was not. A failed
+// transcription keeps the visible text; connection loss lands each take's
+// shown text less its tentative tail; service errors roll takes back.
+// Status labels are local wording: server error text never reaches the
+// status bar.
 
 import type { RealtimeEvent } from "../../services/realtime-event-decoder";
 import {
@@ -18,12 +21,14 @@ import {
   bindItem,
   composeTranscript,
   isRetiredItem,
+  keepAll,
+  landTake,
+  recordAnnouncedSentences,
   recordHypothesisRevision,
   removeTake,
   replaceTake,
   reserveWireRequest,
   retireItem,
-  rollbackAll,
   rollbackTake,
   takeById,
   takeByItem,
@@ -34,6 +39,9 @@ import type { Reduction } from "./take-registry-types";
 const HELD_BACK_TENTATIVE_WORDS = 1;
 
 const LAST_WORD = /\s*\S+\s*$/u;
+
+/** A sentence end: a run of `.`, `?`, or `!` that whitespace or the end of the text follows. */
+const SENTENCE_END = /[.?!]+(?=\s|$)/gu;
 
 type SnapshotEvent = Extract<
   RealtimeEvent,
@@ -311,6 +319,7 @@ function applySnapshot(reduction: Reduction, event: SnapshotEvent): void {
   if (event.type === "conversation.item.input_audio_transcription.delta") {
     const transcript = take.deltaText + event.delta;
     replaceTake(reduction, take.id, composeTranscript(take, transcript), transcript);
+    announceSentences(reduction, take.id, transcript);
     return;
   }
   if (take.hypothesisRevision !== null && event.revision <= take.hypothesisRevision) {
@@ -326,6 +335,28 @@ function applySnapshot(reduction: Reduction, event: SnapshotEvent): void {
     event.transcript,
     tentative.length,
   );
+  announceSentences(reduction, take.id, stable);
+}
+
+/** The offset just past each sentence end in a transcript. */
+function sentenceEnds(transcript: string): number[] {
+  return [...transcript.matchAll(SENTENCE_END)].map((end) => end.index + end[0].length);
+}
+
+/** Announces the finished sentences of a take's stable text it has not yet announced. */
+function announceSentences(reduction: Reduction, takeId: number, stable: string): void {
+  const take = takeById(reduction.state, takeId);
+  const ends = sentenceEnds(stable);
+  if (take === null || ends.length <= take.announcedSentences) {
+    return;
+  }
+  const text = stable
+    .slice(ends[take.announcedSentences - 1] ?? 0, ends[ends.length - 1])
+    .trim();
+  recordAnnouncedSentences(reduction.state, takeId, ends.length);
+  if (text !== "") {
+    reduction.effects.push({ domain: "status", command: "announce", text });
+  }
 }
 
 /**
@@ -376,7 +407,15 @@ function completeTake(
   }
   const authoritative = transcript.trimEnd();
   const text = composeTranscript(take, authoritative);
-  replaceTake(reduction, take.id, text, authoritative);
+  landTake(reduction, take.id, text, authoritative);
+  // A final with fewer sentence ends than were announced resumes after its last one.
+  const ends = sentenceEnds(authoritative);
+  const unannounced = authoritative
+    .slice(ends[Math.min(take.announcedSentences, ends.length) - 1] ?? 0)
+    .trim();
+  if (unannounced !== "") {
+    reduction.effects.push({ domain: "status", command: "announce", text: unannounced });
+  }
   removeTake(reduction, take.id);
   if (text === "") {
     reduction.effects.push({
@@ -420,7 +459,10 @@ export function serviceError(
   });
 }
 
-/** Rolls all live ownership back when the Realtime connection is lost. */
+/**
+ * Ends every take when the Realtime connection is lost: each keeps its
+ * shown text less the tentative tail, lands it, and releases the editor.
+ */
 export function connectionLost(reduction: Reduction): void {
   reduction.state.connection = "unavailable";
   const activeTakeId = reduction.state.activeTakeId;
@@ -437,7 +479,7 @@ export function connectionLost(reduction: Reduction): void {
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = activeTakeId;
   }
-  rollbackAll(reduction);
+  keepAll(reduction);
   reduction.state.awaitingCommit = [];
   reduction.state.pendingWire = [];
   reduction.state.clientEvents = [];

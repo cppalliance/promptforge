@@ -181,7 +181,10 @@ test("transition table replaces selections and gives completion authority", () =
     },
     {
       input: { type: "server.event", event: completion("selection", "final   ") },
-      replacements: [{ from: 6, to: 17, text: "final" }],
+      replacements: [
+        { from: 6, to: 17, text: "test" },
+        { from: 6, to: 10, text: "final" },
+      ],
       takeCount: 0,
     },
   ];
@@ -220,6 +223,7 @@ test("precommit binding confirms matches and rolls back mismatches", () => {
       from: 0,
       to: 9,
       text: "",
+      transient: true,
     },
   ]);
   assert.equal(result.state.takes.length, 0);
@@ -369,9 +373,12 @@ test("an interior-only correction leaves the caret at the take's end for the nex
   let state = stopAndCommit(result.state, "commit_a").state;
   state = server(state, committed("a")).state;
   result = server(state, completion("a", "Ask NOT what"));
-  assert.deepEqual(patches(result.effects), [{ from: 0, to: 3, text: "Ask" }]);
+  assert.deepEqual(patches(result.effects), [
+    { from: 0, to: 12, text: "" },
+    { from: 0, to: 0, text: "Ask NOT what" },
+  ]);
   target = applyToTarget(target, result.effects);
-  assert.deepEqual(target, { text: "Ask NOT what", caret: 12 }, "a completion patch parks the caret");
+  assert.deepEqual(target, { text: "Ask NOT what", caret: 12 }, "a landed completion parks the caret");
 
   state = start(result.state, context(target.caret, target.caret, "", " ")).state;
   result = server(state, hypothesis("b", "Second"));
@@ -531,17 +538,19 @@ test("overlapping takes shift isolated regions and complete in reverse order", (
 
   result = server(state, completion("b", "second"));
   state = result.state;
-  assert.deepEqual(editorReplacements(result.effects), [], "an unchanged completion writes nothing");
+  assert.deepEqual(
+    patches(result.effects),
+    [
+      { from: 10, to: 17, text: "" },
+      { from: 10, to: 10, text: " second" },
+    ],
+    "an unchanged completion still lands as one undoable write",
+  );
   assert.equal(state.takes.length, 1);
   result = server(state, completion("a", "FIRST"));
   assert.deepEqual(editorReplacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 5,
-      to: 10,
-      text: "FIRST",
-    },
+    { domain: "editor", command: "replace", from: 5, to: 10, text: "", transient: true },
+    { domain: "editor", command: "replace", from: 5, to: 5, text: "FIRST", transient: false },
   ]);
   assert.equal(result.state.takes.length, 0);
 });
@@ -571,14 +580,9 @@ test("terminal failure preserves visible text and later take coordinates", () =>
   assert.equal(result.state.takes[0].from, 9);
 
   result = server(result.state, completion("b", "KEPT"));
-  assert.deepEqual(editorReplacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 10,
-      to: 14,
-      text: "KEPT",
-    },
+  assert.deepEqual(patches(result.effects), [
+    { from: 9, to: 14, text: "" },
+    { from: 9, to: 9, text: " KEPT" },
   ]);
 });
 
@@ -596,24 +600,22 @@ test("sequential takes own exactly one composition separator", () => {
   result = server(state, completion("second", "authoritative   "));
   assert.deepEqual(
     patches(result.effects),
-    [{ from: 33, to: 40, text: "authoritative" }],
-    "the completion keeps the take's one separator and patches only the word",
+    [
+      { from: 32, to: 40, text: "" },
+      { from: 32, to: 32, text: " authoritative" },
+    ],
+    "the landed completion keeps the take's one separator",
   );
 });
 
-test("a reconnect rolls back live state and rejects the old session's late events", () => {
+test("a reconnect lands agreed text and rejects the old session's late events", () => {
   let state = start(createTakeRegistry(), context(4, 4, "", " ")).state;
   state = server(state, hypothesis("old", "temporary")).state;
 
   let result = reduceTakeRegistry(state, { type: "connection.lost" });
   assert.deepEqual(editorReplacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 4,
-      to: 14,
-      text: "",
-    },
+    { domain: "editor", command: "replace", from: 4, to: 14, text: "", transient: true },
+    { domain: "editor", command: "replace", from: 4, to: 4, text: " temporary", transient: false },
   ]);
   assert.ok(
     result.effects.some(

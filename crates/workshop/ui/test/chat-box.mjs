@@ -13,6 +13,11 @@
 // whose canUndo/canRedo track the ProseMirror history plugin's depth;
 // setTentativeRange decorates each dictation take's tentative span, maps it
 // through later edits, and clears it, never changing the document text;
+// a transient replaceRange stays out of undo history while any other is
+// its own undo step, so each landed dictation undoes whole and alone and
+// never merges with an edit typed just before or after it; restoreRange
+// puts a captured selection's pills and paragraph breaks back outside
+// undo history, so undoing a dictation over them brings them back;
 // dispose destroys the editor. The contract: defaults, data-* state
 // mirrors (variant, editable, action, mic), the send button's three
 // states, the mic button's rendering per state, the controls slot, the
@@ -619,6 +624,107 @@ await assertNoLeaks(lifecycle, async () => {
     check("routing redo through the service replays the edit", input.getText() === "hello");
     input.dispose();
     check("disposing the prompt unregisters its adapter", textControls.active === null);
+    input.element.remove();
+  }
+
+  // --- Each landed dictation is one undo step --------------------------------------
+
+  {
+    const textControls = getService(TEXT_CONTROL_SERVICE);
+    const input = new ChatBox({ textControls: textControls.register.bind(textControls) });
+    document.body.appendChild(input.element);
+    input.focus();
+    await new Promise((resolve) => globalThis.requestAnimationFrame(resolve));
+    const active = textControls.active;
+    input.replaceRange(1, 1, "draft", { transient: true });
+    check(
+      "a transient replace lands its text but leaves undo history empty",
+      input.getText() === "draft" && active !== null && active.canUndo() === false,
+    );
+    input.replaceRange(1, 6, "", { transient: true });
+    input.setText("Note");
+    // Two dictations back to back, as the take registry writes them:
+    // transient interims, a transient restore of the original, then one
+    // tracked write of the landed text.
+    input.replaceRange(5, 5, " ask", { transient: true });
+    input.replaceRange(5, 9, " ask not", { transient: true });
+    input.replaceRange(5, 13, "", { transient: true });
+    input.replaceRange(5, 5, " ask not what");
+    input.replaceRange(18, 18, " more", { transient: true });
+    input.replaceRange(18, 23, "", { transient: true });
+    input.replaceRange(18, 18, " and more");
+    check("both dictations land", input.getText() === "Note ask not what and more");
+    textControls.undo();
+    check("one undo removes only the latest dictation", input.getText() === "Note ask not what");
+    textControls.undo();
+    check(
+      "the next undo removes the earlier dictation whole, not its interim writes",
+      input.getText() === "Note",
+    );
+    input.dispose();
+    input.element.remove();
+  }
+
+  {
+    const { input, editor } = mountedBox();
+    input.setText("Note");
+    editor.commands.insertContent(" typed");
+    input.replaceRange(11, 11, " spoken");
+    editor.commands.undo();
+    check(
+      "an edit typed just before a landed replace stays when the replace is undone",
+      input.getText() === "Note typed",
+    );
+    input.dispose();
+    input.element.remove();
+  }
+
+  {
+    const { input, editor } = mountedBox();
+    input.setText("Note");
+    input.replaceRange(5, 5, " spoken");
+    editor.commands.insertContent(" typed");
+    editor.commands.undo();
+    check(
+      "an edit typed just after a landed replace undoes alone",
+      input.getText() === "Note spoken",
+    );
+    editor.commands.undo();
+    check("the landed replace then undoes alone", input.getText() === "Note");
+    input.dispose();
+    input.element.remove();
+  }
+
+  // --- A dictation over pills and paragraphs undoes back to them -------------------
+
+  {
+    const { input, editor } = mountedBox({
+      content:
+        '<p>see <span data-type="mentionNode" data-id="src/main.ts" data-label="main.ts"></span> now</p><p>then</p>',
+    });
+    const before = JSON.stringify(input.serialize().doc);
+    // ProseMirror positions: the pill sits at 5, the second paragraph's "then" spans 12..16.
+    input.setSelection(5, 14);
+    const context = input.insertionContext();
+    // The take registry's writes: a whole first interim, a patch, the
+    // restore of the captured selection, then the one tracked final.
+    input.replaceRange(5, 14, "spoken", { transient: true });
+    input.replaceRange(11, 11, " words", { transient: true });
+    input.restoreRange(5, 17, context.content);
+    check(
+      "a restore puts the captured pill and paragraph break back outside undo history",
+      JSON.stringify(input.serialize().doc) === before &&
+        editor.can().undo() === false &&
+        editor.state.selection.from === 14,
+    );
+    input.replaceRange(5, 14, "spoken words");
+    check("the final replaces the restored selection", input.getText() === "see spoken wordsen");
+    editor.commands.undo();
+    check(
+      "one undo brings back the pill and the paragraph break the dictation replaced",
+      JSON.stringify(input.serialize().doc) === before,
+    );
+    input.dispose();
     input.element.remove();
   }
 

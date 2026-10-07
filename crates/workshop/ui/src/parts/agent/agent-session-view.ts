@@ -255,7 +255,7 @@ export class AgentSessionView extends Disposable {
     // views own a fallback for tests and previews.
     const capture = speechCapture ?? new SpeechCaptureService();
     this.stt = this._register(
-      setupStt({ input: chatBox }, status, () => {
+      setupStt({ input: chatBox, liveRegionHost: this.element }, status, () => {
         if (this.service.pendingInputToken === null) {
           return "The agent isn't asking for input; the mic opens when it does.";
         }

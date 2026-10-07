@@ -150,6 +150,8 @@ function startTake(reduction: Reduction, context: SttInsertionContext): void {
     from: context.range.start,
     to: context.range.end,
     original: context.original,
+    originalContent: context.content,
+    originalWidth: context.range.end - context.range.start,
     compositionPrefix: context.compositionPrefix,
     itemId: null,
     itemGeneration: null,
@@ -158,6 +160,7 @@ function startTake(reduction: Reduction, context: SttInsertionContext): void {
     hypothesisRevision: null,
     written: false,
     tentativeLength: 0,
+    announcedSentences: 0,
   };
   const wasEmpty = reduction.state.takes.length === 0;
   reduction.state.takes.push(take);

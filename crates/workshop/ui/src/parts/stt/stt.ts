@@ -17,8 +17,24 @@ export { setupStt } from "./realtime-stt";
 export interface SttInputTarget {
   /** Captures the selected range, rollback text, and target-owned insertion policy. */
   insertionContext(): SttInsertionContext;
-  /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
-  replaceRange(from: number, to: number, text: string): void;
+  /**
+   * Replaces [from, to] with text, leaving the cursor after the inserted
+   * text. A transient replace (an interim write or a rollback) stays out
+   * of the target's undo history; any other replace is its own undo step.
+   * A target without undo history ignores the option.
+   */
+  replaceRange(
+    from: number,
+    to: number,
+    text: string,
+    options?: { readonly transient?: boolean },
+  ): void;
+  /**
+   * Replaces [from, to] with the `content` an earlier insertionContext
+   * captured, outside the undo history, leaving the cursor after it. A
+   * target whose insertionContext supplies content implements it.
+   */
+  restoreRange?(from: number, to: number, content: unknown): void;
   /** Selects [from, to]; a take collapses the cursor to its end after a patch that ends short of it. */
   setSelection(from: number, to: number): void;
   /**
@@ -40,6 +56,12 @@ export interface SttInputTarget {
  */
 export interface SttElements {
   input: SttInputTarget;
+  /**
+   * Where dictation mounts its hidden polite live region, which hears
+   * each finished sentence and a landed take's rest. Absent, dictation
+   * announces nothing.
+   */
+  liveRegionHost?: HTMLElement;
 }
 
 /**

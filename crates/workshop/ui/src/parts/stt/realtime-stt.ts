@@ -1,5 +1,5 @@
 import { Emitter } from "@workshop/platform/event";
-import { DisposableStore } from "@workshop/platform/lifecycle";
+import { DisposableStore, toDisposable } from "@workshop/platform/lifecycle";
 import { RealtimeTranscriptionService } from "../../services/realtime-transcription";
 import {
   SpeechCaptureService,
@@ -39,14 +39,26 @@ function captureFailureLabel(failure: SpeechCaptureFailure): string {
   return "Dictation could not start. Try again.";
 }
 
+/** Mounts a visually hidden polite live region at the end of the host. */
+function mountLiveRegion(host: HTMLElement): HTMLElement {
+  const region = host.ownerDocument.createElement("div");
+  region.className = "ws-stt-live";
+  region.setAttribute("aria-live", "polite");
+  region.setAttribute("aria-atomic", "true");
+  host.append(region);
+  return region;
+}
+
 /**
  * Wires push-to-talk to production PCM16 capture and the additive Realtime
  * relay. The registry exclusively owns take state; this layer interprets its
  * typed editor, capture, status, and wire effects, and publishes the mic
- * state the owning part paints. Each instance holds its own owner token
- * for the shared capture service: it streams only audio it owns, and a
- * press while another instance owns the microphone is refused with a
- * reason rather than stealing the take.
+ * state the owning part paints. Announcements go to a hidden polite live
+ * region mounted on the elements' host, so a screen reader hears finished
+ * sentences without leaving the editor. Each instance holds its own owner
+ * token for the shared capture service: it streams only audio it owns,
+ * and a press while another instance owns the microphone is refused with
+ * a reason rather than stealing the take.
  */
 export function setupStt(
   elements: SttElements,
@@ -55,10 +67,14 @@ export function setupStt(
   capture: SpeechCaptureService,
   providedRealtime?: RealtimeTranscriptionService,
 ): SttHandle {
-  const { input } = elements;
+  const { input, liveRegionHost } = elements;
   const owner = Symbol("stt-owner");
   const store = new DisposableStore();
   const realtime = providedRealtime ?? store.add(new RealtimeTranscriptionService());
+  const liveRegion = liveRegionHost === undefined ? null : mountLiveRegion(liveRegionHost);
+  if (liveRegion !== null) {
+    store.add(toDisposable(() => liveRegion.remove()));
+  }
   let registry: TakeRegistry = createTakeRegistry();
   if (realtime.state === "ready") {
     registry = reduceTakeRegistry(registry, {
@@ -111,7 +127,12 @@ export function setupStt(
       case "editor":
         switch (effect.command) {
           case "replace":
-            input.replaceRange(effect.from, effect.to, effect.text);
+            input.replaceRange(effect.from, effect.to, effect.text, {
+              transient: effect.transient,
+            });
+            return;
+          case "restore":
+            input.restoreRange?.(effect.from, effect.to, effect.content);
             return;
           case "caret":
             input.setSelection(effect.at, effect.at);
@@ -161,6 +182,11 @@ export function setupStt(
             return;
           case "local":
             status.showLocal(effect.label, effect.severity);
+            return;
+          case "announce":
+            if (liveRegion !== null) {
+              liveRegion.textContent = effect.text;
+            }
             return;
           default: {
             const exhaustive: never = effect;

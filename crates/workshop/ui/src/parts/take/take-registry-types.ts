@@ -12,8 +12,15 @@ export interface SttInsertionContext {
     readonly start: number;
     readonly end: number;
   };
-  /** The selected text a cancelled or failed take restores. */
+  /** The selected text, which a take restores when the target captured no `content`. */
   readonly original: string;
+  /**
+   * The selection in the target's own form, as plain data opaque to the
+   * registry. A take restores it through the target's `restoreRange`, so
+   * structure the text does not show, such as paragraph breaks and
+   * mention chips, comes back intact.
+   */
+  readonly content?: unknown;
   /** The separator owned by this take, if appending requires one. */
   readonly compositionPrefix: "" | " ";
 }
@@ -25,6 +32,10 @@ export interface RegistryTake {
   readonly from: number;
   readonly to: number;
   readonly original: string;
+  /** The target's own form of the captured selection; undefined when it captured only text. */
+  readonly originalContent: unknown;
+  /** How many target positions the captured selection spans. */
+  readonly originalWidth: number;
   readonly compositionPrefix: "" | " ";
   readonly itemId: string | null;
   readonly itemGeneration: number | null;
@@ -35,6 +46,8 @@ export interface RegistryTake {
   readonly written: boolean;
   /** The length of the tentative tail that ends `text`; 0 when none is shown. */
   readonly tentativeLength: number;
+  /** How many of the take's finished stable sentences have been announced. */
+  readonly announcedSentences: number;
 }
 
 /** A span in the target's coordinate space. */
@@ -119,6 +132,20 @@ export type TakeRegistryEditorEffect =
       readonly from: number;
       readonly to: number;
       readonly text: string;
+      /**
+       * Whether the edit stays out of the target's undo history. Interim
+       * writes and rollbacks are transient; only the write that lands a
+       * take's text is not, so one dictation is one undo step.
+       */
+      readonly transient: boolean;
+    }
+  | {
+      readonly domain: "editor";
+      readonly command: "restore";
+      readonly from: number;
+      readonly to: number;
+      /** The take's captured selection in the target's own form, written outside undo history. */
+      readonly content: unknown;
     }
   | {
       readonly domain: "editor";
@@ -162,6 +189,12 @@ export type TakeRegistryStatusEffect =
       readonly command: "local";
       readonly label: string;
       readonly severity: "info" | "error";
+    }
+  | {
+      readonly domain: "status";
+      readonly command: "announce";
+      /** Newly finished stable sentences, or the unannounced rest of a completed take. */
+      readonly text: string;
     };
 
 /** A wire operation the registry asks the Realtime owner to perform. */
