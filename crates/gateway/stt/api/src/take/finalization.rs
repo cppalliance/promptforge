@@ -17,7 +17,6 @@ use super::final_outcome::{FinalRangeOutcome, SkipReason};
 use super::state::{TakeFailure, TakeState};
 use super::window::{AcceptedHypothesis, WholeWindowState};
 
-#[path = "finalization-retry.rs"]
 mod retry;
 
 pub(super) use retry::{ClosedRange, append_releasing};
@@ -311,5 +310,6 @@ fn record_skipped_segment(
 }
 
 #[cfg(test)]
-#[path = "finalization-tests.rs"]
+mod skipped_tests;
+#[cfg(test)]
 mod tests;

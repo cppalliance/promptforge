@@ -324,57 +324,6 @@ async fn a_held_range_decodes_once_the_final_queue_has_room() {
     );
 }
 
-/// Appends `samples` of loud speech or digital silence and submits whatever
-/// segments they close.
-fn hear(take: &Take, loud: bool, samples: usize) {
-    take.append(vec![if loud { 0.5 } else { 0.0 }; samples])
-        .expect("the audio appends");
-    take.submit_closed_segments();
-}
-
-async fn settle(take: &Take) {
-    while take.pending_final_segments() > 0 {
-        tokio::task::yield_now().await;
-    }
-}
-
-#[tokio::test]
-async fn a_word_too_short_to_decode_keeps_its_text_when_decoded_speech_follows() {
-    let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
-    let mut take = Take::new(Vec::new(), None);
-    let task = tokio::spawn(run_final_pipeline(
-        receiver,
-        Arc::from([]),
-        Arc::clone(&take.state),
-        Arc::clone(&take.whole_window),
-        |_| async { Some(Ok("The commit rule.".to_owned())) },
-    ));
-    take.final_pipeline = Some(queue(commands, task, Arc::new(AtomicUsize::new(0))));
-
-    hear(&take, false, 16_000);
-    hear(&take, true, 6_720);
-    hear(&take, false, 6_080);
-    take.next_window_snapshot("Hey.", &[], 0, 0, 28_800)
-        .expect("the word is accepted from a window that ends in its closing silence");
-    hear(&take, false, 4_800);
-    settle(&take).await;
-    let consumed = take.consumed();
-    assert_eq!(
-        consumed, 24_640,
-        "the 450 ms word closed as a skipped segment"
-    );
-    assert_eq!(
-        take.finalized(),
-        "Hey.",
-        "the skipped segment keeps its accepted text"
-    );
-
-    hear(&take, true, 16_000);
-    take.next_window_snapshot("The commit rule.", &[], consumed, consumed, 49_600)
-        .expect("the next sentence is accepted");
-    assert_eq!(finish(&take).await, "Hey. The commit rule.");
-}
-
 /// A take whose final queue stays full, so every closed range is held, and
 /// whose pipeline reports each decode's sample count once completion drains
 /// the held ranges.

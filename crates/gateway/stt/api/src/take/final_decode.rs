@@ -70,7 +70,7 @@ async fn process_natural<D, F>(
     D: FnMut(DecodeRequest) -> F,
     F: Future<Output = Option<Result<String, TranscribeError>>>,
 {
-    let finalized = state.finalized();
+    let finalized = state.decoded_text();
     let (samples, owner) = samples.into_decode();
     let request = DecodeRequest::new(DecodeMode::Final, samples, guidance.to_vec(), finalized)
         .with_lifetime_guard(owner);
@@ -90,7 +90,7 @@ async fn process_forced<D, F>(
     D: FnMut(DecodeRequest) -> F,
     F: Future<Output = Option<Result<String, TranscribeError>>>,
 {
-    let finalized = state.finalized();
+    let finalized = state.decoded_text();
     let (samples, owner) = samples.into_decode();
     let (returned, receiver) = oneshot::channel();
     let retirement_state = Arc::clone(state);

@@ -23,6 +23,11 @@ mod reconcile;
 #[derive(Debug, Default)]
 struct FinalizedState {
     text: String,
+    /// The finalized text that final decodes produced, without accepted
+    /// interim text standing in for skipped ranges. It conditions the next
+    /// final decode, because whisper copies its prompt's style and interim
+    /// text often lacks punctuation.
+    decoded_text: String,
     failure: Option<Arc<TakeFailure>>,
     samples: u64,
     /// End of the latest range settled with text, from a final decode or
@@ -117,6 +122,12 @@ impl TakeState {
         Self::lock(&self.finalized).text.clone()
     }
 
+    /// The finalized text that final decodes produced, the history a final
+    /// decode is conditioned on.
+    pub(super) fn decoded_text(&self) -> String {
+        Self::lock(&self.finalized).decoded_text.clone()
+    }
+
     /// The count of final outcomes applied to the take.
     pub(super) fn applied_outcomes(&self) -> u64 {
         Self::lock(&self.finalized).applied_outcomes
@@ -160,6 +171,7 @@ impl TakeState {
         match result {
             Ok(text) if state.failure.is_none() => {
                 append_transcript(&mut state.text, &text);
+                append_transcript(&mut state.decoded_text, &text);
                 if let Some(samples) = samples {
                     state.samples = samples;
                     state.transcribed_samples = samples;
@@ -376,6 +388,7 @@ fn flush_pending_forced(state: &mut FinalizedState, accepted: &[AcceptedHypothes
 
 fn settle_decoded(state: &mut FinalizedState, range: std::ops::Range<u64>, text: &str) {
     append_transcript(&mut state.text, text);
+    append_transcript(&mut state.decoded_text, text);
     state.samples = range.end;
     state.transcribed_samples = range.end;
 }
