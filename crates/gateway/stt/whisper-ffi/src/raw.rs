@@ -14,6 +14,12 @@ pub(crate) struct State {
     _private: [u8; 0],
 }
 
+/// Opaque `whisper_vad_context`.
+#[repr(C)]
+pub(crate) struct VadContext {
+    _private: [u8; 0],
+}
+
 /// One alignment head in `whisper_context_params`.
 #[repr(C)]
 struct Ahead {
@@ -52,6 +58,17 @@ pub(crate) struct GreedyParams {
 struct BeamSearchParams {
     beam_size: c_int,
     patience: f32,
+}
+
+/// Parameters passed by value to `whisper_vad_init_from_file_with_params`.
+///
+/// Distinct from [`VadParams`], the segmenting settings embedded in
+/// `whisper_full_params`.
+#[repr(C)]
+pub(crate) struct VadContextParams {
+    pub(crate) n_threads: c_int,
+    pub(crate) use_gpu: bool,
+    pub(crate) gpu_device: c_int,
 }
 
 /// Whisper's built-in voice-activity detector settings.
@@ -171,6 +188,15 @@ pub(crate) type FullGetTokenDataFromState =
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;
 pub(crate) type Free = unsafe extern "C" fn(*mut Context);
 pub(crate) type FreeState = unsafe extern "C" fn(*mut State);
+pub(crate) type VadDefaultContextParams = unsafe extern "C" fn() -> VadContextParams;
+pub(crate) type VadInitFromFileWithParams =
+    unsafe extern "C" fn(*const c_char, VadContextParams) -> *mut VadContext;
+pub(crate) type VadDetectSpeechNoReset =
+    unsafe extern "C" fn(*mut VadContext, *const f32, c_int) -> bool;
+pub(crate) type VadResetState = unsafe extern "C" fn(*mut VadContext);
+pub(crate) type VadNProbs = unsafe extern "C" fn(*mut VadContext) -> c_int;
+pub(crate) type VadProbs = unsafe extern "C" fn(*mut VadContext) -> *mut f32;
+pub(crate) type VadFree = unsafe extern "C" fn(*mut VadContext);
 
 /// `ggml_abort_callback` from the pinned b4938 ggml.h. whisper calls it after
 /// each encoder pass and decoder step, and a true return ends the pass.

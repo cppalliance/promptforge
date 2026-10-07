@@ -15,11 +15,13 @@ mod library;
 mod log;
 mod params;
 mod raw;
+mod vad;
 
 pub use context::{ContextParams, TokenSpan, WhisperContext, WhisperState};
 pub use error::WhisperError;
 pub use library::WhisperLibrary;
 pub use params::{FullParams, SamplingStrategy};
+pub use vad::VadContext;
 
 // Miri excludes dynamic library loading and native log callback tests; native CI owns them.
 #[cfg(test)]
@@ -33,13 +35,20 @@ mod tests {
 
     const SAMPLE_RATE: u64 = 16_000;
 
-    /// Records every `tracing` event message on the threads it is the default
-    /// subscriber for.
+    /// Records every `tracing` event's level and message on the threads it is
+    /// the default subscriber for.
     #[derive(Clone, Default)]
-    struct CapturedLog(Arc<Mutex<Vec<String>>>);
+    pub(crate) struct CapturedLog(Arc<Mutex<Vec<(tracing::Level, String)>>>);
 
     impl CapturedLog {
         fn take(&self) -> Vec<String> {
+            self.take_leveled()
+                .into_iter()
+                .map(|(_, message)| message)
+                .collect()
+        }
+
+        pub(crate) fn take_leveled(&self) -> Vec<(tracing::Level, String)> {
             std::mem::take(&mut *self.0.lock().expect("log capture lock"))
         }
     }
@@ -70,7 +79,10 @@ mod tests {
         fn event(&self, event: &tracing::Event<'_>) {
             let mut message = Message(String::new());
             event.record(&mut message);
-            self.0.lock().expect("log capture lock").push(message.0);
+            self.0
+                .lock()
+                .expect("log capture lock")
+                .push((*event.metadata().level(), message.0));
         }
 
         fn enter(&self, _: &tracing::span::Id) {}
@@ -78,7 +90,7 @@ mod tests {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
-    fn native_fixture(variable: &str) -> PathBuf {
+    pub(crate) fn native_fixture(variable: &str) -> PathBuf {
         let Some(path) = std::env::var_os(variable) else {
             panic!("{variable} is set");
         };
@@ -129,7 +141,9 @@ mod tests {
     #[test]
     fn wrapper_types_keep_native_ownership_private() {
         fn assert_send_sync<T: Send + Sync>() {}
+        fn assert_send<T: Send>() {}
         assert_send_sync::<WhisperLibrary>();
+        assert_send::<VadContext>();
     }
 
     #[test]
@@ -181,6 +195,13 @@ mod tests {
         assert!(offset_of!(raw::TokenData, p) == 8);
         assert!(offset_of!(raw::TokenData, t0) == 24);
         assert!(offset_of!(raw::TokenData, t1) == 32);
+
+        // `whisper_vad_context_params`, passed by value to the VAD init.
+        assert!(size_of::<raw::VadContextParams>() == 12);
+        assert!(align_of::<raw::VadContextParams>() == 4);
+        assert!(offset_of!(raw::VadContextParams, n_threads) == 0);
+        assert!(offset_of!(raw::VadContextParams, use_gpu) == 4);
+        assert!(offset_of!(raw::VadContextParams, gpu_device) == 8);
     };
 
     #[test]

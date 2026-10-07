@@ -2258,6 +2258,8 @@ dependencies = [
  "build-ceiling",
  "hound",
  "libloading 0.8.9",
+ "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.19",
  "tracing",
  "workspace-hack",

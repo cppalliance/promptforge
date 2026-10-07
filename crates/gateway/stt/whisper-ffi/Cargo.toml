@@ -14,6 +14,8 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 hound.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 
 [build-dependencies]
 build-ceiling.workspace = true

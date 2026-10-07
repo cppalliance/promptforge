@@ -136,4 +136,35 @@ pub enum WhisperError {
     /// whisper.cpp returned no system-information string.
     #[error("whisper returned no system information")]
     NullSystemInfo,
+
+    /// whisper.cpp returned no speech-detection context for a model.
+    #[non_exhaustive]
+    #[error("whisper rejected VAD model {}", path.display())]
+    NullVadContext {
+        /// Model path passed to whisper.cpp.
+        path: PathBuf,
+    },
+
+    /// whisper.cpp could not allocate the speech detector's compute graph.
+    #[error("whisper speech detection failed")]
+    VadDetect,
+
+    /// whisper.cpp reported a different number of speech probabilities than
+    /// the windows it was given.
+    #[non_exhaustive]
+    #[error("whisper reported {actual} speech probabilities for {expected} windows")]
+    VadProbabilityCount {
+        /// One probability per 512-sample window passed in.
+        expected: usize,
+        /// Count reported by whisper.cpp.
+        actual: c_int,
+    },
+
+    /// A streaming speech-detection chunk was not exactly one window.
+    #[non_exhaustive]
+    #[error("a speech-detection chunk needs 512 samples, got {samples}")]
+    VadChunkLength {
+        /// Samples passed by the caller.
+        samples: usize,
+    },
 }

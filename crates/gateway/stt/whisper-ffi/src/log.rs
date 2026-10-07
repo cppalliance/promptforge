@@ -22,15 +22,44 @@ extern "C" fn tracing_bridge(level: c_int, text: *const c_char, _user_data: *mut
     let message = render_text(bytes);
     // The event macros need a static level for their callsite, so the mapped
     // level selects the macro.
-    let level = tracing_level(level);
+    let level = bridged_level(level, &message);
     if level == tracing::Level::ERROR {
         tracing::error!(target: TARGET, "{message}");
     } else if level == tracing::Level::WARN {
         tracing::warn!(target: TARGET, "{message}");
     } else if level == tracing::Level::INFO {
         tracing::info!(target: TARGET, "{message}");
-    } else {
+    } else if level == tracing::Level::DEBUG {
         tracing::debug!(target: TARGET, "{message}");
+    } else {
+        tracing::trace!(target: TARGET, "{message}");
+    }
+}
+
+/// Line openings `whisper_vad_detect_speech_no_reset` writes at INFO on every
+/// call in the pinned b4938 `src/whisper.cpp`. Streaming detection calls it
+/// about 31 times a second; its failure lines share the function prefix and
+/// keep their level.
+const VAD_PER_CALL_LINES: [&str; 5] = [
+    "whisper_vad_detect_speech_no_reset: detecting speech in ",
+    "whisper_vad_detect_speech_no_reset: n_chunks: ",
+    "whisper_vad_detect_speech_no_reset: props size: ",
+    "whisper_vad_detect_speech_no_reset: chunk_len: ",
+    "whisper_vad_detect_speech_no_reset: vad time = ",
+];
+
+/// Picks the `tracing` level for one rendered line: the per-call speech
+/// detection lines drop to [`tracing::Level::TRACE`], and every other line
+/// keeps its mapped native level.
+#[must_use]
+fn bridged_level(level: c_int, message: &str) -> tracing::Level {
+    if VAD_PER_CALL_LINES
+        .iter()
+        .any(|line| message.starts_with(line))
+    {
+        tracing::Level::TRACE
+    } else {
+        tracing_level(level)
     }
 }
 
@@ -112,5 +141,52 @@ mod tests {
     fn callback_consumes_a_nul_terminated_c_string() {
         tracing_bridge(2, c"whisper: loaded model\n".as_ptr(), std::ptr::null_mut());
         tracing_bridge(5, c" continuation".as_ptr(), std::ptr::null_mut());
+    }
+
+    #[test]
+    fn per_call_vad_lines_demote_to_trace() {
+        // Rendered from the format strings in
+        // `whisper_vad_detect_speech_no_reset`, pinned b4938 src/whisper.cpp.
+        for line in [
+            "whisper_vad_detect_speech_no_reset: detecting speech in 512 samples",
+            "whisper_vad_detect_speech_no_reset: n_chunks: 1",
+            "whisper_vad_detect_speech_no_reset: props size: 1",
+            "whisper_vad_detect_speech_no_reset: chunk_len: 188 < n_window: 512",
+            "whisper_vad_detect_speech_no_reset: vad time = 0.31 ms processing 512 samples",
+        ] {
+            assert_eq!(bridged_level(2, line), tracing::Level::TRACE, "{line}");
+        }
+        tracing_bridge(
+            2,
+            c"whisper_vad_detect_speech_no_reset: n_chunks: 1\n".as_ptr(),
+            std::ptr::null_mut(),
+        );
+    }
+
+    #[test]
+    fn vad_failures_and_load_lines_keep_their_level() {
+        assert_eq!(
+            bridged_level(
+                4,
+                "whisper_vad_detect_speech_no_reset: failed to allocate the compute buffer"
+            ),
+            tracing::Level::ERROR
+        );
+        assert_eq!(
+            bridged_level(
+                4,
+                "whisper_vad_detect_speech_no_reset: failed to compute VAD graph"
+            ),
+            tracing::Level::ERROR
+        );
+        assert_eq!(
+            bridged_level(2, "whisper_vad_init_with_params: model type: silero-16k"),
+            tracing::Level::INFO
+        );
+        assert_eq!(
+            bridged_level(2, "whisper_full_with_state: n_chunks: 1"),
+            tracing::Level::INFO,
+            "only the VAD detector's lines are demoted"
+        );
     }
 }

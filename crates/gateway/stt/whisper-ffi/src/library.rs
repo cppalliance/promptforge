@@ -29,6 +29,13 @@ pub(crate) struct Functions {
     pub(crate) free: raw::Free,
     pub(crate) free_state: raw::FreeState,
     log_set: raw::LogSet,
+    pub(crate) vad_default_context_params: raw::VadDefaultContextParams,
+    pub(crate) vad_init_from_file_with_params: raw::VadInitFromFileWithParams,
+    pub(crate) vad_detect_speech_no_reset: raw::VadDetectSpeechNoReset,
+    pub(crate) vad_reset_state: raw::VadResetState,
+    pub(crate) vad_n_probs: raw::VadNProbs,
+    pub(crate) vad_probs: raw::VadProbs,
+    pub(crate) vad_free: raw::VadFree,
 }
 
 impl Functions {
@@ -94,6 +101,29 @@ impl Functions {
             free: load_symbol(library, b"whisper_free\0", "whisper_free")?,
             free_state: load_symbol(library, b"whisper_free_state\0", "whisper_free_state")?,
             log_set: load_symbol(library, b"whisper_log_set\0", "whisper_log_set")?,
+            vad_default_context_params: load_symbol(
+                library,
+                b"whisper_vad_default_context_params\0",
+                "whisper_vad_default_context_params",
+            )?,
+            vad_init_from_file_with_params: load_symbol(
+                library,
+                b"whisper_vad_init_from_file_with_params\0",
+                "whisper_vad_init_from_file_with_params",
+            )?,
+            vad_detect_speech_no_reset: load_symbol(
+                library,
+                b"whisper_vad_detect_speech_no_reset\0",
+                "whisper_vad_detect_speech_no_reset",
+            )?,
+            vad_reset_state: load_symbol(
+                library,
+                b"whisper_vad_reset_state\0",
+                "whisper_vad_reset_state",
+            )?,
+            vad_n_probs: load_symbol(library, b"whisper_vad_n_probs\0", "whisper_vad_n_probs")?,
+            vad_probs: load_symbol(library, b"whisper_vad_probs\0", "whisper_vad_probs")?,
+            vad_free: load_symbol(library, b"whisper_vad_free\0", "whisper_vad_free")?,
         })
     }
 }
