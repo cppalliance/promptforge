@@ -1,13 +1,5 @@
 /** The include token that asks for hypothesis snapshot events. */
 export const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
-/** The include token, valid only beside HYPOTHESIS_INCLUDE, that adds finalized range fields. */
-export const HYPOTHESIS_RANGES_INCLUDE = "item.input_audio_transcription.hypothesis.ranges";
-
-/** What the client asked the server for, which bounds what decoding accepts. */
-export interface RealtimeDecodeOptions {
-  /** Whether this session's update requested HYPOTHESIS_RANGES_INCLUDE. */
-  readonly requestedRanges: boolean;
-}
 
 interface RealtimeAudioFormat {
   readonly type: "audio/pcm";
@@ -31,10 +23,7 @@ interface RealtimeEffectiveSession {
       readonly turn_detection: null;
     };
   };
-  readonly include:
-    | readonly []
-    | readonly [typeof HYPOTHESIS_INCLUDE]
-    | readonly [typeof HYPOTHESIS_INCLUDE, typeof HYPOTHESIS_RANGES_INCLUDE];
+  readonly include: readonly [] | readonly [typeof HYPOTHESIS_INCLUDE];
 }
 
 interface RealtimeWireError {
@@ -125,9 +114,6 @@ export type RealtimeEvent =
       readonly tentative: string;
       readonly audio_start_ms: number;
       readonly audio_end_ms: number;
-      /** Present, together with finalized_seq, only when ranges were requested. */
-      readonly finalized_through_ms?: number;
-      readonly finalized_seq?: number;
     }
   | {
       readonly type: "error";
@@ -163,30 +149,23 @@ function unsignedSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-function negotiableInclude(include: unknown, requestedRanges: boolean): boolean {
+function negotiableInclude(include: unknown): boolean {
   if (!Array.isArray(include)) {
     return false;
   }
   return (
     include.length === 0 ||
-    (include.length === 1 && include[0] === HYPOTHESIS_INCLUDE) ||
-    (requestedRanges &&
-      include.length === 2 &&
-      include[0] === HYPOTHESIS_INCLUDE &&
-      include[1] === HYPOTHESIS_RANGES_INCLUDE)
+    (include.length === 1 && include[0] === HYPOTHESIS_INCLUDE)
   );
 }
 
-function effectiveSession(
-  value: unknown,
-  requestedRanges: boolean,
-): value is RealtimeEffectiveSession {
+function effectiveSession(value: unknown): value is RealtimeEffectiveSession {
   if (
     !exactRecord(value, ["id", "object", "type", "audio", "include"]) ||
     !nonemptyString(value.id) ||
     value.object !== "realtime.transcription_session" ||
     value.type !== "transcription" ||
-    !negotiableInclude(value.include, requestedRanges) ||
+    !negotiableInclude(value.include) ||
     !exactRecord(value.audio, ["input"])
   ) {
     return false;
@@ -259,39 +238,20 @@ function durationUsage(value: unknown): value is RealtimeDurationUsage {
   );
 }
 
-function transcriptionBase(
-  value: Record<string, unknown>,
-  fields: readonly string[],
-  optional: readonly string[] = [],
-): boolean {
+function transcriptionBase(value: Record<string, unknown>, fields: readonly string[]): boolean {
   return (
-    exactRecord(value, fields, optional) &&
+    exactRecord(value, fields) &&
     nonemptyString(value.event_id) &&
     nonemptyString(value.item_id) &&
     value.content_index === 0
   );
 }
 
-const RANGE_FIELDS = ["finalized_through_ms", "finalized_seq"] as const;
-
-function pairedRangeFields(value: Record<string, unknown>): boolean {
-  const present = RANGE_FIELDS.filter((field) => Object.hasOwn(value, field));
-  return (
-    present.length === 0 ||
-    (present.length === RANGE_FIELDS.length &&
-      present.every((field) => unsignedSafeInteger(value[field])))
-  );
-}
-
 /**
  * Validates an unknown Realtime server value without side effects.
- * Unsupported types and malformed event shapes return null, as do range
- * fields and the ranges include token unless options says they were requested.
+ * Unsupported types and malformed event shapes return null.
  */
-export function decodeRealtimeEvent(
-  value: unknown,
-  options: RealtimeDecodeOptions = { requestedRanges: false },
-): RealtimeEvent | null {
+export function decodeRealtimeEvent(value: unknown): RealtimeEvent | null {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -307,7 +267,7 @@ export function decodeRealtimeEvent(
       if (
         exactRecord(event, ["event_id", "type", "session"]) &&
         nonemptyString(event.event_id) &&
-        effectiveSession(event.session, options.requestedRanges)
+        effectiveSession(event.session)
       ) {
         return event as RealtimeEvent;
       }
@@ -396,24 +356,19 @@ export function decodeRealtimeEvent(
       return null;
     case "conversation.item.input_audio_transcription.hypothesis":
       if (
-        transcriptionBase(
-          event,
-          [
-            "event_id",
-            "type",
-            "item_id",
-            "content_index",
-            "revision",
-            "transcript",
-            "finalized",
-            "agreed",
-            "tentative",
-            "audio_start_ms",
-            "audio_end_ms",
-          ],
-          options.requestedRanges ? RANGE_FIELDS : [],
-        ) &&
-        pairedRangeFields(event) &&
+        transcriptionBase(event, [
+          "event_id",
+          "type",
+          "item_id",
+          "content_index",
+          "revision",
+          "transcript",
+          "finalized",
+          "agreed",
+          "tentative",
+          "audio_start_ms",
+          "audio_end_ms",
+        ]) &&
         unsignedSafeInteger(event.revision) &&
         typeof event.transcript === "string" &&
         typeof event.finalized === "string" &&

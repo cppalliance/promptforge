@@ -355,7 +355,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Stop the Workshop negotiating the hypothesis ranges extension
+### Step 3: Stop the Workshop negotiating the hypothesis ranges extension [completed]
 
 - Component: Workshop ranges negotiation
 - Component order: second. It has no dependencies and touches only `crates/workshop/ui`, so it ships ahead of the long gateway work. The gateway extension and its Rust wire tests stay unchanged.

@@ -3,7 +3,6 @@ import { Disposable } from "@workshop/platform/lifecycle";
 import {
   decodeRealtimeEvent,
   HYPOTHESIS_INCLUDE,
-  HYPOTHESIS_RANGES_INCLUDE,
   type RealtimeEvent,
 } from "./realtime-event-decoder";
 import { ReconnectBackoff } from "@workshop/platform/reconnect-backoff";
@@ -98,7 +97,6 @@ export class RealtimeTranscriptionService extends Disposable {
   private readonly errorEmitter = this._register(new Emitter<RealtimeTranscriptionError>());
   private socket: RealtimeSocket | null = null;
   private disposed = false;
-  private requestedRanges = false;
   private negotiatedHypotheses = false;
   private currentState: RealtimeTranscriptionState = "connecting";
   private currentGeneration: RealtimeSocketGeneration = 0;
@@ -224,7 +222,7 @@ export class RealtimeTranscriptionService extends Disposable {
       this.reportError("invalid_server_event", "session", null, generation);
       return;
     }
-    const event = decodeRealtimeEvent(parsed, { requestedRanges: this.requestedRanges });
+    const event = decodeRealtimeEvent(parsed);
     if (event === null) {
       this.reportError("invalid_server_event", "session", null, generation);
       return;
@@ -239,7 +237,7 @@ export class RealtimeTranscriptionService extends Disposable {
 
     switch (event.type) {
       case "session.created":
-        this.requestedRanges = this.send({
+        this.send({
           type: "session.update",
           session: {
             type: "transcription",
@@ -254,7 +252,7 @@ export class RealtimeTranscriptionService extends Disposable {
                 turn_detection: null,
               },
             },
-            include: [HYPOTHESIS_INCLUDE, HYPOTHESIS_RANGES_INCLUDE],
+            include: [HYPOTHESIS_INCLUDE],
           },
           event_id: (this.options.eventId ?? defaultEventId)(),
         });
@@ -317,7 +315,6 @@ export class RealtimeTranscriptionService extends Disposable {
   }
 
   private resetConnectionState(): void {
-    this.requestedRanges = false;
     this.negotiatedHypotheses = false;
   }
 

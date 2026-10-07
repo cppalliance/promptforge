@@ -1038,16 +1038,8 @@ await assertNoLeaks(lifecycle, async () => {
   sockets[0].message(server.session_created);
   assert.deepEqual(
     sockets[0].sent,
-    [
-      {
-        ...client.session_update,
-        session: {
-          ...client.session_update.session,
-          include: client.session_update_ranges.session.include,
-        },
-      },
-    ],
-    "the production service requests hypotheses together with their finalized ranges",
+    [client.session_update],
+    "the production service requests hypotheses without finalized ranges",
   );
   sockets[0].message(server.session_updated);
   assert.equal(service.state, "ready");
@@ -1064,7 +1056,6 @@ await assertNoLeaks(lifecycle, async () => {
 
   sockets[0].message(server.input_audio_buffer_committed);
   sockets[0].message(server.transcription_hypothesis);
-  sockets[0].message(server.transcription_hypothesis_ranges);
   sockets[0].message(server.transcription_delta);
   sockets[0].message(server.transcription_completed);
   sockets[0].message(server.transcription_failed);
@@ -1075,7 +1066,6 @@ await assertNoLeaks(lifecycle, async () => {
       "session.created",
       "session.updated",
       "input_audio_buffer.committed",
-      "conversation.item.input_audio_transcription.hypothesis",
       "conversation.item.input_audio_transcription.hypothesis",
       "conversation.item.input_audio_transcription.completed",
       "conversation.item.input_audio_transcription.failed",
@@ -1098,7 +1088,7 @@ await assertNoLeaks(lifecycle, async () => {
   try {
     const sockets = [];
     const service = new RealtimeTranscriptionService({
-      eventId: () => "client_ranges_update",
+      eventId: () => "client_hypothesis_update",
       socket: (url) => {
         const socket = new ScriptedSocket(url);
         sockets.push(socket);
@@ -1125,30 +1115,36 @@ await assertNoLeaks(lifecycle, async () => {
       const socket = sockets[index];
       const generation = index + 1;
       socket.open();
-      socket.message(server.transcription_hypothesis_ranges);
-      assert.deepEqual(
-        invalidEventGenerations(),
-        Array.from({ length: generation }, (_, earlier) => earlier + 1),
-        `generation ${generation} rejects range fields before it requests them`,
-      );
       events.length = 0;
       socket.message(server.session_created);
+      assert.deepEqual(
+        socket.sent.map(({ session }) => session.include),
+        [client.session_update.session.include],
+        `generation ${generation} requests hypotheses without ranges`,
+      );
       socket.message(rangesSessionUpdated);
-      assert.equal(service.state, "ready", "the two-token effective session negotiates");
+      assert.equal(service.state, "connecting", "the two-token effective session is rejected");
+      socket.message(server.session_updated);
+      assert.equal(service.state, "ready");
       socket.message(server.transcription_delta);
       socket.message(server.transcription_hypothesis_ranges);
+      socket.message(server.transcription_hypothesis);
       assert.deepEqual(
         events.map(({ event }) => event),
-        [server.session_created, rangesSessionUpdated, server.transcription_hypothesis_ranges],
-        `generation ${generation} publishes range fields once requested and drops deltas`,
+        [server.session_created, server.session_updated, server.transcription_hypothesis],
+        `generation ${generation} publishes no range fields and drops deltas`,
+      );
+      assert.deepEqual(
+        invalidEventGenerations(),
+        Array.from({ length: generation }, (_, earlier) => [earlier + 1, earlier + 1]).flat(),
+        `generation ${generation} reports the ranges session and the range event as invalid`,
       );
       if (index === 0) {
         socket.close();
         mock.timers.tick(1_000);
-        assert.equal(sockets.length, 2, "the ranges session reconnects");
+        assert.equal(sockets.length, 2, "the session reconnects");
       }
     }
-    assert.deepEqual(invalidEventGenerations(), [1, 2]);
 
     service.dispose();
   } finally {
