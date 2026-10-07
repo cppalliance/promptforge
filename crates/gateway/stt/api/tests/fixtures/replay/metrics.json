@@ -83,20 +83,20 @@
   },
   "ui": {
     "jfk-native": {
-      "changed_pairs": 12,
-      "changed_words": 41,
+      "changed_pairs": 4,
+      "changed_words": 29,
       "completed_words": 22,
       "pairs": 21,
-      "upsr": 0.5714285714285714,
-      "upwr": 1.8636363636363635
+      "upsr": 0.19047619047619047,
+      "upwr": 1.3181818181818181
     },
     "scripted-agreed-shrink": {
-      "changed_pairs": 2,
-      "changed_words": 4,
+      "changed_pairs": 1,
+      "changed_words": 2,
       "completed_words": 5,
       "pairs": 6,
-      "upsr": 0.3333333333333333,
-      "upwr": 0.8
+      "upsr": 0.16666666666666666,
+      "upwr": 0.4
     },
     "scripted-final-word": {
       "changed_pairs": 1,
@@ -107,20 +107,20 @@
       "upwr": 0.5
     },
     "scripted-punctuation-case": {
-      "changed_pairs": 3,
-      "changed_words": 4,
+      "changed_pairs": 1,
+      "changed_words": 1,
       "completed_words": 9,
       "pairs": 7,
-      "upsr": 0.42857142857142855,
-      "upwr": 0.4444444444444444
+      "upsr": 0.14285714285714285,
+      "upwr": 0.1111111111111111
     },
     "scripted-sliding-window": {
-      "changed_pairs": 2,
-      "changed_words": 15,
+      "changed_pairs": 1,
+      "changed_words": 13,
       "completed_words": 15,
       "pairs": 9,
-      "upsr": 0.2222222222222222,
-      "upwr": 1
+      "upsr": 0.1111111111111111,
+      "upwr": 0.8666666666666667
     }
   }
 }

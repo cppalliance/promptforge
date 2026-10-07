@@ -31,6 +31,16 @@ export interface RegistryTake {
   readonly text: string;
   readonly deltaText: string;
   readonly hypothesisRevision: number | null;
+  /** Whether the region holds text this take wrote, so later writes may patch it word by word. */
+  readonly written: boolean;
+  /** The length of the tentative tail that ends `text`; 0 when none is shown. */
+  readonly tentativeLength: number;
+}
+
+/** A span in the target's coordinate space. */
+export interface SttTargetRange {
+  readonly from: number;
+  readonly to: number;
 }
 
 /** One wire request waiting for its client event identifier. */
@@ -109,6 +119,19 @@ export type TakeRegistryEditorEffect =
       readonly from: number;
       readonly to: number;
       readonly text: string;
+    }
+  | {
+      readonly domain: "editor";
+      readonly command: "caret";
+      /** Where the collapsed caret goes: the end of the take just written. */
+      readonly at: number;
+    }
+  | {
+      readonly domain: "editor";
+      readonly command: "tentative";
+      readonly takeId: number;
+      /** The take's shown tentative words, or null to clear its mark. */
+      readonly range: SttTargetRange | null;
     }
   | {
       readonly domain: "editor";

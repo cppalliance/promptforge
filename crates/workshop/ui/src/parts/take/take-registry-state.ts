@@ -1,10 +1,15 @@
 // Take registry state helpers, called on the writable clone inside one
 // reduction: cloning, lookup, item binding, and region edits.
-// replaceTake shifts every later region by the edit's length delta so
-// document offsets stay exact. removeTake leaves a tombstone for any
-// commit the server has not yet acknowledged and retires the take's item
-// id, so late server events for it change nothing.
+// replaceTake replaces a take's captured range whole on its first write,
+// since the selection may span structure its text does not show, then
+// patches only the changed word runs, leaves the caret at the take's end
+// as a whole-range write would, and shifts every later region by the
+// edit's length delta so document offsets stay exact. removeTake
+// clears the take's tentative mark, leaves a tombstone for any commit the
+// server has not yet acknowledged, and retires the take's item id, so
+// late server events for it change nothing.
 
+import { wordPatches } from "./take-registry-patches";
 import type {
   MutableRegistry,
   PendingWireRequest,
@@ -66,12 +71,16 @@ export function rollbackTake(reduction: Reduction, takeId: number): void {
   removeTake(reduction, take.id);
 }
 
-/** Replaces one region and shifts every later region by the exact coordinate delta. */
+/**
+ * Writes one region whose last `tentativeLength` characters are tentative,
+ * and shifts every later region by the exact coordinate delta.
+ */
 export function replaceTake(
   reduction: Reduction,
   takeId: number,
   text: string,
   deltaText: string,
+  tentativeLength = 0,
 ): void {
   const index = reduction.state.takes.findIndex((take) => take.id === takeId);
   if (index < 0) {
@@ -84,18 +93,46 @@ export function replaceTake(
   const oldEnd = take.to;
   const nextEnd = take.from + text.length;
   const delta = nextEnd - oldEnd;
-  reduction.effects.push({
-    domain: "editor",
-    command: "replace",
-    from: take.from,
-    to: oldEnd,
-    text,
-  });
+  const patches = take.written
+    ? wordPatches(take.text, text)
+    : [{ from: 0, to: oldEnd - take.from, text }];
+  let shift = 0;
+  let caret = nextEnd;
+  for (const patch of patches) {
+    const from = take.from + patch.from + shift;
+    reduction.effects.push({
+      domain: "editor",
+      command: "replace",
+      from,
+      to: take.from + patch.to + shift,
+      text: patch.text,
+    });
+    shift += patch.text.length - (patch.to - patch.from);
+    caret = from + patch.text.length;
+  }
+  // The next take's insertion context reads the caret, which each replace leaves after its insert.
+  if (caret !== nextEnd) {
+    reduction.effects.push({ domain: "editor", command: "caret", at: nextEnd });
+  }
+  // A patch under the mark can drop it in the target, so any patch resends it.
+  if (
+    (patches.length > 0 || tentativeLength !== take.tentativeLength) &&
+    (tentativeLength > 0 || take.tentativeLength > 0)
+  ) {
+    reduction.effects.push({
+      domain: "editor",
+      command: "tentative",
+      takeId,
+      range: tentativeLength > 0 ? { from: nextEnd - tentativeLength, to: nextEnd } : null,
+    });
+  }
   reduction.state.takes[index] = {
     ...take,
     to: nextEnd,
     text,
     deltaText,
+    written: true,
+    tentativeLength,
   };
   if (delta === 0) {
     return;
@@ -112,6 +149,14 @@ export function removeTake(reduction: Reduction, takeId: number): void {
   const take = takeById(reduction.state, takeId);
   if (take === null) {
     return;
+  }
+  if (take.tentativeLength > 0) {
+    reduction.effects.push({
+      domain: "editor",
+      command: "tentative",
+      takeId,
+      range: null,
+    });
   }
   reduction.state.takes = reduction.state.takes.filter(
     (candidate) => candidate.id !== takeId,

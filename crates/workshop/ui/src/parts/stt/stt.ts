@@ -3,7 +3,7 @@
 import "./stt.css";
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
-import type { SttInsertionContext } from "../take/take-registry-types";
+import type { SttInsertionContext, SttTargetRange } from "../take/take-registry-types";
 export { setupStt } from "./realtime-stt";
 
 /**
@@ -19,6 +19,14 @@ export interface SttInputTarget {
   insertionContext(): SttInsertionContext;
   /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
   replaceRange(from: number, to: number, text: string): void;
+  /** Selects [from, to]; a take collapses the cursor to its end after a patch that ends short of it. */
+  setSelection(from: number, to: number): void;
+  /**
+   * Styles one take's tentative words, or clears that take's styling when
+   * range is null, without changing the text. A target without it shows
+   * tentative words unstyled.
+   */
+  setTentativeRange?(takeId: number, range: SttTargetRange | null): void;
   /** Locks the input against typing while a take splices, or releases it. */
   setReadOnly(readOnly: boolean): void;
   /** Returns focus to the input; a landed final calls it. */
@@ -59,6 +67,7 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
       // behaves like typing to whatever listens on the input.
       input.dispatchEvent(new Event("input", { bubbles: true }));
     },
+    setSelection: (from, to) => input.setSelectionRange(from, to),
     setReadOnly: (readOnly) => {
       input.readOnly = readOnly;
       input.classList.toggle("ws-stt-input--recording", readOnly);

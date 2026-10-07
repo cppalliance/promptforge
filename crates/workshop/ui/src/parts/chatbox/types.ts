@@ -152,8 +152,9 @@ export type ChatBoxEventSink = (event: ChatBoxEvent) => void;
 
 /**
  * The imperative surface. A structural superset of dictation's
- * `SttInputTarget` (insertionContext, replaceRange, setReadOnly, focus),
- * so `setupStt({ input: handle })` type-checks with no import in either
+ * `SttInputTarget` (insertionContext, replaceRange, setSelection,
+ * setTentativeRange, setReadOnly, focus), so
+ * `setupStt({ input: handle })` type-checks with no import in either
  * direction.
  */
 export interface ChatBoxHandle {
@@ -163,6 +164,8 @@ export interface ChatBoxHandle {
   setText(text: string): void;
   insertMention(chip: ChipRef): void;
   replaceRange(from: number, to: number, text: string): void;
+  setSelection(from: number, to: number): void;
+  setTentativeRange(takeId: number, range: { readonly from: number; readonly to: number } | null): void;
   insertionContext(): {
     readonly range: { readonly start: number; readonly end: number };
     readonly original: string;

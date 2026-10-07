@@ -83,6 +83,7 @@ function committed(itemId) {
   };
 }
 
+// Agreed text renders whole, so no word is held back as tentative.
 function hypothesis(itemId, transcript, revision = 1) {
   return {
     type: "conversation.item.input_audio_transcription.hypothesis",
@@ -92,8 +93,8 @@ function hypothesis(itemId, transcript, revision = 1) {
     revision,
     transcript,
     finalized: "",
-    agreed: "",
-    tentative: transcript,
+    agreed: transcript,
+    tentative: "",
     audio_start_ms: 0,
     audio_end_ms: 100,
   };
@@ -143,7 +144,7 @@ test("captured coordinate width owns replacement and rollback independently of t
   ]);
 });
 
-test("characterize_every_hypothesis_replaces_the_whole_owned_range", () => {
+test("a hypothesis patches only its changed words and an unchanged one writes nothing", () => {
   let state = start(createTakeRegistry(), context(0)).state;
 
   let result = server(state, hypothesis("whole", "ask not", 1));
@@ -163,23 +164,15 @@ test("characterize_every_hypothesis_replaces_the_whole_owned_range", () => {
     {
       domain: "editor",
       command: "replace",
-      from: 0,
+      from: 7,
       to: 7,
-      text: "ask not what",
+      text: " what",
     },
   ]);
   state = result.state;
 
   result = server(state, hypothesis("whole", "ask not what", 3));
-  assert.deepEqual(replacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 0,
-      to: 12,
-      text: "ask not what",
-    },
-  ]);
+  assert.deepEqual(replacements(result.effects), []);
 });
 
 test("a precommit tombstone consumes its matching acknowledgment before the next take", () => {

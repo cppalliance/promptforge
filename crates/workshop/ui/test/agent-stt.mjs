@@ -756,31 +756,36 @@ await assertNoLeaks(lifecycle, async () => {
       dispose();
       return;
     }
+    // Each tentative carries one extra last word: the take holds it back.
     const interim = (committed, tentative) => socket.message({ type: "interim", committed, tentative });
-    interim("One two.", "three");
+    interim("One two.", "three held");
     check("committed and tentative join with a space", input.getText() === "One two. three");
     interim("One two. three four.", "");
     check("a grown committed prefix lands verbatim", input.getText() === "One two. three four.");
     const grownLength = input.getText().length;
-    interim("One two. three four. five six.", "se");
+    interim("One two. three four. five six.", "se held");
     check(
       "a shorter tentative never shrinks the text while committed grows",
       input.getText() === "One two. three four. five six. se" && input.getText().length > grownLength,
     );
-    interim("One two. three four. five six. ", "seven");
+    interim("One two. three four. five six. ", "seven held");
     check(
       "a trailing-whitespace committed prefix gains no double space",
       input.getText() === "One two. three four. five six. seven",
     );
-    interim("", "fresh start");
+    interim("", "fresh start held");
     check("an empty committed prefix gains no leading space", input.getText() === "fresh start");
     dispose();
   }
 
-  // Producer-generated ownership snapshots replay through replacement verbatim.
+  // Producer-generated ownership snapshots replay through replacement verbatim,
+  // less the held-back last tentative word, with the shown tentative words
+  // decorated in the chat box.
 
   {
-    const { wire, input, startTake, dispose } = await setup();
+    const { wire, input, editorEl, startTake, dispose } = await setup();
+    const marks = () =>
+      [...editorEl.querySelectorAll(".ws-stt-tentative")].map((mark) => mark.textContent);
     wire.fire.inputRequired("producer");
     const socket = await startTake();
     if (socket === null) {
@@ -802,12 +807,16 @@ await assertNoLeaks(lifecycle, async () => {
     socket.message(first);
     check(
       "producer ownership replay lands one exact transcript without a duplicated prefix",
-      input.getText() === "ask not your country new tail first",
+      input.getText() === "ask not your country new tail",
+    );
+    check(
+      "the shown tentative words are decorated in the chat box",
+      marks().join("|") === " new tail",
     );
     socket.message(second);
     check(
-      "producer ownership revision preserves exact spaces while replacing",
-      input.getText() === "ask not your country new tail second",
+      "a revision that holds back its whole tentative tail clears the decoration and keeps the text",
+      marks().length === 0 && input.getText() === "ask not your country new tail",
     );
     dispose();
   }
@@ -848,6 +857,32 @@ await assertNoLeaks(lifecycle, async () => {
     check(
       "the standalone completion replaces its hypothesis without losing composition spacing",
       input.getText() === "First test alpha Second test beta" && editable(),
+    );
+    dispose();
+  }
+
+  {
+    const { wire, mic, input, startTake, dispose } = await setup();
+    wire.fire.inputRequired("interior");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("interior correction: the first take did not start");
+      dispose();
+      return;
+    }
+    socket.message(producerHypothesis("interior_first", "ask not what"));
+    mic.click();
+    await waitFor(() =>
+      socket.sent.some((event) => event.type === "input_audio_buffer.commit"),
+    );
+    socket.message(producerCommitted("interior_first"));
+    socket.message(producerCompletion("interior_first", "Ask not what"));
+
+    await startTake();
+    socket.message(producerHypothesis("interior_second", "Second"));
+    check(
+      "a take after an interior-only completion correction composes at the end",
+      input.getText() === "Ask not what Second",
     );
     dispose();
   }
@@ -1230,8 +1265,8 @@ await assertNoLeaks(lifecycle, async () => {
       revision: 1,
       transcript: "right take",
       finalized: "right",
-      agreed: "",
-      tentative: " take",
+      agreed: " take",
+      tentative: "",
       audio_start_ms: 100,
       audio_end_ms: 200,
     });

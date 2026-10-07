@@ -4,10 +4,13 @@
 // takes first in, first out - or, for a transcript under an unknown id,
 // only when exactly one take is unbound. A hypothesis at or below the
 // last revision applied for its item is dropped, so a repeated or
-// reordered snapshot never replaces newer text. A failed transcription
-// keeps the visible text; service errors and connection loss roll takes back.
-// Status labels are local wording: server error text never reaches the
-// status bar.
+// reordered snapshot never replaces newer text. A hypothesis renders its
+// finalized and agreed parts whole and its tentative part less the last
+// whole word, which waits for the next update or `completed`; what shows
+// of the tentative part is marked as the take's tentative tail. A failed
+// transcription keeps the visible text; service errors and connection
+// loss roll takes back. Status labels are local wording: server error
+// text never reaches the status bar.
 
 import type { RealtimeEvent } from "../../services/realtime-event-decoder";
 import {
@@ -26,6 +29,20 @@ import {
   takeByItem,
 } from "./take-registry-state";
 import type { Reduction } from "./take-registry-types";
+
+/** Tentative words hidden from the end of each hypothesis. */
+const HELD_BACK_TENTATIVE_WORDS = 1;
+
+const LAST_WORD = /\s*\S+\s*$/u;
+
+type SnapshotEvent = Extract<
+  RealtimeEvent,
+  {
+    type:
+      | "conversation.item.input_audio_transcription.hypothesis"
+      | "conversation.item.input_audio_transcription.delta";
+  }
+>;
 
 const UNAVAILABLE_LABEL = "Dictation is temporarily unavailable. Try again.";
 const PRESERVED_TRANSCRIPTION_FAILED_LABEL =
@@ -48,10 +65,8 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
     case "conversation.item.created":
       return;
     case "conversation.item.input_audio_transcription.hypothesis":
-      applySnapshot(reduction, event.item_id, event.transcript, event.revision);
-      return;
     case "conversation.item.input_audio_transcription.delta":
-      applySnapshot(reduction, event.item_id, event.delta, null);
+      applySnapshot(reduction, event);
       return;
     case "conversation.item.input_audio_transcription.completed":
       completeTake(reduction, event.item_id, event.transcript);
@@ -264,13 +279,9 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
   });
 }
 
-/** Applies a hypothesis snapshot, or appends a delta when revision is null. */
-function applySnapshot(
-  reduction: Reduction,
-  itemId: string,
-  incoming: string,
-  revision: number | null,
-): void {
+/** Applies a hypothesis snapshot, or appends a delta. */
+function applySnapshot(reduction: Reduction, event: SnapshotEvent): void {
+  const itemId = event.item_id;
   let take = takeByItem(reduction.state, itemId);
   if (take === null) {
     if (
@@ -297,14 +308,44 @@ function applySnapshot(
   if (take === null) {
     return;
   }
-  if (revision !== null) {
-    if (take.hypothesisRevision !== null && revision <= take.hypothesisRevision) {
-      return;
-    }
-    recordHypothesisRevision(reduction.state, take.id, revision);
+  if (event.type === "conversation.item.input_audio_transcription.delta") {
+    const transcript = take.deltaText + event.delta;
+    replaceTake(reduction, take.id, composeTranscript(take, transcript), transcript);
+    return;
   }
-  const transcript = revision === null ? take.deltaText + incoming : incoming;
-  replaceTake(reduction, take.id, composeTranscript(take, transcript), transcript);
+  if (take.hypothesisRevision !== null && event.revision <= take.hypothesisRevision) {
+    return;
+  }
+  recordHypothesisRevision(reduction.state, take.id, event.revision);
+  const stable = event.finalized + event.agreed;
+  const tentative = shownTentative(stable, event.tentative);
+  replaceTake(
+    reduction,
+    take.id,
+    composeTranscript(take, stable + tentative),
+    event.transcript,
+    tentative.length,
+  );
+}
+
+/**
+ * The tentative part less its last whole words. A word starts after
+ * whitespace or at the start of the transcript; a fragment glued to the
+ * stable text stays shown, since hiding it would cut a word in half.
+ */
+function shownTentative(stable: string, tentative: string): string {
+  let shown = tentative;
+  for (let held = 0; held < HELD_BACK_TENTATIVE_WORDS; held += 1) {
+    const last = LAST_WORD.exec(shown);
+    if (
+      last === null ||
+      (last.index === 0 && !/^\s/u.test(last[0]) && /\S$/u.test(stable))
+    ) {
+      break;
+    }
+    shown = shown.slice(0, last.index);
+  }
+  return shown;
 }
 
 function completeTake(

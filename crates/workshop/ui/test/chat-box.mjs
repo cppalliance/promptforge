@@ -11,6 +11,8 @@
 // clear empties; update({ editable }) toggles contenteditable; the box
 // registers a prosemirror text-control adapter through the injected registrar
 // whose canUndo/canRedo track the ProseMirror history plugin's depth;
+// setTentativeRange decorates each dictation take's tentative span, maps it
+// through later edits, and clears it, never changing the document text;
 // dispose destroys the editor. The contract: defaults, data-* state
 // mirrors (variant, editable, action, mic), the send button's three
 // states, the mic button's rendering per state, the controls slot, the
@@ -484,6 +486,36 @@ await assertNoLeaks(lifecycle, async () => {
       "deleting the spliced range restores the pre-take text",
       input.getText() === "ab",
     );
+    input.dispose();
+  }
+
+  // --- Dictation's tentative tail is a decoration, not text ----------------------
+
+  {
+    const input = new ChatBox();
+    input.setText("ask not what your");
+    const before = JSON.stringify(input.serialize());
+    const marks = () =>
+      [...editorElement(input).querySelectorAll(".ws-stt-tentative")].map((mark) => mark.textContent);
+    const unchanged = () =>
+      input.getText() === "ask not what your" && JSON.stringify(input.serialize()) === before;
+    // ProseMirror positions: the paragraph opens at 0, so " your" spans 13..18.
+    input.setTentativeRange(1, { from: 13, to: 18 });
+    check("a tentative range decorates exactly its span", marks().join("|") === " your");
+    check("the tentative decoration leaves the document text unchanged", unchanged());
+    input.setTentativeRange(2, { from: 1, to: 4 });
+    check("each take owns its own tentative range", marks().join("|") === "ask| your");
+    input.setTentativeRange(1, { from: 8, to: 13 });
+    check("a take's next range replaces its previous one", marks().join("|") === "ask| what");
+    input.replaceRange(1, 1, "so ");
+    check("both ranges follow an edit before them", marks().join("|") === "ask| what");
+    input.replaceRange(1, 4, "");
+    input.setTentativeRange(1, null);
+    input.setTentativeRange(2, null);
+    check("clearing every take's range removes the decoration", marks().length === 0);
+    check("clearing the decoration leaves the document text unchanged", unchanged());
+    input.setTentativeRange(1, { from: 30, to: 40 });
+    check("a range outside the document is ignored", marks().length === 0 && unchanged());
     input.dispose();
   }
 

@@ -118,6 +118,17 @@ function thresholdViolations(current, baseline) {
   });
 }
 
+/** Whether total changed over total completed words, across fixtures, is strictly below the baseline's. */
+function aggregateUpwrBelowBaseline(current, baseline) {
+  const names = Object.keys(current);
+  const total = (metrics, field) =>
+    names.reduce((sum, name) => sum + (metrics[name]?.[field] ?? 0), 0);
+  return (
+    total(current, "changed_words") * total(baseline, "completed_words") <
+    total(baseline, "changed_words") * total(current, "completed_words")
+  );
+}
+
 function applyEdits(text, effects) {
   let next = text;
   for (const effect of effects) {
@@ -245,6 +256,10 @@ test("every replay fixture renders through the take reducer within its ui baseli
   }
   const violations = thresholdViolations(current, baseline);
   assert.deepEqual(violations, [], `rendered-text thresholds are broken:\n${violations.join("\n")}`);
+  assert.ok(
+    aggregateUpwrBelowBaseline(current, baseline),
+    "aggregate rendered UPWR across fixtures is below the ui baseline aggregate",
+  );
 });
 
 test("rendered UPWR and UPSR count earlier editor words after the exact common prefix", () => {
@@ -276,4 +291,21 @@ test("the ui threshold flags rendered UPWR above baseline and a fixture without 
   assert.equal(check(counted(4, 20)), 0, "an equal ratio over more words passes");
   assert.equal(check(counted(3, 10)), 1, "UPWR rises");
   assert.equal(check(counted(2, 10), "scripted-b"), 1, "a fixture without a baseline section fails");
+});
+
+test("the aggregate ui rule sums every fixture and requires strictly lower UPWR", () => {
+  const counted = (changed, completed) => ({ changed_words: changed, completed_words: completed });
+  const baseline = { a: counted(4, 10), b: counted(2, 10) };
+
+  assert.equal(aggregateUpwrBelowBaseline({ a: counted(3, 10), b: counted(2, 10) }, baseline), true);
+  assert.equal(
+    aggregateUpwrBelowBaseline({ a: counted(6, 10), b: counted(0, 10) }, baseline),
+    false,
+    "an equal aggregate is not below",
+  );
+  assert.equal(
+    aggregateUpwrBelowBaseline({ a: counted(1, 10), b: counted(6, 10) }, baseline),
+    false,
+    "one fixture's rise outweighs another's fall",
+  );
 });

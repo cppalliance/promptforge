@@ -34,6 +34,7 @@ import {
   MentionChip,
   MentionSuggestionPluginKey,
 } from "./mention-chip";
+import { setTentativeMark, TentativeMark } from "./tentative-mark";
 import { renderMentionTypeahead } from "./typeahead-popup";
 import type {
   ChatBoxDynamicProps,
@@ -132,8 +133,9 @@ function micTitle(mic: ResolvedDynamicProps["mic"]): string {
  *
  * The handle is a structural superset of dictation's input target:
  * dictation splices the transcript in through insertionContext and
- * replaceRange and holds the box with setReadOnly. Offsets are
- * ProseMirror positions.
+ * replaceRange, parks the cursor at a take's end through setSelection,
+ * styles a take's tentative words through setTentativeRange, and holds
+ * the box with setReadOnly. Offsets are ProseMirror positions.
  */
 export class ChatBox extends Disposable implements ChatBoxHandle {
   /** The bar; append it where the composer belongs. */
@@ -270,6 +272,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
             minQueryLength: 0,
           },
         }),
+        TentativeMark,
       ],
       content: props.content ?? "",
       editable: this.dynamic.editable,
@@ -524,6 +527,18 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       .insertContentAt({ from, to }, content)
       .setTextSelection(from + text.length)
       .run();
+  }
+
+  /**
+   * Styles one dictation take's tentative words at ProseMirror positions,
+   * or clears that take's styling when range is null. The text and the
+   * undo history are untouched.
+   */
+  setTentativeRange(
+    takeId: number,
+    range: { readonly from: number; readonly to: number } | null,
+  ): void {
+    this.editor.view.dispatch(setTentativeMark(this.editor.state.tr, takeId, range));
   }
 
   /**

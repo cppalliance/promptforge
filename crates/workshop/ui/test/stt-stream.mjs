@@ -202,8 +202,8 @@ await assertNoLeaks(lifecycle, async () => {
       item_id: "item_delayed_textarea",
       transcript: "spoken",
       finalized: "",
-      agreed: "",
-      tentative: "spoken",
+      agreed: "spoken",
+      tentative: "",
     });
     assert.equal(textarea.value, "edited spoken tail");
     stt.discardIfRecording();
@@ -276,10 +276,11 @@ await assertNoLeaks(lifecycle, async () => {
       {
         transcript: timelineText(0, 21),
         finalized: timelineText(0, 2),
-        agreed: ` ${timelineText(2, 20)}`,
-        tentative: ` ${timelineText(20, 21)}`,
+        agreed: ` ${timelineText(2, 19)}`,
+        tentative: ` ${timelineText(19, 21)}`,
       },
     ];
+    const shown = [timelineText(0, 10), timelineText(0, 20)];
     let previousLength = 0;
     for (const [revision, snapshot] of snapshots.entries()) {
       socket.message({
@@ -289,7 +290,11 @@ await assertNoLeaks(lifecycle, async () => {
         revision: revision + 1,
         ...snapshot,
       });
-      assert.equal(textarea.value, snapshot.transcript);
+      assert.equal(
+        textarea.value,
+        shown[revision],
+        "the textarea shows every word but the held-back last tentative one, unstyled",
+      );
       assert.ok(
         textarea.value.length >= previousLength,
         "the production editor never drops the revisable forced middle",
@@ -394,8 +399,8 @@ await assertNoLeaks(lifecycle, async () => {
       item_id: "item_failure",
       transcript: "accepted visible words",
       finalized: "accepted ",
-      agreed: "visible ",
-      tentative: "words",
+      agreed: "visible words",
+      tentative: "",
     });
     const precommit = {
       event_id: "evt_precommit_failure",
@@ -639,8 +644,8 @@ await assertNoLeaks(lifecycle, async () => {
       item_id: "item_hour",
       transcript: "accepted visible words",
       finalized: "accepted ",
-      agreed: "visible ",
-      tentative: "words",
+      agreed: "visible words",
+      tentative: "",
     });
     assert.equal(textarea.value, "accepted visible words");
     captureTrace.length = 0;

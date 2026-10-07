@@ -662,7 +662,7 @@ flowchart TD
 
 <step-18>
 
-### Step 18: Word-level patching and tentative styling
+### Step 18: Word-level patching and tentative styling [completed]
 
 - Component: Live rendering
 - Piece: workshop UI

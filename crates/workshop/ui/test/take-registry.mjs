@@ -76,20 +76,25 @@ function committed(itemId, eventId = `commit_${itemId}`) {
   };
 }
 
-function hypothesis(itemId, transcript, revision = 1) {
+function parts(itemId, revision, { finalized = "", agreed = "", tentative = "" }) {
   return {
     type: "conversation.item.input_audio_transcription.hypothesis",
     event_id: `hypothesis_${itemId}_${revision}`,
     item_id: itemId,
     content_index: 0,
     revision,
-    transcript,
-    finalized: "",
-    agreed: "",
-    tentative: transcript,
+    transcript: `${finalized}${agreed}${tentative}`,
+    finalized,
+    agreed,
+    tentative,
     audio_start_ms: 0,
     audio_end_ms: 100,
   };
+}
+
+// Agreed text renders whole; the tentative hold-back has its own tests.
+function hypothesis(itemId, transcript, revision = 1) {
+  return parts(itemId, revision, { agreed: transcript });
 }
 
 function completion(itemId, transcript) {
@@ -122,6 +127,38 @@ function editorReplacements(effects) {
   return effects.filter(
     (effect) => effect.domain === "editor" && effect.command === "replace",
   );
+}
+
+function patches(effects) {
+  return editorReplacements(effects).map(({ from, to, text }) => ({ from, to, text }));
+}
+
+function tentativeMarks(effects) {
+  return effects
+    .filter((effect) => effect.domain === "editor" && effect.command === "tentative")
+    .map(({ takeId, range }) => ({ takeId, range }));
+}
+
+function applyEdits(text, effects) {
+  let next = text;
+  for (const { from, to, text: inserted } of editorReplacements(effects)) {
+    assert.ok(from >= 0 && from <= to && to <= next.length, `replace [${from}, ${to}] lies inside the text`);
+    next = next.slice(0, from) + inserted + next.slice(to);
+  }
+  return next;
+}
+
+// Every target leaves the caret after a replace's insert and moves it on a caret effect.
+function applyToTarget(target, effects) {
+  let caret = target.caret;
+  for (const effect of effects) {
+    if (effect.domain === "editor" && effect.command === "replace") {
+      caret = effect.from + effect.text.length;
+    } else if (effect.domain === "editor" && effect.command === "caret") {
+      caret = effect.at;
+    }
+  }
+  return { text: applyEdits(target.text, effects), caret };
 }
 
 test("transition table replaces selections and gives completion authority", () => {
@@ -258,7 +295,7 @@ test("hypotheses at or below their item's last applied revision are ignored", ()
   }
 
   result = server(state, hypothesis("a", "ask not what", 5));
-  assert.equal(editorReplacements(result.effects)[0].text, "ask not what");
+  assert.deepEqual(patches(result.effects), [{ from: 7, to: 7, text: " what" }]);
   state = result.state;
   assert.deepEqual(server(state, hypothesis("a", "stale", 4)).effects, []);
 
@@ -272,7 +309,7 @@ test("hypotheses at or below their item's last applied revision are ignored", ()
   state = result.state;
   assert.deepEqual(server(state, hypothesis("b", "stale", 1)).effects, []);
   result = server(state, hypothesis("a", "ask not what you", 6));
-  assert.equal(editorReplacements(result.effects)[0].text, "ask not what you");
+  assert.deepEqual(patches(result.effects), [{ from: 12, to: 12, text: " you" }]);
   assert.deepEqual(
     result.state.takes.map(({ itemId, text }) => ({ itemId, text })),
     [
@@ -280,6 +317,181 @@ test("hypotheses at or below their item's last applied revision are ignored", ()
       { itemId: "b", text: " your" },
     ],
   );
+});
+
+test("a revision replaces only the word runs that changed and shifts later takes", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+  state = stopAndCommit(state, "commit_a").state;
+  let result = server(state, hypothesis("a", "ask not what"));
+  let editor = applyEdits("", result.effects);
+  state = server(result.state, committed("a")).state;
+  state = start(state, context(12, 12, "", " ")).state;
+  result = server(state, hypothesis("b", "your"));
+  editor = applyEdits(editor, result.effects);
+  state = result.state;
+
+  result = server(state, hypothesis("a", "Ask not, what you", 2));
+  assert.deepEqual(
+    patches(result.effects),
+    [
+      { from: 0, to: 7, text: "Ask not," },
+      { from: 13, to: 13, text: " you" },
+    ],
+    "the unchanged word between the two changes is not rewritten",
+  );
+  editor = applyEdits(editor, result.effects);
+  assert.equal(editor, "Ask not, what you your");
+  assert.deepEqual(
+    result.state.takes.map(({ from, to, text }) => ({ from, to, text })),
+    [
+      { from: 0, to: 17, text: "Ask not, what you" },
+      { from: 17, to: 22, text: " your" },
+    ],
+  );
+
+  assert.deepEqual(
+    patches(server(result.state, hypothesis("a", "Ask not, what you", 3)).effects),
+    [],
+    "an unchanged revision writes nothing",
+  );
+});
+
+test("an interior-only correction leaves the caret at the take's end for the next take", () => {
+  let target = { text: "", caret: 0 };
+  let result = server(start(createTakeRegistry(), context(0)).state, hypothesis("a", "ask not what"));
+  target = applyToTarget(target, result.effects);
+
+  result = server(result.state, hypothesis("a", "ask NOT what", 2));
+  assert.deepEqual(patches(result.effects), [{ from: 4, to: 7, text: "NOT" }]);
+  target = applyToTarget(target, result.effects);
+  assert.deepEqual(target, { text: "ask NOT what", caret: 12 }, "a hypothesis patch parks the caret");
+
+  let state = stopAndCommit(result.state, "commit_a").state;
+  state = server(state, committed("a")).state;
+  result = server(state, completion("a", "Ask NOT what"));
+  assert.deepEqual(patches(result.effects), [{ from: 0, to: 3, text: "Ask" }]);
+  target = applyToTarget(target, result.effects);
+  assert.deepEqual(target, { text: "Ask NOT what", caret: 12 }, "a completion patch parks the caret");
+
+  state = start(result.state, context(target.caret, target.caret, "", " ")).state;
+  result = server(state, hypothesis("b", "Second"));
+  assert.equal(applyToTarget(target, result.effects).text, "Ask NOT what Second");
+});
+
+test("a changed middle past the alignment budget becomes one patch that lands the exact text", () => {
+  const words = (count) => Array.from({ length: count }, (_, index) => `w${index}`).join(" ");
+  const revise = (count) => {
+    const before = `keep start alpha ${words(count)} omega keep end`;
+    const after = `keep start ALPHA ${words(count)} OMEGA keep end`;
+    const state = server(start(createTakeRegistry(), context(0)).state, hypothesis("a", before)).state;
+    const { effects } = server(state, hypothesis("a", after, 2));
+    assert.equal(applyEdits(before, effects), after, `${count} middle words land the exact text`);
+    return { before, after, patches: patches(effects) };
+  };
+
+  assert.equal(revise(10).patches.length, 2, "a middle inside the budget patches each changed word");
+
+  const { before, after, patches: [patch, ...rest] } = revise(150);
+  assert.deepEqual(rest, [], "about 300 runs a side collapse into one patch");
+  const prefix = "keep start ".length;
+  const suffix = " keep end".length;
+  assert.deepEqual(
+    patch,
+    { from: prefix, to: before.length - suffix, text: after.slice(prefix, after.length - suffix) },
+    "the patch spans exactly the changed middle and keeps the shared prefix and suffix",
+  );
+});
+
+test("the tentative mark covers exactly the shown tentative words and clears on completion", () => {
+  let editor = "Note";
+  let state = start(createTakeRegistry(), context(4, 4, "", " ")).state;
+  const step = (event) => {
+    const result = server(state, event);
+    state = result.state;
+    editor = applyEdits(editor, result.effects);
+    return tentativeMarks(result.effects);
+  };
+
+  assert.deepEqual(
+    step(parts("a", 1, { tentative: "ask not" })),
+    [{ takeId: 1, range: { from: 5, to: 8 } }],
+    "the mark leaves out the take's separator",
+  );
+  assert.equal(editor, "Note ask");
+
+  assert.deepEqual(
+    step(parts("a", 2, { agreed: "ask not", tentative: " what your" })),
+    [{ takeId: 1, range: { from: 12, to: 17 } }],
+  );
+  assert.equal(editor, "Note ask not what");
+  assert.equal(editor.slice(12, 17), " what");
+
+  assert.deepEqual(
+    step(parts("a", 3, { agreed: "ask not what", tentative: " your" })),
+    [{ takeId: 1, range: null }],
+    "a tail that is wholly held back clears the mark",
+  );
+  assert.equal(editor, "Note ask not what");
+
+  assert.deepEqual(
+    step(parts("a", 4, { agreed: "ask not what", tentative: " your country" })),
+    [{ takeId: 1, range: { from: 17, to: 22 } }],
+  );
+
+  state = stopAndCommit(state, "commit_a").state;
+  state = server(state, committed("a")).state;
+  assert.deepEqual(
+    step(completion("a", "ask not what your country")),
+    [{ takeId: 1, range: null }],
+    "completion clears the mark",
+  );
+  assert.equal(editor, "Note ask not what your country");
+});
+
+test("a discarded, failed, or disconnected take clears its tentative mark once", () => {
+  const recording = start(createTakeRegistry(), context(0)).state;
+  const live = server(recording, parts("live", 1, { agreed: "kept", tentative: " words here" }));
+  assert.deepEqual(tentativeMarks(live.effects), [{ takeId: 1, range: { from: 4, to: 10 } }]);
+
+  for (const [label, input] of [
+    ["a discard", { type: "user.discard" }],
+    ["a transcription failure", { type: "server.event", event: transcriptionFailure("live") }],
+    ["a connection loss", { type: "connection.lost" }],
+  ]) {
+    assert.deepEqual(
+      tentativeMarks(reduceTakeRegistry(live.state, input).effects),
+      [{ takeId: 1, range: null }],
+      `${label} clears the mark once`,
+    );
+  }
+});
+
+test("the last tentative word stays hidden until the next update or completion", () => {
+  let editor = "";
+  let state = start(createTakeRegistry(), context(0)).state;
+  const show = (event) => {
+    const result = server(state, event);
+    state = result.state;
+    editor = applyEdits(editor, result.effects);
+    return editor;
+  };
+
+  assert.equal(show(parts("a", 1, { tentative: "ask" })), "", "a lone tentative word is held back");
+  assert.equal(
+    show(parts("a", 2, { tentative: "ask not" })),
+    "ask",
+    "the next update shows the word it held back",
+  );
+  assert.equal(show(parts("a", 3, { agreed: "ask not", tentative: " what" })), "ask not");
+  assert.equal(
+    show(parts("a", 4, { agreed: "ask not wh", tentative: "at" })),
+    "ask not what",
+    "a fragment glued to stable text is not a whole word and stays shown",
+  );
+
+  state = stopAndCommit(state, "commit_a").state;
+  state = server(state, committed("a")).state;
+  assert.equal(show(completion("a", "ask not what you")), "ask not what you", "completion shows every word");
 });
 
 test("decoded delta events accumulate into replacement snapshots", () => {
@@ -293,7 +505,8 @@ test("decoded delta events accumulate into replacement snapshots", () => {
       delta,
     });
     state = result.state;
-    assert.equal(editorReplacements(result.effects)[0].text, index === 0 ? "one" : "one two");
+    assert.equal(state.takes[0].text, index === 0 ? "one" : "one two");
+    assert.equal(editorReplacements(result.effects)[0].text, index === 0 ? "one" : " two");
   }
 });
 
@@ -318,15 +531,8 @@ test("overlapping takes shift isolated regions and complete in reverse order", (
 
   result = server(state, completion("b", "second"));
   state = result.state;
-  assert.deepEqual(editorReplacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 10,
-      to: 17,
-      text: " second",
-    },
-  ]);
+  assert.deepEqual(editorReplacements(result.effects), [], "an unchanged completion writes nothing");
+  assert.equal(state.takes.length, 1);
   result = server(state, completion("a", "FIRST"));
   assert.deepEqual(editorReplacements(result.effects), [
     {
@@ -369,9 +575,9 @@ test("terminal failure preserves visible text and later take coordinates", () =>
     {
       domain: "editor",
       command: "replace",
-      from: 9,
+      from: 10,
       to: 14,
-      text: " KEPT",
+      text: "KEPT",
     },
   ]);
 });
@@ -388,7 +594,11 @@ test("sequential takes own exactly one composition separator", () => {
   assert.equal(editorReplacements(result.effects)[0].text, " leading");
   state = result.state;
   result = server(state, completion("second", "authoritative   "));
-  assert.equal(editorReplacements(result.effects)[0].text, " authoritative");
+  assert.deepEqual(
+    patches(result.effects),
+    [{ from: 33, to: 40, text: "authoritative" }],
+    "the completion keeps the take's one separator and patches only the word",
+  );
 });
 
 test("a reconnect rolls back live state and rejects the old session's late events", () => {

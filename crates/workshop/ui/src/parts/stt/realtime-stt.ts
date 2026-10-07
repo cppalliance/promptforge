@@ -113,6 +113,12 @@ export function setupStt(
           case "replace":
             input.replaceRange(effect.from, effect.to, effect.text);
             return;
+          case "caret":
+            input.setSelection(effect.at, effect.at);
+            return;
+          case "tentative":
+            input.setTentativeRange?.(effect.takeId, effect.range);
+            return;
           case "read-only":
             input.setReadOnly(effect.readOnly);
             return;
