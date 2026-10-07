@@ -485,7 +485,7 @@ flowchart TD
 
 <step-6>
 
-### Step 6: Native jfk replay capture and interim decode timing
+### Step 6: Native jfk replay capture and interim decode timing [completed]
 
 - Component: Speech-sandbox
 - Piece: native capture

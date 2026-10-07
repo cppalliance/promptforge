@@ -22,7 +22,15 @@ pub(crate) fn require_model() -> PathBuf {
     )
 }
 
-pub(crate) fn jfk_samples() -> Vec<f32> {
+pub(crate) fn require_library() -> PathBuf {
+    require_fixture(
+        "PROMPTFORGE_WHISPER_LIBRARY",
+        &native_fixture_root(),
+        "whisper.dll",
+    )
+}
+
+pub(crate) fn jfk_pcm16() -> Vec<i16> {
     let path = require_fixture(
         "PROMPTFORGE_WHISPER_AUDIO",
         &native_fixture_root(),
@@ -35,7 +43,14 @@ pub(crate) fn jfk_samples() -> Vec<f32> {
     assert_eq!(spec.bits_per_sample, 16, "fixture must be 16-bit PCM");
     reader
         .samples::<i16>()
-        .map(|sample| f32::from(sample.expect("fixture sample decodes")) / 32_768.0)
+        .map(|sample| sample.expect("fixture sample decodes"))
+        .collect()
+}
+
+pub(crate) fn jfk_samples() -> Vec<f32> {
+    jfk_pcm16()
+        .into_iter()
+        .map(|sample| f32::from(sample) / 32_768.0)
         .collect()
 }
 

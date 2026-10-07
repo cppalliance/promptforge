@@ -1,4 +1,26 @@
 {
+  "jfk-native": {
+    "agreed_shrink_events": 5,
+    "changed_pairs": 13,
+    "changed_words": 43,
+    "commit_lag_ms": 810.9545454545455,
+    "completed_words": 22,
+    "lag_sum_ms": 17841.0,
+    "lag_words": 22,
+    "latency_sum_ms": 18499.0,
+    "latency_words": 22,
+    "pairs": 21,
+    "partial_latency_ms": 840.8636363636364,
+    "upsr": 0.6190476190476191,
+    "upwr": 1.9545454545454546
+  },
+  "native": {
+    "gpu_available": true,
+    "interim_decode_max_ms": 53.736,
+    "interim_decode_mean_ms": 28.960545454545453,
+    "interim_decodes": 22,
+    "window_seconds": 15
+  },
   "scripted-agreed-shrink": {
     "agreed_shrink_events": 2,
     "changed_pairs": 3,

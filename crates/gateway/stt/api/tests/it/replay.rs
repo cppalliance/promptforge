@@ -1,5 +1,5 @@
-//! Speech-sandbox replay of scripted takes against golden snapshots, the
-//! current metrics, and the baseline thresholds.
+//! Speech-sandbox replay of scripted and natively captured takes against
+//! golden snapshots, the current metrics, and the baseline thresholds.
 
 #![expect(
     clippy::expect_used,
@@ -7,6 +7,7 @@
 )]
 
 mod metrics;
+mod native_capture;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,10 @@ use metrics::Metrics;
 
 const UPDATE_VARIABLE: &str = "PROMPTFORGE_REPLAY_UPDATE";
 const SCRIPTED_PREFIX: &str = "scripted-";
+const NATIVE_FIXTURE: &str = "jfk-native";
+/// The native interim decode timing section, which no replay produces.
+const NATIVE_TIMING: &str = "native";
+const SUMMARY_FILES: [&str; 2] = ["baseline", "metrics"];
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -59,7 +64,7 @@ fn scripts() -> Vec<(String, ReplayScript)> {
                 .to_str()?
                 .strip_suffix(".json")?
                 .to_owned();
-            (name.starts_with(SCRIPTED_PREFIX) && !name.ends_with(".snapshots"))
+            (!name.ends_with(".snapshots") && !SUMMARY_FILES.contains(&name.as_str()))
                 .then(|| (name, read_json(&path)))
         })
         .collect::<Vec<_>>();
@@ -75,10 +80,10 @@ fn sections(path: &Path) -> Map<String, Value> {
     }
 }
 
-fn scripted_sections(sections: &Map<String, Value>) -> BTreeMap<String, Metrics> {
+fn replay_sections(sections: &Map<String, Value>) -> BTreeMap<String, Metrics> {
     sections
         .iter()
-        .filter(|(name, _)| name.starts_with(SCRIPTED_PREFIX))
+        .filter(|(name, _)| name.as_str() != NATIVE_TIMING)
         .map(|(name, value)| {
             let metrics = serde_json::from_value(value.clone())
                 .unwrap_or_else(|error| panic!("the {name} metrics section parses: {error}"));
@@ -92,10 +97,21 @@ fn section(metrics: &Metrics) -> Value {
 }
 
 #[tokio::test]
-async fn scripted_replays_match_golden_snapshots_metrics_and_baseline_thresholds() {
+async fn every_replay_fixture_matches_golden_snapshots_metrics_and_baseline_thresholds() {
     let update = updating();
     let scripts = scripts();
-    assert!(scripts.len() >= 4, "every scripted fixture is discovered");
+    assert!(
+        scripts
+            .iter()
+            .filter(|(name, _)| name.starts_with(SCRIPTED_PREFIX))
+            .count()
+            >= 4,
+        "every scripted fixture is discovered"
+    );
+    assert!(
+        scripts.iter().any(|(name, _)| name == NATIVE_FIXTURE),
+        "{NATIVE_FIXTURE}.json is replayed; record it once with the ignored native capture test"
+    );
     let mut current = BTreeMap::new();
     for (name, script) in &scripts {
         let outcome = ReplayTake::run(script)
@@ -120,14 +136,14 @@ async fn scripted_replays_match_golden_snapshots_metrics_and_baseline_thresholds
     let metrics_path = fixture_dir().join("metrics.json");
     let mut recorded = sections(&metrics_path);
     if update {
-        recorded.retain(|name, _| !name.starts_with(SCRIPTED_PREFIX));
+        recorded.retain(|name, _| name == NATIVE_TIMING);
         for (name, metrics) in &current {
             recorded.insert(name.clone(), section(metrics));
         }
         write_json(&metrics_path, &recorded);
     } else {
         assert_eq!(
-            scripted_sections(&recorded),
+            replay_sections(&recorded),
             current,
             "metrics.json drifted; run with {UPDATE_VARIABLE}=1 to regenerate it"
         );
@@ -135,15 +151,16 @@ async fn scripted_replays_match_golden_snapshots_metrics_and_baseline_thresholds
 
     let baseline_path = fixture_dir().join("baseline.json");
     let mut baseline = sections(&baseline_path);
-    if update && scripted_sections(&baseline).is_empty() {
-        baseline.extend(
-            current
-                .iter()
-                .map(|(name, metrics)| (name.clone(), section(metrics))),
-        );
+    let unrecorded = current
+        .iter()
+        .filter(|(name, _)| !baseline.contains_key(name.as_str()))
+        .map(|(name, metrics)| (name.clone(), section(metrics)))
+        .collect::<Vec<_>>();
+    if update && !unrecorded.is_empty() {
+        baseline.extend(unrecorded);
         write_json(&baseline_path, &baseline);
     }
-    let violations = metrics::threshold_violations(&current, &scripted_sections(&baseline));
+    let violations = metrics::threshold_violations(&current, &replay_sections(&baseline));
     assert!(
         violations.is_empty(),
         "speech-sandbox thresholds are broken:\n{}",
@@ -193,6 +210,28 @@ async fn replay_rejects_finals_listed_out_of_at_ms_order() {
     assert!(
         matches!(error, ReplayError::InvalidScript(_)),
         "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn replay_accepts_a_forced_final_whose_range_awaits_the_next_final() {
+    let outcome = ReplayTake::run(&script(serde_json::json!({
+        "speech_samples": [[0, 176_000]],
+        "ticks": [
+            {"at_ms": 5_100, "audio_start_ms": 0, "audio_end_ms": 5_000, "transcript": "ask not"}
+        ],
+        "finals": [
+            {"at_ms": 10_200, "sample_start": 0, "sample_end": 160_000, "text": "ask not what your country"},
+            {"at_ms": 11_200, "sample_start": 32_000, "sample_end": 176_000, "text": "what your country can do"}
+        ]
+    })))
+    .await
+    .expect("ten seconds of continuous speech force a final the commit reconciles");
+
+    assert!(
+        outcome.completed.ends_with("can do"),
+        "unexpected completed transcript: {}",
+        outcome.completed
     );
 }
 

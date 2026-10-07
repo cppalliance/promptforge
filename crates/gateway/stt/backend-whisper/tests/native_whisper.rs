@@ -6,12 +6,15 @@
     reason = "native fixture setup fails by panicking with the missing invariant named"
 )]
 
+mod common;
+
 use std::error::Error as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
+use common::{fixture_dir, jfk_samples};
 use gateway_progress::{Activity, ProgressHub};
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::test_fixtures::native::require_fixture;
@@ -34,29 +37,12 @@ const MID_PASS: Duration = Duration::from_millis(300);
 const ABORT_BOUND: Duration = Duration::from_secs(1);
 static NATIVE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
-}
-
 #[test]
 fn native_backend_suite_keeps_its_backend_fixture_root() {
     assert_eq!(
         fixture_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
     );
-}
-
-fn jfk_samples() -> Vec<f32> {
-    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", &fixture_dir(), "jfk.wav");
-    let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
-    let spec = reader.spec();
-    assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
-    assert_eq!(spec.channels, 1, "fixture must be mono");
-    assert_eq!(spec.bits_per_sample, 16, "fixture must be 16-bit PCM");
-    reader
-        .samples::<i16>()
-        .map(|sample| f32::from(sample.expect("fixture sample decodes")) / 32_768.0)
-        .collect()
 }
 
 fn engine(library: PathBuf, interim: PathBuf, final_model: Option<PathBuf>) -> SttEngine {

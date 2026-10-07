@@ -4,9 +4,9 @@
 use std::future::Future;
 
 #[cfg(feature = "test-fixtures")]
-use crate::SpeechError;
-#[cfg(feature = "test-fixtures")]
 use crate::realtime::{CommitReceipt, Session, SessionRegistry};
+#[cfg(feature = "test-fixtures")]
+use crate::{SpeechError, SpeechService};
 
 #[cfg(feature = "test-fixtures")]
 mod generation;
@@ -76,6 +76,9 @@ pub enum FixtureError {
     /// The hour simulation generation never published an engine.
     #[error("hour simulation generation did not publish")]
     HourSimulationNotPublished,
+    /// The service has no published generation to back a session.
+    #[error("speech service has no published generation")]
+    GenerationNotPublished,
     /// The session update was rejected.
     #[error("apply session update")]
     #[non_exhaustive]
@@ -186,6 +189,29 @@ impl RealtimeSessionRegistryFixture {
             .state
             .active()
             .ok_or(FixtureError::ScriptedGenerationNotPublished)?;
+        Ok(RealtimeSessionFixture {
+            session: Session::new(registration, Some(engine)),
+        })
+    }
+
+    /// Registers one session backed by `service`'s published generation.
+    ///
+    /// # Errors
+    /// Returns the stable capacity error, or
+    /// [`FixtureError::GenerationNotPublished`] when `service` has published
+    /// no generation.
+    pub fn register_with_service(
+        &self,
+        service: &SpeechService,
+    ) -> Result<RealtimeSessionFixture, FixtureError> {
+        let registration = self
+            .inner
+            .register()
+            .map_err(|error| FixtureError::Register(boxed(error)))?;
+        let engine = service
+            .state
+            .active()
+            .ok_or(FixtureError::GenerationNotPublished)?;
         Ok(RealtimeSessionFixture {
             session: Session::new(registration, Some(engine)),
         })

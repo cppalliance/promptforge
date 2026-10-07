@@ -1,0 +1,151 @@
+{
+  "window_seconds": 15,
+  "speech_samples": [
+    [
+      960,
+      175680
+    ]
+  ],
+  "ticks": [
+    {
+      "at_ms": 622,
+      "audio_start_ms": 0,
+      "audio_end_ms": 500,
+      "transcript": "And"
+    },
+    {
+      "at_ms": 1014,
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000,
+      "transcript": "And so..."
+    },
+    {
+      "at_ms": 1515,
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500,
+      "transcript": "And so my fellow"
+    },
+    {
+      "at_ms": 2017,
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000,
+      "transcript": "And so my fellow American"
+    },
+    {
+      "at_ms": 2521,
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500,
+      "transcript": "And so am I fellow Americans."
+    },
+    {
+      "at_ms": 3021,
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000,
+      "transcript": "And so am I fellow Americans."
+    },
+    {
+      "at_ms": 3519,
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500,
+      "transcript": "And so my fellow Americans."
+    },
+    {
+      "at_ms": 4020,
+      "audio_start_ms": 0,
+      "audio_end_ms": 4000,
+      "transcript": "And so my fellow Americans asked"
+    },
+    {
+      "at_ms": 4521,
+      "audio_start_ms": 0,
+      "audio_end_ms": 4500,
+      "transcript": "And so my fellow Americans ask not"
+    },
+    {
+      "at_ms": 5022,
+      "audio_start_ms": 0,
+      "audio_end_ms": 5000,
+      "transcript": "And so my fellow Americans ask not"
+    },
+    {
+      "at_ms": 5524,
+      "audio_start_ms": 0,
+      "audio_end_ms": 5500,
+      "transcript": "And so my fellow Americans asked not why"
+    },
+    {
+      "at_ms": 6025,
+      "audio_start_ms": 0,
+      "audio_end_ms": 6000,
+      "transcript": "And so my fellow Americans ask not what your"
+    },
+    {
+      "at_ms": 6533,
+      "audio_start_ms": 0,
+      "audio_end_ms": 6500,
+      "transcript": "And so my fellow Americans ask not what your country can do."
+    },
+    {
+      "at_ms": 7033,
+      "audio_start_ms": 0,
+      "audio_end_ms": 7000,
+      "transcript": "And so my fellow Americans ask not what your country can do for"
+    },
+    {
+      "at_ms": 7537,
+      "audio_start_ms": 0,
+      "audio_end_ms": 7500,
+      "transcript": "And so my fellow Americans ask not what your country can do for you."
+    },
+    {
+      "at_ms": 8037,
+      "audio_start_ms": 0,
+      "audio_end_ms": 8000,
+      "transcript": "And so my fellow Americans ask not what your country can do for you."
+    },
+    {
+      "at_ms": 8539,
+      "audio_start_ms": 0,
+      "audio_end_ms": 8500,
+      "transcript": "And so my fellow Americans ask not what your country can do for you as a"
+    },
+    {
+      "at_ms": 9043,
+      "audio_start_ms": 0,
+      "audio_end_ms": 9000,
+      "transcript": "And so my fellow Americans ask not what your country can do for you ask what you"
+    },
+    {
+      "at_ms": 9548,
+      "audio_start_ms": 0,
+      "audio_end_ms": 9500,
+      "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do."
+    },
+    {
+      "at_ms": 10053,
+      "audio_start_ms": 0,
+      "audio_end_ms": 10000,
+      "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country."
+    },
+    {
+      "at_ms": 11019,
+      "audio_start_ms": 10060,
+      "audio_end_ms": 11000,
+      "transcript": "I'm free."
+    }
+  ],
+  "finals": [
+    {
+      "at_ms": 10158,
+      "sample_start": 960,
+      "sample_end": 160960,
+      "text": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country."
+    },
+    {
+      "at_ms": 11076,
+      "sample_start": 32960,
+      "sample_end": 176000,
+      "text": "Ask not what your country can do for you. Ask what you can do for your country."
+    }
+  ]
+}

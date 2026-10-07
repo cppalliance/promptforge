@@ -167,16 +167,16 @@ impl ReplayTake {
         }
         self.settle(at_ms).await?;
         self.verify_final(step)?;
-        let finalized = self
-            .session
-            .take_metrics()
-            .map_or(0, |metrics| metrics.coverage().0);
-        if finalized != step.sample_end {
+        let covered = self.session.take_metrics().map_or(0, |metrics| {
+            let (finalized, unresolved) = metrics.coverage();
+            unresolved.map_or(finalized, |range| range.end)
+        });
+        if covered != step.sample_end {
             return Err(diverged(
                 at_ms,
                 format!(
-                    "the final expects finalized audio through sample {}, but the take finalized \
-                     through sample {finalized}",
+                    "the final expects audio through sample {} finalized or awaiting the next \
+                     final's overlap, but the take covers through sample {covered}",
                     step.sample_end
                 ),
             ));

@@ -2217,6 +2217,7 @@ dependencies = [
  "gateway-stt-engine",
  "gateway-whisper-ffi",
  "hound",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
