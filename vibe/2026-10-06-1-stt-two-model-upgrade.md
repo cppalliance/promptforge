@@ -141,7 +141,7 @@ flowchart LR
 - Modules and interfaces:
   - `whisper-ffi`: new `FullParams` setters beside the existing `set_*` methods and wired in `apply` (`crates/gateway/stt/whisper-ffi/src/params.rs:37-202`) for temperature increment, audio context, max tokens, thread count, token timestamps, and entropy, log-probability, and no-speech thresholds. New context getters beside `segment_count` and `segment_text` (`crates/gateway/stt/whisper-ffi/src/context.rs:184-198`) for per-token probability and timestamps, and per-segment no-speech probability when the `b4938` library exports it. Flash attention is a context parameter in whisper.cpp; expose it only if `raw.rs` mirrors it for `b4938`.
   - `backend-whisper`: per-role parameter profiles. Interim: temperature fallback disabled, `audio_ctx = max(512, roundup64(50 x window_seconds + 128))`, `max_tokens` about 4 per second of window, `n_threads = max(1, min(4, available_parallelism / 2))`. Final: fallback kept, same thread rule.
-  - `api/take`: normalized comparison and per-token evidence (observation count, first and latest audio end) in agreement; monotonic agreed; outlier hold; aligned reconcile and anchored fast suffix in state; interim window start at the end of the last agreed word once token timestamps exist (`crates/gateway/stt/api/src/take.rs:120-121,135-139`).
+  - `api/take`: normalized comparison and per-token evidence (observation count, first and latest audio end) in agreement; monotonic agreed; outlier hold; aligned reconcile and anchored fast suffix in state; interim window start at the end of the last agreed word once token timestamps exist (`crates/gateway/stt/api/src/take.rs:120-121,135-139`; deferred during the run, see Deferred and Out of Scope).
   - `api/segment`: hangover, 0.5 s pre-roll, hint-aware close silence, and a pure three-rule endpoint function (`crates/gateway/stt/api/src/segment.rs:22-34,94-175`, `crates/gateway/stt/engine/src/policy.rs:7,95-96`).
   - `api/realtime`: revision bump only on change; second include token for extended fields; live plain-client deltas with a 2-word hold-back.
   - Workshop UI: revision guard, word-level minimal diff in `replaceTake`, tentative decorations from part lengths, a 1-word render hold-back, undo grouping, a hidden polite accessibility region, and socket-loss keep; jitter in `crates/workshop/platform/reconnect-backoff.ts:47-62`.
@@ -302,6 +302,7 @@ Characterization tests pin today's behavior before anything changes, then each b
 - Deferred: adaptive hold-back and evidence span from observed revision depth (https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/). Revisit when the speech-sandbox shows a fixed hold-back is wrong for some speakers.
 - Deferred: Silero or whisper.cpp built-in VAD (https://github.com/ggml-org/whisper.cpp/pull/3065, streaming follow-up https://github.com/ggml-org/whisper.cpp/pull/3677). Revisit after the cheap endpointing changes, with measured per-frame CPU cost.
 - Deferred: admission control at session start. Revisit after the degrade work shows overload in practice.
+- Deferred: starting interim windows at the last agreed word, with promotion before forced start moves and evidence rebasing, and the 10 s window default tied to it. Measured during the run on a fresh native `jfk.wav` capture: UPWR 3.45 against the 1.95 baseline, partial latency 606 ms against 841 ms. `tiny.en` token end times err both ways: early ends re-decode and re-agree words ("ask not what What your country"), late or clamped ends cut into the next word ("ass", "S not!"). Interim word ends stay carried through the engine for this work. Revisit with a start margin before the agreed end, removal of words the window repeats, and clamped ends ignored, or with DTW token timestamps; gate on a fresh native capture meeting UPWR.
 - Out of scope: language selection and multilingual models.
 - Out of scope: batch transcription and the config UI.
 
@@ -601,18 +602,19 @@ flowchart TD
 
 <step-14>
 
-### Step 14: Start interim windows at the last agreed word
+### Step 14: Size interim audio context from the actual window [completed]
 
 - Component: Timestamped window
 - Piece: trimming
+- Re-plan during the run: only the `audio_ctx` sizing from the request's actual sample count lands in this step. The window-start rule in `take.rs`, promotion before a forced start move, evidence rebasing, the skipped-range rework, replay word-end support, and the 10 s `DEFAULT_STT_WINDOW_SECONDS` change are deferred (see Deferred and Out of Scope): on a fresh native `jfk.wav` capture the full change raised UPWR to 3.45 against the 1.95 baseline, because `tiny.en` token end times err in both directions. The take keeps today's window start, the default stays 15 s, and the replay fixtures stay unchanged. The bullets below describe the deferred design and are not built in this step, except the `profile.rs` bullet.
 - Changes:
   - `crates/gateway/stt/api/src/take.rs` `interim_window` (lines 120-121 and 135-139): start the next interim window at the later of the last agreed word's end and the segmenter's consumed cursor, instead of the consumed cursor alone. `take.rs` is 334 lines with inline tests from line 229; move them into the `take/` directory if new tests would cross the ceiling.
   - `take/window/`: when the window cap forces the start past words that are not yet agreed, promote them to agreed first so their text is not lost; rebase per-token evidence whenever the window start moves.
   - Preserve the skipped-range fill: `assemble_completion` and `skipped_outcomes_exactly_cover` (`take/final_outcome.rs:62-118`) need accepted interim text that exactly covers skipped segment ranges, and Step 23 reuses that path. If a moving window start breaks that coverage, record agreed words with their end samples and build the skipped-range text from them instead.
   - `crates/gateway/stt/backend-whisper/src/profile.rs`: derive `audio_ctx` from the request's actual sample count.
   - Set `DEFAULT_STT_WINDOW_SECONDS` in `crates/gateway/config/src/config/stt.rs:6` from 15 to 10 so the cap matches the 10 s forced stride, and update config tests, `gateway.local.example.toml`, and any guide page that states the 15 s default.
-- Tests: take and window tests show the window start at the later of the last agreed word's end and the consumed cursor, promotion before a forced start move, and evidence rebased on start moves; a final-outcome test shows a skipped range still filled from interim text; profile tests for the actual-window `audio_ctx`; regenerate the replay snapshots and `metrics.json` with interim decode time and partial latency within the speech-sandbox thresholds.
-- Commit: `Start interim windows at the last agreed word`
+- Tests: profile tests for the actual-window `audio_ctx` (including a partial encoder frame counting as a whole one); the replay snapshots and `metrics.json` stay unchanged and within the speech-sandbox thresholds. The deferred design's tests (window start, promotion, evidence rebasing, skipped-range fill after a start move, 10 s default) are not written in this step.
+- Commit: `Size interim audio context from the actual window`
 
 </step-14>
 

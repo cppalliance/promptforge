@@ -275,7 +275,7 @@ fn transcribe_blocking(
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
-    profile.apply(&mut params);
+    profile.apply(&mut params, samples.len());
     if let Some(flag) = cancellation {
         params.set_abort_flag(Arc::clone(flag));
     }
