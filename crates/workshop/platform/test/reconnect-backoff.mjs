@@ -1,10 +1,11 @@
 // Unit test for the shared reconnect backoff (reconnect-backoff.ts,
 // consumed by the Workshop UI's workshop and agent sockets): exponential growth,
-// the cap, and the reset that a successful open triggers. Bundles the module
-// with esbuild and drives it against scripted fake timers, so the growth,
-// cap, and reset are pinned deterministically without waiting on a real
-// clock: the delay argument each schedule hands to setTimeout is captured,
-// and the queued callback is fired by hand.
+// the cap, the reset that a successful open triggers, and the equal jitter
+// bounds. Bundles the module with esbuild and drives it against scripted fake
+// timers and an injected random source, so the growth, cap, reset, and jitter
+// are pinned deterministically without waiting on a real clock: the delay
+// argument each schedule hands to setTimeout is captured, and the queued
+// callback is fired by hand.
 // Run: node --test test/reconnect-backoff.mjs (from crates/workshop/platform).
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -62,17 +63,20 @@ function fireNext() {
   timer.fn();
 }
 
-// --- Growth, the cap, and the reset -----------------------------------------
+// --- Growth, the cap, and the reset at the jitter's lower bound -------------
 
+// Equal jitter waits half the computed delay plus a random share of the other
+// half. A source of 0 pins the lower bound: exactly half of a computed delay
+// that still doubles to the cap and resets to the initial delay.
 {
-  const backoff = new ReconnectBackoff({ initialMs: 1000, maxMs: 3000 });
+  const backoff = new ReconnectBackoff({ initialMs: 1000, maxMs: 3000, random: () => 0 });
   let retries = 0;
   const retry = () => {
     retries += 1;
   };
 
   backoff.schedule(retry);
-  check("the first retry waits the initial delay", lastDelay() === 1000);
+  check("the first retry waits half the initial delay at the lower bound", lastDelay() === 500);
   backoff.schedule(retry);
   check(
     "a second schedule while one is waiting stacks nothing",
@@ -82,29 +86,69 @@ function fireNext() {
   fireNext();
   check("the first attempt's retry fires", retries === 1);
   backoff.schedule(retry);
-  check("the delay doubles after a failed attempt", lastDelay() === 2000);
+  check("the computed delay doubles after a failed attempt", lastDelay() === 1000);
 
   fireNext();
   backoff.schedule(retry);
-  check("the delay caps at the maximum instead of doubling past it", lastDelay() === 3000);
+  check(
+    "the computed delay caps at the maximum instead of doubling past it",
+    lastDelay() === 1500,
+  );
 
   fireNext();
   backoff.schedule(retry);
-  check("the delay stays capped at the maximum", lastDelay() === 3000);
+  check("the computed delay stays capped at the maximum", lastDelay() === 1500);
 
   fireNext();
   backoff.reset();
   backoff.schedule(retry);
-  check("reset restores the initial delay", lastDelay() === 1000);
+  check("reset restores the initial computed delay", lastDelay() === 500);
+  fireNext();
+}
+
+// --- The jitter's upper bound -----------------------------------------------
+
+// A source just under 1 waits just under the full computed delay, so the
+// jitter never pushes a wait past the computed delay or the cap.
+{
+  const justUnderOne = 0.999;
+  const backoff = new ReconnectBackoff({
+    initialMs: 1000,
+    maxMs: 3000,
+    random: () => justUnderOne,
+  });
+  const justUnder = (delay, full) => delay > full * justUnderOne && delay < full;
+
+  for (const [attempt, full] of [1000, 2000, 3000, 3000].entries()) {
+    backoff.schedule(() => {});
+    check(
+      `attempt ${attempt + 1} waits just under its full ${full}ms delay at the upper bound`,
+      justUnder(lastDelay(), full),
+    );
+    fireNext();
+  }
+
+  backoff.reset();
+  backoff.schedule(() => {});
+  check(
+    "reset restores just under the full initial delay at the upper bound",
+    justUnder(lastDelay(), 1000),
+  );
   fireNext();
 }
 
 // --- The defaults -----------------------------------------------------------
 
 {
+  const realRandom = Math.random;
+  Math.random = () => 0.5;
   const backoff = new ReconnectBackoff();
   backoff.schedule(() => {});
-  check("the default initial delay is one second", lastDelay() === 1000);
+  Math.random = realRandom;
+  check(
+    "the default jitter source is Math.random over a one-second initial delay",
+    lastDelay() === 750,
+  );
   backoff.cancel();
   check(
     "cancel clears the pending timer",

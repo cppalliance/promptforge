@@ -423,7 +423,7 @@ flowchart TD
 
 <step-2>
 
-### Step 2: Reconnect jitter
+### Step 2: Reconnect jitter [completed]
 
 - Component: Groundwork
 - Piece: safe fixes

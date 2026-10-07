@@ -1353,32 +1353,46 @@ await assertNoLeaks(lifecycle, async () => {
   }
 });
 
+// The service's reconnect backoff captures Math.random when it is built, so a
+// source pinned only during construction holds every jittered wait at exactly
+// half the computed delay.
+function withLowerBoundJitter(construct) {
+  const realRandom = Math.random;
+  Math.random = () => 0;
+  try {
+    return construct();
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 await assertNoLeaks(lifecycle, async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
     let attempts = 0;
-    const service = new RealtimeTranscriptionService({
+    const service = withLowerBoundJitter(() => new RealtimeTranscriptionService({
       socket: () => {
         attempts += 1;
         throw new Error("gateway is still starting");
       },
-    });
+    }));
 
     assert.equal(service.state, "unavailable");
     assert.equal(attempts, 1);
     const schedule = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000];
     for (const [index, delay] of schedule.entries()) {
-      mock.timers.tick(delay - 1);
+      const wait = delay / 2;
+      mock.timers.tick(wait - 1);
       assert.equal(
         attempts,
         index + 1,
-        `retry ${index + 1} does not run before its ${delay} ms delay`,
+        `retry ${index + 1} does not run before half its ${delay} ms delay`,
       );
       mock.timers.tick(1);
       assert.equal(
         attempts,
         index + 2,
-        `retry ${index + 1} runs at its ${delay} ms delay`,
+        `retry ${index + 1} runs at half its ${delay} ms delay`,
       );
     }
 
@@ -1395,7 +1409,7 @@ await assertNoLeaks(lifecycle, async () => {
   try {
     const sockets = [];
     let attempts = 0;
-    const service = new RealtimeTranscriptionService({
+    const service = withLowerBoundJitter(() => new RealtimeTranscriptionService({
       socket: (url) => {
         attempts += 1;
         if (attempts === 1) {
@@ -1405,7 +1419,7 @@ await assertNoLeaks(lifecycle, async () => {
         sockets.push(socket);
         return socket;
       },
-    });
+    }));
 
     mock.timers.tick(1000);
     assert.equal(attempts, 2, "an initial failure reconnects without another mic click");
@@ -1415,8 +1429,12 @@ await assertNoLeaks(lifecycle, async () => {
     assert.equal(service.state, "ready");
 
     sockets[0].close();
-    mock.timers.tick(999);
-    assert.equal(attempts, 2, "readiness resets the reconnect delay to one second");
+    mock.timers.tick(499);
+    assert.equal(
+      attempts,
+      2,
+      "readiness resets the reconnect delay to one second, a 500 ms wait at the lower jitter bound",
+    );
     mock.timers.tick(1);
     assert.equal(attempts, 3, "an established connection reconnects on the reset delay");
     const racing = sockets[1];
