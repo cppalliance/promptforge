@@ -43,9 +43,9 @@ pub use crate::config::{
     Capabilities, Config, DominionConfig, DominionKind, DraftTokenMax, DraftTokenMaxError,
     EndpointConfig, LlamaBackend, LocalConfig, LocalModelConfig, ModelConfig, ModelKind,
     MultimodalProjectorConfig, ProfileConfig, Protocol, QueuePolicy, RECOMMENDED_STT_MODELS,
-    RecommendedSttModel, SearchProvider, Secret, ServerConfig, SpeculationType, SpeculativeConfig,
-    SttModelConfig, SttPipelineConfig, SttRole, ThinkingMode, ToolDialect, ToolsConfig,
-    WebSearchConfig, WhisperBackend, WorkshopConfig,
+    RecommendedSttModel, SILERO_VAD_MODEL, SearchProvider, Secret, ServerConfig, SpeculationType,
+    SpeculativeConfig, SpeechArtifactPin, SttModelConfig, SttPipelineConfig, SttRole, ThinkingMode,
+    ToolDialect, ToolsConfig, WebSearchConfig, WhisperBackend, WorkshopConfig,
 };
 pub use crate::profile::{
     ProfileName, ProfileNameError, ProfileSelection, ProfileState, profile_state_path,

@@ -1,6 +1,7 @@
 ﻿//! The `GET /admin/orphans` route: files in the artifact cache's `models/`
 //! tree that no `[[local_model]]` or `[[stt_model]]` declared in the catalog
-//! references, so an operator can adopt or delete leftovers.
+//! references, and that are not the pinned Silero VAD model, so an operator
+//! can adopt or delete leftovers.
 //!
 //! The scan is blocking filesystem work, so it goes through
 //! [`crate::error::blocking`] like every store operation (Amendment D).
@@ -11,7 +12,7 @@ use axum::extract::State;
 use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
-use gateway_config::SttModelConfig;
+use gateway_config::{SILERO_VAD_MODEL, SttModelConfig};
 use serde::Serialize;
 
 use crate::AppState;
@@ -40,7 +41,8 @@ pub(super) fn routes() -> Router<AppState> {
 
 /// The `GET /admin/orphans` route: bearer-authed, scans `<cache_dir>/models/`
 /// and reports every file no `[[local_model]]` or `[[stt_model]]` declared in
-/// the catalog references as `{"orphans": [{"path", "size_bytes", "sha256"}]}`.
+/// the catalog references, other than the pinned Silero VAD model, as
+/// `{"orphans": [{"path", "size_bytes", "sha256"}]}`.
 ///
 /// `path` is relative to the resolved cache root (`/`-separated on every
 /// platform). `sha256` comes from the blob's cache sidecar and is null for
@@ -63,6 +65,7 @@ async fn admin_orphans(
             .catalog_stt_models()
             .iter()
             .map(SttModelConfig::source)
+            .chain([SILERO_VAD_MODEL.source()])
             .collect();
         orphans(&root, config.catalog_local_models(), &stt_sources)
     })

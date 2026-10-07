@@ -8,7 +8,7 @@ use gateway_stt_engine::{
 };
 
 use crate::admission::AdmissionGate;
-use crate::artifacts::SpeechError;
+use crate::artifacts::{SileroModel, SpeechError};
 use crate::model::{ModelNames, SpeechModelInfo};
 use crate::status::SpeechStatus;
 
@@ -38,6 +38,7 @@ pub(super) struct GenerationSpec {
     policy: EnginePolicy,
     names: ModelNames,
     guidance: Vec<String>,
+    silero: Option<SileroModel>,
     infer_scripted_final: bool,
 }
 
@@ -55,8 +56,14 @@ impl GenerationSpec {
             policy,
             names,
             guidance,
+            silero: None,
             infer_scripted_final: false,
         }
+    }
+
+    pub(super) fn with_silero(mut self, silero: SileroModel) -> Self {
+        self.silero = Some(silero);
+        self
     }
 
     #[cfg(feature = "test-fixtures")]
@@ -85,19 +92,23 @@ impl GenerationSpec {
             engine,
             names,
             guidance: self.guidance.clone().into(),
+            silero: self.silero.clone(),
             admission: Arc::new(AdmissionGate::default()),
         })
     }
 }
 
-/// The smallest immutable runtime handle: engine, identity, guidance, and
-/// admission ownership shared by every admitted request and worker job.
+/// The smallest immutable runtime handle: engine, identity, guidance, the
+/// Silero model, and admission ownership shared by every admitted request
+/// and worker job.
 #[derive(Debug)]
 pub(super) struct SpeechRuntime {
     backend: Backend,
     engine: SttEngine,
     names: ModelNames,
     pub(super) guidance: Arc<[String]>,
+    /// `None` for a backend that provisions no Silero model.
+    pub(super) silero: Option<SileroModel>,
     pub(super) admission: Arc<AdmissionGate>,
 }
 

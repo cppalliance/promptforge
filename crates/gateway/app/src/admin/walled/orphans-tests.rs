@@ -1,11 +1,14 @@
-﻿use std::path::Path;
+use std::fmt::Write as _;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gateway_config::{Config, ProfileName};
+use gateway_config::{Config, ProfileName, SILERO_VAD_MODEL};
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::Command;
+use crate::local::artifacts::{existing_model_path, filename_from_url};
 use crate::test_support::{app_state, parking_executor, serve, serve_state};
 
 /// A profile rooting the cache at `cache_dir` with one `[[local_model]]`
@@ -284,5 +287,47 @@ async fn admin_orphans_keeps_catalog_models_outside_the_running_profile() {
         orphans,
         serde_json::json!({ "orphans": [] }),
         "a declared model outside the running profile is not an orphan"
+    );
+}
+
+/// The speech engine provisions the Silero VAD model with no catalog
+/// entry, so its cache slot is referenced by the pin alone.
+#[tokio::test]
+async fn admin_orphans_keeps_the_provisioned_silero_model() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let source = SILERO_VAD_MODEL.source();
+    let mut key = String::with_capacity(16);
+    for byte in &Sha256::digest(source.as_bytes())[..8] {
+        write!(&mut key, "{byte:02x}").expect("writing to String is infallible");
+    }
+    let slot = temp.path().join("models").join(key);
+    std::fs::create_dir_all(&slot).expect("mkdir slot");
+    let silero = slot.join(filename_from_url(source).expect("the pin names a file"));
+    std::fs::write(&silero, b"silero-bytes").expect("write silero");
+    assert_eq!(
+        existing_model_path(temp.path(), source).expect("the slot resolves"),
+        Some(silero),
+        "the seeded model sits in the store's provisioning slot"
+    );
+    std::fs::write(
+        temp.path().join("models").join("stray.gguf"),
+        b"stray-bytes",
+    )
+    .expect("write stray");
+    let missing = temp.path().join("models").join("never-provisioned.gguf");
+
+    let addr = serve(orphan_config(temp.path(), &missing)).await;
+    let orphans = get_json(addr, "/admin/orphans").await;
+
+    assert_eq!(
+        orphans,
+        serde_json::json!({
+            "orphans": [{
+                "path": "models/stray.gguf",
+                "size_bytes": b"stray-bytes".len(),
+                "sha256": null,
+            }]
+        }),
+        "the provisioned Silero model is not an orphan"
     );
 }

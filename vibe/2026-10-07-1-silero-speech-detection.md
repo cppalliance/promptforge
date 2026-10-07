@@ -424,7 +424,7 @@ flowchart TD
 
 <step-6>
 
-### Step 6: Pin and provision the Silero model
+### Step 6: Pin and provision the Silero model [completed]
 
 - Component: Silero detection
 - Piece: model artifact
@@ -432,6 +432,7 @@ flowchart TD
   - `crates/gateway/config/src/config/stt.rs`: a `SILERO_VAD_MODEL` pin beside `RECOMMENDED_STT_MODELS`, with the Technical Design's URL, SHA-256, size (885,098 bytes), and MIT license, exposing `source()` and `sha256()` like the recommended pins. It is not an `[[stt_model]]`, and the config schema does not change.
   - `crates/gateway/stt/api/src/artifacts-silero.rs` (new `#[path]` sibling, because `artifacts.rs` is at 461 lines): `artifacts::prepare_impl` fetches the model through `ensure_model_with_cancellation` into `~/.promptforge/models/`. Its SHA-256 is checked on every prepare, cache hits included; reuse the store's check if it already covers cache hits. A failed fetch or digest mismatch yields no path plus a cause, and the generation still loads.
   - `crates/gateway/stt/api/src/generation.rs` and `generation-lease.rs`: the generation carries the verified Silero path or the cause, and `GenerationLease` exposes it. A cause is reported once per generation through gateway progress and logs.
+  - `crates/gateway/app/src/admin/walled/orphans.rs` `admin_orphans`: the Silero pin's source joins the STT sources the scan diffs against, so `GET /admin/orphans` never reports the provisioned Silero model as an orphan. Test in `orphans-tests.rs`.
 - Tests: a pin shape test beside the recommended-model tests; the Silero pin added to the live drift test under its existing `#[ignore = "downloads large live artifacts to detect upstream URL or digest drift"]`; artifact tests with a stubbed store showing that the verified path reaches the lease, and that a digest mismatch or failed fetch leaves no path, reports once, and still loads the generation. Gateway app suite.
 - Commit: `Pin and provision the Silero VAD model`
 

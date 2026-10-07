@@ -280,5 +280,44 @@ fn whisper_spec(prepared: PreparedGeneration) -> Result<GenerationSpec, SpeechEr
         policy,
         prepared.names,
         prepared.guidance,
-    ))
+    )
+    .with_silero(prepared.silero))
+}
+
+#[cfg(all(test, feature = "test-fixtures"))]
+mod tests {
+    use std::path::PathBuf;
+
+    use gateway_stt_engine::EnginePolicy;
+    use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+    use tokio_util::sync::CancellationToken;
+
+    use super::GenerationState;
+    use super::snapshot::GenerationSpec;
+
+    #[test]
+    fn the_lease_exposes_the_generations_verified_silero_path() {
+        let path = PathBuf::from("ggml-silero.bin");
+        let policy = EnginePolicy::new(15, 500, false).expect("policy is valid");
+        let runtime = GenerationSpec::scripted_inferred(
+            ScriptedModelFactory::new(ScriptedDecoder::new()),
+            policy,
+        )
+        .with_silero(Ok(path.clone()))
+        .build()
+        .expect("runtime builds");
+        let state = GenerationState::default();
+        state
+            .publish_initial(Some(runtime), &CancellationToken::new())
+            .expect("runtime publishes");
+
+        let lease = state.active().expect("the published runtime admits");
+
+        assert_eq!(
+            lease.silero_model().and_then(|model| model.as_ref().ok()),
+            Some(&path)
+        );
+        drop(lease);
+        state.shutdown();
+    }
 }

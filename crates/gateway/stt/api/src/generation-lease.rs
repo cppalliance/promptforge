@@ -6,6 +6,7 @@ use std::time::Duration;
 use gateway_stt_engine::{DecodeMode, DecodeOutput, DecodeRequest, TranscribeError};
 
 use crate::admission::{AdmissionLease, JobLease, SessionEpoch};
+use crate::artifacts::SileroModel;
 
 use super::snapshot::SpeechRuntime;
 
@@ -47,6 +48,16 @@ impl GenerationLease {
 
     pub(crate) fn guidance(&self) -> &[String] {
         &self.runtime().guidance
+    }
+
+    /// The verified Silero model path or the cause there is none, which the
+    /// load already reported; `None` for a backend that provisions no model.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no take selects a Silero detector yet")
+    )]
+    pub(crate) fn silero_model(&self) -> Option<&SileroModel> {
+        self.runtime().silero.as_ref()
     }
 
     pub(super) fn select(&self, name: &str) -> Option<DecodeMode> {

@@ -10,6 +10,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 
+#[path = "artifacts-silero.rs"]
+mod silero;
+
+pub(crate) use silero::SileroModel;
+use silero::SileroPin;
+
 /// Verified artifacts and policy for a runtime that has not started workers.
 #[derive(Debug)]
 pub(crate) struct PreparedSpeech {
@@ -21,6 +27,7 @@ pub(crate) struct PreparedGeneration {
     pub(crate) library: PathBuf,
     pub(crate) interim_model: PathBuf,
     pub(crate) final_model: Option<PathBuf>,
+    pub(crate) silero: SileroModel,
     pub(crate) names: ModelNames,
     pub(crate) guidance: Vec<String>,
     pub(crate) window_seconds: u64,
@@ -37,9 +44,9 @@ struct ProvisionedModels {
     final_model: Option<(String, PathBuf)>,
 }
 
-/// Provisions the whisper library and the speech models; a fired `cancel`
-/// stops their downloads at the next chunk and fails the load as
-/// [`SpeechError::InitialLoadCancelled`].
+/// Provisions the whisper library, the speech models, and the Silero model;
+/// a fired `cancel` stops their downloads at the next chunk and fails the
+/// load as [`SpeechError::InitialLoadCancelled`].
 pub(crate) fn prepare(
     config: &Config,
     progress: Option<&Arc<Activity>>,
@@ -50,12 +57,14 @@ pub(crate) fn prepare(
         progress,
         cancel,
         ArtifactStore::provision_whisper_library_with_cancellation,
+        SileroPin::PINNED,
     )
 }
 
-/// Body of [`prepare`] with the whisper library provision injectable, so a
-/// test can observe the backend `[stt]` and the load token it hands over
-/// without probing the machine's GPUs or downloading a runtime.
+/// Body of [`prepare`] with the whisper library provision and the Silero
+/// pin injectable, so a test can observe the backend `[stt]` and the load
+/// token it hands over without probing the machine's GPUs or downloading a
+/// runtime or the Silero model.
 fn prepare_impl(
     config: &Config,
     progress: Option<&Arc<Activity>>,
@@ -66,6 +75,7 @@ fn prepare_impl(
         Option<&Activity>,
         Option<&CancellationToken>,
     ) -> Result<PathBuf, gateway_local::LocalError>,
+    silero_pin: SileroPin<'_>,
 ) -> Result<PreparedSpeech, SpeechError> {
     if config.stt_models().is_empty() {
         return Ok(PreparedSpeech { generation: None });
@@ -99,12 +109,14 @@ fn prepare_impl(
     let (final_name, final_model) = models
         .final_model
         .map_or((None, None), |(name, path)| (Some(name), Some(path)));
+    let silero = silero::provision(&store, silero_pin, activity, cancel)?;
 
     Ok(PreparedSpeech {
         generation: Some(PreparedGeneration {
             library,
             interim_model,
             final_model,
+            silero,
             names: ModelNames::new(interim_name, final_name).map_err(|error| {
                 SpeechError::ReservedModelName {
                     model: error.into_name(),
@@ -304,9 +316,16 @@ mod tests {
 
     use super::*;
 
+    /// A Silero pin naming no file, so a load reaching it reports it
+    /// unavailable instead of downloading the real model.
+    const NO_SILERO: SileroPin<'static> = SileroPin {
+        source: "/missing-silero.bin",
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    };
+
     /// A selected profile whose one interim model is `source`. `sections`
     /// holds whole top-level tables, such as `[local]` or `[stt]`.
-    fn selected(source: &str, sha256: Option<&str>, sections: &str) -> Config {
+    pub(super) fn selected(source: &str, sha256: Option<&str>, sections: &str) -> Config {
         let pin = sha256.map_or_else(String::new, |pin| format!("sha256 = \"{pin}\"\n"));
         let catalog = Config::from_toml_str(&format!(
             "config-version = 0\n\
@@ -394,6 +413,7 @@ mod tests {
                     received = Some(backend);
                     Ok(library.clone())
                 },
+                NO_SILERO,
             )
             .expect("speech prepares");
             assert_eq!(received, Some(expected), "{stt:?}");
@@ -421,6 +441,7 @@ mod tests {
                 handed = token.is_some_and(|token| std::ptr::eq(token, load_token));
                 Err(gateway_local::LocalError::Cancelled)
             },
+            NO_SILERO,
         )
         .expect_err("a cancelled library provision fails the load");
         assert!(handed, "the provision received the load's own token");
@@ -451,6 +472,7 @@ mod tests {
             None,
             &cancel,
             |_store, _backend, _activity, _token| Ok(library.clone()),
+            NO_SILERO,
         )
         .expect_err("a fired token stops the model download");
         assert!(

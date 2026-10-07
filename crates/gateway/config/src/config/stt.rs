@@ -1,4 +1,5 @@
-//! Speech-to-text catalog entries and the digest-pinned recommended pair.
+//! Speech-to-text catalog entries, the digest-pinned recommended pair, and
+//! the pinned Silero VAD model.
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -294,6 +295,53 @@ pub const RECOMMENDED_STT_MODELS: [RecommendedSttModel; 2] = [
     },
 ];
 
+/// One digest-pinned artifact the speech engine provisions for itself,
+/// outside the `[[stt_model]]` catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SpeechArtifactPin {
+    source: &'static str,
+    sha256: &'static str,
+    size_bytes: u64,
+    license: &'static str,
+}
+
+impl SpeechArtifactPin {
+    /// Returns the canonical download URL.
+    #[must_use]
+    pub const fn source(self) -> &'static str {
+        self.source
+    }
+
+    /// Returns the verified lowercase hexadecimal SHA-256 pin.
+    #[must_use]
+    pub const fn sha256(self) -> &'static str {
+        self.sha256
+    }
+
+    /// Returns the artifact's exact size in bytes.
+    #[must_use]
+    pub const fn size_bytes(self) -> u64 {
+        self.size_bytes
+    }
+
+    /// Returns the artifact's SPDX license identifier.
+    #[must_use]
+    pub const fn license(self) -> &'static str {
+        self.license
+    }
+}
+
+/// Digest-pinned Silero voice-activity model, byte-identical to the test
+/// model whisper.cpp ships at `b4938`. It is not an `[[stt_model]]`, because
+/// [`SttRole`] names only decode slots.
+pub const SILERO_VAD_MODEL: SpeechArtifactPin = SpeechArtifactPin {
+    source: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+    sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+    size_bytes: 885_098,
+    license: "MIT",
+};
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
@@ -389,30 +437,61 @@ mod tests {
     }
 
     #[test]
+    fn silero_vad_pin_names_the_v6_2_0_model_by_digest_and_size() {
+        let source = SILERO_VAD_MODEL.source();
+        assert!(source.starts_with("https://huggingface.co/ggml-org/whisper-vad/resolve/main/"));
+        assert!(source.ends_with("/ggml-silero-v6.2.0.bin"), "{source}");
+        let sha256 = SILERO_VAD_MODEL.sha256();
+        assert_eq!(sha256.len(), 64);
+        assert!(
+            sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        );
+        assert_eq!(SILERO_VAD_MODEL.size_bytes(), 885_098);
+        assert_eq!(SILERO_VAD_MODEL.license(), "MIT");
+    }
+
+    #[test]
     #[ignore = "downloads large live artifacts to detect upstream URL or digest drift"]
-    fn recommended_pair_live_urls_match_pins() {
-        for model in RECOMMENDED_STT_MODELS {
-            let mut response = reqwest::blocking::get(model.source())
-                .expect("recommended STT URL responds")
+    fn pinned_speech_artifacts_live_urls_match_pins() {
+        let silero = (
+            "silero-vad",
+            SILERO_VAD_MODEL.source(),
+            SILERO_VAD_MODEL.sha256(),
+            Some(SILERO_VAD_MODEL.size_bytes()),
+        );
+        let pins = RECOMMENDED_STT_MODELS
+            .iter()
+            .map(|model| (model.name(), model.source(), model.sha256(), None))
+            .chain([silero]);
+        for (name, source, sha256, size) in pins {
+            let mut response = reqwest::blocking::get(source)
+                .expect("pinned STT URL responds")
                 .error_for_status()
-                .expect("recommended STT URL returns success");
+                .expect("pinned STT URL returns success");
             let mut hasher = Sha256::new();
+            let mut received = 0_u64;
             let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
             loop {
                 let count = response
                     .read(&mut buffer)
-                    .expect("recommended STT artifact downloads");
+                    .expect("pinned STT artifact downloads");
                 if count == 0 {
                     break;
                 }
                 hasher.update(&buffer[..count]);
+                received += count as u64;
             }
             let digest = hasher.finalize();
             let mut actual = String::with_capacity(64);
             for byte in digest {
                 write!(&mut actual, "{byte:02x}").expect("writing to String is infallible");
             }
-            assert_eq!(actual, model.sha256(), "digest drift for {}", model.name());
+            assert_eq!(actual, sha256, "digest drift for {name}");
+            if let Some(size) = size {
+                assert_eq!(received, size, "size drift for {name}");
+            }
         }
     }
 }
