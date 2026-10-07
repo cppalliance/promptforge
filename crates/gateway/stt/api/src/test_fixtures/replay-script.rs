@@ -34,7 +34,8 @@ pub struct ReplayTick {
     pub at_ms: u64,
     /// Start of the window the take must choose.
     pub audio_start_ms: u64,
-    /// Audio appended before the tick, which is where its window ends.
+    /// Audio appended before the tick, which is where its window ends. A
+    /// window ends no later than the speech tail after the last speech frame.
     pub audio_end_ms: u64,
     /// The interim decoder's raw output for the window.
     pub transcript: String,

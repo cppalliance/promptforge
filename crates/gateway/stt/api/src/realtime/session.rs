@@ -49,7 +49,7 @@ impl Session {
 
     /// Appends like [`append_base64`](Self::append_base64), except that a
     /// take this append starts classifies speech with `detector`.
-    #[cfg(feature = "test-fixtures")]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn append_base64_detecting(
         &mut self,
         payload: &str,
@@ -95,7 +95,7 @@ impl Session {
             self.canceled_tasks.push(task);
         }
         self.input = None;
-        self.last_interim_window = None;
+        self.last_interim_end = None;
         self.standard_interim_sent.clear();
         self.standard_interim_committed.clear();
         self.hypothesis_revision = 0;

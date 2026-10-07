@@ -4,11 +4,11 @@
     {"at_ms": 1150, "audio_start_ms": 0, "audio_end_ms": 1000, "transcript": "Okay listen up"},
     {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "Okay listen up this is"},
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Okay listen up this is what I want."},
-    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "Okay listen up this is what I want."},
+    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3308, "transcript": "Okay listen up this is what I want."},
     {"at_ms": 4650, "audio_start_ms": 3108, "audio_end_ms": 4500, "transcript": "I want you to"},
     {"at_ms": 5150, "audio_start_ms": 3108, "audio_end_ms": 5000, "transcript": "I want you to create"},
     {"at_ms": 5650, "audio_start_ms": 3108, "audio_end_ms": 5500, "transcript": "I want you to create a plan."},
-    {"at_ms": 6150, "audio_start_ms": 3108, "audio_end_ms": 6000, "transcript": "I want you to create a plan. I want you to create"}
+    {"at_ms": 6150, "audio_start_ms": 3108, "audio_end_ms": 5836, "transcript": "I want you to create a plan. I want you to create"}
   ],
   "finals": [
     {"at_ms": 4200, "sample_start": 0, "sample_end": 49728, "text": "Okay listen up this is what I want."},

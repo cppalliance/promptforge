@@ -40,12 +40,8 @@ impl Session {
             .ok_or(SessionError::GenerationUnavailable)?;
         let window = input.take().interim_window(engine.window_samples())?;
         if window.samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES
-            || EnginePolicy::is_silence(window.samples.samples())
+            || self.last_interim_end.is_some_and(|end| window.end <= end)
         {
-            return Ok(());
-        }
-        let origin = (window.segment_start, window.start, window.end);
-        if self.last_interim_window == Some(origin) {
             return Ok(());
         }
         let engine = engine.clone();
@@ -53,7 +49,7 @@ impl Session {
         let guidance = input.take().guidance().to_vec();
         let finalized = input.take().finalized();
         let epoch = self.begin_interim()?;
-        self.last_interim_window = Some(origin);
+        self.last_interim_end = Some(window.end);
         let (samples, samples_owner) = window.samples.into_decode();
         self.interim_task = Some(tokio::spawn(async move {
             let request = DecodeRequest::new(DecodeMode::Interim, samples, guidance, finalized)
@@ -107,7 +103,7 @@ impl Session {
             Err(TranscribeError::Overloaded { .. }) => {
                 // The full worker queue never decoded this window, so the
                 // next tick may submit it again.
-                self.last_interim_window = None;
+                self.last_interim_end = None;
                 return Ok(None);
             }
             Err(error) => return Err(SessionError::Inference(error)),

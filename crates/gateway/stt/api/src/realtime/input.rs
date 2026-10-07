@@ -112,7 +112,7 @@ impl UncommittedInput {
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
-    #[cfg(feature = "test-fixtures")]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(super) fn first_append_with_detector(
         item_id: String,
         snapshot: InputSnapshot,

@@ -40,15 +40,15 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 1,
     "changed_words": 6,
-    "commit_lag_ms": 525.0,
+    "commit_lag_ms": 662.5,
     "completed_words": 12,
-    "lag_sum_ms": 6300.0,
+    "lag_sum_ms": 7950.0,
     "lag_words": 12,
     "latency_sum_ms": 6700.0,
     "latency_words": 12,
-    "pairs": 12,
+    "pairs": 10,
     "partial_latency_ms": 558.3333333333334,
-    "upsr": 0.08333333333333333,
+    "upsr": 0.1,
     "upwr": 0.5
   },
   "scripted-punctuation-case": {
@@ -70,15 +70,15 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 3,
     "changed_words": 10,
-    "commit_lag_ms": 960.0,
+    "commit_lag_ms": 1105.0,
     "completed_words": 10,
-    "lag_sum_ms": 9600.0,
+    "lag_sum_ms": 11050.0,
     "lag_words": 10,
     "latency_sum_ms": -1476.0,
     "latency_words": 10,
-    "pairs": 15,
+    "pairs": 13,
     "partial_latency_ms": -147.6,
-    "upsr": 0.2,
+    "upsr": 0.23076923076923078,
     "upwr": 1.0
   },
   "scripted-silence-short-word": {
@@ -130,9 +130,9 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 0,
     "changed_words": 0,
-    "commit_lag_ms": 690.0,
+    "commit_lag_ms": 863.3333333333334,
     "completed_words": 15,
-    "lag_sum_ms": 10350.0,
+    "lag_sum_ms": 12950.0,
     "lag_words": 15,
     "latency_sum_ms": 5219.999999999998,
     "latency_words": 15,
@@ -145,9 +145,9 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 0,
     "changed_words": 0,
-    "commit_lag_ms": 713.3333333333334,
+    "commit_lag_ms": 800.0,
     "completed_words": 15,
-    "lag_sum_ms": 10700.0,
+    "lag_sum_ms": 12000.0,
     "lag_words": 15,
     "latency_sum_ms": 4819.999999999998,
     "latency_words": 15,
@@ -175,11 +175,11 @@
     },
     "scripted-final-word": {
       "changed_pairs": 1,
-      "changed_words": 6,
+      "changed_words": 5,
       "completed_words": 12,
-      "pairs": 12,
-      "upsr": 0.08333333333333333,
-      "upwr": 0.5
+      "pairs": 10,
+      "upsr": 0.1,
+      "upwr": 0.4166666666666667
     },
     "scripted-punctuation-case": {
       "changed_pairs": 1,
@@ -190,12 +190,12 @@
       "upwr": 0.1111111111111111
     },
     "scripted-short-word-final": {
-      "changed_pairs": 3,
-      "changed_words": 8,
+      "changed_pairs": 2,
+      "changed_words": 7,
       "completed_words": 10,
-      "pairs": 15,
-      "upsr": 0.2,
-      "upwr": 0.8
+      "pairs": 13,
+      "upsr": 0.15384615384615385,
+      "upwr": 0.7
     },
     "scripted-silence-short-word": {
       "changed_pairs": 1,

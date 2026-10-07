@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::native::{native_clip_24khz, native_speech_service_with};
+use super::native::{native_clip_24khz, native_speech_service_with, recording_fallbacks};
 use super::{Socket, audio_samples, connect, server};
 
 const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REALTIME_CAPTURE";
@@ -47,12 +47,24 @@ type Sink = SplitSink<Socket, Message>;
 
 /// The server half of the socket and every event it delivered, stamped on
 /// arrival.
-struct Recorder {
+pub(super) struct Recorder {
     stream: SplitStream<Socket>,
     received: Vec<(Instant, Value)>,
 }
 
 impl Recorder {
+    pub(super) const fn new(stream: SplitStream<Socket>) -> Self {
+        Self {
+            stream,
+            received: Vec::new(),
+        }
+    }
+
+    /// Every event received, in arrival order.
+    pub(super) fn events(&self) -> impl Iterator<Item = &Value> {
+        self.received.iter().map(|(_, event)| event)
+    }
+
     /// Records the next server event, or returns `None` once the socket
     /// closes or stays idle past [`IDLE_TIMEOUT`].
     async fn next(&mut self) -> Option<Value> {
@@ -90,7 +102,7 @@ impl Recorder {
 
     /// Records events until the take completes or fails, the socket
     /// closes, or the route goes idle.
-    async fn until_result(mut self) -> Self {
+    pub(super) async fn until_result(mut self) -> Self {
         while let Some(event) = self.next().await {
             if event["type"] == COMPLETED || event["type"] == FAILED {
                 break;
@@ -99,7 +111,7 @@ impl Recorder {
         self
     }
 
-    fn completed(&self) -> Option<Value> {
+    pub(super) fn completed(&self) -> Option<Value> {
         self.received
             .iter()
             .find(|(_, event)| event["type"] == COMPLETED)
@@ -108,7 +120,7 @@ impl Recorder {
 }
 
 /// When the client sent its first and last appends and its commit.
-struct Schedule {
+pub(super) struct Schedule {
     first_append: Instant,
     last_append: Instant,
     commit: Instant,
@@ -121,7 +133,7 @@ async fn send(sink: &mut Sink, event: &Value) {
 }
 
 /// Requests hypotheses with ranges in the session update Workshop sends.
-async fn negotiate(sink: &mut Sink, recorder: &mut Recorder) {
+pub(super) async fn negotiate(sink: &mut Sink, recorder: &mut Recorder) {
     recorder.expect("session.created").await;
     send(
         sink,
@@ -150,7 +162,7 @@ async fn negotiate(sink: &mut Sink, recorder: &mut Recorder) {
 }
 
 /// Appends `clip` one chunk per [`CHUNK`] of wall time, then commits.
-async fn stream_and_commit(sink: &mut Sink, clip: &[i16]) -> Schedule {
+pub(super) async fn stream_and_commit(sink: &mut Sink, clip: &[i16]) -> Schedule {
     let first_append = Instant::now();
     let mut last_append = first_append;
     for (index, chunk) in (0_u32..).zip(clip.chunks(CHUNK_SAMPLES)) {
@@ -268,32 +280,35 @@ fn check_output(output: &Path) -> Result<(), String> {
 
 // The client paces and stamps on its own worker, apart from the route's
 // task, as a separate Workshop process would.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[test]
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
-async fn native_realtime_capture_records_every_server_event_at_real_time_pace() {
+fn native_realtime_capture_records_every_server_event_at_real_time_pace() {
     let output = std::env::var_os(CAPTURE_VARIABLE).map(PathBuf::from);
     if let Some(output) = &output {
         check_output(output).unwrap_or_else(|reason| panic!("{reason}"));
     }
     let clip = native_clip_24khz();
-    let service = native_speech_service_with("");
-    let server = server(true, &service).await;
-    let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
-        .await
-        .split();
-    let mut recorder = Recorder {
-        stream,
-        received: Vec::new(),
-    };
-    negotiate(&mut sink, &mut recorder).await;
-    let recording = tokio::spawn(recorder.until_result());
-    let schedule = stream_and_commit(&mut sink, &clip).await;
-    let recorder = recording.await.expect("the recorder joins");
-    sink.close().await.expect("socket closes");
-    server.shutdown().await;
-    tokio::task::spawn_blocking(move || service.shutdown())
-        .await
-        .expect("native shutdown thread joins");
+    let audio = clip.as_slice();
+    let (schedule, recorder) = recording_fallbacks(|fallbacks| async move {
+        let (service, cache) = native_speech_service_with("");
+        let server = server(true, &service).await;
+        let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
+            .await
+            .split();
+        let mut recorder = Recorder::new(stream);
+        negotiate(&mut sink, &mut recorder).await;
+        let recording = tokio::spawn(recorder.until_result());
+        let schedule = stream_and_commit(&mut sink, audio).await;
+        let recorder = recording.await.expect("the recorder joins");
+        sink.close().await.expect("socket closes");
+        server.shutdown().await;
+        tokio::task::spawn_blocking(move || service.shutdown())
+            .await
+            .expect("native shutdown thread joins");
+        drop(cache);
+        fallbacks.assert_none();
+        (schedule, recorder)
+    });
 
     if let Some(output) = &output {
         let capture = capture_json(&clip, &schedule, &recorder);

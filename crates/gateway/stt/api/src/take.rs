@@ -27,21 +27,14 @@ pub(crate) use fallback::FallbackReport;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, append_releasing, spawn_final_pipeline};
+#[cfg(test)]
+pub(crate) use interim::SPEECH_TAIL_SAMPLES;
 pub(crate) use interim::{FinalizedRange, InterimSnapshot};
 #[cfg(test)]
 use pcm::PcmBudgetProbe;
-use pcm::RetainedPcm;
 pub(crate) use state::TakeFailure;
 use state::TakeState;
 use window::WholeWindowState;
-
-#[derive(Debug)]
-pub(crate) struct InterimAudioWindow {
-    pub(crate) samples: RetainedPcm,
-    pub(crate) start: u64,
-    pub(crate) end: u64,
-    pub(crate) segment_start: u64,
-}
 
 #[cfg(feature = "test-fixtures")]
 pub(crate) struct TakeMetrics {
@@ -159,6 +152,7 @@ impl Take {
         }
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     fn consumed(&self) -> u64 {
         TakeState::lock(&self.state.segmenter).consumed()
     }
@@ -168,23 +162,6 @@ impl Take {
         let consumed = self.consumed();
         let buffer = TakeState::lock(&self.state.buffer);
         buffer.snapshot_from(consumed, window_samples)
-    }
-
-    pub(crate) fn interim_window(
-        &self,
-        window_samples: usize,
-    ) -> Result<InterimAudioWindow, AudioError> {
-        let segment_start = self.consumed();
-        let buffer = TakeState::lock(&self.state.buffer);
-        let end = buffer.end();
-        let start = segment_start
-            .max(end.saturating_sub(u64::try_from(window_samples).unwrap_or(u64::MAX)));
-        Ok(InterimAudioWindow {
-            samples: buffer.copy_range(start..end)?,
-            start,
-            end,
-            segment_start,
-        })
     }
 
     pub(crate) fn finalized(&self) -> String {

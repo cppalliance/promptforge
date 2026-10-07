@@ -38,7 +38,7 @@
       "agreed": "Okay listen",
       "tentative": " up.",
       "audio_start_ms": 0,
-      "audio_end_ms": 3500
+      "audio_end_ms": 3308
     },
     {
       "at_ms": 4200,
@@ -47,8 +47,8 @@
       "finalized": "Okay, listen up.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 3500,
-      "audio_end_ms": 3500
+      "audio_start_ms": 3308,
+      "audio_end_ms": 3308
     },
     {
       "at_ms": 7550,
@@ -62,47 +62,27 @@
     },
     {
       "at_ms": 8050,
-      "revision": 6,
+      "revision": 5,
       "transcript": "Okay, listen up. Hey",
       "finalized": "Okay, listen up.",
-      "agreed": " Hey",
-      "tentative": "",
+      "agreed": "",
+      "tentative": " Hey",
       "audio_start_ms": 3108,
-      "audio_end_ms": 8000
-    },
-    {
-      "at_ms": 8550,
-      "revision": 6,
-      "transcript": "Okay, listen up. Hey",
-      "finalized": "Okay, listen up.",
-      "agreed": " Hey",
-      "tentative": "",
-      "audio_start_ms": 3108,
-      "audio_end_ms": 8500
-    },
-    {
-      "at_ms": 9050,
-      "revision": 6,
-      "transcript": "Okay, listen up. Hey",
-      "finalized": "Okay, listen up.",
-      "agreed": " Hey",
-      "tentative": "",
-      "audio_start_ms": 3108,
-      "audio_end_ms": 9000
+      "audio_end_ms": 7756
     },
     {
       "at_ms": 9500,
-      "revision": 7,
+      "revision": 6,
       "transcript": "Okay, listen up. Hey.",
       "finalized": "Okay, listen up. Hey.",
       "agreed": "",
       "tentative": "",
-      "audio_start_ms": 9000,
-      "audio_end_ms": 9000
+      "audio_start_ms": 7756,
+      "audio_end_ms": 7756
     },
     {
       "at_ms": 11150,
-      "revision": 8,
+      "revision": 7,
       "transcript": "Okay, listen up. Hey. the commit rule",
       "finalized": "Okay, listen up. Hey.",
       "agreed": "",
@@ -112,7 +92,7 @@
     },
     {
       "at_ms": 12150,
-      "revision": 9,
+      "revision": 8,
       "transcript": "Okay, listen up. Hey. the commit rule needs two",
       "finalized": "Okay, listen up. Hey.",
       "agreed": " the commit rule",
@@ -122,7 +102,7 @@
     },
     {
       "at_ms": 13150,
-      "revision": 10,
+      "revision": 9,
       "transcript": "Okay, listen up. Hey. the commit rule needs two passes.",
       "finalized": "Okay, listen up. Hey.",
       "agreed": " the commit rule needs two",
@@ -132,7 +112,7 @@
     },
     {
       "at_ms": 13650,
-      "revision": 10,
+      "revision": 9,
       "transcript": "Okay, listen up. Hey. the commit rule needs two passes.",
       "finalized": "Okay, listen up. Hey.",
       "agreed": " the commit rule needs two",
@@ -142,7 +122,7 @@
     },
     {
       "at_ms": 14200,
-      "revision": 11,
+      "revision": 10,
       "transcript": "Okay, listen up. Hey. The commit rule needs two passes.",
       "finalized": "Okay, listen up. Hey. The commit rule needs two passes.",
       "agreed": "",

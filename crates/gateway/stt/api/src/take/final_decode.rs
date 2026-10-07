@@ -31,6 +31,8 @@ pub(super) async fn process_samples<D, F>(
     }
     let skipped = if samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES {
         Some(SkipReason::BelowFinalWindow)
+    } else if !heard_speech(state, &range) {
+        Some(SkipReason::NoSpeech)
     } else if EnginePolicy::is_silence(samples.samples()) {
         Some(SkipReason::Silence)
     } else {
@@ -57,6 +59,15 @@ pub(super) async fn process_samples<D, F>(
             process_natural(state, whole_window, guidance, decode, samples, range).await;
         }
     }
+}
+
+/// Whether the take's detector heard speech in `range`. Every final range
+/// either holds the speech run it closed on or runs to the buffer end, so
+/// speech ending after its start lies within it.
+fn heard_speech(state: &TakeState, range: &Range<u64>) -> bool {
+    TakeState::lock(&state.segmenter)
+        .speech_end()
+        .is_some_and(|end| end > range.start)
 }
 
 async fn process_natural<D, F>(

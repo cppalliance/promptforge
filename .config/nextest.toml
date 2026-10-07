@@ -28,3 +28,14 @@ threads-required = 4
 filter = 'package(gateway-stt-backend-whisper) | package(gateway-stt)'
 test-group = 'heavy'
 threads-required = 4
+
+# The ignored native realtime tests download and load the whisper runtime,
+# then stream every clip at real-time pace; the noise clips alone take
+# about three minutes, past the default 180 s termination.
+[[profile.default.overrides]]
+filter = 'package(gateway) & (test(/^realtime_stt::noise::/) | test(/^realtime_stt::capture::/))'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'package(gateway) & (test(/^realtime_stt::noise::/) | test(/^realtime_stt::capture::/))'
+slow-timeout = { period = "60s", terminate-after = 10 }

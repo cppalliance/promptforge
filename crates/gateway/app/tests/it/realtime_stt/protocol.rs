@@ -71,7 +71,7 @@ async fn realtime_stt_native_incremental() {
     ] {
         let _fixture = require_fixture(variable, &native_fixture_root(), name);
     }
-    let service = native_speech_service();
+    let (service, cache) = native_speech_service();
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
     expect_type(&mut socket, "session.created").await;
@@ -126,6 +126,7 @@ async fn realtime_stt_native_incremental() {
     tokio::task::spawn_blocking(move || service.shutdown())
         .await
         .expect("native shutdown thread joins");
+    drop(cache);
 }
 #[tokio::test]
 async fn mounted_route_drives_scripted_wire_ownership_errors_and_privacy() {

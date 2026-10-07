@@ -1,8 +1,8 @@
 //! Tests for sample-to-millisecond conversion at the u64 boundary, for
 //! hypothesis revisions that advance only when the emitted snapshot changes,
 //! for negotiated finalized range fields, for the append-only deltas a plain
-//! session receives during the take, and for the update a landed final sends
-//! without an interim decode.
+//! session receives during the take, for the update a landed final sends
+//! without an interim decode, and for interim decodes that follow speech.
 
 use std::ops::Range;
 
@@ -13,6 +13,9 @@ use serde_json::Value;
 use super::{InterimTaskOutput, Session, sample_millis};
 use crate::realtime::registry::SessionRegistry;
 use crate::realtime::session::InterimEpoch;
+
+#[path = "route-tests-interim.rs"]
+mod interim;
 
 const HYPOTHESIS: &str = "item.input_audio_transcription.hypothesis";
 const RANGES: &str = "item.input_audio_transcription.hypothesis.ranges";

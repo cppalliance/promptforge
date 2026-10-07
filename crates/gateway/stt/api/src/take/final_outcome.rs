@@ -11,6 +11,7 @@ use super::window::AcceptedHypothesis;
 pub(super) enum SkipReason {
     BelowSpeechThreshold,
     BelowFinalWindow,
+    NoSpeech,
     Silence,
     Released,
 }

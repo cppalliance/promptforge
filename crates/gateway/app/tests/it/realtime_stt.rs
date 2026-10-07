@@ -20,6 +20,7 @@ use crate::support::{PHASE_TIMEOUT, TestServer, send_within};
 
 mod capture;
 mod native;
+mod noise;
 
 use native::{
     assert_native_incremental_spans, native_clip_24khz, native_fixture_root, native_speech_service,

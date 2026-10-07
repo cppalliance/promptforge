@@ -312,4 +312,6 @@ fn record_skipped_segment(
 #[cfg(test)]
 mod short_tests;
 #[cfg(test)]
+mod speech_tests;
+#[cfg(test)]
 mod tests;

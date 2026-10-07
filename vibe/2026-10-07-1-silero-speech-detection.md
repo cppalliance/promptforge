@@ -203,6 +203,7 @@ Detector decisions get unit tests through a scripted detector, so every timing r
   - The meter's tooltip names the receiving agent and a click reveals it. User chose: "Tooltip names the receiving agent, and clicking the meter jumps to that agent."
   - The meter reads the PCM chunks the capture service already emits instead of adding an `AnalyserNode`, because a history of 100 ms moments needs no finer timing.
   - Silero detection runs inline on the session task. Rationale: single 512-sample `detect_chunk` calls measured p50 131 to 132 µs and p99 140 to 158 µs over three runs of 2,198 chunks of `dictation-01.wav` (slowest call 741 µs), about six times under the 1 ms budget. Measured on an AMD Ryzen Threadripper PRO 9995WX (AVX2), Windows build 26200, whisper.cpp `b4938` CUDA DLL with VAD forced to one CPU thread, unoptimized test profile, tracing log bridge installed. Slower CPUs are unmeasured.
+  - Final decodes skip ranges with no detector speech, including the commit-time flush. Rationale: this was deferred until a capture showed final decodes of noise, and during Step 10 the gateway-level noise test did: with Silero classifying no chunk of a 29.9 s DEMAND kitchen clip as speech, the commit flush sent the whole take to small.en, which invented "Okay." and, on repeat runs, other sentences. Interim gating held; only the flush leaked. Pulled into Step 10 by the vibe coder because the trigger fired and the change serves the first success criterion; it is cheap to reverse.
 - Rejected alternatives:
   - The `whisper_full` VAD flag on interim decodes. Reason: it strips the trailing pause Whisper needs for punctuation, reruns detection on every call, and does not touch endpointing. Revisit if the standalone detector leaves invented text inside decoded windows.
   - WebRTC VAD. Reason: best MCC of 0.41 (https://arxiv.org/abs/2601.17270), and it accepted every noise-only ESC-50 file as speech (https://github.com/snakers4/silero-vad/wiki/Quality-Metrics).
@@ -224,7 +225,6 @@ Detector decisions get unit tests through a scripted detector, so every timing r
 ### Deferred and Out of Scope
 
 - Deferred: starting interim windows at detected speech boundaries instead of token timestamps. Revisit after this plan lands, gated on a fresh native capture meeting UPWR.
-- Deferred: skipping final decodes for segments Silero marks as non-speech. Revisit if the capture shows final decodes of noise.
 - Deferred: tinting the meter when the gateway's detector hears speech. It needs a new wire field; revisit after this plan lands.
 - Deferred: Earshot (pure Rust, MIT or Apache-2.0, about 95 KiB, about 5 microseconds per frame, https://github.com/pykeio/earshot/tree/ffd32d426f556c55a8c84490c12745743ee4bd79; one independent test put its error rate at 26.5 against Silero's 23.9 percent, https://github.com/ekhodzitsky/polyvoice/blob/e35db215/benchmarks/results/earshot-vad-notes.md) as the fallback instead of the loudness rule. Revisit if fallback sessions prove common.
 - Deferred: fuzzy near-repeat matching in the echo trim (the line 8 copies differed by one word). Revisit if near-repeats still show after the speech tail ends interim windows.
@@ -505,7 +505,7 @@ flowchart TD
 
 <step-10>
 
-### Step 10: Speech-aware interim windows and decode skipping
+### Step 10: Speech-aware interim windows and decode skipping [completed]
 
 - Component: Interim decoding
 - Piece: interim gating
@@ -514,10 +514,14 @@ flowchart TD
   - `crates/gateway/stt/api/src/realtime/session/route.rs` `Session::schedule_interim`: drop the whole-window `EnginePolicy::is_silence` check. Skip the decode when the new window's end has not moved past the last decoded window's end, kept in `realtime/session/state.rs`. This applies the spec's "no speech chunk has ended since the last decoded window end" so that a tail cut short by the buffer end is decoded once more when it completes.
   - Hypothesis `audio_end_ms` keeps reporting the window end, which is now speech end plus tail.
   - The whisper backend's silence check on decode buffers (`crates/gateway/stt/backend-whisper/src/model.rs`) and the final pass's check in `take/final_decode.rs` stay.
+  - Final decodes skip ranges with no detector speech (Decision Record): a final decode whose sample range holds no speech run the take's detector recorded is not sent to the model and settles with no text. This covers the commit-time flush of the remaining buffer (the commit branch of `run_final_pipeline` through `process_samples`), which today decodes a whole speechless take. The loudness checks above stay as a second gate; under the loudness fallback the recorded runs are loudness runs, so fallback behavior is unchanged.
 - Tests:
+  - Final-decode gating: a commit over a take whose detector recorded no speech decodes nothing and emits no final text; a commit over a take with a scripted speech run still decodes it; a fallback take decodes as before.
   - Window tests: the end sits at speech end plus tail, capped at the buffer end, with the start clamped to the segment.
   - `realtime/session/route-tests.rs`: decodes run while speech continues, one more runs when a partial tail completes, then decodes stop through silence and resume with new speech. Hypothesis `audio_end_ms` equals the window end.
-  - An ignored gateway-level test, `crates/gateway/app/tests/it/realtime_stt/noise.rs` (new), streams each clip in `PROMPTFORGE_NOISE_CLIPS` and asserts no hypothesis or final text.
+  - An ignored gateway-level test, `crates/gateway/app/tests/it/realtime_stt/noise.rs` (new), streams each `.wav` clip in the directory `PROMPTFORGE_NOISE_CLIPS` names (the same directory, read the same way, as Step 7's `native_silero.rs`) and asserts no hypothesis or final text.
+  - Native gateway fixture prerequisite: `native_speech_service_with` in `crates/gateway/app/tests/it/realtime_stt/native.rs` builds the service's `[local] cache_dir` in a `tempfile::TempDir` that is dropped as soon as loading finishes, so every take's Silero init later fails to open the model and the take falls back to loudness. Return the `TempDir` with the service and hold it in every caller (the capture, noise, and incremental-span tests) until the service shuts down. Make the gateway-level capture and noise tests fail when any take reports a loudness fallback, so a run on the fallback can never pass as a Silero measurement.
+  - `.config/nextest.toml`: a `slow-timeout` override for the ignored native realtime tests (`realtime_stt::noise::` and `realtime_stt::capture::` in package `gateway`) long enough for real-time streaming of every clip plus startup; the default terminates at 180 s and the noise test takes about 178 s.
   - Regenerate replays; Miri for `gateway-stt` in WSL; gateway app suite.
 - Commit: `End interim windows at speech plus tail and skip silent decodes`
 

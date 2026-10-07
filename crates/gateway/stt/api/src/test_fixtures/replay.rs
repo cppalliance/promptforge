@@ -132,8 +132,8 @@ impl ReplayTake {
         let Some([request]) = requests.get(self.interim_decodes..) else {
             return Err(diverged(
                 at_ms,
-                "the take did not decode the tick's window; it skips a window that is silent, \
-                 shorter than 0.5 s, or identical to the previous one",
+                "the take did not decode the tick's window; it skips a window shorter than \
+                 0.5 s or one ending no later than the last decoded window",
             ));
         };
         self.interim_decodes += 1;

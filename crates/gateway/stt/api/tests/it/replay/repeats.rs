@@ -73,7 +73,7 @@ async fn a_short_phrase_after_a_sentence_is_never_cut_as_an_echo_of_its_words() 
             {"at_ms": 2_150, "audio_start_ms": 0, "audio_end_ms": 2_000, "transcript": "Can you check whether the gateway is running?"},
             {"at_ms": 2_650, "audio_start_ms": 0, "audio_end_ms": 2_500, "transcript": "Can you check whether the gateway is running?"},
             {"at_ms": 4_150, "audio_start_ms": 2_628, "audio_end_ms": 4_000, "transcript": "Thank you."},
-            {"at_ms": 4_650, "audio_start_ms": 2_628, "audio_end_ms": 4_500, "transcript": "Thank you."}
+            {"at_ms": 4_650, "audio_start_ms": 2_628, "audio_end_ms": 4_396, "transcript": "Thank you."}
         ],
         "finals": [
             {"at_ms": 3_300, "sample_start": 0, "sample_end": 42_048, "text": "Can you check whether the gateway is running?"},
@@ -93,12 +93,13 @@ async fn a_short_phrase_after_a_sentence_is_never_cut_as_an_echo_of_its_words() 
 
 async fn repeated_word(speech_end: u64, final_text: &str) -> ReplayOutcome {
     let final_end = speech_end.next_multiple_of(512) + 1_600;
+    let speech_tail_ms = (speech_end.next_multiple_of(512) + 4_800) / 16;
     ReplayTake::run(&script(serde_json::json!({
         "speech_samples": [[0, speech_end]],
         "ticks": [
             {"at_ms": 1_150, "audio_start_ms": 0, "audio_end_ms": 1_000, "transcript": "create a"},
             {"at_ms": 1_650, "audio_start_ms": 0, "audio_end_ms": 1_500, "transcript": "create a plan."},
-            {"at_ms": 2_050, "audio_start_ms": 0, "audio_end_ms": 2_000, "transcript": "create a plan. Plan."}
+            {"at_ms": 2_050, "audio_start_ms": 0, "audio_end_ms": speech_tail_ms.min(2_000), "transcript": "create a plan. Plan."}
         ],
         "finals": [
             {"at_ms": 3_200, "sample_start": 0, "sample_end": final_end, "text": final_text},

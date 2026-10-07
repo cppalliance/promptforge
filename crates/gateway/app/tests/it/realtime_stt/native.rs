@@ -1,14 +1,24 @@
 //! Native whisper fixture: the workspace-local fixture root, the clip at
-//! 24 kHz, the packaged native speech service, and its incremental-span checks.
+//! 24 kHz, the packaged native speech service, the loudness fallbacks it
+//! reports, and its incremental-span checks.
 
+use std::cell::Cell;
+use std::fmt::Write as _;
+use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use gateway::Config;
 use gateway_stt::SpeechService;
 use gateway_stt::test_fixtures::native::{
     fixture_final_model, fixture_whisper_backend, require_fixture,
 };
+use tempfile::TempDir;
+use tracing::Dispatch;
+use tracing::dispatcher::DefaultGuard;
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::{Context, SubscriberExt as _};
 
 /// The `[stt]` tuning the incremental-span checks expect: a four-second
 /// window, so the JFK clip slides within its eleven seconds.
@@ -29,12 +39,17 @@ fn gateway_native_realtime_keeps_its_workspace_local_fixture_root() {
 /// The 16 kHz mono 16-bit clip `PROMPTFORGE_WHISPER_AUDIO` names, or
 /// `jfk.wav`, upsampled to the 24 kHz wire rate.
 pub(super) fn native_clip_24khz() -> Vec<i16> {
-    let path = require_fixture(
+    clip_24khz(&require_fixture(
         "PROMPTFORGE_WHISPER_AUDIO",
         &native_fixture_root(),
         "jfk.wav",
-    );
-    let mut reader = hound::WavReader::open(path).expect("native clip opens");
+    ))
+}
+
+/// The 16 kHz mono 16-bit clip at `path`, upsampled to the 24 kHz wire rate.
+pub(super) fn clip_24khz(path: &Path) -> Vec<i16> {
+    let mut reader = hound::WavReader::open(path)
+        .unwrap_or_else(|error| panic!("{} opens: {error}", path.display()));
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000, "native clip must be 16 kHz");
     assert_eq!(spec.channels, 1, "native clip must be mono");
@@ -54,14 +69,17 @@ pub(super) fn native_clip_24khz() -> Vec<i16> {
     resampled
 }
 
-pub(super) fn native_speech_service() -> SpeechService {
+pub(super) fn native_speech_service() -> (SpeechService, TempDir) {
     native_speech_service_with(INCREMENTAL_TUNING)
 }
 
 /// The packaged speech service under a real interim and final
 /// `[[stt_model]]` pair, with `tuning` as the `[stt]` keys beside the
-/// whisper backend; empty tuning keeps the gateway defaults.
-pub(super) fn native_speech_service_with(tuning: &str) -> SpeechService {
+/// whisper backend; empty tuning keeps the gateway defaults. Also returns
+/// the temporary `[local] cache_dir` the service provisions into, which the
+/// caller holds until the service shuts down: each take opens the Silero
+/// model from it. The load logs to the caller's default subscriber.
+pub(super) fn native_speech_service_with(tuning: &str) -> (SpeechService, TempDir) {
     let model = require_fixture(
         "PROMPTFORGE_WHISPER_MODEL",
         &native_fixture_root(),
@@ -72,13 +90,15 @@ pub(super) fn native_speech_service_with(tuning: &str) -> SpeechService {
         [model, final_model].map(|path| path.display().to_string().replace('\\', "/"));
     let whisper_backend = fixture_whisper_backend();
     let tuning = tuning.to_owned();
+    let dispatch = tracing::dispatcher::get_default(Dispatch::clone);
     std::thread::spawn(move || {
+        let _logging = tracing::dispatcher::set_default(&dispatch);
         let cache = tempfile::tempdir().expect("native test cache creates");
-        let cache = cache.path().display().to_string().replace('\\', "/");
+        let cache_dir = cache.path().display().to_string().replace('\\', "/");
         let catalog = Config::from_toml_str(&format!(
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [local]\ncache_dir = {cache:?}\n\
+             [local]\ncache_dir = {cache_dir:?}\n\
              [stt]\n{tuning}whisper_backend = {whisper_backend:?}\n\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {model:?}\nvram_gb = 1.0\n\
              [[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {final_model:?}\nvram_gb = 1.0\n\
@@ -94,10 +114,91 @@ pub(super) fn native_speech_service_with(tuning: &str) -> SpeechService {
         service
             .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
             .expect("the native speech engine loads");
-        service
+        (service, cache)
     })
     .join()
     .expect("native startup thread joins")
+}
+
+thread_local! {
+    static RECORDING: Cell<Option<DefaultGuard>> = const { Cell::new(None) };
+}
+
+/// Runs `test` on a two-worker runtime, handing it the loudness fallbacks
+/// the speech service reports. Takes start on the runtime's threads, and the
+/// workspace keeps process-global subscribers to binaries, so every runtime
+/// thread and the calling thread record into their own default subscriber.
+pub(super) fn recording_fallbacks<F, T>(test: impl FnOnce(LoudnessFallbacks) -> F) -> T
+where
+    F: Future<Output = T>,
+{
+    let fallbacks = LoudnessFallbacks::default();
+    let dispatch = Dispatch::new(tracing_subscriber::registry().with(fallbacks.clone()));
+    let started = dispatch.clone();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .on_thread_start(move || RECORDING.set(Some(tracing::dispatcher::set_default(&started))))
+        .on_thread_stop(|| drop(RECORDING.take()))
+        .build()
+        .expect("the test runtime builds");
+    tracing::dispatcher::with_default(&dispatch, || runtime.block_on(test(fallbacks)))
+}
+
+/// Every speech service warning that speech detection uses loudness: a
+/// take's Silero load or inference failure, or a generation's Silero model
+/// that could not be provisioned.
+#[derive(Clone, Debug, Default)]
+pub(super) struct LoudnessFallbacks(Arc<Mutex<Vec<String>>>);
+
+impl LoudnessFallbacks {
+    /// Fails when the speech service reported a fallback, so a run on
+    /// loudness never passes as a Silero measurement.
+    pub(super) fn assert_none(&self) {
+        let reported = std::mem::take(&mut *self.reported());
+        assert!(
+            reported.is_empty(),
+            "the run detected speech by loudness, not Silero:\n{}",
+            reported.join("\n")
+        );
+    }
+
+    fn reported(&self) -> MutexGuard<'_, Vec<String>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl<S: tracing::Subscriber> Layer<S> for LoudnessFallbacks {
+    fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
+        let metadata = event.metadata();
+        if *metadata.level() != tracing::Level::WARN
+            || !metadata.target().starts_with("gateway_stt")
+        {
+            return;
+        }
+        let mut fields = Fields::default();
+        event.record(&mut fields);
+        if fields.0.contains("loudness") {
+            self.reported().push(fields.0);
+        }
+    }
+}
+
+/// One event's fields as `name=value`, the message bare.
+#[derive(Default)]
+struct Fields(String);
+
+impl tracing::field::Visit for Fields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if !self.0.is_empty() {
+            self.0.push(' ');
+        }
+        if field.name() != "message" {
+            self.0.push_str(field.name());
+            self.0.push('=');
+        }
+        write!(self.0, "{value:?}").expect("writing to String is infallible");
+    }
 }
 
 pub(super) fn assert_native_incremental_spans(spans: &[(u64, u64, String)]) {

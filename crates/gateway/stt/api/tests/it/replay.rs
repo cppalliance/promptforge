@@ -246,7 +246,7 @@ fn sentence_then_silence(finals: &Value) -> ReplayScript {
         "ticks": [
             {"at_ms": 2_650, "audio_start_ms": 0, "audio_end_ms": 2_500, "transcript": "ask not"},
             {"at_ms": 3_150, "audio_start_ms": 0, "audio_end_ms": 3_000, "transcript": "ask not what you can do."},
-            {"at_ms": 3_550, "audio_start_ms": 0, "audio_end_ms": 3_500, "transcript": "ask not what you can do."}
+            {"at_ms": 3_550, "audio_start_ms": 0, "audio_end_ms": 3_308, "transcript": "ask not what you can do."}
         ],
         "finals": finals
     }))
@@ -277,7 +277,7 @@ async fn replay_completes_a_short_word_once_when_a_silent_commit_follows_its_fin
         {"at_ms": 10_500, "sample_start": 137_280, "sample_end": 168_000, "text": ""}
     ]));
     script.ticks.extend(
-        [(8_350, 8_300), (8_850, 8_800)].map(|(at_ms, audio_end_ms)| ReplayTick {
+        [(8_350, 8_300), (8_850, 8_780)].map(|(at_ms, audio_end_ms)| ReplayTick {
             at_ms,
             audio_start_ms: 3_108,
             audio_end_ms,

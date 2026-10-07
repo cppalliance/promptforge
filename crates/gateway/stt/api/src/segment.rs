@@ -126,6 +126,12 @@ impl Segmenter {
         self.cursor
     }
 
+    /// End of the latest frame the detector read as speech, or `None`
+    /// before it has read any.
+    pub(crate) fn speech_end(&self) -> Option<u64> {
+        (self.speech_end > 0).then_some(self.speech_end)
+    }
+
     /// What the detector heard before `end`, or `None` while a whole frame
     /// before `end` is unclassified.
     pub(crate) fn speech_before(&self, end: u64) -> Option<SpeechBefore> {

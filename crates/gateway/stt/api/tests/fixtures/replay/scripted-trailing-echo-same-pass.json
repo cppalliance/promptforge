@@ -4,7 +4,7 @@
     {"at_ms": 1150, "audio_start_ms": 0, "audio_end_ms": 1000, "transcript": "Okay listen up"},
     {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "Okay listen up this is"},
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Okay listen up this is what I want."},
-    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "Okay listen up this is what I want."},
+    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3308, "transcript": "Okay listen up this is what I want."},
     {"at_ms": 4450, "audio_start_ms": 3108, "audio_end_ms": 4300, "transcript": "I want you"},
     {"at_ms": 4950, "audio_start_ms": 3108, "audio_end_ms": 4800, "transcript": "I want you to create"},
     {"at_ms": 5450, "audio_start_ms": 3108, "audio_end_ms": 5300, "transcript": "I want you to create a"},

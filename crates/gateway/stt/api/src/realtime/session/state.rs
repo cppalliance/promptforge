@@ -79,7 +79,9 @@ pub(crate) struct Session {
     pub(super) current_epoch: Option<InterimEpoch>,
     pub(super) next_epoch: u64,
     pub(super) interim_task: Option<InterimTask>,
-    pub(super) last_interim_window: Option<(u64, u64, u64)>,
+    /// End of the latest interim window submitted for decoding. Window ends
+    /// only move forward, so a window ending no later holds no new speech.
+    pub(super) last_interim_end: Option<u64>,
     pub(super) canceled_tasks: Vec<InterimTask>,
     pub(super) canceled_task_failed: bool,
     pub(super) committed: HashMap<String, CommittedItem>,
@@ -112,7 +114,7 @@ impl Session {
             current_epoch: None,
             next_epoch: 1,
             interim_task: None,
-            last_interim_window: None,
+            last_interim_end: None,
             canceled_tasks: Vec::with_capacity(SESSION_CANCEL_JOIN_CAPACITY),
             canceled_task_failed: false,
             committed: HashMap::with_capacity(MAX_COMMITTED_ITEMS_PER_SESSION),
