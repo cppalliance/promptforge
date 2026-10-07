@@ -9,10 +9,9 @@ const LOG_PROBABILITY_THRESHOLD: f32 = -1.0;
 /// common in real speech.
 const LOOP_COPIES: usize = 3;
 /// Whole hypotheses whisper emits for silence or noise, in compared form.
-const SILENCE_HALLUCINATIONS: [&str; 6] = [
-    "you",
-    "bye",
-    "thank you",
+/// Short phrases people often say, such as "thank you", "you", and "bye",
+/// stay out, so a spoken one shows during the take.
+const SILENCE_HALLUCINATIONS: [&str; 3] = [
     "please subscribe",
     "thanks for watching",
     "thank you for watching",
@@ -308,9 +307,8 @@ mod tests {
     #[test]
     fn a_hypothesis_of_only_a_listed_silence_phrase_is_vetoed() {
         for text in [
-            "Thank you.",
             "Thanks for watching!",
-            "you",
+            "Thank you for watching.",
             "Please subscribe.",
         ] {
             assert_eq!(guard_interim(text, confident()), "", "{text} vetoes");
@@ -318,8 +316,18 @@ mod tests {
     }
 
     #[test]
+    fn short_phrases_people_often_say_are_kept_alone() {
+        for text in ["Thank you.", "you", "Bye.", "Thank you. Thank you."] {
+            assert_eq!(guard_interim(text, confident()), text, "{text} stays");
+        }
+    }
+
+    #[test]
     fn a_listed_phrase_inside_longer_speech_is_kept() {
-        for text in ["Thank you for coming.", "and you", "Thank you. Thank you."] {
+        for text in [
+            "Thanks for watching the demo with me.",
+            "please subscribe to the feed",
+        ] {
             assert_eq!(guard_interim(text, confident()), text, "{text} stays");
         }
     }
@@ -327,7 +335,10 @@ mod tests {
     #[test]
     fn a_looped_silence_phrase_collapses_and_then_vetoes() {
         assert_eq!(
-            guard_interim("Thank you. Thank you. Thank you.", confident()),
+            guard_interim(
+                "Thanks for watching. Thanks for watching. Thanks for watching.",
+                confident()
+            ),
             ""
         );
     }
