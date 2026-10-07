@@ -1,0 +1,105 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "Okay listen up",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "Okay listen up",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 2150,
+      "revision": 2,
+      "transcript": "Okay listen up this is",
+      "finalized": "",
+      "agreed": "Okay listen up",
+      "tentative": " this is",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 3150,
+      "revision": 3,
+      "transcript": "Okay listen up this is what I want.",
+      "finalized": "",
+      "agreed": "Okay listen up this is",
+      "tentative": " what I want.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3550,
+      "revision": 4,
+      "transcript": "Okay listen up this is what I want.",
+      "finalized": "",
+      "agreed": "Okay listen up this is what I",
+      "tentative": " want.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 4200,
+      "revision": 5,
+      "transcript": "Okay listen up this is what I want.",
+      "finalized": "Okay listen up this is what I want.",
+      "agreed": "",
+      "tentative": "",
+      "audio_start_ms": 3500,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 4650,
+      "revision": 6,
+      "transcript": "Okay listen up this is what I want. I want you to",
+      "finalized": "Okay listen up this is what I want.",
+      "agreed": "",
+      "tentative": " I want you to",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 4500
+    },
+    {
+      "at_ms": 5150,
+      "revision": 7,
+      "transcript": "Okay listen up this is what I want. I want you to create",
+      "finalized": "Okay listen up this is what I want.",
+      "agreed": " I want you to",
+      "tentative": " create",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 5000
+    },
+    {
+      "at_ms": 5650,
+      "revision": 8,
+      "transcript": "Okay listen up this is what I want. I want you to create a plan.",
+      "finalized": "Okay listen up this is what I want.",
+      "agreed": " I want you to create",
+      "tentative": " a plan.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 5500
+    },
+    {
+      "at_ms": 6150,
+      "revision": 9,
+      "transcript": "Okay listen up this is what I want. I want you to create a plan. I want you to create",
+      "finalized": "Okay listen up this is what I want.",
+      "agreed": " I want you to create a plan.",
+      "tentative": " I want you to create",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 6000
+    },
+    {
+      "at_ms": 6800,
+      "revision": 10,
+      "transcript": "Okay listen up this is what I want. I want you to create a plan.",
+      "finalized": "Okay listen up this is what I want. I want you to create a plan.",
+      "agreed": "",
+      "tentative": "",
+      "audio_start_ms": 6000,
+      "audio_end_ms": 6000
+    }
+  ],
+  "completed": "Okay listen up this is what I want. I want you to create a plan."
+}

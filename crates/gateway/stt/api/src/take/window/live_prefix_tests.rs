@@ -106,7 +106,7 @@ fn every_forced_stride_keeps_the_complete_visible_prefix() {
         };
         let snapshot = state
             .try_next(
-                &prefix("settled", 1, owned_pending),
+                &prefix("settled", 0, owned_pending),
                 pending_end,
                 pending_end,
                 pending_end + 16_000,

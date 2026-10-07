@@ -266,6 +266,8 @@ mod tests {
 
     use tokio::sync::{mpsc, oneshot};
 
+    use super::final_outcome::{FinalRangeOutcome, SkipReason};
+    use super::window::ShownHypotheses;
     use super::{FinalCommand, FinalSegmentOwner, Take, TakeFailure, run_final_pipeline};
 
     #[test]
@@ -345,6 +347,43 @@ mod tests {
         take.next_window_snapshot("What your country can do.", &[], 16_000, 16_000, 32_000)
             .expect("the open segment's hypothesis is accepted");
         assert!(sentence_end_hinted(&take));
+    }
+
+    #[test]
+    fn a_late_decode_of_a_window_a_final_already_covers_shows_nothing() {
+        let take = Take::without_final(Vec::new());
+        take.next_window_snapshot("ask not what", &[], 0, 0, 16_000)
+            .expect("the first hypothesis is accepted");
+        take.record_finalized_through("Ask not what.", Some(12_000));
+
+        assert_eq!(
+            take.next_window_snapshot("ask not what", &[], 0, 0, 20_000),
+            None,
+            "a window that starts inside settled text would show its words again"
+        );
+        assert!(
+            take.next_window_snapshot("you can", &[], 12_000, 12_000, 28_000)
+                .is_some(),
+            "a window from the final's end is decoded as before"
+        );
+    }
+
+    #[test]
+    fn a_late_decode_over_audio_skipped_without_text_is_still_accepted() {
+        let take = Take::without_final(Vec::new());
+        take.next_window_snapshot("Hey.", &[], 0, 0, 16_000)
+            .expect("the first hypothesis is accepted");
+        take.state.record_final_outcome(
+            FinalRangeOutcome::skipped(0..12_000, SkipReason::BelowSpeechThreshold),
+            &[],
+            &ShownHypotheses::default(),
+        );
+
+        assert!(
+            take.next_window_snapshot("Hey.", &[], 0, 0, 20_000)
+                .is_some(),
+            "no settled text holds the skipped word yet"
+        );
     }
 
     #[test]

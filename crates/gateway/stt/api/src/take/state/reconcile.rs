@@ -1,7 +1,7 @@
 //! Aligned rewrite of a natural final over the interim text it replaces.
 
 use super::FinalizedState;
-use crate::take::agreement::{anchored_final_end, token_spans};
+use crate::take::agreement::{anchored_final_end, normalized_token, token_spans};
 use crate::take::live_prefix::AnchoredSuffix;
 use crate::take::text::append_transcript;
 use crate::take::window::ShownHypotheses;
@@ -24,7 +24,25 @@ pub(super) fn rewrite_natural(
     state.samples = range_end;
     state.transcribed_samples = range_end;
     state.anchored = anchored_final_end(text, &displayed, SUFFIX_ANCHOR_TOKENS)
-        .and_then(|end| anchored_suffix(&displayed, end, agreed_end));
+        .and_then(|end| anchored_suffix(&displayed, end, agreed_end))
+        .filter(|suffix| !repeats_final(text, suffix.text()));
+}
+
+/// Whether every word of `suffix`, in order, repeats a run of words in
+/// `final_text`: the fast pass echoing audio the final covers, which it
+/// often decodes from trailing silence, rather than speech after the final.
+fn repeats_final(final_text: &str, suffix: &str) -> bool {
+    let words = |text: &str| {
+        token_spans(text)
+            .into_iter()
+            .map(|(token, _, _)| normalized_token(token))
+            .collect::<Vec<_>>()
+    };
+    let echoed = words(suffix);
+    !echoed.is_empty()
+        && words(final_text)
+            .windows(echoed.len())
+            .any(|run| run == echoed.as_slice())
 }
 
 /// The first `MAX_ANCHORED_SUFFIX_WORDS` words of `displayed` after byte

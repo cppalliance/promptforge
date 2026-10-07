@@ -250,6 +250,23 @@ fn a_refresh_after_an_unanchored_final_shows_only_the_finalized_text() {
 }
 
 #[test]
+fn displayed_words_that_only_repeat_the_final_are_not_kept_after_it() {
+    let rewrite = rewrite(&["ask not what your country ask not what your"], FINALIZED);
+
+    assert_eq!(rewrite.state.live_prefix_snapshot().anchored(), None);
+    assert_eq!(
+        rewrite.refresh(),
+        parts("", ""),
+        "the echo the fast pass decoded from trailing silence leaves with the final"
+    );
+    assert_eq!(
+        rewrite.next(1, "for you"),
+        parts("", " for you"),
+        "the next fast pass does not bring the echo back"
+    );
+}
+
+#[test]
 fn a_refresh_after_a_skip_without_text_keeps_the_word_shown_and_accepted() {
     let rewrite = rewrite(&["ask not what your country"], FINALIZED);
     assert_eq!(rewrite.next(3, "Hey."), parts("", " Hey."));

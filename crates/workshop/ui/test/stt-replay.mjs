@@ -272,6 +272,19 @@ test("a final that lands in silence shows the last word and its period before th
   assert.equal(rendered[beforeNextWord], "About one tick faster than the plan's 0.6 seconds.");
 });
 
+test("a final shows no tentative echo of the words it covers", () => {
+  const outcome = readJson("scripted-trailing-echo.snapshots.json");
+  const rendered = render(outcome);
+  const landed = outcome.snapshots.findIndex((snapshot) =>
+    snapshot.finalized.endsWith("create a plan."),
+  );
+  assert.ok(landed >= 0, "the fixture's second final lands before the commit");
+  assert.equal(
+    rendered[landed],
+    "Okay listen up this is what I want. I want you to create a plan.",
+  );
+});
+
 test("rendered UPWR and UPSR count earlier editor words after the exact common prefix", () => {
   assert.deepEqual(
     renderedMetrics(["ask not", "Ask not what", "Ask not, what your", "Ask not, what your country"]),

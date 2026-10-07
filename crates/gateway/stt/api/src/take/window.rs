@@ -120,6 +120,11 @@ impl WholeWindowState {
         window_end: u64,
         hypothesis: &str,
     ) -> Result<Option<InterimSnapshot>, AcceptedHypothesisCapacity> {
+        // A window that starts inside settled or pending forced text was
+        // decoded before that final landed, so its words would show again.
+        if window_start < live_prefix.text_end() {
+            return Ok(None);
+        }
         let coverage_end = live_prefix.coverage_end();
         self.pending
             .retain(|accepted| accepted.range.start >= coverage_end);
