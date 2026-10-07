@@ -1,6 +1,6 @@
 //! Tests for activation by service id: a need is met only by a provider
-//! under the id with the id's type, and an unmet need refuses a required
-//! Plugin or records a gap for an optional one, naming the id.
+//! under the id with the id's type, and an unmet need refuses the
+//! declared Plugin, naming the id.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +9,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::plugins::PluginId;
 use promptforge::{MissingService, Prompt};
 
-use super::{Activation, ServiceGap, activate};
+use super::{Activation, activate};
 use crate::{
     Contribution, Plugin, PluginError, PluginRegistry, RunServices, ServiceId, ServiceKey,
 };
@@ -79,20 +79,12 @@ fn with_wrong_typed_clock() -> RunServices {
     services
 }
 
-/// Activates a prompt declaring `timed`, optional when `optional`
-/// is set, under `services`. Returns the activation and how many times
-/// the fixture's `create` ran.
-fn activate_timed(optional: bool, services: &RunServices) -> (Activation, usize) {
-    let declaration = if optional {
-        "  - ref: timed\n    optional: true\n"
-    } else {
-        "  - timed\n"
-    };
-    let source = format!(
-        "---\nname: timed\ndescription: d\npromptforge: 0\nplugins:\n{declaration}---\n\n\
-         # Title\n\n## Only\n\nDone.\n"
-    );
-    let prompt = Prompt::parse(&source, "timed")
+/// Activates a prompt declaring `timed` under `services`. Returns the
+/// activation and how many times the fixture's `create` ran.
+fn activate_timed(services: &RunServices) -> (Activation, usize) {
+    let source = "---\nname: timed\ndescription: d\npromptforge: 0\nplugins:\n  - timed\n---\n\n\
+         # Title\n\n## Only\n\nDone.\n";
+    let prompt = Prompt::parse(source, "timed")
         .0
         .expect("the fixture prompt parses");
     let creates = Arc::new(AtomicUsize::new(0));
@@ -107,57 +99,29 @@ fn activate_timed(optional: bool, services: &RunServices) -> (Activation, usize)
     (activation, creates.load(Ordering::SeqCst))
 }
 
-/// The refusal a required `timed` gets without its clock.
+/// The refusal `timed` gets without its clock.
 fn clock_refusal() -> [MissingService; 1] {
     [MissingService::new(timed_id(), "acme/clock")]
 }
 
-/// The gap an optional `timed` records without its clock.
-fn clock_gap() -> [ServiceGap; 1] {
-    [ServiceGap {
-        plugin: timed_id(),
-        service: CLOCK.id(),
-    }]
-}
-
 #[test]
 fn a_provider_of_the_needed_type_satisfies_the_need() {
-    for optional in [false, true] {
-        let (activation, creates) = activate_timed(optional, &with_clock());
-        assert_eq!(creates, 1, "optional {optional}: create ran once");
-        assert!(activation.requirements.is_satisfied());
-        assert!(activation.service_gaps.is_empty());
-    }
+    let (activation, creates) = activate_timed(&with_clock());
+    assert_eq!(creates, 1, "create ran once");
+    assert!(activation.requirements.is_satisfied());
 }
 
 #[test]
-fn a_required_plugin_without_its_service_is_refused_naming_the_id() {
-    let (activation, creates) = activate_timed(false, &bare());
+fn a_plugin_without_its_service_is_refused_naming_the_id() {
+    let (activation, creates) = activate_timed(&bare());
     assert_eq!(creates, 0, "activation refuses before create runs");
     assert_eq!(activation.requirements.missing_services, clock_refusal());
     assert!(activation.requirements.missing_required.is_empty());
-    assert!(activation.service_gaps.is_empty());
 }
 
 #[test]
-fn an_optional_plugin_without_its_service_records_a_gap_naming_the_id() {
-    let (activation, creates) = activate_timed(true, &bare());
-    assert_eq!(creates, 1, "an optional Plugin still activates");
-    assert!(activation.requirements.is_satisfied());
-    assert_eq!(activation.service_gaps, clock_gap());
-}
-
-#[test]
-fn a_wrong_typed_provider_counts_as_missing_for_a_required_plugin() {
-    let (activation, creates) = activate_timed(false, &with_wrong_typed_clock());
+fn a_wrong_typed_provider_counts_as_missing() {
+    let (activation, creates) = activate_timed(&with_wrong_typed_clock());
     assert_eq!(creates, 0, "activation refuses before create runs");
     assert_eq!(activation.requirements.missing_services, clock_refusal());
-}
-
-#[test]
-fn a_wrong_typed_provider_counts_as_missing_for_an_optional_plugin() {
-    let (activation, creates) = activate_timed(true, &with_wrong_typed_clock());
-    assert_eq!(creates, 1, "an optional Plugin still activates");
-    assert!(activation.requirements.is_satisfied());
-    assert_eq!(activation.service_gaps, clock_gap());
 }

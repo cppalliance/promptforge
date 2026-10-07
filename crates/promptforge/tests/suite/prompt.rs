@@ -86,9 +86,9 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
     let plugins: Vec<_> = frontmatter
         .plugins()
         .iter()
-        .map(|plugin| (plugin.id().to_string(), plugin.is_optional()))
+        .map(ToString::to_string)
         .collect();
-    assert_eq!(plugins, [("text".to_owned(), false)]);
+    assert_eq!(plugins, ["text"]);
     let slots: Vec<_> = frontmatter
         .tools()
         .iter()

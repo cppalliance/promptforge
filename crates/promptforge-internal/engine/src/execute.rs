@@ -58,9 +58,7 @@ pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
-pub use requirements::{
-    MissingService, PluginConflict, RequirementCheck, Requirements, UnmetRequirement,
-};
+pub use requirements::{MissingService, RequirementCheck, Requirements, UnmetRequirement};
 pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,
     ToolAnswerRecord, ToolCallOrigin, ToolCaller,
@@ -134,9 +132,9 @@ pub fn perform_vfs_op(
 ///   itself ends in [`RunResult::Cancelled`].
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 /// - [`RunErrorKind::RequirementsUnmet`] - a missing required Plugin,
-///   a service the caller left out, a Plugin conflict, a model
-///   requirement a bound model fails to meet (a context minimum or a hard
-///   keyword), or an H1 block that failed the prompt's hard gate.
+///   a service the caller left out, a model requirement a bound model
+///   fails to meet (a context minimum or a hard keyword), or an H1 block
+///   that failed the prompt's hard gate.
 #[derive(Debug)]
 pub enum RunResult {
     /// The run completed with its final text. The name matches

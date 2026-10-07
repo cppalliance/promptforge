@@ -104,7 +104,6 @@ fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
         !descriptor.structured_output,
         "a descriptor that does not declare structured output stays plain text"
     );
-    assert!(descriptor.conflicts.is_empty());
     let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
     let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
     assert_eq!(back, descriptor);

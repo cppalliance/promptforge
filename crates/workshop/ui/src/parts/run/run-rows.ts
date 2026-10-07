@@ -1,13 +1,13 @@
 // The Run window's contract rows: one renderer per contract section,
 // pure DOM building over the narrowed RunContract. Every frontmatter
-// key present in the prompt appears as exactly one row: name,
-// description, and promptforge read-only; input a text field plus
-// Browse; output a text field; one control per arg by type with
-// required markers and defaults (the implicit declaration is the single
-// prose box); Plugins as checkboxes, disabled when required; tools
-// and model roles read-only; max_tool_iterations numeric with the
-// runtime-default placeholder. No bind-time validation runs here -
-// validation is the parser's alone.
+// key present in the prompt except `plugins`, which has nothing to
+// bind, appears as exactly one row: name, description, and promptforge
+// read-only; input a text field plus Browse; output a text field; one
+// control per arg by type with required markers and defaults (the
+// implicit declaration is the single prose box); tools and model roles
+// read-only; max_tool_iterations numeric with the runtime-default
+// placeholder. No bind-time validation runs here - validation is the
+// parser's alone.
 
 import type { RunContract, RunContractArg } from "../../services/run-api";
 
@@ -128,16 +128,6 @@ export function renderContractRows(
       }
       rows.appendChild(row(arg.name, control, ...(arg.optional ? [] : [requiredMarker()])));
     }
-  }
-
-  for (const plugin of contract.plugins) {
-    const field = document.createElement("input");
-    field.type = "checkbox";
-    field.className = "ws-run-panel__checkbox";
-    field.checked = true;
-    // A required Plugin cannot be switched off.
-    field.disabled = !plugin.optional;
-    rows.appendChild(row(plugin.id, field));
   }
 
   for (const tool of contract.tools) {

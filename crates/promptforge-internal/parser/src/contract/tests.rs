@@ -21,10 +21,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
         "description: d\n",
         "plugins:\n",
         "  - web\n",
-        "  - ref: mcp\n",
-        "    optional: true\n",
-        "    config:\n",
-        "      servers: [alpha]\n",
+        "  - mcp\n",
         "tools:\n",
         "  search: web/search\n",
         "  fetch: web/fetch\n",
@@ -46,18 +43,10 @@ fn the_full_contract_declaration_parses_and_round_trips() {
 
     let fm = prompt.frontmatter();
 
-    let caps = fm.plugins();
-    assert_eq!(caps.len(), 2);
-    assert_eq!(caps[0].id().to_string(), "web");
-    assert!(!caps[0].is_optional());
-    assert!(caps[0].config().is_none());
-    assert_eq!(caps[1].id().to_string(), "mcp");
-    assert!(caps[1].is_optional());
-    let config = caps[1].config().expect("the detailed entry has config");
-    assert_eq!(
-        config["servers"],
-        serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("alpha".to_owned())])
-    );
+    let plugins = fm.plugins();
+    assert_eq!(plugins.len(), 2);
+    assert_eq!(plugins[0].to_string(), "web");
+    assert_eq!(plugins[1].to_string(), "mcp");
 
     let tools = fm.tools();
     assert_eq!(tools.len(), 2);
@@ -124,7 +113,6 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     // `deny_unknown_fields` must hold inside each new key's entries too: a
     // typo'd field is an authoring error, not silently ignored.
     for yaml in [
-        "name: x\ndescription: d\nplugins:\n  - ref: web\n    optionl: true\n",
         "name: x\ndescription: d\ntools:\n  wiki:\n    wants: prose\n",
         "name: x\ndescription: d\nargs:\n  flag:\n    tipe: boolean\n",
         "name: x\ndescription: d\nmodels:\n  analyst:\n    keyword: [fast]\n",

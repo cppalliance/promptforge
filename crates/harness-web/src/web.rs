@@ -43,9 +43,8 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 ///
 /// It needs two services: the search provider registered under the key
 /// [`SEARCH_PROVIDER`] and the tokio runtime handle registered under the
-/// key [`TOKIO_RUNTIME`]. A run that requires the Plugin is refused
-/// when either service is missing. A run that declares it optional gets
-/// the web tools only when both services are present.
+/// key [`TOKIO_RUNTIME`]. A run that declares the Plugin is refused
+/// when either service is missing.
 #[derive(Debug, Clone)]
 pub struct Web {
     /// The stable identity, `web`.

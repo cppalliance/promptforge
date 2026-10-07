@@ -213,24 +213,17 @@ impl Tool for BadWireTool {
     }
 }
 
-/// A fixture Plugin contributing tools and declaring co-activation
-/// conflicts.
+/// A fixture Plugin contributing tools.
 pub(super) struct ToolFixture {
     id: PluginId,
-    conflicts: Vec<PluginId>,
     tools: Vec<Arc<dyn Tool>>,
 }
 
 impl ToolFixture {
-    /// Builds a fixture registered under `id`, contributing `tools` and
-    /// conflicting with each id in `conflicts`.
-    pub(super) fn new(id: &str, conflicts: &[&str], tools: Vec<Arc<dyn Tool>>) -> ToolFixture {
+    /// Builds a fixture registered under `id`, contributing `tools`.
+    pub(super) fn new(id: &str, tools: Vec<Arc<dyn Tool>>) -> ToolFixture {
         ToolFixture {
             id: PluginId::parse(id).expect("the fixture id is valid"),
-            conflicts: conflicts
-                .iter()
-                .map(|id| PluginId::parse(id).expect("the conflict id is valid"))
-                .collect(),
             tools,
         }
     }
@@ -247,10 +240,6 @@ impl Plugin for ToolFixture {
     )]
     fn description(&self) -> &str {
         "A tool-contributing fixture Plugin."
-    }
-
-    fn conflicts(&self) -> &[PluginId] {
-        &self.conflicts
     }
 
     fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {

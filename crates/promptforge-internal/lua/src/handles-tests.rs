@@ -2,13 +2,12 @@
 //! descriptor's data is copied verbatim and its structured-output flag
 //! selects the binding's output kind.
 
-use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
 use super::{ToolBinding, ToolOutputKind};
 
-/// A descriptor for `tools/fetch` with one declared conflict.
+/// A descriptor for `tools/fetch`.
 fn descriptor(structured: bool) -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/fetch").expect("the id is valid"),
@@ -17,7 +16,6 @@ fn descriptor(structured: bool) -> ToolDescriptor {
         json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )
     .structured(structured)
-    .with_conflicts(vec![PluginId::parse("other").expect("the id is valid")])
 }
 
 #[test]
@@ -29,7 +27,6 @@ fn a_structured_descriptor_binds_with_structured_output() {
     assert_eq!(binding.id(), &descriptor.id);
     assert_eq!(binding.description(), "Fetch a page");
     assert_eq!(binding.schema(), &descriptor.parameters_schema);
-    assert_eq!(binding.conflicts, descriptor.conflicts);
     assert!(binding.model_description().is_none());
 }
 

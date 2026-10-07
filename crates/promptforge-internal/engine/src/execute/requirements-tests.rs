@@ -2,7 +2,7 @@
 
 use promptforge_types::plugins::PluginId;
 
-use super::{MissingService, PluginConflict, RequirementCheck, Requirements, UnmetRequirement};
+use super::{MissingService, Requirements};
 
 fn id(text: &str) -> PluginId {
     PluginId::parse(text).expect("a static valid id")
@@ -94,33 +94,5 @@ fn the_notice_lists_missing_services_after_missing_plugins() {
         "the environment cannot satisfy this prompt:\n\
          - missing required Plugin: web\n\
          - user-input needs an input broker, and the environment provides none"
-    );
-}
-
-#[test]
-fn the_notice_lists_a_conflict_after_missing_services_and_before_unmet_requirements() {
-    let mut requirements = Requirements::default();
-    requirements.unmet_requirements.push(UnmetRequirement {
-        role: "writer".to_owned(),
-        check: RequirementCheck::ContextMinimum,
-        required: "200000".to_owned(),
-        actual: "32000".to_owned(),
-    });
-    requirements
-        .conflicts
-        .push(PluginConflict::new(id("bashkit"), id("terminal")));
-    requirements
-        .missing_services
-        .push(missing_input("user-input"));
-    requirements.missing_required.push(id("web"));
-    assert_eq!(
-        requirements.notice(),
-        "the environment cannot satisfy this prompt:\n\
-         - missing required Plugin: web\n\
-         - user-input needs an input broker, and the environment provides none\n\
-         - conflicting Plugins: bashkit and terminal cannot be \
-         activated together; declare one or the other\n\
-         - role 'writer': requires a context of at least 200000 tokens; \
-         the current model provides 32000"
     );
 }

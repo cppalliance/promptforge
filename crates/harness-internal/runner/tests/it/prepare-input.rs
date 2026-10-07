@@ -1,9 +1,8 @@
 //! The Host's optional input broker at preparation, supplied among its
 //! services under `INPUT_BROKER`: activation hands it to every declared
 //! Plugin, or hands none when the Host has nobody to ask; and the
-//! `user-input` Plugin's `input.ask()` reaches it, is
-//! refused when required on a Host without one, and degrades when
-//! optional. A frontmatter alias named `input` collides with the
+//! `user-input` Plugin's `input.ask()` reaches it, and is refused on a
+//! Host without one. A frontmatter alias named `input` collides with the
 //! Plugin's prelude global and fails the run before any effect, while
 //! an alias of another name runs beside it.
 
@@ -11,8 +10,7 @@ use super::*;
 
 use std::sync::Mutex;
 
-use harness_plugins::{INPUT_BROKER, InputBroker, InputError, UserInput, activate};
-use promptforge::Prompt;
+use harness_plugins::{INPUT_BROKER, InputBroker, InputError, UserInput};
 
 /// A prompt declaring the probe Plugin, with nothing to run.
 const DECLARES_PROBE: &str = "---\nname: declares-probe\ndescription: d\npromptforge: 0\n\
@@ -138,12 +136,9 @@ async fn activation_hands_no_broker_to_a_plugin_when_the_host_has_none() {
     );
 }
 
-/// The frontmatter line declaring `user-input` as required,
-/// the way `chat.md` declares it.
+/// The frontmatter line declaring `user-input`, the way `chat.md`
+/// declares it.
 const REQUIRED: &str = "  - user-input\n";
-
-/// The frontmatter lines declaring `user-input` as optional.
-const OPTIONAL: &str = "  - ref: user-input\n    optional: true\n";
 
 /// Asks once and returns the run-fixed connection flag, the answer, and
 /// the availability beside it.
@@ -229,50 +224,6 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
     assert!(
         !notice.contains("missing required Plugin: user-input"),
         "the notice does not call the registered Plugin missing: {notice}"
-    );
-}
-
-#[tokio::test]
-async fn an_optional_user_input_declaration_without_a_broker_runs_on_the_fallback() {
-    let recorder = recorder();
-    let outcome = drive_prompt(
-        &user_input_prompt(OPTIONAL, ASKS_ONCE),
-        user_input_services(&recorder, None),
-    )
-    .await;
-    assert_eq!(
-        completed(outcome),
-        "false|User input is unavailable in this host; continue without it.|false",
-        "input.connected() is false and input.ask() answers the fallback, unavailable"
-    );
-}
-
-#[test]
-fn an_optional_user_input_declaration_without_a_broker_records_the_service_gap() {
-    let source = user_input_prompt(OPTIONAL, ASKS_ONCE);
-    let prompt = Prompt::parse(&source, "asks-input").0.unwrap();
-    let services = RunServices::new(CancelHandle::new());
-    let activation = activate(Some(&user_input_registry()), &prompt, &services);
-    assert!(activation.requirements.is_satisfied());
-    assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
-    let gap = &activation.service_gaps[0];
-    assert_eq!(gap.plugin.to_string(), "user-input");
-    assert_eq!(gap.service, INPUT_BROKER.id());
-}
-
-#[tokio::test]
-async fn an_operator_who_types_the_fallback_sentence_is_still_available() {
-    let recorder = recorder();
-    let fallback = "User input is unavailable in this host; continue without it.";
-    let outcome = drive_prompt(
-        &user_input_prompt(REQUIRED, ASKS_ONCE),
-        user_input_services(&recorder, Some(Arc::new(Scripted(fallback)))),
-    )
-    .await;
-    assert_eq!(
-        completed(outcome),
-        format!("true|{fallback}|true"),
-        "the operator's text comes back byte-exact, marked available"
     );
 }
 

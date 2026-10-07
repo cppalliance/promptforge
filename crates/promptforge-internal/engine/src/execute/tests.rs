@@ -123,7 +123,6 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             model_description: Some("bind override".to_owned()),
             schema: EchoTool.parameters_schema(),
             output_kind: ToolOutputKind::Plain,
-            conflicts: Vec::new(),
         }],
         Vec::new(),
     );

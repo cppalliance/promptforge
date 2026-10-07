@@ -84,7 +84,6 @@ fn the_plugin_is_user_input_and_needs_the_input_broker() {
     assert_eq!(plugin.id().to_string(), "user-input");
     assert_eq!(plugin.needs(), [INPUT_BROKER.id()]);
     assert_eq!(plugin.needs()[0].to_string(), "promptforge/input-broker");
-    assert!(plugin.conflicts().is_empty());
 }
 
 #[test]

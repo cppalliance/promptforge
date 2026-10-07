@@ -1,6 +1,5 @@
-//! Declared service needs at activation: a Plugin that needs the
-//! input broker, declared required or optional, on a Host that has or
-//! lacks one.
+//! Declared service needs at activation: a declared Plugin that needs
+//! the input broker, on a Host that has or lacks one.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,7 +11,7 @@ use harness_plugins::{
 use promptforge::cancel::CancelHandle;
 use promptforge::{MissingService, RunErrorKind, RunResult};
 
-use super::support::{captured_logs, context, parse, run_activated};
+use super::support::{context, parse, run_activated};
 
 /// A prompt declaring `asker` as a required Plugin.
 const REQUIRES_ASKER: &str = concat!(
@@ -22,21 +21,6 @@ const REQUIRES_ASKER: &str = concat!(
     "promptforge: 0\n",
     "plugins:\n",
     "  - asker\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// A prompt declaring `asker` as an optional Plugin.
-const OPTIONAL_ASKER: &str = concat!(
-    "---\n",
-    "name: optional-asker\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "plugins:\n",
-    "  - ref: asker\n",
-    "    optional: true\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -124,15 +108,6 @@ fn a_required_plugin_whose_service_is_present_activates_normally() {
     let (activation, creates) = activate_asker(REQUIRES_ASKER, true);
     assert_eq!(creates, 1, "create ran exactly once");
     assert!(activation.requirements.is_satisfied());
-    assert!(activation.service_gaps.is_empty());
-}
-
-#[test]
-fn an_optional_plugin_whose_service_is_present_activates_normally() {
-    let (activation, creates) = activate_asker(OPTIONAL_ASKER, true);
-    assert_eq!(creates, 1, "create ran exactly once");
-    assert!(activation.requirements.is_satisfied());
-    assert!(activation.service_gaps.is_empty());
 }
 
 #[test]
@@ -148,30 +123,6 @@ fn a_required_plugin_whose_service_is_missing_is_reported_without_calling_create
         "the Plugin is present, so it is not reported missing"
     );
     assert!(!activation.requirements.is_satisfied());
-    assert!(activation.service_gaps.is_empty());
-}
-
-#[test]
-fn an_optional_plugin_whose_service_is_missing_activates_degraded_with_a_warning() {
-    let logs = captured_logs(|| {
-        let (activation, creates) = activate_asker(OPTIONAL_ASKER, false);
-        assert_eq!(creates, 1, "an optional Plugin still activates");
-        assert!(
-            activation.requirements.is_satisfied(),
-            "an optional Plugin's missing service does not refuse the run"
-        );
-        assert_eq!(activation.service_gaps.len(), 1);
-        assert_eq!(activation.service_gaps[0].plugin, asker_id());
-        assert_eq!(activation.service_gaps[0].service, INPUT_BROKER.id());
-    });
-    assert!(
-        logs.contains("WARN"),
-        "the gap is logged as a warning: {logs}"
-    );
-    assert!(
-        logs.contains("asker") && logs.contains("promptforge/input-broker"),
-        "the warning names the Plugin and the service: {logs}"
-    );
 }
 
 #[test]

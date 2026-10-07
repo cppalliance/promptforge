@@ -14,8 +14,9 @@ use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
 use promptforge::Prompt;
+use promptforge::plugins::PluginId;
 use promptforge::prompt::{
-    ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, PluginDecl, ToolSlot,
+    ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
 };
 
 use crate::error::AppError;
@@ -80,21 +81,16 @@ impl From<&FileDecl> for FileDto {
     }
 }
 
-/// A declared Plugin: its global id and optionality.
+/// A declared Plugin.
 #[derive(Debug, Serialize)]
 struct PluginDto {
-    /// The Plugin's global id (`namespace/plugin`).
+    /// The Plugin's one-segment name, such as `web`.
     id: String,
-    /// Whether an absent Plugin skips instead of failing.
-    optional: bool,
 }
 
-impl From<&PluginDecl> for PluginDto {
-    fn from(decl: &PluginDecl) -> Self {
-        Self {
-            id: decl.id().to_string(),
-            optional: decl.is_optional(),
-        }
+impl From<&PluginId> for PluginDto {
+    fn from(id: &PluginId) -> Self {
+        Self { id: id.to_string() }
     }
 }
 

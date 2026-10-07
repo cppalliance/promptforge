@@ -1,9 +1,8 @@
 //! The `user-input` Plugin: a prompt section pauses and asks the
 //! operator for their next message.
 //!
-//! A prompt declares the Plugin in its frontmatter, required or
-//! optional, and its sections then have an `input` table with two
-//! functions:
+//! A prompt declares the Plugin in its frontmatter, and its sections
+//! then have an `input` table with two functions:
 //!
 //! ````text
 //! plugins:
@@ -50,26 +49,12 @@
 //! # Answering without an operator
 //!
 //! For a Host with nobody to ask, such as a batch or eval Host, the
-//! Harness supplies no broker. What happens then depends on how the
-//! prompt declared the Plugin.
-//!
-//! - A required declaration is refused before the run starts. The
-//!   Plugin's [`needs`](Plugin::needs) names
-//!   [`INPUT_BROKER`], so activation never calls
-//!   [`create`](Plugin::create) and the refusal notice holds the line
-//!   "- user-input needs promptforge/input-broker, and the environment
-//!   provides none".
-//! - An optional declaration activates anyway, and the activation
-//!   records a [`ServiceGap`](crate::ServiceGap). `input.connected()`
-//!   returns `false`. Each `input.ask()` still issues the tool call, so
-//!   the Host sees every ask, and returns the fixed sentence "User input
-//!   is unavailable in this host; continue without it." with `available`
-//!   set to `false`.
-//!
-//! **Branch on the flag.** A prompt tells real input from the fallback
-//! by `available` or `input.connected()`, not by the text. An operator
-//! who types exactly the fallback sentence still reports `available` as
-//! `true`, so an operator cannot fake the unavailable state.
+//! Harness supplies no broker, and a prompt that declares the Plugin is
+//! refused before the run starts. The Plugin's [`needs`](Plugin::needs)
+//! names [`INPUT_BROKER`], so activation never calls
+//! [`create`](Plugin::create) and the refusal notice holds the line
+//! "- user-input needs promptforge/input-broker, and the environment
+//! provides none".
 //!
 //! # Failed and cancelled waits
 //!

@@ -1,17 +1,17 @@
 //! The frontmatter contract keys: `plugins`, `tools`, `args`, `models`.
 //!
 //! The YAML is the whole contract: Plugins install, tools bind, models
-//! declare, args type. Parsing validates the static shape - Plugin id
-//! arity, each Plugin declared once, the alias grammar on slot keys,
-//! the reserved names no tool alias or model role label may take, no tool
-//! slot backed by an optional Plugin, the closed model-keyword
-//! vocabulary, arg name and type sanity - and exposes the FULL declaration
-//! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
-//! against the caller's environment is prepare's job, never the parser's.
+//! declare, args type. Parsing validates the static shape - each Plugin
+//! a one-segment plain name declared once, the alias grammar on slot keys,
+//! the reserved names no tool alias or model role label may take, the
+//! closed model-keyword vocabulary, arg name and type sanity - and exposes
+//! the FULL declaration on the parsed [`Prompt`](crate::Prompt); satisfying
+//! the declaration against the caller's environment is prepare's job,
+//! never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
-//! Plugin and tool-slot shapes plus the map deserializer all four keys
-//! share.
+//! tool-slot shape, the duplicate-Plugin check, and the map deserializer
+//! the three map keys share.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -20,7 +20,6 @@ use std::marker::PhantomData;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use promptforge_types::names::GlobalName;
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolId;
 
@@ -140,143 +139,6 @@ where
             entries.insert(key, map.next_value::<T>()?);
         }
         Ok(entries)
-    }
-}
-
-/// Parses a Plugin id: a [`GlobalName`] of exactly one segment, such as
-/// `web`.
-///
-/// The grammar accepts any number of segments, so the arity check looks
-/// for a separator: no `/` is one segment. A `@` never gets that far - the
-/// charset rejects it.
-fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
-    let name =
-        GlobalName::parse(text).map_err(|error| format!("invalid Plugin id `{text}`: {error}"))?;
-    if text.contains('/') {
-        return Err(format!(
-            "invalid Plugin id `{text}`: a Plugin id is one segment, such as `web`, with no '/'"
-        ));
-    }
-    Ok(name)
-}
-
-/// One Plugin declared in a prompt's `plugins` frontmatter list.
-///
-/// A declaration takes one of two forms. A plain id string declares a
-/// required Plugin. A map names the id under `ref` and may also set
-/// `optional` (default `false`) and `config`.
-///
-/// `config` holds only data written in the prompt. User-specific
-/// configuration, such as credentials or server lists, never appears in the
-/// prompt. The caller supplies it through the run services.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct PluginDecl {
-    /// The Plugin's id: one segment, such as `web`.
-    id: GlobalName,
-    /// Whether an absent Plugin skips with a log line instead of
-    /// failing preparation.
-    optional: bool,
-    /// Prompt-side configuration data, when declared.
-    config: Option<serde_yaml_ng::Value>,
-}
-
-impl PluginDecl {
-    /// Returns the Plugin's one-segment id, such as `web`.
-    #[must_use]
-    pub fn id(&self) -> &GlobalName {
-        &self.id
-    }
-
-    /// Returns whether the Plugin is optional.
-    ///
-    /// When an optional Plugin is absent, preparation logs a line, skips
-    /// it, and continues.
-    #[must_use]
-    pub fn is_optional(&self) -> bool {
-        self.optional
-    }
-
-    /// Returns the `config` data written in the prompt, when declared.
-    #[must_use]
-    pub fn config(&self) -> Option<&serde_yaml_ng::Value> {
-        self.config.as_ref()
-    }
-}
-
-impl<'de> Deserialize<'de> for PluginDecl {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(PluginDeclVisitor)
-    }
-}
-
-/// Deserializes a Plugin declaration from either frontmatter form: a
-/// bare id string or a `ref` map. A streaming visitor (not an untagged
-/// buffer) so rejections keep their source position.
-struct PluginDeclVisitor;
-
-impl<'de> Visitor<'de> for PluginDeclVisitor {
-    type Value = PluginDecl;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a Plugin id string or a map with `ref`, `optional`, and `config`")
-    }
-
-    fn visit_str<E>(self, text: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(PluginDecl {
-            id: parse_plugin_id(text).map_err(E::custom)?,
-            optional: false,
-            config: None,
-        })
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut reference: Option<String> = None;
-        let mut optional: Option<bool> = None;
-        let mut config: Option<serde_yaml_ng::Value> = None;
-        while let Some(key) = map.next_key::<String>()? {
-            match key.as_str() {
-                "ref" => {
-                    if reference.is_some() {
-                        return Err(de::Error::duplicate_field("ref"));
-                    }
-                    reference = Some(map.next_value()?);
-                }
-                "optional" => {
-                    if optional.is_some() {
-                        return Err(de::Error::duplicate_field("optional"));
-                    }
-                    optional = Some(map.next_value()?);
-                }
-                "config" => {
-                    if config.is_some() {
-                        return Err(de::Error::duplicate_field("config"));
-                    }
-                    config = Some(map.next_value()?);
-                }
-                other => {
-                    return Err(de::Error::unknown_field(
-                        other,
-                        &["ref", "optional", "config"],
-                    ));
-                }
-            }
-        }
-        let reference = reference.ok_or_else(|| de::Error::missing_field("ref"))?;
-        Ok(PluginDecl {
-            id: parse_plugin_id(&reference).map_err(de::Error::custom)?,
-            optional: optional.unwrap_or(false),
-            config,
-        })
     }
 }
 
@@ -401,43 +263,14 @@ pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> 
     }
 }
 
-/// Refuses a `plugins:` list that names one Plugin id twice,
-/// whatever each entry's form, `optional` flag, and `config`. Returns the
-/// refusal's message, naming the first id declared again.
-pub(crate) fn check_distinct_plugins(plugins: &[PluginDecl]) -> Result<(), String> {
+/// Refuses a `plugins:` list that names one Plugin twice. Returns the
+/// refusal's message, naming the first Plugin declared again.
+pub(crate) fn check_distinct_plugins(plugins: &[PluginId]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
-    match plugins.iter().find(|decl| !seen.insert(decl.id())) {
-        Some(decl) => Err(format!(
-            "invalid frontmatter: Plugin {} is declared more than once under plugins",
-            decl.id()
+    match plugins.iter().find(|plugin| !seen.insert(*plugin)) {
+        Some(plugin) => Err(format!(
+            "invalid frontmatter: Plugin {plugin} is declared more than once under plugins"
         )),
         None => Ok(()),
     }
-}
-
-/// Refuses a tool slot whose Plugin is declared optional: a slot
-/// requires its Plugin, so an absent optional one would fail the run
-/// anyway. Returns the refusal's message, naming the first offending alias
-/// in sorted order.
-pub(crate) fn check_slot_plugins(tools: &ToolSlots, plugins: &[PluginDecl]) -> Result<(), String> {
-    for (alias, slot) in tools.iter() {
-        let ToolSlot::Exact(tool) = slot;
-        let plugin = tool.plugin();
-        if plugins
-            .iter()
-            .any(|decl| decl.is_optional() && declares(decl, &plugin))
-        {
-            return Err(format!(
-                "invalid frontmatter: tool alias '{alias}' names {tool}, whose Plugin \
-                 {plugin} is declared optional; a tool slot requires its Plugin"
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Whether `decl` declares `plugin`. Both ids are one validated segment,
-/// so equal text is equal ids.
-fn declares(decl: &PluginDecl, plugin: &PluginId) -> bool {
-    decl.id().to_string() == plugin.to_string()
 }

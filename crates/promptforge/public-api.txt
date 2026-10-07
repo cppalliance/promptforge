@@ -32,7 +32,6 @@
 #[non_exhaustive] pub struct promptforge::Environment { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::MissingService { .. }
 #[non_exhaustive] pub struct promptforge::ParseError { /* private fields */ }
-#[non_exhaustive] pub struct promptforge::PluginConflict { .. }
 #[non_exhaustive] pub struct promptforge::Prompt { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::Requirements { .. }
 #[non_exhaustive] pub struct promptforge::RunContext { /* private fields */ }
@@ -61,7 +60,6 @@
 #[non_exhaustive] pub struct promptforge::prompt::Frontmatter { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::prompt::ModelRole { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::prompt::ModelRoles { /* private fields */ }
-#[non_exhaustive] pub struct promptforge::prompt::PluginDecl { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::prompt::ToolSlots { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::tools::ToolBindings { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::tools::ToolCatalog { /* private fields */ }
@@ -79,7 +77,6 @@ auto promptforge::Environment: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindS
 auto promptforge::MissingService: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::PluginConflict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Prompt: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::RequirementCheck: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Requirements: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -156,7 +153,6 @@ auto promptforge::prompt::Frontmatter: Freeze, RefUnwindSafe, Send, Sync, Unpin,
 auto promptforge::prompt::ModelKeyword: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRole: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRoles: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::prompt::PluginDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ToolSlot: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ToolSlots: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::replay::Flags: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -201,7 +197,6 @@ derives promptforge::Environment: Clone, Debug, Default
 derives promptforge::MissingService: Clone, Debug, Eq, PartialEq
 derives promptforge::ParseError: Debug
 derives promptforge::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
-derives promptforge::PluginConflict: Clone, Debug, Eq, PartialEq
 derives promptforge::Prompt: Clone, Debug, Eq, PartialEq
 derives promptforge::RequirementCheck: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::Requirements: Clone, Debug, Default, Eq, PartialEq
@@ -278,7 +273,6 @@ derives promptforge::prompt::Frontmatter: Clone, Debug, Deserialize, Eq, Partial
 derives promptforge::prompt::ModelKeyword: Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd
 derives promptforge::prompt::ModelRole: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ModelRoles: Clone, Debug, Default, Deserialize, Eq, PartialEq
-derives promptforge::prompt::PluginDecl: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ToolSlot: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ToolSlots: Clone, Debug, Default, Deserialize, Eq, PartialEq
 derives promptforge::replay::Flags: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize
@@ -410,7 +404,6 @@ pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
 pub fn promptforge::ParseError::line(&self) -> core::option::Option<u32>
 pub fn promptforge::ParseError::name(&self) -> core::option::Option<&str>
 pub fn promptforge::ParseError::span(&self) -> core::option::Option<(usize, usize)>
-pub fn promptforge::PluginConflict::new(first: promptforge::plugins::PluginId, second: promptforge::plugins::PluginId) -> promptforge::PluginConflict
 pub fn promptforge::Prompt::frontmatter(&self) -> &promptforge::prompt::Frontmatter
 pub fn promptforge::Prompt::parse(input: &str, execution: &str) -> (core::result::Result<promptforge::Prompt, promptforge::ParseError>, alloc::vec::Vec<promptforge::event::Event>)
 pub fn promptforge::Prompt::strip_h1_prose(&mut self)
@@ -591,7 +584,7 @@ pub fn promptforge::prompt::Frontmatter::max_tool_iterations(&self) -> core::opt
 pub fn promptforge::prompt::Frontmatter::models(&self) -> &promptforge::prompt::ModelRoles
 pub fn promptforge::prompt::Frontmatter::name(&self) -> &str
 pub fn promptforge::prompt::Frontmatter::output(&self) -> core::option::Option<&promptforge::prompt::FileDecl>
-pub fn promptforge::prompt::Frontmatter::plugins(&self) -> &[promptforge::prompt::PluginDecl]
+pub fn promptforge::prompt::Frontmatter::plugins(&self) -> &[promptforge::plugins::PluginId]
 pub fn promptforge::prompt::Frontmatter::promptforge(&self) -> core::option::Option<u32>
 pub fn promptforge::prompt::Frontmatter::tools(&self) -> &promptforge::prompt::ToolSlots
 pub fn promptforge::prompt::ModelRole::description(&self) -> core::option::Option<&str>
@@ -601,9 +594,6 @@ pub fn promptforge::prompt::ModelRoles::get(&self, label: &str) -> core::option:
 pub fn promptforge::prompt::ModelRoles::is_empty(&self) -> bool
 pub fn promptforge::prompt::ModelRoles::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ModelRole)>
 pub fn promptforge::prompt::ModelRoles::len(&self) -> usize
-pub fn promptforge::prompt::PluginDecl::config(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
-pub fn promptforge::prompt::PluginDecl::id(&self) -> &promptforge::plugins::GlobalName
-pub fn promptforge::prompt::PluginDecl::is_optional(&self) -> bool
 pub fn promptforge::prompt::ToolSlots::get(&self, alias: &str) -> core::option::Option<&promptforge::prompt::ToolSlot>
 pub fn promptforge::prompt::ToolSlots::is_empty(&self) -> bool
 pub fn promptforge::prompt::ToolSlots::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ToolSlot)>
@@ -621,7 +611,6 @@ pub fn promptforge::tools::ToolCatalogError::duplicate_id(&self) -> core::option
 pub fn promptforge::tools::ToolCatalogError::kind(&self) -> promptforge::tools::ToolCatalogErrorKind
 pub fn promptforge::tools::ToolDescriptor::new(id: promptforge::tools::ToolId, wire_name: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolDescriptor::structured(self, structured: bool) -> promptforge::tools::ToolDescriptor
-pub fn promptforge::tools::ToolDescriptor::with_conflicts(self, conflicts: alloc::vec::Vec<promptforge::plugins::PluginId>) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolError::is_cancelled(&self) -> bool
 pub fn promptforge::tools::ToolError::is_retryable(&self) -> bool
 pub fn promptforge::tools::ToolError::kind(&self) -> promptforge::tools::ToolErrorKind
@@ -723,11 +712,8 @@ pub promptforge::ParseErrorKind::Frontmatter
 pub promptforge::ParseErrorKind::List
 pub promptforge::ParseErrorKind::Lua
 pub promptforge::ParseErrorKind::Structure
-pub promptforge::PluginConflict::first: promptforge::plugins::PluginId
-pub promptforge::PluginConflict::second: promptforge::plugins::PluginId
 pub promptforge::RequirementCheck::ContextMinimum
 pub promptforge::RequirementCheck::HardKeyword
-pub promptforge::Requirements::conflicts: alloc::vec::Vec<promptforge::PluginConflict>
 pub promptforge::Requirements::missing_required: alloc::vec::Vec<promptforge::plugins::PluginId>
 pub promptforge::Requirements::missing_services: alloc::vec::Vec<promptforge::MissingService>
 pub promptforge::Requirements::unmet_requirements: alloc::vec::Vec<promptforge::UnmetRequirement>
@@ -1226,7 +1212,6 @@ pub promptforge::tools::ToolCatalogError::InvalidWireName::reason: &'static str
 pub promptforge::tools::ToolCatalogError::InvalidWireName::wire_name: alloc::string::String
 pub promptforge::tools::ToolCatalogErrorKind::DuplicateId
 pub promptforge::tools::ToolCatalogErrorKind::InvalidWireName
-pub promptforge::tools::ToolDescriptor::conflicts: alloc::vec::Vec<promptforge::plugins::PluginId>
 pub promptforge::tools::ToolDescriptor::description: alloc::string::String
 pub promptforge::tools::ToolDescriptor::id: promptforge::tools::ToolId
 pub promptforge::tools::ToolDescriptor::parameters_schema: serde_json::value::Value

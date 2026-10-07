@@ -51,12 +51,6 @@ const fn _assert_plugin_trait_object_is_shareable() {
 }
 
 #[test]
-fn a_plugin_declares_no_conflicts_by_default() {
-    let plugin = StubPlugin::web();
-    assert!(plugin.conflicts().is_empty());
-}
-
-#[test]
 fn a_plugin_needs_no_host_service_by_default() {
     let plugin = StubPlugin::web();
     assert!(plugin.needs().is_empty());

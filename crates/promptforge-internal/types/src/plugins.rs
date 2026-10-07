@@ -6,11 +6,9 @@
 //! makes services available to the run. Plugins ship in crates and are
 //! identified by a one-segment [`PluginId`], such as `web`, and every tool
 //! one contributes sits under it, such as `web/fetch`. The Engine knows
-//! Plugins by identity alone:
-//! a prompt declares them, an exact tool slot names one through its
-//! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
-//! records the conflicts of the Plugin that contributed it. Activating a
-//! Plugin is the Harness's job; the Engine never activates anything.
+//! Plugins by identity alone: a prompt declares them by plain name, and
+//! an exact tool slot names one through its [`ToolId`] prefix. Activating
+//! a Plugin is the Harness's job; the Engine never activates anything.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
@@ -91,11 +89,29 @@ impl serde::Serialize for PluginId {
 
 impl<'de> serde::Deserialize<'de> for PluginId {
     /// Deserializes the id from its one-segment string and validates it
-    /// the same way `PluginId::parse` does. An invalid string fails
-    /// deserialization.
+    /// the same way `PluginId::parse` does. An invalid string, or any value
+    /// that is not a string, such as a map or a number, fails
+    /// deserialization with a message naming the plain-name form.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        PluginId::parse(&text).map_err(serde::de::Error::custom)
+        deserializer.deserialize_any(PluginIdVisitor)
+    }
+}
+
+/// Deserializes a [`PluginId`] from a string alone. It asks for any value,
+/// not a string, because YAML would otherwise read a scalar such as `42` or
+/// `true` as its text.
+struct PluginIdVisitor;
+
+impl serde::de::Visitor<'_> for PluginIdVisitor {
+    type Value = PluginId;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a Plugin's plain name, such as `web`")
+    }
+
+    fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<PluginId, E> {
+        PluginId::parse(text)
+            .map_err(|error| E::custom(format!("invalid Plugin id `{text}`: {}", error.reason)))
     }
 }
 

@@ -1125,7 +1125,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-2>
 
-### Step 2: Remove conflicts, optional Plugins, and the PluginDecl map form
+### Step 2: Remove conflicts, optional Plugins, and the PluginDecl map form [completed]
 
 - Component: Removals
 - Placement: second. The parser and activation already speak one-segment ids after step 1. Removing `optional` before step 3 means an activation failure has one meaning when step 3 maps it into `unavailable`.

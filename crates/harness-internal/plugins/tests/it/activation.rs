@@ -1,6 +1,6 @@
-//! Activation against the registry: missing required reported, absent
-//! optional skipped and logged, the run's services reaching `create`,
-//! activation failure semantics, and the run path's refusals.
+//! Activation against the registry: a missing declared Plugin reported,
+//! the run's services reaching `create`, activation failure semantics,
+//! and the run path's refusals.
 
 use harness_plugins::{PluginId, PluginRegistry};
 use promptforge::cancel::CancelHandle;
@@ -16,21 +16,6 @@ pub(super) const DECLARES_REQUIRED: &str = concat!(
     "promptforge: 0\n",
     "plugins:\n",
     "  - web\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// A prompt declaring `web` as an optional Plugin.
-const DECLARES_OPTIONAL: &str = concat!(
-    "---\n",
-    "name: declares-optional\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "plugins:\n",
-    "  - ref: web\n",
-    "    optional: true\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -71,25 +56,6 @@ fn a_missing_required_plugin_is_reported() {
         [PluginId::parse("web").expect("the id is valid")]
     );
     assert!(!requirements.is_satisfied());
-}
-
-#[test]
-fn an_absent_optional_plugin_is_skipped_and_logged() {
-    let prompt = parse(DECLARES_OPTIONAL, "declares-optional");
-    let logs = captured_logs(|| {
-        let (_ctx, requirements, _) = prepare_activated(
-            Environment::new(),
-            None,
-            &prompt,
-            context("prepare-optional"),
-        );
-        assert!(requirements.missing_required.is_empty());
-        assert!(requirements.is_satisfied());
-    });
-    assert!(
-        logs.contains("web"),
-        "the skip log line names the Plugin: {logs}"
-    );
 }
 
 #[test]
@@ -146,29 +112,6 @@ fn a_required_activation_failure_is_logged_and_reported() {
 }
 
 #[test]
-fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
-    let prompt = parse(DECLARES_OPTIONAL, "declares-optional");
-    let (fixture, _activations) = Fixture::new("web", true);
-    let mut registry = PluginRegistry::new();
-    registry.register(fixture).expect("the fixture registers");
-    let logs = captured_logs(|| {
-        // An optional Plugin that fails to activate is only a log
-        // line: the prompt declared it could run without.
-        let (_ctx, requirements, _) = prepare_activated(
-            Environment::new(),
-            Some(&registry),
-            &prompt,
-            context("prepare-failing"),
-        );
-        assert!(requirements.is_satisfied());
-    });
-    assert!(
-        logs.contains("web"),
-        "the failure log line names the Plugin: {logs}"
-    );
-}
-
-#[test]
 fn the_run_path_refuses_a_missing_required_plugin_with_a_notice_naming_it() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // An empty registry: activation reports the declared required
@@ -183,6 +126,24 @@ fn the_run_path_refuses_a_missing_required_plugin_with_a_notice_naming_it() {
     assert!(
         notice.contains("missing required Plugin: web"),
         "the notice names the missing Plugin: {notice}"
+    );
+}
+
+#[test]
+fn the_run_path_refuses_a_declared_plugin_whose_activation_fails() {
+    let prompt = parse(RUNS_AFTER_ACTIVATION, "runs-after-activation");
+    let (fixture, _activations) = Fixture::new("web", true);
+    let mut registry = PluginRegistry::new();
+    registry.register(fixture).expect("the fixture registers");
+    let result = run_activated(&registry, &prompt, context("refuse-failing"));
+    let RunResult::Failure(error) = result else {
+        panic!("a declared Plugin that activates to nothing refuses the run: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    assert!(
+        notice.contains("missing required Plugin: web"),
+        "the notice names the Plugin: {notice}"
     );
 }
 

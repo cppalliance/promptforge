@@ -1,7 +1,9 @@
 //! The [`Frontmatter`] model and its `max_tool_iterations` cap, and the
 //! frontmatter splitting and version detection that read a prompt's source.
 
-use crate::contract::{ArgsDecl, ModelRoles, PluginDecl, ToolSlots};
+use promptforge_types::plugins::PluginId;
+
+use crate::contract::{ArgsDecl, ModelRoles, ToolSlots};
 use crate::{Error, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
@@ -62,9 +64,10 @@ pub struct Frontmatter {
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
     output: Option<FileDecl>,
-    /// Plugins the prompt activates at prepare, in declaration order.
+    /// Plugins the prompt activates at prepare, by plain name, in
+    /// declaration order.
     #[serde(default)]
-    plugins: Vec<PluginDecl>,
+    plugins: Vec<PluginId>,
     /// Declared tool slots: alias to exact path.
     #[serde(default)]
     tools: ToolSlots,
@@ -183,9 +186,10 @@ impl Frontmatter {
         self.output.as_ref()
     }
 
-    /// Returns the declared Plugins, in declaration order.
+    /// Returns the declared Plugins, in declaration order. Every declared
+    /// Plugin is required.
     #[must_use]
-    pub fn plugins(&self) -> &[PluginDecl] {
+    pub fn plugins(&self) -> &[PluginId] {
         &self.plugins
     }
 

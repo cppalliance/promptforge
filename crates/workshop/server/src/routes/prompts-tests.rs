@@ -42,8 +42,7 @@ output:
   description: the result
 plugins:
   - web
-  - ref: fs
-    optional: true
+  - fs
 tools:
   search: web/search
 args:
@@ -90,8 +89,8 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
     assert_eq!(
         json["plugins"],
         serde_json::json!([
-            { "id": "web", "optional": false },
-            { "id": "fs", "optional": true },
+            { "id": "web" },
+            { "id": "fs" },
         ])
     );
     assert_eq!(

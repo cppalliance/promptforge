@@ -1,6 +1,5 @@
 //! harness-plugins - the Harness's Plugin layer: the registry,
-//! activation with co-activation conflict checking, the [`Plugin`]
-//! and [`Tool`] traits the first-party Plugin crates implement, and
+//! activation, the [`Plugin`] and [`Tool`] traits the first-party Plugin crates implement, and
 //! one core Plugin of its own, [`UserInput`] (`user-input`).
 //!
 //! The Engine holds none of this. It binds tool slots against descriptors
@@ -36,7 +35,7 @@ mod test_support;
 mod tool;
 mod user_input;
 
-pub use activation::{Activation, ServiceGap, ToolTable, activate};
+pub use activation::{Activation, ToolTable, activate};
 pub use input::{InputBroker, InputError};
 pub use plugin::{Contribution, Plugin, PluginError, PluginErrorKind, RunServices};
 pub use registry::{PluginRegistry, RegistryError, RegistryErrorKind};

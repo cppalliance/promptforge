@@ -1,5 +1,5 @@
-//! Tests for the `plugins` and `tools` keys: Plugin ids, tool slot
-//! paths and aliases, and the slots an optional Plugin cannot back.
+//! Tests for the `plugins` and `tools` keys: Plugin names, and tool slot
+//! paths and aliases.
 
 use super::*;
 
@@ -36,26 +36,34 @@ fn a_plugin_id_with_uppercase_is_rejected() {
 }
 
 #[test]
-fn a_plugin_is_required_unless_flagged_optional() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "plugins:\n",
-        "  - web\n",
-        "  - ref: mcp\n",
-        "    optional: true\n",
-    ))
-    .expect("Plugin entries must parse");
-    let caps = prompt.frontmatter().plugins();
-    assert_eq!(caps.len(), 2);
-    assert!(!caps[0].is_optional(), "a plain string entry is required");
-    assert!(caps[1].is_optional());
-}
-
-#[test]
-fn a_plugin_entry_must_be_a_string_or_a_ref_map() {
+fn a_plugin_entry_must_be_a_plain_name() {
     let error = parse("name: x\ndescription: d\nplugins:\n  - 42\n")
         .expect_err("a numeric Plugin entry must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+}
+
+#[test]
+fn the_map_form_of_a_plugin_entry_is_refused_naming_the_plain_name_form() {
+    for entry in [
+        "  - ref: web\n",
+        "  - ref: web\n    optional: true\n",
+        "  - ref: web\n    config: { depth: 1 }\n",
+    ] {
+        let error = parse(&format!("name: x\ndescription: d\nplugins:\n{entry}"))
+            .expect_err("the map form must be refused");
+        assert_eq!(
+            error.kind(),
+            ParseErrorKind::Frontmatter,
+            "{entry}: {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("expected a Plugin's plain name, such as `web`"),
+            "the refusal names the plain-name form: {error}"
+        );
+        assert_eq!(error.line(), Some(5), "the entry's own line: {error}");
+    }
 }
 
 #[test]
@@ -119,77 +127,8 @@ fn tool_slot_aliases_must_match_the_alias_grammar() {
 }
 
 #[test]
-fn a_tool_slot_backed_by_an_optional_plugin_is_refused() {
-    let error = parse(concat!(
-        "name: x\ndescription: d\n",
-        "plugins:\n",
-        "  - web\n",
-        "  - ref: mcp\n",
-        "    optional: true\n",
-        "tools:\n",
-        "  search: web/search\n",
-        "  probe: mcp/probe\n",
-        "  lookup: mcp/lookup\n",
-    ))
-    .expect_err("a slot on an optional Plugin must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
-    assert_eq!(
-        error.to_string(),
-        "invalid frontmatter: tool alias 'lookup' names mcp/lookup, whose \
-         Plugin mcp is declared optional; a tool slot requires its Plugin",
-        "the refusal names the first offending alias in sorted order"
-    );
-    assert_eq!(error.line(), None, "the refusal spans two keys: {error}");
-}
-
-#[test]
-fn an_optional_plugin_without_a_tool_slot_still_parses() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "plugins:\n",
-        "  - ref: web\n",
-        "    optional: false\n",
-        "  - ref: mcp\n",
-        "    optional: true\n",
-        "tools:\n",
-        "  search: web/search\n",
-    ))
-    .expect("an optional Plugin that backs no slot parses");
-    let caps = prompt.frontmatter().plugins();
-    assert_eq!(caps.len(), 2);
-    assert!(caps[1].is_optional());
-    assert!(prompt.frontmatter().tools().get("search").is_some());
-}
-
-#[test]
-fn a_slot_on_a_required_plugin_parses_beside_optional_ones_whose_names_extend_it() {
-    // Each optional Plugin's name starts with the slot's Plugin name, so a
-    // check comparing name prefixes instead of whole names would refuse
-    // this prompt.
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "plugins:\n",
-        "  - web\n",
-        "  - ref: web2\n",
-        "    optional: true\n",
-        "  - ref: web-search\n",
-        "    optional: true\n",
-        "tools:\n",
-        "  search: web/search\n",
-    ))
-    .expect("a slot whose Plugin is required parses");
-    assert_eq!(prompt.frontmatter().plugins().len(), 3);
-    assert!(prompt.frontmatter().tools().get("search").is_some());
-}
-
-#[test]
-fn a_plugin_declared_twice_is_refused_whatever_the_entry_forms() {
-    for entries in [
-        "  - web\n  - mcp\n  - web\n",
-        "  - ref: web\n    optional: true\n  - ref: web\n    optional: true\n",
-        "  - web\n  - ref: web\n    optional: true\n",
-        "  - ref: web\n    config: { depth: 1 }\n  - ref: web\n    config: { depth: 2 }\n",
-    ] {
+fn a_plugin_declared_twice_is_refused() {
+    for entries in ["  - web\n  - mcp\n  - web\n", "  - web\n  - web\n"] {
         let error = parse(&format!("name: x\ndescription: d\nplugins:\n{entries}"))
             .expect_err("a Plugin declared twice must be rejected");
         assert_eq!(
@@ -211,10 +150,8 @@ fn a_duplicate_plugin_that_also_backs_a_slot_reports_the_duplicate() {
     let error = parse(concat!(
         "name: x\ndescription: d\n",
         "plugins:\n",
-        "  - ref: web\n",
-        "    optional: true\n",
-        "  - ref: web\n",
-        "    optional: true\n",
+        "  - web\n",
+        "  - web\n",
         "tools:\n",
         "  fetch: web/fetch\n",
     ))
@@ -233,38 +170,25 @@ fn a_list_of_distinct_plugins_still_parses() {
         "plugins:\n",
         "  - web\n",
         "  - web2\n",
-        "  - ref: web-search\n",
-        "    optional: true\n",
+        "  - web-search\n",
     ))
     .expect("distinct Plugins parse");
     assert_eq!(prompt.frontmatter().plugins().len(), 3);
 }
 
 #[test]
-fn the_plugins_key_takes_both_entry_forms_and_the_old_key_is_refused() {
+fn the_plugins_key_takes_plain_names_and_the_old_key_is_refused() {
     let prompt = parse(concat!(
         "name: x\ndescription: d\n",
         "plugins:\n",
         "  - web\n",
-        "  - ref: mcp\n",
-        "    optional: true\n",
-        "    config: { depth: 1 }\n",
+        "  - mcp\n",
     ))
-    .expect("both entry forms parse under `plugins`");
+    .expect("plain names parse under `plugins`");
     let plugins = prompt.frontmatter().plugins();
     assert_eq!(plugins.len(), 2);
-    assert_eq!(plugins[0].id().to_string(), "web");
-    assert!(
-        !plugins[0].is_optional(),
-        "a plain string entry is required"
-    );
-    assert!(plugins[0].config().is_none());
-    assert_eq!(plugins[1].id().to_string(), "mcp");
-    assert!(plugins[1].is_optional());
-    assert!(
-        plugins[1].config().is_some(),
-        "the map form keeps its config"
-    );
+    assert_eq!(plugins[0].to_string(), "web");
+    assert_eq!(plugins[1].to_string(), "mcp");
 
     let error = parse("name: x\ndescription: d\ncapabilities:\n  - web\n")
         .expect_err("the retired `capabilities` key must be rejected");

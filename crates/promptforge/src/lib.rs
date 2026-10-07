@@ -12,7 +12,6 @@
 
 pub use promptforge_engine::Environment;
 pub use promptforge_engine::MissingService;
-pub use promptforge_engine::PluginConflict;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;
 pub use promptforge_engine::Run;
@@ -135,7 +134,6 @@ pub mod prompt {
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
-    pub use promptforge_parser::PluginDecl;
     pub use promptforge_parser::ToolSlot;
     pub use promptforge_parser::ToolSlots;
 }

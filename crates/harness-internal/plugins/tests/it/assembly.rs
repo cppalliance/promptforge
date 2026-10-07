@@ -1,8 +1,7 @@
-//! Catalog assembly and conflict checks: activation assembles the
-//! activated Plugins' contributed tools into the run's catalog in
-//! declaration order, enforcing tool prefix-containment at assembly, and
-//! rejects Plugin co-activation conflicts naming both; the Engine's
-//! prepare fills exact slots against the catalog it is handed.
+//! Catalog assembly: activation assembles the activated Plugins'
+//! contributed tools into the run's catalog in declaration order,
+//! enforcing tool prefix-containment at assembly; the Engine's prepare
+//! fills exact slots against the catalog it is handed.
 
 use std::sync::Arc;
 
@@ -15,22 +14,6 @@ use super::support::{
     BadWireTool, ToolFixture, captured_logs, context, described_tool, fixture_tool, parse,
     prepare_activated, run_activated,
 };
-
-/// A prompt declaring `bashkit` and `terminal`,
-/// in that order.
-const DECLARES_CONFLICTING: &str = concat!(
-    "---\n",
-    "name: declares-conflicting\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "plugins:\n",
-    "  - bashkit\n",
-    "  - terminal\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
 
 /// A prompt declaring `web` and `fs`, in that
 /// order.
@@ -70,80 +53,10 @@ fn web_registry() -> PluginRegistry {
     registry
         .register(Arc::new(ToolFixture::new(
             "web",
-            &[],
             vec![described_tool("web/fetch", "Fetch a web page over HTTP")],
         )))
         .expect("web registers");
     registry
-}
-
-#[test]
-fn a_co_activation_conflict_fails_preparation_naming_both() {
-    let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
-    // The check is symmetric: the conflict is found whether the earlier-
-    // or the later-declared Plugin declares it.
-    for (bashkit_conflicts, terminal_conflicts) in
-        [(vec!["terminal"], vec![]), (vec![], vec!["bashkit"])]
-    {
-        let mut registry = PluginRegistry::new();
-        registry
-            .register(Arc::new(ToolFixture::new(
-                "bashkit",
-                &bashkit_conflicts,
-                vec![fixture_tool("bashkit/run")],
-            )))
-            .expect("bashkit registers");
-        registry
-            .register(Arc::new(ToolFixture::new(
-                "terminal",
-                &terminal_conflicts,
-                vec![fixture_tool("terminal/run")],
-            )))
-            .expect("terminal registers");
-        let (ctx, requirements, activation) = prepare_activated(
-            Environment::new(),
-            Some(&registry),
-            &prompt,
-            context("prepare-conflict"),
-        );
-        assert!(!requirements.is_satisfied());
-        let [conflict] = requirements.conflicts.as_slice() else {
-            panic!(
-                "exactly one conflict is reported: {:?}",
-                requirements.conflicts
-            );
-        };
-        // Both Plugins are named, in declaration order.
-        assert_eq!(conflict.first.to_string(), "bashkit");
-        assert_eq!(conflict.second.to_string(), "terminal");
-        // A context gets one filesystem reality or the other, never
-        // both: neither member of the conflicting pair activated, so
-        // neither tool reached the catalog or the implementation table.
-        assert!(ctx.tools().tools().is_empty());
-        assert!(activation.tools.is_empty());
-    }
-}
-
-#[test]
-fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
-    let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
-    let mut registry = PluginRegistry::new();
-    registry
-        .register(Arc::new(ToolFixture::new("bashkit", &["terminal"], vec![])))
-        .expect("bashkit registers");
-    registry
-        .register(Arc::new(ToolFixture::new("terminal", &[], vec![])))
-        .expect("terminal registers");
-    let result = run_activated(&registry, &prompt, context("refuse-conflict"));
-    let RunResult::Failure(error) = result else {
-        panic!("a conflicting pair is refused: {result:?}");
-    };
-    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
-    let notice = error.to_string();
-    assert!(
-        notice.contains("bashkit") && notice.contains("terminal"),
-        "the notice names both conflicting Plugins: {notice}"
-    );
 }
 
 #[test]
@@ -153,7 +66,6 @@ fn a_contributed_tool_outside_the_plugins_id_is_rejected_at_assembly() {
     let stray = ToolId::parse("other/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
         "web",
-        &[],
         vec![fixture_tool("web/fetch"), fixture_tool("other/fetch")],
     );
     let mut registry = PluginRegistry::new();
@@ -195,10 +107,9 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
     let prompt = parse(DECLARES_TWO, "declares-two");
     let web = ToolFixture::new(
         "web",
-        &[],
         vec![fixture_tool("web/fetch"), fixture_tool("web/search")],
     );
-    let fs = ToolFixture::new("fs", &[], vec![fixture_tool("fs/read")]);
+    let fs = ToolFixture::new("fs", vec![fixture_tool("fs/read")]);
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(web)).expect("web registers");
     registry.register(Arc::new(fs)).expect("fs registers");
@@ -228,7 +139,6 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
     let repeated = ToolId::parse("web/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
         "web",
-        &[],
         vec![
             fixture_tool("web/fetch"),
             fixture_tool("web/search"),
@@ -270,7 +180,6 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     let bad = ToolId::parse("web/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
         "web",
-        &[],
         vec![
             Arc::new(BadWireTool {
                 id: bad.clone(),

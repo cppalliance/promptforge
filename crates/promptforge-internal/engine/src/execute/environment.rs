@@ -99,8 +99,8 @@ impl Environment {
     /// Plugin is in the catalog but the named tool is absent, the slot
     /// stays empty and the report omits it. Advertising the slot's alias
     /// fails at run time. Every fill is recorded in the context's tool
-    /// bindings. Plugin resolution, co-activation conflicts, and
-    /// activation happen in the caller before `prepare`, and the caller
+    /// bindings. Plugin resolution and activation happen in the caller
+    /// before `prepare`, and the caller
     /// merges that report into the one `prepare` returns.
     ///
     /// Every declared model role binds to the context's current model.

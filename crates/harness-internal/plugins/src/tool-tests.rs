@@ -115,7 +115,6 @@ fn a_descriptor_has_the_tools_surface_and_never_the_implementation() {
     assert_eq!(descriptor.description, "Inspect a fixture.");
     assert_eq!(descriptor.parameters_schema["required"], json!(["path"]));
     assert!(!descriptor.structured_output);
-    assert!(descriptor.conflicts.is_empty());
 }
 
 #[test]

@@ -5,13 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ids::ToolId;
-use crate::plugins::PluginId;
 
 /// A tool described as data.
 ///
 /// A descriptor holds the tool's stable id, its wire name, the description
-/// the model reads, its parameter schema, whether its output is structured,
-/// and the Plugins that conflict with the contributing Plugin.
+/// the model reads, its parameter schema, and whether its output is
+/// structured.
 ///
 /// The caller collects the descriptors of its activated Plugins into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay in the
@@ -36,15 +35,10 @@ pub struct ToolDescriptor {
     /// script that calls the tool receives the output as data. Otherwise the
     /// script receives it as a string.
     pub structured_output: bool,
-    /// The Plugins that conflict with the contributing Plugin. Each
-    /// of them and the contributing Plugin exclude each other in a run.
-    /// The descriptor only records them. The caller checks them before
-    /// activation.
-    pub conflicts: Vec<PluginId>,
 }
 
 impl ToolDescriptor {
-    /// Builds a descriptor with plain-text output and an empty conflict list.
+    /// Builds a descriptor with plain-text output.
     #[must_use]
     pub fn new(
         id: ToolId,
@@ -58,7 +52,6 @@ impl ToolDescriptor {
             description: description.into(),
             parameters_schema,
             structured_output: false,
-            conflicts: Vec::new(),
         }
     }
 
@@ -67,15 +60,6 @@ impl ToolDescriptor {
     #[must_use]
     pub fn structured(mut self, structured: bool) -> ToolDescriptor {
         self.structured_output = structured;
-        self
-    }
-
-    /// Sets the Plugins that conflict with the contributing Plugin.
-    /// Each of them and the contributing Plugin exclude each other in a
-    /// run.
-    #[must_use]
-    pub fn with_conflicts(mut self, conflicts: Vec<PluginId>) -> ToolDescriptor {
-        self.conflicts = conflicts;
         self
     }
 }

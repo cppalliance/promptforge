@@ -17,10 +17,9 @@ export interface RunContractFile {
   readonly description: string;
 }
 
-/** A declared Plugin: its global id and optionality. */
+/** A declared Plugin: its one-segment name, such as `web`. */
 export interface RunContractPlugin {
   readonly id: string;
-  readonly optional: boolean;
 }
 
 /** One tool slot: its alias and the canonical namespace/plugin/name path. */
@@ -90,11 +89,11 @@ function parsePlugin(value: unknown): RunContractPlugin | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { id, optional } = value;
-  if (typeof id !== "string" || typeof optional !== "boolean") {
+  const { id } = value;
+  if (typeof id !== "string") {
     return null;
   }
-  return { id, optional };
+  return { id };
 }
 
 function parseTool(value: unknown): RunContractTool | null {

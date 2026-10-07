@@ -10,7 +10,7 @@ mod tests;
 ///
 /// [`Environment::prepare`](super::Environment::prepare) returns one
 /// together with the prepared context. The report lists only what needs a
-/// person's attention. A skipped optional Plugin is logged.
+/// person's attention.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
@@ -34,31 +34,20 @@ pub struct Requirements {
     ///
     /// There is one entry for each Plugin and missing service.
     /// Plugin activation adds these and skips each such Plugin.
-    /// The run fails until the application provides the service or the
-    /// prompt declares the Plugin optional.
+    /// The run fails until the application provides the service.
     pub missing_services: Vec<MissingService>,
-    /// The declared conflicts: pairs of registered Plugins that
-    /// exclude each other in a run.
-    ///
-    /// For example, `bashkit` and `terminal` each give the run its own
-    /// view of the filesystem, so a run gets one or the other. Only
-    /// Plugin activation adds these, and it skips both members of each
-    /// pair. The run fails until the prompt declares only one of them.
-    pub conflicts: Vec<PluginConflict>,
 }
 
 impl Requirements {
     /// Returns whether the report lets the run proceed.
     ///
-    /// That holds when every model requirement is met, every required
-    /// Plugin is present and has the services it needs, and every
-    /// pair of Plugins is compatible.
+    /// That holds when every model requirement is met and every required
+    /// Plugin is present and has the services it needs.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
             && self.missing_required.is_empty()
             && self.missing_services.is_empty()
-            && self.conflicts.is_empty()
     }
 
     /// Adds the entries of `other` to this report.
@@ -91,7 +80,6 @@ impl Requirements {
                 .iter()
                 .any(|missing| missing.plugin == *id)
         });
-        self.conflicts.extend(other.conflicts);
         self.unmet_requirements.extend(other.unmet_requirements);
     }
 
@@ -132,14 +120,6 @@ impl Requirements {
                 missing.plugin, missing.service
             );
         }
-        for conflict in &self.conflicts {
-            let _ = write!(
-                notice,
-                "\n- conflicting Plugins: {} and {} cannot be activated \
-                 together; declare one or the other",
-                conflict.first, conflict.second
-            );
-        }
         for unmet in &self.unmet_requirements {
             let line = match unmet.check {
                 RequirementCheck::ContextMinimum => format!(
@@ -156,30 +136,6 @@ impl Requirements {
             let _ = write!(notice, "\n- {line}");
         }
         notice
-    }
-}
-
-/// A declared conflict between two registered Plugins that exclude
-/// each other in a run.
-///
-/// The pair is named in the order the prompt declares them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct PluginConflict {
-    /// The earlier-declared Plugin.
-    pub first: PluginId,
-    /// The later-declared Plugin.
-    pub second: PluginId,
-}
-
-impl PluginConflict {
-    /// Creates a conflict between `first` and `second`, where the prompt
-    /// declares `first` before `second`.
-    ///
-    /// Only Plugin activation reports these.
-    #[must_use]
-    pub fn new(first: PluginId, second: PluginId) -> PluginConflict {
-        PluginConflict { first, second }
     }
 }
 

@@ -49,31 +49,16 @@ pub trait Plugin: Send + Sync {
     /// Hosts.
     fn description(&self) -> &str;
 
-    /// Returns the Plugins that conflict with this one when declared
-    /// in the same run.
-    ///
-    /// For example, bashkit and a terminal each give the run its own
-    /// filesystem, so a run uses at most one of the two. Activation checks
-    /// every pair of declared Plugins that are present. The check is
-    /// symmetric, so only one member of a pair needs to name the other. A
-    /// conflicting pair fails preparation, and the failure names both
-    /// members. The default returns an empty list.
-    fn conflicts(&self) -> &[PluginId] {
-        &[]
-    }
-
     /// Returns the ids of the run services this Plugin needs from
     /// [`RunServices`].
     ///
     /// Activation checks each id with [`RunServices::provides`] before it
     /// calls this Plugin's [`create`](Plugin::create). A provider
     /// registered under the id but supplied as a different type than the
-    /// id names counts as missing. When a required Plugin needs a
+    /// id names counts as missing. When a declared Plugin needs a
     /// missing service, activation skips its `create` and refuses the run,
-    /// naming the Plugin and the service. When the Plugin is
-    /// optional, activation calls `create` anyway, and the Plugin
-    /// decides how to handle the missing service. The default returns an
-    /// empty list.
+    /// naming the Plugin and the service. The default returns an empty
+    /// list.
     fn needs(&self) -> &[ServiceId] {
         &[]
     }

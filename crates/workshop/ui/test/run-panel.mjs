@@ -117,7 +117,7 @@ function contractFor(name) {
     max_tool_iterations: 12,
     input: { path: "in/papers.md", description: "the papers" },
     output: { path: "out/verdicts.md", description: "the verdicts" },
-    plugins: [{ id: "tools/web", optional: false }],
+    plugins: [{ id: "tools/web" }],
     tools: [{ kind: "exact", alias: "search", path: "tools/web/search" }],
     args: {
       implicit: false,
@@ -384,11 +384,6 @@ check(
   "an integer arg is a numeric control prefilled from its default",
   limitRow?.querySelector('input[type="number"]')?.value === "5" &&
     limitRow.querySelector('input[type="number"]')?.step === "1",
-);
-const pluginRow = rowText("tools/web");
-check(
-  "a required Plugin is a disabled checkbox",
-  pluginRow?.querySelector('input[type="checkbox"]')?.disabled === true,
 );
 const toolRows = rows.filter((row) => row.classList.contains("ws-run-panel__row--tool"));
 check(

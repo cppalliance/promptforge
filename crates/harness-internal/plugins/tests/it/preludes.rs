@@ -1,7 +1,6 @@
 //! Preludes at activation: each activated Plugin's prelude is
 //! returned in declaration order, and a Plugin that does not
-//! activate (absent, in a conflicting pair, or failing in `create`)
-//! contributes none.
+//! activate (absent, or failing in `create`) contributes none.
 
 use std::sync::Arc;
 
@@ -18,12 +17,10 @@ fn id(text: &str) -> PluginId {
 }
 
 /// A fixture Plugin contributing `prelude` when it has one and no
-/// tools. It conflicts with each id in `conflicts`, and `fail` turns its
-/// activation into an error.
+/// tools. `fail` turns its activation into an error.
 struct Preluder {
     id: PluginId,
     prelude: Option<&'static str>,
-    conflicts: Vec<PluginId>,
     fail: bool,
 }
 
@@ -32,14 +29,8 @@ impl Preluder {
         Preluder {
             id: id(plugin),
             prelude,
-            conflicts: Vec::new(),
             fail: false,
         }
-    }
-
-    fn conflicting_with(mut self, other: &str) -> Preluder {
-        self.conflicts.push(id(other));
-        self
     }
 
     fn failing(mut self) -> Preluder {
@@ -59,10 +50,6 @@ impl Plugin for Preluder {
     )]
     fn description(&self) -> &str {
         "A fixture Plugin contributing a prelude."
-    }
-
-    fn conflicts(&self) -> &[PluginId] {
-        &self.conflicts
     }
 
     fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
@@ -121,10 +108,10 @@ fn activation_returns_each_contributed_prelude_in_declaration_order() {
 #[test]
 fn an_absent_plugin_contributes_no_prelude() {
     let activation = activate_declaring(
-        "  - alpha\n  - ref: absent\n    optional: true\n",
+        "  - alpha\n  - absent\n",
         vec![Preluder::new("alpha", Some("alpha = {}"))],
     );
-    assert!(activation.requirements.is_satisfied());
+    assert_eq!(activation.requirements.missing_required, [id("absent")]);
     assert_eq!(
         activation.preludes,
         [Prelude::new(id("alpha"), "alpha = {}")]
@@ -132,37 +119,15 @@ fn an_absent_plugin_contributes_no_prelude() {
 }
 
 #[test]
-fn a_conflicting_pair_contributes_no_prelude() {
-    let activation = activate_declaring(
-        "  - left\n  - right\n  - alpha\n",
-        vec![
-            Preluder::new("left", Some("left = {}")).conflicting_with("right"),
-            Preluder::new("right", Some("right = {}")),
-            Preluder::new("alpha", Some("alpha = {}")),
-        ],
-    );
-    assert_eq!(
-        activation.requirements.conflicts.len(),
-        1,
-        "the pair is reported as a conflict"
-    );
-    assert_eq!(
-        activation.preludes,
-        [Prelude::new(id("alpha"), "alpha = {}")],
-        "neither member of the conflicting pair contributes its prelude"
-    );
-}
-
-#[test]
 fn a_plugin_whose_create_fails_contributes_no_prelude() {
     let activation = activate_declaring(
-        "  - ref: broken\n    optional: true\n  - alpha\n",
+        "  - broken\n  - alpha\n",
         vec![
             Preluder::new("broken", Some("broken = {}")).failing(),
             Preluder::new("alpha", Some("alpha = {}")),
         ],
     );
-    assert!(activation.requirements.is_satisfied());
+    assert_eq!(activation.requirements.missing_required, [id("broken")]);
     assert_eq!(
         activation.preludes,
         [Prelude::new(id("alpha"), "alpha = {}")]
