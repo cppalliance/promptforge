@@ -1,15 +1,104 @@
-//! Interim task ownership, retry, and canceled-join capacity.
+//! Interim task ownership, retry, canceled-join capacity, and the discard of
+//! empty interim transcripts.
 
 use std::future::pending;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use futures_util::FutureExt as _;
+use gateway_stt::test_fixtures::{
+    RealtimeSessionFixture, RealtimeSessionRegistryFixture, ScriptedDecoder, ScriptedModelFactory,
+};
+use serde_json::Value;
 
 use super::{
     BLOCKING_TASK_TEST, BlockingPoll, CANCEL_JOIN_CAPACITY, encoded, session, source_message,
-    wait_until_started,
+    update, wait_until_started,
 };
+
+const SNAPSHOT_FIELDS: [&str; 7] = [
+    "revision",
+    "transcript",
+    "finalized",
+    "agreed",
+    "tentative",
+    "audio_start_ms",
+    "audio_end_ms",
+];
+
+#[expect(
+    clippy::expect_used,
+    reason = "a fresh registry has capacity and the update is a valid hypothesis include"
+)]
+fn hypothesis_session(interim: &ScriptedDecoder) -> RealtimeSessionFixture {
+    let mut session = RealtimeSessionRegistryFixture::default()
+        .register_with_scripted_engine(ScriptedModelFactory::new(interim.clone()))
+        .expect("scripted session starts");
+    session
+        .update_text(&update("", true))
+        .expect("hypothesis include applies");
+    session
+}
+
+/// Appends `seconds` of 24 kHz speech-level audio, runs one production
+/// interim, and returns its hypothesis snapshot fields.
+#[expect(
+    clippy::expect_used,
+    reason = "speech-level audio appends and its scripted interim decodes"
+)]
+async fn speak_then_decode(session: &mut RealtimeSessionFixture, seconds: usize) -> Option<Value> {
+    let second = encoded(&vec![16_384; 24_000]);
+    for _ in 0..seconds {
+        session.append_base64(&second).expect("speech appends");
+    }
+    let event = session.run_interim().await.expect("the interim runs")?;
+    Some(
+        SNAPSHOT_FIELDS
+            .iter()
+            .map(|field| ((*field).to_owned(), event[*field].clone()))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn an_empty_interim_transcript_leaves_the_snapshot_and_agreement_unchanged() {
+    let interim = ScriptedDecoder::new();
+    for text in ["alpha beta", "", "alpha beta"] {
+        interim.push_text(text);
+    }
+    let mut session = hypothesis_session(&interim);
+    let first = speak_then_decode(&mut session, 1)
+        .await
+        .expect("the first interim emits a hypothesis");
+    assert_eq!(
+        speak_then_decode(&mut session, 1).await,
+        None,
+        "the empty interim emits nothing"
+    );
+    assert_eq!(
+        interim.requests().len(),
+        2,
+        "the empty interim decoded before the session discarded it"
+    );
+    let after = speak_then_decode(&mut session, 1)
+        .await
+        .expect("the next interim emits a hypothesis");
+
+    let control_interim = ScriptedDecoder::new();
+    for text in ["alpha beta", "alpha beta"] {
+        control_interim.push_text(text);
+    }
+    let mut control = hypothesis_session(&control_interim);
+    assert_eq!(speak_then_decode(&mut control, 1).await, Some(first));
+    let expected = speak_then_decode(&mut control, 2)
+        .await
+        .expect("the control's second interim emits a hypothesis");
+    assert_eq!(
+        after, expected,
+        "the take advances as if the empty interim never arrived"
+    );
+    assert_eq!(after["agreed"], "alpha beta");
+}
 
 #[tokio::test]
 async fn canceling_finish_keeps_current_task_owned_for_retry() {

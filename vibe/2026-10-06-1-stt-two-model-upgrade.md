@@ -542,7 +542,7 @@ flowchart TD
 
 <step-10>
 
-### Step 10: Interim hallucination guards
+### Step 10: Interim hallucination guards [completed]
 
 - Component: Decode tuning
 - Piece: guards

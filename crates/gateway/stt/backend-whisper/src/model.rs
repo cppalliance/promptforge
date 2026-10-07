@@ -10,10 +10,11 @@ use gateway_stt_engine::{
     DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 use gateway_whisper_ffi::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState,
+    FullParams, SamplingStrategy, WhisperContext, WhisperError, WhisperLibrary, WhisperState,
 };
 
 use crate::WhisperConfig;
+use crate::guard::{TokenStats, guard_interim};
 use crate::profile::{RoleProfile, available_cores};
 use crate::prompt::{
     GLOSSARY_TOKEN_BUDGET, MAX_PROMPT_TOKENS, final_prompt, fit_glossary, sanitize_prompt,
@@ -142,14 +143,40 @@ impl Decoder for WhisperDecoder {
         } else {
             glossary
         };
-        transcribe_blocking(
+        let text = transcribe_blocking(
             &mut self.state,
             request.samples(),
             prompt.as_deref(),
             &self.profile,
             request.cancellation(),
-        )
+        )?;
+        guard_role(request.mode(), text, || token_stats(&self.state)).map_err(inference_error)
     }
+}
+
+/// `text` from a pass in `mode`: a final pass keeps it as decoded without
+/// reading `stats`, and any other pass runs the interim guards over it.
+fn guard_role(
+    mode: DecodeMode,
+    text: String,
+    stats: impl FnOnce() -> Result<TokenStats, WhisperError>,
+) -> Result<String, WhisperError> {
+    if mode == DecodeMode::Final {
+        return Ok(text);
+    }
+    Ok(guard_interim(&text, stats()?))
+}
+
+/// Token evidence from `state`'s most recent pass.
+fn token_stats(state: &WhisperState) -> Result<TokenStats, WhisperError> {
+    let mut segments = Vec::new();
+    for segment in 0..state.segment_count() {
+        let tokens = (0..state.token_count(segment)?)
+            .map(|token| state.token_probability(segment, token))
+            .collect::<Result<Vec<_>, _>>()?;
+        segments.push((state.segment_no_speech_probability(segment)?, tokens));
+    }
+    Ok(TokenStats::from_segments(segments))
 }
 
 fn require_model_file(path: &Path) -> Result<(), TranscribeError> {
@@ -260,6 +287,7 @@ fn transcribe_blocking(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::sync::Arc;
 
     use gateway_progress::ProgressHub;
@@ -267,6 +295,30 @@ mod tests {
     use super::*;
 
     const WINDOW_SECONDS: u64 = 15;
+    const SPOKEN: &str = "ask not what your country can do for you";
+    const VETOING: TokenStats = TokenStats {
+        no_speech: Some(0.9),
+        mean_log_probability: Some(-2.0),
+    };
+
+    #[test]
+    fn a_final_pass_bypasses_the_interim_guard_without_reading_token_stats() {
+        let read = Cell::new(false);
+        let text = guard_role(DecodeMode::Final, SPOKEN.to_owned(), || {
+            read.set(true);
+            Ok(VETOING)
+        })
+        .expect("a final pass keeps its text");
+        assert_eq!(text, SPOKEN);
+        assert!(!read.get(), "a final pass never reads token statistics");
+    }
+
+    #[test]
+    fn an_interim_pass_runs_the_guard_on_its_token_stats() {
+        let text = guard_role(DecodeMode::Interim, SPOKEN.to_owned(), || Ok(VETOING))
+            .expect("an interim pass guards its text");
+        assert_eq!(text, "", "vetoing token statistics empty an interim pass");
+    }
 
     #[test]
     fn prewarm_of_a_plain_file_writes_the_read_percent() {
