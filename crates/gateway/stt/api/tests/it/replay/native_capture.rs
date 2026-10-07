@@ -362,7 +362,13 @@ fn snapshot(at_ms: u64, event: Value) -> ReplaySnapshot {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once() {
     let model = common::require_model();
-    let config = WhisperConfig::new(common::require_library(), model.clone(), Some(model), None);
+    let config = WhisperConfig::new(
+        common::require_library(),
+        model.clone(),
+        Some(model),
+        WINDOW_SECONDS,
+        None,
+    );
     let decodes = Decodes::default();
     let factory = RecordingFactory {
         inner: WhisperModelFactory::new(config).expect("the packaged runtime loads"),

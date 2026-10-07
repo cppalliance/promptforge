@@ -2,6 +2,7 @@
 
 mod config;
 mod model;
+mod profile;
 mod prompt;
 
 pub use config::WhisperConfig;

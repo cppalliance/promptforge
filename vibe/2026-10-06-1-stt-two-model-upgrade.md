@@ -528,7 +528,7 @@ flowchart TD
 
 <step-9>
 
-### Step 9: Per-role whisper decode profiles
+### Step 9: Per-role whisper decode profiles [completed]
 
 - Component: Decode tuning
 - Piece: role profiles

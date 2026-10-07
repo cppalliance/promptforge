@@ -108,8 +108,14 @@ async fn native_interim_decode_timing_is_recorded_in_the_native_sections() {
         &fixture_dir(),
         "ggml-tiny.en.bin",
     );
-    let factory = WhisperModelFactory::new(WhisperConfig::new(library, model, None, None))
-        .expect("packaged runtime loads");
+    let factory = WhisperModelFactory::new(WhisperConfig::new(
+        library,
+        model,
+        None,
+        WINDOW_SECONDS,
+        None,
+    ))
+    .expect("packaged runtime loads");
     let gpu_available = factory.gpu_available();
     let policy = EnginePolicy::new(WINDOW_SECONDS, INTERVAL_MS, gpu_available)
         .expect("the gateway default policy is valid");

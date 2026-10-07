@@ -14,6 +14,7 @@ use gateway_whisper_ffi::{
 };
 
 use crate::WhisperConfig;
+use crate::profile::{RoleProfile, available_cores};
 use crate::prompt::{
     GLOSSARY_TOKEN_BUDGET, MAX_PROMPT_TOKENS, final_prompt, fit_glossary, sanitize_prompt,
 };
@@ -64,18 +65,23 @@ impl WhisperModelFactory {
 
 impl ModelFactory for WhisperModelFactory {
     fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-        let (path, role) = match mode {
-            DecodeMode::Interim => (&self.config.interim_model, "interim"),
+        let cores = available_cores();
+        let (path, role, profile) = match mode {
+            DecodeMode::Interim => (
+                &self.config.interim_model,
+                "interim",
+                RoleProfile::interim(self.config.window_seconds, cores),
+            ),
             DecodeMode::Final => {
                 let Some(path) = &self.config.final_model else {
                     return Ok(None);
                 };
-                (path, "final")
+                (path, "final", RoleProfile::final_pass(cores))
             }
             _ => return Ok(None),
         };
         let progress = self.config.live_progress();
-        WhisperDecoder::load(&self.library, path, role, progress.as_deref())
+        WhisperDecoder::load(&self.library, path, role, profile, progress.as_deref())
             .map(|decoder| Some(Box::new(decoder) as Box<dyn Decoder>))
     }
 }
@@ -84,6 +90,7 @@ impl ModelFactory for WhisperModelFactory {
 struct WhisperDecoder {
     context: WhisperContext,
     state: WhisperState,
+    profile: RoleProfile,
 }
 
 impl WhisperDecoder {
@@ -91,6 +98,7 @@ impl WhisperDecoder {
         library: &WhisperLibrary,
         path: &Path,
         role: &str,
+        profile: RoleProfile,
         progress: Option<&Activity>,
     ) -> Result<Self, TranscribeError> {
         prewarm(path, role, progress)?;
@@ -102,7 +110,11 @@ impl WhisperDecoder {
         let state = context
             .create_state()
             .map_err(|source| load_model_error(path, source))?;
-        Ok(Self { context, state })
+        Ok(Self {
+            context,
+            state,
+            profile,
+        })
     }
 }
 
@@ -134,7 +146,7 @@ impl Decoder for WhisperDecoder {
             &mut self.state,
             request.samples(),
             prompt.as_deref(),
-            !final_pass,
+            &self.profile,
             request.cancellation(),
         )
     }
@@ -207,7 +219,7 @@ fn transcribe_blocking(
     state: &mut WhisperState,
     samples: &[f32],
     prompt: Option<&str>,
-    single_segment: bool,
+    profile: &RoleProfile,
     cancellation: Option<&Arc<AtomicBool>>,
 ) -> Result<String, TranscribeError> {
     if cancellation.is_some_and(|flag| flag.load(Ordering::Acquire)) {
@@ -219,7 +231,6 @@ fn transcribe_blocking(
     params.set_language(Some("en")).map_err(inference_error)?;
     params.set_translate(false);
     params.set_no_context(true);
-    params.set_single_segment(single_segment);
     params.set_no_timestamps(true);
     params.set_print_special(false);
     params.set_print_progress(false);
@@ -227,6 +238,7 @@ fn transcribe_blocking(
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
+    profile.apply(&mut params);
     if let Some(flag) = cancellation {
         params.set_abort_flag(Arc::clone(flag));
     }
@@ -254,6 +266,8 @@ mod tests {
 
     use super::*;
 
+    const WINDOW_SECONDS: u64 = 15;
+
     #[test]
     fn prewarm_of_a_plain_file_writes_the_read_percent() {
         let directory = tempfile::tempdir().expect("temporary model directory");
@@ -278,6 +292,7 @@ mod tests {
             "unused-library".into(),
             "unused-interim.bin".into(),
             None,
+            WINDOW_SECONDS,
             Some(Arc::downgrade(&activity)),
         );
         let live = config
@@ -297,7 +312,13 @@ mod tests {
 
     #[test]
     fn a_config_without_progress_yields_none() {
-        let config = WhisperConfig::new("unused-library".into(), "unused.bin".into(), None, None);
+        let config = WhisperConfig::new(
+            "unused-library".into(),
+            "unused.bin".into(),
+            None,
+            WINDOW_SECONDS,
+            None,
+        );
         assert!(config.live_progress().is_none());
     }
 
@@ -319,6 +340,7 @@ mod tests {
             "unused-library".into(),
             "definitely-missing-interim-model.bin".into(),
             None,
+            WINDOW_SECONDS,
             None,
         );
         let error = WhisperModelFactory::new(config).expect_err("missing model must fail");
@@ -339,6 +361,7 @@ mod tests {
             "unused-library".into(),
             interim,
             Some("definitely-missing-final-model.bin".into()),
+            WINDOW_SECONDS,
             None,
         );
         let error = WhisperModelFactory::new(config).expect_err("missing model must fail");

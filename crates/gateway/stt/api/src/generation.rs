@@ -264,6 +264,7 @@ fn whisper_spec(prepared: PreparedGeneration) -> Result<GenerationSpec, SpeechEr
         prepared.library,
         prepared.interim_model,
         prepared.final_model,
+        prepared.window_seconds,
         prepared.progress,
     );
     let factory = WhisperModelFactory::new(backend_config).map_err(SpeechError::Engine)?;

@@ -35,6 +35,8 @@ const MID_PASS: Duration = Duration::from_millis(300);
 /// The longest an aborted decode may run on after its flag is set: one
 /// encoder pass or decoder step, which tiny.en finishes well within it.
 const ABORT_BOUND: Duration = Duration::from_secs(1);
+/// The capture policy's interim window.
+const WINDOW_SECONDS: u64 = 12;
 static NATIVE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[test]
@@ -55,10 +57,10 @@ fn engine_with_progress(
     final_model: Option<PathBuf>,
     progress: Option<Weak<Activity>>,
 ) -> SttEngine {
-    let config = WhisperConfig::new(library, interim, final_model, progress);
+    let config = WhisperConfig::new(library, interim, final_model, WINDOW_SECONDS, progress);
     let factory = WhisperModelFactory::new(config).expect("packaged runtime loads");
-    let policy =
-        EnginePolicy::new(12, 500, factory.gpu_available()).expect("capture policy is valid");
+    let policy = EnginePolicy::new(WINDOW_SECONDS, 500, factory.gpu_available())
+        .expect("capture policy is valid");
     SttEngine::new(factory, policy).expect("backend models load")
 }
 

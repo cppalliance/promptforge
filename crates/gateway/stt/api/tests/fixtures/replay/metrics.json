@@ -16,8 +16,8 @@
   },
   "native": {
     "gpu_available": true,
-    "interim_decode_max_ms": 53.736,
-    "interim_decode_mean_ms": 28.960545454545453,
+    "interim_decode_max_ms": 50.859,
+    "interim_decode_mean_ms": 27.19031818181818,
     "interim_decodes": 22,
     "window_seconds": 15
   },
