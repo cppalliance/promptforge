@@ -3,7 +3,7 @@
 //! Whisper often fills trailing silence by repeating the words before it,
 //! as in "create a plan. I want you to create". A hypothesis tail is cut
 //! when it repeats the start of the run of words just before it and the
-//! speech the energy gate heard after the words before the tail is too short
+//! speech the detector heard after the words before the tail is too short
 //! to have said the words decoded since. A phrase the speaker repeats keeps
 //! its speech, so it stays.
 

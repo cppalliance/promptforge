@@ -55,17 +55,17 @@ fn scripted_take(outputs: &[&'static str]) -> (Take, mpsc::UnboundedReceiver<(us
 async fn a_click_keeps_its_accepted_text_when_decoded_speech_follows() {
     let (take, mut requests) = scripted_take(&["The commit rule."]);
 
-    hear(&take, false, 16_320);
-    hear(&take, true, 3_840);
+    hear(&take, false, 16_384);
+    hear(&take, true, 3_584);
     hear(&take, false, 4_800);
-    take.next_window_snapshot("Hey.", &[], 0, 0, 24_960)
+    take.next_window_snapshot("Hey.", &[], 0, 0, 24_768)
         .expect("the word is accepted from a window that ends in its closing silence");
-    hear(&take, false, 4_800);
+    hear(&take, false, 4_928);
     settle(&take).await;
     let consumed = take.consumed();
     assert_eq!(
-        consumed, 21_760,
-        "the 240 ms click closed as a skipped segment"
+        consumed, 21_568,
+        "the 224 ms click closed as a skipped segment"
     );
     assert_eq!(
         take.finalized(),
@@ -74,7 +74,7 @@ async fn a_click_keeps_its_accepted_text_when_decoded_speech_follows() {
     );
 
     hear(&take, true, 16_000);
-    take.next_window_snapshot("The commit rule.", &[], consumed, consumed, 45_760)
+    take.next_window_snapshot("The commit rule.", &[], consumed, consumed, 45_696)
         .expect("the next sentence is accepted");
     let completed = take
         .finalization()
@@ -93,21 +93,21 @@ async fn a_click_keeps_its_accepted_text_when_decoded_speech_follows() {
 async fn a_short_word_before_silence_settles_its_punctuated_final_over_the_interim_word() {
     let (take, mut requests) = scripted_take(&["Hey.", "The commit rule."]);
 
-    hear(&take, false, 16_320);
-    hear(&take, true, 6_720);
+    hear(&take, false, 16_384);
+    hear(&take, true, 6_656);
     hear(&take, false, 4_800);
     take.next_window_snapshot("Hey", &[], 0, 0, 27_840)
         .expect("the unpunctuated interim word is accepted");
-    hear(&take, false, 27_360);
+    hear(&take, false, 27_456);
     settle(&take).await;
     let consumed = take.consumed();
     assert_eq!(
         consumed, 24_640,
-        "the 420 ms word closed after two seconds of silence"
+        "the 416 ms word closed after two seconds of silence"
     );
     assert_eq!(
         requests.try_recv(),
-        Ok((16_320, String::new())),
+        Ok((16_256, String::new())),
         "the final pass decodes the word with its pre-roll and hangover"
     );
     let (snapshot, _) = take
@@ -121,7 +121,7 @@ async fn a_short_word_before_silence_settles_its_punctuated_final_over_the_inter
     );
 
     hear(&take, true, 16_000);
-    take.next_window_snapshot("the commit rule", &[], consumed, consumed, 71_200)
+    take.next_window_snapshot("the commit rule", &[], consumed, consumed, 71_296)
         .expect("the next sentence is accepted");
     let completed = take
         .finalization()

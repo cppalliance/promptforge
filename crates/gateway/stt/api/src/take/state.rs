@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use gateway_stt_engine::TranscribeError;
+use gateway_stt_engine::{FallbackDetector, TranscribeError};
 
 use super::agreement::{
     final_transcript_within_limit, projected_prefix_end, range_guided_suffix_prefix_start,
@@ -94,28 +94,42 @@ pub(super) struct TakeState {
 
 impl Default for TakeState {
     fn default() -> Self {
-        Self {
-            held: Mutex::default(),
-            buffer: Mutex::new(RollingPcm::new(RetainedPcmBudget::default())),
-            segmenter: Mutex::new(Segmenter::default()),
-            finalized: Mutex::new(FinalizedState::default()),
-        }
+        Self::new(RetainedPcmBudget::default(), FallbackDetector::energy())
     }
 }
 
 impl TakeState {
-    #[cfg(test)]
-    pub(super) fn with_pcm_limit(limit: usize) -> Self {
+    fn new(budget: RetainedPcmBudget, detector: FallbackDetector) -> Self {
         Self {
             held: Mutex::default(),
-            buffer: Mutex::new(RollingPcm::new(RetainedPcmBudget::with_limit(limit))),
-            segmenter: Mutex::new(Segmenter::default()),
+            buffer: Mutex::new(RollingPcm::new(budget)),
+            segmenter: Mutex::new(Segmenter::new(detector)),
             finalized: Mutex::new(FinalizedState::default()),
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn with_pcm_limit(limit: usize) -> Self {
+        Self::new(
+            RetainedPcmBudget::with_limit(limit),
+            FallbackDetector::energy(),
+        )
+    }
+
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(super) fn with_detector(detector: FallbackDetector) -> Self {
+        Self::new(RetainedPcmBudget::default(), detector)
+    }
+
     pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Classifies the audio appended since the last call, queueing the
+    /// decisions for segment closing only when `closes_segments`.
+    pub(super) fn classify(&self, closes_segments: bool) {
+        let buffer = Self::lock(&self.buffer);
+        Self::lock(&self.segmenter).classify(buffer.samples(), buffer.origin(), closes_segments);
     }
 
     pub(super) fn finalized(&self) -> String {

@@ -2,7 +2,8 @@
 
 use std::ops::Range;
 
-use gateway_stt_engine::EnginePolicy;
+use gateway_stt_engine::test_fixtures::ScriptedDetector;
+use gateway_stt_engine::{EnginePolicy, FallbackDetector};
 use serde::{Deserialize, Serialize};
 
 use crate::test_fixtures::FixtureError;
@@ -201,6 +202,14 @@ pub(super) fn speech_ranges(
             }
         })
         .collect()
+}
+
+/// A detector that hears speech exactly in `speech`, so the take segments
+/// the script's layout whatever the loudness of the synthesized audio.
+pub(super) fn speech_detector(speech: &[Range<u64>]) -> FallbackDetector {
+    let index = |sample: u64| usize::try_from(sample).unwrap_or(usize::MAX);
+    let runs = speech.iter().map(|run| (index(run.start), index(run.end)));
+    FallbackDetector::new(Box::new(ScriptedDetector::new(runs)))
 }
 
 pub(super) const fn millis_to_samples(millis: u64) -> u64 {

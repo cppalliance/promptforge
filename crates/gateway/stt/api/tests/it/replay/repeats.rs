@@ -53,8 +53,8 @@ async fn a_phrase_the_speaker_repeats_stays_shown_as_it_is_spoken() {
             {"at_ms": 3_650, "audio_start_ms": 0, "audio_end_ms": 3_500, "transcript": "I want you to create a plan. I want you to create"}
         ],
         "finals": [
-            {"at_ms": 6_200, "sample_start": 0, "sample_end": 65_920, "text": "I want you to create a plan. I want you to create."},
-            {"at_ms": 7_000, "sample_start": 65_920, "sample_end": 112_000, "text": ""}
+            {"at_ms": 6_200, "sample_start": 0, "sample_end": 66_112, "text": "I want you to create a plan. I want you to create."},
+            {"at_ms": 7_000, "sample_start": 66_112, "sample_end": 112_000, "text": ""}
         ]
     })))
     .await
@@ -72,13 +72,13 @@ async fn a_short_phrase_after_a_sentence_is_never_cut_as_an_echo_of_its_words() 
             {"at_ms": 1_150, "audio_start_ms": 0, "audio_end_ms": 1_000, "transcript": "Can you check"},
             {"at_ms": 2_150, "audio_start_ms": 0, "audio_end_ms": 2_000, "transcript": "Can you check whether the gateway is running?"},
             {"at_ms": 2_650, "audio_start_ms": 0, "audio_end_ms": 2_500, "transcript": "Can you check whether the gateway is running?"},
-            {"at_ms": 4_150, "audio_start_ms": 2_620, "audio_end_ms": 4_000, "transcript": "Thank you."},
-            {"at_ms": 4_650, "audio_start_ms": 2_620, "audio_end_ms": 4_500, "transcript": "Thank you."}
+            {"at_ms": 4_150, "audio_start_ms": 2_628, "audio_end_ms": 4_000, "transcript": "Thank you."},
+            {"at_ms": 4_650, "audio_start_ms": 2_628, "audio_end_ms": 4_500, "transcript": "Thank you."}
         ],
         "finals": [
-            {"at_ms": 3_300, "sample_start": 0, "sample_end": 41_920, "text": "Can you check whether the gateway is running?"},
-            {"at_ms": 5_300, "sample_start": 48_160, "sample_end": 66_880, "text": "Thank you."},
-            {"at_ms": 7_000, "sample_start": 66_880, "sample_end": 112_000, "text": ""}
+            {"at_ms": 3_300, "sample_start": 0, "sample_end": 42_048, "text": "Can you check whether the gateway is running?"},
+            {"at_ms": 5_300, "sample_start": 47_808, "sample_end": 67_136, "text": "Thank you."},
+            {"at_ms": 7_000, "sample_start": 67_136, "sample_end": 112_000, "text": ""}
         ]
     })))
     .await
@@ -92,7 +92,7 @@ async fn a_short_phrase_after_a_sentence_is_never_cut_as_an_echo_of_its_words() 
 }
 
 async fn repeated_word(speech_end: u64, final_text: &str) -> ReplayOutcome {
-    let final_end = speech_end + 1_600;
+    let final_end = speech_end.next_multiple_of(512) + 1_600;
     ReplayTake::run(&script(serde_json::json!({
         "speech_samples": [[0, speech_end]],
         "ticks": [

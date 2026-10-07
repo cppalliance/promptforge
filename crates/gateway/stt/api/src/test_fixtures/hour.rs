@@ -10,8 +10,11 @@ use gateway_stt_engine::{
 use crate::realtime::UncommittedInput;
 use crate::{SpeechError, SpeechService};
 
-const FINAL_STRIDE_SECONDS: usize = 10;
-const FINAL_OVERLAP_SECONDS: usize = 8;
+/// One forced stride of 16 kHz output: 313 frames of 512 samples.
+const FINAL_STRIDE_SAMPLES: u64 = 160_256;
+const FINAL_OVERLAP_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 8) as u64;
+/// The simulated speaker says this many words per forced stride.
+const WORDS_PER_STRIDE: u64 = 10;
 const MARKER_START: u16 = 0x6a5a;
 const MARKER_END: u16 = 0xa5a6;
 const SPEECH_SAMPLE: i16 = 8_192;
@@ -26,17 +29,9 @@ pub struct RealtimeTakeMetricsFixture {
     pending_final_segments: usize,
     pending_final_outcomes: usize,
     retained_hypotheses: usize,
-    frame_grid_origin: u64,
 }
 
 impl RealtimeTakeMetricsFixture {
-    /// Returns where the segmenter's 30 ms analysis frame grid last started:
-    /// zero, or the end of the latest forced stride.
-    #[must_use]
-    pub const fn frame_grid_origin(&self) -> u64 {
-        self.frame_grid_origin
-    }
-
     /// Returns exact lifetime 24 kHz input samples.
     #[must_use]
     pub const fn input_samples(&self) -> u64 {
@@ -76,7 +71,6 @@ pub(super) fn take_metrics(input: &UncommittedInput) -> RealtimeTakeMetricsFixtu
         pending_final_segments: metrics.pending_final_segments,
         pending_final_outcomes: metrics.pending_final_outcomes,
         retained_hypotheses: metrics.retained_hypotheses,
-        frame_grid_origin: metrics.frame_grid_origin,
     }
 }
 
@@ -207,20 +201,22 @@ impl Decoder for HourSimulationDecoder {
             DecodeMode::Interim => {
                 let mut state = self.probe.state();
                 state.interim_decodes += 1;
-                let end_second = end / EnginePolicy::SAMPLE_RATE as u64;
-                let index = end_second.saturating_sub(4) / FINAL_STRIDE_SECONDS as u64;
+                let live = end.saturating_sub((EnginePolicy::SAMPLE_RATE * 4) as u64);
+                let index = live / FINAL_STRIDE_SAMPLES;
                 Ok(DecodeOutput::new(format!("live region {index:04}")))
             }
             DecodeMode::Final => {
                 let mut state = self.probe.state();
-                let stride = (EnginePolicy::SAMPLE_RATE * FINAL_STRIDE_SECONDS) as u64;
-                let overlap = (EnginePolicy::SAMPLE_RATE * FINAL_OVERLAP_SECONDS) as u64;
                 let expected_start = if state.gap_free_coverage_samples == 0 {
                     0
                 } else {
-                    state.gap_free_coverage_samples.saturating_sub(overlap)
+                    state
+                        .gap_free_coverage_samples
+                        .saturating_sub(FINAL_OVERLAP_SAMPLES)
                 };
-                let expected_end = state.gap_free_coverage_samples.saturating_add(stride);
+                let expected_end = state
+                    .gap_free_coverage_samples
+                    .saturating_add(FINAL_STRIDE_SAMPLES);
                 if start != expected_start || end != expected_end {
                     state.final_shape_valid = false;
                     return Err(marker_error(
@@ -233,11 +229,11 @@ impl Decoder for HourSimulationDecoder {
                 self.probe.shared.1.notify_all();
                 drop(state);
 
-                let start_second = usize::try_from(start / EnginePolicy::SAMPLE_RATE as u64)
-                    .map_err(|_| marker_error("marker start does not fit fixture text"))?;
-                let end_second = usize::try_from(end / EnginePolicy::SAMPLE_RATE as u64)
-                    .map_err(|_| marker_error("marker end does not fit fixture text"))?;
-                Ok(DecodeOutput::new(timeline_text(start_second, end_second)))
+                let word = |sample: u64| {
+                    usize::try_from(sample * WORDS_PER_STRIDE / FINAL_STRIDE_SAMPLES)
+                        .map_err(|_| marker_error("marker position does not fit fixture text"))
+                };
+                Ok(DecodeOutput::new(timeline_text(word(start)?, word(end)?)))
             }
             _ => unreachable!("the hour simulation scripts only interim and final decodes"),
         }
@@ -329,9 +325,9 @@ fn marker_error(_message: &'static str) -> TranscribeError {
     }
 }
 
-fn timeline_text(start_second: usize, end_second: usize) -> String {
-    (start_second..end_second)
-        .map(|second| format!("word{second:04}"))
+fn timeline_text(start_word: usize, end_word: usize) -> String {
+    (start_word..end_word)
+        .map(|word| format!("word{word:04}"))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -355,7 +351,10 @@ pub fn hour_simulation_service(probe: HourSimulationProbe) -> Result<SpeechServi
 mod tests {
     use gateway_stt_engine::{DecodeMode, DecodeRequest, Decoder, EnginePolicy};
 
-    use super::{HourSimulationDecoder, HourSimulationProbe, hour_marker_input, marker_sample};
+    use super::{
+        FINAL_STRIDE_SAMPLES, HourSimulationDecoder, HourSimulationProbe, hour_marker_input,
+        marker_sample,
+    };
 
     fn output(start: u64, samples: usize) -> Vec<f32> {
         (0..samples)
@@ -399,7 +398,7 @@ mod tests {
 
     #[test]
     fn hour_decoder_rejects_wrong_stale_duplicated_reordered_and_compacted_pcm() {
-        let stride = EnginePolicy::SAMPLE_RATE * 10;
+        let stride = usize::try_from(FINAL_STRIDE_SAMPLES).expect("a stride fits usize");
         let mut stale = decoder();
         let valid = output(0, stride);
         assert!(stale.decode(request(valid.clone())).is_ok());

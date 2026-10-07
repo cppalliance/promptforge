@@ -3,38 +3,32 @@
 use std::ops::Range;
 
 use base64::Engine as _;
-use gateway_stt_engine::EnginePolicy;
+use gateway_stt_engine::{EnergyDetector, EnginePolicy, SpeechDetector};
 
-const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1_000;
+const FRAME_SAMPLES: usize = EnginePolicy::DETECTOR_CHUNK_SAMPLES;
 const FRAME: u64 = FRAME_SAMPLES as u64;
 
-/// Lists the runs the segmenter reads as speech on its 30 ms frame grid,
-/// which restarts at each of `grid_origins`, so audio synthesized from them
-/// segments like the clip. The segmenter skips the part of a frame that a
-/// restart cuts short; that part keeps the clip's own reading, so windows
-/// synthesized over it stay as loud as the clip's.
-pub(super) fn speech_runs(pcm: &[i16], grid_origins: &[u64]) -> Vec<[u64; 2]> {
+/// Lists the runs the take's loudness detector reads as speech on the
+/// segmenter's frame grid from sample 0, so a take scripted with them
+/// segments like the clip.
+pub(super) fn speech_runs(pcm: &[i16]) -> Vec<[u64; 2]> {
     let samples = pcm
         .iter()
         .map(|sample| f32::from(*sample) / 32_768.0)
         .collect::<Vec<_>>();
-    let total = u64::try_from(samples.len()).expect("the clip length fits u64");
-    let index = |sample: u64| usize::try_from(sample).expect("the clip index fits usize");
+    let mut detector = EnergyDetector;
     let mut runs: Vec<[u64; 2]> = Vec::new();
-    let mut start = 0;
-    while start + FRAME <= total {
-        let end = grid_origins
-            .iter()
-            .copied()
-            .find(|origin| (start + 1..start + FRAME).contains(origin))
-            .unwrap_or(start + FRAME);
-        if !EnginePolicy::is_silence(&samples[index(start)..index(end)]) {
+    for (index, frame) in samples.as_chunks::<FRAME_SAMPLES>().0.iter().enumerate() {
+        let start = u64::try_from(index).expect("the frame index fits u64") * FRAME;
+        if detector
+            .classify(frame)
+            .expect("the energy detector never fails")
+        {
             match runs.last_mut() {
-                Some(run) if run[1] == start => run[1] = end,
-                _ => runs.push([start, end]),
+                Some(run) if run[1] == start => run[1] = start + FRAME,
+                _ => runs.push([start, start + FRAME]),
             }
         }
-        start = end;
     }
     runs
 }
@@ -59,16 +53,15 @@ const fn input_samples(output: u64) -> u64 {
 }
 
 #[test]
-fn speech_runs_follow_the_frame_grid_through_a_restart() {
+fn speech_runs_cover_whole_frames_on_the_grid_from_sample_zero() {
     let speech = i16::MAX / 2;
-    let mut pcm = vec![0; FRAME_SAMPLES * 4];
-    pcm[FRAME_SAMPLES..FRAME_SAMPLES * 3].fill(speech);
-    assert_eq!(speech_runs(&pcm, &[]), [[FRAME, FRAME * 3]]);
-
-    let origin = FRAME + 160;
+    let mut pcm = vec![0; FRAME_SAMPLES * 5 + 100];
+    pcm[FRAME_SAMPLES + 160..FRAME_SAMPLES * 3].fill(speech);
+    pcm[FRAME_SAMPLES * 5..].fill(speech);
     assert_eq!(
-        speech_runs(&pcm, &[origin]),
-        [[FRAME, FRAME * 3 + 160]],
-        "after the restart frames start at {origin}, so speech reads a frame later"
+        speech_runs(&pcm),
+        [[FRAME, FRAME * 3]],
+        "speech that starts inside a frame reads from that frame's start, and a partial last \
+         frame is never classified"
     );
 }

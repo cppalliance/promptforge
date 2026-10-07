@@ -5,7 +5,7 @@
 //! [`MIN_SILENCE_SAMPLES`] (or [`SENTENCE_END_SILENCE_SAMPLES`] when the take
 //! hints that the speech ends a sentence), and speech closes at the forced
 //! stride [`FORCED_STRIDE_SAMPLES`] after its onset. Closing timing is
-//! measured on the energy gate's speech run; the finalized segment adds a
+//! measured on the detector's speech run; the finalized segment adds a
 //! pre-roll before the run and a hangover after it.
 
 use std::ops::Range;
@@ -25,14 +25,18 @@ const MIN_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 2) as u64;
 /// pass without waiting out the pause allowance for a sentence still going.
 const SENTENCE_END_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 3 / 5) as u64;
 
-const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
+/// Speech runs this long before a stride closes it: 10 s rounded up to whole
+/// frames (313 frames, 10.016 s), so a stride ends on the frame grid and
+/// scanning after it stays on that grid.
+const FORCED_STRIDE_SAMPLES: u64 =
+    ((EnginePolicy::SAMPLE_RATE * 10).div_ceil(FRAME_SAMPLES) * FRAME_SAMPLES) as u64;
 
 /// Closing silence kept at the end of a segment: 100 ms, so a trailing
-/// consonant the energy gate reads as silence still reaches the final pass.
+/// consonant the detector reads as silence still reaches the final pass.
 pub(super) const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
 
 /// Audio kept before a segment's first speech frame: 0.5 s, so a soft onset
-/// the energy gate misses still reaches the final pass.
+/// the detector misses still reaches the final pass.
 const PRE_ROLL_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 2) as u64;
 
 const _: () = assert!(HANGOVER_SAMPLES < SENTENCE_END_SILENCE_SAMPLES);
@@ -62,10 +66,10 @@ impl EndpointState {
 pub(super) struct Scan {
     /// First sample of the next analysis frame.
     pub(super) cursor: u64,
-    /// End of the audio received so far.
+    /// End of the audio classified so far.
     pub(super) received: u64,
-    /// Whether the energy gate reads the next frame as silence, or `None`
-    /// until that whole frame has arrived.
+    /// Whether the detector reads the next frame as silence, or `None`
+    /// until that whole frame is classified.
     pub(super) silent: Option<bool>,
     /// Whether the take hints that the tracked speech ends a sentence.
     pub(super) sentence_end: bool,
@@ -82,7 +86,7 @@ pub(super) enum Rule {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Closed {
     pub(super) rule: Rule,
-    /// The speech run the energy gate tracked, from its first speech frame.
+    /// The speech run the detector tracked, from its first speech frame.
     pub(super) speech: Range<u64>,
     /// The audio to finalize: the speech run with its pre-roll and hangover.
     pub(super) segment: Range<u64>,
@@ -248,10 +252,10 @@ mod tests {
 
     #[test]
     fn speech_closes_at_the_forced_stride_once_its_audio_arrives() {
-        let state = speaking(1_000, None, 0);
+        let state = speaking(1_024, None, 0);
         let waiting = Scan {
-            cursor: 160_800,
-            received: 160_999,
+            cursor: 161_280,
+            received: 161_279,
             silent: None,
             sentence_end: false,
         };
@@ -259,30 +263,34 @@ mod tests {
         let advance = endpoint(
             state,
             Scan {
-                received: 161_000,
+                received: 161_280,
                 ..waiting
             },
         )
         .expect("the stride closes");
-        assert_eq!(advance.cursor, 161_000);
+        assert_eq!(advance.cursor, 161_280);
         assert_eq!(
             advance.state,
-            speaking(161_000, None, 161_000),
+            speaking(161_280, None, 161_280),
             "speech continuing through the stride opens the next run at its end"
         );
         let stride = advance.closed.expect("the stride closes a segment");
         assert_eq!(stride.rule, Rule::Stride);
-        assert_eq!(stride.speech, 1_000..161_000);
+        assert_eq!(
+            stride.speech,
+            1_024..161_280,
+            "the stride is 313 whole frames, 10.016 s"
+        );
     }
 
     #[test]
     fn a_stride_during_a_pause_tracks_no_speech_after_it() {
-        let advance = endpoint(speaking(0, Some(158_400), 0), scan(159_840, true))
+        let advance = endpoint(speaking(0, Some(158_208), 0), scan(160_256, true))
             .expect("the stride closes");
         assert_eq!(
             advance.state,
             EndpointState {
-                consumed: 160_000,
+                consumed: 160_256,
                 ..EndpointState::default()
             }
         );
@@ -311,8 +319,8 @@ mod tests {
             scan(62_400 + 32_000 - FRAME, true),
         ));
         assert_eq!(closing.segment.start, 16_000);
-        let stride = closed(endpoint(speaking(24_000, None, 0), scan(183_840, false)));
-        assert_eq!(stride.segment, 16_000..184_000);
+        let stride = closed(endpoint(speaking(24_064, None, 0), scan(184_320, false)));
+        assert_eq!(stride.segment, 16_064..184_320);
     }
 
     #[test]

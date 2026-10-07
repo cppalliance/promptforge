@@ -48,7 +48,6 @@ pub(crate) struct TakeMetrics {
     pub(crate) pending_final_segments: usize,
     pub(crate) pending_final_outcomes: usize,
     pub(crate) retained_hypotheses: usize,
-    pub(crate) frame_grid_origin: u64,
 }
 
 /// All mutable and immutable state belonging to one speech take.
@@ -100,6 +99,15 @@ impl Take {
         Self::with_state(guidance, engine, TakeState::with_pcm_limit(limit))
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(crate) fn with_detector(
+        guidance: Vec<String>,
+        engine: Option<GenerationLease>,
+        detector: gateway_stt_engine::FallbackDetector,
+    ) -> Self {
+        Self::with_state(guidance, engine, TakeState::with_detector(detector))
+    }
+
     #[cfg(test)]
     fn without_final(guidance: Vec<String>) -> Self {
         Self::new(guidance, None)
@@ -110,7 +118,9 @@ impl Take {
     }
 
     pub(crate) fn append(&self, samples: Vec<f32>) -> Result<(), AudioError> {
-        append_releasing(&self.state, samples)
+        append_releasing(&self.state, samples)?;
+        self.state.classify(self.final_pipeline.is_some());
+        Ok(())
     }
 
     pub(crate) fn submit_closed_segments(&self) {
@@ -239,7 +249,6 @@ impl Take {
             pending_final_segments: self.pending_final_segments(),
             pending_final_outcomes,
             retained_hypotheses,
-            frame_grid_origin: TakeState::lock(&self.state.segmenter).frame_grid_origin(),
         }
     }
 
@@ -279,6 +288,8 @@ mod tests {
     use std::sync::{Arc, Mutex, Weak};
     use std::time::Duration;
 
+    use gateway_stt_engine::FallbackDetector;
+    use gateway_stt_engine::test_fixtures::ScriptedDetector;
     use tokio::sync::{mpsc, oneshot};
 
     use super::final_outcome::{FinalRangeOutcome, SkipReason};
@@ -364,25 +375,23 @@ mod tests {
         assert!(sentence_end_hinted(&take));
     }
 
-    fn hear(take: &Take, samples: Vec<f32>) {
-        take.append(samples).expect("audio appends");
-        let buffer = super::TakeState::lock(&take.state.buffer);
-        let mut segmenter = super::TakeState::lock(&take.state.segmenter);
-        while segmenter.poll(buffer.samples(), buffer.origin()).is_some() {}
-    }
-
     #[test]
-    fn a_repeat_decoded_from_silence_is_cut_before_it_shows_or_clears_the_sentence_end() {
-        let take = Take::without_final(Vec::new());
-        hear(&take, vec![0.5; 24_000]);
+    fn a_take_without_a_final_pipeline_cuts_a_repeat_over_scripted_silence() {
+        let detector = ScriptedDetector::new([(0, 24_000)]);
+        let take = Take::with_detector(Vec::new(), None, FallbackDetector::new(Box::new(detector)));
+        take.append(vec![0.5; 24_000]).expect("audio appends");
         take.next_window_snapshot("create a plan.", &[], 0, 0, 24_000)
             .expect("the sentence is accepted");
-        hear(&take, vec![0.0; 8_000]);
+        take.append(vec![0.5; 8_000]).expect("audio appends");
 
         let (snapshot, _) = take
             .next_window_snapshot("create a plan. Create a", &[], 0, 0, 32_000)
             .expect("the hypothesis less its repeat is accepted");
-        assert_eq!(snapshot.into_parts().0, "create a plan.");
+        assert_eq!(
+            snapshot.into_parts().0,
+            "create a plan.",
+            "the detector heard silence after the sentence, however loud the audio"
+        );
         assert!(
             sentence_end_hinted(&take),
             "the sentence still ends, so the segment closes after the short silence"

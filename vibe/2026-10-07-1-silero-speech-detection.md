@@ -396,7 +396,7 @@ flowchart TD
 
 <step-5>
 
-### Step 5: Segmenter on detector decisions
+### Step 5: Segmenter on detector decisions [completed]
 
 - Component: Detector seam
 - Piece: segmenter on detector decisions

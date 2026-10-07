@@ -83,7 +83,7 @@ async fn mounted_unaligned_windows_keep_complete_live_text_and_finish_once() {
         let samples = if window == 0 {
             LIVE_PREFIX_STRIDE_SAMPLES
         } else {
-            LIVE_PREFIX_STRIDE_SAMPLES * 9 / 10
+            LIVE_PREFIX_STRIDE_SAMPLES - LIVE_PREFIX_TAIL_SAMPLES
         };
         append_audio(&mut socket, audio_samples(&vec![8_192; samples])).await;
         wait_for_live_prefix_decodes(&final_decoder, window + 1).await;
@@ -100,7 +100,7 @@ async fn mounted_unaligned_windows_keep_complete_live_text_and_finish_once() {
         }
         append_audio(
             &mut socket,
-            audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
+            audio_samples(&vec![8_192; LIVE_PREFIX_TAIL_SAMPLES]),
         )
         .await;
         let hypothesis = expect_window_hypothesis(&mut socket).await;

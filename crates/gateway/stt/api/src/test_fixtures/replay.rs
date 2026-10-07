@@ -7,6 +7,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use base64::Engine as _;
+use gateway_stt_engine::FallbackDetector;
 use serde::Deserialize;
 
 use super::{
@@ -18,7 +19,7 @@ use crate::segment::FRAME_SAMPLES;
 pub use script::{
     ReplayError, ReplayFinal, ReplayOutcome, ReplayScript, ReplaySnapshot, ReplayTick,
 };
-use script::{SAMPLES_PER_MS, Step, millis_to_samples, speech_ranges, timeline};
+use script::{SAMPLES_PER_MS, Step, millis_to_samples, speech_detector, speech_ranges, timeline};
 
 const FRAME: u64 = FRAME_SAMPLES as u64;
 const SPEECH_SAMPLE: i16 = 16_384;
@@ -42,7 +43,8 @@ struct HypothesisFields {
 ///
 /// Audio is synthesized from the speech layout and appended only as far as
 /// each event needs, so the take's segmenter closes a natural final while its
-/// event runs. Each tick calls the session's interim scheduling directly and
+/// event runs. The take hears speech through a detector scripted from the
+/// same layout. Each tick calls the session's interim scheduling directly and
 /// stamps its snapshot with the tick's `at_ms`; each natural final, once
 /// applied, emits the session's update for landed finals stamped with the
 /// final's `at_ms`.
@@ -52,6 +54,8 @@ pub struct ReplayTake {
     interim: ScriptedDecoder,
     final_decoder: ScriptedDecoder,
     speech: Vec<Range<u64>>,
+    /// The detector the first append hands the take it starts.
+    detector: Option<FallbackDetector>,
     appended: u64,
     interim_decodes: usize,
     final_decodes: usize,
@@ -89,6 +93,7 @@ impl ReplayTake {
             session,
             interim,
             final_decoder,
+            detector: Some(speech_detector(&speech)),
             speech,
             appended: 0,
             interim_decodes: 0,
@@ -239,7 +244,14 @@ impl ReplayTake {
         }
         if target > self.appended {
             let payload = pcm_payload(&self.speech, self.appended..target);
-            self.session.append_base64(&payload)?;
+            match self.detector.take() {
+                Some(detector) => self
+                    .session
+                    .session
+                    .append_base64_detecting(&payload, detector)
+                    .map_err(|error| FixtureError::Append(boxed(error)))?,
+                None => self.session.append_base64(&payload)?,
+            }
             self.appended = target;
         }
         Ok(())

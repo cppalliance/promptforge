@@ -7,13 +7,13 @@
     {"at_ms": 2650, "audio_start_ms": 0, "audio_end_ms": 2500, "transcript": "About one tick faster than the plans 0.6"},
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "About one tick faster than the plans 0.6 seconds."},
     {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "About one tick faster than the plans 0.6 seconds."},
-    {"at_ms": 8350, "audio_start_ms": 3100, "audio_end_ms": 8300, "transcript": "Hey."},
-    {"at_ms": 8850, "audio_start_ms": 3100, "audio_end_ms": 8800, "transcript": "Hey."},
-    {"at_ms": 9150, "audio_start_ms": 3100, "audio_end_ms": 9100, "transcript": "Hey."}
+    {"at_ms": 8350, "audio_start_ms": 3108, "audio_end_ms": 8300, "transcript": "Hey."},
+    {"at_ms": 8850, "audio_start_ms": 3108, "audio_end_ms": 8800, "transcript": "Hey."},
+    {"at_ms": 9150, "audio_start_ms": 3108, "audio_end_ms": 9100, "transcript": "Hey."}
   ],
   "finals": [
-    {"at_ms": 4200, "sample_start": 0, "sample_end": 49600, "text": "About one tick faster than the plan's 0.6 seconds."},
-    {"at_ms": 9800, "sample_start": 120160, "sample_end": 139360, "text": "Hey."},
-    {"at_ms": 10500, "sample_start": 139360, "sample_end": 168000, "text": ""}
+    {"at_ms": 4200, "sample_start": 0, "sample_end": 49728, "text": "About one tick faster than the plan's 0.6 seconds."},
+    {"at_ms": 9800, "sample_start": 120000, "sample_end": 139840, "text": "Hey."},
+    {"at_ms": 10500, "sample_start": 139840, "sample_end": 168000, "text": ""}
   ]
 }

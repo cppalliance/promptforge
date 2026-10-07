@@ -203,10 +203,9 @@ impl FinalPipeline {
 }
 
 fn poll_closed(state: &TakeState) -> Option<ClosedRange> {
-    let buffer = TakeState::lock(&state.buffer);
     let mut segmenter = TakeState::lock(&state.segmenter);
     let previous_consumed = segmenter.consumed();
-    let outcome = segmenter.poll(buffer.samples(), buffer.origin())?;
+    let outcome = segmenter.poll()?;
     Some(ClosedRange::closed(
         outcome,
         previous_consumed,

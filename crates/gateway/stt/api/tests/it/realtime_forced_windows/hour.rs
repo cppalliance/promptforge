@@ -10,7 +10,8 @@ use gateway_stt::test_fixtures::{
 use super::{INPUT_SAMPLES_PER_STRIDE, LATER_FORCED_SAMPLES, WAIT};
 
 const HOUR_STRIDES: usize = 360;
-const OUTPUT_SAMPLES_PER_STRIDE: u64 = 16_000 * 10;
+const OUTPUT_SAMPLES_PER_STRIDE: u64 = 160_256;
+const STRIDE_MS: usize = 10_016;
 
 fn encoded_marker_samples(start: u64, samples: usize) -> String {
     let bytes = hour_marker_input(start, samples)
@@ -20,9 +21,10 @@ fn encoded_marker_samples(start: u64, samples: usize) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn timeline_text(start_second: usize, end_second: usize) -> String {
-    (start_second..end_second)
-        .map(|second| format!("word{second:04}"))
+/// The simulated speaker's words, ten per forced stride.
+fn timeline_text(start_word: usize, end_word: usize) -> String {
+    (start_word..end_word)
+        .map(|word| format!("word{word:04}"))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -127,8 +129,8 @@ fn append_marked_rotated(
 fn assert_hour_hypothesis(hypothesis: &serde_json::Value, item_id: &str, stride: usize) {
     assert_eq!(hypothesis["item_id"], item_id);
     assert_eq!(hypothesis["revision"], stride + 1);
-    assert_eq!(hypothesis["audio_start_ms"], stride * 10_000);
-    assert_eq!(hypothesis["audio_end_ms"], stride * 10_000 + 4_000);
+    assert_eq!(hypothesis["audio_start_ms"], stride * STRIDE_MS);
+    assert_eq!(hypothesis["audio_end_ms"], stride * STRIDE_MS + 4_000);
     let finalized_end = stride.checked_sub(2).map_or(0, |index| index * 10 + 2);
     assert_eq!(hypothesis["finalized"], timeline_text(0, finalized_end));
     let current_live = format!("live region {stride:04}");
@@ -175,7 +177,7 @@ async fn one_take_runs_for_an_hour_with_bounded_absolute_ownership() {
         )
         .expect("complete replacement hypotheses are negotiated");
     let leading = [1, 23_999, 72_000];
-    let trailing = [17, 47_983, 96_000];
+    let trailing = [17, 47_983, 96_384];
     let mut provisional = None;
     let mut peaks = HourPeaks::default();
 
@@ -230,7 +232,10 @@ async fn one_take_runs_for_an_hour_with_bounded_absolute_ownership() {
 
     assert_eq!(probe.final_decode_count(), HOUR_STRIDES);
     assert_eq!(probe.interim_decode_count(), HOUR_STRIDES);
-    assert_eq!(probe.gap_free_coverage_samples(), 16_000_u64 * 3_600);
+    assert_eq!(
+        probe.gap_free_coverage_samples(),
+        OUTPUT_SAMPLES_PER_STRIDE * HOUR_STRIDES as u64
+    );
     assert!(probe.max_final_samples() <= LATER_FORCED_SAMPLES);
     peaks.assert_bounded();
     assert_eq!(
@@ -238,7 +243,7 @@ async fn one_take_runs_for_an_hour_with_bounded_absolute_ownership() {
             .take_metrics()
             .expect("the one input remains before commit")
             .input_samples(),
-        24_000_u64 * 3_600
+        (INPUT_SAMPLES_PER_STRIDE * HOUR_STRIDES) as u64
     );
 
     let provisional = provisional.expect("the hour owns one provisional item");
@@ -254,6 +259,6 @@ async fn one_take_runs_for_an_hour_with_bounded_absolute_ownership() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["type"], "completed");
     assert_eq!(results[0]["item_id"], provisional);
-    assert_eq!(results[0]["seconds"], 3_600.0);
+    assert_eq!(results[0]["seconds"], 3_605.76);
     assert_eq!(results[0]["transcript"], timeline_text(0, 3_600));
 }

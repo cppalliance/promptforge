@@ -37,18 +37,43 @@ impl Session {
             return input.append_base64(payload).map_err(SessionError::from);
         }
 
-        let snapshot = InputSnapshot::new(
-            self.effective.prompt().to_owned(),
-            self.effective.hypothesis_include(),
-        );
         let input = UncommittedInput::first_append(
             self.ids.item(),
-            snapshot,
+            self.input_snapshot(),
             self.engine.clone(),
             payload,
         )?;
         self.input = Some(input);
         Ok(())
+    }
+
+    /// Appends like [`append_base64`](Self::append_base64), except that a
+    /// take this append starts classifies speech with `detector`.
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn append_base64_detecting(
+        &mut self,
+        payload: &str,
+        detector: gateway_stt_engine::FallbackDetector,
+    ) -> Result<(), SessionError> {
+        if self.input.is_some() {
+            return self.append_base64(payload);
+        }
+        let input = UncommittedInput::first_append_with_detector(
+            self.ids.item(),
+            self.input_snapshot(),
+            self.engine.clone(),
+            payload,
+            detector,
+        )?;
+        self.input = Some(input);
+        Ok(())
+    }
+
+    fn input_snapshot(&self) -> InputSnapshot {
+        InputSnapshot::new(
+            self.effective.prompt().to_owned(),
+            self.effective.hypothesis_include(),
+        )
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]

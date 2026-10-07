@@ -37,6 +37,15 @@ fn closed_speech() -> Vec<f32> {
     samples
 }
 
+/// Appends `samples` and classifies them for segment closing, as a take with
+/// a final pipeline does.
+fn hear(state: &TakeState, samples: Vec<f32>) {
+    TakeState::lock(&state.buffer)
+        .append(samples)
+        .expect("resident PCM reserves");
+    state.classify(true);
+}
+
 fn saturate(pending: &Arc<AtomicUsize>) -> Vec<FinalSegmentOwner> {
     (0..FINAL_SEGMENT_CAPACITY)
         .map(|_| FinalSegmentOwner::reserve(pending).expect("the queue has a free slot"))
@@ -64,11 +73,7 @@ async fn natural_handoff_stays_resident_until_ordered_pipeline_transfer() {
         Arc::clone(&pending),
     );
     let state = TakeState::default();
-    let mut samples = vec![0.5; 16_000];
-    samples.extend(vec![0.0; 48_000]);
-    TakeState::lock(&state.buffer)
-        .append(samples)
-        .expect("resident PCM reserves");
+    hear(&state, closed_speech());
 
     pipeline.submit_closed_segments(&state);
 
@@ -100,9 +105,7 @@ async fn saturated_handoff_holds_the_closed_range_resident_without_failing() {
     );
     let held = saturate(&pending);
     let state = TakeState::default();
-    TakeState::lock(&state.buffer)
-        .append(closed_speech())
-        .expect("resident PCM reserves");
+    hear(&state, closed_speech());
 
     pipeline.submit_closed_segments(&state);
 
@@ -236,9 +239,7 @@ async fn a_full_final_queue_holds_later_ranges_in_order_without_failing_the_take
         );
         let state = TakeState::default();
         for _ in 0..=FINAL_SEGMENT_CAPACITY {
-            TakeState::lock(&state.buffer)
-                .append(closed_speech())
-                .expect("resident PCM reserves");
+            hear(&state, closed_speech());
         }
 
         pipeline.submit_closed_segments(&state);
@@ -347,7 +348,7 @@ fn held_take(limit: usize) -> (Take, Vec<FinalSegmentOwner>, mpsc::UnboundedRece
 }
 
 /// Appends continuous speech in 200 ms chunks through `end`, polling the
-/// segmenter after each so ten-second strides close and are held.
+/// segmenter after each so forced strides close and are held.
 fn speak_through(take: &Take, end: u64) {
     let mut appended = TakeState::lock(&take.state.buffer).end();
     while appended < end {
@@ -398,11 +399,11 @@ async fn the_pcm_cap_releases_a_held_range_and_keeps_its_interim_text_final() {
 #[tokio::test]
 async fn the_pcm_cap_releases_a_held_stride_and_its_held_successor_decodes_alone() {
     let (take, _held, mut decodes) = held_take(400_000);
-    speak_through(&take, 320_000);
+    speak_through(&take, 320_512);
     assert_eq!(TakeState::lock(&take.state.held).len(), 2);
     speak_through(&take, 400_000);
-    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 160_000);
-    take.next_window_snapshot("first stride words", &[], 0, 0, 160_000)
+    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 160_256);
+    take.next_window_snapshot("first stride words", &[], 0, 0, 160_256)
         .expect("the first stride's hypothesis is accepted");
 
     let transcript = finish(&take).await;
@@ -413,20 +414,20 @@ async fn the_pcm_cap_releases_a_held_stride_and_its_held_successor_decodes_alone
     assert!(transcript.ends_with("decoded"), "{transcript}");
     assert_eq!(
         decodes.recv().await,
-        Some(160_000),
+        Some(160_256),
         "the successor decodes its new audio without the released overlap"
     );
-    assert_eq!(decodes.recv().await, Some(208_000), "the tail overlaps it");
+    assert_eq!(decodes.recv().await, Some(207_488), "the tail overlaps it");
 }
 
 #[tokio::test]
 async fn a_stride_after_a_released_stride_starts_without_overlap() {
     let (take, _held, mut decodes) = held_take(240_000);
     speak_through(&take, 416_000);
-    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 320_000);
-    take.next_window_snapshot("first stride words", &[], 0, 0, 160_000)
+    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 320_512);
+    take.next_window_snapshot("first stride words", &[], 0, 0, 160_256)
         .expect("the first stride's hypothesis is accepted");
-    take.next_window_snapshot("second stride words", &[], 160_000, 160_000, 320_000)
+    take.next_window_snapshot("second stride words", &[], 160_256, 160_256, 320_512)
         .expect("the second stride's hypothesis is accepted");
 
     assert_eq!(
@@ -435,7 +436,7 @@ async fn a_stride_after_a_released_stride_starts_without_overlap() {
     );
     assert_eq!(
         decodes.recv().await,
-        Some(96_000),
+        Some(95_488),
         "the tail after the released strides decodes as a natural segment"
     );
     assert_eq!(decodes.recv().await, None);

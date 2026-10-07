@@ -57,7 +57,7 @@
       "finalized": "Okay, listen up.",
       "agreed": "",
       "tentative": " Hey.",
-      "audio_start_ms": 3100,
+      "audio_start_ms": 3108,
       "audio_end_ms": 7500
     },
     {
@@ -67,7 +67,7 @@
       "finalized": "Okay, listen up.",
       "agreed": "",
       "tentative": " Hey.",
-      "audio_start_ms": 3100,
+      "audio_start_ms": 3108,
       "audio_end_ms": 7800
     },
     {
@@ -87,7 +87,7 @@
       "finalized": "Okay, listen up. Hey.",
       "agreed": "",
       "tentative": " The commit rule",
-      "audio_start_ms": 7330,
+      "audio_start_ms": 7332,
       "audio_end_ms": 11000
     },
     {
@@ -97,7 +97,7 @@
       "finalized": "Okay, listen up. Hey.",
       "agreed": " The commit rule",
       "tentative": " needs two",
-      "audio_start_ms": 7330,
+      "audio_start_ms": 7332,
       "audio_end_ms": 12000
     },
     {
@@ -107,7 +107,7 @@
       "finalized": "Okay, listen up. Hey.",
       "agreed": " The commit rule needs two",
       "tentative": " passes.",
-      "audio_start_ms": 7330,
+      "audio_start_ms": 7332,
       "audio_end_ms": 13000
     },
     {
@@ -117,7 +117,7 @@
       "finalized": "Okay, listen up. Hey.",
       "agreed": " The commit rule needs two",
       "tentative": " passes.",
-      "audio_start_ms": 7330,
+      "audio_start_ms": 7332,
       "audio_end_ms": 13500
     },
     {

@@ -112,6 +112,20 @@ impl UncommittedInput {
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn first_append_with_detector(
+        item_id: String,
+        snapshot: InputSnapshot,
+        engine: Option<GenerationLease>,
+        payload: &str,
+        detector: gateway_stt_engine::FallbackDetector,
+    ) -> Result<Self, AudioError> {
+        let mut audio = AudioBuffer::default();
+        audio.append_base64(payload)?;
+        let take = Take::with_detector(Self::guidance(&snapshot), engine, detector);
+        Self::from_audio_and_take(item_id, snapshot, audio, take)
+    }
+
     fn from_audio(
         item_id: String,
         snapshot: InputSnapshot,

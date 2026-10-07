@@ -129,7 +129,7 @@
     },
     {
       "at_ms": 11019,
-      "audio_start_ms": 10060,
+      "audio_start_ms": 10048,
       "audio_end_ms": 11000,
       "transcript": "I'm free."
     }
@@ -138,12 +138,12 @@
     {
       "at_ms": 10158,
       "sample_start": 0,
-      "sample_end": 160960,
+      "sample_end": 160768,
       "text": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country."
     },
     {
       "at_ms": 11076,
-      "sample_start": 32960,
+      "sample_start": 32768,
       "sample_end": 176000,
       "text": "Ask not what your country can do for you. Ask what you can do for your country."
     }

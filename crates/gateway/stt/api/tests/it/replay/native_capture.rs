@@ -108,8 +108,6 @@ struct Capture {
     clock_ms: u64,
     /// End of the audio finalized or awaiting a forced overlap.
     covered: u64,
-    /// Where the segmenter's frame grid restarted, at each forced stride end.
-    grid_origins: Vec<u64>,
     script: Script,
     snapshots: Vec<ReplaySnapshot>,
 }
@@ -123,7 +121,6 @@ impl Capture {
             appended: 0,
             clock_ms: 0,
             covered: 0,
-            grid_origins: Vec::new(),
             script: Script {
                 window_seconds: WINDOW_SECONDS,
                 speech_samples: Vec::new(),
@@ -143,22 +140,10 @@ impl Capture {
                 .append_base64(&payload)
                 .expect("a native chunk appends");
             self.appended = end;
-            self.note_grid_origin();
             self.settle_natural_final().await;
             if end % TICK_SAMPLES == 0 {
                 self.tick().await;
             }
-        }
-    }
-
-    fn note_grid_origin(&mut self) {
-        let origin = self
-            .session
-            .take_metrics()
-            .expect("the take is uncommitted")
-            .frame_grid_origin();
-        if origin > self.grid_origins.last().copied().unwrap_or(0) {
-            self.grid_origins.push(origin);
         }
     }
 
@@ -290,7 +275,7 @@ impl Capture {
             .to_owned();
         let decode = self.take_at_most_one(DecodeMode::Final, "the commit");
         self.record_final(issued_ms, decode, self.appended);
-        self.script.speech_samples = audio::speech_runs(&self.pcm, &self.grid_origins);
+        self.script.speech_samples = audio::speech_runs(&self.pcm);
         let outcome = ReplayOutcome {
             snapshots: self.snapshots,
             completed,

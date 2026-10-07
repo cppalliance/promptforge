@@ -73,17 +73,17 @@ fn mounted_no_alignment_is_drained_through_production_logging() {
     for expected in [
         "warning_code=\"forced_final_overlap_estimated\"",
         "prior_decode_start=0",
-        "prior_decode_end=160000",
-        "current_decode_start=32000",
-        "current_decode_end=320000",
-        "overlap_start=32000",
-        "overlap_end=160000",
-        "prior_decode_start=32000",
-        "prior_decode_end=320000",
-        "current_decode_start=192000",
-        "current_decode_end=480000",
-        "overlap_start=192000",
-        "overlap_end=320000",
+        "prior_decode_end=160256",
+        "current_decode_start=32256",
+        "current_decode_end=320512",
+        "overlap_start=32256",
+        "overlap_end=160256",
+        "prior_decode_start=32256",
+        "prior_decode_end=320512",
+        "current_decode_start=192512",
+        "current_decode_end=480768",
+        "overlap_start=192512",
+        "overlap_end=320512",
         "projection_input_bytes=",
         "projection_tokens=",
         "projection_audio_before_overlap=",
@@ -193,9 +193,10 @@ fn a_lease_holder_resolution_failure_leaves_the_canonical_log_untouched() {
     );
 }
 
+/// One forced stride of 24 kHz input, which resamples to 313 frames of 512.
 #[cfg(feature = "stt")]
 fn audio_payload() -> String {
-    let samples = (0..240_000)
+    let samples = (0..240_384)
         .map(|index| {
             if index % 2 == 0 {
                 0x1357_i16

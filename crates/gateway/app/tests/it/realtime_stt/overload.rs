@@ -50,7 +50,7 @@ async fn mounted_slower_than_capture_overload_preserves_the_committable_input() 
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
     expect_type(&mut socket, "session.created").await;
-    let stride = audio_samples(&vec![8_192; 24_000 * 10]);
+    let stride = audio_samples(&vec![8_192; 240_384]);
 
     final_decoder
         .with_next_decode_blocked(

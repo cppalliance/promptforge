@@ -1,17 +1,15 @@
-//! Energy-based voice activity segmentation for the pipelined final pass.
+//! Voice activity segmentation for the pipelined final pass.
 //!
-//! [`Segmenter`] scans a growing take buffer in fixed frames and reports a
-//! completed speech segment each time a run of silence long enough to be a
-//! segment boundary follows speech. The session hands each reported range to
-//! the final-pass worker while the take is still recording, so on `stop`
-//! only the unclosed tail remains to transcribe. The detector is a plain
-//! RMS-over-window gate (the same threshold as the interim silence gate);
-//! whisper.cpp's own `vad.cpp` Silero integration was considered and
-//! rejected as too heavy for this pipeline (see the design log).
+//! [`Segmenter`] classifies a growing take buffer one detector chunk at a
+//! time and reports a completed speech segment each time a run of silence
+//! long enough to be a segment boundary follows speech. The session hands
+//! each reported range to the final-pass worker while the take is still
+//! recording, so on `stop` only the unclosed tail remains to transcribe.
 
+use std::collections::VecDeque;
 use std::ops::Range;
 
-use gateway_stt_engine::EnginePolicy;
+use gateway_stt_engine::{EnginePolicy, FallbackDetector};
 
 mod boundary;
 mod endpoint;
@@ -19,8 +17,8 @@ mod endpoint;
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
 use endpoint::{Closed, EndpointState, HANGOVER_SAMPLES, Rule, Scan};
 
-/// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
-pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
+/// Analysis frame length: one detector chunk, 32 ms at 16 kHz.
+pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::DETECTOR_CHUNK_SAMPLES;
 pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 
 /// Speech shorter than 250 ms is discarded as a click or cough rather than
@@ -29,12 +27,19 @@ const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
 
 /// Incremental speech segmenter over one take's PCM buffer.
 ///
-/// The buffer is append-only for the life of a take, so the segmenter keeps
-/// a cursor into it and each [`poll`](Segmenter::poll) scans only frames
-/// completed since the last call. Ranges are indices into that buffer.
-#[derive(Debug, Default)]
+/// The buffer is append-only for the life of a take. Each
+/// [`classify`](Segmenter::classify) hands the frames completed since the
+/// last call to the take's detector, on one grid from sample 0, and each
+/// [`poll`](Segmenter::poll) applies the endpoint rules to the decisions
+/// classified since the last poll. Ranges are indices into that buffer.
+#[derive(Debug)]
 pub(crate) struct Segmenter {
-    /// Next unscanned sample index.
+    detector: FallbackDetector,
+    /// End of the latest classified frame.
+    classified: u64,
+    /// The speech runs classified at or after `cursor`, oldest first.
+    queued: VecDeque<Range<u64>>,
+    /// Next frame the endpoint rules have not decided on.
     cursor: u64,
     /// The tracked speech run and the end of the last completed segment.
     endpoint: EndpointState,
@@ -44,16 +49,12 @@ pub(crate) struct Segmenter {
     /// Start of the segment whose latest accepted interim text ends a
     /// sentence, if one does.
     sentence_end: Option<u64>,
-    /// End of the latest scanned frame the energy gate read as speech.
+    /// End of the latest classified frame the detector read as speech.
     speech_end: u64,
-    /// Where the analysis frame grid last started: zero, or the end of the
-    /// latest forced stride, where scanning resumes off the earlier grid.
-    #[cfg(feature = "test-fixtures")]
-    frame_grid_origin: u64,
 }
 
-/// What the energy gate heard before some sample: where its last speech
-/// frame ended, with speech scanned after that sample counting as reaching it.
+/// What the detector heard before some sample: where its last speech frame
+/// ended, with speech classified after that sample counting as reaching it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SpeechBefore {
     speech_end: u64,
@@ -76,15 +77,17 @@ impl SpeechBefore {
 impl Segmenter {
     /// A fresh segmenter positioned at the start of a take buffer.
     #[must_use]
-    #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-    /// Rewinds the segmenter for a new take; the caller clears the buffer at
-    /// the same time, so indices stay aligned.
-    #[cfg(test)]
-    fn reset(&mut self) {
-        *self = Self::new();
+    pub(crate) fn new(detector: FallbackDetector) -> Self {
+        Self {
+            detector,
+            classified: 0,
+            queued: VecDeque::new(),
+            cursor: 0,
+            endpoint: EndpointState::default(),
+            forced_predecessor: None,
+            sentence_end: None,
+            speech_end: 0,
+        }
     }
 
     #[cfg(test)]
@@ -111,21 +114,17 @@ impl Segmenter {
         self.sentence_end == Some(self.endpoint.consumed)
     }
 
-    #[cfg(feature = "test-fixtures")]
-    pub(crate) const fn frame_grid_origin(&self) -> u64 {
-        self.frame_grid_origin
-    }
-
-    /// The next unscanned sample. Right after a silence rule closes a
-    /// segment, the audio from the segment's end through it is silence.
+    /// The next frame the endpoint rules have not decided on. Right after a
+    /// silence rule closes a segment, the audio from the segment's end
+    /// through it is silence.
     pub(crate) const fn scanned(&self) -> u64 {
         self.cursor
     }
 
-    /// What the energy gate heard before `end`, or `None` while a whole
-    /// frame before `end` is unscanned.
+    /// What the detector heard before `end`, or `None` while a whole frame
+    /// before `end` is unclassified.
     pub(crate) fn speech_before(&self, end: u64) -> Option<SpeechBefore> {
-        (self.cursor.saturating_add(FRAME_SAMPLES as u64) >= end).then(|| SpeechBefore {
+        (self.classified.saturating_add(FRAME_SAMPLES as u64) >= end).then(|| SpeechBefore {
             speech_end: self.speech_end.min(end),
         })
     }
@@ -144,38 +143,57 @@ impl Segmenter {
             .then(|| Self::successor(consumed..end, false))
     }
 
-    /// Scans newly arrived frames and returns the range of the next
-    /// completed speech segment, if one closed. Call in a loop: a large
-    /// arrival can complete more than one segment.
-    pub(crate) fn poll(&mut self, buffer: &[f32], buffer_origin: u64) -> Option<SegmentOutcome> {
-        debug_assert!(self.cursor >= buffer_origin);
-        let received =
-            buffer_origin.checked_add(u64::try_from(buffer.len()).unwrap_or(u64::MAX))?;
-        loop {
-            let frame = usize::try_from(self.cursor - buffer_origin)
-                .ok()
-                .and_then(|start| buffer.get(start..start.checked_add(FRAME_SAMPLES)?));
-            let silent = frame.map(EnginePolicy::is_silence);
-            if silent == Some(false) {
-                self.speech_end = self
-                    .speech_end
-                    .max(self.cursor.saturating_add(FRAME_SAMPLES as u64));
+    /// Classifies every frame completed since the last call, in order, and
+    /// queues the decisions for [`poll`](Self::poll) when `closes_segments`.
+    /// A take without a final pipeline never polls, so it queues nothing.
+    pub(crate) fn classify(&mut self, buffer: &[f32], buffer_origin: u64, closes_segments: bool) {
+        debug_assert!(self.classified >= buffer_origin);
+        while let Some(frame) = self
+            .classified
+            .checked_sub(buffer_origin)
+            .and_then(|start| usize::try_from(start).ok())
+            .and_then(|start| buffer.get(start..start.checked_add(FRAME_SAMPLES)?))
+        {
+            let start = self.classified;
+            self.classified += FRAME_SAMPLES as u64;
+            if !self.detector.classify(frame) {
+                continue;
             }
+            self.speech_end = self.classified;
+            if closes_segments {
+                match self.queued.back_mut() {
+                    Some(run) if run.end == start => run.end = self.classified,
+                    _ => self.queued.push_back(start..self.classified),
+                }
+            }
+        }
+    }
+
+    /// Applies the endpoint rules to the queued decisions and returns the
+    /// range of the next completed speech segment, if one closed. Call in a
+    /// loop: a large arrival can complete more than one segment.
+    pub(crate) fn poll(&mut self) -> Option<SegmentOutcome> {
+        loop {
+            while self
+                .queued
+                .front()
+                .is_some_and(|run| run.end <= self.cursor)
+            {
+                self.queued.pop_front();
+            }
+            let frame_end = self.cursor.saturating_add(FRAME_SAMPLES as u64);
+            let silent = (frame_end <= self.classified).then(|| {
+                self.queued
+                    .front()
+                    .is_none_or(|run| run.start > self.cursor)
+            });
             let scan = Scan {
                 cursor: self.cursor,
-                received,
+                received: self.classified,
                 silent,
                 sentence_end: self.ends_sentence(),
             };
             let advance = endpoint::endpoint(self.endpoint, scan)?;
-            #[cfg(feature = "test-fixtures")]
-            if advance
-                .closed
-                .as_ref()
-                .is_some_and(|closed| closed.rule == Rule::Stride)
-            {
-                self.frame_grid_origin = advance.cursor;
-            }
             self.cursor = advance.cursor;
             self.endpoint = advance.state;
             if let Some(closed) = advance.closed {

@@ -1,4 +1,7 @@
-const LIVE_PREFIX_STRIDE_SAMPLES: usize = 24_000 * 10;
+/// The 24 kHz input that resamples to one forced stride, 313 frames of 512.
+const LIVE_PREFIX_STRIDE_SAMPLES: usize = 240_384;
+/// One second of input after a stride, which the next hypothesis decodes.
+const LIVE_PREFIX_TAIL_SAMPLES: usize = 24_000;
 
 fn live_prefix_text(start: usize, end: usize) -> String {
     (start..end)
@@ -51,7 +54,7 @@ async fn mounted_hypotheses_keep_revisable_forced_text_until_stop() {
     wait_for_live_prefix_decodes(&final_decoder, 1).await;
     append_audio(
         &mut socket,
-        audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
+        audio_samples(&vec![8_192; LIVE_PREFIX_TAIL_SAMPLES]),
     )
     .await;
     let first = expect_window_hypothesis(&mut socket).await;
@@ -62,13 +65,16 @@ async fn mounted_hypotheses_keep_revisable_forced_text_until_stop() {
 
     append_audio(
         &mut socket,
-        audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES * 9 / 10]),
+        audio_samples(&vec![
+            8_192;
+            LIVE_PREFIX_STRIDE_SAMPLES - LIVE_PREFIX_TAIL_SAMPLES
+        ]),
     )
     .await;
     wait_for_live_prefix_decodes(&final_decoder, 2).await;
     append_audio(
         &mut socket,
-        audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
+        audio_samples(&vec![8_192; LIVE_PREFIX_TAIL_SAMPLES]),
     )
     .await;
     let second = expect_window_hypothesis(&mut socket).await;

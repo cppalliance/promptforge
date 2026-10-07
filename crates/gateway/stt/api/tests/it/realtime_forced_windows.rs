@@ -15,9 +15,10 @@ fn source_message(error: &FixtureError) -> Option<String> {
 }
 
 const WAIT: Duration = Duration::from_secs(2);
-const INPUT_SAMPLES_PER_STRIDE: usize = 24_000 * 10;
-const FIRST_FORCED_SAMPLES: usize = 16_000 * 10;
-const LATER_FORCED_SAMPLES: usize = 16_000 * 18;
+/// The 24 kHz input that resamples to one forced stride, 313 frames of 512.
+const INPUT_SAMPLES_PER_STRIDE: usize = 240_384;
+const FIRST_FORCED_SAMPLES: usize = 160_256;
+const LATER_FORCED_SAMPLES: usize = FIRST_FORCED_SAMPLES + 16_000 * 8;
 
 fn encoded_samples(value: i16, samples: usize) -> String {
     let bytes = vec![value; samples]
@@ -123,7 +124,7 @@ async fn one_item_reconciles_bounded_forced_windows() {
         results[0]["transcript"],
         "alpha beta echo now revised ending final words"
     );
-    assert_eq!(results[0]["seconds"], 30.0);
+    assert_eq!(results[0]["seconds"], 30.048);
 
     let requests = final_decoder.requests();
     assert_eq!(requests.len(), 3);
@@ -229,7 +230,7 @@ async fn blocked_forced_decode_enforces_the_thirty_second_aggregate_budget() {
             |(session, provisional)| async {
                 session
                     .append_base64(&encoded_speech())
-                    .expect("an 18-second decode leaves room for the next ten-second stride");
+                    .expect("an 18-second decode leaves room for the next forced stride");
                 assert_eq!(
                     session
                         .input_snapshot()
@@ -299,7 +300,7 @@ async fn stop_exactly_on_the_cut_does_not_decode_the_overlap_twice() {
     let mut session = scripted_session(&final_decoder);
     session
         .append_base64(&encoded_speech())
-        .expect("ten seconds reach the forced cut");
+        .expect("one stride reaches the forced cut");
 
     let committed = session.commit().expect("the take stops on the cut");
     session

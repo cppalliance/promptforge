@@ -3,13 +3,15 @@ use gateway_stt::test_fixtures::{
 };
 
 const HOUR_STRIDES: usize = 360;
-const INPUT_STRIDE_SAMPLES: usize = 24_000 * 10;
-const OUTPUT_STRIDE_SAMPLES: u64 = 16_000 * 10;
-const HOUR_CHUNKS: [usize; 6] = [1, 23_999, 72_000, 17, 47_983, 96_000];
+/// The 24 kHz input that resamples to one forced stride, 313 frames of 512.
+const INPUT_STRIDE_SAMPLES: usize = 240_384;
+const OUTPUT_STRIDE_SAMPLES: u64 = 160_256;
+const HOUR_CHUNKS: [usize; 6] = [1, 23_999, 72_000, 17, 47_983, 96_384];
 
+/// The simulated speaker's words, ten per forced stride.
 fn expected_hour_text() -> String {
     (0..3_600)
-        .map(|second| format!("word{second:04}"))
+        .map(|word| format!("word{word:04}"))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -87,7 +89,7 @@ async fn mounted_hour_stream_keeps_one_item_commit_and_completion() {
     assert_eq!(committed.len(), 1);
     assert_eq!(created, committed);
     assert_eq!(completed["item_id"], committed[0]);
-    assert_eq!(completed["usage"]["seconds"], 3_600.0);
+    assert_eq!(completed["usage"]["seconds"], 3_605.76);
     assert_eq!(completed["transcript"], expected_hour_text());
     assert_eq!(probe.final_decode_count(), HOUR_STRIDES);
     assert_eq!(

@@ -226,12 +226,12 @@ async fn replay_accepts_a_forced_final_whose_range_awaits_the_next_final() {
             {"at_ms": 5_100, "audio_start_ms": 0, "audio_end_ms": 5_000, "transcript": "ask not"}
         ],
         "finals": [
-            {"at_ms": 10_200, "sample_start": 0, "sample_end": 160_000, "text": "ask not what your country"},
-            {"at_ms": 11_200, "sample_start": 32_000, "sample_end": 176_000, "text": "what your country can do"}
+            {"at_ms": 10_200, "sample_start": 0, "sample_end": 160_256, "text": "ask not what your country"},
+            {"at_ms": 11_200, "sample_start": 32_256, "sample_end": 176_000, "text": "what your country can do"}
         ]
     })))
     .await
-    .expect("ten seconds of continuous speech force a final the commit reconciles");
+    .expect("313 frames of continuous speech force a final the commit reconciles");
 
     assert!(
         outcome.completed.ends_with("can do"),
@@ -255,8 +255,8 @@ fn sentence_then_silence(finals: &Value) -> ReplayScript {
 #[tokio::test]
 async fn replay_completes_a_sentence_once_when_a_silent_commit_follows_its_final() {
     let mut script = sentence_then_silence(&serde_json::json!([
-        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_600, "text": "Ask not what you can do."},
-        {"at_ms": 6_000, "sample_start": 49_600, "sample_end": 96_000, "text": ""}
+        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_728, "text": "Ask not what you can do."},
+        {"at_ms": 6_000, "sample_start": 49_728, "sample_end": 96_000, "text": ""}
     ]));
     script.speech_samples.truncate(1);
     let outcome = ReplayTake::run(&script)
@@ -272,21 +272,21 @@ async fn replay_completes_a_sentence_once_when_a_silent_commit_follows_its_final
 #[tokio::test]
 async fn replay_completes_a_short_word_once_when_a_silent_commit_follows_its_final() {
     let mut script = sentence_then_silence(&serde_json::json!([
-        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_600, "text": "Ask not what you can do."},
-        {"at_ms": 9_600, "sample_start": 120_160, "sample_end": 136_960, "text": "Hey."},
-        {"at_ms": 10_500, "sample_start": 136_960, "sample_end": 168_000, "text": ""}
+        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_728, "text": "Ask not what you can do."},
+        {"at_ms": 9_600, "sample_start": 120_000, "sample_end": 137_280, "text": "Hey."},
+        {"at_ms": 10_500, "sample_start": 137_280, "sample_end": 168_000, "text": ""}
     ]));
     script.ticks.extend(
         [(8_350, 8_300), (8_850, 8_800)].map(|(at_ms, audio_end_ms)| ReplayTick {
             at_ms,
-            audio_start_ms: 3_100,
+            audio_start_ms: 3_108,
             audio_end_ms,
             transcript: "Hey.".to_owned(),
         }),
     );
     let outcome = ReplayTake::run(&script)
         .await
-        .expect("a 0.45 s word that the final pass decodes replays");
+        .expect("a 0.48 s word that the final pass decodes replays");
 
     assert_eq!(
         outcome.completed, "Ask not what you can do. Hey.",
