@@ -56,8 +56,10 @@ impl<'text> From<&'text str> for Spoken<'text> {
 /// `MAX_REPEATED_RUN_WORDS` at the most. `seen[i]` is the end of the window in
 /// which an earlier hypothesis first decoded the hypothesis's word `i` at the
 /// same place, for its leading such words; words past them were decoded from
-/// the window that starts at `window_start`. Shorter cuts are tried after
-/// longer ones, so a whole repeated run leaves together.
+/// the window that starts at `window_start`. A tail starts past those words,
+/// which an earlier pass already heard, and one word repeats only the word
+/// right before it, since a lone word often recurs in real speech. Shorter
+/// cuts are tried after longer ones, so a whole repeated run leaves together.
 pub(super) fn spoken_end(
     hypothesis: &str,
     before: &[&str],
@@ -71,21 +73,16 @@ pub(super) fn spoken_end(
         .copied()
         .chain(spans.iter().map(|(token, _, _)| *token))
         .collect::<Vec<_>>();
-    for split in 0..spans.len() {
+    let since = seen.last().copied().unwrap_or(window_start);
+    for split in seen.len()..spans.len() {
         let tail = spans.len() - split;
         let at = before.len() + split;
-        let repeats = (tail..=at.min(MAX_REPEATED_RUN_WORDS)).any(|run| {
+        let longest_run = if tail == 1 { 1 } else { MAX_REPEATED_RUN_WORDS };
+        let repeats = (tail..=at.min(longest_run)).any(|run| {
             (0..tail).all(|index| equivalent_token(words[at - run + index], words[at + index]))
         });
-        if !repeats {
-            continue;
-        }
-        let seen_before = seen.len().min(split);
-        let since = seen_before
-            .checked_sub(1)
-            .map_or(window_start, |last| seen[last]);
-        let unseen = u64::try_from(split - seen_before + tail).unwrap_or(u64::MAX);
-        if speech.after(since) < unseen.saturating_mul(MIN_WORD_SAMPLES) {
+        let unseen = u64::try_from(split - seen.len() + tail).unwrap_or(u64::MAX);
+        if repeats && speech.after(since) < unseen.saturating_mul(MIN_WORD_SAMPLES) {
             return split.checked_sub(1).map_or(0, |last| spans[last].2);
         }
     }
@@ -167,6 +164,31 @@ mod tests {
         let before = ["create", "a", "plan."];
         assert_eq!(spoken("a plan", &before, &[], HANGOVER), "");
         assert_eq!(spoken("a plan", &before, &[], SPEECH_END), "a plan");
+    }
+
+    #[test]
+    fn a_word_an_earlier_pass_already_decoded_at_its_place_is_never_cut() {
+        let before = ["Can", "you", "check", "whether", "it", "runs?"];
+        let hypothesis = "Thank you.";
+        assert_eq!(
+            spoken(hypothesis, &before, &[87_000; 2], SPEECH_END),
+            hypothesis,
+            "both words were heard by the earlier pass, so neither came from the silence"
+        );
+    }
+
+    #[test]
+    fn one_word_repeats_only_the_word_right_before_it() {
+        let before = ["Can", "you", "check", "whether", "it", "runs?"];
+        assert_eq!(
+            spoken("Thank you.", &before, &[87_000], SPEECH_END),
+            "Thank you.",
+            "an earlier you several words back is not this word's echo"
+        );
+        assert_eq!(
+            spoken("Thank thank", &before, &[87_000], SPEECH_END),
+            "Thank"
+        );
     }
 
     #[test]
