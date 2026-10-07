@@ -499,7 +499,7 @@ flowchart TD
 
 <step-7>
 
-### Step 7: Replay fixtures through the workshop take reducer
+### Step 7: Replay fixtures through the workshop take reducer [completed]
 
 - Component: Speech-sandbox
 - Piece: UI replay

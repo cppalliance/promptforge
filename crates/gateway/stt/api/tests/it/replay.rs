@@ -22,8 +22,10 @@ use metrics::Metrics;
 const UPDATE_VARIABLE: &str = "PROMPTFORGE_REPLAY_UPDATE";
 const SCRIPTED_PREFIX: &str = "scripted-";
 const NATIVE_FIXTURE: &str = "jfk-native";
-/// The native interim decode timing section, which no replay produces.
-const NATIVE_TIMING: &str = "native";
+/// Sections no replay produces, kept as written: the native interim decode
+/// timing and the Workshop take reducer's rendered-text metrics, which
+/// `crates/workshop/ui/test/stt-replay.mjs` owns.
+const FOREIGN_SECTIONS: [&str; 2] = ["native", "ui"];
 const SUMMARY_FILES: [&str; 2] = ["baseline", "metrics"];
 
 fn fixture_dir() -> PathBuf {
@@ -83,7 +85,7 @@ fn sections(path: &Path) -> Map<String, Value> {
 fn replay_sections(sections: &Map<String, Value>) -> BTreeMap<String, Metrics> {
     sections
         .iter()
-        .filter(|(name, _)| name.as_str() != NATIVE_TIMING)
+        .filter(|(name, _)| !FOREIGN_SECTIONS.contains(&name.as_str()))
         .map(|(name, value)| {
             let metrics = serde_json::from_value(value.clone())
                 .unwrap_or_else(|error| panic!("the {name} metrics section parses: {error}"));
@@ -136,7 +138,7 @@ async fn every_replay_fixture_matches_golden_snapshots_metrics_and_baseline_thre
     let metrics_path = fixture_dir().join("metrics.json");
     let mut recorded = sections(&metrics_path);
     if update {
-        recorded.retain(|name, _| name == NATIVE_TIMING);
+        recorded.retain(|name, _| FOREIGN_SECTIONS.contains(&name.as_str()));
         for (name, metrics) in &current {
             recorded.insert(name.clone(), section(metrics));
         }

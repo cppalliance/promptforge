@@ -80,5 +80,47 @@
     "partial_latency_ms": 150.0,
     "upsr": 0.3333333333333333,
     "upwr": 1.3333333333333333
+  },
+  "ui": {
+    "jfk-native": {
+      "changed_pairs": 13,
+      "changed_words": 43,
+      "completed_words": 22,
+      "pairs": 21,
+      "upsr": 0.6190476190476191,
+      "upwr": 1.9545454545454546
+    },
+    "scripted-agreed-shrink": {
+      "changed_pairs": 3,
+      "changed_words": 4,
+      "completed_words": 5,
+      "pairs": 6,
+      "upsr": 0.5,
+      "upwr": 0.8
+    },
+    "scripted-final-word": {
+      "changed_pairs": 1,
+      "changed_words": 6,
+      "completed_words": 12,
+      "pairs": 11,
+      "upsr": 0.09090909090909091,
+      "upwr": 0.5
+    },
+    "scripted-punctuation-case": {
+      "changed_pairs": 6,
+      "changed_words": 18,
+      "completed_words": 9,
+      "pairs": 7,
+      "upsr": 0.8571428571428571,
+      "upwr": 2
+    },
+    "scripted-sliding-window": {
+      "changed_pairs": 3,
+      "changed_words": 20,
+      "completed_words": 15,
+      "pairs": 9,
+      "upsr": 0.3333333333333333,
+      "upwr": 1.3333333333333333
+    }
   }
 }
