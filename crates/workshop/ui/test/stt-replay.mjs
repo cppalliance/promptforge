@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import * as esbuild from "esbuild";
+import { applyEdits, createTakeRegistry, reduceTakeRegistry } from "./take-reducer-loader.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const replayDir = path.resolve(testDir, "../../../gateway/stt/api/tests/fixtures/replay");
@@ -16,29 +16,6 @@ const UPDATE_VARIABLE = "PROMPTFORGE_REPLAY_UPDATE";
 const UI_SECTION = "ui";
 const SNAPSHOTS_SUFFIX = ".snapshots.json";
 const ITEM_ID = "replay";
-
-const bundle = await esbuild.build({
-  stdin: {
-    contents: `
-      export {
-        createTakeRegistry,
-        reduceTakeRegistry,
-      } from "./src/parts/take/take-registry.ts";
-    `,
-    resolveDir: path.join(testDir, ".."),
-    loader: "ts",
-  },
-  bundle: true,
-  write: false,
-  format: "esm",
-  platform: "browser",
-  target: "es2022",
-  logLevel: "silent",
-});
-
-const { createTakeRegistry, reduceTakeRegistry } = await import(
-  `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
-);
 
 function readJson(file) {
   return JSON.parse(readFileSync(path.join(replayDir, file), "utf8"));
@@ -127,21 +104,6 @@ function aggregateUpwrBelowBaseline(current, baseline) {
     total(current, "changed_words") * total(baseline, "completed_words") <
     total(baseline, "changed_words") * total(current, "completed_words")
   );
-}
-
-function applyEdits(text, effects) {
-  let next = text;
-  for (const effect of effects) {
-    if (effect.domain !== "editor" || effect.command !== "replace") {
-      continue;
-    }
-    assert.ok(
-      effect.from >= 0 && effect.from <= effect.to && effect.to <= next.length,
-      `replace [${effect.from}, ${effect.to}] lies inside ${JSON.stringify(next)}`,
-    );
-    next = next.slice(0, effect.from) + effect.text + next.slice(effect.to);
-  }
-  return next;
 }
 
 function hypothesis(snapshot) {
