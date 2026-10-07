@@ -36,6 +36,9 @@ impl AnchoredSuffix {
 pub(super) struct LivePrefixSnapshot {
     finalized: String,
     finalized_samples: u64,
+    /// End of the latest range settled with text; skipped ranges settled
+    /// without text can carry `finalized_samples` past it.
+    transcribed_samples: u64,
     applied_outcomes: u64,
     pending_forced: Option<PendingForcedSnapshot>,
     anchored: Option<AnchoredSuffix>,
@@ -45,6 +48,7 @@ impl LivePrefixSnapshot {
     pub(super) fn new(
         finalized: String,
         finalized_samples: u64,
+        transcribed_samples: u64,
         applied_outcomes: u64,
         pending_forced: Option<(String, Range<u64>)>,
         anchored: Option<AnchoredSuffix>,
@@ -52,6 +56,7 @@ impl LivePrefixSnapshot {
         Self {
             finalized,
             finalized_samples,
+            transcribed_samples,
             applied_outcomes,
             pending_forced: pending_forced
                 .map(|(text, range)| PendingForcedSnapshot { text, range }),
@@ -92,6 +97,14 @@ impl LivePrefixSnapshot {
             .map_or(self.finalized_samples, |pending| pending.range.end)
     }
 
+    /// End of the audio whose words the live prefix shows, as settled text
+    /// or as pending forced text.
+    pub(super) fn text_end(&self) -> u64 {
+        self.pending_forced
+            .as_ref()
+            .map_or(self.transcribed_samples, |pending| pending.range.end)
+    }
+
     #[cfg(test)]
     pub(super) fn for_test(
         finalized: &str,
@@ -100,6 +113,7 @@ impl LivePrefixSnapshot {
     ) -> Self {
         Self::new(
             finalized.to_owned(),
+            finalized_samples,
             finalized_samples,
             0,
             pending_forced.map(|(text, range)| (text.to_owned(), range)),

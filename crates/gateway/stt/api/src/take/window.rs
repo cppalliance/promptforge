@@ -181,25 +181,47 @@ impl WholeWindowState {
         self.active_range = Some(active_start..window_end);
         self.window_start = Some(window_start);
 
-        let mut agreed = String::new();
-        if let Some((pending_forced, _)) = live_prefix.pending_forced() {
-            append_transcript(&mut agreed, pending_forced);
-        }
-        for accepted in &self.pending {
-            append_transcript(&mut agreed, accepted.text());
-        }
-        append_transcript(&mut agreed, self.active[..agreed_end].trim());
-        let agreed = owned_piece(!live_prefix.finalized().is_empty(), &agreed);
-        let tentative = owned_piece(
-            !live_prefix.finalized().is_empty() || !agreed.is_empty(),
-            &self.active[agreed_end..],
-        );
-        let snapshot = InterimSnapshot::new(live_prefix.finalized().to_owned(), agreed, tentative);
+        let snapshot = compose(live_prefix, &self.pending, &self.active, agreed_end);
         if self.last.as_ref() == Some(&snapshot) {
             return Ok((!hypothesis.is_empty()).then_some(snapshot));
         }
         self.last = Some(snapshot.clone());
         Ok(Some(snapshot))
+    }
+
+    /// Recomposes the shown snapshot over `live_prefix` after final outcomes
+    /// landed, without a new hypothesis. Text that starts before the live
+    /// prefix's text end is hidden, since settled or pending forced text holds
+    /// its words, but stays accepted for the skipped ranges that may need it.
+    /// The anchored suffix a natural final left shows in its place until the
+    /// next hypothesis seeds from it.
+    pub(super) fn refresh(&mut self, live_prefix: &LivePrefixSnapshot) -> InterimSnapshot {
+        let text_end = live_prefix.text_end();
+        let pending = self
+            .pending
+            .iter()
+            .filter(|accepted| accepted.range.start >= text_end)
+            .collect::<Vec<_>>();
+        let active_shown = !self.active.is_empty()
+            && self
+                .active_range
+                .as_ref()
+                .is_some_and(|range| range.start >= text_end);
+        let (active, agreed_end) = if active_shown {
+            (self.active.as_str(), self.agreement.agreed_end())
+        } else {
+            live_prefix
+                .anchored()
+                .filter(|_| {
+                    pending.is_empty()
+                        && live_prefix.pending_forced().is_none()
+                        && self.seeded_through != Some(live_prefix.coverage_end())
+                })
+                .map_or(("", 0), |suffix| (suffix.text(), suffix.agreed_end()))
+        };
+        let snapshot = compose(live_prefix, pending, active, agreed_end);
+        self.last = Some(snapshot.clone());
+        snapshot
     }
 
     pub(super) fn accepted_hypotheses(&self, committed_samples: u64) -> Vec<AcceptedHypothesis> {
@@ -353,6 +375,30 @@ fn normalized_tokens(text: &str) -> Vec<String> {
         .into_iter()
         .map(|(token, _, _)| normalized_token(token))
         .collect()
+}
+
+/// The snapshot of `live_prefix`, the `pending` hypotheses, and `active`,
+/// whose first `agreed_end` bytes are agreed.
+fn compose<'pending>(
+    live_prefix: &LivePrefixSnapshot,
+    pending: impl IntoIterator<Item = &'pending AcceptedHypothesis>,
+    active: &str,
+    agreed_end: usize,
+) -> InterimSnapshot {
+    let mut agreed = String::new();
+    if let Some((pending_forced, _)) = live_prefix.pending_forced() {
+        append_transcript(&mut agreed, pending_forced);
+    }
+    for accepted in pending {
+        append_transcript(&mut agreed, accepted.text());
+    }
+    append_transcript(&mut agreed, active[..agreed_end].trim());
+    let agreed = owned_piece(!live_prefix.finalized().is_empty(), &agreed);
+    let tentative = owned_piece(
+        !live_prefix.finalized().is_empty() || !agreed.is_empty(),
+        &active[agreed_end..],
+    );
+    InterimSnapshot::new(live_prefix.finalized().to_owned(), agreed, tentative)
 }
 
 fn owned_piece(has_prefix: bool, piece: &str) -> String {

@@ -1,7 +1,8 @@
 //! Tests for sample-to-millisecond conversion at the u64 boundary, for
 //! hypothesis revisions that advance only when the emitted snapshot changes,
-//! for negotiated finalized range fields, and for the append-only deltas a
-//! plain session receives during the take.
+//! for negotiated finalized range fields, for the append-only deltas a plain
+//! session receives during the take, and for the update a landed final sends
+//! without an interim decode.
 
 use std::ops::Range;
 
@@ -316,6 +317,96 @@ fn stable_text_that_falls_short_of_what_was_sent_resumes_with_only_the_words_pas
         "agreement past what was sent resumes with only the new word"
     );
     assert_eq!(commit_rest(&mut session), [" delta epsilon"]);
+}
+
+fn finalized_update(session: &mut Session) -> Option<Value> {
+    session
+        .finalized_update()
+        .expect("the finalized update is composed")
+        .map(|event| serde_json::to_value(event).expect("update serializes"))
+}
+
+fn record_final(session: &Session, text: &str, samples: Option<u64>) {
+    session
+        .input()
+        .expect("input exists")
+        .take()
+        .record_finalized_through(text, samples);
+}
+
+#[test]
+fn a_landed_final_reaches_a_hypothesis_client_without_another_interim_decode() {
+    let mut session = hypothesis_session();
+    let epoch = session.begin_interim().expect("epoch begins");
+    assert_eq!(accept(&mut session, epoch, 0..16_000, "ask not."), Some(1));
+    assert_eq!(accept(&mut session, epoch, 0..24_000, "ask not."), Some(2));
+    assert_eq!(
+        finalized_update(&mut session),
+        None,
+        "no final has landed since the last hypothesis"
+    );
+
+    record_final(&session, "Ask not.", Some(24_000));
+    let event = finalized_update(&mut session).expect("the landed final is sent");
+    assert_eq!(event["revision"], 3);
+    assert_eq!(event["finalized"], "Ask not.");
+    assert_eq!(event["agreed"], "");
+    assert_eq!(
+        event["tentative"], "",
+        "the tentative last word is now final"
+    );
+    assert_eq!(
+        (&event["audio_start_ms"], &event["audio_end_ms"]),
+        (&Value::from(1_500), &Value::from(1_500)),
+        "no window was decoded, so the span is empty at the latest window's end"
+    );
+    assert_eq!(
+        finalized_update(&mut session),
+        None,
+        "each outcome is sent once"
+    );
+}
+
+#[test]
+fn an_outcome_that_changes_nothing_shown_sends_nothing() {
+    let mut session = hypothesis_session();
+    record_final(&session, "", None);
+    assert_eq!(
+        finalized_update(&mut session),
+        None,
+        "an empty take shows nothing before its first hypothesis"
+    );
+
+    let epoch = session.begin_interim().expect("epoch begins");
+    assert_eq!(
+        accept(&mut session, epoch, 0..16_000, "alpha beta"),
+        Some(1)
+    );
+    record_final(&session, "", None);
+    assert_eq!(finalized_update(&mut session), None);
+    assert_eq!(session.hypothesis_revision, 1);
+}
+
+#[test]
+fn a_landed_final_streams_its_appended_words_to_a_plain_client() {
+    let mut session = session_including(&[]);
+    let epoch = session.begin_interim().expect("epoch begins");
+    assert_eq!(
+        accept_delta(&mut session, epoch, 0..16_000, "alpha beta gamma"),
+        None
+    );
+    assert_eq!(
+        accept_delta(&mut session, epoch, 0..24_000, "alpha beta gamma").as_deref(),
+        Some("alpha")
+    );
+    record_final(&session, "alpha beta gamma.", Some(24_000));
+    let event = finalized_update(&mut session).expect("the final extends what was sent");
+    assert_eq!(
+        event["type"],
+        "conversation.item.input_audio_transcription.delta"
+    );
+    assert_eq!(event["delta"], " beta gamma.");
+    assert!(commit_rest(&mut session).is_empty());
 }
 
 #[test]

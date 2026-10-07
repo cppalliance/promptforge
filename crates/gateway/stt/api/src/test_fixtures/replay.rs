@@ -43,7 +43,9 @@ struct HypothesisFields {
 /// Audio is synthesized from the speech layout and appended only as far as
 /// each event needs, so the take's segmenter closes a natural final while its
 /// event runs. Each tick calls the session's interim scheduling directly and
-/// stamps its snapshot with the tick's `at_ms`.
+/// stamps its snapshot with the tick's `at_ms`; each natural final, once
+/// applied, emits the session's update for landed finals stamped with the
+/// final's `at_ms`.
 #[derive(Debug)]
 pub struct ReplayTake {
     session: RealtimeSessionFixture,
@@ -180,6 +182,9 @@ impl ReplayTake {
                     step.sample_end
                 ),
             ));
+        }
+        if let Some(event) = self.session.finalized_update()? {
+            self.snapshots.push(snapshot(at_ms, event)?);
         }
         Ok(())
     }

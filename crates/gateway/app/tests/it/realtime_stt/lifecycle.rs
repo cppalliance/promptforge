@@ -119,11 +119,7 @@ async fn consumed_boundary_rebases_before_delayed_finalization_completes() {
             .expect("finalization completion observer joins")
     );
     append_audio(&mut socket, audio()).await;
-    let revised = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
+    let revised = expect_window_hypothesis(&mut socket).await;
     assert_eq!(revised["finalized"], "revised first");
     assert_eq!(revised["transcript"], "revised first second phrase now");
 

@@ -28,6 +28,10 @@ impl InterimSnapshot {
         }
     }
 
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.transcript.is_empty()
+    }
+
     pub(crate) fn into_parts(self) -> (String, String, String, String) {
         (self.transcript, self.finalized, self.agreed, self.tentative)
     }

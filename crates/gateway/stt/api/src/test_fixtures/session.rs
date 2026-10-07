@@ -269,6 +269,20 @@ impl RealtimeSessionFixture {
         self.finish_interim().await
     }
 
+    /// Emits the update for final outcomes that landed since the take's last
+    /// update, as the session loop does on each completion poll.
+    ///
+    /// # Errors
+    /// Returns a revision or serialization error.
+    pub fn finalized_update(&mut self) -> Result<Option<serde_json::Value>, FixtureError> {
+        self.session
+            .finalized_update()
+            .map_err(|error| FixtureError::FinalizedUpdate(boxed(error)))?
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(FixtureError::Serialize)
+    }
+
     /// Joins every canceled interim task without relinquishing ownership.
     ///
     /// # Errors

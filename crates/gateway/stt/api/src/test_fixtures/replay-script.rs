@@ -59,7 +59,8 @@ pub struct ReplayFinal {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaySnapshot {
-    /// The `at_ms` of the tick whose interim decode emitted the event.
+    /// The `at_ms` of the tick whose interim decode emitted the event, or of
+    /// the natural final whose outcome emitted it.
     pub at_ms: u64,
     /// The event's hypothesis revision.
     pub revision: u64,

@@ -103,11 +103,7 @@ async fn mounted_unaligned_windows_keep_complete_live_text_and_finish_once() {
             audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
         )
         .await;
-        let hypothesis = expect_type(
-            &mut socket,
-            "conversation.item.input_audio_transcription.hypothesis",
-        )
-        .await;
+        let hypothesis = expect_window_hypothesis(&mut socket).await;
         assert_complete_estimated_hypothesis(
             &hypothesis,
             &finalized,

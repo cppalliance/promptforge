@@ -163,20 +163,14 @@ async fn run_socket(
                     }
                 }
                 if session.interim_finished() {
-                    match session.finish_interim().await {
-                        Ok(Some(event)) => {
-                            if !send_event(&mut socket, &event, &policy).await {
-                                return;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            let error = session_error(&error, None);
-                            if !send_client_error(&mut socket, &session, error, &policy).await {
-                                return;
-                            }
-                        }
+                    let update = session.finish_interim().await;
+                    if !send_update(&mut socket, &session, update, &policy).await {
+                        return;
                     }
+                }
+                let update = session.finalized_update();
+                if !send_update(&mut socket, &session, update, &policy).await {
+                    return;
                 }
                 let Ok(events) = session.finish_ready().await else {
                     return;
@@ -376,6 +370,18 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
                 client_event_id,
             )
         }
+    }
+}
+async fn send_update(
+    socket: &mut WebSocket,
+    session: &Session,
+    update: Result<Option<ServerEvent>, SessionError>,
+    policy: &RoutePolicy,
+) -> bool {
+    match update {
+        Ok(Some(event)) => send_event(socket, &event, policy).await,
+        Ok(None) => true,
+        Err(error) => send_client_error(socket, session, session_error(&error, None), policy).await,
     }
 }
 async fn send_events(socket: &mut WebSocket, events: &[ServerEvent], policy: &RoutePolicy) -> bool {

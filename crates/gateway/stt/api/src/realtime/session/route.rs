@@ -4,7 +4,7 @@ use super::{Session, SessionError};
 use crate::realtime::result_mailbox::ItemResult;
 use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::{HypothesisRanges, ServerEvent};
-use crate::take::{InterimSnapshot, token_spans};
+use crate::take::{FinalizedRange, InterimSnapshot, token_spans};
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, TranscribeError};
 
 /// Trailing agreed words a plain client receives only once later agreement
@@ -115,24 +115,55 @@ impl Session {
         if transcript.text().is_empty() {
             return Ok(None);
         }
-        let include_hypothesis = input.snapshot().include_hypothesis();
-        let include_ranges = input.snapshot().include_ranges();
-        let update = input.take().next_window_snapshot(
+        let Some((snapshot, finalized)) = input.take().next_window_snapshot(
             transcript.text(),
             transcript.word_ends(),
             segment_start,
             audio_start,
             audio_end,
-        );
-        if !include_hypothesis {
-            let Some((snapshot, _)) = update else {
-                return Ok(None);
-            };
-            return Ok(self.standard_delta(item_id, snapshot));
-        }
-        let Some((snapshot, finalized)) = update else {
+        ) else {
             return Ok(None);
         };
+        self.take_update(item_id, snapshot, finalized, Some((audio_start, audio_end)))
+    }
+
+    /// The update for final outcomes that landed since the take's last
+    /// update, so finalized text reaches the client while interim decodes
+    /// are skipped as silent, come back empty, or are rejected.
+    pub(crate) fn finalized_update(&mut self) -> Result<Option<ServerEvent>, SessionError> {
+        let Some(input) = self.input.as_ref() else {
+            return Ok(None);
+        };
+        let Some((snapshot, finalized)) = input.take().refreshed_snapshot(self.shown_finalized_seq)
+        else {
+            return Ok(None);
+        };
+        let item_id = input.item_id().to_owned();
+        self.take_update(item_id, snapshot, finalized, None)
+    }
+
+    /// Emits `snapshot` as a hypothesis, or as a plain client's delta.
+    /// `window` is the interim window decoded for it; a hypothesis equal to
+    /// the last one keeps its revision and is sent again for a new window.
+    /// An update without one reports the empty span at the latest window's
+    /// end and is sent only when it changes the hypothesis; before any
+    /// hypothesis, an empty snapshot counts as unchanged.
+    fn take_update(
+        &mut self,
+        item_id: String,
+        snapshot: InterimSnapshot,
+        finalized: FinalizedRange,
+        window: Option<(u64, u64)>,
+    ) -> Result<Option<ServerEvent>, SessionError> {
+        self.shown_finalized_seq = finalized.seq;
+        if let Some((_, end)) = window {
+            self.hypothesis_window_end = end;
+        }
+        let input = self.input.as_ref().ok_or(SessionError::NoInput)?;
+        let include_ranges = input.snapshot().include_ranges();
+        if !input.snapshot().include_hypothesis() {
+            return Ok(self.standard_delta(item_id, snapshot));
+        }
         let shown = (
             snapshot,
             include_ranges.then(|| HypothesisRanges {
@@ -140,17 +171,25 @@ impl Session {
                 finalized_seq: finalized.seq,
             }),
         );
-        if self.last_hypothesis.as_ref() != Some(&shown) {
+        let changed = self
+            .last_hypothesis
+            .as_ref()
+            .map_or(!shown.0.is_empty(), |last| last != &shown);
+        if changed {
             self.hypothesis_revision = self
                 .hypothesis_revision
                 .checked_add(1)
                 .ok_or(SessionError::EpochExhausted)?;
             self.last_hypothesis = Some(shown.clone());
+        } else if window.is_none() || self.last_hypothesis.is_none() {
+            return Ok(None);
         }
         let (snapshot, ranges) = shown;
+        let end = self.hypothesis_window_end;
+        let (audio_start, audio_end) = window.unwrap_or((end, end));
         Ok(Some(ServerEvent::hypothesis(
             self.ids.event(),
-            input.item_id().to_owned(),
+            item_id,
             self.hypothesis_revision,
             snapshot,
             sample_millis(audio_start),
@@ -187,6 +226,8 @@ impl Session {
     pub(crate) fn take_pending_interim(&mut self, item_id: &str) -> Option<ServerEvent> {
         self.hypothesis_revision = 0;
         self.last_hypothesis = None;
+        self.shown_finalized_seq = 0;
+        self.hypothesis_window_end = 0;
         let sent = std::mem::take(&mut self.standard_interim_sent);
         let committed = std::mem::take(&mut self.standard_interim_committed);
         let rest = committed

@@ -133,10 +133,14 @@ async fn mounted_installed_whisper_sequence_reconciles_without_duplicate_phrases
     )
     .await;
 
+    let mut streamed = String::new();
     let completed = loop {
         let event = receive(&mut socket).await;
         match event["type"].as_str() {
             Some("conversation.item.input_audio_transcription.completed") => break event,
+            Some("conversation.item.input_audio_transcription.delta") => {
+                streamed.push_str(event["delta"].as_str().expect("a delta carries text"));
+            }
             Some("input_audio_buffer.committed" | "conversation.item.created") => {}
             other => panic!("unexpected installed sequence event {other:?}: {event}"),
         }
@@ -144,6 +148,13 @@ async fn mounted_installed_whisper_sequence_reconciles_without_duplicate_phrases
     assert_eq!(
         completed["transcript"],
         "The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window"
+    );
+    assert!(
+        !streamed.is_empty()
+            && completed["transcript"]
+                .as_str()
+                .is_some_and(|transcript| transcript.starts_with(&streamed)),
+        "landed finals stream append-only deltas that the transcript continues: {streamed:?}"
     );
 
     socket.close(None).await.expect("socket closes");

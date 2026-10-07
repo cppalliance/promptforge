@@ -201,8 +201,18 @@
       "audio_end_ms": 10000
     },
     {
-      "at_ms": 11019,
+      "at_ms": 10158,
       "revision": 18,
+      "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+      "tentative": "",
+      "audio_start_ms": 10000,
+      "audio_end_ms": 10000
+    },
+    {
+      "at_ms": 11019,
+      "revision": 19,
       "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country. I'm free.",
       "finalized": "",
       "agreed": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",

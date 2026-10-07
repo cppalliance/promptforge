@@ -254,6 +254,21 @@ async fn expect_type(socket: &mut Socket, expected: &str) -> serde_json::Value {
     event
 }
 
+/// Receives the next hypothesis decoded from an interim window, skipping any
+/// update a landed final sent first, which reports an empty audio span.
+async fn expect_window_hypothesis(socket: &mut Socket) -> serde_json::Value {
+    loop {
+        let hypothesis = expect_type(
+            socket,
+            "conversation.item.input_audio_transcription.hypothesis",
+        )
+        .await;
+        if hypothesis["audio_start_ms"] != hypothesis["audio_end_ms"] {
+            return hypothesis;
+        }
+    }
+}
+
 async fn expect_error(
     socket: &mut Socket,
     kind: &str,

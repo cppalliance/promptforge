@@ -54,11 +54,7 @@ async fn mounted_hypotheses_keep_revisable_forced_text_until_stop() {
         audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
     )
     .await;
-    let first = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
+    let first = expect_window_hypothesis(&mut socket).await;
     assert_eq!(first["finalized"], "");
     assert_eq!(first["agreed"], live_prefix_text(0, 10));
     assert_eq!(first["tentative"], " word0010");
@@ -75,11 +71,7 @@ async fn mounted_hypotheses_keep_revisable_forced_text_until_stop() {
         audio_samples(&vec![8_192; LIVE_PREFIX_STRIDE_SAMPLES / 10]),
     )
     .await;
-    let second = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
+    let second = expect_window_hypothesis(&mut socket).await;
     assert_eq!(second["finalized"], live_prefix_text(0, 2));
     assert_eq!(
         second["agreed"],

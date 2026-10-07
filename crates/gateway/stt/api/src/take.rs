@@ -181,6 +181,20 @@ impl Take {
         Some((snapshot, live_prefix.finalized_range()))
     }
 
+    /// The snapshot recomposed without a new hypothesis once final outcomes
+    /// have landed beyond the first `seen`, or `None` while none has.
+    pub(crate) fn refreshed_snapshot(
+        &self,
+        seen: u64,
+    ) -> Option<(InterimSnapshot, FinalizedRange)> {
+        if self.state.applied_outcomes() == seen {
+            return None;
+        }
+        let live_prefix = self.state.live_prefix_snapshot();
+        let snapshot = TakeState::lock(&self.whole_window).refresh(&live_prefix);
+        Some((snapshot, live_prefix.finalized_range()))
+    }
+
     #[cfg(test)]
     fn record_finalized(&self, result: Result<String, TranscribeError>) {
         self.state.record_finalized(result, None);

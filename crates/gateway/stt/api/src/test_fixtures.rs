@@ -139,6 +139,10 @@ pub enum FixtureError {
     #[error("finish fixture interim")]
     #[non_exhaustive]
     FinishInterim(#[source] BoxedSource),
+    /// The update for landed final outcomes failed.
+    #[error("emit fixture finalized update")]
+    #[non_exhaustive]
+    FinalizedUpdate(#[source] BoxedSource),
     /// The canceled-task join failed.
     #[error("join canceled fixture interims")]
     #[non_exhaustive]

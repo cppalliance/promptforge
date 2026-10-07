@@ -88,6 +88,11 @@ pub(crate) struct Session {
     pub(super) standard_interim_committed: String,
     pub(super) hypothesis_revision: u64,
     pub(super) last_hypothesis: Option<(InterimSnapshot, Option<HypothesisRanges>)>,
+    /// Final outcomes applied to the take when its latest update was composed.
+    pub(super) shown_finalized_seq: u64,
+    /// End of the latest accepted interim window, where an update for landed
+    /// final outcomes reports its empty span.
+    pub(super) hypothesis_window_end: u64,
     pub(super) results: ResultMailbox,
 }
 
@@ -116,6 +121,8 @@ impl Session {
             standard_interim_committed: String::new(),
             hypothesis_revision: 0,
             last_hypothesis: None,
+            shown_finalized_seq: 0,
+            hypothesis_window_end: 0,
             results: ResultMailbox::default(),
         }
     }

@@ -75,6 +75,8 @@ impl Session {
         self.standard_interim_committed.clear();
         self.hypothesis_revision = 0;
         self.last_hypothesis = None;
+        self.shown_finalized_seq = 0;
+        self.hypothesis_window_end = 0;
         Ok(())
     }
 

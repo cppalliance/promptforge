@@ -117,6 +117,11 @@ impl TakeState {
         Self::lock(&self.finalized).text.clone()
     }
 
+    /// The count of final outcomes applied to the take.
+    pub(super) fn applied_outcomes(&self) -> u64 {
+        Self::lock(&self.finalized).applied_outcomes
+    }
+
     #[cfg(test)]
     fn finalized_snapshot(&self) -> (String, u64) {
         self.finalized_snapshot_with(|| {})
@@ -134,6 +139,7 @@ impl TakeState {
         LivePrefixSnapshot::new(
             state.text.clone(),
             state.samples,
+            state.transcribed_samples,
             state.applied_outcomes,
             state
                 .pending_forced

@@ -262,6 +262,16 @@ test("every replay fixture renders through the take reducer within its ui baseli
   );
 });
 
+test("a final that lands in silence shows the last word and its period before the next word", () => {
+  const outcome = readJson("scripted-silence-short-word.snapshots.json");
+  const rendered = render(outcome);
+  const beforeNextWord = outcome.snapshots.findIndex((snapshot) =>
+    snapshot.transcript.includes("Hey"),
+  ) - 1;
+  assert.ok(beforeNextWord >= 0, "the fixture says a word after its silence");
+  assert.equal(rendered[beforeNextWord], "About one tick faster than the plan's 0.6 seconds.");
+});
+
 test("rendered UPWR and UPSR count earlier editor words after the exact common prefix", () => {
   assert.deepEqual(
     renderedMetrics(["ask not", "Ask not what", "Ask not, what your", "Ask not, what your country"]),

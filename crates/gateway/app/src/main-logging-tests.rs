@@ -286,14 +286,18 @@ async fn expect_healthy_completion(socket: &mut Socket) {
         serde_json::json!({"type": "input_audio_buffer.commit"}),
     )
     .await;
-    for _ in 0..12 {
+    for _ in 0..16 {
         let event = receive(socket).await;
         match event["type"].as_str() {
             Some("conversation.item.input_audio_transcription.completed") => return,
             Some("conversation.item.input_audio_transcription.failed" | "error") => {
                 panic!("estimated reconciliation emitted a terminal failure: {event}")
             }
-            Some("input_audio_buffer.committed" | "conversation.item.created") => {}
+            Some(
+                "input_audio_buffer.committed"
+                | "conversation.item.created"
+                | "conversation.item.input_audio_transcription.delta",
+            ) => {}
             other => panic!("unexpected mounted logging event {other:?}: {event}"),
         }
     }

@@ -7,7 +7,7 @@ use crate::take::InterimSnapshot;
 use crate::take::final_outcome::{FinalRangeOutcome, SkipReason};
 use crate::take::finalization::record_outcome;
 use crate::take::live_prefix::AnchoredSuffix;
-use crate::take::window::{ShownHypotheses, WholeWindowState};
+use crate::take::window::{AcceptedHypothesis, ShownHypotheses, WholeWindowState};
 
 const FINAL_END: u64 = 32_000;
 const HALF_SECOND: u64 = 8_000;
@@ -52,6 +52,13 @@ impl Rewrite {
             )
             .expect("the window stays within capacity")
             .map(InterimSnapshot::into_parts)
+    }
+
+    /// Recomposes the shown snapshot after the final without a fast pass.
+    fn refresh(&self) -> Parts {
+        TakeState::lock(&self.window)
+            .refresh(&self.state.live_prefix_snapshot())
+            .into_parts()
     }
 
     /// Renders the fast pass `step` half seconds after the final's end.
@@ -211,6 +218,61 @@ fn an_anchored_suffix_seeds_the_next_window_once() {
         rewrite.next(3, "for you"),
         parts("", " for you"),
         "the suffix stays gone once a fast pass drops it"
+    );
+}
+
+#[test]
+fn a_refresh_after_the_final_shows_the_anchored_suffix_and_leaves_it_to_seed_the_next_pass() {
+    let rewrite = rewrite(&["ask not what your country can do"], FINALIZED);
+
+    assert_eq!(rewrite.refresh(), parts("", " can do"));
+    assert_eq!(rewrite.next(1, "for you"), parts("", " can do for you"));
+}
+
+#[test]
+fn a_refresh_keeps_anchored_words_agreed_before_the_final_agreed() {
+    let rewrite = rewrite(
+        &[
+            "ask not what your country can",
+            "ask not what your country can do",
+        ],
+        FINALIZED,
+    );
+
+    assert_eq!(rewrite.refresh(), parts(" can", " do"));
+}
+
+#[test]
+fn a_refresh_after_an_unanchored_final_shows_only_the_finalized_text() {
+    let rewrite = rewrite(&["ask not what your nation can do"], FINALIZED);
+
+    assert_eq!(rewrite.refresh(), parts("", ""));
+}
+
+#[test]
+fn a_refresh_after_a_skip_without_text_keeps_the_word_shown_and_accepted() {
+    let rewrite = rewrite(&["ask not what your country"], FINALIZED);
+    assert_eq!(rewrite.next(3, "Hey."), parts("", " Hey."));
+    record_outcome(
+        &rewrite.state,
+        &rewrite.window,
+        FinalRangeOutcome::skipped(
+            FINAL_END..FINAL_END + 2 * HALF_SECOND,
+            SkipReason::BelowSpeechThreshold,
+        ),
+    );
+
+    assert_eq!(
+        rewrite.refresh(),
+        parts("", " Hey."),
+        "no settled text holds the word yet"
+    );
+    let accepted =
+        TakeState::lock(&rewrite.window).accepted_hypotheses(FINAL_END + 3 * HALF_SECOND);
+    assert_eq!(
+        accepted.last().map(AcceptedHypothesis::text),
+        Some("Hey."),
+        "a later skipped range can still settle the word"
     );
 }
 
