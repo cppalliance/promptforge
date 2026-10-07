@@ -23,7 +23,7 @@ mod window;
 pub(crate) use agreement::token_spans;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
-use finalization::{FinalPipeline, spawn_final_pipeline};
+use finalization::{FinalPipeline, append_releasing, spawn_final_pipeline};
 pub(crate) use interim::{FinalizedRange, InterimSnapshot};
 #[cfg(test)]
 use pcm::PcmBudgetProbe;
@@ -109,7 +109,7 @@ impl Take {
     }
 
     pub(crate) fn append(&self, samples: Vec<f32>) -> Result<(), AudioError> {
-        TakeState::lock(&self.state.buffer).append(samples)
+        append_releasing(&self.state, samples)
     }
 
     pub(crate) fn submit_closed_segments(&self) {

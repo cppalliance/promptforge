@@ -12,6 +12,7 @@ pub(super) enum SkipReason {
     BelowSpeechThreshold,
     BelowFinalWindow,
     Silence,
+    Released,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

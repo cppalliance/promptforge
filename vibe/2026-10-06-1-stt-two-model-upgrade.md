@@ -734,7 +734,7 @@ flowchart TD
 
 <step-23>
 
-### Step 23: Keep interim text when the final queue is full
+### Step 23: Keep interim text when the final queue is full [completed]
 
 - Component: Load degradation
 - Piece: final-queue retry

@@ -10,12 +10,17 @@ use gateway_stt_engine::{DecodeOutput, DecodeRequest, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::generation::GenerationLease;
-use crate::segment::{ForcedBoundary, SegmentOutcome};
+use crate::segment::ForcedBoundary;
 
 use super::final_decode::process_samples;
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
 use super::state::{TakeFailure, TakeState};
 use super::window::{AcceptedHypothesis, WholeWindowState};
+
+#[path = "finalization-retry.rs"]
+mod retry;
+
+pub(super) use retry::{ClosedRange, append_releasing};
 
 pub(super) type TakeFinalization =
     Pin<Box<dyn Future<Output = Result<String, Arc<TakeFailure>>> + Send>>;
@@ -23,16 +28,8 @@ pub(super) const FINAL_SEGMENT_CAPACITY: usize = 4;
 
 #[derive(Debug)]
 pub(super) enum FinalCommand {
-    Segment {
-        range: Range<u64>,
-        forced: Option<ForcedBoundary>,
-        leading_silence: Option<Range<u64>>,
-        owner: FinalSegmentOwner,
-    },
-    Skipped {
-        range: Range<u64>,
-        reason: SkipReason,
-        leading_silence: Option<Range<u64>>,
+    Closed {
+        closed: ClosedRange,
         owner: FinalSegmentOwner,
     },
     Complete {
@@ -56,60 +53,6 @@ impl Drop for FinalPipeline {
 }
 
 impl FinalPipeline {
-    pub(super) fn submit_closed_segments(&self, state: &TakeState) {
-        loop {
-            let command = {
-                let buffer = TakeState::lock(&state.buffer);
-                let mut segmenter = TakeState::lock(&state.segmenter);
-                let previous_consumed = segmenter.consumed();
-                let Some(outcome) = segmenter.poll(buffer.samples(), buffer.origin()) else {
-                    break;
-                };
-                let Some(owner) = FinalSegmentOwner::reserve(&self.pending_segments) else {
-                    state.record_failure(TakeFailure::SegmentCapacity);
-                    break;
-                };
-                let range = match &outcome {
-                    SegmentOutcome::Decode(range) | SegmentOutcome::Skipped(range) => range.clone(),
-                    SegmentOutcome::Forced(boundary) => boundary.decode_range(),
-                };
-                let leading_silence =
-                    (previous_consumed < range.start).then_some(previous_consumed..range.start);
-                match outcome {
-                    SegmentOutcome::Decode(range) => FinalCommand::Segment {
-                        range,
-                        forced: None,
-                        leading_silence,
-                        owner,
-                    },
-                    SegmentOutcome::Forced(boundary) => FinalCommand::Segment {
-                        range,
-                        forced: Some(boundary),
-                        leading_silence,
-                        owner,
-                    },
-                    SegmentOutcome::Skipped(range) => FinalCommand::Skipped {
-                        range,
-                        reason: SkipReason::BelowSpeechThreshold,
-                        leading_silence,
-                        owner,
-                    },
-                }
-            };
-            match self.commands.try_send(command) {
-                Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    state.record_failure(TakeFailure::SegmentCapacity);
-                    break;
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => {
-                    state.record_failure(TakeFailure::PipelineExited);
-                    break;
-                }
-            }
-        }
-    }
-
     #[cfg(any(test, feature = "test-fixtures"))]
     pub(super) fn pending_segments(&self) -> usize {
         self.pending_segments.load(Ordering::Acquire)
@@ -207,43 +150,8 @@ pub(super) async fn run_final_pipeline<D, F>(
 {
     while let Some(command) = receiver.recv().await {
         match command {
-            FinalCommand::Segment {
-                range,
-                forced,
-                leading_silence,
-                owner,
-            } => {
-                record_leading_silence(&state, &whole_window, leading_silence);
-                let samples = TakeState::lock(&state.buffer)
-                    .transfer_range(range.clone())
-                    .unwrap_or_else(|_| panic!("ordered segment range must remain resident"));
-                process_samples(
-                    &state,
-                    &whole_window,
-                    &guidance,
-                    &mut decode,
-                    samples,
-                    range,
-                    forced,
-                )
-                .await;
-                drop(owner);
-            }
-            FinalCommand::Skipped {
-                range,
-                reason,
-                leading_silence,
-                owner,
-            } => {
-                record_leading_silence(&state, &whole_window, leading_silence);
-                TakeState::lock(&state.buffer)
-                    .compact_to(range.end)
-                    .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
-                record_outcome(
-                    &state,
-                    &whole_window,
-                    FinalRangeOutcome::skipped(range, reason),
-                );
+            FinalCommand::Closed { closed, owner } => {
+                process_closed(&state, &whole_window, &guidance, &mut decode, closed).await;
                 drop(owner);
             }
             FinalCommand::Complete {
@@ -251,6 +159,10 @@ pub(super) async fn run_final_pipeline<D, F>(
                 accepted,
                 reply,
             } => {
+                let held = std::mem::take(&mut *TakeState::lock(&state.held));
+                for closed in held {
+                    process_closed(&state, &whole_window, &guidance, &mut decode, closed).await;
+                }
                 let (start, forced) = {
                     let segmenter = TakeState::lock(&state.segmenter);
                     (
@@ -277,6 +189,66 @@ pub(super) async fn run_final_pipeline<D, F>(
                 drop(reply.send(state.completion(&accepted, committed_samples)));
                 break;
             }
+        }
+    }
+}
+
+async fn process_closed<D, F>(
+    state: &Arc<TakeState>,
+    whole_window: &Mutex<WholeWindowState>,
+    guidance: &[String],
+    decode: &mut D,
+    closed: ClosedRange,
+) where
+    D: FnMut(DecodeRequest) -> F,
+    F: Future<Output = Option<Result<String, TranscribeError>>>,
+{
+    match closed {
+        ClosedRange::Segment {
+            range,
+            forced,
+            leading_silence,
+        } => {
+            record_leading_silence(state, whole_window, leading_silence);
+            let samples = TakeState::lock(&state.buffer)
+                .transfer_range(range.clone())
+                .unwrap_or_else(|_| panic!("ordered segment range must remain resident"));
+            process_samples(
+                state,
+                whole_window,
+                guidance,
+                decode,
+                samples,
+                range,
+                forced,
+            )
+            .await;
+        }
+        ClosedRange::Skipped {
+            range,
+            reason,
+            leading_silence,
+        } => {
+            record_leading_silence(state, whole_window, leading_silence);
+            TakeState::lock(&state.buffer)
+                .compact_to(range.end)
+                .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
+            record_outcome(
+                state,
+                whole_window,
+                FinalRangeOutcome::skipped(range, reason),
+            );
+        }
+        ClosedRange::Released {
+            range,
+            leading_silence,
+        } => {
+            record_leading_silence(state, whole_window, leading_silence);
+            record_outcome(
+                state,
+                whole_window,
+                FinalRangeOutcome::skipped(range, SkipReason::Released),
+            );
         }
     }
 }

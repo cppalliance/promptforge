@@ -84,6 +84,14 @@ impl Segmenter {
         self.sentence_end == Some(self.endpoint.consumed)
     }
 
+    /// Stops the next segment from overlapping the forced stride that ended
+    /// at `end`, whose audio was released without a final decode.
+    pub(crate) fn forget_forced_predecessor(&mut self, end: u64) {
+        if self.forced_predecessor == Some(end) {
+            self.forced_predecessor = None;
+        }
+    }
+
     pub(crate) fn terminal_boundary(&self, end: u64) -> Option<ForcedBoundary> {
         let consumed = self.endpoint.consumed;
         (consumed < end && self.forced_predecessor == Some(consumed))

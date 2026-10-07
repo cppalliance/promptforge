@@ -191,25 +191,38 @@ impl RollingPcm {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn append(&mut self, samples: Vec<f32>) -> Result<(), AudioError> {
-        let next_len =
-            self.samples
-                .len()
-                .checked_add(samples.len())
-                .ok_or(AudioError::BufferTooLong {
-                    maximum_seconds: MAX_RETAINED_SECONDS,
-                })?;
-        let _ = u64::try_from(next_len)
-            .ok()
-            .and_then(|length| self.origin.checked_add(length))
-            .ok_or(AudioError::BufferTooLong {
-                maximum_seconds: MAX_RETAINED_SECONDS,
-            })?;
+        self.try_append(samples).map_err(|(error, _)| error)
+    }
+
+    /// Appends `samples`, handing them back with the error when the cap
+    /// rejects them.
+    pub(super) fn try_append(&mut self, samples: Vec<f32>) -> Result<(), (AudioError, Vec<f32>)> {
+        let too_long = || AudioError::BufferTooLong {
+            maximum_seconds: MAX_RETAINED_SECONDS,
+        };
+        let Some(next_len) = self
+            .samples
+            .len()
+            .checked_add(samples.len())
+            .filter(|length| {
+                u64::try_from(*length)
+                    .ok()
+                    .and_then(|length| self.origin.checked_add(length))
+                    .is_some()
+            })
+        else {
+            return Err((too_long(), samples));
+        };
 
         if samples.is_empty() {
             return Ok(());
         }
-        let incoming = self.owner.budget.reserve(samples.capacity())?;
+        let incoming = match self.owner.budget.reserve(samples.capacity()) {
+            Ok(incoming) => incoming,
+            Err(error) => return Err((error, samples)),
+        };
         if self.samples.is_empty() && self.samples.capacity() == 0 {
             self.samples = samples;
             self.owner.absorb(incoming);
@@ -221,18 +234,14 @@ impl RollingPcm {
             let mut headroom = self.owner.budget.reserve_remaining();
             let required = next_len - old_capacity;
             if required > headroom.capacity || self.samples.try_reserve_exact(required).is_err() {
-                return Err(AudioError::BufferTooLong {
-                    maximum_seconds: MAX_RETAINED_SECONDS,
-                });
+                return Err((too_long(), samples));
             }
             if self.samples.capacity() - old_capacity > headroom.capacity {
                 self.samples.shrink_to(next_len);
             }
             let allocated = self.samples.capacity() - old_capacity;
             if allocated > headroom.capacity {
-                return Err(AudioError::BufferTooLong {
-                    maximum_seconds: MAX_RETAINED_SECONDS,
-                });
+                return Err((too_long(), samples));
             }
             headroom.release(headroom.capacity - allocated);
             self.owner.absorb(headroom);
@@ -302,6 +311,11 @@ impl RollingPcm {
         Ok(RetainedPcm { samples, owner })
     }
 
+    /// Moves `range` out for decoding. The decode normally keeps the resident
+    /// allocation and the audio after the range is copied, because a forced
+    /// decode returns its overlap into that allocation's spare capacity. When
+    /// the cap cannot hold that copy, the range is copied out instead and the
+    /// audio after it stays in place.
     pub(super) fn transfer_range(
         &mut self,
         range: Range<u64>,
@@ -310,21 +324,14 @@ impl RollingPcm {
         let tail = if local.end == self.samples.len() {
             None
         } else {
-            let tail_capacity = self.samples.len() - local.end;
-            let mut tail_owner = self.owner.budget.reserve_remaining();
-            if tail_capacity > tail_owner.capacity {
-                return Err(PcmRangeError);
-            }
-            let mut tail = Vec::new();
-            tail.try_reserve_exact(tail_capacity)
-                .map_err(|_| PcmRangeError)?;
-            if tail.capacity() > tail_owner.capacity {
-                return Err(PcmRangeError);
-            }
-            tail_owner.release(tail_owner.capacity - tail.capacity());
-            tail.extend_from_slice(&self.samples[local.end..]);
+            let Some(tail) = self.copy_tail(local.end) else {
+                let copied = self.copy_range(range.clone()).map_err(|_| PcmRangeError)?;
+                self.samples.drain(..local.end);
+                self.origin = range.end;
+                return Ok(copied);
+            };
             self.samples.truncate(local.end);
-            Some((tail, tail_owner))
+            Some(tail)
         };
         self.samples.drain(..local.start);
         let samples = std::mem::take(&mut self.samples);
@@ -338,6 +345,35 @@ impl RollingPcm {
             samples,
             owner: transferred,
         })
+    }
+
+    fn copy_tail(&self, start: usize) -> Option<(Vec<f32>, RetainedPcmOwner)> {
+        let tail_capacity = self.samples.len() - start;
+        let mut tail_owner = self.owner.budget.reserve_remaining();
+        if tail_capacity > tail_owner.capacity {
+            return None;
+        }
+        let mut tail = Vec::new();
+        tail.try_reserve_exact(tail_capacity).ok()?;
+        if tail.capacity() > tail_owner.capacity {
+            return None;
+        }
+        tail_owner.release(tail_owner.capacity - tail.capacity());
+        tail.extend_from_slice(&self.samples[start..]);
+        Some((tail, tail_owner))
+    }
+
+    /// Drops resident PCM before `end` in place and returns the freed capacity
+    /// to the budget. Unlike `transfer_range` it reserves nothing, so it
+    /// succeeds when the cap is full.
+    pub(super) fn release_prefix(&mut self, end: u64) -> Result<(), PcmRangeError> {
+        let local = self.try_local_range(&(self.origin..end))?;
+        self.samples.drain(..local.end);
+        self.samples.shrink_to_fit();
+        self.origin = end;
+        let freed = self.owner.capacity.saturating_sub(self.samples.capacity());
+        self.owner.release(freed);
+        Ok(())
     }
 
     pub(super) fn compact_to(&mut self, end: u64) -> Result<(), PcmRangeError> {

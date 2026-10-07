@@ -9,26 +9,21 @@ pub(super) const SESSION_RESULT_CAPACITY: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ItemFailure {
-    FinalSegmentOverload(String),
     PrecommitTranscriptionFailed(String),
     TranscriptionFailed(String),
 }
 
 impl ItemFailure {
     pub(super) fn from_precommit(failure: &TakeFailure) -> Self {
-        if matches!(failure, TakeFailure::SegmentCapacity) {
-            Self::FinalSegmentOverload(failure.to_string())
-        } else {
-            Self::PrecommitTranscriptionFailed(failure.to_string())
-        }
+        Self::PrecommitTranscriptionFailed(failure.to_string())
     }
 
     #[cfg(feature = "test-fixtures")]
     pub(crate) fn diagnostic(&self) -> &str {
         match self {
-            Self::FinalSegmentOverload(message)
-            | Self::PrecommitTranscriptionFailed(message)
-            | Self::TranscriptionFailed(message) => message,
+            Self::PrecommitTranscriptionFailed(message) | Self::TranscriptionFailed(message) => {
+                message
+            }
         }
     }
 }

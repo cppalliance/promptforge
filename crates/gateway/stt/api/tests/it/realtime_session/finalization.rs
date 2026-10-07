@@ -241,10 +241,12 @@ async fn asynchronous_final_failure_is_observed_before_the_next_append_and_at_co
 }
 
 #[tokio::test]
-async fn production_final_segment_admission_is_exact_and_fails_atomically() {
+async fn production_final_segment_saturation_holds_the_next_segment_until_the_queue_has_room() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.push_text("first");
+    for index in 1..=5 {
+        final_decoder.push_text(format!("segment-{index}"));
+    }
     let registry = RealtimeSessionRegistryFixture::default();
     let mut session = registry
         .register_with_scripted_engine(
@@ -252,7 +254,7 @@ async fn production_final_segment_admission_is_exact_and_fails_atomically() {
         )
         .expect("scripted session starts");
 
-    final_decoder
+    let item_id = final_decoder
         .with_next_decode_blocked(
             Duration::from_secs(1),
             || async {
@@ -274,21 +276,34 @@ async fn production_final_segment_admission_is_exact_and_fails_atomically() {
 
                 session
                     .append_base64(&closed_segment())
-                    .expect("audio ingestion remains recoverable at segment saturation");
+                    .expect("a segment past capacity is held rather than rejected");
                 assert_eq!(session.pending_final_segments(), Some(4));
-                assert_eq!(
-                    session.pending_failure().as_deref(),
-                    Some("final segment capacity is reached")
+                assert!(
+                    session.pending_failure().is_none(),
+                    "a full final queue does not fail the take"
                 );
-                let item = session
+                let item_id = session
                     .commit()
-                    .expect("capacity failure atomically becomes an item failure");
-                let results = session.drain_results();
-                assert_eq!(results.len(), 1);
-                assert_eq!(results[0]["item_id"], item.item_id());
-                assert_eq!(results[0]["message"], "final segment capacity is reached");
+                    .expect("the saturated take commits")
+                    .item_id()
+                    .to_owned();
+                assert_eq!(session.finalizing_count(), 1);
+                item_id
             },
         )
         .await
         .expect("the first production segment blocks in final decoding");
+
+    session
+        .finish_finalization(&item_id)
+        .await
+        .expect("the held segment decodes once the queue has room");
+    let results = session.drain_results();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["item_id"], item_id.as_str());
+    assert_eq!(results[0]["type"], "completed");
+    assert_eq!(
+        results[0]["transcript"],
+        "segment-1 segment-2 segment-3 segment-4 segment-5"
+    );
 }

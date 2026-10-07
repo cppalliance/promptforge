@@ -1,5 +1,6 @@
 //! Shared take state tracking finalized text, failures, and final outcomes.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use gateway_stt_engine::TranscribeError;
@@ -10,6 +11,7 @@ use super::agreement::{
 use super::final_outcome::{
     FinalBoundary, FinalRangeOutcome, FinalRangeResult, assemble_completion,
 };
+use super::finalization::ClosedRange;
 use super::live_prefix::{AnchoredSuffix, LivePrefixSnapshot};
 use super::pcm::{RetainedPcmBudget, RollingPcm};
 use super::text::append_transcript;
@@ -47,8 +49,6 @@ pub(crate) enum TakeFailure {
     ForcedOverlapInconsistent,
     #[error("final outcome capacity is reached")]
     OutcomeCapacity,
-    #[error("final segment capacity is reached")]
-    SegmentCapacity,
     #[error("final transcription pipeline exited")]
     PipelineExited,
     #[error("accepted hypothesis capacity is reached")]
@@ -74,6 +74,9 @@ struct PendingForced {
 
 #[derive(Debug)]
 pub(super) struct TakeState {
+    /// Closed ranges waiting for a final queue slot, in audio order. Lock it
+    /// before `buffer`.
+    pub(super) held: Mutex<VecDeque<ClosedRange>>,
     pub(super) buffer: Mutex<RollingPcm>,
     pub(super) segmenter: Mutex<Segmenter>,
     finalized: Mutex<FinalizedState>,
@@ -82,6 +85,7 @@ pub(super) struct TakeState {
 impl Default for TakeState {
     fn default() -> Self {
         Self {
+            held: Mutex::default(),
             buffer: Mutex::new(RollingPcm::new(RetainedPcmBudget::default())),
             segmenter: Mutex::new(Segmenter::default()),
             finalized: Mutex::new(FinalizedState::default()),
@@ -93,6 +97,7 @@ impl TakeState {
     #[cfg(test)]
     pub(super) fn with_pcm_limit(limit: usize) -> Self {
         Self {
+            held: Mutex::default(),
             buffer: Mutex::new(RollingPcm::new(RetainedPcmBudget::with_limit(limit))),
             segmenter: Mutex::new(Segmenter::default()),
             finalized: Mutex::new(FinalizedState::default()),

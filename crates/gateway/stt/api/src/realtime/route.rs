@@ -37,7 +37,6 @@ struct RouteState {
 #[cfg(feature = "test-fixtures")]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ForcedPrecommitFailure {
-    FinalSegmentOverload,
     Transcription,
 }
 
@@ -77,7 +76,6 @@ impl RoutePolicy {
         #[cfg(feature = "test-fixtures")]
         if let Some(failure) = self.forced_precommit_failure {
             return Some(match failure {
-                ForcedPrecommitFailure::FinalSegmentOverload => TakeFailure::SegmentCapacity,
                 ForcedPrecommitFailure::Transcription => TakeFailure::WorkerUnavailable,
             });
         }

@@ -67,6 +67,49 @@ fn multiple_compactions_keep_absolute_origins() {
 }
 
 #[test]
+fn a_tail_too_large_for_the_headroom_transfers_by_copying_the_range() {
+    let budget = RetainedPcmBudget::with_limit(14);
+    let mut resident = RollingPcm::new(budget.clone());
+    resident
+        .append((0_u8..10).map(f32::from).collect())
+        .expect("resident PCM reserves");
+
+    let front = resident
+        .transfer_range(0..2)
+        .expect("the range fits the headroom its tail does not");
+    assert_eq!(front.samples(), &[0.0, 1.0]);
+    assert_eq!(resident.origin(), 2);
+    assert_eq!(
+        resident.samples(),
+        (2_u8..10).map(f32::from).collect::<Vec<_>>()
+    );
+    assert_eq!(budget.retained_samples(), 12);
+    drop(front);
+    assert_eq!(budget.retained_samples(), 10);
+}
+
+#[test]
+fn miri_releasing_a_prefix_at_the_cap_frees_its_budget_in_place() {
+    let budget = RetainedPcmBudget::with_limit(12);
+    let mut resident = RollingPcm::new(budget.clone());
+    resident
+        .append((0_u8..12).map(f32::from).collect())
+        .expect("resident PCM fills the cap");
+    let (_, rejected) = resident
+        .try_append(vec![12.0; 2])
+        .expect_err("the full cap rejects new audio");
+    assert_eq!(rejected, [12.0; 2], "the rejected samples come back");
+
+    resident.release_prefix(8).expect("the prefix is resident");
+    assert_eq!(resident.origin(), 8);
+    assert_eq!(resident.samples(), &[8.0, 9.0, 10.0, 11.0]);
+    assert_eq!(budget.retained_samples(), 4);
+    resident
+        .try_append(rejected)
+        .expect("the freed budget admits the rejected samples");
+}
+
+#[test]
 fn miri_eighteen_second_decode_and_ten_second_resident_count_allocation_capacity() {
     let budget = RetainedPcmBudget::with_limit(30);
     let mut resident = RollingPcm::new(budget.clone());

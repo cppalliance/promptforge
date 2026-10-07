@@ -221,6 +221,11 @@ async fn one_take_runs_for_an_hour_with_bounded_absolute_ownership() {
         assert_eq!(unresolved.start, finalized);
         assert_eq!(unresolved.end, expected_end);
         peaks.observe(&session, stride);
+        assert_eq!(
+            session.pending_failure(),
+            None,
+            "stride {stride} keeps the take healthy"
+        );
     }
 
     assert_eq!(probe.final_decode_count(), HOUR_STRIDES);

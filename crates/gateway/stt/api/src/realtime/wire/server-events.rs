@@ -134,12 +134,6 @@ impl ServerEvent {
 
 fn item_failure_error(failure: &ItemFailure) -> WireError {
     let (kind, code, message, param) = match failure {
-        ItemFailure::FinalSegmentOverload(_) => (
-            "overload_error",
-            "final_segment_overload",
-            "The authoritative segment could not be admitted",
-            OptionalNullable::Null,
-        ),
         ItemFailure::PrecommitTranscriptionFailed(_) => (
             "server_error",
             "precommit_transcription_failed",

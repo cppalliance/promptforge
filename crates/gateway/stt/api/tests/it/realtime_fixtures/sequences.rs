@@ -21,7 +21,6 @@ const VALID_SEQUENCE_CASES: &[&str] = &[
     "pending_precommit_failure_commit",
     "producer_hypothesis_ownership",
     "saturated_commit_retry",
-    "segment_admission_failure",
     "standard_live_deltas_before_commit",
 ];
 

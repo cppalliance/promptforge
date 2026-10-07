@@ -122,13 +122,6 @@ impl SpeechService {
             .force_precommit_failure(ForcedPrecommitFailure::Transcription);
     }
 
-    /// Forces a typed final-segment overload for route tests.
-    #[cfg(feature = "test-fixtures")]
-    pub fn overload_realtime_final_segment(&mut self) {
-        self.realtime_policy
-            .force_precommit_failure(ForcedPrecommitFailure::FinalSegmentOverload);
-    }
-
     /// Closes admission on the published runtime the way [`Self::shutdown`]
     /// does - cancelling the session epoch - without draining or retiring
     /// it, so a test can observe cancelled work while worker ownership
