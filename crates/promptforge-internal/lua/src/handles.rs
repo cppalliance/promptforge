@@ -234,24 +234,11 @@ pub trait ToolView: Send + Sync {
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
     fn always(&self) -> Result<Vec<String>>;
 
-    /// Returns an owned clone of the binding for `alias`, if it was
-    /// declared.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn binding(&self, alias: &str) -> Result<Option<ToolBinding>>;
-
     /// Returns an owned snapshot of the offering in tool id order.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
     fn offered(&self) -> Result<Vec<ToolBinding>>;
-
-    /// Returns an owned clone of the offered binding under `name`, if any.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn offered_binding(&self, name: &str) -> Result<Option<ToolBinding>>;
 }
 
 /// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
@@ -270,16 +257,8 @@ impl ToolView for Mutex<ToolSet> {
         Ok(lock_tool_set(self)?.always.clone())
     }
 
-    fn binding(&self, alias: &str) -> Result<Option<ToolBinding>> {
-        Ok(lock_tool_set(self)?.binding(alias).cloned())
-    }
-
     fn offered(&self) -> Result<Vec<ToolBinding>> {
         Ok(lock_tool_set(self)?.offered.clone())
-    }
-
-    fn offered_binding(&self, name: &str) -> Result<Option<ToolBinding>> {
-        Ok(lock_tool_set(self)?.offered_binding(name).cloned())
     }
 }
 

@@ -81,14 +81,6 @@ fn the_view_snapshots_the_offering() {
     ));
     assert_eq!(
         ToolView::offered(&set).expect("the lock is healthy"),
-        vec![offered.clone()]
-    );
-    assert_eq!(
-        ToolView::offered_binding(&set, "tools_fetch").expect("the lock is healthy"),
-        Some(offered)
-    );
-    assert_eq!(
-        ToolView::offered_binding(&set, "fetch").expect("the lock is healthy"),
-        None
+        vec![offered]
     );
 }
