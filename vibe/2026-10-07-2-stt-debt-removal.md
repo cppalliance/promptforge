@@ -340,7 +340,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Log interim ticks skipped under worker overload
+### Step 2: Log interim ticks skipped under worker overload [completed]
 
 - Component: Realtime overload handling
 - Piece: overload-skip trace (D1-10), built after Step 1 in the same realtime session module tree.

@@ -66,6 +66,60 @@ fn source_message(error: &FixtureError) -> Option<String> {
     std::error::Error::source(error).map(ToString::to_string)
 }
 
+/// A shared buffer that collects what a capture subscriber writes.
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl LogBuffer {
+    fn lines_containing(&self, needle: &str) -> Vec<String> {
+        let bytes = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&bytes)
+            .lines()
+            .filter(|line| line.contains(needle))
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Installs a DEBUG-level subscriber writing to a fresh capture buffer for
+/// the current thread. Only a current-thread test runtime keeps every poll
+/// on this thread, so the session's events land in the buffer.
+fn capture_debug_logs() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+    let buffer = LogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(buffer.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+    let guard = tracing::subscriber::set_default(subscriber);
+    (buffer, guard)
+}
+
 struct BlockingPoll {
     started: Arc<(Mutex<bool>, Condvar)>,
     release: Arc<AtomicBool>,

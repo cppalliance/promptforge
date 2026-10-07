@@ -101,6 +101,12 @@ impl Session {
         let transcript = match transcript {
             Ok(transcript) => transcript,
             Err(TranscribeError::Overloaded { .. }) => {
+                tracing::debug!(
+                    item_id = %item_id,
+                    audio_start_ms = sample_millis(audio_start),
+                    audio_end_ms = sample_millis(audio_end),
+                    "skipped an interim tick: the transcription worker queue is full"
+                );
                 // The full worker queue never decoded this window, so the
                 // next tick may submit it again.
                 self.last_interim_end = None;

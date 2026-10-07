@@ -13,9 +13,12 @@ use gateway_stt::test_fixtures::{
 use serde_json::Value;
 
 use super::{
-    BLOCKING_TASK_TEST, BlockingPoll, CANCEL_JOIN_CAPACITY, encoded, session, source_message,
-    update, wait_until_started,
+    BLOCKING_TASK_TEST, BlockingPoll, CANCEL_JOIN_CAPACITY, capture_debug_logs, encoded, session,
+    source_message, update, wait_until_started,
 };
+
+const OVERLOAD_SKIP_MESSAGE: &str =
+    "skipped an interim tick: the transcription worker queue is full";
 
 const SNAPSHOT_FIELDS: [&str; 7] = [
     "revision",
@@ -103,6 +106,8 @@ async fn an_empty_interim_transcript_leaves_the_snapshot_and_agreement_unchanged
 
 #[tokio::test]
 async fn an_overloaded_interim_is_skipped_and_the_next_tick_decodes_its_window() {
+    let (logs, _logs_guard) = capture_debug_logs();
+    let skips = || logs.lines_containing(OVERLOAD_SKIP_MESSAGE);
     let interim = ScriptedDecoder::new();
     interim.push_text("alpha beta");
     interim.push_overloaded();
@@ -111,15 +116,36 @@ async fn an_overloaded_interim_is_skipped_and_the_next_tick_decodes_its_window()
     let first = speak_then_decode(&mut session, 1)
         .await
         .expect("the first interim emits a hypothesis");
+    assert_eq!(skips().len(), 0, "a decoded tick logs no skip");
     assert_eq!(
         speak_then_decode(&mut session, 1).await,
         None,
         "the overloaded tick emits neither a failure nor a snapshot"
     );
+    assert_eq!(skips().len(), 1, "the overloaded tick logs one skip");
     let retried = speak_then_decode(&mut session, 0)
         .await
         .expect("the next tick decodes the window the overloaded tick skipped");
     assert_eq!(interim.requests().len(), 3);
+    let skips_after_retry = skips();
+    assert_eq!(
+        skips_after_retry.len(),
+        1,
+        "the retried tick logs no further skip"
+    );
+    let skip = &skips_after_retry[0];
+    assert!(
+        skip.contains("DEBUG"),
+        "the skip logs at debug level: {skip}"
+    );
+    let window = format!(
+        "audio_start_ms={} audio_end_ms={}",
+        retried["audio_start_ms"], retried["audio_end_ms"]
+    );
+    assert!(
+        skip.contains(&window),
+        "the skip names the window the next tick decodes ({window}): {skip}"
+    );
 
     let control_interim = ScriptedDecoder::new();
     for text in ["alpha beta", "alpha beta"] {
@@ -135,6 +161,7 @@ async fn an_overloaded_interim_is_skipped_and_the_next_tick_decodes_its_window()
         "the take advances as if the overloaded tick never arrived"
     );
     assert_eq!(retried["agreed"], "alpha beta");
+    assert_eq!(skips().len(), 1, "the control's ticks log no skip");
 }
 
 #[tokio::test]
