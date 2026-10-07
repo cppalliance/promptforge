@@ -116,6 +116,12 @@ impl Segmenter {
         self.frame_grid_origin
     }
 
+    /// The next unscanned sample. Right after a silence rule closes a
+    /// segment, the audio from the segment's end through it is silence.
+    pub(crate) const fn scanned(&self) -> u64 {
+        self.cursor
+    }
+
     /// What the energy gate heard before `end`, or `None` while a whole
     /// frame before `end` is unscanned.
     pub(crate) fn speech_before(&self, end: u64) -> Option<SpeechBefore> {

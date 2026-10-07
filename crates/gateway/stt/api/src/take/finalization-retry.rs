@@ -31,6 +31,9 @@ pub(in crate::take) enum ClosedRange {
         range: Range<u64>,
         reason: SkipReason,
         leading_silence: Option<Range<u64>>,
+        /// End of the silence the segmenter heard after `range` before it
+        /// closed the segment.
+        silent_through: u64,
     },
     /// Released under the PCM cap before a queue slot opened; its PCM is
     /// gone and its accepted interim text is final.
@@ -41,7 +44,7 @@ pub(in crate::take) enum ClosedRange {
 }
 
 impl ClosedRange {
-    fn closed(outcome: SegmentOutcome, previous_consumed: u64) -> Self {
+    fn closed(outcome: SegmentOutcome, previous_consumed: u64, scanned: u64) -> Self {
         let range = match &outcome {
             SegmentOutcome::Decode(range) | SegmentOutcome::Skipped(range) => range.clone(),
             SegmentOutcome::Forced(boundary) => boundary.decode_range(),
@@ -63,6 +66,7 @@ impl ClosedRange {
                 range,
                 reason: SkipReason::BelowSpeechThreshold,
                 leading_silence,
+                silent_through: scanned,
             },
         }
     }
@@ -203,7 +207,11 @@ fn poll_closed(state: &TakeState) -> Option<ClosedRange> {
     let mut segmenter = TakeState::lock(&state.segmenter);
     let previous_consumed = segmenter.consumed();
     let outcome = segmenter.poll(buffer.samples(), buffer.origin())?;
-    Some(ClosedRange::closed(outcome, previous_consumed))
+    Some(ClosedRange::closed(
+        outcome,
+        previous_consumed,
+        segmenter.scanned(),
+    ))
 }
 
 /// Appends `samples`, releasing the oldest held range each time the retained

@@ -1,0 +1,21 @@
+{
+  "speech_samples": [[0, 48000], [112320, 119040], [168000, 216000]],
+  "ticks": [
+    {"at_ms": 1150, "audio_start_ms": 0, "audio_end_ms": 1000, "transcript": "Okay"},
+    {"at_ms": 2150, "audio_start_ms": 0, "audio_end_ms": 2000, "transcript": "Okay listen"},
+    {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "Okay, listen up."},
+    {"at_ms": 3550, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "Okay, listen up."},
+    {"at_ms": 7550, "audio_start_ms": 3100, "audio_end_ms": 7500, "transcript": "Hey."},
+    {"at_ms": 8050, "audio_start_ms": 3100, "audio_end_ms": 8000, "transcript": "Hey."},
+    {"at_ms": 11150, "audio_start_ms": 7540, "audio_end_ms": 11000, "transcript": "The commit rule"},
+    {"at_ms": 12150, "audio_start_ms": 7540, "audio_end_ms": 12000, "transcript": "The commit rule needs two"},
+    {"at_ms": 13150, "audio_start_ms": 7540, "audio_end_ms": 13000, "transcript": "The commit rule needs two passes."},
+    {"at_ms": 13650, "audio_start_ms": 7540, "audio_end_ms": 13500, "transcript": "The commit rule needs two passes."}
+  ],
+  "finals": [
+    {"at_ms": 4200, "sample_start": 0, "sample_end": 49600, "text": "Okay, listen up."},
+    {"at_ms": 8100, "sample_start": 49600, "sample_end": 120640, "text": ""},
+    {"at_ms": 14200, "sample_start": 160000, "sample_end": 217600, "text": "The commit rule needs two passes."},
+    {"at_ms": 16000, "sample_start": 217600, "sample_end": 256000, "text": ""}
+  ]
+}

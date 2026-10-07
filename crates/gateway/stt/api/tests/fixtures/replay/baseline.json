@@ -81,6 +81,21 @@
     "upsr": 0.1111111111111111,
     "upwr": 0.3
   },
+  "scripted-skipped-word-then-speech": {
+    "agreed_shrink_events": 0,
+    "changed_pairs": 2,
+    "changed_words": 4,
+    "commit_lag_ms": 1411.111111111111,
+    "completed_words": 9,
+    "lag_sum_ms": 12700.0,
+    "lag_words": 9,
+    "latency_sum_ms": -5050.0,
+    "latency_words": 9,
+    "pairs": 12,
+    "partial_latency_ms": -561.1111111111111,
+    "upsr": 0.16666666666666666,
+    "upwr": 0.4444444444444444
+  },
   "scripted-sliding-window": {
     "agreed_shrink_events": 1,
     "changed_pairs": 3,
@@ -166,6 +181,14 @@
       "pairs": 9,
       "upsr": 0.1111111111111111,
       "upwr": 0.2
+    },
+    "scripted-skipped-word-then-speech": {
+      "changed_pairs": 1,
+      "changed_words": 2,
+      "completed_words": 9,
+      "pairs": 12,
+      "upsr": 0.08333333333333333,
+      "upwr": 0.2222222222222222
     },
     "scripted-sliding-window": {
       "changed_pairs": 3,

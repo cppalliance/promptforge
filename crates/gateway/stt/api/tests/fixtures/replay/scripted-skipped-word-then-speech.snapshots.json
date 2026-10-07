@@ -1,0 +1,135 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "Okay",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "Okay",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 2150,
+      "revision": 2,
+      "transcript": "Okay listen",
+      "finalized": "",
+      "agreed": "Okay",
+      "tentative": " listen",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 3150,
+      "revision": 3,
+      "transcript": "Okay listen up.",
+      "finalized": "",
+      "agreed": "Okay listen",
+      "tentative": " up.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3550,
+      "revision": 3,
+      "transcript": "Okay listen up.",
+      "finalized": "",
+      "agreed": "Okay listen",
+      "tentative": " up.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 4200,
+      "revision": 4,
+      "transcript": "Okay, listen up.",
+      "finalized": "Okay, listen up.",
+      "agreed": "",
+      "tentative": "",
+      "audio_start_ms": 3500,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 7550,
+      "revision": 5,
+      "transcript": "Okay, listen up. Hey.",
+      "finalized": "Okay, listen up.",
+      "agreed": "",
+      "tentative": " Hey.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 7500
+    },
+    {
+      "at_ms": 8050,
+      "revision": 5,
+      "transcript": "Okay, listen up. Hey.",
+      "finalized": "Okay, listen up.",
+      "agreed": "",
+      "tentative": " Hey.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 8000
+    },
+    {
+      "at_ms": 8100,
+      "revision": 6,
+      "transcript": "Okay, listen up. Hey.",
+      "finalized": "Okay, listen up. Hey.",
+      "agreed": "",
+      "tentative": "",
+      "audio_start_ms": 8000,
+      "audio_end_ms": 8000
+    },
+    {
+      "at_ms": 11150,
+      "revision": 7,
+      "transcript": "Okay, listen up. Hey. The commit rule",
+      "finalized": "Okay, listen up. Hey.",
+      "agreed": "",
+      "tentative": " The commit rule",
+      "audio_start_ms": 7540,
+      "audio_end_ms": 11000
+    },
+    {
+      "at_ms": 12150,
+      "revision": 8,
+      "transcript": "Okay, listen up. Hey. The commit rule needs two",
+      "finalized": "Okay, listen up. Hey.",
+      "agreed": " The commit rule",
+      "tentative": " needs two",
+      "audio_start_ms": 7540,
+      "audio_end_ms": 12000
+    },
+    {
+      "at_ms": 13150,
+      "revision": 9,
+      "transcript": "Okay, listen up. Hey. The commit rule needs two passes.",
+      "finalized": "Okay, listen up. Hey.",
+      "agreed": " The commit rule needs two",
+      "tentative": " passes.",
+      "audio_start_ms": 7540,
+      "audio_end_ms": 13000
+    },
+    {
+      "at_ms": 13650,
+      "revision": 9,
+      "transcript": "Okay, listen up. Hey. The commit rule needs two passes.",
+      "finalized": "Okay, listen up. Hey.",
+      "agreed": " The commit rule needs two",
+      "tentative": " passes.",
+      "audio_start_ms": 7540,
+      "audio_end_ms": 13500
+    },
+    {
+      "at_ms": 14200,
+      "revision": 10,
+      "transcript": "Okay, listen up. Hey. The commit rule needs two passes.",
+      "finalized": "Okay, listen up. Hey. The commit rule needs two passes.",
+      "agreed": "",
+      "tentative": "",
+      "audio_start_ms": 13500,
+      "audio_end_ms": 13500
+    }
+  ],
+  "completed": "Okay, listen up. Hey. The commit rule needs two passes."
+}

@@ -228,15 +228,17 @@ async fn process_closed<D, F>(
             range,
             reason,
             leading_silence,
+            silent_through,
         } => {
             record_leading_silence(state, whole_window, leading_silence);
             TakeState::lock(&state.buffer)
                 .compact_to(range.end)
                 .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
-            record_outcome(
+            record_skipped_segment(
                 state,
                 whole_window,
                 FinalRangeOutcome::skipped(range, reason),
+                silent_through,
             );
         }
         ClosedRange::Released {
@@ -274,6 +276,35 @@ pub(super) fn record_outcome(
 ) {
     let window = TakeState::lock(whole_window);
     let accepted = window.accepted_hypotheses(outcome.range.end);
+    let shown = window.shown();
+    drop(window);
+    state.record_final_outcome(outcome, &accepted, &shown);
+}
+
+/// Records a segment too short to decode that the segmenter closed after
+/// hearing silence from its end through `silent_through`. Accepted text whose
+/// window ran on into that silence holds no word from past the segment, so
+/// it counts as ending with the segment and can stand in for it.
+fn record_skipped_segment(
+    state: &TakeState,
+    whole_window: &Mutex<WholeWindowState>,
+    outcome: FinalRangeOutcome,
+    silent_through: u64,
+) {
+    let end = outcome.range.end;
+    let window = TakeState::lock(whole_window);
+    let accepted = window
+        .accepted_hypotheses(silent_through.max(end))
+        .into_iter()
+        .map(|hypothesis| {
+            let range = hypothesis.range();
+            if range.start < end && range.end > end {
+                AcceptedHypothesis::new(range.start..end, hypothesis.text().to_owned())
+            } else {
+                hypothesis
+            }
+        })
+        .collect::<Vec<_>>();
     let shown = window.shown();
     drop(window);
     state.record_final_outcome(outcome, &accepted, &shown);

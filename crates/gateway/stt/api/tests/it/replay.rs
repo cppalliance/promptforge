@@ -292,6 +292,29 @@ async fn replay_completes_a_word_too_short_to_decode_once_from_its_accepted_text
 }
 
 #[tokio::test]
+async fn replay_keeps_a_word_too_short_to_decode_when_decoded_speech_follows() {
+    let script: ReplayScript =
+        read_json(&fixture_dir().join("scripted-skipped-word-then-speech.json"));
+    let outcome = ReplayTake::run(&script)
+        .await
+        .expect("a skipped word between two sentences replays");
+
+    assert_eq!(
+        outcome.completed,
+        "Okay, listen up. Hey. The commit rule needs two passes."
+    );
+    assert!(
+        outcome
+            .snapshots
+            .iter()
+            .skip_while(|snapshot| !snapshot.transcript.contains("Hey."))
+            .all(|snapshot| snapshot.transcript.contains("Hey.")),
+        "once shown, the word stays shown: {:#?}",
+        outcome.snapshots
+    );
+}
+
+#[tokio::test]
 async fn replay_reports_a_tick_window_that_disagrees_with_the_take() {
     let error = ReplayTake::run(&script(serde_json::json!({
         "speech_samples": [[0, 48_000]],
