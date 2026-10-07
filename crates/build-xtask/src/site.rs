@@ -65,11 +65,7 @@ const RUSTDOC_SITES: [(&str, &str, &str); 4] = [
         "harness-gateway-client",
         "Model calls through the Gateway",
     ),
-    (
-        "harness-web",
-        "harness-web",
-        "Web fetch and web search tools",
-    ),
+    ("plugin-web", "plugin-web", "Web fetch and web search tools"),
 ];
 
 /// Link targets the link check never resolves.

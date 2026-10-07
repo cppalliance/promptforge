@@ -9,7 +9,7 @@
 use std::sync::{Mutex, PoisonError};
 
 use harness_gateway_client::GatewaySearch;
-use harness_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResults};
+use plugin_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResults};
 use workshop_gateway::GatewayHandles;
 use workshop_registry::Registry;
 

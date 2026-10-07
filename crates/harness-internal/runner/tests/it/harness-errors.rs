@@ -10,12 +10,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
 
-use harness_plugins::{HostServices, PluginRegistry};
 use harness_runner::display_chain;
 use harness_runner::environment::CurrentModelError;
 use harness_runner::recorder::MemoryRecorder;
-use harness_runner::{Harness, HarnessError};
+use harness_runner::{Harness, HarnessError, HostContext};
 use promptforge::model::{Completion, CompletionError, CompletionErrorKind};
+use promptforge_plugin::HostServices;
 
 use super::{
     OutputError, PendingTimer, RunOutcome, answers_to, plain_harness, request, run_beside, until,
@@ -46,7 +46,7 @@ fn harness_over(recorder: &Arc<FailingRecorder>, broker: ScriptedBroker) -> Harn
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        PluginRegistry::new(),
+        Arc::new(HostContext::new(HostServices::new())),
         HostServices::new(),
     )
 }

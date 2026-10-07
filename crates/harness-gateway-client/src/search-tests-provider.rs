@@ -8,7 +8,7 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 use axum::http::StatusCode;
-use harness_web::{
+use plugin_web::{
     Freshness, SafeSearch, SearchErrorKind, SearchProvider, SearchQuery, SearchResult,
 };
 

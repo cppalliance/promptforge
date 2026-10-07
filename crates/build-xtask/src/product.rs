@@ -16,13 +16,17 @@
 //!   workshop crates; outside their own family they may name only
 //!   `promptforge`, `promptforge-plugin`, and `workspace-hack`, which
 //!   rules out `build-*` and other unaffiliated crates.
+//! - `plugin-*` crates may depend only on `promptforge-plugin`, `shared-*`
+//!   crates, `workspace-hack`, and outside libraries. `promptforge`,
+//!   gateway, and Harness crates must not depend on `plugin-*` crates,
+//!   except `harness-gateway-client`, which implements web's
+//!   `SearchProvider`.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through its two public crates, `promptforge` and
 //!   `promptforge-plugin`, and a crate outside the Harness family on that
-//!   family only through its three public crates, `harness`,
-//!   `harness-gateway-client`, and `harness-web`. The `build-*` crates
-//!   are bound too.
+//!   family only through its two public crates, `harness` and
+//!   `harness-gateway-client`. The `build-*` crates are bound too.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
@@ -51,6 +55,7 @@ enum Family {
     Gateway,
     Workshop,
     Harness,
+    Plugin,
     Shared,
     Build,
     /// Named after no product family; has no matrix rules of its own.
@@ -67,6 +72,8 @@ fn family(package: &str) -> Family {
         Family::Workshop
     } else if package == "harness" || package.starts_with("harness-") {
         Family::Harness
+    } else if package.starts_with("plugin-") {
+        Family::Plugin
     } else if package.starts_with("shared-") {
         Family::Shared
     } else if package.starts_with("build-") {
@@ -141,12 +148,16 @@ const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"]
 /// The Harness family's facade: the one outside crate permitted into
 /// `crates/harness-internal/`.
 const HARNESS_FACADE: &str = "harness";
-/// The Harness family's three public root crates, the facade, the gateway
-/// client, and the web Plugin: the only Harness crates outside crates
-/// may name.
-const PUBLIC_HARNESS: [&str; 3] = [HARNESS_FACADE, "harness-gateway-client", "harness-web"];
+/// The Harness gateway client, which implements web's `SearchProvider`:
+/// the one Harness crate that may name a Plugin crate.
+const GATEWAY_CLIENT: &str = "harness-gateway-client";
+/// The Harness family's two public root crates, the facade and the gateway
+/// client: the only Harness crates outside crates may name.
+const PUBLIC_HARNESS: [&str; 2] = [HARNESS_FACADE, GATEWAY_CLIENT];
+/// The Plugin contract: the one promptforge crate Plugin crates may name.
+const PLUGIN_CONTRACT: &str = "promptforge-plugin";
 /// The hakari feature-unification crate: the one unaffiliated crate Harness
-/// crates may name.
+/// and Plugin crates may name.
 const WORKSPACE_HACK: &str = "workspace-hack";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
@@ -193,6 +204,9 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             });
         }
     }
+    if let Some(reason) = plugin_breach(package, dep) {
+        return Some(reason.to_owned());
+    }
     let (from, to) = (family(&package.package), family(&dep.package));
     let public_gateway = PUBLIC_GATEWAY.contains(&dep.package.as_str());
     let family_rule = match (from, to) {
@@ -222,7 +236,11 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         ),
         (
             Family::Shared,
-            Family::Promptforge | Family::Gateway | Family::Workshop | Family::Harness,
+            Family::Promptforge
+            | Family::Gateway
+            | Family::Workshop
+            | Family::Harness
+            | Family::Plugin,
         ) => Some("shared crates must not depend on product crates"),
         _ => None,
     };
@@ -240,13 +258,39 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             && !PUBLIC_HARNESS.contains(&dep.package.as_str())
         {
             Some(
-                "outside crates may depend on the harness family only through harness, harness-gateway-client, or harness-web"
+                "outside crates may depend on the harness family only through harness or harness-gateway-client"
                     .to_owned(),
             )
         } else {
             None
         }
     })
+}
+
+/// The reason an edge from `package` to `dep` breaches the Plugin family's
+/// rules, or `None` when they allow it: a Plugin crate names only its
+/// allow-list, and no promptforge, gateway, or Harness crate but the
+/// gateway client names a Plugin crate.
+fn plugin_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<&'static str> {
+    let (from, to) = (family(&package.package), family(&dep.package));
+    // `workspace-hack` is unaffiliated, so the allow-list names it, as the
+    // Harness rule does.
+    let allowed = to == Family::Shared
+        || [PLUGIN_CONTRACT, WORKSPACE_HACK, package.package.as_str()]
+            .contains(&dep.package.as_str());
+    match (from, to) {
+        (Family::Plugin, _) if !allowed => Some(
+            "plugin crates may depend only on promptforge-plugin, shared-* crates, workspace-hack, and outside libraries",
+        ),
+        (Family::Promptforge | Family::Gateway | Family::Harness, Family::Plugin)
+            if package.package != GATEWAY_CLIENT =>
+        {
+            Some(
+                "promptforge, gateway, and harness crates must not depend on plugin crates; only harness-gateway-client may",
+            )
+        }
+        _ => None,
+    }
 }
 
 /// The one workshop crate a crate on the desktop-app boundary may name, or
@@ -437,6 +481,8 @@ fn collect_deps(table: &toml::map::Map<String, toml::Value>, names: &mut Vec<Str
 mod container_tests;
 #[cfg(test)]
 mod harness_tests;
+#[cfg(test)]
+mod plugin_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]

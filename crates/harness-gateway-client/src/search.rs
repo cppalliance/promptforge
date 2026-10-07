@@ -7,7 +7,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use harness_web::{
+use plugin_web::{
     SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult, SearchResults,
 };
 

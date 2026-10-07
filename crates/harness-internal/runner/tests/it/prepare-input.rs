@@ -1,27 +1,27 @@
-//! The Host's optional input broker at preparation, supplied among its
-//! services under `INPUT_BROKER`: activation hands it to every declared
-//! Plugin, or hands none when the Host has nobody to ask; and the
-//! `user-input` Plugin's `input.ask()` reaches it, and is refused on a
-//! Host without one. A frontmatter alias named `input` collides with the
-//! Plugin's prelude global and fails the run before any effect, while
-//! an alias of another name runs beside it.
+//! The run's optional input broker at preparation, supplied among its own
+//! services under the fixture's `BROKER`: every tool call of the run is
+//! lent it, or lent none when the Host has nobody to ask; and the fixture
+//! ask Plugin's `input.ask()` reaches it, and is refused on a run without
+//! one. A frontmatter alias named `input` collides with the Plugin's
+//! prelude global and fails the run before any effect, while an alias of
+//! another name runs beside it.
 
 use super::*;
 
-use std::sync::Mutex;
+use crate::asker::{ASKER, AskBroker, BROKER, broker_services};
 
-use harness_plugins::{INPUT_BROKER, InputBroker, InputError, UserInput};
-
-/// A prompt declaring the probe Plugin, with nothing to run.
-const DECLARES_PROBE: &str = "---\nname: declares-probe\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
+/// A prompt declaring the probe Plugin and returning what its one call
+/// saw.
+const PROBES: &str = "---\nname: probes\ndescription: d\npromptforge: 0\n\
+    plugins:\n  - probe\n---\n\n# Title\n\n## Only\n\n\
+    ```lua\nreturn tools.call('probe/saw')\n```\n";
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
 
 #[async_trait::async_trait]
-impl InputBroker for Scripted {
-    async fn wait(&self) -> Result<String, InputError> {
+impl AskBroker for Scripted {
+    async fn wait(&self) -> Result<String, ToolError> {
         Ok(self.0.to_owned())
     }
 }
@@ -31,72 +31,66 @@ impl InputBroker for Scripted {
 struct Failing;
 
 #[async_trait::async_trait]
-impl InputBroker for Failing {
-    async fn wait(&self) -> Result<String, InputError> {
-        Err(InputError::with_source(
+impl AskBroker for Failing {
+    async fn wait(&self) -> Result<String, ToolError> {
+        Err(ToolError::with_source(
             "the operator's window closed",
             std::io::Error::other("socket reset"),
         ))
     }
 }
 
-/// A fixture Plugin contributing nothing, which records whether each
-/// activation's services carried a broker.
+/// The fixture Plugin `probe`: one tool, `probe/saw`, answering whether
+/// its call was lent a broker. It needs nothing, so a run without a
+/// broker can use it.
+const PROBE: Package = Package {
+    name: "tests/probe",
+    prelude: None,
+    needs: &[],
+    construct: construct_probe,
+};
+
 struct Probe {
-    id: PluginId,
-    saw_broker: Arc<Mutex<Vec<bool>>>,
+    tools: Vec<ToolDescriptor>,
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Package construct signature fixes the return type"
+)]
+fn construct_probe(
+    name: &PluginId,
+    _config: Value,
+    _services: &HostServices,
+) -> Result<Arc<dyn Plugin>, ToolError> {
+    let saw = ToolDescriptor::new(
+        ToolId::parse(&format!("{name}/saw")).unwrap(),
+        "saw",
+        "Answer whether the call was lent a broker.",
+        json!({ "type": "object", "properties": {} }),
+    );
+    Ok(Arc::new(Probe { tools: vec![saw] }))
 }
 
 impl Plugin for Probe {
-    fn id(&self) -> &PluginId {
-        &self.id
+    fn tools(&self) -> Vec<ToolDescriptor> {
+        self.tools.clone()
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Plugin trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Records whether a broker reached activation."
-    }
-
-    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
-        self.saw_broker
-            .lock()
-            .unwrap()
-            .push(services.get(&INPUT_BROKER).is_some());
-        Ok(Contribution::default())
+    fn call<'a>(
+        &'a self,
+        cx: ToolContext<'a>,
+        _args: Value,
+    ) -> PluginFuture<'a, Result<ToolOutput, ToolError>> {
+        let saw = cx.service(&BROKER).is_some();
+        Box::pin(async move { Ok(ToolOutput::trusted(saw.to_string())) })
     }
 }
 
-/// Host services holding `input` under `INPUT_BROKER`, or none when the
-/// Host has nobody to ask.
-fn with_input(input: Option<Arc<dyn InputBroker>>) -> HostServices {
-    let mut host = HostServices::new();
-    if let Some(input) = input {
-        host.provide(&INPUT_BROKER, input).unwrap();
-    }
-    host
-}
-
-/// Prepares the probe-declaring prompt with `input` as the Host's broker,
-/// and returns what each activation of the probe saw.
-async fn probe_activations(input: Option<Arc<dyn InputBroker>>) -> Vec<bool> {
-    let saw_broker = Arc::new(Mutex::new(Vec::new()));
-    let mut registry = PluginRegistry::new();
-    registry
-        .register(Arc::new(Probe {
-            id: PluginId::parse("probe").unwrap(),
-            saw_broker: Arc::clone(&saw_broker),
-        }))
-        .unwrap();
-    let recorder = recorder();
-    let mut services = services(&recorder, Some(Arc::new(registry)));
-    services.services = with_input(input);
-    prepare(DECLARES_PROBE, "", services)
-        .await
-        .expect("the prompt prepares");
-    saw_broker.lock().unwrap().clone()
+/// Run services holding `input` under the fixture's `BROKER`, or none
+/// when the Host has nobody to ask.
+fn with_input(input: Option<Arc<dyn AskBroker>>) -> HostServices {
+    input.map_or_else(HostServices::new, broker_services)
 }
 
 /// Prepares `source` under `services` and drives the run to its end.
@@ -116,34 +110,30 @@ async fn drive_prompt(source: &str, services: Services) -> RunOutcome {
     .expect("the loop reaches an outcome")
 }
 
-#[tokio::test]
-async fn activation_hands_the_hosts_broker_to_each_declared_plugin() {
-    let seen = probe_activations(Some(Arc::new(Scripted("unused")))).await;
-    assert_eq!(
-        seen,
-        [true],
-        "the probe's one activation received the host's broker"
-    );
+/// What the probe's one call saw, on a run with `input` as its broker.
+async fn probe_sees(input: Option<Arc<dyn AskBroker>>) -> String {
+    let recorder = recorder();
+    let mut services = services(&recorder, installing(PROBE));
+    services.services = with_input(input);
+    completed(drive_prompt(PROBES, services).await)
 }
 
 #[tokio::test]
-async fn activation_hands_no_broker_to_a_plugin_when_the_host_has_none() {
-    let seen = probe_activations(None).await;
-    assert_eq!(
-        seen,
-        [false],
-        "the probe's one activation received no broker"
-    );
+async fn a_tool_call_is_lent_the_runs_broker() {
+    assert_eq!(probe_sees(Some(Arc::new(Scripted("unused")))).await, "true");
+}
+
+#[tokio::test]
+async fn a_tool_call_is_lent_no_broker_when_the_host_has_none() {
+    assert_eq!(probe_sees(None).await, "false");
 }
 
 /// The frontmatter line declaring `user-input`, the way `chat.md`
 /// declares it.
 const REQUIRED: &str = "  - user-input\n";
 
-/// Asks once and returns the run-fixed connection flag, the answer, and
-/// the availability beside it.
-const ASKS_ONCE: &str = "local text, available = input.ask()\n\
-    return tostring(input.connected()) .. '|' .. text .. '|' .. tostring(available)";
+/// Asks once and returns the answer.
+const ASKS_ONCE: &str = "local text = input.ask()\nreturn text";
 
 /// A one-section prompt that declares the user-input Plugin with
 /// `declaration` (none when empty) and runs `lua`.
@@ -159,20 +149,13 @@ fn user_input_prompt(declaration: &str, lua: &str) -> String {
     )
 }
 
-/// A registry holding the first-party user-input Plugin.
-fn user_input_registry() -> Arc<PluginRegistry> {
-    let mut registry = PluginRegistry::new();
-    registry.register(Arc::new(UserInput::new())).unwrap();
-    Arc::new(registry)
-}
-
-/// The preparation services over `recorder` with the user-input registry and
-/// `input` as the Host's broker.
+/// The preparation services over `recorder` with the fixture ask Plugin
+/// installed as `user-input` and `input` as the run's broker.
 fn user_input_services(
     recorder: &Arc<MemoryRecorder>,
-    input: Option<Arc<dyn InputBroker>>,
+    input: Option<Arc<dyn AskBroker>>,
 ) -> Services {
-    let mut services = services(recorder, Some(user_input_registry()));
+    let mut services = services(recorder, installing(ASKER));
     services.services = with_input(input);
     services
 }
@@ -192,9 +175,9 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert!(
-        error.to_string().contains(
-            "- user-input needs promptforge/input-broker, and the environment provides none"
-        ),
+        error
+            .to_string()
+            .contains("- user-input needs tests/input-broker, and the environment provides none"),
         "the notice names the Plugin and the missing service: {error}"
     );
 }
@@ -216,9 +199,7 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
-        notice.contains(
-            "- user-input needs promptforge/input-broker, and the environment provides none"
-        ),
+        notice.contains("- user-input needs tests/input-broker, and the environment provides none"),
         "the notice names the Plugin and the missing service: {notice}"
     );
     assert!(

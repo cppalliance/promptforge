@@ -13,8 +13,8 @@
 //! - `config` - the public [`RunContext`] and [`RunLimits`].
 //! - `context` - the ambient `RunState` run state.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
-//!   against the caller's catalog. Plugin activation itself is the
-//!   Harness's job.
+//!   against the caller's catalog; installing Plugins and taking each
+//!   run's catalog from them is the Harness's job.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's tool- and model-slot fill functions.
 //! - `protocol` - the coroutine request/answer types for the yield/resume

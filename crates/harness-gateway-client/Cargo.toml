@@ -12,7 +12,7 @@ publish = false
 harness.workspace = true
 # The `promptforge/web` Plugin's `SearchProvider` trait and its query,
 # result, and error vocabulary, which `GatewaySearch` implements.
-harness-web.workspace = true
+plugin-web.workspace = true
 # The Engine's public API: the chat vocabulary (Message, ToolSchema,
 # Completion, CompletionError) the wire code reads and builds through its
 # public constructors, the canonical metrics and model catalog

@@ -15,12 +15,12 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
 use std::time::Duration;
 
-use harness_plugins::{HostServices, PluginRegistry};
 use harness_runner::environment::HostSnapshot;
 use harness_runner::files::OutputError;
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
-use harness_runner::{Harness, HarnessError, RunControl, RunReport, RunRequest};
+use harness_runner::{Harness, HarnessError, HostContext, RunControl, RunReport, RunRequest};
 use promptforge::vfs::VfsRef;
+use promptforge_plugin::HostServices;
 use serde_json::{Value, json};
 
 use crate::scripted::{Kept, MODEL, ScriptedBroker};
@@ -63,7 +63,7 @@ fn plain_harness(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker) -> Harn
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        PluginRegistry::new(),
+        Arc::new(HostContext::new(HostServices::new())),
         HostServices::new(),
     )
 }

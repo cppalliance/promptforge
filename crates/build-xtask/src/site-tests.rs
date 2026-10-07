@@ -341,8 +341,8 @@ fn the_crate_page_uses_the_underscored_crate_name() {
 }
 
 #[test]
-fn the_harness_sites_document_each_public_harness_crate() {
-    for krate in ["harness", "harness-gateway-client", "harness-web"] {
+fn the_rustdoc_sites_document_each_public_harness_crate_and_the_web_plugin() {
+    for krate in ["harness", "harness-gateway-client", "plugin-web"] {
         assert!(
             RUSTDOC_SITES
                 .iter()

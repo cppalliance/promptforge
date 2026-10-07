@@ -30,8 +30,9 @@
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-agents`,
 //!   `workshop-run-log`, `workshop-user-state`, `workshop-workspace`),
-//!   the Harness's public crates `harness`, `harness-gateway-client`, and
-//!   `harness-web`, and the Engine's public API `promptforge`.
+//!   the Harness's public crates `harness` and `harness-gateway-client`,
+//!   the Plugin crates `plugin-web` and `plugin-user-input`, and the
+//!   Engine's public API `promptforge`.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries. Read `crates/workshop/server/AGENTS.md` before adding an
 //!   import.

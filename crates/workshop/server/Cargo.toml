@@ -18,9 +18,11 @@ harness.workspace = true
 # The Gateway web search client the agent sessions' search provider
 # sends each search through.
 harness-gateway-client.workspace = true
-# The `promptforge/web` Plugin the Harness's registry holds, and the
-# search-provider and runtime services it reads.
-harness-web.workspace = true
+# The two Plugins every agent run's Host installs: `promptforge/web`, with
+# the search-provider and runtime services it reads, and
+# `promptforge/user-input`, whose ask tool id the agent socket frames by.
+plugin-user-input.workspace = true
+plugin-web.workspace = true
 # The Engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.

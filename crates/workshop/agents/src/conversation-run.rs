@@ -1,13 +1,14 @@
 //! What a conversation hands its run's Harness, and how it takes the
-//! run's report: the recorder tee, the per-run services with the
+//! run's report: the recorder tee, the run's own services holding the
 //! conversation's input broker, the live pieces of the run's own rounds,
 //! and the drive that ends the conversation with its run.
 
 use std::sync::Arc;
 
-use harness::plugin::{HostServices, INPUT_BROKER, InputBroker};
+use harness::plugin::HostServices;
 use harness::record::{RunOutcome, RunRecorder};
 use harness::{Harness, HarnessError, RunReport, RunRequest, display_chain};
+use plugin_user_input::{INPUT_BROKER, InputBroker};
 use promptforge::ids::RoundId;
 use tokio::sync::broadcast;
 
@@ -29,12 +30,10 @@ impl Conversation {
         Arc::new(ConversationRecorder::new(self.clone(), inner))
     }
 
-    /// The run's services: a clone of `base` with this conversation's
-    /// input broker supplied under [`INPUT_BROKER`]. `base` leaves
-    /// [`INPUT_BROKER`] empty, because a provider refuses a duplicate; a
-    /// `base` that holds one keeps it, and the refusal is logged.
+    /// The run's own services: this conversation's input broker, supplied
+    /// under [`INPUT_BROKER`], and nothing else.
     #[must_use]
-    pub fn services(&self, base: &HostServices) -> HostServices {
+    pub fn run_services(&self) -> HostServices {
         let frames = self
             .channels()
             .map_or_else(|| broadcast::channel(1).0, |channels| channels.waits);
@@ -42,12 +41,14 @@ impl Conversation {
             Arc::clone(&self.core.waits),
             frames,
         ));
-        let mut services = base.clone();
+        let mut services = HostServices::new();
         if let Err(error) = services.provide(&INPUT_BROKER, broker) {
+            // An empty map takes the broker's valid literal id, so this
+            // refusal is defensive.
             tracing::warn!(
                 conversation = %self.core.id,
                 %error,
-                "the base services already hold an input broker; the conversation's is not supplied"
+                "the conversation's input broker was refused; the run has no operator"
             );
         }
         services

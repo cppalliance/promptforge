@@ -10,9 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Poll, Waker};
 
 use async_trait::async_trait;
-use harness::plugin::{
-    HostServices, INPUT_BROKER, InputBroker, InputError, PluginRegistry, UserInput,
-};
+use harness::plugin::{HostContext, HostServices};
 use harness::record::{MemoryRecorder, RecordKind, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -22,7 +20,9 @@ use promptforge::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
+use promptforge_plugin::ToolError;
 
+use crate::asker::{AskBroker, asker_host, broker_services};
 use crate::support::{Clock, Offline};
 
 /// Asks the operator once and returns the answer.
@@ -86,8 +86,8 @@ fn stub_catalog() -> Result<ModelCatalog, Box<dyn Error>> {
 struct Operator(&'static str);
 
 #[async_trait]
-impl InputBroker for Operator {
-    async fn wait(&self) -> Result<String, InputError> {
+impl AskBroker for Operator {
+    async fn wait(&self) -> Result<String, ToolError> {
         Ok(self.0.to_owned())
     }
 }
@@ -154,7 +154,7 @@ fn stuck_harness(catalog: ModelCatalog) -> (Harness, Arc<Started>) {
         Arc::new(MemoryRecorder::new()),
         Arc::new(broker),
         Arc::new(Clock),
-        PluginRegistry::new(),
+        Arc::new(HostContext::new(HostServices::new())),
         HostServices::new(),
     );
     (harness, started)
@@ -204,21 +204,12 @@ impl InferenceBroker for Streaming {
 
 #[tokio::test]
 async fn input_ask_returns_what_the_hosts_input_broker_answers_byte_for_byte() {
-    let mut plugins = PluginRegistry::new();
-    plugins
-        .register(Arc::new(UserInput::new()))
-        .expect("the user input Plugin registers once");
-    let mut services = HostServices::new();
-    let operator: Arc<dyn InputBroker> = Arc::new(Operator("Hello, desk."));
-    services
-        .provide(&INPUT_BROKER, operator)
-        .expect("the input broker is provided once");
     let harness = Harness::new(
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
         Arc::new(Clock),
-        plugins,
-        services,
+        asker_host(),
+        broker_services(Arc::new(Operator("Hello, desk."))),
     );
 
     let report = harness
@@ -273,7 +264,7 @@ async fn a_hosts_own_broker_streams_a_section_round_under_the_round_id_the_run_r
         recorder.clone(),
         Arc::new(broker),
         Arc::new(Clock),
-        PluginRegistry::new(),
+        Arc::new(HostContext::new(HostServices::new())),
         HostServices::new(),
     );
     let report = harness

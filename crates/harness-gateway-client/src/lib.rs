@@ -21,7 +21,7 @@
 //! credential except the Gateway's shared key. The model vendor's
 //! credential stays in the Gateway.
 //!
-//! [`GatewaySearch`] is the [`harness_web::SearchProvider`] that a Host
+//! [`GatewaySearch`] is the [`plugin_web::SearchProvider`] that a Host
 //! using the Gateway supplies for web search. It sends each search through
 //! the Gateway's `/tools/web_search` relay with a 30-second deadline and
 //! maps the reply into the provider's results. The search vendor's

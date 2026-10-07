@@ -256,7 +256,7 @@ mod tests {
             local,
         );
         let web = includes("../build-ceiling/src/lib.rs");
-        write_built(root, "harness-web", "harness-web", "", Some(&web));
+        write_built(root, "plugin-web", "plugin-web", "", Some(&web));
         let runner = includes("../../build-ceiling/src/lib.rs");
         let dir = "harness-internal/runner";
         write_built(root, dir, "harness-runner", "", Some(&runner));
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn a_path_include_of_any_file_but_the_ceiling_source_fails() {
-        let build = includes("../harness-web/src/lib.rs");
+        let build = includes("../plugin-web/src/lib.rs");
         let name = "harness-gateway-client";
         let violations = wiring_with(name, name, "", Some(&build));
         assert_eq!(violations.len(), 1, "{violations:?}");

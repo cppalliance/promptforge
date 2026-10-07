@@ -1,10 +1,13 @@
 //! The suites' fixture tool implementations: [`TestTool`], and the
 //! [`TestToolTable`] a `ToolCall` effect's id resolves in.
 //!
-//! The Engine holds no implementation and names no implementation trait,
-//! but the suites still need something to perform a `ToolCall` effect
-//! with. These are the test doubles, shaped like a production tool and
-//! built into the [`Performers`] the tokio test driver takes by
+//! The Engine holds no implementation and names no implementation trait;
+//! the production trait (`Plugin`) is the Plugin contract's, in
+//! `promptforge-plugin`, which the Engine never depends on. The suites
+//! still need something to perform a `ToolCall` effect with, so these are
+//! the test doubles: one tool per object, with its id, wire name,
+//! description, schema, and call, built
+//! into the [`Performers`] the tokio test driver takes by
 //! [`RunFixture`](super::RunFixture). Nothing here reaches the Engine.
 //!
 //! The async methods are declared in the boxed form

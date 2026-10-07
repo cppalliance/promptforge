@@ -1194,7 +1194,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-5>
 
-### Step 5: HostContext, Plugin crates, Workshop install, delete harness-plugins
+### Step 5: HostContext, Plugin crates, Workshop install, delete harness-plugins [completed]
 
 - Component: Host install and name dispatch
 - Placement: fifth. It needs the contract and the Engine additive surface. The Plugin crates, Workshop, the runner switch, and the boundary rules are joint: Workshop's chat agent must install both Packages in the same commit that deletes activation.

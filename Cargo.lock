@@ -2628,9 +2628,10 @@ name = "harness"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "harness-plugins",
  "harness-runner",
  "promptforge",
+ "promptforge-plugin",
+ "serde_json",
  "tokio",
  "workspace-hack",
 ]
@@ -2643,7 +2644,7 @@ dependencies = [
  "axum",
  "bytes",
  "harness",
- "harness-web",
+ "plugin-web",
  "promptforge",
  "reqwest",
  "serde",
@@ -2651,20 +2652,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "url",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-plugins"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "promptforge",
- "promptforge-plugin",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -2674,39 +2661,14 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
- "harness-plugins",
  "promptforge",
+ "promptforge-plugin",
  "rand 0.9.5",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-web"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "encoding_rs",
- "flate2",
- "futures-util",
- "harness",
- "htmd",
- "ipnet",
- "mime",
- "promptforge",
- "readabilityrs",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "url",
  "workspace-hack",
 ]
 
@@ -4591,6 +4553,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
 dependencies = [
  "plotters-backend",
+]
+
+[[package]]
+name = "plugin-user-input"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "promptforge-plugin",
+ "serde_json",
+ "workspace-hack",
+]
+
+[[package]]
+name = "plugin-web"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "encoding_rs",
+ "flate2",
+ "futures-util",
+ "htmd",
+ "ipnet",
+ "mime",
+ "promptforge-plugin",
+ "readabilityrs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -8481,6 +8477,7 @@ dependencies = [
  "async-trait",
  "build-ceiling",
  "harness",
+ "plugin-user-input",
  "promptforge",
  "rand 0.9.5",
  "serde",
@@ -8584,7 +8581,8 @@ dependencies = [
  "gateway-api-discovery",
  "harness",
  "harness-gateway-client",
- "harness-web",
+ "plugin-user-input",
+ "plugin-web",
  "promptforge",
  "reqwest",
  "rust-embed",

@@ -4,10 +4,11 @@ use super::*;
 
 use std::sync::Arc;
 
-use harness::plugin::{HostServices, INPUT_BROKER, InputBroker, PluginRegistry, UserInput};
+use harness::plugin::{HostContext, HostServices};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
+use plugin_user_input::{INPUT_BROKER, InputBroker};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
@@ -223,6 +224,11 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
         .expect("the task joins")
         .expect_err("a cancelled wait fails the broker call");
     assert_eq!(error.to_string(), "the user-input wait was cancelled");
+    assert_eq!(
+        error.kind(),
+        promptforge::tools::ToolErrorKind::Backend,
+        "the ask call fails as a backend failure"
+    );
     let frame = socket.recv().await.expect("the cancellation frame arrives");
     assert_eq!(
         frame,
@@ -261,10 +267,9 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\
                   plugins:\n  - user-input\n---\n\n\
                   # Ask\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
-    let mut plugins = PluginRegistry::new();
-    plugins
-        .register(Arc::new(UserInput::new()))
-        .expect("an empty registry takes the Plugin");
+    let mut host = HostContext::new(HostServices::new());
+    host.install(plugin_user_input::PACKAGE, None, serde_json::Value::Null)
+        .expect("an empty Host installs the Plugin");
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
     let recorder = Arc::new(MemoryRecorder::new());
@@ -277,7 +282,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
         recorder.clone(),
         Arc::new(NoChat),
         Arc::new(TokioTimer),
-        plugins,
+        Arc::new(host),
         services,
     );
     let request = RunRequest {

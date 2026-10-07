@@ -96,6 +96,18 @@ fn a_harness_crate_without_the_marker_is_a_violation() {
 }
 
 #[test]
+fn a_plugin_crate_without_the_marker_is_a_violation() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(root.path(), "plugin-web", "plugin-web", UNMARKED);
+    let violations = marker_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("plugin-web") && violations[0].contains(INVARIANT_MARKER),
+        "the crate and the missing marker are named: {violations:?}"
+    );
+}
+
+#[test]
 fn a_harness_crate_whose_manifest_has_no_package_name_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(root.path(), "harness/runner", "harness-runner", UNMARKED);

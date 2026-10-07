@@ -6,8 +6,10 @@
 //! prepare-run refusals drive the run fixture in `promptforge-engine`'s
 //! test support, so they sit in that crate's own suite.
 //!
-//! Plugin activation is the Harness's job, not the Engine's; the Engine's
-//! prepare only ever sees the catalog its caller hands it.
+//! Plugin install and each run's snapshot - resolving a prompt's
+//! declarations against the installed Plugins and catalog assembly - are
+//! the Harness's job, not the Engine's; the Engine's prepare only ever
+//! sees the catalog its caller hands it.
 
 use std::num::NonZeroU32;
 

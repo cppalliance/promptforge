@@ -18,7 +18,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::vfs::{MemoryBackend, Mode, ModePolicy, Origin, VfsError, VfsRef};
 
-use super::{PLAIN, completed, recorded_parse_events, recorder, services};
+use super::{PLAIN, bare, completed, recorded_parse_events, recorder, services};
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its
 /// output, whose one section writes the output from the input.
@@ -35,7 +35,7 @@ async fn prepare_over(
     input_text: Option<&str>,
 ) -> (Arc<MemoryRecorder>, Result<Prepared, PrepareError>) {
     let recorder = recorder();
-    let mut services = services(&recorder, None);
+    let mut services = services(&recorder, bare());
     services.vfs = vfs.clone();
     services.input_text = input_text.map(str::to_owned);
     let prepared = prepare(source, "", services).await;

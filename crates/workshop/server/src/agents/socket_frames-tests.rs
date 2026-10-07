@@ -75,9 +75,12 @@ fn provenance() -> Provenance {
     }
 }
 
+/// The ask tool's id under the name Workshop installs user-input as.
+const ASK_TOOL: &str = "user-input/ask";
+
 /// The ask tool's id, which a script's ask result is recognized by.
 fn ask() -> ToolId {
-    ToolId::parse(harness::USER_INPUT_ASK_TOOL).expect("the ask tool id parses")
+    ToolId::parse(ASK_TOOL).expect("the ask tool id parses")
 }
 
 /// The operator's message as a script's ask result, which has a wire
@@ -89,7 +92,7 @@ fn operator_message(text: &str) -> Event {
         provenance: provenance(),
         turn: 0,
         tool_call_id: String::new(),
-        alias: harness::USER_INPUT_ASK_TOOL.to_owned(),
+        alias: ASK_TOOL.to_owned(),
         tool: Some(ask()),
         content: text.to_owned(),
         trusted: true,

@@ -18,8 +18,9 @@
 //! - Tier: feature; may depend on: the vocabulary crates
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`), the
 //!   service crates (`workshop-gateway`, `workshop-menu`,
-//!   `workshop-status`), the Harness's public API `harness`, the Engine's
-//!   public API `promptforge`, and third-party crates; today it names
+//!   `workshop-status`), the Harness's public API `harness`, the Plugin
+//!   crate `plugin-user-input`, the Engine's public API `promptforge`,
+//!   and third-party crates; today it names
 //!   none of the Workshop crates. Never on `workshop-server`, another
 //!   feature crate, or a private Harness, Engine, or Gateway crate.
 //!   `cargo test -p build-xtask` enforces the product and container

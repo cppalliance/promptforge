@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use harness::plugin::{HostServices, PluginRegistry, UserInput};
+use harness::plugin::{HostContext, HostServices};
 use harness::record::MemoryRecorder;
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -60,16 +60,15 @@ pub(crate) fn harness_for(
     recorder: Arc<MemoryRecorder>,
     source: String,
 ) -> (Harness, RunRequest) {
-    let mut plugins = PluginRegistry::new();
-    plugins
-        .register(Arc::new(UserInput::new()))
-        .expect("an empty registry takes the Plugin");
+    let mut host = HostContext::new(HostServices::new());
+    host.install(plugin_user_input::PACKAGE, None, serde_json::Value::Null)
+        .expect("an empty Host installs the Plugin");
     let harness = Harness::new(
         conversation.recorder(recorder),
         Arc::new(Offline),
         Arc::new(TokioTimer),
-        plugins,
-        conversation.services(&HostServices::new()),
+        Arc::new(host),
+        conversation.run_services(),
     );
     let request = RunRequest {
         name: conversation.id().to_string(),

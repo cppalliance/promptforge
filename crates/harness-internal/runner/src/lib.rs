@@ -2,7 +2,8 @@
 //! [`Harness`] resolves the launch model through the Host's broker,
 //! prepares an Engine `Run` from the prompt's source (drawing the inputs
 //! the Engine refuses to draw itself, putting the declared input file in
-//! place, activating Plugins, beginning the run at its recorder),
+//! place, taking the run's snapshot of the [`HostContext`]'s Plugins,
+//! beginning the run at its recorder),
 //! steps it, performs each chat, tool-call, and timer effect through its
 //! performer and answers each Vfs effect inline, feeds the answers back,
 //! hands every event, effect, and answer to the run's recorder, and reads
@@ -31,12 +32,14 @@ pub mod effect_loop;
 pub mod environment;
 pub mod files;
 mod harness;
+mod host;
 pub mod performers;
 pub mod prepare;
 pub mod recorder;
 
 pub use display_chain::display_chain;
 pub use harness::{Harness, HarnessError, RunControl, RunReport, RunRequest};
+pub use host::{HostContext, InstallError};
 pub use recorder::{
     MemoryRecorder, Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome,
     RunRecorder,

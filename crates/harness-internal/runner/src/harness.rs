@@ -2,7 +2,7 @@
 //! supplies, which drives that one run as a single future.
 //!
 //! A Host builds a [`Harness`] from its recorder, inference broker, timer,
-//! Plugin registry, and services, takes the run's [`RunControl`], and
+//! installed Plugins, and the run's services, takes the run's [`RunControl`], and
 //! awaits [`Harness::run`] on whatever executor it likes. The run resolves
 //! the launch model through the broker, prepares the request's source,
 //! drives the run through the effect loop, and reads the declared output
@@ -14,13 +14,14 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use futures_util::future::{Either, select};
-use harness_plugins::{HostServices, PluginRegistry};
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::VfsRef;
+use promptforge_plugin::HostServices;
 
 use crate::effect_loop::{DriveError, drive};
 use crate::environment::{CurrentModelError, HostSnapshot, current_model};
 use crate::files::{OutputError, report_output};
+use crate::host::HostContext;
 use crate::performers::{InferenceBroker, Timer};
 use crate::prepare::{Services, prepare};
 use crate::recorder::{RecorderError, RunId, RunOutcome, RunRecorder};
@@ -34,13 +35,13 @@ pub(crate) use control::StopSignal;
 /// Drives one run of a prompt for a Host.
 ///
 /// It holds what the Host supplies for the run: a recorder, an inference
-/// broker, a timer, a Plugin registry, and services. [`Harness::run`]
-/// consumes it.
+/// broker, a timer, the Host's installed Plugins, and the run's own
+/// services. [`Harness::run`] consumes it.
 pub struct Harness {
     recorder: Arc<dyn RunRecorder>,
     broker: Arc<dyn InferenceBroker>,
     timer: Arc<dyn Timer>,
-    plugins: PluginRegistry,
+    host: Arc<HostContext>,
     services: HostServices,
     control: RunControl,
 }
@@ -48,7 +49,7 @@ pub struct Harness {
 impl std::fmt::Debug for Harness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Harness")
-            .field("plugins", &self.plugins)
+            .field("host", &self.host)
             .field("services", &self.services)
             .field("control", &self.control)
             .finish_non_exhaustive()
@@ -126,22 +127,22 @@ impl Harness {
     ///
     /// The Harness records the run through `recorder`. It resolves the
     /// run's model and gets the model's replies through `broker`. It sleeps
-    /// through `timer`. It activates the Plugins the prompt declares
-    /// from `plugins` and hands them `services`. All of this work
-    /// happens in [`Harness::run`].
+    /// through `timer`. Its tool calls go to the Plugins installed in
+    /// `host`, and each call is lent `services`, the run's own, such as
+    /// its input broker. All of this work happens in [`Harness::run`].
     #[must_use]
     pub fn new(
         recorder: Arc<dyn RunRecorder>,
         broker: Arc<dyn InferenceBroker>,
         timer: Arc<dyn Timer>,
-        plugins: PluginRegistry,
+        host: Arc<HostContext>,
         services: HostServices,
     ) -> Harness {
         Harness {
             recorder,
             broker,
             timer,
-            plugins,
+            host,
             services,
             control: RunControl::new(CancelHandle::new()),
         }
@@ -185,7 +186,7 @@ impl Harness {
             recorder,
             broker,
             timer,
-            plugins,
+            host: plugins,
             services,
             control,
         } = self;
@@ -215,7 +216,7 @@ impl Harness {
         };
 
         let services = Services {
-            registry: Some(Arc::new(plugins)),
+            host: plugins,
             services,
             vfs: vfs.clone(),
             input_text,

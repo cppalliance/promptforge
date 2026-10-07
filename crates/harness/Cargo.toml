@@ -8,18 +8,20 @@ publish = false
 
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path. The Engine's types a Harness signature names are
-# re-exported through the `promptforge` facade, their one public path.
+# re-exported through the `promptforge` facade, their one public path, and
+# the service map and Plugin name through the Plugin contract.
 [dependencies]
-harness-plugins.workspace = true
 harness-runner.workspace = true
 promptforge.workspace = true
+promptforge-plugin.workspace = true
 workspace-hack.workspace = true
 
 # The suite and the `run-prompt` example run a Host on tokio, as a real
-# Host does; the facade's own items name no tokio type. The suite
-# implements `InputBroker`, an `async_trait` trait.
+# Host does; the facade's own items name no tokio type. The suite's
+# fixture ask Plugin's broker is an `async_trait` trait.
 [dev-dependencies]
 async-trait.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "signal", "time"] }
 
 [lints]

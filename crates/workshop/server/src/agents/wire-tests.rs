@@ -33,9 +33,12 @@ fn provenance() -> Provenance {
     }
 }
 
+/// The ask tool's id under the name Workshop installs user-input as.
+const ASK_TOOL: &str = "user-input/ask";
+
 /// The ask tool's id, which Workshop recognizes a script's ask by.
 fn ask() -> ToolId {
-    ToolId::parse(harness::USER_INPUT_ASK_TOOL).expect("the ask tool id parses")
+    ToolId::parse(ASK_TOOL).expect("the ask tool id parses")
 }
 
 /// The operator's message in the `chat` section, as a script's ask
@@ -275,7 +278,7 @@ fn a_scripts_ask_is_recognized_by_its_tool_whatever_its_alias() {
     let ask = ask();
     let renamed = tool_result("", "question", Some(ask.clone()), "hi");
     assert_eq!(kind_under(&renamed, Some(&ask)), "user_message");
-    let unbound = tool_result("", harness::USER_INPUT_ASK_TOOL, None, "hi");
+    let unbound = tool_result("", ASK_TOOL, None, "hi");
     let elsewhere = ToolId::parse("asker/ask").expect("a valid tool id");
     let fetch = ToolId::parse("web/fetch").expect("a valid tool id");
     let other = tool_result("", "fetch", Some(fetch), "the page");

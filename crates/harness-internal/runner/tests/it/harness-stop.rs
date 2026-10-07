@@ -9,19 +9,22 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use harness_plugins::{HostServices, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::Harness;
 use harness_runner::recorder::MemoryRecorder;
 use promptforge::model::{Completion, CompletionResult, ToolCall};
+use promptforge_plugin::HostServices;
 use serde_json::json;
 
 use super::{
     PendingTimer, RunOutcome, answers_to, answers_where, calls, request, run_beside, until,
 };
 use crate::scripted::{
-    Held, HeldTimer, MODEL, Operator, ScriptedBroker, held_broker, hold_registry, reply,
-    surviving_hold_registry,
+    Held, HeldTimer, MODEL, Operator, ScriptedBroker, held_broker, hold_host, reply,
+    surviving_hold_host, with_asker,
 };
+
+/// The fixture ask tool's id, under the name the asker is installed as.
+const ASK_TOOL: &str = "user-input/ask";
 
 /// A main section parked under a `pcall` on a 30-second timed wait over
 /// two children: one parked on a model round, the other on a held tool
@@ -84,7 +87,7 @@ async fn a_stop_drops_a_chat_round_a_tool_call_and_a_timer_and_a_pcall_keeps_the
         recorder.clone(),
         Arc::new(held_broker(&chat)),
         Arc::new(HeldTimer(Arc::clone(&timer))),
-        hold_registry(&tool),
+        Arc::new(hold_host(&tool)),
         HostServices::new(),
     );
     let in_flight = [Arc::clone(&chat), Arc::clone(&tool), Arc::clone(&timer)];
@@ -130,7 +133,7 @@ async fn an_uncaught_stopped_round_ends_the_run_cancelled() {
         recorder.clone(),
         Arc::new(held_broker(&chat)),
         Arc::new(PendingTimer::default()),
-        hold_registry(&Arc::default()),
+        Arc::new(hold_host(&Arc::default())),
         HostServices::new(),
     );
     let watched = Arc::clone(&chat);
@@ -170,14 +173,12 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
     let tool = Arc::new(Held::default());
     let (operator, answers) = Operator::new();
     let asked = Arc::clone(&operator.asked);
-    let mut plugins = hold_registry(&tool);
-    plugins.register(Arc::new(UserInput::new())).unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
     let harness = Harness::new(
         recorder.clone(),
         Arc::new(calls_hold_once()),
         Arc::new(PendingTimer::default()),
-        plugins,
+        Arc::new(with_asker(hold_host(&tool))),
         operator.services(),
     );
     let watched = Arc::clone(&tool);
@@ -219,7 +220,7 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
         [json!("Dropped")],
         "the stop answered the model's tool call Dropped"
     );
-    let asks = answers_where(&records, "ToolCall", calls(USER_INPUT_ASK_TOOL));
+    let asks = answers_where(&records, "ToolCall", calls(ASK_TOOL));
     assert_eq!(asks.len(), 2, "two questions: {asks:?}");
     assert_eq!(asks[0]["ToolCall"]["Ok"]["text"], "hello");
     assert_eq!(
@@ -229,16 +230,14 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
     );
 }
 
-/// A Harness on `operator` with the user-input Plugin and a broker no
+/// A Harness on `operator` with the fixture ask Plugin and a broker no
 /// round reaches.
 fn asking_harness(recorder: &Arc<MemoryRecorder>, operator: &Arc<Operator>) -> Harness {
-    let mut plugins = hold_registry(&Arc::default());
-    plugins.register(Arc::new(UserInput::new())).unwrap();
     Harness::new(
         recorder.clone(),
         Arc::new(ScriptedBroker::replying()),
         Arc::new(PendingTimer::default()),
-        plugins,
+        Arc::new(with_asker(hold_host(&Arc::default()))),
         operator.services(),
     )
 }
@@ -293,7 +292,7 @@ async fn a_stop_leaves_any_tool_call_whose_descriptor_survives_stops_in_flight()
         recorder.clone(),
         Arc::new(ScriptedBroker::replying()),
         Arc::new(PendingTimer::default()),
-        surviving_hold_registry(&tool),
+        Arc::new(surviving_hold_host(&tool)),
         HostServices::new(),
     );
     let watched = Arc::clone(&tool);

@@ -6,14 +6,13 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
-use harness::plugin::{
-    HostServices, INPUT_BROKER, InputBroker, InputError, PluginRegistry, UserInput,
-};
 use harness::record::MemoryRecorder;
 use harness::vfs::{Origin, VfsError, VfsRef};
 use harness::{Harness, HostSnapshot, RunRequest};
 use promptforge::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
+use promptforge_plugin::ToolError;
 
+use crate::asker::{AskBroker, asker_host, broker_services};
 use crate::support::{Clock, Offline};
 
 /// Reads the notes, asks the operator, and writes the approved notes.
@@ -70,8 +69,8 @@ struct Edit {
 }
 
 #[async_trait]
-impl InputBroker for Edit {
-    async fn wait(&self) -> Result<String, InputError> {
+impl AskBroker for Edit {
+    async fn wait(&self) -> Result<String, ToolError> {
         let edit = self
             .vfs
             .acquire_store(Origin::new("desk edit"))
@@ -108,24 +107,16 @@ async fn a_hosts_edit_of_a_file_the_run_read_conflicts_while_the_run_waits_on_it
         .expect("the policy allows a declared file");
 
     let edited = Arc::new(Mutex::new(None));
-    let operator: Arc<dyn InputBroker> = Arc::new(Edit {
+    let operator = Arc::new(Edit {
         vfs: vfs.clone(),
         outcome: Arc::clone(&edited),
     });
-    let mut services = HostServices::new();
-    services
-        .provide(&INPUT_BROKER, operator)
-        .expect("the input broker is provided once");
-    let mut plugins = PluginRegistry::new();
-    plugins
-        .register(Arc::new(UserInput::new()))
-        .expect("the user input Plugin registers once");
     let harness = Harness::new(
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
         Arc::new(Clock),
-        plugins,
-        services,
+        asker_host(),
+        broker_services(operator),
     );
     let request = RunRequest {
         name: "desk-review-1".to_owned(),

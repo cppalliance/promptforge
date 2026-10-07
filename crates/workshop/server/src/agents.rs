@@ -9,9 +9,9 @@
 //! conversation's one run its own [`Harness`]: over the conversation's
 //! recorder tee on a handle of the run log's [`TursoRecorder`] that names
 //! the launched agent, a per-run broker over
-//! the server's inference broker ([`broker`]), the tokio timer, a clone of
-//! the server's Plugin registry, and a clone of the server's services
-//! with the conversation's input broker. The Harness reaches the gateway
+//! the server's inference broker ([`broker`]), the tokio timer, the
+//! server's [`HostContext`] with web and user-input installed, and the
+//! conversation's own services, which hold its input broker. The Harness reaches the gateway
 //! only through that broker, which follows the live gateway binding and
 //! sends each round to the dropdown's current pick. The
 //! run's request carries the Host snapshot ([`bindings`]): the menu's
@@ -42,12 +42,13 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use harness::plugin::{HostServices, PluginRegistry, UserInput};
+use harness::plugin::{HostContext, HostServices};
 use harness::record::RunId;
 use harness::vfs::VfsRef;
-use harness::{Harness, RunRequest, USER_INPUT_ASK_TOOL};
-use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
+use harness::{Harness, RunRequest};
+use plugin_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
 use promptforge::tools::ToolId;
+use serde_json::Value;
 use workshop_agents::{
     Conversation, ConversationId, Conversations, LaunchError, TokioTimer, discover_agents,
     load_agent,
@@ -66,22 +67,40 @@ pub(crate) use state::{SessionsState, register};
 /// the `runs.db` every conversation's run is recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
 
-/// The Plugins agents may declare: `user-input`, so they
-/// can ask the operator, and `web`.
-fn plugins() -> PluginRegistry {
-    let mut plugins = PluginRegistry::new();
-    // Two unrelated ids into an empty registry, so neither registration
-    // can be refused.
-    let _ = plugins.register(Arc::new(UserInput::new()));
-    let _ = plugins.register(Arc::new(Web::new()));
-    plugins
+/// The server's installed Plugins over its Host-wide [`services`], beside
+/// the ask tool's id.
+fn host_context(registry: &Registry) -> (HostContext, Option<ToolId>) {
+    with_plugins(services(registry))
 }
 
-/// The services `web` reads: the search provider over the
-/// gateway `registry` holds, and the runtime the server runs on. Built
+/// A Host over the Host-wide `services` with the Plugins agents may
+/// declare installed under their default names: `web`, and `user-input`,
+/// so they can ask the operator. The ask tool's id is `<name>/ask` under
+/// the name the user-input install returned, and `None` only if that
+/// install was refused.
+fn with_plugins(services: HostServices) -> (HostContext, Option<ToolId>) {
+    let mut host = HostContext::new(services);
+    if let Err(error) = host.install(plugin_web::PACKAGE, None, Value::Null) {
+        tracing::warn!(%error, "the web Plugin was not installed");
+    }
+    let ask = match host.install(plugin_user_input::PACKAGE, None, Value::Null) {
+        Ok(name) => ToolId::parse(&format!("{name}/{}", plugin_user_input::ASK))
+            .inspect_err(|error| tracing::warn!(%error, "the ask tool's id does not parse"))
+            .ok(),
+        Err(error) => {
+            tracing::warn!(%error, "the user-input Plugin was not installed");
+            None
+        }
+    };
+    (host, ask)
+}
+
+/// The Host-wide services `web`'s install reads: the search provider over
+/// the gateway `registry` holds, and the runtime the server runs on. Built
 /// outside a runtime, as a synchronous test does, the runtime is left
-/// out, and a run that requires web is refused. Each run's clone adds its
-/// conversation's input broker, so these leave it out.
+/// out, web installs as unavailable, and a run that requires web is
+/// refused. Each run's input broker is the run's own, so these leave it
+/// out.
 fn services(registry: &Registry) -> HostServices {
     let mut services = HostServices::new();
     // Two valid, distinct literals into an empty map, so neither call
@@ -101,7 +120,7 @@ fn services(registry: &Registry) -> HostServices {
 /// run's Harness and the status reporter.
 ///
 /// Typed and construction-phased: the registry, the server's backoff, the
-/// run log, and every run's Plugins and services are captured when
+/// run log, and the installed Plugins every run shares are captured when
 /// the composition root builds it, and the other subsystems are read
 /// through the registry at the point of use, so this handle never holds
 /// another subsystem's handle.
@@ -124,13 +143,12 @@ struct Inner {
     recorder: Arc<TursoRecorder>,
     /// The inference broker behind each run's broker.
     broker: WorkshopBroker,
-    /// The Plugins every run resolves its declarations against.
-    plugins: PluginRegistry,
-    /// The ask tool's id, which a script's ask result is recognized by;
-    /// `None` only if the id fails to parse.
+    /// The installed Plugins every run takes its snapshot of.
+    host: Arc<HostContext>,
+    /// The ask tool's id under the name user-input was installed as,
+    /// which a script's ask result is recognized by; `None` only if that
+    /// install was refused.
     ask: Option<ToolId>,
-    /// The services every run's clone starts from.
-    services: HostServices,
     /// The running conversations.
     conversations: Conversations,
 }
@@ -151,6 +169,7 @@ impl AgentSessions {
     /// directory when the first run starts.
     #[must_use]
     pub fn new(config: &Config, registry: Registry, backoff: ReconnectBackoff) -> Self {
+        let (host, ask) = host_context(&registry);
         Self {
             inner: Arc::new(Inner {
                 agents_path: config.agents.path.clone(),
@@ -158,9 +177,8 @@ impl AgentSessions {
                     config.server.state_dir.join(HARNESS_STATE_DIR),
                 )),
                 broker: WorkshopBroker::new(registry.clone()),
-                plugins: plugins(),
-                ask: ToolId::parse(USER_INPUT_ASK_TOOL).ok(),
-                services: services(&registry),
+                host: Arc::new(host),
+                ask,
                 conversations: Conversations::new(),
                 registry,
                 backoff,
@@ -247,8 +265,8 @@ impl AgentSessions {
                 conversation.clone(),
             )),
             Arc::new(TokioTimer),
-            self.inner.plugins.clone(),
-            conversation.services(&self.inner.services),
+            Arc::clone(&self.inner.host),
+            conversation.run_services(),
         )
     }
 

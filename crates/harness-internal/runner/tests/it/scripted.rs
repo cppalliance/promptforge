@@ -8,19 +8,21 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use harness_plugins::{
-    Contribution, HostServices, INPUT_BROKER, InputBroker, InputError, Plugin, PluginError,
-    PluginId, PluginRegistry, RunServices, Tool, ToolContext,
-};
+use harness_runner::HostContext;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, CompletionResult, Message,
     ModelBinding, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
-use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
+use promptforge_plugin::{
+    HostServices, Package, Plugin, PluginFuture, PluginId, ServiceKey, ToolContext, ToolDescriptor,
+    ToolError, ToolId, ToolOutput,
+};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+
+use crate::asker::{ASKER, AskBroker, broker_services};
 
 /// The one model the scripted broker lists.
 pub(crate) const MODEL: &str = "m";
@@ -192,105 +194,88 @@ pub(crate) fn held_broker(held: &Arc<Held>) -> ScriptedBroker {
     ScriptedBroker::new(move |_round, _messages| held.hold())
 }
 
-/// The fixture Plugin `harness`, contributing the one tool
-/// `harness/hold`, whose every call is held, and which a stop leaves in
-/// flight when `survives_stop` is set.
+/// The Host-wide service the hold Plugin's construct reads its [`Held`]
+/// from.
+const HELD: ServiceKey<Held> = ServiceKey::new("tests/held");
+
+/// The fixture Plugin `harness`: one tool, `harness/hold`, whose every
+/// call is held, and which a stop leaves in flight when its configuration
+/// sets `survives_stop`.
+const HOLD: Package = Package {
+    name: "tests/harness",
+    prelude: None,
+    needs: &[],
+    construct: construct_hold,
+};
+
 struct HoldPlugin {
-    id: PluginId,
     held: Arc<Held>,
-    survives_stop: bool,
+    tools: Vec<ToolDescriptor>,
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the Package construct signature fixes the argument types"
+)]
+fn construct_hold(
+    name: &PluginId,
+    config: Value,
+    services: &HostServices,
+) -> Result<Arc<dyn Plugin>, ToolError> {
+    let held = services
+        .get(&HELD)
+        .ok_or_else(|| ToolError::message("the hold Plugin needs tests/held"))?;
+    let descriptor = ToolDescriptor::new(
+        ToolId::parse(&format!("{name}/hold")).unwrap(),
+        "hold",
+        "Hold until the call is dropped.",
+        json!({ "type": "object", "properties": {} }),
+    )
+    .survives_stop(config["survives_stop"].as_bool().unwrap_or(false));
+    Ok(Arc::new(HoldPlugin {
+        held,
+        tools: vec![descriptor],
+    }))
 }
 
 impl Plugin for HoldPlugin {
-    fn id(&self) -> &PluginId {
-        &self.id
+    fn tools(&self) -> Vec<ToolDescriptor> {
+        self.tools.clone()
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Plugin trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Holds every call."
-    }
-
-    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
-        Ok(Contribution {
-            tools: vec![Arc::new(HoldTool {
-                id: ToolId::parse("harness/hold").unwrap(),
-                held: Arc::clone(&self.held),
-                survives_stop: self.survives_stop,
-            })],
-            prelude: None,
-        })
+    fn call<'a>(
+        &'a self,
+        _cx: ToolContext<'a>,
+        _args: Value,
+    ) -> PluginFuture<'a, Result<ToolOutput, ToolError>> {
+        self.held.hold()
     }
 }
 
-/// The held tool.
-struct HoldTool {
-    id: ToolId,
-    held: Arc<Held>,
-    survives_stop: bool,
+/// A Host holding the hold Plugin over `held`.
+pub(crate) fn hold_host(held: &Arc<Held>) -> HostContext {
+    host_holding(held, false)
 }
 
-#[async_trait::async_trait]
-impl Tool for HoldTool {
-    fn id(&self) -> ToolId {
-        self.id.clone()
-    }
-
-    fn wire_name(&self) -> &str {
-        self.id.name()
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Hold until the call is dropped."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    fn descriptor(&self) -> ToolDescriptor {
-        ToolDescriptor::new(
-            self.id(),
-            self.wire_name(),
-            self.description(),
-            self.parameters_schema(),
-        )
-        .survives_stop(self.survives_stop)
-    }
-
-    async fn call(&self, _cx: ToolContext<'_>, _args: Value) -> Result<ToolOutput, ToolError> {
-        self.held.hold().await
-    }
-}
-
-/// A registry holding the hold Plugin over `held`.
-pub(crate) fn hold_registry(held: &Arc<Held>) -> PluginRegistry {
-    registry_holding(held, false)
-}
-
-/// A registry holding the hold Plugin over `held`, its tool marked to
+/// A Host holding the hold Plugin over `held`, its tool marked to
 /// survive a stop.
-pub(crate) fn surviving_hold_registry(held: &Arc<Held>) -> PluginRegistry {
-    registry_holding(held, true)
+pub(crate) fn surviving_hold_host(held: &Arc<Held>) -> HostContext {
+    host_holding(held, true)
 }
 
-fn registry_holding(held: &Arc<Held>, survives_stop: bool) -> PluginRegistry {
-    let mut registry = PluginRegistry::new();
-    registry
-        .register(Arc::new(HoldPlugin {
-            id: PluginId::parse("harness").unwrap(),
-            held: Arc::clone(held),
-            survives_stop,
-        }))
+fn host_holding(held: &Arc<Held>, survives_stop: bool) -> HostContext {
+    let mut services = HostServices::new();
+    services.provide(&HELD, Arc::clone(held)).unwrap();
+    let mut host = HostContext::new(services);
+    host.install(HOLD, None, json!({ "survives_stop": survives_stop }))
         .unwrap();
-    registry
+    host
+}
+
+/// `host` with the fixture ask Plugin installed as `user-input`.
+pub(crate) fn with_asker(mut host: HostContext) -> HostContext {
+    host.install(ASKER, None, Value::Null).unwrap();
+    host
 }
 
 /// The operator: counts each question asked and each one torn down
@@ -313,23 +298,20 @@ impl Operator {
         (operator, answer)
     }
 
-    /// Host services whose input broker is this operator.
+    /// Run services whose input broker is this operator.
     pub(crate) fn services(self: &Arc<Self>) -> HostServices {
-        let mut services = HostServices::new();
-        let broker: Arc<dyn InputBroker> = Arc::clone(self) as Arc<dyn InputBroker>;
-        services.provide(&INPUT_BROKER, broker).unwrap();
-        services
+        broker_services(Arc::clone(self) as Arc<dyn AskBroker>)
     }
 }
 
 #[async_trait::async_trait]
-impl InputBroker for Operator {
-    async fn wait(&self) -> Result<String, InputError> {
+impl AskBroker for Operator {
+    async fn wait(&self) -> Result<String, ToolError> {
         self.asked.fetch_add(1, Ordering::SeqCst);
         let mut unanswered = Unanswered(Some(Arc::clone(&self.abandoned)));
         let text = self.answers.lock().await.recv().await;
         unanswered.0 = None;
-        text.ok_or_else(|| InputError::message("the operator left"))
+        text.ok_or_else(|| ToolError::message("the operator left"))
     }
 }
 

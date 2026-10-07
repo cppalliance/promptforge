@@ -1,14 +1,14 @@
 //! The Harness, which runs one prompt for a Host and records the run.
 //!
-//! A Host builds one Harness for each run. [`Harness::new`] takes the
-//! Host's recorder, inference broker, timer, Plugin registry, and
+//! A Host installs its Plugins once, in a [`plugin::HostContext`], and
+//! builds one Harness for each run. [`Harness::new`] takes the Host's
+//! recorder, inference broker, timer, installed Plugins, and the run's own
 //! services. [`Harness::run`] runs the prompt to its end and returns its
 //! [`RunReport`]. While the run goes on, the Host steers it through the
 //! [`RunControl`] it took from `Harness::control` before the run started.
 //!
 //! The crate's `run-prompt` example runs one prompt from start to end.
 
-pub use harness_plugins::USER_INPUT_ASK_TOOL;
 pub use harness_runner::Harness;
 pub use harness_runner::HarnessError;
 pub use harness_runner::RunControl;
@@ -23,30 +23,14 @@ pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
 pub mod plugin {
-    //! Plugins, the registry a Host installs them in, the services
-    //! they read, and the context each tool call lends its tool.
+    //! The context a Host installs its Plugins in, the services maps a
+    //! Host fills, and the names Plugins are installed under. The Plugin
+    //! crates themselves are the Host's own dependencies.
 
-    pub use harness_plugins::Contribution;
-    pub use harness_plugins::HostServices;
-    pub use harness_plugins::INPUT_BROKER;
-    pub use harness_plugins::InputBroker;
-    pub use harness_plugins::InputError;
-    pub use harness_plugins::Plugin;
-    pub use harness_plugins::PluginError;
-    pub use harness_plugins::PluginErrorKind;
-    pub use harness_plugins::PluginRegistry;
-    pub use harness_plugins::RegistryError;
-    pub use harness_plugins::RegistryErrorKind;
-    pub use harness_plugins::RunServices;
-    pub use harness_plugins::ServiceError;
-    pub use harness_plugins::ServiceId;
-    pub use harness_plugins::ServiceKey;
-    pub use harness_plugins::Tool;
-    pub use harness_plugins::ToolContext;
-    pub use harness_plugins::UserInput;
-    pub use promptforge::effect::ToolCallOrigin;
-    pub use promptforge::effect::ToolCaller;
-    pub use promptforge::plugins::PluginId;
+    pub use harness_runner::HostContext;
+    pub use harness_runner::InstallError;
+    pub use promptforge_plugin::HostServices;
+    pub use promptforge_plugin::PluginId;
 }
 
 pub mod record {

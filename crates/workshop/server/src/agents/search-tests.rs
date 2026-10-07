@@ -7,7 +7,7 @@ use axum::Json;
 use axum::Router;
 use axum::http::HeaderMap;
 use axum::routing::post;
-use harness_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery};
+use plugin_web::{SearchError, SearchErrorKind, SearchProvider, SearchQuery};
 use serde_json::{Value, json};
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
 use workshop_registry::{Registration, Registry};

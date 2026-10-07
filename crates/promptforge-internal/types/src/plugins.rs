@@ -7,8 +7,10 @@
 //! identified by a one-segment [`PluginId`], such as `web`, and every tool
 //! one contributes sits under it, such as `web/fetch`. The Engine knows
 //! Plugins by identity alone: a prompt declares them by plain name, and
-//! an exact tool slot names one through its [`ToolId`] prefix. Activating
-//! a Plugin is the Harness's job; the Engine never activates anything.
+//! an exact tool slot names one through its [`ToolId`] prefix. The
+//! Plugin contract - the `Package` label, the `Plugin` trait, and the
+//! services a Plugin reads - is in `promptforge-plugin`, and installing
+//! Plugins is the Harness's; the Engine never builds a Plugin.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;

@@ -1,0 +1,24 @@
+[package]
+name = "plugin-user-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# `InputBroker`, the trait a Host implements to deliver the operator's
+# answer, is an `async_trait` trait.
+async-trait.workspace = true
+# The Plugin contract: the package label, the Plugin trait, the context a
+# call is lent, and the tool and service vocabulary.
+promptforge-plugin.workspace = true
+serde_json.workspace = true
+workspace-hack.workspace = true
+
+[dev-dependencies]
+# `testing::TestCall`, which lends the ask tool a context without a Harness.
+promptforge-plugin = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

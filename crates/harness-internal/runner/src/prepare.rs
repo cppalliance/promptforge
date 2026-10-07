@@ -8,15 +8,13 @@
 //! the ceremony the Engine's `Environment` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
-//! directories and the declared store, to the context as given, and the
-//! cancel flag and the Host's services to the Plugins' services;
-//! activate the prompt's declared Plugins against the caller's
-//! registry, which assembles the catalog, the preludes, and the
-//! implementation table; install the
-//! catalog and the preludes and prepare the context; merge activation's
-//! report into prepare's and refuse an
-//! unsatisfiable prompt with the Engine's model-readable notice; and
-//! build the `Run` beside its performers.
+//! directories and the declared store, to the context as given; take the
+//! run's snapshot of the Host's Plugins with the run's own services,
+//! which yields the catalog, the preludes, and the tool performer;
+//! install the catalog and the preludes and prepare the context; merge
+//! the snapshot's report into prepare's and refuse an unsatisfiable
+//! prompt with the Engine's model-readable notice; and build the `Run`
+//! beside its performers.
 //!
 //! A refusal (or a prompt that fails to parse, or an input file that
 //! cannot be put in place) is a run that ended before
@@ -32,34 +30,32 @@ use std::fmt::{self, Write as _};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_plugins::{HostServices, PluginRegistry, RunServices, activate};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
 use promptforge::prompt::FileDecl;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::VfsRef;
-use promptforge::{Environment, RunContext, RunError};
-use promptforge::{ParseError, Prompt, Run};
+use promptforge::{ParseError, Prompt, Run, RunContext, RunError};
+use promptforge_plugin::HostServices;
 use sha2::{Digest as _, Sha256};
 
 use crate::display_chain::display_chain;
 use crate::effect_loop::failed_outcome;
 use crate::files::{InputFileError, stage_input};
-use crate::performers::{ActivatedTools, InferenceBroker, Performers, Timer};
+use crate::host::HostContext;
+use crate::performers::{InferenceBroker, Performers, Timer};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
 
-/// What the caller owns and preparation borrows: the registry of
-/// installed Plugins and the Host's services, the real directories,
-/// the run's cancel flag, the recorder, the inference broker and the
-/// timer that reach beyond the runner, and the run's name.
+/// What the caller owns and preparation borrows: the Host's installed
+/// Plugins and the run's own services, the real directories, the run's
+/// cancel flag, the recorder, the inference broker and the timer that
+/// reach beyond the runner, and the run's name.
 pub struct Services {
-    /// The installed Plugins the prompt's declarations resolve
-    /// against; `None` is a Harness with no Plugins, where every
-    /// required declaration is reported missing.
-    pub registry: Option<Arc<PluginRegistry>>,
-    /// The Host's services: the run's Plugins read them, its input
-    /// broker among them when it has one.
+    /// The Host's installed Plugins, which the run takes its snapshot of.
+    pub host: Arc<HostContext>,
+    /// The run's own services, such as its input broker: every tool call
+    /// of the run is lent them.
     pub services: HostServices,
     /// The run's whole filesystem: the real directories and the declared store,
     /// passed straight to the context's VFS.
@@ -67,8 +63,8 @@ pub struct Services {
     /// The text staged at the prompt's declared `input:` path before the
     /// run, when the launch supplied one.
     pub input_text: Option<String>,
-    /// The run's cancel flag: handed to the context, to every Plugin
-    /// activated for the run, and polled by the Engine.
+    /// The run's cancel flag: handed to the context and polled by the
+    /// Engine.
     pub cancel: CancelHandle,
     /// The recorder the run begins at and the loop will write to.
     pub recorder: Arc<dyn RunRecorder>,
@@ -90,7 +86,7 @@ pub struct Services {
 impl fmt::Debug for Services {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Services")
-            .field("registry", &self.registry)
+            .field("host", &self.host)
             .field("services", &self.services)
             .field("name", &self.name)
             .field("model", &self.model)
@@ -110,7 +106,8 @@ pub struct Prepared {
     /// first, are read from the recorder under this id.
     pub run_id: RunId,
     /// The performers for the run: the caller's inference broker and timer
-    /// beside the runner's own tool performer over the activated tools.
+    /// beside the runner's own tool performer, the run's snapshot of the
+    /// Host's Plugins.
     pub performers: Performers,
     /// The prompt's declared `output:` path, which the caller reads with
     /// [`read_output`](crate::files::read_output) once the run completes.
@@ -132,7 +129,7 @@ pub enum PrepareError {
         source: ParseError,
     },
     /// The environment cannot satisfy the prompt: a declared Plugin
-    /// is missing or lacks a service it needs, or the current
+    /// is missing, unavailable, or lacks a service it needs, or the current
     /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run is
     /// ended as failed with that notice.
@@ -185,8 +182,8 @@ impl PrepareError {
 
 /// Prepares the prompt `source` for one run with `args`: draws the run's
 /// seed and start and begins the run at its recorder, parses the prompt,
-/// puts its declared input file in place, activates its declared
-/// Plugins against the caller's registry, prepares the context,
+/// puts its declared input file in place, takes the run's snapshot of
+/// the Host's Plugins, prepares the context,
 /// refuses an unsatisfiable prompt, and builds the `Run` and its
 /// performers.
 ///
@@ -204,8 +201,8 @@ pub async fn prepare(
     services: Services,
 ) -> Result<Prepared, PrepareError> {
     let Services {
-        registry,
-        services: host,
+        host,
+        services,
         vfs,
         input_text,
         cancel,
@@ -282,19 +279,15 @@ pub async fn prepare(
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    // The activate-prepare-refuse ceremony: the run's whole filesystem,
+    // The snapshot-prepare-refuse ceremony: the run's whole filesystem,
     // the real directories and the declared store, goes to the context as
-    // given, and the Plugins' services hold the cancel flag and the
-    // Host's services; the activated catalog is what prepare fills slots
-    // against, its preludes go to every section VM, and the
-    // implementations stay here for the tool performer.
-    let env = Environment::new();
+    // given; the snapshot's catalog is what prepare fills slots against,
+    // its preludes go to every section VM, and the snapshot itself stays
+    // here as the tool performer, lending each call the run's services.
     let ctx = ctx.vfs(vfs);
-    let run_services = RunServices::with_host(ctx.cancel_handle(), host);
-    let activation = activate(registry.as_deref(), &prompt, &run_services);
-    let env = env.tools(activation.catalog).preludes(activation.preludes);
+    let (snapshot, env, unmet) = host.begin_run(services, &prompt);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);
-    requirements.merge(activation.requirements);
+    requirements.merge(unmet);
     if let Some(error) = requirements.refusal() {
         recorder
             .end_run(run_id, failed_outcome(&error))
@@ -306,7 +299,7 @@ pub async fn prepare(
     let run = Run::new(Arc::new(prompt), args, ctx);
     let performers = Performers {
         broker,
-        tool: Arc::new(ActivatedTools::new(activation.tools)),
+        tool: Arc::new(snapshot),
         timer,
     };
     Ok(Prepared {

@@ -1,96 +1,108 @@
-//! The Host's services at preparation: a declared Plugin that needs a
-//! service activates with the provider the Host's map holds, and a run
-//! whose Host provides no such service is refused naming the service.
+//! The run's services at preparation: a declared Plugin that needs a
+//! service serves a call with the provider the run's map holds, and a run
+//! whose services lack it is refused naming the service.
 
 use super::*;
 
-use std::sync::Mutex;
-
-use harness_plugins::{ServiceId, ServiceKey};
+use promptforge_plugin::{ServiceId, ServiceKey};
 
 /// The test-only service the fixture needs.
 const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
 
-/// A prompt declaring the greeter Plugin, with nothing to run.
-const DECLARES_GREETER: &str = "---\nname: declares-greeter\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
+const NEEDS: &[ServiceId] = &[GREETING.id()];
 
-/// A fixture Plugin needing [`GREETING`], which records the greeting
-/// each activation read.
+/// The fixture Plugin `greeter`: one tool, `greeter/greet`, answering
+/// with the run's greeting.
+const GREETER: Package = Package {
+    name: "tests/greeter",
+    prelude: None,
+    needs: NEEDS,
+    construct: construct_greeter,
+};
+
+/// A prompt declaring the greeter Plugin and returning its greeting.
+const GREETS: &str = "---\nname: greets\ndescription: d\npromptforge: 0\n\
+    plugins:\n  - greeter\n---\n\n# Title\n\n## Only\n\n\
+    ```lua\nreturn tools.call('greeter/greet')\n```\n";
+
 struct Greeter {
-    id: PluginId,
-    greetings: Arc<Mutex<Vec<Option<String>>>>,
+    tools: Vec<ToolDescriptor>,
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Package construct signature fixes the return type"
+)]
+fn construct_greeter(
+    name: &PluginId,
+    _config: Value,
+    _services: &HostServices,
+) -> Result<Arc<dyn Plugin>, ToolError> {
+    let greet = ToolDescriptor::new(
+        ToolId::parse(&format!("{name}/greet")).unwrap(),
+        "greet",
+        "Answer with the run's greeting.",
+        json!({ "type": "object", "properties": {} }),
+    );
+    Ok(Arc::new(Greeter { tools: vec![greet] }))
 }
 
 impl Plugin for Greeter {
-    fn id(&self) -> &PluginId {
-        &self.id
+    fn tools(&self) -> Vec<ToolDescriptor> {
+        self.tools.clone()
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Plugin trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Records the greeting the Host provides."
-    }
-
-    fn needs(&self) -> &[ServiceId] {
-        const NEEDS: &[ServiceId] = &[GREETING.id()];
-        NEEDS
-    }
-
-    fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
-        let greeting = services.get(&GREETING).map(|greeting| greeting.to_string());
-        self.greetings.lock().unwrap().push(greeting);
-        Ok(Contribution::default())
+    fn call<'a>(
+        &'a self,
+        cx: ToolContext<'a>,
+        _args: Value,
+    ) -> PluginFuture<'a, Result<ToolOutput, ToolError>> {
+        Box::pin(async move {
+            let greeting = cx
+                .service(&GREETING)
+                .ok_or_else(|| ToolError::message("no greeting in this run"))?;
+            Ok(ToolOutput::trusted(greeting.to_string()))
+        })
     }
 }
 
-/// A registry holding the greeter, which records into `greetings`.
-fn greeter_registry(greetings: &Arc<Mutex<Vec<Option<String>>>>) -> PluginRegistry {
-    let mut registry = PluginRegistry::new();
-    registry
-        .register(Arc::new(Greeter {
-            id: PluginId::parse("greeter").unwrap(),
-            greetings: Arc::clone(greetings),
-        }))
-        .unwrap();
-    registry
-}
-
-/// Prepares `source` with `host` as the Host's services, and returns the
-/// preparation beside the greetings its activations read.
+/// Prepares [`GREETS`] with `run` as the run's services.
 async fn prepare_greeter(
-    source: &str,
-    host: HostServices,
-) -> (Result<Prepared, PrepareError>, Vec<Option<String>>) {
-    let greetings = Arc::new(Mutex::new(Vec::new()));
+    run: HostServices,
+) -> (Arc<MemoryRecorder>, Result<Prepared, PrepareError>) {
     let recorder = recorder();
-    let mut services = services(&recorder, Some(Arc::new(greeter_registry(&greetings))));
-    services.services = host;
-    let prepared = prepare(source, "", services).await;
-    let greetings = greetings.lock().unwrap().clone();
-    (prepared, greetings)
+    let mut services = services(&recorder, installing(GREETER));
+    services.services = run;
+    let prepared = prepare(GREETS, "", services).await;
+    (recorder, prepared)
 }
 
 #[tokio::test]
-async fn a_plugin_activates_with_the_service_the_hosts_map_provides() {
-    let mut host = HostServices::new();
-    host.provide(&GREETING, Arc::from("hello")).unwrap();
-    let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, host).await;
-    assert!(prepared.is_ok(), "the Host's service meets the need");
+async fn a_plugin_serves_a_call_with_the_service_the_runs_map_provides() {
+    let mut run = HostServices::new();
+    run.provide(&GREETING, Arc::from("hello")).unwrap();
+    let (recorder, prepared) = prepare_greeter(run).await;
+    let prepared = prepared.expect("the run's service meets the need");
+    let outcome = drive_run(
+        prepared.run,
+        prepared.performers,
+        recorder.clone(),
+        prepared.run_id,
+        CancelHandle::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        greetings,
-        [Some("hello".to_owned())],
-        "activation read the Host's provider"
+        completed(outcome),
+        "hello",
+        "the call read the run's provider"
     );
 }
 
 #[tokio::test]
-async fn a_plugin_whose_service_the_host_lacks_is_refused_naming_the_service() {
-    let (prepared, greetings) = prepare_greeter(DECLARES_GREETER, HostServices::new()).await;
-    let Err(PrepareError::Refused { error, .. }) = prepared else {
+async fn a_plugin_whose_service_the_run_lacks_is_refused_naming_the_service() {
+    let (recorder, prepared) = prepare_greeter(HostServices::new()).await;
+    let Err(PrepareError::Refused { run_id, error }) = prepared else {
         panic!("a required Plugin without its service refuses the run");
     };
     assert!(
@@ -99,5 +111,10 @@ async fn a_plugin_whose_service_the_host_lacks_is_refused_naming_the_service() {
             .contains("- greeter needs tests/greeting, and the environment provides none"),
         "the notice names the Plugin and the missing service: {error}"
     );
-    assert!(greetings.is_empty(), "the Plugin never activated");
+    let effects = recorder
+        .records(run_id)
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Effect)
+        .count();
+    assert_eq!(effects, 0, "the Plugin was never called");
 }

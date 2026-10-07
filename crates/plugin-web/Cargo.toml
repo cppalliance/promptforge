@@ -1,0 +1,41 @@
+[package]
+name = "plugin-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The Plugin contract: the package label, the Plugin trait, the context a
+# call is lent, and the tool, error, and service vocabulary.
+promptforge-plugin.workspace = true
+# `SearchProvider` is an `async_trait` trait.
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["gzip", "brotli"] }
+readabilityrs.workspace = true
+htmd.workspace = true
+mime.workspace = true
+encoding_rs.workspace = true
+url.workspace = true
+ipnet.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# The Host's runtime handle every fetch is spawned onto.
+tokio = { workspace = true }
+workspace-hack.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+# `testing::TestCall`, which lends the Plugin a context without a Harness.
+promptforge-plugin = { workspace = true, features = ["test-support"] }
+# `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock reads
+# its request and watches for the client's hang-up with.
+tokio = { workspace = true, features = ["io-util"] }
+
+[lints]
+workspace = true

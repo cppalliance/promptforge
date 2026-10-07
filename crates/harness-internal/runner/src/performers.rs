@@ -20,8 +20,8 @@
 //! design, so the loop answers it inline through the Engine's store
 //! operation.
 //!
-//! The runner supplies one performer itself, [`ActivatedTools`], over the
-//! tool table run preparation activated. The Host supplies the
+//! The runner supplies the tool performer itself: the run's snapshot of
+//! the Host's Plugins, taken at preparation. The Host supplies the
 //! [`InferenceBroker`] and the [`Timer`].
 
 use std::future::Future;
@@ -35,11 +35,6 @@ use promptforge::model::{
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
 use serde_json::Value;
-
-#[path = "performers-tools.rs"]
-mod tools;
-
-pub use tools::ActivatedTools;
 
 /// The boxed future a performer returns for the Harness to poll.
 ///

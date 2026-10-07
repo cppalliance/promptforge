@@ -50,7 +50,8 @@ const FEATURES: &[Tiered] = &[
 const SERVER: &[Tiered] = &[("workshop-server", "server")];
 
 /// Marker in a crate's `lib.rs` (or `main.rs`) crate docs. Mandatory for
-/// every `workshop-*` and `harness-*` crate (see [`family_requires_marker`]);
+/// every `workshop-*`, `harness-*`, and `plugin-*` crate (see
+/// [`family_requires_marker`]);
 /// optional on any other crate. The `new-crate` scaffolder emits it.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
@@ -253,7 +254,7 @@ fn marker_violations(root: &Path) -> Vec<String> {
         if family_requires_marker(&krate.package) && !has_marker(&root.join(&krate.dir)) {
             violations.push(format!(
                 "{}: src/lib.rs lacks the `{INVARIANT_MARKER}` marker required of every \
-                 workshop-* and harness-* crate",
+                 workshop-*, harness-*, and plugin-* crate",
                 krate.package
             ));
         }
@@ -262,11 +263,14 @@ fn marker_violations(root: &Path) -> Vec<String> {
 }
 
 /// Whether a package name places the crate in a family that must have the
-/// marker: `workshop-*` and `harness-*`. The Tauri desktop app (the
-/// `workshop` package) and the `harness` facade fall outside both prefixes,
-/// so they are exempt.
+/// marker: `workshop-*`, `harness-*`, and `plugin-*`. The Tauri desktop app
+/// (the `workshop` package) and the `harness` facade fall outside every
+/// prefix, so they are exempt.
 fn family_requires_marker(name: &str) -> bool {
-    name != "workshop" && (name.starts_with("workshop-") || name.starts_with("harness-"))
+    name != "workshop"
+        && ["workshop-", "harness-", "plugin-"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
 /// Whether a crate's `lib.rs` or `main.rs` crate docs have the marker.

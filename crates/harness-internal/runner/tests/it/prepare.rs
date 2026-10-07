@@ -4,33 +4,29 @@
 //! `Parse` kind, and each failure leaves its parse events at the recorder;
 //! each preparation draws a fresh seed and start, both handed to the
 //! recorder when the run begins under the run's name; and the prepared tool
-//! performer resolves a `ToolCall` effect's id in the activated table. The
-//! Host's optional input broker - one of its services, handed to every
-//! activated Plugin and behind the `user-input`
-//! Plugin - sits in the `input` child module, the Host's services
-//! reaching activation sit in the `host_services` child module, a
-//! Plugin's prelude reaching the prepared run sits in the `prelude`
-//! child module, and the prompt's declared input and output files sit in
-//! the `files` child module.
+//! performer sends a `ToolCall` effect to the Plugin its id names. The
+//! run's optional input broker - one of its own services, lent to every
+//! tool call and behind the fixture ask Plugin - sits in the `input`
+//! child module, the run's services meeting a Plugin's needs sit in the
+//! `host_services` child module, a Plugin's prelude reaching the prepared
+//! run sits in the `prelude` child module, and the prompt's declared input
+//! and output files sit in the `files` child module.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_plugins::{
-    Contribution, HostServices, Plugin, PluginError, PluginId, PluginRegistry, RunServices, Tool,
-    ToolContext, ToolTable,
-};
-use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
-use harness_runner::performers::{ActivatedTools, ToolPerformer};
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
+use harness_runner::{HostContext, display_chain};
 use promptforge::RunErrorKind;
 use promptforge::cancel::CancelHandle;
-use promptforge::effect::{ToolCallOrigin, ToolCaller};
 use promptforge::event::Event;
-use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::{Origin, VfsRef};
+use promptforge_plugin::{
+    HostServices, Package, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
+    ToolId, ToolOutput,
+};
+use serde_json::{Value, json};
 
 use crate::support::Unused;
 
@@ -44,7 +40,7 @@ mod input;
 mod prelude;
 
 /// A prompt declaring `web` as a required Plugin that no
-/// registry here provides.
+/// Host here installs.
 const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
     plugins:\n  - web\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
@@ -87,14 +83,23 @@ fn recorded_parse_events(recorder: &MemoryRecorder, run_id: RunId) -> Vec<Event>
     events
 }
 
-/// The preparation services over `recorder` and `registry`, with no Host
+/// A Host with no Plugins.
+pub(crate) fn bare() -> HostContext {
+    HostContext::new(HostServices::new())
+}
+
+/// A Host with `package` installed under its default name.
+pub(crate) fn installing(package: Package) -> HostContext {
+    let mut host = bare();
+    host.install(package, None, Value::Null).unwrap();
+    host
+}
+
+/// The preparation services over `recorder` and `host`, with no run
 /// services and the performers no test here reaches.
-pub(crate) fn services(
-    recorder: &Arc<MemoryRecorder>,
-    registry: Option<Arc<PluginRegistry>>,
-) -> Services {
+pub(crate) fn services(recorder: &Arc<MemoryRecorder>, host: HostContext) -> Services {
     Services {
-        registry,
+        host: Arc::new(host),
         services: HostServices::new(),
         vfs: promptforge::vfs::VfsRef::default(),
         input_text: None,
@@ -108,83 +113,61 @@ pub(crate) fn services(
     }
 }
 
-/// A fixture tool echoing its `value` argument as trusted text.
+/// The fixture Plugin `tools`: one tool, `tools/echo`, echoing its
+/// `value` argument as trusted text.
+const TOOLS: Package = echo_package("tests/tools", None);
+
+/// A package whose Plugin offers `<name>/echo`, with `prelude`.
+pub(crate) const fn echo_package(name: &'static str, prelude: Option<&'static str>) -> Package {
+    Package {
+        name,
+        prelude,
+        needs: &[],
+        construct: construct_echo,
+    }
+}
+
+/// A Plugin offering the one echo tool.
 struct Echo {
-    id: ToolId,
+    tools: Vec<ToolDescriptor>,
 }
 
-#[async_trait::async_trait]
-impl Tool for Echo {
-    fn id(&self) -> ToolId {
-        self.id.clone()
-    }
-
-    fn wire_name(&self) -> &str {
-        self.id.name()
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Echo the value argument."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object", "properties": {"value": {"type": "string"}}})
-    }
-
-    async fn call(
-        &self,
-        _cx: ToolContext<'_>,
-        args: serde_json::Value,
-    ) -> Result<ToolOutput, ToolError> {
-        let value = args
-            .get("value")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| ToolError::message("echo: missing `value`"))?;
-        Ok(ToolOutput::trusted(value.to_owned()))
-    }
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Package construct signature fixes the return type"
+)]
+fn construct_echo(
+    name: &PluginId,
+    _config: Value,
+    _services: &HostServices,
+) -> Result<Arc<dyn Plugin>, ToolError> {
+    let echo = ToolDescriptor::new(
+        ToolId::parse(&format!("{name}/echo")).unwrap(),
+        "echo",
+        "Echo the value argument.",
+        json!({"type": "object", "properties": {"value": {"type": "string"}}}),
+    );
+    Ok(Arc::new(Echo { tools: vec![echo] }))
 }
 
-/// A fixture Plugin contributing the echo tool.
-struct Tools {
-    id: PluginId,
-}
-
-impl Plugin for Tools {
-    fn id(&self) -> &PluginId {
-        &self.id
+impl Plugin for Echo {
+    fn tools(&self) -> Vec<ToolDescriptor> {
+        self.tools.clone()
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Plugin trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "The test tools."
-    }
-
-    fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
-        Ok(Contribution {
-            tools: vec![Arc::new(Echo {
-                id: ToolId::parse("tools/echo").unwrap(),
-            })],
-            prelude: None,
+    fn call<'a>(
+        &'a self,
+        _cx: ToolContext<'a>,
+        args: Value,
+    ) -> PluginFuture<'a, Result<ToolOutput, ToolError>> {
+        Box::pin(async move {
+            let value = args
+                .get("value")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ToolError::message("echo: missing `value`"))?;
+            Ok(ToolOutput::trusted(value.to_owned()))
         })
     }
-}
-
-/// A registry holding the fixture Plugin.
-fn fixture_registry() -> Arc<PluginRegistry> {
-    let mut registry = PluginRegistry::new();
-    registry
-        .register(Arc::new(Tools {
-            id: PluginId::parse("tools").unwrap(),
-        }))
-        .unwrap();
-    Arc::new(registry)
 }
 
 /// The wall clock now, UTC milliseconds since the Unix epoch, the unit of
@@ -205,7 +188,7 @@ fn completed(outcome: RunOutcome) -> String {
 #[tokio::test]
 async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_ended_as_failed() {
     let recorder = recorder();
-    let error = prepare(NEEDS_WEB, "", services(&recorder, None))
+    let error = prepare(NEEDS_WEB, "", services(&recorder, bare()))
         .await
         .expect_err("a missing required Plugin refuses the run");
 
@@ -239,7 +222,7 @@ async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_end
 #[tokio::test]
 async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_parse_failure() {
     let recorder = recorder();
-    let error = prepare(UNCLOSED, "", services(&recorder, None))
+    let error = prepare(UNCLOSED, "", services(&recorder, bare()))
         .await
         .expect_err("a prompt without a closed frontmatter does not parse");
 
@@ -266,8 +249,12 @@ async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_pa
 async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder() {
     let recorder = recorder();
     let before = unix_millis_now();
-    let first = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
-    let second = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
+    let first = prepare(PLAIN, "", services(&recorder, bare()))
+        .await
+        .unwrap();
+    let second = prepare(PLAIN, "", services(&recorder, bare()))
+        .await
+        .unwrap();
     let after = unix_millis_now();
 
     assert_ne!(
@@ -324,7 +311,9 @@ async fn a_prepared_run_drives_to_its_end_under_its_own_performers() {
         run_id,
         performers,
         ..
-    } = prepare(PLAIN, "", services(&recorder, None)).await.unwrap();
+    } = prepare(PLAIN, "", services(&recorder, bare()))
+        .await
+        .unwrap();
     let outcome = drive_run(
         run,
         performers,
@@ -342,17 +331,13 @@ async fn a_prepared_run_drives_to_its_end_under_its_own_performers() {
     );
 }
 
-#[tokio::test]
-async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
+/// Prepares `source` over `host` and drives the run to its end.
+pub(crate) async fn drive_over(source: &str, host: HostContext) -> RunOutcome {
     let recorder = recorder();
-    let prepared = prepare(
-        CALLS_ECHO,
-        "",
-        services(&recorder, Some(fixture_registry())),
-    )
-    .await
-    .unwrap();
-    let outcome = drive_run(
+    let prepared = prepare(source, "", services(&recorder, host))
+        .await
+        .unwrap();
+    drive_run(
         prepared.run,
         prepared.performers,
         recorder.clone(),
@@ -360,36 +345,27 @@ async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
         CancelHandle::new(),
     )
     .await
-    .unwrap();
+    .unwrap()
+}
+
+#[tokio::test]
+async fn the_tool_performer_sends_the_effect_to_the_plugin_its_id_names() {
     assert_eq!(
-        completed(outcome),
+        completed(drive_over(CALLS_ECHO, installing(TOOLS)).await),
         "hi",
-        "the ToolCall effect reached the activated echo tool"
+        "the ToolCall effect reached the echo tool"
     );
 }
+
 #[tokio::test]
-async fn the_tool_performer_refuses_an_id_the_table_does_not_hold() {
-    let performer = ActivatedTools::new(ToolTable::new());
-    let access = VfsRef::default()
-        .acquire(Origin::new("prepare test"))
-        .unwrap();
-    let origin = ToolCallOrigin {
-        execution: "prepare-test".to_owned(),
-        section: "Only".to_owned(),
-        caller: ToolCaller::Script,
-    };
-    let error = performer
-        .call(
-            ToolId::parse("tools/echo").unwrap(),
-            "echo".to_owned(),
-            Arc::new(access),
-            origin,
-            serde_json::json!({}),
-        )
-        .await
-        .expect_err("an id outside the table is refused");
-    assert!(
-        error.to_string().contains("tools/echo"),
-        "the refusal names the id: {error}"
+async fn a_script_reaches_an_undeclared_plugins_tool_by_full_id_without_its_prelude() {
+    let undeclared = "---\nname: undeclared\ndescription: d\npromptforge: 0\n---\n\n\
+        # Title\n\n## Only\n\n```lua\n\
+        return tools.call('extra/echo', { value = 'hi' }) .. '|' .. type(extra)\n```\n";
+    let extra = echo_package("tests/extra", Some("extra = {}\n"));
+    assert_eq!(
+        completed(drive_over(undeclared, installing(extra)).await),
+        "hi|nil",
+        "the undeclared Plugin's tool is in the catalog, and its prelude is not installed"
     );
 }

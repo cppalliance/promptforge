@@ -8,17 +8,17 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use harness_plugins::{HostServices, PluginRegistry, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::recorder::MemoryRecorder;
-use harness_runner::{Harness, RunRequest};
+use harness_runner::{Harness, HostContext, RunRequest};
 use promptforge::vfs::VfsRef;
+use promptforge_plugin::HostServices;
 use serde_json::json;
 
 use super::{
     HookedBackend, PendingTimer, RunOutcome, answers_to, answers_where, calls, plain_harness,
     request, run_beside, until,
 };
-use crate::scripted::{Held, HeldTimer, Operator, ScriptedBroker, held_broker};
+use crate::scripted::{Held, HeldTimer, Operator, ScriptedBroker, held_broker, with_asker};
 
 /// A main section parked under a `pcall` on a 30-second timed
 /// `tasks.join_any` over a child that asks the operator. Once the wait
@@ -62,11 +62,9 @@ const WRITES_THEN_INFERS: &str = "---\nname: writes-infers\ndescription: d\nprom
     # WritesInfers\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\nstore.write('note.md', 'kept')\nreturn models.infer('after')\n```\n";
 
-/// A registry holding only the user-input Plugin.
-fn user_input_registry() -> PluginRegistry {
-    let mut plugins = PluginRegistry::new();
-    plugins.register(Arc::new(UserInput::new())).unwrap();
-    plugins
+/// A Host holding only the fixture ask Plugin, as `user-input`.
+fn asker_host() -> Arc<HostContext> {
+    Arc::new(with_asker(HostContext::new(HostServices::new())))
 }
 
 /// A store whose every write raises a stop through `harness`'s control.
@@ -89,7 +87,7 @@ async fn a_stop_interrupts_a_timed_join_any_and_its_pcall_resumes_while_the_join
         recorder.clone(),
         Arc::new(broker),
         Arc::new(HeldTimer(Arc::clone(&timer))),
-        user_input_registry(),
+        asker_host(),
         operator.services(),
     );
     let watched = Arc::clone(&timer);
@@ -126,7 +124,7 @@ async fn a_stop_interrupts_a_timed_join_any_and_its_pcall_resumes_while_the_join
     );
     let records = recorder.records(report.run_id.expect("the run began"));
     assert_eq!(answers_to(&records, "Timer"), [json!("Dropped")]);
-    let asks = answers_where(&records, "ToolCall", calls(USER_INPUT_ASK_TOOL));
+    let asks = answers_where(&records, "ToolCall", calls("user-input/ask"));
     assert_eq!(asks.len(), 1, "one question: {asks:?}");
     assert_eq!(asks[0]["ToolCall"]["Ok"]["text"], "kept");
 }
@@ -140,7 +138,7 @@ async fn a_stop_seen_before_a_steps_effects_start_drops_the_round_in_flight_and_
         recorder.clone(),
         Arc::new(held_broker(&chat)),
         Arc::new(PendingTimer::default()),
-        PluginRegistry::new(),
+        Arc::new(HostContext::new(HostServices::new())),
         HostServices::new(),
     );
     let vfs = stopping_store(&harness);
@@ -186,7 +184,7 @@ async fn a_stop_with_only_a_question_open_spares_the_round_after_its_answer() {
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        user_input_registry(),
+        asker_host(),
         operator.services(),
     );
 

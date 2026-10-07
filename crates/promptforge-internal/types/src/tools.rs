@@ -9,9 +9,10 @@
 //! [`ToolDescriptor`] and the caller-supplied [`ToolCatalog`] of descriptors,
 //! trusted output ([`ToolOutput`], [`OutputTrust`]), the model-safe
 //! [`ToolError`], a call's [`ToolCallOrigin`], and the contract errors. The
-//! tool implementation behind a descriptor is the Harness's; the prompt
-//! parser and the executor sit in their own crates and depend on
-//! `promptforge-types`.
+//! implementation trait behind a descriptor (`Plugin`) is the Plugin
+//! contract's, in `promptforge-plugin`, which the `plugin-*` crates
+//! implement; the prompt parser and
+//! the executor sit in their own crates and depend on `promptforge-types`.
 
 mod descriptor;
 mod ids;
