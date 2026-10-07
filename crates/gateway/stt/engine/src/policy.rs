@@ -24,6 +24,9 @@ impl EnginePolicy {
     /// Minimum audio the interim loop bothers to transcribe.
     pub const MIN_WINDOW_SAMPLES: usize = Self::SAMPLE_RATE / 2;
 
+    /// Samples a speech detector classifies at once: 32 ms at [`Self::SAMPLE_RATE`].
+    pub const DETECTOR_CHUNK_SAMPLES: usize = 512;
+
     /// Validates capture policy and applies the bounded startup deadline.
     ///
     /// # Errors

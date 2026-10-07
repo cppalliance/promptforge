@@ -81,3 +81,17 @@ pub enum TranscribeError {
     #[error("invalid STT configuration: {0}")]
     InvalidConfig(String),
 }
+
+/// A speech detector construction or classification failure.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DetectorError {
+    /// The detector model could not be loaded.
+    #[non_exhaustive]
+    #[error("load speech detector: {0}")]
+    Load(String),
+    /// The detector could not classify a chunk.
+    #[non_exhaustive]
+    #[error("classify speech chunk: {0}")]
+    Inference(String),
+}

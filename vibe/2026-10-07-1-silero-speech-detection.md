@@ -377,7 +377,7 @@ flowchart TD
 
 <step-4>
 
-### Step 4: Speech detector trait with energy, fallback, and scripted detectors
+### Step 4: Speech detector trait with energy, fallback, and scripted detectors [completed]
 
 - Component: Detector seam
 - Piece: engine detectors

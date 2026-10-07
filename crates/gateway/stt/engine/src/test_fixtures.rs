@@ -1,4 +1,4 @@
-//! Deterministic decoder fixtures for downstream integration tests.
+//! Deterministic decoder and detector fixtures for downstream integration tests.
 
 /// Native asset resolution for ignored integration tests.
 pub mod native;
@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use crate::{DecodeMode, Decoder, ModelFactory, TranscribeError};
 
+mod detector;
 mod scenarios;
+pub use detector::ScriptedDetector;
 pub use scenarios::ScriptedDecoder;
 
 struct ConstructionBlock(ScriptedDecoder);

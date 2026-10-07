@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::TranscribeError;
+use crate::{DetectorError, TranscribeError};
 
 impl TranscribeError {
     /// Returns whether startup exceeded a deadline and abandoned at least one
@@ -46,5 +46,17 @@ impl TranscribeError {
     /// Translates a backend inference source.
     pub fn inference(source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Inference(Box::new(source))
+    }
+}
+
+impl DetectorError {
+    /// Translates a detector construction failure message.
+    pub fn load(message: impl Into<String>) -> Self {
+        Self::Load(message.into())
+    }
+
+    /// Translates a detector classification failure message.
+    pub fn inference(message: impl Into<String>) -> Self {
+        Self::Inference(message.into())
     }
 }
