@@ -748,7 +748,7 @@ flowchart TD
 
 <step-24>
 
-### Step 24: Skip overloaded interim ticks
+### Step 24: Skip overloaded interim ticks [completed]
 
 - Component: Load degradation
 - Piece: overloaded-interim skip

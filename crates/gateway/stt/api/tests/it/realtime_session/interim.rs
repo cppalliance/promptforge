@@ -1,5 +1,6 @@
 //! Interim task ownership, retry, canceled-join capacity, the discard of
-//! empty interim transcripts, and plain-session deltas during the take.
+//! empty interim transcripts, the skip of overloaded interim ticks, and
+//! plain-session deltas during the take.
 
 use std::future::pending;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +99,42 @@ async fn an_empty_interim_transcript_leaves_the_snapshot_and_agreement_unchanged
         "the take advances as if the empty interim never arrived"
     );
     assert_eq!(after["agreed"], "alpha beta");
+}
+
+#[tokio::test]
+async fn an_overloaded_interim_is_skipped_and_the_next_tick_decodes_its_window() {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("alpha beta");
+    interim.push_overloaded();
+    interim.push_text("alpha beta");
+    let mut session = hypothesis_session(&interim);
+    let first = speak_then_decode(&mut session, 1)
+        .await
+        .expect("the first interim emits a hypothesis");
+    assert_eq!(
+        speak_then_decode(&mut session, 1).await,
+        None,
+        "the overloaded tick emits neither a failure nor a snapshot"
+    );
+    let retried = speak_then_decode(&mut session, 0)
+        .await
+        .expect("the next tick decodes the window the overloaded tick skipped");
+    assert_eq!(interim.requests().len(), 3);
+
+    let control_interim = ScriptedDecoder::new();
+    for text in ["alpha beta", "alpha beta"] {
+        control_interim.push_text(text);
+    }
+    let mut control = hypothesis_session(&control_interim);
+    assert_eq!(speak_then_decode(&mut control, 1).await, Some(first));
+    let expected = speak_then_decode(&mut control, 1)
+        .await
+        .expect("the control's second interim emits a hypothesis");
+    assert_eq!(
+        retried, expected,
+        "the take advances as if the overloaded tick never arrived"
+    );
+    assert_eq!(retried["agreed"], "alpha beta");
 }
 
 #[tokio::test]

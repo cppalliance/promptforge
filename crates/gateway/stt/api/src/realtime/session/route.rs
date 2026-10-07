@@ -5,7 +5,7 @@ use crate::realtime::result_mailbox::ItemResult;
 use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::{HypothesisRanges, ServerEvent};
 use crate::take::{InterimSnapshot, token_spans};
-use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, TranscribeError};
 
 /// Trailing agreed words a plain client receives only once later agreement
 /// extends past them or the input commits, because an aligned final rewrite
@@ -102,7 +102,16 @@ impl Session {
         if input.item_id() != item_id {
             return Ok(None);
         }
-        let transcript = transcript.map_err(SessionError::Inference)?;
+        let transcript = match transcript {
+            Ok(transcript) => transcript,
+            Err(TranscribeError::Overloaded { .. }) => {
+                // The full worker queue never decoded this window, so the
+                // next tick may submit it again.
+                self.last_interim_window = None;
+                return Ok(None);
+            }
+            Err(error) => return Err(SessionError::Inference(error)),
+        };
         if transcript.text().is_empty() {
             return Ok(None);
         }

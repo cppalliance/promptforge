@@ -13,6 +13,7 @@ use crate::{DecodeOutput, DecodeRequest, Decoder, TranscribeError};
 enum ScriptedOutcome {
     Text(String),
     Error(String),
+    Overloaded,
     Panic,
 }
 
@@ -84,6 +85,12 @@ impl ScriptedDecoder {
         self.state()
             .outcomes
             .push_back(ScriptedOutcome::Error(message.into()));
+    }
+
+    /// Appends one [`TranscribeError::Overloaded`] result, as a full worker
+    /// queue reports it.
+    pub fn push_overloaded(&self) {
+        self.state().outcomes.push_back(ScriptedOutcome::Overloaded);
     }
 
     /// Makes the next decode panic on its owning worker.
@@ -305,6 +312,7 @@ impl Decoder for WorkerDecoder {
             Some(ScriptedOutcome::Error(message)) => {
                 Err(TranscribeError::inference(std::io::Error::other(message)))
             }
+            Some(ScriptedOutcome::Overloaded) => Err(TranscribeError::Overloaded),
             Some(ScriptedOutcome::Panic) => panic!("scripted decoder panic"),
             None => Ok(DecodeOutput::default()),
         };
