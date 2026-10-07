@@ -47,7 +47,7 @@ impl Plugin for Listed {
 }
 
 /// Builds a [`Listed`] from a configuration that is a list of
-/// `{ id, wire, survives_stop }` tool entries, taking each id as given.
+/// `{ id, survives_stop }` tool entries, taking each id as given.
 #[expect(
     clippy::needless_pass_by_value,
     clippy::unnecessary_wraps,
@@ -61,9 +61,8 @@ fn listed(
     let mut tools = Vec::new();
     for entry in config.as_array().into_iter().flatten() {
         let id = ToolId::parse(entry["id"].as_str().unwrap()).unwrap();
-        let wire = entry["wire"].as_str().unwrap();
         let schema = json!({ "type": "object", "properties": {} });
-        let descriptor = ToolDescriptor::new(id, wire, "A listed tool.", schema)
+        let descriptor = ToolDescriptor::new(id, "A listed tool.", schema)
             .survives_stop(entry["survives_stop"].as_bool().unwrap_or(false));
         tools.push(descriptor);
     }
@@ -85,22 +84,17 @@ fn backed(
             "backed needs tests/backend, and this host provides none",
         ));
     }
-    listed(name, json!([tool(&format!("{name}/use"), "use")]), services)
+    listed(name, json!([tool(&format!("{name}/use"))]), services)
 }
 
 /// A package named `name` whose Plugin offers the configured tools.
 const fn package(name: &'static str) -> Package {
-    Package {
-        name,
-        prelude: None,
-        needs: &[],
-        construct: listed,
-    }
+    Package::new(name, listed)
 }
 
 /// One tool entry of a [`listed`] configuration.
-fn tool(id: &str, wire: &str) -> Value {
-    json!({ "id": id, "wire": wire })
+fn tool(id: &str) -> Value {
+    json!({ "id": id })
 }
 
 fn name(text: &str) -> PluginId {
@@ -191,10 +185,7 @@ fn install_refuses_a_name_already_installed_and_its_punctuation_twin() {
 
 #[test]
 fn a_construct_failure_is_stored_and_reported_as_unavailable_with_its_reason() {
-    let backed_package = Package {
-        construct: backed,
-        ..package("acme/backed")
-    };
+    let backed_package = Package::new("acme/backed", backed);
     let mut bare = host();
     assert_eq!(
         bare.install(backed_package, None, Value::Null),
@@ -227,14 +218,8 @@ fn a_construct_failure_is_stored_and_reported_as_unavailable_with_its_reason() {
 #[test]
 fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
     let mut host = host();
-    let needy = Package {
-        needs: NEEDS_SESSION,
-        ..package("acme/needy")
-    };
-    let broken = Package {
-        construct: backed,
-        ..package("acme/broken")
-    };
+    let needy = package("acme/needy").needs(NEEDS_SESSION);
+    let broken = Package::new("acme/broken", backed);
     host.install(needy, None, Value::Null).unwrap();
     host.install(broken, None, Value::Null).unwrap();
     host.install(package("acme/fine"), None, Value::Null)
@@ -258,14 +243,9 @@ fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
 }
 
 #[test]
-fn begin_run_drops_a_tool_outside_its_plugin_a_repeated_id_and_an_illegal_wire_name() {
+fn begin_run_drops_a_tool_outside_its_plugin_and_a_repeated_id() {
     let mut host = host();
-    let config = json!([
-        tool("kit/good", "good"),
-        tool("other/escape", "escape"),
-        tool("kit/good", "again"),
-        tool("kit/bad", "kit/bad"),
-    ]);
+    let config = json!([tool("kit/good"), tool("other/escape"), tool("kit/good")]);
     host.install(package("acme/kit"), None, config).unwrap();
     assert_eq!(
         catalog_ids(&host, HostServices::new(), &prompt("")),
@@ -276,11 +256,8 @@ fn begin_run_drops_a_tool_outside_its_plugin_a_repeated_id_and_an_illegal_wire_n
 #[test]
 fn a_plugin_whose_needs_the_run_lacks_offers_it_no_tools() {
     let mut host = host();
-    let needy = Package {
-        needs: NEEDS_SESSION,
-        ..package("acme/needy")
-    };
-    host.install(needy, None, json!([tool("needy/use", "use")]))
+    let needy = package("acme/needy").needs(NEEDS_SESSION);
+    host.install(needy, None, json!([tool("needy/use")]))
         .unwrap();
     assert!(catalog_ids(&host, HostServices::new(), &prompt("")).is_empty());
 
@@ -292,18 +269,11 @@ fn a_plugin_whose_needs_the_run_lacks_offers_it_no_tools() {
 #[test]
 fn an_undeclared_plugins_tools_reach_the_catalog_but_its_prelude_does_not() {
     let mut host = host();
-    let declared = Package {
-        prelude: Some("declared = {}\n"),
-        ..package("acme/declared")
-    };
-    let extra = Package {
-        prelude: Some("extra = {}\n"),
-        ..package("acme/extra")
-    };
-    host.install(declared, None, json!([tool("declared/a", "a")]))
+    let declared = package("acme/declared").prelude("declared = {}\n");
+    let extra = package("acme/extra").prelude("extra = {}\n");
+    host.install(declared, None, json!([tool("declared/a")]))
         .unwrap();
-    host.install(extra, None, json!([tool("extra/b", "b")]))
-        .unwrap();
+    host.install(extra, None, json!([tool("extra/b")])).unwrap();
     let prompt = prompt("plugins:\n  - declared\n");
     assert_eq!(
         catalog_ids(&host, HostServices::new(), &prompt),
@@ -322,16 +292,10 @@ fn an_undeclared_plugins_tools_reach_the_catalog_but_its_prelude_does_not() {
 fn preludes_follow_the_prompts_declaration_order_and_carry_the_installed_name() {
     let mut host = host();
     for package_name in ["acme/first", "acme/second"] {
-        let with_prelude = Package {
-            prelude: Some("local plugin = ...\n"),
-            ..package(package_name)
-        };
+        let with_prelude = package(package_name).prelude("local plugin = ...\n");
         host.install(with_prelude, None, Value::Null).unwrap();
     }
-    let renamed = Package {
-        prelude: Some("local plugin = ...\n"),
-        ..package("acme/first")
-    };
+    let renamed = package("acme/first").prelude("local plugin = ...\n");
     host.install(renamed, Some(name("third")), Value::Null)
         .unwrap();
     let prompt = prompt("plugins:\n  - third\n  - second\n  - first\n");
@@ -366,18 +330,10 @@ async fn call(run: &dyn ToolPerformer, tool: &str) -> Result<ToolOutput, ToolErr
 #[tokio::test]
 async fn a_call_goes_to_the_plugin_its_tool_ids_first_segment_names() {
     let mut host = host();
-    host.install(
-        package("acme/one"),
-        None,
-        json!([tool("one/echo", "one_echo")]),
-    )
-    .unwrap();
-    host.install(
-        package("acme/two"),
-        None,
-        json!([tool("two/echo", "two_echo")]),
-    )
-    .unwrap();
+    host.install(package("acme/one"), None, json!([tool("one/echo")]))
+        .unwrap();
+    host.install(package("acme/two"), None, json!([tool("two/echo")]))
+        .unwrap();
     let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));
 
     let answer = |result: Result<ToolOutput, ToolError>| result.unwrap().text().to_owned();
@@ -392,11 +348,8 @@ async fn a_call_goes_to_the_plugin_its_tool_ids_first_segment_names() {
 #[tokio::test]
 async fn a_call_to_a_plugin_the_run_cannot_use_fails_naming_the_tool() {
     let mut host = host();
-    let needy = Package {
-        needs: NEEDS_SESSION,
-        ..package("acme/needy")
-    };
-    host.install(needy, None, json!([tool("needy/use", "use")]))
+    let needy = package("acme/needy").needs(NEEDS_SESSION);
+    host.install(needy, None, json!([tool("needy/use")]))
         .unwrap();
     let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));
     let error = call(&run, "needy/use")
@@ -409,8 +362,8 @@ async fn a_call_to_a_plugin_the_run_cannot_use_fails_naming_the_tool() {
 fn survives_stop_answers_from_the_runs_snapshot_of_descriptors() {
     let mut host = host();
     let config = json!([
-        { "id": "kit/ask", "wire": "ask", "survives_stop": true },
-        tool("kit/fetch", "fetch"),
+        { "id": "kit/ask", "survives_stop": true },
+        tool("kit/fetch"),
     ]);
     host.install(package("acme/kit"), None, config).unwrap();
     let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));

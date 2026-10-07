@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::descriptor::ToolDescriptor;
-use super::ids::{ToolId, validate_identifier};
+use super::ids::ToolId;
 
 /// A catalog of the tools a run may bind, given as tool descriptors.
 ///
@@ -13,9 +13,8 @@ use super::ids::{ToolId, validate_identifier};
 /// Engine fills a prompt's tool slots from these descriptors and offers the
 /// tools of Plugins the prompt does not declare to the prompt's Lua.
 ///
-/// Every tool in a catalog has a unique [`ToolId`] and a wire name of one or
-/// more characters, free of `/` and control characters. Construction checks
-/// both, and the [`get`](Self::get) lookup relies on that check.
+/// Every tool in a catalog has a unique [`ToolId`]. Construction checks it,
+/// and the [`get`](Self::get) lookup relies on that check.
 ///
 /// Cloning is cheap, because all clones share one reference-counted list of
 /// descriptors.
@@ -40,24 +39,14 @@ impl std::fmt::Debug for ToolCatalog {
 impl ToolCatalog {
     /// Builds a catalog from tool descriptors.
     ///
-    /// This is the only place the catalog checks identities and wire names.
+    /// This is the only place the catalog checks identities.
     ///
     /// # Errors
     /// Returns [`ToolCatalogError::DuplicateId`] if two descriptors share a
-    /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a
-    /// descriptor's wire name is empty or contains a `/` separator or a
-    /// control character.
+    /// [`ToolId`].
     pub fn new(tools: &[ToolDescriptor]) -> Result<Self, ToolCatalogError> {
         let mut seen = std::collections::BTreeSet::new();
         for tool in tools {
-            // The catalog is the transport boundary: reject a wire name that
-            // is empty or holds a separator/control character.
-            if let Err(error) = validate_identifier("wire name", &tool.wire_name) {
-                return Err(ToolCatalogError::InvalidWireName {
-                    wire_name: tool.wire_name.clone(),
-                    reason: error.reason(),
-                });
-            }
             if !seen.insert(tool.id.clone()) {
                 return Err(ToolCatalogError::DuplicateId {
                     id: tool.id.clone(),
@@ -93,18 +82,13 @@ impl ToolCatalog {
 pub enum ToolCatalogErrorKind {
     /// Two supplied tools shared a stable [`ToolId`].
     DuplicateId,
-    /// A supplied descriptor's [`wire_name`](ToolDescriptor::wire_name) was
-    /// empty or contained a `/` separator or a control character.
-    InvalidWireName,
 }
 
 /// The error returned when building a [`ToolCatalog`] from the supplied
 /// tools fails.
 ///
-/// Building fails when two tools share an identity, or when a descriptor's
-/// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a `/`
-/// separator or a control character. Call [`kind`](Self::kind) to get a
-/// stable classification you can match on.
+/// Building fails when two tools share an identity. Call
+/// [`kind`](Self::kind) to get a stable classification you can match on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolCatalogError {
@@ -115,16 +99,6 @@ pub enum ToolCatalogError {
         /// The stable identity supplied more than once.
         id: ToolId,
     },
-    /// A tool's wire name was empty or contained a `/` separator or a
-    /// control character.
-    #[error("invalid tool wire name {wire_name:?}: {reason}")]
-    #[non_exhaustive]
-    InvalidWireName {
-        /// The rejected wire name.
-        wire_name: String,
-        /// Why it was rejected.
-        reason: &'static str,
-    },
 }
 
 impl ToolCatalogError {
@@ -133,7 +107,6 @@ impl ToolCatalogError {
     pub fn kind(&self) -> ToolCatalogErrorKind {
         match self {
             ToolCatalogError::DuplicateId { .. } => ToolCatalogErrorKind::DuplicateId,
-            ToolCatalogError::InvalidWireName { .. } => ToolCatalogErrorKind::InvalidWireName,
         }
     }
 
@@ -142,7 +115,6 @@ impl ToolCatalogError {
     pub fn duplicate_id(&self) -> Option<&ToolId> {
         match self {
             ToolCatalogError::DuplicateId { id } => Some(id),
-            ToolCatalogError::InvalidWireName { .. } => None,
         }
     }
 }

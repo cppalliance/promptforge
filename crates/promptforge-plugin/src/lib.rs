@@ -1,13 +1,13 @@
 //! `promptforge-plugin` - the contract a Plugin crate implements, and the
 //! one crate it depends on.
 //!
-//! A Plugin crate exports a [`Package`]: its `vendor/name`, an optional
-//! Lua prelude, the per-run services its calls read, and the `construct`
-//! function the Host calls once, at install, to build the one [`Plugin`]
-//! object every run shares. [`Plugin::call`] performs one tool call with
-//! the [`ToolContext`] the Harness lends it. [`HostServices`] maps service
-//! ids to the shared objects a Host provides, each read back through a
-//! typed [`ServiceKey`].
+//! A Plugin crate exports a [`Package`], built with [`Package::new`]: its
+//! `vendor/name`, an optional Lua prelude, the per-run services its calls
+//! read, and the `construct` function the Host calls once, at install, to
+//! build the one [`Plugin`] object every run shares. [`Plugin::call`]
+//! performs one tool call with the [`ToolContext`] the Harness lends it.
+//! [`HostServices`] maps service ids to the shared objects a Host provides,
+//! each read back through a typed [`ServiceKey`].
 //!
 //! The Engine never depends on this crate; it sees only tool descriptors,
 //! preludes, and ids. The Engine and filesystem names a Plugin author

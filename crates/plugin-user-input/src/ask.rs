@@ -34,7 +34,6 @@ pub(crate) fn construct(
         .map_err(|e| ToolError::with_source("user-input could not name its ask tool", e))?;
     let ask = ToolDescriptor::new(
         id,
-        "ask",
         "Wait for the operator's next message and return its text.",
         json!({ "type": "object", "properties": {} }),
     )

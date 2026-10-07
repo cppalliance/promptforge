@@ -14,7 +14,6 @@ use super::{ToolBinding, ToolOutputKind, ToolSet, ToolView};
 fn descriptor(structured: bool) -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/fetch").expect("the id is valid"),
-        "fetch",
         "Fetch a page",
         json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )

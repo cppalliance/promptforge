@@ -36,14 +36,6 @@ impl TestTool for FilesTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        "files"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "reads or writes one of the run's files"
     }

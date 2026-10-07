@@ -182,12 +182,11 @@ mod tests {
         );
     }
 
-    /// A fixture descriptor under `id`: a static wire name and an empty
+    /// A fixture descriptor under `id`: a static description and an empty
     /// schema.
     fn fixture(id: &ToolId) -> ToolDescriptor {
         ToolDescriptor::new(
             id.clone(),
-            "fixture",
             "A fixture tool.",
             serde_json::json!({"type": "object", "properties": {}}),
         )

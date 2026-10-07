@@ -84,12 +84,9 @@ use promptforge_plugin::{Package, ServiceId, ServiceKey, ToolError};
 /// Its name is `promptforge/user-input`, so a Host that picks no name
 /// installs it as `user-input`. It has a prelude and needs the run's
 /// [`INPUT_BROKER`].
-pub const PACKAGE: Package = Package {
-    name: "promptforge/user-input",
-    prelude: Some(PRELUDE),
-    needs: NEEDS,
-    construct: ask::construct,
-};
+pub const PACKAGE: Package = Package::new("promptforge/user-input", ask::construct)
+    .prelude(PRELUDE)
+    .needs(NEEDS);
 
 /// The ask tool's last segment: its full id is `<name>/ask`, under the
 /// name the Host installed the Plugin under.

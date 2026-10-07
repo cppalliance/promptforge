@@ -38,14 +38,6 @@ impl TestTool for Offered {
         ToolId::parse(self.id).expect("valid id")
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "offered"
-    }
-
     fn description(&self) -> &str {
         self.id
     }

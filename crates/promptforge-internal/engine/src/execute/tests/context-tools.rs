@@ -110,6 +110,6 @@ pub(in super::super) fn fixture_tools(
     let table = TestToolTable::from_tools(tools);
     let catalog = table
         .catalog()
-        .expect("the fixture tools have legal wire names and distinct ids");
+        .expect("the fixture tools have distinct ids");
     (catalog, table)
 }

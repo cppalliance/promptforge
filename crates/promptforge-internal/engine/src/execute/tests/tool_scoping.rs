@@ -17,11 +17,8 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// pinned by the always/add tests below.)
 #[test]
 fn declared_tools_are_not_injected_without_always_or_add() {
-    let tool: Arc<dyn TestTool> = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Concrete description.",
-    ));
+    let tool: Arc<dyn TestTool> =
+        Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
     let tools = FixtureTools::new(
         vec![fixture_binding("local_alias", "capability", tool)],
         Vec::new(),
@@ -41,11 +38,7 @@ fn declared_tools_are_not_injected_without_always_or_add() {
 #[tokio::test(flavor = "current_thread")]
 async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
     let gateway = ScriptedChat::new(aliased_tool_script("local_alias"));
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Concrete description.",
-    ));
+    let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
     let tools = FixtureTools::new(
         vec![fixture_binding(
             "local_alias",
@@ -90,17 +83,12 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
             "required": ["value"]
         })
     );
-    assert_ne!(function.name(), "canonical_wire");
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let gateway = ScriptedChat::new(aliased_tool_script("section_tool"));
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Section concrete.",
-    ));
+    let tool = Arc::new(ScopedFixtureTool::new("concrete", "Section concrete."));
     let tools = FixtureTools::new(
         vec![fixture_binding(
             "section_tool",

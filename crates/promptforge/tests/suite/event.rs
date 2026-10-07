@@ -80,7 +80,6 @@ fn shout_offer() -> Result<(ModelDescriptor, Environment), Box<dyn Error>> {
     let schema = serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}});
     let shout = ToolDescriptor::new(
         ToolId::parse("example/text/shout")?,
-        "shout",
         "Shouts the text.",
         schema,
     );

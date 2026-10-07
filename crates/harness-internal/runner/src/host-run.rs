@@ -96,8 +96,8 @@ impl HostRunContext {
             .cloned()
             .collect();
         ToolCatalog::new(&tools).unwrap_or_else(|error| {
-            // Every tool passed containment, uniqueness, and wire-name
-            // validation one at a time, so this build cannot fail.
+            // Every tool passed containment and uniqueness validation one
+            // at a time, so this build cannot fail.
             tracing::warn!(%error, "the run's catalog failed after per-tool validation");
             ToolCatalog::default()
         })
@@ -231,9 +231,9 @@ impl fmt::Debug for HostRunContext {
 }
 
 /// The tools of the Plugin installed as `plugin` that pass validation: a
-/// tool must sit under the Plugin's name, must not repeat an id in
-/// `seen`, and must have a wire name a model transport accepts. A tool
-/// that fails is logged and dropped, so it costs only itself.
+/// tool must sit under the Plugin's name and must not repeat an id in
+/// `seen`. A tool that fails is logged and dropped, so it costs only
+/// itself.
 fn validated(
     plugin: &PluginId,
     tools: Vec<ToolDescriptor>,
@@ -255,15 +255,6 @@ fn validated(
                     plugin = %plugin,
                     tool = %tool.id,
                     "a Plugin's tool id repeats an earlier tool; dropped"
-                );
-                return false;
-            }
-            if let Err(error) = ToolCatalog::new(std::slice::from_ref(tool)) {
-                tracing::warn!(
-                    plugin = %plugin,
-                    tool = %tool.id,
-                    %error,
-                    "a Plugin's tool failed catalog validation; dropped"
                 );
                 return false;
             }

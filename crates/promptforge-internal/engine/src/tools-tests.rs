@@ -16,7 +16,6 @@ fn reexport_descriptor() -> ToolDescriptor {
     ToolDescriptor::new(
         promptforge_types::tools::ToolId::parse("fixtures/tools/reexport")
             .expect("fixture id is valid"),
-        "reexport_wire",
         "Exercise the re-exported contract path.",
         json!({"type": "object"}),
     )
@@ -30,12 +29,12 @@ fn reexported_identity_looks_up_in_reexported_catalog() {
     let found = catalog
         .get(&id)
         .expect("the stable identity should resolve");
-    assert_eq!(found.wire_name, "reexport_wire");
+    assert_eq!(found.description, "Exercise the re-exported contract path.");
     assert!(
         catalog
-            .get(&crate::tools::ToolId::parse("fixtures/tools/reexport_wire").expect("valid id"))
+            .get(&crate::tools::ToolId::parse("fixtures/tools/other").expect("valid id"))
             .is_none(),
-        "the transport name must not become identity through the re-export either"
+        "an id outside the catalog resolves to nothing through the re-export"
     );
 }
 

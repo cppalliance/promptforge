@@ -375,11 +375,7 @@ async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
 
 #[tokio::test]
 async fn local_tool_alias_cannot_shadow_a_declared_tool() {
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Concrete description.",
-    ));
+    let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  grab: tools/concrete\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua\n\

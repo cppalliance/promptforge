@@ -60,7 +60,6 @@ fn test_models() -> ModelSet {
 fn stub_tool() -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/echo").expect("valid id"),
-        "echo",
         "echo tool",
         json!({ "type": "object" }),
     )

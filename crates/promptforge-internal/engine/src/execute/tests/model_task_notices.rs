@@ -47,14 +47,6 @@ impl TestTool for DelayedTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        "delayed"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "Answer after the test's next scripted delay."
     }

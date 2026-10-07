@@ -197,15 +197,6 @@ impl TestTool for SlowTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        // Matches the function name the scripted replies ask for.
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "a deliberately slow tool"
     }

@@ -88,7 +88,6 @@ pub fn greet() -> Result<String, Box<dyn Error>> {
     //    reports a gap.
     let shout = ToolDescriptor::new(
         ToolId::parse("example/text/shout")?,
-        "shout",
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );

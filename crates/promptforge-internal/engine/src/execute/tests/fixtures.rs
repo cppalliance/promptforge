@@ -17,14 +17,6 @@ impl TestTool for EchoTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "Echo the value argument back to the caller."
     }
@@ -64,14 +56,6 @@ pub(super) struct UntrustedEchoTool;
 impl TestTool for UntrustedEchoTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tools/untrusted_echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "echo"
     }
 
     #[expect(
@@ -119,14 +103,6 @@ impl TestTool for StructuredFixtureTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        "structured"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "Return a structured payload."
     }
@@ -158,14 +134,6 @@ impl TestTool for FailingTool {
         clippy::unnecessary_literal_bound,
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn wire_name(&self) -> &str {
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
     fn description(&self) -> &str {
         "Always fail."
     }
@@ -187,16 +155,14 @@ impl TestTool for FailingTool {
 
 pub(super) struct ScopedFixtureTool {
     id: ToolId,
-    wire_name: &'static str,
     description: &'static str,
     pub(super) calls: Arc<AtomicUsize>,
 }
 
 impl ScopedFixtureTool {
-    pub(super) fn new(name: &str, wire_name: &'static str, description: &'static str) -> Self {
+    pub(super) fn new(name: &str, description: &'static str) -> Self {
         Self {
             id: ToolId::parse(&format!("tools/{name}")).expect("valid id"),
-            wire_name,
             description,
             calls: Arc::new(AtomicUsize::new(0)),
         }
@@ -207,10 +173,6 @@ impl ScopedFixtureTool {
 impl TestTool for ScopedFixtureTool {
     fn id(&self) -> ToolId {
         self.id.clone()
-    }
-
-    fn wire_name(&self) -> &str {
-        self.wire_name
     }
 
     fn description(&self) -> &str {

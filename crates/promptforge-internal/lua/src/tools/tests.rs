@@ -336,7 +336,6 @@ fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
 fn tool_at(id: &str) -> promptforge_types::tools::ToolDescriptor {
     promptforge_types::tools::ToolDescriptor::new(
         ToolId::parse(id).expect("valid id"),
-        "wire",
         format!("{id} tool"),
         json!({ "type": "object" }),
     )

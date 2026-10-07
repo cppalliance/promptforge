@@ -356,11 +356,7 @@ async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
 #[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let gateway = ScriptedChat::new(vec![resp_text("aliased final")]);
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "echo",
-        "canonical_echo",
-        "Echo a test value.",
-    ));
+    let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
     let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
          tools.always('echo')\n\

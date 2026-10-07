@@ -97,7 +97,6 @@ fn construct_names_the_ask_tool_under_the_installed_name_and_marks_it_to_survive
         ask.id,
         ToolId::parse("operator/ask").expect("the id parses")
     );
-    assert_eq!(ask.wire_name, "ask");
     assert_eq!(
         ask.description,
         "Wait for the operator's next message and return its text."

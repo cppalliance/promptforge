@@ -68,11 +68,7 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
 fn echo_and_concrete() -> Vec<Arc<dyn TestTool>> {
     vec![
         Arc::new(EchoTool),
-        Arc::new(ScopedFixtureTool::new(
-            "concrete",
-            "concrete",
-            "Concrete description.",
-        )),
+        Arc::new(ScopedFixtureTool::new("concrete", "Concrete description.")),
     ]
 }
 

@@ -72,8 +72,16 @@ pub trait Plugin: Send + Sync {
 ///
 /// It is fixed data the Host reads before anything is built. Passing it to
 /// the Harness's install is also what links the Plugin crate into the
-/// Host.
+/// Host. A Plugin crate builds it with [`Package::new`], adding
+/// [`Package::prelude`] and [`Package::needs`] only where it has them:
+///
+/// ```text
+/// pub const PACKAGE: Package = Package::new("acme/greeter", construct)
+///     .prelude(PRELUDE)
+///     .needs(NEEDS);
+/// ```
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct Package {
     /// The package name, `vendor/name` with two segments, such as
     /// `promptforge/web`. A Host installs the Plugin under the second
@@ -102,6 +110,46 @@ pub struct Package {
         config: serde_json::Value,
         services: &HostServices,
     ) -> Result<Arc<dyn Plugin>, ToolError>,
+}
+
+impl Package {
+    /// Builds the label for the package `name`, with no prelude and no
+    /// needs.
+    #[expect(
+        clippy::type_complexity,
+        reason = "spelled out so a Plugin author reads the signature construct implements in one place"
+    )]
+    #[must_use]
+    pub const fn new(
+        name: &'static str,
+        construct: fn(
+            name: &PluginId,
+            config: serde_json::Value,
+            services: &HostServices,
+        ) -> Result<Arc<dyn Plugin>, ToolError>,
+    ) -> Package {
+        Package {
+            name,
+            prelude: None,
+            needs: &[],
+            construct,
+        }
+    }
+
+    /// Sets the Lua run once for each prompt that declares the Plugin.
+    #[must_use]
+    pub const fn prelude(self, prelude: &'static str) -> Package {
+        Package {
+            prelude: Some(prelude),
+            ..self
+        }
+    }
+
+    /// Sets the per-run services the Plugin's calls read.
+    #[must_use]
+    pub const fn needs(self, needs: &'static [ServiceId]) -> Package {
+        Package { needs, ..self }
+    }
 }
 
 impl fmt::Debug for Package {

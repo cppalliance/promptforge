@@ -310,20 +310,12 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             fixture_binding(
                 "scoped",
                 "A scoped tool.",
-                Arc::new(ScopedFixtureTool::new(
-                    "scoped",
-                    "canonical_scoped",
-                    "A scoped tool.",
-                )),
+                Arc::new(ScopedFixtureTool::new("scoped", "A scoped tool.")),
             ),
             fixture_binding(
                 "global_tool",
                 "A global tool.",
-                Arc::new(ScopedFixtureTool::new(
-                    "global_tool",
-                    "canonical_global",
-                    "A global tool.",
-                )),
+                Arc::new(ScopedFixtureTool::new("global_tool", "A global tool.")),
             ),
         ],
         vec!["scoped".to_owned()],

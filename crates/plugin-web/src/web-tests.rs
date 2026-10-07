@@ -67,8 +67,6 @@ async fn construct_names_both_tools_under_the_installed_name() {
         .tools();
     let ids: Vec<String> = tools.iter().map(|tool| tool.id.to_string()).collect();
     assert_eq!(ids, ["browse/fetch", "browse/search"]);
-    let wire_names: Vec<&str> = tools.iter().map(|tool| tool.wire_name.as_str()).collect();
-    assert_eq!(wire_names, ["web_fetch", "web_search"]);
     assert!(tools.iter().all(|tool| !tool.survives_stop));
 }
 
@@ -121,7 +119,7 @@ async fn a_custom_fetch_policy_reaches_the_fetch_tools_schema() {
     let fetch = web
         .tools()
         .into_iter()
-        .find(|tool| tool.wire_name == "web_fetch")
+        .find(|tool| tool.id.to_string() == "web/fetch")
         .expect("the fetch tool is offered");
     assert_eq!(
         fetch.parameters_schema["properties"]["max_chars"]["maximum"], 10_000,

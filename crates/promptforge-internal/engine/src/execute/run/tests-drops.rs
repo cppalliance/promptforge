@@ -51,7 +51,6 @@ fn bound_sections(sections: &str) -> Run {
     );
     let echo = ToolDescriptor::new(
         ToolId::parse("tools/echo").expect("a valid tool id"),
-        "echo",
         "Echoes its value.",
         json!({ "type": "object" }),
     );

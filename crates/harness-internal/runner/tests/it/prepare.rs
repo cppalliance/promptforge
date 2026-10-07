@@ -119,11 +119,10 @@ const TOOLS: Package = echo_package("tests/tools", None);
 
 /// A package whose Plugin offers `<name>/echo`, with `prelude`.
 pub(crate) const fn echo_package(name: &'static str, prelude: Option<&'static str>) -> Package {
-    Package {
-        name,
-        prelude,
-        needs: &[],
-        construct: construct_echo,
+    let package = Package::new(name, construct_echo);
+    match prelude {
+        Some(prelude) => package.prelude(prelude),
+        None => package,
     }
 }
 
@@ -143,7 +142,6 @@ fn construct_echo(
 ) -> Result<Arc<dyn Plugin>, ToolError> {
     let echo = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/echo")).unwrap(),
-        "echo",
         "Echo the value argument.",
         json!({"type": "object", "properties": {"value": {"type": "string"}}}),
     );

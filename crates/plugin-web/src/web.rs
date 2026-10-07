@@ -25,12 +25,7 @@ use crate::search::WebSearch;
 /// as `web`. It has no prelude and needs no per-run service; its
 /// `construct` reads [`SEARCH_PROVIDER`] and [`TOKIO_RUNTIME`] from the
 /// Host-wide services and takes no configuration but `null` or `{}`.
-pub const PACKAGE: Package = Package {
-    name: "promptforge/web",
-    prelude: None,
-    needs: &[],
-    construct,
-};
+pub const PACKAGE: Package = Package::new("promptforge/web", construct);
 
 /// The service key for the Host's search provider.
 ///
@@ -90,15 +85,9 @@ impl Web {
                 .map_err(|e| ToolError::with_source("web could not name its tools", e))
         };
         let tools = vec![
-            ToolDescriptor::new(
-                id("fetch")?,
-                "web_fetch",
-                fetch.description(),
-                fetch.parameters_schema(),
-            ),
+            ToolDescriptor::new(id("fetch")?, fetch.description(), fetch.parameters_schema()),
             ToolDescriptor::new(
                 id("search")?,
-                "web_search",
                 search.description(),
                 search.parameters_schema(),
             ),

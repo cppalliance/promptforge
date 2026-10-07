@@ -43,12 +43,7 @@ impl AskBroker for Failing {
 /// The fixture Plugin `probe`: one tool, `probe/saw`, answering whether
 /// its call was lent a broker. It needs nothing, so a run without a
 /// broker can use it.
-const PROBE: Package = Package {
-    name: "tests/probe",
-    prelude: None,
-    needs: &[],
-    construct: construct_probe,
-};
+const PROBE: Package = Package::new("tests/probe", construct_probe);
 
 struct Probe {
     tools: Vec<ToolDescriptor>,
@@ -65,7 +60,6 @@ fn construct_probe(
 ) -> Result<Arc<dyn Plugin>, ToolError> {
     let saw = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/saw")).unwrap(),
-        "saw",
         "Answer whether the call was lent a broker.",
         json!({ "type": "object", "properties": {} }),
     );

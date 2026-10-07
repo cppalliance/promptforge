@@ -36,7 +36,6 @@ pub(crate) const WAITS: &str = "return tools.call('tests/runner/wait')";
 fn catalog() -> ToolCatalog {
     let wait = ToolDescriptor::new(
         ToolId::parse("tests/runner/wait").expect("the wait tool id is valid"),
-        "wait",
         "Wait until the test's tool performer answers.",
         json!({ "type": "object", "properties": {} }),
     );

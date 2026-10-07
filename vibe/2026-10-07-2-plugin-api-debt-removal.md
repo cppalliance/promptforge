@@ -216,7 +216,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Build Plugin labels with `Package::new` and drop `ToolDescriptor::wire_name`
+### Step 2: Build Plugin labels with `Package::new` and drop `ToolDescriptor::wire_name` [completed]
 
 - Component: `none`
 

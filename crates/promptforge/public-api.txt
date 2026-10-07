@@ -28,7 +28,6 @@
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::DuplicateId { .. }
-#[non_exhaustive] pub promptforge::tools::ToolCatalogError::InvalidWireName { .. }
 #[non_exhaustive] pub struct promptforge::Environment { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::MissingService { .. }
 #[non_exhaustive] pub struct promptforge::ParseError { /* private fields */ }
@@ -613,7 +612,7 @@ pub fn promptforge::tools::ToolCatalog::new(tools: &[promptforge::tools::ToolDes
 pub fn promptforge::tools::ToolCatalog::tools(&self) -> &[promptforge::tools::ToolDescriptor]
 pub fn promptforge::tools::ToolCatalogError::duplicate_id(&self) -> core::option::Option<&promptforge::tools::ToolId>
 pub fn promptforge::tools::ToolCatalogError::kind(&self) -> promptforge::tools::ToolCatalogErrorKind
-pub fn promptforge::tools::ToolDescriptor::new(id: promptforge::tools::ToolId, wire_name: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> promptforge::tools::ToolDescriptor
+pub fn promptforge::tools::ToolDescriptor::new(id: promptforge::tools::ToolId, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolDescriptor::structured(self, structured: bool) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolDescriptor::survives_stop(self, survives: bool) -> promptforge::tools::ToolDescriptor
 pub fn promptforge::tools::ToolError::is_cancelled(&self) -> bool
@@ -1219,16 +1218,12 @@ pub promptforge::prompt::ToolSlot::Exact::0: promptforge::tools::ToolId
 pub promptforge::tools::OutputTrust::Trusted
 pub promptforge::tools::OutputTrust::Untrusted
 pub promptforge::tools::ToolCatalogError::DuplicateId::id: promptforge::tools::ToolId
-pub promptforge::tools::ToolCatalogError::InvalidWireName::reason: &'static str
-pub promptforge::tools::ToolCatalogError::InvalidWireName::wire_name: alloc::string::String
 pub promptforge::tools::ToolCatalogErrorKind::DuplicateId
-pub promptforge::tools::ToolCatalogErrorKind::InvalidWireName
 pub promptforge::tools::ToolDescriptor::description: alloc::string::String
 pub promptforge::tools::ToolDescriptor::id: promptforge::tools::ToolId
 pub promptforge::tools::ToolDescriptor::parameters_schema: serde_json::value::Value
 pub promptforge::tools::ToolDescriptor::structured_output: bool
 pub promptforge::tools::ToolDescriptor::survives_stop: bool
-pub promptforge::tools::ToolDescriptor::wire_name: alloc::string::String
 pub promptforge::tools::ToolErrorKind::Backend
 pub promptforge::tools::ToolErrorKind::Cancelled
 pub promptforge::tools::ToolErrorKind::InvalidArguments
@@ -1237,7 +1232,6 @@ pub promptforge::tools::ToolErrorKind::Transport
 pub promptforge::tools::ToolIdErrorKind::Control
 pub promptforge::tools::ToolIdErrorKind::Empty
 pub promptforge::tools::ToolIdErrorKind::SegmentCount
-pub promptforge::tools::ToolIdErrorKind::Separator
 pub promptforge::vfs::Entry::description: core::option::Option<alloc::string::String>
 pub promptforge::vfs::Entry::name: alloc::string::String
 pub promptforge::vfs::Entry::stat: promptforge::vfs::Stat

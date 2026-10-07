@@ -67,7 +67,6 @@ fn prepared_run() -> Result<Run, Box<dyn Error>> {
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
     let shout = ToolDescriptor::new(
         ToolId::parse("example/text/shout")?,
-        "shout",
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );

@@ -92,7 +92,6 @@ fn canned_model() -> Result<ModelDescriptor, Box<dyn Error>> {
 fn shout_environment() -> Result<Environment, Box<dyn Error>> {
     let shout = ToolDescriptor::new(
         ToolId::parse("example/text/shout")?,
-        "shout",
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );

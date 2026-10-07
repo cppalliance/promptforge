@@ -12,12 +12,9 @@ use promptforge_plugin::{
 use serde_json::{Value, json};
 
 /// The label: installed with no name, the Plugin is `user-input`.
-pub(crate) const ASKER: Package = Package {
-    name: "tests/user-input",
-    prelude: Some(PRELUDE),
-    needs: NEEDS,
-    construct,
-};
+pub(crate) const ASKER: Package = Package::new("tests/user-input", construct)
+    .prelude(PRELUDE)
+    .needs(NEEDS);
 
 /// The key the run's broker is provided under.
 pub(crate) const BROKER: ServiceKey<dyn AskBroker> = ServiceKey::new("tests/input-broker");
@@ -62,7 +59,6 @@ fn construct(
 ) -> Result<Arc<dyn Plugin>, ToolError> {
     let ask = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/ask")).unwrap(),
-        "ask",
         "Wait for the operator's next message.",
         json!({ "type": "object", "properties": {} }),
     )

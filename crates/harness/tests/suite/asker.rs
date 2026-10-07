@@ -13,12 +13,9 @@ use promptforge_plugin::{
 use serde_json::{Value, json};
 
 /// The label: installed with no name, the Plugin is `user-input`.
-const ASKER: Package = Package {
-    name: "tests/user-input",
-    prelude: Some(PRELUDE),
-    needs: NEEDS,
-    construct,
-};
+const ASKER: Package = Package::new("tests/user-input", construct)
+    .prelude(PRELUDE)
+    .needs(NEEDS);
 
 /// The key the run's broker is provided under.
 const BROKER: ServiceKey<dyn AskBroker> = ServiceKey::new("tests/input-broker");
@@ -72,7 +69,6 @@ fn construct(
         .map_err(|e| ToolError::with_source("the fixture could not name its ask tool", e))?;
     let ask = ToolDescriptor::new(
         id,
-        "ask",
         "Wait for the operator's next message.",
         json!({ "type": "object", "properties": {} }),
     )

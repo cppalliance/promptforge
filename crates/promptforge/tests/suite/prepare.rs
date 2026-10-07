@@ -299,7 +299,6 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     let id = ToolId::parse(id).expect("the fixture tool id is valid");
     ToolDescriptor::new(
         id.clone(),
-        id.name(),
         description,
         serde_json::json!({"type": "object", "properties": {}}),
     )
@@ -315,7 +314,6 @@ fn prepare_fills_a_slot_by_id_against_a_caller_supplied_catalog() {
     let id = ToolId::parse("web/fetch").expect("the id is valid");
     let descriptor = ToolDescriptor::new(
         id.clone(),
-        "fetch",
         "Fetch a web page over HTTP",
         serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )

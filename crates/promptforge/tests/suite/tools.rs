@@ -1,14 +1,10 @@
-//! Offering tools and answering their calls: a catalog refuses a wire name
-//! that `ToolDescriptor::new` accepts, and a tool's output carries its
-//! trust while a failure shows only its message.
+//! Answering tool calls: a tool's output carries its trust while a failure
+//! shows only its message.
 
 use std::error::Error;
 use std::io;
 
-use promptforge::tools::{
-    OutputTrust, ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolError, ToolErrorKind,
-    ToolId, ToolOutput,
-};
+use promptforge::tools::{OutputTrust, ToolError, ToolErrorKind, ToolOutput};
 use serde_json::{Value, json};
 
 /// The greeter's own `shout` tool: this code wrote the text, so it is
@@ -28,22 +24,6 @@ fn fetch(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let timeout = io::Error::new(io::ErrorKind::TimedOut, "no reply from 10.0.0.7:443");
     Err(ToolError::with_source("fetch failed", timeout).with_kind(ToolErrorKind::Transport))
-}
-
-#[test]
-fn a_catalog_refuses_a_slashed_wire_name_the_descriptor_accepted() -> Result<(), Box<dyn Error>> {
-    let schema = json!({"type": "object", "properties": {"url": {"type": "string"}}});
-    let slashed = ToolDescriptor::new(
-        ToolId::parse("web/fetch")?,
-        "web/fetch",
-        "Fetch a web page over HTTP.",
-        schema,
-    );
-    let error = ToolCatalog::new(&[slashed])
-        .err()
-        .ok_or("a slash in a wire name fails")?;
-    assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
-    Ok(())
 }
 
 #[test]

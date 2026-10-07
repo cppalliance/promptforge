@@ -8,9 +8,9 @@ use super::ids::ToolId;
 
 /// A tool described as data.
 ///
-/// A descriptor holds the tool's stable id, its wire name, the description
-/// the model reads, its parameter schema, whether its output is
-/// structured, and whether a stop leaves its calls running.
+/// A descriptor holds the tool's stable id, the description the model
+/// reads, its parameter schema, whether its output is structured, and
+/// whether a stop leaves its calls running.
 ///
 /// The caller collects the descriptors of every Plugin it can serve into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay with the
@@ -24,10 +24,6 @@ use super::ids::ToolId;
 pub struct ToolDescriptor {
     /// The tool's stable identity. The catalog uses it as the key.
     pub id: ToolId,
-    /// The name the tool is sent under on the wire. It must be non-empty and
-    /// free of `/` and control characters. When the tool is advertised to a
-    /// model, it appears under its prompt-local alias.
-    pub wire_name: String,
     /// The one-sentence description the model reads.
     pub description: String,
     /// The JSON-Schema `object` the tool's arguments must match.
@@ -50,13 +46,11 @@ impl ToolDescriptor {
     #[must_use]
     pub fn new(
         id: ToolId,
-        wire_name: impl Into<String>,
         description: impl Into<String>,
         parameters_schema: Value,
     ) -> ToolDescriptor {
         ToolDescriptor {
             id,
-            wire_name: wire_name.into(),
             description: description.into(),
             parameters_schema,
             structured_output: false,

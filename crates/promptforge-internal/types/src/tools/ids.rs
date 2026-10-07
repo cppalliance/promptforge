@@ -11,10 +11,10 @@ use crate::plugins::PluginId;
 /// the tool, and the last is the tool's own name. For example, `web/fetch`
 /// comes from `web`.
 ///
-/// A tool's wire name is the name a model request uses for it. The tool id
-/// stays its identity under any wire name. When a Plugin is bound to a
-/// prompt, a selected tool can be offered under a prompt-local alias. Calls
-/// under that alias still reach the same tool.
+/// The tool id stays its identity under any name a model request uses for
+/// it. When a Plugin is bound to a prompt, a selected tool can be offered
+/// under a prompt-local alias. Calls under that alias still reach the same
+/// tool.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct ToolId(GlobalName);
@@ -96,21 +96,18 @@ impl<'de> serde::Deserialize<'de> for ToolId {
 pub enum ToolIdErrorKind {
     /// The id had fewer than two segments.
     SegmentCount,
-    /// A segment (or a wire name) was empty.
+    /// The id was empty or had an empty segment.
     Empty,
-    /// A wire name contained the `/` namespace separator.
-    Separator,
-    /// A segment contained a character outside the allowed set, or a wire name
-    /// contained a control character.
+    /// A segment contained a character outside the allowed set.
     Control,
 }
 
-/// The reason a [`ToolId`] (or a validated wire name) failed to build.
+/// The reason a [`ToolId`] failed to parse.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid tool {field}: {reason}")]
 #[non_exhaustive]
 pub struct ToolIdError {
-    /// What was rejected (`id` for a parse failure, or `wire name`).
+    /// What was rejected: `id`, the tool id being parsed.
     field: &'static str,
     /// A stable classification of why it was rejected.
     kind: ToolIdErrorKind,
@@ -125,16 +122,10 @@ impl ToolIdError {
         self.kind
     }
 
-    /// Returns what was rejected (`id` for a parse failure, or `wire name`).
+    /// Returns what was rejected: `id`, the tool id being parsed.
     #[must_use]
     pub fn field(&self) -> &str {
         self.field
-    }
-
-    /// The crate-internal human-readable reason, reused when a wire-name
-    /// rejection is re-reported as a [`crate::tools::ToolCatalogError`].
-    pub(super) fn reason(&self) -> &'static str {
-        self.reason
     }
 
     /// Maps a global-name rejection onto the tool-id error vocabulary.
@@ -152,35 +143,4 @@ impl ToolIdError {
             reason,
         }
     }
-}
-
-/// Validates one identity component (wire name).
-///
-/// A component must be non-empty and free of the `/` namespace separator and any
-/// control character. Tool identity itself is the global grammar
-/// ([`ToolId`]); this rule set remains for tool wire names, which are
-/// single-segment transport tokens.
-pub(super) fn validate_identifier(field: &'static str, value: &str) -> Result<(), ToolIdError> {
-    if value.is_empty() {
-        return Err(ToolIdError {
-            field,
-            kind: ToolIdErrorKind::Empty,
-            reason: "must not be empty",
-        });
-    }
-    if value.contains('/') {
-        return Err(ToolIdError {
-            field,
-            kind: ToolIdErrorKind::Separator,
-            reason: "must not contain the '/' separator",
-        });
-    }
-    if value.bytes().any(|b| b < 0x20 || b == 0x7f) {
-        return Err(ToolIdError {
-            field,
-            kind: ToolIdErrorKind::Control,
-            reason: "must not contain a control character",
-        });
-    }
-    Ok(())
 }

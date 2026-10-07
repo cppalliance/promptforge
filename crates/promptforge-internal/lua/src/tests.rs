@@ -211,7 +211,6 @@ fn program(source: &str) -> LuaProgram {
 fn fixture_tool(name: &str) -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse(&format!("fixtures/tools/{name}")).expect("valid id"),
-        name,
         "fixture",
         json!({}),
     )

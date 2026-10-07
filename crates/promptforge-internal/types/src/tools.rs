@@ -2,8 +2,8 @@
 //!
 //! Performing a tool call is the Harness's job. The Engine binds and
 //! advertises tools as data and issues each call as an effect naming the
-//! tool's stable identity ([`ToolId`]), which is separate from the wire name
-//! used by the current model transport.
+//! tool's stable identity ([`ToolId`]), whatever name the model saw the
+//! tool under.
 //!
 //! This module holds vocabulary only: the implementation-free
 //! [`ToolDescriptor`] and the caller-supplied [`ToolCatalog`] of descriptors,

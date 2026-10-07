@@ -23,12 +23,9 @@ const VISITOR: ServiceKey<str> = ServiceKey::new("acme/visitor");
 
 const NEEDS: &[ServiceId] = &[VISITOR.id()];
 
-const PACKAGE: Package = Package {
-    name: "acme/greeter",
-    prelude: Some("local plugin = ...\n"),
-    needs: NEEDS,
-    construct,
-};
+const PACKAGE: Package = Package::new("acme/greeter", construct)
+    .prelude("local plugin = ...\n")
+    .needs(NEEDS);
 
 /// The one object every run shares.
 struct Greeter {
@@ -55,7 +52,6 @@ fn construct(
         .map_err(|e| ToolError::with_source("greeter could not name its tool", e))?;
     let tools = vec![ToolDescriptor::new(
         id,
-        "greet",
         "Greets this run's visitor.",
         json!({"type": "object", "properties": {"mark": {"type": "string"}}}),
     )];
@@ -124,7 +120,6 @@ fn construct_names_the_tools_under_the_name_the_host_chose() {
     let tools = installed_as("hi").tools();
     let ids: Vec<String> = tools.iter().map(|tool| tool.id.to_string()).collect();
     assert_eq!(ids, ["hi/greet"]);
-    assert_eq!(tools[0].wire_name, "greet");
 }
 
 #[test]
@@ -160,6 +155,32 @@ fn a_call_without_the_per_run_service_it_needs_fails() {
     let error = block_on(plugin.call(call.context(), json!({})))
         .expect_err("the greet call fails without a visitor");
     assert_eq!(error.to_string(), "no visitor is in this run");
+}
+
+#[test]
+fn a_package_from_new_has_no_prelude_and_no_needs_until_set() {
+    const BARE: Package = Package::new("acme/bare", construct);
+    const FULL: Package = Package::new("acme/full", construct)
+        .prelude("local plugin = ...\n")
+        .needs(NEEDS);
+
+    assert_eq!(BARE.name, "acme/bare");
+    assert_eq!(BARE.prelude, None);
+    assert!(BARE.needs.is_empty());
+    assert_eq!(FULL.name, "acme/full");
+    assert_eq!(FULL.prelude, Some("local plugin = ...\n"));
+    assert_eq!(FULL.needs, [VISITOR.id()]);
+    let name = PluginId::parse("hi").expect("a one-segment Plugin name parses");
+    for label in [BARE, FULL] {
+        let Ok(plugin) = (label.construct)(&name, Value::Null, &host_wide()) else {
+            panic!(
+                "{}: construct succeeds with its Host-wide service",
+                label.name
+            );
+        };
+        let ids: Vec<String> = plugin.tools().iter().map(|t| t.id.to_string()).collect();
+        assert_eq!(ids, ["hi/greet"], "{}", label.name);
+    }
 }
 
 #[test]

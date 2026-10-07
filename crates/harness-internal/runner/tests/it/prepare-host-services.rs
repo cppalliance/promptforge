@@ -13,12 +13,7 @@ const NEEDS: &[ServiceId] = &[GREETING.id()];
 
 /// The fixture Plugin `greeter`: one tool, `greeter/greet`, answering
 /// with the run's greeting.
-const GREETER: Package = Package {
-    name: "tests/greeter",
-    prelude: None,
-    needs: NEEDS,
-    construct: construct_greeter,
-};
+const GREETER: Package = Package::new("tests/greeter", construct_greeter).needs(NEEDS);
 
 /// A prompt declaring the greeter Plugin and returning its greeting.
 const GREETS: &str = "---\nname: greets\ndescription: d\npromptforge: 0\n\
@@ -40,7 +35,6 @@ fn construct_greeter(
 ) -> Result<Arc<dyn Plugin>, ToolError> {
     let greet = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/greet")).unwrap(),
-        "greet",
         "Answer with the run's greeting.",
         json!({ "type": "object", "properties": {} }),
     );

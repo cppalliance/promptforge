@@ -13,7 +13,6 @@ fn inspect_id() -> ToolId {
 fn inspect_descriptor() -> ToolDescriptor {
     ToolDescriptor::new(
         inspect_id(),
-        "inspect_wire",
         "Inspect a fixture.",
         json!({
             "type": "object",
@@ -23,13 +22,12 @@ fn inspect_descriptor() -> ToolDescriptor {
     )
 }
 
-/// A catalog fixture descriptor under `fixtures/tools/<id_name>` advertised
-/// as `wire_name`.
-fn catalog_descriptor(id_name: &str, wire_name: &str) -> ToolDescriptor {
+/// A catalog fixture descriptor under `fixtures/tools/<id_name>`, described
+/// as `id_name`.
+fn catalog_descriptor(id_name: &str) -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse(&format!("fixtures/tools/{id_name}")).expect("fixture id is valid"),
-        wire_name,
-        wire_name,
+        id_name,
         json!({"type": "object"}),
     )
 }
@@ -92,12 +90,11 @@ fn an_empty_catalog_builds_and_holds_no_tools() {
 
 #[test]
 fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
-    // The descriptor is the tool as data: identity, wire name, description,
-    // schema, and the output kind, so a catalog built from descriptors holds
-    // no implementation and round-trips through serde.
+    // The descriptor is the tool as data: identity, description, schema,
+    // and the output kind, so a catalog built from descriptors holds no
+    // implementation and round-trips through serde.
     let descriptor = inspect_descriptor();
     assert_eq!(descriptor.id, inspect_id());
-    assert_eq!(descriptor.wire_name, "inspect_wire");
     assert_eq!(descriptor.description, "Inspect a fixture.");
     assert_eq!(descriptor.parameters_schema["required"], json!(["path"]));
     assert!(
@@ -152,26 +149,26 @@ fn a_tool_call_origin_keeps_its_logged_shape() {
 }
 
 #[test]
-fn catalog_lookup_uses_stable_identity_not_wire_name() {
+fn catalog_lookup_matches_the_whole_tool_id() {
     let catalog = ToolCatalog::new(&[inspect_descriptor()]).expect("unique catalog");
 
     let found = catalog
         .get(&inspect_id())
         .expect("the stable identity should resolve");
-    assert_eq!(found.wire_name, "inspect_wire");
+    assert_eq!(found.description, "Inspect a fixture.");
     assert!(
         catalog
-            .get(&ToolId::parse("fixtures/tools/inspect_wire").expect("valid id"))
+            .get(&ToolId::parse("other/inspect").expect("valid id"))
             .is_none(),
-        "the transport name must not become identity"
+        "a tool's last segment alone must not resolve it"
     );
 }
 
 #[test]
 fn catalog_preserves_order_and_first_match_lookup() {
     let catalog = ToolCatalog::new(&[
-        catalog_descriptor("inspect", "first_inspect"),
-        catalog_descriptor("summarize", "summarize"),
+        catalog_descriptor("inspect"),
+        catalog_descriptor("summarize"),
     ])
     .expect("distinct identities build a catalog");
 
@@ -179,27 +176,24 @@ fn catalog_preserves_order_and_first_match_lookup() {
         catalog
             .tools()
             .iter()
-            .map(|tool| tool.wire_name.as_str())
+            .map(|tool| tool.id.to_string())
             .collect::<Vec<_>>(),
-        ["first_inspect", "summarize"]
+        ["fixtures/tools/inspect", "fixtures/tools/summarize"]
     );
     assert_eq!(catalog.tools().len(), 2);
     assert_eq!(
         catalog
             .get(&inspect_id())
             .expect("the identity should resolve")
-            .wire_name,
-        "first_inspect",
+            .description,
+        "inspect",
     );
 }
 
 #[test]
 fn catalog_rejects_duplicate_tool_ids() {
-    let error = ToolCatalog::new(&[
-        catalog_descriptor("inspect", "first_inspect"),
-        catalog_descriptor("inspect", "second_inspect"),
-    ])
-    .expect_err("a repeated tool identity must be rejected at catalog construction");
+    let error = ToolCatalog::new(&[catalog_descriptor("inspect"), catalog_descriptor("inspect")])
+        .expect_err("a repeated tool identity must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::DuplicateId);
     assert_eq!(
         error.duplicate_id(),
@@ -303,18 +297,4 @@ fn a_tool_id_serializes_as_its_global_name_string() {
 fn deserializing_an_invalid_tool_id_is_a_data_error() {
     assert!(serde_json::from_str::<ToolId>("\"web_fetch\"").is_err());
     assert!(serde_json::from_str::<ToolId>("\"web//fetch\"").is_err());
-}
-
-#[test]
-fn catalog_rejects_illegal_wire_name() {
-    let bad = ToolDescriptor::new(
-        ToolId::parse("fixtures/tools/bad_wire").expect("valid id"),
-        "bad/name",
-        "bad",
-        json!({"type": "object"}),
-    );
-    let error = ToolCatalog::new(&[bad])
-        .expect_err("an illegal wire name must be rejected at catalog construction");
-    assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
-    assert!(error.duplicate_id().is_none());
 }

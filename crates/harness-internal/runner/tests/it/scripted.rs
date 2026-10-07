@@ -201,12 +201,7 @@ const HELD: ServiceKey<Held> = ServiceKey::new("tests/held");
 /// The fixture Plugin `harness`: one tool, `harness/hold`, whose every
 /// call is held, and which a stop leaves in flight when its configuration
 /// sets `survives_stop`.
-const HOLD: Package = Package {
-    name: "tests/harness",
-    prelude: None,
-    needs: &[],
-    construct: construct_hold,
-};
+const HOLD: Package = Package::new("tests/harness", construct_hold);
 
 struct HoldPlugin {
     held: Arc<Held>,
@@ -227,7 +222,6 @@ fn construct_hold(
         .ok_or_else(|| ToolError::message("the hold Plugin needs tests/held"))?;
     let descriptor = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/hold")).unwrap(),
-        "hold",
         "Hold until the call is dropped.",
         json!({ "type": "object", "properties": {} }),
     )

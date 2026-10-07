@@ -27,8 +27,7 @@ struct Round {
     options: CompletionOptions,
 }
 
-/// One tool a round offers: its wire name, description, and parameters
-/// schema.
+/// One tool a round offers: its name, description, and parameters schema.
 type Offered = (&'static str, &'static str, Value);
 
 /// Drives a facade `Run` through one tool round and returns what its second
@@ -57,7 +56,7 @@ fn tool_round(offered: &[Offered]) -> Round {
         .iter()
         .map(|(name, description, parameters)| {
             let id = ToolId::parse(&format!("example/test/{name}")).expect("a valid tool id");
-            ToolDescriptor::new(id, *name, *description, parameters.clone())
+            ToolDescriptor::new(id, *description, parameters.clone())
         })
         .collect();
     let model = ModelDescriptor::new(

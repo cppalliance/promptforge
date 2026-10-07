@@ -30,12 +30,7 @@ const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\npromptforge
 /// The fixture Plugin `context`: one tool, `context/record`, which writes
 /// [`WRITTEN`] to `/from-tool.md` through the access its call lends it
 /// and answers with the caller its origin names.
-const CONTEXT: Package = Package {
-    name: "tests/context",
-    prelude: None,
-    needs: &[],
-    construct,
-};
+const CONTEXT: Package = Package::new("tests/context", construct);
 
 struct Record {
     tools: Vec<ToolDescriptor>,
@@ -52,7 +47,6 @@ fn construct(
 ) -> Result<Arc<dyn Plugin>, ToolError> {
     let record = ToolDescriptor::new(
         ToolId::parse(&format!("{name}/record")).unwrap(),
-        "record",
         "Write a file through the call's access and name the caller.",
         json!({ "type": "object", "properties": {} }),
     );

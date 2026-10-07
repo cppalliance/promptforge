@@ -5,9 +5,8 @@
 //! the production trait (`Plugin`) is the Plugin contract's, in
 //! `promptforge-plugin`, which the Engine never depends on. The suites
 //! still need something to perform a `ToolCall` effect with, so these are
-//! the test doubles: one tool per object, with its id, wire name,
-//! description, schema, and call, built
-//! into the [`Performers`] the tokio test driver takes by
+//! the test doubles: one tool per object, with its id, description,
+//! schema, and call, built into the [`Performers`] the tokio test driver takes by
 //! [`RunFixture`](super::RunFixture). Nothing here reaches the Engine.
 //!
 //! The async methods are declared in the boxed form
@@ -35,8 +34,7 @@ type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// A fixture tool the tokio test driver dispatches a `ToolCall` effect to.
 ///
 /// The surface: a stable [`id`](TestTool::id), a
-/// transport [`wire_name`](TestTool::wire_name), a model-facing
-/// [`description`](TestTool::description), a JSON-Schema
+/// model-facing [`description`](TestTool::description), a JSON-Schema
 /// [`parameters_schema`](TestTool::parameters_schema), the
 /// [`structured_output`](TestTool::structured_output) flag, and the
 /// future-returning [`call`](TestTool::call). [`descriptor`](TestTool::descriptor)
@@ -45,9 +43,6 @@ pub trait TestTool: Send + Sync {
     /// The tool's stable identity: the catalog key and what a `ToolCall`
     /// effect names.
     fn id(&self) -> ToolId;
-
-    /// The transport name the tool is advertised under before aliasing.
-    fn wire_name(&self) -> &str;
 
     /// The one-sentence description the model reads.
     fn description(&self) -> &str;
@@ -62,13 +57,8 @@ pub trait TestTool: Send + Sync {
 
     /// The tool as data: the descriptor the Engine binds and advertises.
     fn descriptor(&self) -> ToolDescriptor {
-        ToolDescriptor::new(
-            self.id(),
-            self.wire_name(),
-            self.description(),
-            self.parameters_schema(),
-        )
-        .structured(self.structured_output())
+        ToolDescriptor::new(self.id(), self.description(), self.parameters_schema())
+            .structured(self.structured_output())
     }
 
     /// Performs one call with `args`. The future resolves to the tool's
@@ -129,8 +119,8 @@ impl TestToolTable {
     /// against, in identity order.
     ///
     /// # Errors
-    /// Returns the catalog's construction error when a fixture has a
-    /// transport-illegal wire name.
+    /// Returns the catalog's construction error when two descriptors share
+    /// an id, which a table holding one tool per id never builds.
     pub fn catalog(&self) -> Result<ToolCatalog, ToolCatalogError> {
         let descriptors: Vec<ToolDescriptor> =
             self.tools.values().map(|tool| tool.descriptor()).collect();

@@ -16,7 +16,6 @@ const SECTION: &str = "Test";
 fn echo_tool() -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/echo").expect("valid id"),
-        "echo",
         "echo the value argument",
         json!({ "type": "object" }),
     )
@@ -26,7 +25,6 @@ fn echo_tool() -> ToolDescriptor {
 fn failing_tool() -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/failing").expect("valid id"),
-        "failing",
         "always fail",
         json!({ "type": "object" }),
     )

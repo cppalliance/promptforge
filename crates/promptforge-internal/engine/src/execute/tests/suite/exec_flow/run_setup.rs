@@ -122,7 +122,7 @@ async fn a_slot_its_present_plugin_does_not_offer_refuses_the_run() {
     let table = TestToolTable::from_tools(&[tool]);
     let catalog = table
         .catalog()
-        .expect("the fixture tools have legal wire names and distinct ids");
+        .expect("the fixture tools have distinct ids");
     let RunResult::Failure(error) = run_with_fixture(
         &Environment::new().tools(catalog),
         &prompt,
@@ -177,14 +177,6 @@ struct EchoTool;
 impl TestTool for EchoTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "echo"
     }
 
     #[expect(
