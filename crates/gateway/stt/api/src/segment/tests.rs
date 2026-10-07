@@ -258,6 +258,50 @@ fn natural_segment_ends_a_hangover_past_the_silence_and_closes_after_two_seconds
 }
 
 #[test]
+fn a_sentence_end_hint_closes_a_segment_after_six_tenths_of_a_second() {
+    let buffer = take(&[run(true, 38_400), run(false, 48_000)]);
+    let mut unhinted = Segmenter::new();
+    assert_eq!(
+        unhinted.poll(&buffer[..48_000], 0),
+        None,
+        "without the hint 0.6 s of silence is a pause"
+    );
+    let mut segmenter = Segmenter::new();
+    segmenter.set_sentence_end(0, true);
+    assert_eq!(segmenter.poll(&buffer[..47_999], 0), None);
+    assert_eq!(
+        segmenter.poll(&buffer[..48_000], 0),
+        Some(SegmentOutcome::Decode(0..40_000)),
+        "silence from 38,400 closes once a frame reaches 0.6 s past it"
+    );
+}
+
+#[test]
+fn a_sentence_end_hint_lapses_once_its_segment_closes() {
+    let buffer = take(&[
+        run(true, 38_400),
+        run(false, 9_600),
+        run(true, 38_400),
+        run(false, 48_000),
+    ]);
+    let mut segmenter = Segmenter::new();
+    segmenter.set_sentence_end(0, true);
+    assert_eq!(
+        segmenter.poll(&buffer, 0),
+        Some(SegmentOutcome::Decode(0..40_000))
+    );
+    assert_eq!(
+        segmenter.poll(&buffer[..118_559], 0),
+        None,
+        "the next segment has no accepted interim text, so its pause is not a sentence end"
+    );
+    assert_eq!(
+        segmenter.poll(&buffer[..118_560], 0),
+        Some(SegmentOutcome::Decode(40_000..88_000))
+    );
+}
+
+#[test]
 fn natural_segment_starts_half_a_second_before_its_speech() {
     let buffer = take(&[run(false, 24_000), run(true, 38_400), run(false, 48_000)]);
     let mut segmenter = Segmenter::new();

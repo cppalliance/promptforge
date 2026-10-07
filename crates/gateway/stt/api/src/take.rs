@@ -153,7 +153,8 @@ impl Take {
     /// `_word_ends` holds where each word of `hypothesis` ends, in samples
     /// from `window_start`, or nothing when the decode timed no words. The
     /// finalized range comes from the same live prefix as the snapshot's
-    /// finalized part.
+    /// finalized part. An accepted hypothesis also tells the segmenter
+    /// whether it ends a sentence.
     pub(crate) fn next_window_snapshot(
         &self,
         hypothesis: &str,
@@ -170,12 +171,14 @@ impl Take {
             window_end,
             hypothesis,
         );
-        if let Ok(snapshot) = update {
-            snapshot.map(|snapshot| (snapshot, live_prefix.finalized_range()))
-        } else {
+        let Ok(snapshot) = update else {
             self.state.record_failure(TakeFailure::HypothesisCapacity);
-            None
-        }
+            return None;
+        };
+        let snapshot = snapshot?;
+        TakeState::lock(&self.state.segmenter)
+            .set_sentence_end(segment_start, ends_sentence(hypothesis));
+        Some((snapshot, live_prefix.finalized_range()))
     }
 
     #[cfg(test)]
@@ -236,6 +239,11 @@ impl Take {
     }
 }
 
+/// Whether `text` ends in sentence-final punctuation.
+fn ends_sentence(text: &str) -> bool {
+    text.trim_end().ends_with(['.', '?', '!'])
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -284,6 +292,45 @@ mod tests {
         take.record_finalized(Ok("ask not".to_owned()));
         take.record_finalized(Ok("what you can do".to_owned()));
         assert_eq!(take.finalized(), "ask not what you can do");
+    }
+
+    fn sentence_end_hinted(take: &Take) -> bool {
+        super::TakeState::lock(&take.state.segmenter).ends_sentence()
+    }
+
+    #[test]
+    fn the_sentence_end_hint_follows_the_latest_accepted_interim_text() {
+        let take = Take::without_final(Vec::new());
+        take.next_window_snapshot("Ask not.", &[], 0, 0, 16_000)
+            .expect("the first hypothesis is accepted");
+        assert!(sentence_end_hinted(&take));
+        take.next_window_snapshot("Ask not what", &[], 0, 0, 24_000)
+            .expect("a longer hypothesis is accepted");
+        assert!(!sentence_end_hinted(&take));
+        take.next_window_snapshot("Ask not what you can do?", &[], 0, 0, 32_000)
+            .expect("a question is accepted");
+        assert!(sentence_end_hinted(&take));
+        assert!(
+            take.next_window_snapshot("Completely unrelated words", &[], 0, 16_000, 40_000)
+                .is_none(),
+            "a sliding window that shares no words with the active text is rejected"
+        );
+        assert!(
+            sentence_end_hinted(&take),
+            "a rejected hypothesis leaves the hint of the last accepted one"
+        );
+    }
+
+    #[test]
+    fn a_sentence_end_hint_decoded_from_a_closed_segment_is_ignored() {
+        let take = Take::without_final(Vec::new());
+        super::TakeState::lock(&take.state.segmenter).set_consumed_for_test(16_000);
+        take.next_window_snapshot("Ask not.", &[], 0, 0, 16_000)
+            .expect("a late decode of the closed segment is accepted");
+        assert!(!sentence_end_hinted(&take));
+        take.next_window_snapshot("What your country can do.", &[], 16_000, 16_000, 32_000)
+            .expect("the open segment's hypothesis is accepted");
+        assert!(sentence_end_hinted(&take));
     }
 
     #[test]

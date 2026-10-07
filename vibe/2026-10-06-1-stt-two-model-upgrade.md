@@ -707,7 +707,7 @@ flowchart TD
 
 <step-21>
 
-### Step 21: Sentence-end hint for short closes
+### Step 21: Sentence-end hint for short closes [completed]
 
 - Component: Endpointing
 - Piece: sentence-end hint

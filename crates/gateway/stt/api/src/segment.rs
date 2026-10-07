@@ -41,6 +41,9 @@ pub(crate) struct Segmenter {
     /// End of the preceding forced stride when uninterrupted speech may
     /// overlap it.
     forced_predecessor: Option<u64>,
+    /// Start of the segment whose latest accepted interim text ends a
+    /// sentence, if one does.
+    sentence_end: Option<u64>,
 }
 
 impl Segmenter {
@@ -69,6 +72,18 @@ impl Segmenter {
         self.endpoint.consumed
     }
 
+    /// Records whether the latest accepted interim text, decoded from the
+    /// segment that starts at `segment_start`, ends a sentence. The hint
+    /// shortens the closing silence only while that segment is still open.
+    pub(crate) fn set_sentence_end(&mut self, segment_start: u64, ends_sentence: bool) {
+        self.sentence_end = ends_sentence.then_some(segment_start);
+    }
+
+    /// Whether the open segment's latest accepted interim text ends a sentence.
+    pub(crate) fn ends_sentence(&self) -> bool {
+        self.sentence_end == Some(self.endpoint.consumed)
+    }
+
     pub(crate) fn terminal_boundary(&self, end: u64) -> Option<ForcedBoundary> {
         let consumed = self.endpoint.consumed;
         (consumed < end && self.forced_predecessor == Some(consumed))
@@ -90,6 +105,7 @@ impl Segmenter {
                 cursor: self.cursor,
                 received,
                 silent: frame.map(EnginePolicy::is_silence),
+                sentence_end: self.ends_sentence(),
             };
             let advance = endpoint::endpoint(self.endpoint, scan)?;
             self.cursor = advance.cursor;
