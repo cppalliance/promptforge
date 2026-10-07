@@ -2660,6 +2660,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "promptforge",
+ "promptforge-plugin",
  "serde_json",
  "tokio",
  "tracing",
@@ -4838,6 +4839,17 @@ dependencies = [
  "serde",
  "serde_yaml_ng",
  "thiserror 2.0.19",
+ "workspace-hack",
+]
+
+[[package]]
+name = "promptforge-plugin"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "promptforge-types",
+ "promptforge-vfs",
+ "serde_json",
  "workspace-hack",
 ]
 

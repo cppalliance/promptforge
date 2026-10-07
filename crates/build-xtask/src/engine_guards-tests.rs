@@ -97,8 +97,26 @@ fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
             "promptforge",
             "promptforge-internal/lua",
             "promptforge-internal/store",
+            "promptforge-plugin",
         ],
         "harness and gateway crates are outside the engine"
+    );
+}
+
+#[test]
+fn a_forbidden_dependency_in_the_plugin_contract_fails_the_guard() {
+    let root = clean_engine_root();
+    write_crate(
+        root.path(),
+        "promptforge-plugin",
+        "[dependencies]\nasync-trait = \"0.1\"\n",
+        "pub trait Plugin {}\n",
+    );
+    let violations = engine_guard_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("async-trait") && violations[0].contains("promptforge-plugin"),
+        "the Plugin contract is an engine root crate, so the manifest guard binds it: {violations:?}"
     );
 }
 
@@ -125,6 +143,7 @@ fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_gua
         "[dependencies]\npromptforge-engine = { path = \"../promptforge-internal/engine\" }\n\
          [features]\ntest-support = [\"promptforge-engine/test-support\"]\n",
     );
+    test_support::write_crate(root.path(), "promptforge-plugin", "promptforge-plugin", "");
     let violations = engine_guard_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -214,6 +233,12 @@ fn a_missing_root_engine_crate_is_reported_not_skipped() {
     write_crate(
         root.path(),
         "promptforge-internal/engine",
+        "[dependencies]\nserde = \"1\"\n",
+        "pub struct Live;\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-plugin",
         "[dependencies]\nserde = \"1\"\n",
         "pub struct Live;\n",
     );

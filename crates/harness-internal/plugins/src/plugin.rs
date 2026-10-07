@@ -17,8 +17,8 @@ use std::sync::Arc;
 use promptforge::cancel::CancelHandle;
 use promptforge::plugins::PluginId;
 
-use crate::service::{HostServices, ServiceId, ServiceKey};
 use crate::tool::Tool;
+use crate::{HostServices, ServiceId, ServiceKey};
 
 #[cfg(test)]
 #[path = "plugin-tests.rs"]

@@ -30,6 +30,7 @@ bytes = "1"
 build-ceiling = { path = "crates/build-ceiling" }
 promptforge = { path = "crates/promptforge" }
 promptforge-engine = { path = "crates/promptforge-internal/engine" }
+promptforge-plugin = { path = "crates/promptforge-plugin" }
 promptforge-types = { path = "crates/promptforge-internal/types" }
 gateway-api-types = { path = "crates/gateway-api-types" }
 gateway-cloud-providers = { path = "crates/gateway/cloud-providers" }

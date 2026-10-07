@@ -1,11 +1,11 @@
 //! Host services: typed objects the Host hands to the Plugins it
 //! installs, each under a named id.
 //!
-//! A Plugin names the services it needs as [`ServiceId`]s in
-//! [`Plugin::needs`](crate::Plugin::needs), and reads them at
-//! activation through a [`ServiceKey`], which binds an id literal to the
-//! provider's Rust type. The Host fills a [`HostServices`] map, and the
-//! Harness hands it to each run in [`RunServices`](crate::RunServices).
+//! A Plugin names the per-run services its calls read as [`ServiceId`]s,
+//! and reads a service through a [`ServiceKey`], which binds an id
+//! literal to the provider's Rust type. The Host fills two
+//! [`HostServices`] maps: the Host-wide one a Plugin's `construct` reads,
+//! and each run's own, which its calls read.
 //!
 //! An id literal is a [`GlobalName`] with exactly one `/`, as in
 //! `namespace/name`. [`HostServices::provide`] refuses any other literal.
@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use promptforge::plugins::GlobalName;
+use promptforge_types::names::GlobalName;
 
 #[cfg(test)]
 #[path = "service-tests.rs"]

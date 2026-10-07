@@ -29,7 +29,6 @@ mod activation;
 mod input;
 mod plugin;
 mod registry;
-mod service;
 #[cfg(test)]
 mod test_support;
 mod tool;
@@ -38,8 +37,8 @@ mod user_input;
 pub use activation::{Activation, ToolTable, activate};
 pub use input::{InputBroker, InputError};
 pub use plugin::{Contribution, Plugin, PluginError, PluginErrorKind, RunServices};
+pub use promptforge_plugin::{HostServices, ServiceError, ServiceId, ServiceKey};
 pub use registry::{PluginRegistry, RegistryError, RegistryErrorKind};
-pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
 pub use tool::{Tool, ToolContext};
 pub use user_input::{INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 

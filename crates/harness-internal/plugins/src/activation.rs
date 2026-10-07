@@ -21,9 +21,9 @@ use promptforge::plugins::{PluginId, Prelude};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::{MissingService, Requirements, UnavailablePlugin};
 
+use crate::ServiceId;
 use crate::plugin::{Contribution, RunServices};
 use crate::registry::PluginRegistry;
-use crate::service::ServiceId;
 use crate::tool::Tool;
 
 #[cfg(test)]

@@ -162,10 +162,24 @@ fn an_outside_crate_depending_on_a_root_promptforge_crate_other_than_the_facade_
     assert!(
         violations.iter().all(
             |v| v.starts_with("workshop-sessions depends on promptforge-")
-                && v.ends_with("only through promptforge")
+                && v.ends_with("only through promptforge or promptforge-plugin")
         ),
-        "promptforge is the one public crate, wherever the others sit: {violations:?}"
+        "promptforge and promptforge-plugin are the public crates, wherever the others sit: {violations:?}"
     );
+}
+
+#[test]
+fn an_outside_crate_depending_on_the_plugin_contract_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "outside-tool",
+        "outside-tool",
+        "[dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\" }\n",
+    );
+    write_crate(root.path(), "promptforge-plugin", "promptforge-plugin", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(violations.is_empty(), "{violations:?}");
 }
 
 #[test]

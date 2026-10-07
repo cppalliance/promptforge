@@ -24,7 +24,7 @@ fn an_outside_crate_depending_into_the_private_container_is_reported() {
     assert!(
         violations[0].contains("workshop-sessions depends on promptforge-lua")
             && violations[0].contains("crates/promptforge-internal is private to its family")
-            && violations[0].contains("only promptforge may depend into it"),
+            && violations[0].contains("only promptforge or promptforge-plugin may depend into it"),
         "the violation includes the container privacy message: {violations:?}"
     );
 }
@@ -69,17 +69,46 @@ fn the_facade_depending_into_the_engine_container_passes() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the facade is the container's one named crate: {violations:?}"
+        "the facade is one of the container's named crates: {violations:?}"
     );
 }
 
 #[test]
-fn a_root_promptforge_crate_other_than_the_facade_depending_into_the_engine_container_is_reported()
-{
+fn the_plugin_contract_depending_into_the_engine_container_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "promptforge-plugin",
+        "promptforge-plugin",
+        "[dependencies]\npromptforge-types = { path = \"../promptforge-internal/types\" }\n\
+         promptforge-vfs = { path = \"../promptforge-internal/vfs\" }\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/types",
+        "promptforge-types",
+        "",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/vfs",
+        "promptforge-vfs",
+        "",
+    );
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the Plugin contract is the container's second named crate: {violations:?}"
+    );
+}
+
+#[test]
+fn a_root_promptforge_crate_other_than_the_named_ones_depending_into_the_engine_container_is_reported()
+ {
     assert_eq!(
         container_named_exception("promptforge-internal"),
-        Some("promptforge"),
-        "the facade is the container's one named crate"
+        ["promptforge", "promptforge-plugin"],
+        "the facade and the Plugin contract are the container's named crates"
     );
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
@@ -98,8 +127,8 @@ fn a_root_promptforge_crate_other_than_the_facade_depending_into_the_engine_cont
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("promptforge-extra depends on promptforge-lua:")
-            && violations[0].contains("only promptforge may depend into it"),
-        "no crate outside the container but the facade enters it: {violations:?}"
+            && violations[0].contains("only promptforge or promptforge-plugin may depend into it"),
+        "no crate outside the container but the named ones enters it: {violations:?}"
     );
 }
 

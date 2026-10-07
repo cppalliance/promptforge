@@ -12,7 +12,7 @@ const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
 /// A second key with the greeting's literal and another type.
 const GREETING_AS_NUMBER: ServiceKey<u32> = ServiceKey::new("acme/greeting");
 
-/// A static slice of ids, the shape `Plugin::needs` returns.
+/// A static slice of ids, the shape `Package::needs` holds.
 const NEEDS: &[ServiceId] = &[GREETING.id()];
 
 #[test]

@@ -14,21 +14,22 @@
 //!   `gateway-api-discovery`).
 //! - `harness`/`harness-*` crates must not depend on gateway, shared, or
 //!   workshop crates; outside their own family they may name only
-//!   `promptforge` and `workspace-hack`, which rules out `build-*` and
-//!   other unaffiliated crates.
+//!   `promptforge`, `promptforge-plugin`, and `workspace-hack`, which
+//!   rules out `build-*` and other unaffiliated crates.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
-//!   the family only through `promptforge`, and a crate outside the
-//!   Harness family on that family only through its three public crates,
-//!   `harness`, `harness-gateway-client`, and `harness-web`. The
-//!   `build-*` crates are bound too.
+//!   the family only through its two public crates, `promptforge` and
+//!   `promptforge-plugin`, and a crate outside the Harness family on that
+//!   family only through its three public crates, `harness`,
+//!   `harness-gateway-client`, and `harness-web`. The `build-*` crates
+//!   are bound too.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
-//!   container and the container's named outside exception (`promptforge`
-//!   for `crates/promptforge-internal/`, `harness` for
-//!   `crates/harness-internal/`; the gateway and workshop containers name
-//!   none) may depend on the crates it holds. Containers nest:
+//!   container and the container's named outside exceptions (`promptforge`
+//!   and `promptforge-plugin` for `crates/promptforge-internal/`, `harness`
+//!   for `crates/harness-internal/`; the gateway and workshop containers
+//!   name none) may depend on the crates it holds. Containers nest:
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
 //!   with `gateway-stt` as its public member - the one crate inside the
 //!   family outside the subsystem may name.
@@ -131,8 +132,9 @@ const DESKTOP: &str = "workshop";
 const SERVER_API: &str = "workshop-server-api";
 /// The server crate: the one workshop crate the facade may name.
 const SERVER: &str = "workshop-server";
-/// The promptforge-family crates outside crates may depend on directly.
-const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
+/// The promptforge-family crates outside crates may depend on directly:
+/// the Engine facade and the Plugin contract.
+const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge", "promptforge-plugin"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
@@ -169,7 +171,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         let inside = package
             .dir
             .starts_with(Path::new("crates").join(&container));
-        let named = container_named_exception(&container) == Some(package.package.as_str());
+        let named = container_named_exception(&container).contains(&package.package.as_str());
         // The build-* crates are meta tooling, not a product family: they
         // may depend into any container.
         let meta = family(&package.package) == Family::Build;
@@ -213,10 +215,10 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             Some("harness crates must not depend on shared crates")
         }
         (Family::Harness, Family::Build) => Some(
-            "harness crates must not depend on build-* crates; outside their family they may name only promptforge and workspace-hack",
+            "harness crates must not depend on build-* crates; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack",
         ),
         (Family::Harness, Family::Unaffiliated) if dep.package != WORKSPACE_HACK => Some(
-            "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge and workspace-hack",
+            "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack",
         ),
         (
             Family::Shared,
@@ -230,7 +232,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             && !PUBLIC_PROMPTFORGE.contains(&dep.package.as_str())
         {
             Some(
-                "outside crates may depend on the promptforge family only through promptforge"
+                "outside crates may depend on the promptforge family only through promptforge or promptforge-plugin"
                     .to_owned(),
             )
         } else if from != Family::Harness
@@ -282,13 +284,13 @@ fn parent_scope(container: &str) -> Option<&str> {
     container.rsplit_once('/').map(|(parent, _)| parent)
 }
 
-/// The one crate outside a container permitted to depend into it, when the
-/// container names one.
-fn container_named_exception(container: &str) -> Option<&'static str> {
+/// The crates outside a container permitted to depend into it; empty when
+/// the container names none.
+fn container_named_exception(container: &str) -> &'static [&'static str] {
     match container {
-        "promptforge-internal" => Some("promptforge"),
-        "harness-internal" => Some(HARNESS_FACADE),
-        _ => None,
+        "promptforge-internal" => &["promptforge", "promptforge-plugin"],
+        "harness-internal" => &[HARNESS_FACADE],
+        _ => &[],
     }
 }
 
@@ -301,10 +303,13 @@ fn container_public_member(container: &str) -> Option<&'static str> {
     }
 }
 
-/// The crate a container-privacy violation names as the legal way in: the
-/// named outside exception, or the public member when there is none.
-fn container_face(container: &str) -> Option<&'static str> {
-    container_named_exception(container).or_else(|| container_public_member(container))
+/// The crates a container-privacy violation names as the legal way in: the
+/// named outside exceptions, or the public member when there are none.
+fn container_face(container: &str) -> Option<String> {
+    match container_named_exception(container) {
+        [] => container_public_member(container).map(str::to_owned),
+        named => Some(named.join(" or ")),
+    }
 }
 
 /// Every workspace crate's package name, manifest directory, and dependency

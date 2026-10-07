@@ -1175,7 +1175,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-4>
 
-### Step 4: Add the `promptforge-plugin` contract crate
+### Step 4: Add the `promptforge-plugin` contract crate [completed]
 
 - Component: Plugin contract crate
 - Placement: fourth. `HostContext` and every `plugin-*` crate depend on it, and the Engine never does. It re-exports `ToolCallOrigin` from `promptforge-types`, where step 3 moved it. It ships alone so the contract surface can be reviewed before the Host migration.

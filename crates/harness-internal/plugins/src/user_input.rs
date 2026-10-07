@@ -95,8 +95,8 @@ use promptforge::tools::{ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolO
 
 use crate::input::{InputBroker, InputError};
 use crate::plugin::{Contribution, Plugin, PluginError, RunServices};
-use crate::service::{ServiceId, ServiceKey};
 use crate::tool::{Tool, ToolContext};
+use crate::{ServiceId, ServiceKey};
 
 #[cfg(test)]
 #[path = "user_input-tests.rs"]

@@ -12,6 +12,9 @@ async-trait.workspace = true
 # the tool vocabulary a Plugin contributes, and the filesystem access a
 # tool call borrows.
 promptforge.workspace = true
+# The Plugin contract: the Host service vocabulary this crate re-exports
+# until the Host moves onto the contract.
+promptforge-plugin.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true

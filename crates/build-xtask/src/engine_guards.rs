@@ -3,17 +3,17 @@
 //! whole workspace, as part of `cargo test -p build-xtask` and
 //! `cargo xtask tidy`.
 //!
-//! The Engine is the `promptforge` facade and every crate under the
-//! `crates/promptforge-internal/` container. The root crate is named, so
-//! a missing manifest is reported rather than skipped; the container's
-//! members are discovered, so a new Engine crate is covered the moment it
-//! lands.
+//! The Engine is the `promptforge` facade, the `promptforge-plugin`
+//! contract, and every crate under the `crates/promptforge-internal/`
+//! container. The root crates are named, so a missing manifest is
+//! reported rather than skipped; the container's members are discovered,
+//! so a new Engine crate is covered the moment it lands.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The Engine crates that live directly under `crates/`.
-const ENGINE_ROOT_CRATES: [&str; 1] = ["promptforge"];
+const ENGINE_ROOT_CRATES: [&str; 2] = ["promptforge", "promptforge-plugin"];
 
 /// The private container whose every member is an Engine crate.
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";

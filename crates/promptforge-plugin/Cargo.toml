@@ -1,0 +1,27 @@
+[package]
+name = "promptforge-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Every crate that defines a re-exported item, so a Plugin crate depends on
+# this one crate for the whole contract.
+[dependencies]
+promptforge-types.workspace = true
+promptforge-vfs.workspace = true
+# The JSON a Plugin's configuration and every tool call's arguments arrive as.
+serde_json.workspace = true
+workspace-hack.workspace = true
+
+[features]
+# `testing::TestCall`, which lends a `ToolContext` to a Plugin crate's own
+# tests; Plugin crates enable it from `[dev-dependencies]` only.
+test-support = []
+
+[build-dependencies]
+build-ceiling.workspace = true
+
+[lints]
+workspace = true
