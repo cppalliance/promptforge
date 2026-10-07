@@ -20,6 +20,8 @@ mod replay;
 mod segment;
 #[cfg(feature = "test-fixtures")]
 mod session;
+#[cfg(test)]
+mod warnings;
 
 #[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
@@ -43,6 +45,8 @@ pub use replay::{
 };
 #[cfg(feature = "test-fixtures")]
 pub use segment::segment_ranges;
+#[cfg(test)]
+pub(crate) use warnings::Warnings;
 
 /// A boxed crate-internal source surfaced through [`FixtureError`].
 #[cfg(feature = "test-fixtures")]

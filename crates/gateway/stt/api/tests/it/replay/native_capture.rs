@@ -261,6 +261,15 @@ impl Capture {
 
     async fn commit(mut self) -> (Script, ReplayOutcome) {
         let issued_ms = self.position_ms().max(self.clock_ms);
+        // The stream leaves no sample in the resampler, so the take has
+        // classified every whole frame before the commit hands it over.
+        self.script.speech_samples = self
+            .session
+            .speech_runs()
+            .expect("the take is uncommitted")
+            .into_iter()
+            .map(|run| [run.start, run.end])
+            .collect();
         let receipt = self.session.commit().expect("the native take commits");
         self.session
             .finish_finalization(receipt.item_id())
@@ -275,7 +284,6 @@ impl Capture {
             .to_owned();
         let decode = self.take_at_most_one(DecodeMode::Final, "the commit");
         self.record_final(issued_ms, decode, self.appended);
-        self.script.speech_samples = audio::speech_runs(&self.pcm);
         let outcome = ReplayOutcome {
             snapshots: self.snapshots,
             completed,

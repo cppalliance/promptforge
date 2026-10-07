@@ -138,6 +138,15 @@ impl Activity {
         }
         self.inner.publish();
     }
+
+    /// The hub this activity belongs to, which outlives it, so a producer
+    /// handed only an activity can begin later ones after it ends.
+    #[must_use]
+    pub fn hub(&self) -> ProgressHub {
+        ProgressHub {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl Drop for Activity {

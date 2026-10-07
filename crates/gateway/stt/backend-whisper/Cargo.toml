@@ -17,6 +17,7 @@ workspace-hack.workspace = true
 gateway-stt-engine = { workspace = true, features = ["test-fixtures"] }
 hound.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

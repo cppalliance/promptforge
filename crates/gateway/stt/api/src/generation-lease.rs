@@ -3,12 +3,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gateway_stt_engine::{DecodeMode, DecodeOutput, DecodeRequest, TranscribeError};
+use gateway_stt_engine::{
+    DecodeMode, DecodeOutput, DecodeRequest, FallbackDetector, TranscribeError,
+};
 
 use crate::admission::{AdmissionLease, JobLease, SessionEpoch};
-use crate::artifacts::SileroModel;
+use crate::take::FallbackReport;
 
-use super::snapshot::SpeechRuntime;
+use super::snapshot::{Silero, SpeechRuntime};
 
 /// One explicitly counted request or session borrowing a complete runtime.
 #[derive(Debug)]
@@ -50,14 +52,31 @@ impl GenerationLease {
         &self.runtime().guidance
     }
 
-    /// The verified Silero model path or the cause there is none, which the
-    /// load already reported; `None` for a backend that provisions no model.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no take selects a Silero detector yet")
-    )]
-    pub(crate) fn silero_model(&self) -> Option<&SileroModel> {
-        self.runtime().silero.as_ref()
+    /// The detector a new take classifies with, Silero when the generation
+    /// has a verified model that loads and loudness otherwise, and the
+    /// report its later fall back goes through. A load failure is reported
+    /// here, once for the take; a missing model was reported by the
+    /// generation's load.
+    pub(crate) fn speech_detector(&self) -> (FallbackDetector, FallbackReport) {
+        let Some(Silero {
+            model: Ok(model),
+            source,
+            progress,
+        }) = &self.runtime().silero
+        else {
+            return (FallbackDetector::energy(), FallbackReport::default());
+        };
+        let report = FallbackReport::new(progress.clone());
+        match source.load(model) {
+            Ok(primary) => (FallbackDetector::new(primary), report),
+            Err(error) => {
+                report.report(
+                    "Silero speech detector did not load; this take detects speech by loudness",
+                    &error,
+                );
+                (FallbackDetector::energy(), report)
+            }
+        }
     }
 
     pub(super) fn select(&self, name: &str) -> Option<DecodeMode> {

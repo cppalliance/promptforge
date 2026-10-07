@@ -440,7 +440,7 @@ flowchart TD
 
 <step-7>
 
-### Step 7: Silero detector per take with loudness fallback
+### Step 7: Silero detector per take with loudness fallback [completed]
 
 - Component: Silero detection
 - Piece: detector selection

@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 
 use gateway_config::{Config, SttRole, WhisperBackend};
 use gateway_local::artifacts::ArtifactStore;
-use gateway_progress::Activity;
+use gateway_progress::{Activity, ProgressHub};
 use tokio_util::sync::CancellationToken;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
@@ -36,6 +36,9 @@ pub(crate) struct PreparedGeneration {
     /// lives for the process, while the activity ends with the load, so a
     /// later decoder rebuild finds nothing to report into.
     pub(crate) progress: Option<Weak<Activity>>,
+    /// The hub the load's activity reports into, which a take reports its
+    /// fall back to loudness through long after the load ends.
+    pub(crate) hub: Option<Arc<ProgressHub>>,
 }
 
 #[derive(Debug, Default)]
@@ -126,6 +129,7 @@ fn prepare_impl(
             window_seconds: capture.window_seconds(),
             interval_ms: capture.interval_ms(),
             progress: progress.map(Arc::downgrade),
+            hub: progress.map(|activity| Arc::new(activity.hub())),
         }),
     })
 }

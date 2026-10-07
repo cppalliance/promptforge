@@ -63,6 +63,12 @@ impl WhisperModelFactory {
     pub fn gpu_available(&self) -> bool {
         self.gpu_available
     }
+
+    /// The loaded runtime, which also hosts the Silero speech detector.
+    #[must_use]
+    pub fn library(&self) -> &WhisperLibrary {
+        &self.library
+    }
 }
 
 impl ModelFactory for WhisperModelFactory {

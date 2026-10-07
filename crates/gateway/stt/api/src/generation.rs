@@ -23,7 +23,9 @@ mod snapshot;
 #[cfg(feature = "test-fixtures")]
 pub(crate) use lease::GenerationJob;
 pub(crate) use lease::GenerationLease;
-use snapshot::{Backend, GenerationSpec, SpeechRuntime};
+#[cfg(test)]
+pub(crate) use snapshot::SileroSource;
+use snapshot::{Backend, GenerationSpec, SharedFactory, SpeechRuntime};
 
 #[derive(Debug)]
 struct Shared {
@@ -110,9 +112,30 @@ impl GenerationState {
         if cancel.is_cancelled() {
             return Err(SpeechError::InitialLoadCancelled);
         }
-        let runtime =
-            GenerationSpec::scripted_inferred(snapshot::SharedFactory(factory), policy).build()?;
+        let runtime = GenerationSpec::scripted_inferred(SharedFactory(factory), policy).build()?;
         self.publish_initial(Some(runtime), cancel)
+    }
+
+    /// Publishes scripted interim workers whose takes load their Silero
+    /// detector from `model` through `source` and report falling back to
+    /// loudness through `progress`.
+    #[cfg(test)]
+    pub(crate) fn publish_scripted_silero(
+        &self,
+        model: crate::artifacts::SileroModel,
+        source: Arc<dyn SileroSource>,
+        progress: Option<Arc<gateway_progress::ProgressHub>>,
+    ) {
+        use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+        let policy = EnginePolicy::new(15, 500, false).expect("the scripted policy is valid");
+        let factory = ScriptedModelFactory::new(ScriptedDecoder::new());
+        let runtime = GenerationSpec::scripted_inferred(factory, policy)
+            .with_silero(model, source, progress)
+            .build()
+            .expect("the scripted runtime builds");
+        self.publish_initial(Some(runtime), &CancellationToken::new())
+            .expect("the scripted runtime publishes");
     }
 
     fn claim_initial_load(&self) -> Result<(), SpeechError> {
@@ -267,7 +290,7 @@ fn whisper_spec(prepared: PreparedGeneration) -> Result<GenerationSpec, SpeechEr
         prepared.window_seconds,
         prepared.progress,
     );
-    let factory = WhisperModelFactory::new(backend_config).map_err(SpeechError::Engine)?;
+    let factory = Arc::new(WhisperModelFactory::new(backend_config).map_err(SpeechError::Engine)?);
     let policy = EnginePolicy::new(
         prepared.window_seconds,
         prepared.interval_ms,
@@ -276,48 +299,10 @@ fn whisper_spec(prepared: PreparedGeneration) -> Result<GenerationSpec, SpeechEr
     .map_err(SpeechError::Engine)?;
     Ok(GenerationSpec::new(
         Backend::Whisper,
-        factory,
+        SharedFactory(factory.clone()),
         policy,
         prepared.names,
         prepared.guidance,
     )
-    .with_silero(prepared.silero))
-}
-
-#[cfg(all(test, feature = "test-fixtures"))]
-mod tests {
-    use std::path::PathBuf;
-
-    use gateway_stt_engine::EnginePolicy;
-    use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
-    use tokio_util::sync::CancellationToken;
-
-    use super::GenerationState;
-    use super::snapshot::GenerationSpec;
-
-    #[test]
-    fn the_lease_exposes_the_generations_verified_silero_path() {
-        let path = PathBuf::from("ggml-silero.bin");
-        let policy = EnginePolicy::new(15, 500, false).expect("policy is valid");
-        let runtime = GenerationSpec::scripted_inferred(
-            ScriptedModelFactory::new(ScriptedDecoder::new()),
-            policy,
-        )
-        .with_silero(Ok(path.clone()))
-        .build()
-        .expect("runtime builds");
-        let state = GenerationState::default();
-        state
-            .publish_initial(Some(runtime), &CancellationToken::new())
-            .expect("runtime publishes");
-
-        let lease = state.active().expect("the published runtime admits");
-
-        assert_eq!(
-            lease.silero_model().and_then(|model| model.as_ref().ok()),
-            Some(&path)
-        );
-        drop(lease);
-        state.shutdown();
-    }
+    .with_silero(prepared.silero, factory, prepared.hub))
 }

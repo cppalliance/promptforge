@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use gateway_stt_engine::{EnginePolicy, FallbackDetector};
+use gateway_stt_engine::{DetectorError, EnginePolicy, FallbackDetector};
 
 mod boundary;
 mod endpoint;
@@ -51,6 +51,9 @@ pub(crate) struct Segmenter {
     sentence_end: Option<u64>,
     /// End of the latest classified frame the detector read as speech.
     speech_end: u64,
+    /// Every speech run classified, oldest first.
+    #[cfg(any(test, feature = "test-fixtures"))]
+    speech_runs: Vec<Range<u64>>,
 }
 
 /// What the detector heard before some sample: where its last speech frame
@@ -87,6 +90,8 @@ impl Segmenter {
             forced_predecessor: None,
             sentence_end: None,
             speech_end: 0,
+            #[cfg(any(test, feature = "test-fixtures"))]
+            speech_runs: Vec::new(),
         }
     }
 
@@ -166,7 +171,23 @@ impl Segmenter {
                     _ => self.queued.push_back(start..self.classified),
                 }
             }
+            #[cfg(any(test, feature = "test-fixtures"))]
+            match self.speech_runs.last_mut() {
+                Some(run) if run.end == start => run.end = self.classified,
+                _ => self.speech_runs.push(start..self.classified),
+            }
         }
+    }
+
+    /// Hands out the detector's first failure once, for reporting.
+    pub(crate) fn take_fault(&mut self) -> Option<DetectorError> {
+        self.detector.take_fault()
+    }
+
+    /// Every speech run classified so far, on the frame grid from sample 0.
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(crate) fn speech_runs(&self) -> &[Range<u64>] {
+        &self.speech_runs
     }
 
     /// Applies the endpoint rules to the queued decisions and returns the

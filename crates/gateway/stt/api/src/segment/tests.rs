@@ -436,6 +436,26 @@ fn speech_before_reads_classified_speech_without_a_poll() {
 }
 
 #[test]
+fn the_speech_record_holds_every_classified_speech_frame_merged_into_runs() {
+    let (mut segmenter, _) = scripted(&[(600, 1_100), (2_100, 2_200)]);
+    let mut buffer = vec![0.0; 1_100];
+    segmenter.classify(&buffer, 0, false);
+    assert_eq!(
+        segmenter.speech_runs(),
+        std::slice::from_ref(&(FRAME..2 * FRAME)),
+        "the first call classifies frames 0 and 1, so the run straddles the calls"
+    );
+    buffer.resize(5 * FRAME_SAMPLES + 100, 0.0);
+    segmenter.classify(&buffer, 0, false);
+    assert_eq!(
+        segmenter.speech_runs(),
+        [FRAME..3 * FRAME, 4 * FRAME..5 * FRAME],
+        "speech inside a frame records that whole frame, adjacent frames merge across calls, \
+         and the partial last frame is not yet classified"
+    );
+}
+
+#[test]
 fn a_take_without_a_final_pipeline_queues_no_decisions() {
     let audio = vec![0.0; 84_000];
     let (mut queued, _) = scripted(&[(0, 24_000)]);

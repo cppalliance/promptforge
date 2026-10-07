@@ -1,10 +1,15 @@
 //! The one complete engine runtime and its immutable published facts.
 
+use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gateway_progress::ProgressHub;
+use gateway_stt_backend_whisper::{SileroDetector, WhisperModelFactory};
 use gateway_stt_engine::{
-    DecodeMode, DecodeOutput, DecodeRequest, EnginePolicy, ModelFactory, SttEngine, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, DetectorError, EnginePolicy, ModelFactory,
+    SpeechDetector, SttEngine, TranscribeError,
 };
 
 use crate::admission::AdmissionGate;
@@ -31,6 +36,27 @@ impl ModelFactory for SharedFactory {
     }
 }
 
+/// Loads the Silero detector each take classifies with.
+pub(crate) trait SileroSource: fmt::Debug + Send + Sync {
+    /// Loads a detector from the digest-verified model at `model`.
+    fn load(&self, model: &Path) -> Result<Box<dyn SpeechDetector>, DetectorError>;
+}
+
+impl SileroSource for WhisperModelFactory {
+    fn load(&self, model: &Path) -> Result<Box<dyn SpeechDetector>, DetectorError> {
+        Ok(Box::new(SileroDetector::new(self.library(), model)?))
+    }
+}
+
+/// A generation's Silero model, the source each take loads it through, and
+/// the hub a take reports its fall back to loudness through.
+#[derive(Debug, Clone)]
+pub(super) struct Silero {
+    pub(super) model: SileroModel,
+    pub(super) source: Arc<dyn SileroSource>,
+    pub(super) progress: Option<Arc<ProgressHub>>,
+}
+
 #[derive(Debug)]
 pub(super) struct GenerationSpec {
     backend: Backend,
@@ -38,7 +64,7 @@ pub(super) struct GenerationSpec {
     policy: EnginePolicy,
     names: ModelNames,
     guidance: Vec<String>,
-    silero: Option<SileroModel>,
+    silero: Option<Silero>,
     infer_scripted_final: bool,
 }
 
@@ -61,8 +87,17 @@ impl GenerationSpec {
         }
     }
 
-    pub(super) fn with_silero(mut self, silero: SileroModel) -> Self {
-        self.silero = Some(silero);
+    pub(super) fn with_silero(
+        mut self,
+        model: SileroModel,
+        source: Arc<dyn SileroSource>,
+        progress: Option<Arc<ProgressHub>>,
+    ) -> Self {
+        self.silero = Some(Silero {
+            model,
+            source,
+            progress,
+        });
         self
     }
 
@@ -108,7 +143,7 @@ pub(super) struct SpeechRuntime {
     names: ModelNames,
     pub(super) guidance: Arc<[String]>,
     /// `None` for a backend that provisions no Silero model.
-    pub(super) silero: Option<SileroModel>,
+    pub(super) silero: Option<Silero>,
     pub(super) admission: Arc<AdmissionGate>,
 }
 

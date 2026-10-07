@@ -75,7 +75,7 @@ fn chain(error: &dyn std::error::Error) -> String {
 mod tests {
     use std::fmt::Write as _;
     use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use gateway_local::LocalError;
     use gateway_progress::{Activity, ProgressHub};
@@ -85,46 +85,7 @@ mod tests {
     use super::super::tests::selected;
     use super::super::{PreparedGeneration, SpeechError, prepare_impl};
     use super::SileroPin;
-
-    /// The message of every WARN-level event.
-    #[derive(Clone, Default)]
-    struct Warnings(Arc<Mutex<Vec<String>>>);
-
-    struct Message(String);
-
-    impl tracing::field::Visit for Message {
-        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            if field.name() == "message" {
-                self.0 = format!("{value:?}");
-            }
-        }
-    }
-
-    impl tracing::Subscriber for Warnings {
-        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-            true
-        }
-
-        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-
-        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-
-        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-
-        fn event(&self, event: &tracing::Event<'_>) {
-            if *event.metadata().level() == tracing::Level::WARN {
-                let mut message = Message(String::new());
-                event.record(&mut message);
-                self.0.lock().expect("warning capture lock").push(message.0);
-            }
-        }
-
-        fn enter(&self, _: &tracing::span::Id) {}
-
-        fn exit(&self, _: &tracing::span::Id) {}
-    }
+    use crate::test_fixtures::Warnings;
 
     fn hex_sha256(bytes: &[u8]) -> String {
         let mut hex = String::with_capacity(64);
@@ -175,8 +136,7 @@ mod tests {
             .silero
             .expect_err("an unusable Silero model leaves no path");
         let text = hub.current().text;
-        let warnings = std::mem::take(&mut *warnings.0.lock().expect("warning capture lock"));
-        (cause, text, warnings)
+        (cause, text, warnings.take())
     }
 
     #[test]

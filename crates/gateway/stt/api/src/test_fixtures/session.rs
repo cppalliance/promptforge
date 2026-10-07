@@ -57,6 +57,12 @@ impl RealtimeSessionFixture {
         self.session.input().map(hour::take_metrics)
     }
 
+    /// Returns every speech run the current take's detector has heard, as
+    /// half-open 16 kHz sample ranges on the segmenter's frame grid.
+    pub fn speech_runs(&self) -> Option<Vec<std::ops::Range<u64>>> {
+        self.session.input().map(|input| input.take().speech_runs())
+    }
+
     /// Returns the current input's resampled audio snapshot.
     pub fn resampled_audio(&self) -> Option<Vec<f32>> {
         self.session

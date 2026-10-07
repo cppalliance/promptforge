@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use gateway_stt_engine::{FallbackDetector, TranscribeError};
+use gateway_stt_engine::{DetectorError, FallbackDetector, TranscribeError};
 
 use super::agreement::{
     final_transcript_within_limit, projected_prefix_end, range_guided_suffix_prefix_start,
@@ -116,7 +116,6 @@ impl TakeState {
         )
     }
 
-    #[cfg(any(test, feature = "test-fixtures"))]
     pub(super) fn with_detector(detector: FallbackDetector) -> Self {
         Self::new(RetainedPcmBudget::default(), detector)
     }
@@ -126,10 +125,14 @@ impl TakeState {
     }
 
     /// Classifies the audio appended since the last call, queueing the
-    /// decisions for segment closing only when `closes_segments`.
-    pub(super) fn classify(&self, closes_segments: bool) {
+    /// decisions for segment closing only when `closes_segments`. Returns
+    /// the detector's first failure once, for reporting; classification
+    /// continues by loudness.
+    pub(super) fn classify(&self, closes_segments: bool) -> Option<DetectorError> {
         let buffer = Self::lock(&self.buffer);
-        Self::lock(&self.segmenter).classify(buffer.samples(), buffer.origin(), closes_segments);
+        let mut segmenter = Self::lock(&self.segmenter);
+        segmenter.classify(buffer.samples(), buffer.origin(), closes_segments);
+        segmenter.take_fault()
     }
 
     pub(super) fn finalized(&self) -> String {
