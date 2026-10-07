@@ -1,9 +1,10 @@
 // Unit test for the update view (src/parts/chrome/update-view.ts): the shared toast
 // stack fires once when an update becomes available, a re-render in the
-// same phase does not re-toast, a failed install toasts the error, and
-// the install overlay shows the shared inline progress bar. Bundles the
-// view with esbuild and drives it against jsdom with a stub-backend
-// UpdateService and a recording toast stub.
+// same phase does not re-toast, a failed install toasts the error, a
+// failed startup check stays quiet while a failed check the user asks for
+// toasts, and the install overlay shows the shared inline progress bar.
+// Bundles the view with esbuild and drives it against jsdom with a
+// stub-backend UpdateService and a recording toast stub.
 // Run: node test/update-view.mjs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,6 +158,59 @@ await assertNoLeaks(lifecycle, async () => {
   );
   failView.dispose();
   failService.dispose();
+
+  // A failed startup check stays quiet; the same failure from a check the
+  // user asks for toasts.
+  const quietToasts = toastStub();
+  const quietService = new UpdateService({
+    ...backendWith(null),
+    check: async () => {
+      throw new Error("Could not fetch a valid release JSON from the remote");
+    },
+  });
+  const quietView = new UpdateView(quietService, quietToasts);
+  quietService.startAutoCheck(0);
+  await waitForPhase(quietService, "error");
+  check("the startup check reached the error phase", quietService.snapshot.phase === "error");
+  check("a failed startup check shows no toast", quietToasts.shown.length === 0);
+  await quietService.checkNow();
+  check(
+    "a failed check the user asks for toasts the error",
+    quietToasts.shown.length === 1 &&
+      quietToasts.shown[0]?.kind === "error" &&
+      quietToasts.shown[0]?.message ===
+        "Update failed: Could not fetch a valid release JSON from the remote",
+  );
+  quietView.dispose();
+  quietService.dispose();
+
+  // An install started from the startup check's banner is the user's
+  // request, so its failure still toasts.
+  const installToasts = toastStub();
+  const installService = new UpdateService(
+    backendWith({
+      currentVersion: "0.2.0",
+      version: "0.3.0",
+      body: "",
+      async downloadAndInstall() {
+        throw new Error("disk full");
+      },
+      async close() {},
+    }),
+  );
+  const installView = new UpdateView(installService, installToasts);
+  installService.startAutoCheck(0);
+  await waitForPhase(installService, "available");
+  updateNowButton()?.click();
+  await waitForPhase(installService, "error");
+  check(
+    "a failed install after the startup check toasts the error",
+    installToasts.shown.length === 2 &&
+      installToasts.shown[1]?.kind === "error" &&
+      installToasts.shown[1]?.message === "Update failed: disk full",
+  );
+  installView.dispose();
+  installService.dispose();
 });
 
 if (failures.length > 0) {

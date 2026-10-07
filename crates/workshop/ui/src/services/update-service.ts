@@ -32,6 +32,8 @@ export interface UpdateSnapshot {
   readonly total: number | null;
   readonly error: string;
   readonly log: readonly string[];
+  /** The startup check produced this state, not a check or install the user asked for. */
+  readonly background: boolean;
 }
 
 interface DesktopUpdate {
@@ -69,6 +71,7 @@ const EMPTY: UpdateSnapshot = {
   total: null,
   error: "",
   log: [],
+  background: false,
 };
 
 function oneLine(text: string | undefined): string {
@@ -99,11 +102,15 @@ export class UpdateService extends Disposable {
     if (!this.backend.desktop) {
       return;
     }
-    const timer = window.setTimeout(() => void this.checkNow(), delayMs);
+    const timer = window.setTimeout(() => void this.checkOnce(true), delayMs);
     this._register(toDisposable(() => window.clearTimeout(timer)));
   }
 
   async checkNow(): Promise<void> {
+    return this.checkOnce(false);
+  }
+
+  private async checkOnce(background: boolean): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -114,7 +121,7 @@ export class UpdateService extends Disposable {
     if (this.checking !== null) {
       return this.checking;
     }
-    this.checking = this.runCheck();
+    this.checking = this.runCheck(background);
     try {
       await this.checking;
     } finally {
@@ -146,6 +153,7 @@ export class UpdateService extends Disposable {
       total: null,
       error: "",
       log: [...this.state.log, `Downloading PromptForge ${update.version}`],
+      background: false,
     });
     try {
       await update.downloadAndInstall((event) => {
@@ -188,8 +196,8 @@ export class UpdateService extends Disposable {
     super.dispose();
   }
 
-  private async runCheck(): Promise<void> {
-    this.publish({ phase: "checking", error: "" });
+  private async runCheck(background: boolean): Promise<void> {
+    this.publish({ phase: "checking", error: "", background });
     try {
       const currentVersion = await this.backend.currentVersion();
       if (!(await this.backend.supported())) {

@@ -45,7 +45,10 @@ export class UpdateView extends Disposable {
     this.renderScreen(snapshot);
   }
 
-  /** Toasts the phase transitions a user must notice without watching. */
+  /**
+   * Toasts the phase transitions a user must notice without watching. A
+   * failed startup check stays quiet; the About dialog offers the retry.
+   */
   private notify(snapshot: UpdateSnapshot): void {
     if (snapshot.phase === this.notifiedPhase) {
       return;
@@ -53,7 +56,7 @@ export class UpdateView extends Disposable {
     this.notifiedPhase = snapshot.phase;
     if (snapshot.phase === "available") {
       this.toasts.show(`PromptForge ${snapshot.version} is available`, "info");
-    } else if (snapshot.phase === "error") {
+    } else if (snapshot.phase === "error" && !snapshot.background) {
       this.toasts.show(`Update failed: ${snapshot.error}`, "error");
     }
   }
