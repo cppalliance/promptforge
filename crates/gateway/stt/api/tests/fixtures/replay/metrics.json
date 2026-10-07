@@ -1,18 +1,18 @@
 {
   "jfk-native": {
-    "agreed_shrink_events": 5,
-    "changed_pairs": 13,
-    "changed_words": 43,
-    "commit_lag_ms": 810.9545454545455,
+    "agreed_shrink_events": 0,
+    "changed_pairs": 12,
+    "changed_words": 41,
+    "commit_lag_ms": 743.5,
     "completed_words": 22,
-    "lag_sum_ms": 17841.0,
+    "lag_sum_ms": 16357.0,
     "lag_words": 22,
-    "latency_sum_ms": 18499.0,
+    "latency_sum_ms": 19998.0,
     "latency_words": 22,
     "pairs": 21,
-    "partial_latency_ms": 840.8636363636364,
-    "upsr": 0.6190476190476191,
-    "upwr": 1.9545454545454546
+    "partial_latency_ms": 909.0,
+    "upsr": 0.5714285714285714,
+    "upwr": 1.8636363636363635
   },
   "native": {
     "gpu_available": true,
@@ -22,18 +22,18 @@
     "window_seconds": 15
   },
   "scripted-agreed-shrink": {
-    "agreed_shrink_events": 2,
-    "changed_pairs": 3,
+    "agreed_shrink_events": 0,
+    "changed_pairs": 2,
     "changed_words": 4,
-    "commit_lag_ms": 550.0,
+    "commit_lag_ms": 500.0,
     "completed_words": 5,
-    "lag_sum_ms": 2200.0,
+    "lag_sum_ms": 2000.0,
     "lag_words": 4,
     "latency_sum_ms": -650.0,
     "latency_words": 5,
     "pairs": 6,
     "partial_latency_ms": -130.0,
-    "upsr": 0.5,
+    "upsr": 0.3333333333333333,
     "upwr": 0.8
   },
   "scripted-final-word": {
@@ -52,50 +52,50 @@
     "upwr": 0.5
   },
   "scripted-punctuation-case": {
-    "agreed_shrink_events": 1,
-    "changed_pairs": 6,
-    "changed_words": 18,
-    "commit_lag_ms": 1375.0,
+    "agreed_shrink_events": 0,
+    "changed_pairs": 3,
+    "changed_words": 4,
+    "commit_lag_ms": 500.0,
     "completed_words": 9,
-    "lag_sum_ms": 11000.0,
+    "lag_sum_ms": 4000.0,
     "lag_words": 8,
     "latency_sum_ms": 350.0000000000002,
     "latency_words": 9,
     "pairs": 7,
     "partial_latency_ms": 38.888888888888914,
-    "upsr": 0.8571428571428571,
-    "upwr": 2.0
+    "upsr": 0.42857142857142855,
+    "upwr": 0.4444444444444444
   },
   "scripted-sliding-window": {
-    "agreed_shrink_events": 1,
-    "changed_pairs": 3,
-    "changed_words": 20,
-    "commit_lag_ms": 1185.7142857142858,
+    "agreed_shrink_events": 0,
+    "changed_pairs": 2,
+    "changed_words": 15,
+    "commit_lag_ms": 971.4285714285714,
     "completed_words": 15,
-    "lag_sum_ms": 16600.0,
+    "lag_sum_ms": 13600.0,
     "lag_words": 14,
     "latency_sum_ms": 2250.0,
     "latency_words": 15,
     "pairs": 9,
     "partial_latency_ms": 150.0,
-    "upsr": 0.3333333333333333,
-    "upwr": 1.3333333333333333
+    "upsr": 0.2222222222222222,
+    "upwr": 1.0
   },
   "ui": {
     "jfk-native": {
-      "changed_pairs": 13,
-      "changed_words": 43,
+      "changed_pairs": 12,
+      "changed_words": 41,
       "completed_words": 22,
       "pairs": 21,
-      "upsr": 0.6190476190476191,
-      "upwr": 1.9545454545454546
+      "upsr": 0.5714285714285714,
+      "upwr": 1.8636363636363635
     },
     "scripted-agreed-shrink": {
-      "changed_pairs": 3,
+      "changed_pairs": 2,
       "changed_words": 4,
       "completed_words": 5,
       "pairs": 6,
-      "upsr": 0.5,
+      "upsr": 0.3333333333333333,
       "upwr": 0.8
     },
     "scripted-final-word": {
@@ -107,20 +107,20 @@
       "upwr": 0.5
     },
     "scripted-punctuation-case": {
-      "changed_pairs": 6,
-      "changed_words": 18,
+      "changed_pairs": 3,
+      "changed_words": 4,
       "completed_words": 9,
       "pairs": 7,
-      "upsr": 0.8571428571428571,
-      "upwr": 2
+      "upsr": 0.42857142857142855,
+      "upwr": 0.4444444444444444
     },
     "scripted-sliding-window": {
-      "changed_pairs": 3,
-      "changed_words": 20,
+      "changed_pairs": 2,
+      "changed_words": 15,
       "completed_words": 15,
       "pairs": 9,
-      "upsr": 0.3333333333333333,
-      "upwr": 1.3333333333333333
+      "upsr": 0.2222222222222222,
+      "upwr": 1
     }
   }
 }

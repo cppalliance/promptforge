@@ -78,12 +78,12 @@ fn an_unchanged_snapshot_keeps_the_current_revision() {
         Some(1)
     );
     assert_eq!(
-        accept(&mut session, epoch, 0..16_000, "alpha beta"),
+        accept(&mut session, epoch, 0..24_000, "alpha beta"),
         Some(2),
-        "agreement moves the text from tentative to agreed"
+        "agreement half a second later moves the text from tentative to agreed"
     );
     assert_eq!(
-        accept(&mut session, epoch, 0..16_000, "alpha beta"),
+        accept(&mut session, epoch, 0..32_000, "alpha beta"),
         Some(2)
     );
 }

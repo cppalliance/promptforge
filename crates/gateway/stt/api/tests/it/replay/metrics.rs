@@ -116,10 +116,10 @@ pub(super) fn threshold_violations(
                 metrics.upwr, base.upwr
             ));
         }
-        if metrics.agreed_shrink_events > base.agreed_shrink_events {
+        if metrics.agreed_shrink_events > 0 {
             violations.push(format!(
-                "{name} has {} agreed-shrink events, above its baseline {}",
-                metrics.agreed_shrink_events, base.agreed_shrink_events
+                "{name} has {} agreed-shrink events, expected 0 within a window",
+                metrics.agreed_shrink_events
             ));
         }
     }
@@ -177,6 +177,7 @@ fn agreed_shrink_events(snapshots: &[ReplaySnapshot]) -> usize {
         .windows(2)
         .filter(|pair| {
             pair[1].finalized == pair[0].finalized
+                && pair[1].audio_start_ms == pair[0].audio_start_ms
                 && !words(&pair[1].agreed).starts_with(&words(&pair[0].agreed))
         })
         .count()
@@ -353,6 +354,25 @@ fn agreed_shrink_counts_only_snapshots_whose_finalized_text_is_unchanged() {
     assert_eq!(metrics.agreed_shrink_events, 2);
 }
 
+#[test]
+fn agreed_shrink_counts_only_snapshots_whose_window_start_is_unchanged() {
+    let handoff = |at_ms, audio_start_ms, agreed| ReplaySnapshot {
+        audio_start_ms,
+        ..snapshot(at_ms, "", agreed, "")
+    };
+    let snapshots = [
+        handoff(9_000, 0, "ask not what your"),
+        handoff(10_000, 5_000, "what your"),
+        handoff(11_000, 5_000, "what"),
+    ];
+    let metrics = compute(&snapshots, "ask not what your country", &[]);
+
+    assert_eq!(
+        metrics.agreed_shrink_events, 1,
+        "a window handoff is the final winning; only the in-window shrink counts"
+    );
+}
+
 fn counted(changed: usize, completed: usize, latency: f64, lag: f64, shrink: usize) -> Metrics {
     Metrics {
         changed_words: changed,
@@ -367,8 +387,8 @@ fn counted(changed: usize, completed: usize, latency: f64, lag: f64, shrink: usi
 }
 
 #[test]
-fn thresholds_flag_upwr_and_shrink_above_baseline_and_latency_beyond_a_tenth() {
-    let baseline = BTreeMap::from([("scripted-a".to_owned(), counted(2, 10, 1_000.0, 500.0, 1))]);
+fn thresholds_flag_upwr_above_baseline_any_shrink_and_latency_beyond_a_tenth() {
+    let baseline = BTreeMap::from([("scripted-a".to_owned(), counted(2, 10, 1_000.0, 500.0, 5))]);
     let check = |metrics: Metrics| {
         threshold_violations(
             &BTreeMap::from([("scripted-a".to_owned(), metrics)]),
@@ -376,30 +396,30 @@ fn thresholds_flag_upwr_and_shrink_above_baseline_and_latency_beyond_a_tenth() {
         )
     };
 
-    assert!(check(counted(2, 10, 1_000.0, 500.0, 1)).is_empty());
+    assert!(check(counted(2, 10, 1_000.0, 500.0, 0)).is_empty());
     assert!(
         check(counted(1, 10, 1_100.0, 550.0, 0)).is_empty(),
         "ten percent above the latency and lag baselines still passes"
     );
     assert_eq!(
-        check(counted(3, 10, 1_000.0, 500.0, 1)).len(),
+        check(counted(3, 10, 1_000.0, 500.0, 0)).len(),
         1,
         "UPWR rises"
     );
-    assert_eq!(check(counted(2, 10, 1_101.0, 500.0, 1)).len(), 1, "latency");
+    assert_eq!(check(counted(2, 10, 1_101.0, 500.0, 0)).len(), 1, "latency");
     assert_eq!(
-        check(counted(2, 10, 1_000.0, 551.0, 1)).len(),
+        check(counted(2, 10, 1_000.0, 551.0, 0)).len(),
         1,
         "commit lag"
     );
     assert_eq!(
-        check(counted(2, 10, 1_000.0, 500.0, 2)).len(),
+        check(counted(2, 10, 1_000.0, 500.0, 1)).len(),
         1,
-        "shrink rises"
+        "one shrink fails even below the baseline's five"
     );
     assert_eq!(
         threshold_violations(
-            &BTreeMap::from([("scripted-b".to_owned(), counted(2, 10, 1_000.0, 500.0, 1))]),
+            &BTreeMap::from([("scripted-b".to_owned(), counted(2, 10, 1_000.0, 500.0, 0))]),
             &baseline,
         )
         .len(),

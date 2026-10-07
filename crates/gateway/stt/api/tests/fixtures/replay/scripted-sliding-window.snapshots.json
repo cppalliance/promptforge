@@ -35,8 +35,8 @@
       "revision": 4,
       "transcript": "And so my fellow Americans, ask not",
       "finalized": "",
-      "agreed": "And so my fellow",
-      "tentative": " Americans, ask not",
+      "agreed": "And so my fellow Americans,",
+      "tentative": " ask not",
       "audio_start_ms": 0,
       "audio_end_ms": 4000
     },
@@ -53,19 +53,19 @@
     {
       "at_ms": 6150,
       "revision": 6,
-      "transcript": "And so my fellow Americans ask not what your country can",
+      "transcript": "And so my fellow Americans, ask not what your country can",
       "finalized": "",
-      "agreed": "And so my fellow",
-      "tentative": " Americans ask not what your country can",
+      "agreed": "And so my fellow Americans, ask not what your",
+      "tentative": " country can",
       "audio_start_ms": 2000,
       "audio_end_ms": 6000
     },
     {
       "at_ms": 7150,
       "revision": 7,
-      "transcript": "And so my fellow Americans ask not what your country can do for",
+      "transcript": "And so my fellow Americans, ask not what your country can do for",
       "finalized": "",
-      "agreed": "And so my fellow Americans ask not what your country can",
+      "agreed": "And so my fellow Americans, ask not what your country can",
       "tentative": " do for",
       "audio_start_ms": 3000,
       "audio_end_ms": 7000
@@ -73,9 +73,9 @@
     {
       "at_ms": 8150,
       "revision": 8,
-      "transcript": "And so my fellow Americans ask not what your country can do for you,",
+      "transcript": "And so my fellow Americans, ask not what your country can do for you,",
       "finalized": "",
-      "agreed": "And so my fellow Americans ask not what your country can do for",
+      "agreed": "And so my fellow Americans, ask not what your country can do for",
       "tentative": " you,",
       "audio_start_ms": 4000,
       "audio_end_ms": 8000
@@ -83,9 +83,9 @@
     {
       "at_ms": 8750,
       "revision": 9,
-      "transcript": "And so my fellow Americans ask not what your country can do for you, ask",
+      "transcript": "And so my fellow Americans, ask not what your country can do for you, ask",
       "finalized": "",
-      "agreed": "And so my fellow Americans ask not what your country can do for you,",
+      "agreed": "And so my fellow Americans, ask not what your country can do for you,",
       "tentative": " ask",
       "audio_start_ms": 4600,
       "audio_end_ms": 8600

@@ -4,7 +4,7 @@ use super::{MAX_PENDING_ACCEPTED_HYPOTHESES, WholeWindowState};
 use crate::take::final_outcome::{FinalRangeOutcome, SkipReason, assemble_completion};
 
 #[test]
-fn whole_window_revision_replaces_a_promoted_leading_phrase() {
+fn whole_window_revision_replaces_an_unpromoted_leading_phrase() {
     let mut state = WholeWindowState::default();
     state.next("", 0, 0, 0, 8_000, "Why is it");
     state.next("", 0, 0, 0, 9_600, "Why is it");
@@ -17,29 +17,29 @@ fn whole_window_revision_replaces_a_promoted_leading_phrase() {
         (
             "Why is this".to_owned(),
             String::new(),
-            "Why is".to_owned(),
-            " this".to_owned(),
+            String::new(),
+            "Why is this".to_owned(),
         )
     );
 }
 
 #[test]
-fn characterize_agreed_text_shrinks_when_a_later_hypothesis_revises_an_agreed_word() {
+fn agreed_text_does_not_shrink_when_a_later_hypothesis_revises_an_agreed_word() {
     let mut state = WholeWindowState::default();
     state.next("", 0, 0, 0, 8_000, "Why is it");
     let agreed = state
-        .next("", 0, 0, 0, 9_600, "Why is it")
+        .next("", 0, 0, 0, 16_000, "Why is it")
         .expect("a repeated hypothesis agrees on every word")
         .into_parts()
         .2;
     assert_eq!(agreed, "Why is it");
 
-    let shrunk = state
-        .next("", 0, 0, 0, 11_200, "Why is this")
+    let revised = state
+        .next("", 0, 0, 0, 24_000, "Why is this")
         .expect("a revised hypothesis emits")
-        .into_parts()
-        .2;
-    assert_eq!(shrunk, "Why is");
+        .into_parts();
+    assert_eq!(revised.0, "Why is it");
+    assert_eq!(revised.2, "Why is it");
 }
 
 #[test]

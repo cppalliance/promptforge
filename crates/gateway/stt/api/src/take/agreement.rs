@@ -14,10 +14,21 @@ pub(super) fn matching_token_prefix_end(previous: &str, current: &str) -> usize 
     previous
         .iter()
         .zip(&current)
-        .take_while(|((left, _, _), (right, _, _))| left == right)
+        .take_while(|((left, _, _), (right, _, _))| left == right || equivalent_token(left, right))
         .map(|(_, (_, _, end))| *end)
         .last()
         .unwrap_or(0)
+}
+
+/// Lowercase alphanumerics of a token that has any, else the token itself, so
+/// two forms are equal exactly when `matching_token_prefix_end` matches the
+/// tokens.
+pub(super) fn normalized_token(token: &str) -> String {
+    if token.chars().any(char::is_alphanumeric) {
+        folded(token).collect()
+    } else {
+        token.to_owned()
+    }
 }
 
 pub(super) fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
@@ -40,28 +51,63 @@ pub(super) fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
 }
 
 pub(super) fn equivalent_token(left: &str, right: &str) -> bool {
-    left.chars().any(char::is_alphanumeric)
-        && left
-            .chars()
-            .filter(|character| character.is_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .eq(right
-                .chars()
-                .filter(|character| character.is_alphanumeric())
-                .flat_map(char::to_lowercase))
+    left.chars().any(char::is_alphanumeric) && folded(left).eq(folded(right))
+}
+
+/// Lowercase alphanumerics of `token`, the one fold that both
+/// `equivalent_token` and `normalized_token` compare.
+fn folded(token: &str) -> impl Iterator<Item = char> {
+    token
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{equivalent_token, matching_token_prefix_end, range_guided_suffix_prefix_start};
+    use super::{
+        equivalent_token, matching_token_prefix_end, normalized_token,
+        range_guided_suffix_prefix_start,
+    };
 
     #[test]
-    fn characterize_matching_token_prefix_end_stops_at_a_punctuation_or_case_difference() {
+    fn normalized_forms_are_equal_exactly_when_the_tokens_match() {
+        for (left, right) in [
+            ("Ask", "ask"),
+            ("not,", "not"),
+            ("now", "not"),
+            ("...", "..."),
+            ("...", "?!"),
+            ("way?", "?"),
+            ("?", "way?"),
+        ] {
+            assert_eq!(
+                normalized_token(left) == normalized_token(right),
+                matching_token_prefix_end(left, right) > 0,
+                "{left:?} against {right:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn matching_token_prefix_end_ignores_punctuation_and_case_differences() {
         assert_eq!(
             matching_token_prefix_end("ask not, what", "ask not what"),
+            "ask not what".len()
+        );
+        assert_eq!(
+            matching_token_prefix_end("Ask not what", "ask not what"),
+            "ask not what".len()
+        );
+        assert_eq!(
+            matching_token_prefix_end("ask not what", "ask now what"),
             "ask".len()
         );
-        assert_eq!(matching_token_prefix_end("Ask not what", "ask not what"), 0);
+        assert_eq!(
+            matching_token_prefix_end("so ... then", "so ... than"),
+            "so ...".len(),
+            "an identical punctuation-only token still matches"
+        );
     }
 
     #[test]

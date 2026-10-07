@@ -2,10 +2,14 @@
 
 use std::ops::Range;
 
-use super::agreement::{equivalent_token, matching_token_prefix_end, token_spans};
+use super::agreement::{equivalent_token, token_spans};
 use super::interim::InterimSnapshot;
 use super::live_prefix::LivePrefixSnapshot;
 use super::text::append_transcript;
+
+mod evidence;
+
+use evidence::Agreement;
 
 const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
 const MIN_LEADING_REPLACEMENT_TOKENS: usize = 2;
@@ -39,6 +43,7 @@ pub(super) struct WholeWindowState {
     window_start: Option<u64>,
     active: String,
     active_range: Option<Range<u64>>,
+    agreement: Agreement,
     pending: Vec<AcceptedHypothesis>,
     last: Option<InterimSnapshot>,
 }
@@ -114,12 +119,17 @@ impl WholeWindowState {
             }
             Some(_) | None => (hypothesis.to_owned(), window_start),
         };
-        let agreed_end = if self.active.is_empty() {
-            0
-        } else {
-            matching_token_prefix_end(&self.active, &replacement)
+        if self.active.is_empty() {
+            self.agreement = Agreement::default();
+        }
+        let Some(active) =
+            self.agreement
+                .revise(&self.active, hypothesis, &replacement, window_end)
+        else {
+            return Ok(None);
         };
-        self.active = replacement;
+        let agreed_end = self.agreement.agreed_end();
+        self.active = active;
         self.active_range = Some(active_start..window_end);
         self.window_start = Some(window_start);
 
@@ -230,9 +240,8 @@ fn owned_piece(has_prefix: bool, piece: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "window-tests-live-prefix.rs"]
-mod live_prefix_tests;
-
+mod commit_tests;
 #[cfg(test)]
-#[path = "window-tests.rs"]
+mod live_prefix_tests;
+#[cfg(test)]
 mod tests;
