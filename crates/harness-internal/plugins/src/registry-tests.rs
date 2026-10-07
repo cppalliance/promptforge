@@ -44,17 +44,17 @@ fn stub(id: &str, description: &str) -> Arc<dyn Plugin> {
 fn registering_a_second_plugin_under_the_same_id_is_rejected() {
     let mut registry = PluginRegistry::new();
     registry
-        .register(stub("promptforge/web", "Web tools."))
+        .register(stub("web", "Web tools."))
         .expect("the first registration succeeds");
     let error = registry
-        .register(stub("promptforge/web", "Other web tools."))
+        .register(stub("web", "Other web tools."))
         .expect_err("a duplicate id is rejected");
     assert_eq!(error.kind(), RegistryErrorKind::DuplicateId);
-    assert_eq!(error.id(), &plugin_id("promptforge/web"));
+    assert_eq!(error.id(), &plugin_id("web"));
     // The first registration survives the rejected duplicate.
     assert_eq!(
         registry
-            .get(&plugin_id("promptforge/web"))
+            .get(&plugin_id("web"))
             .map(|plugin| plugin.description()),
         Some("Web tools.")
     );
@@ -64,33 +64,33 @@ fn registering_a_second_plugin_under_the_same_id_is_rejected() {
 fn a_registered_plugin_resolves_by_exact_id_lookup() {
     let mut registry = PluginRegistry::new();
     registry
-        .register(stub("promptforge/web", "Web tools."))
+        .register(stub("web", "Web tools."))
         .expect("the first registration succeeds");
     registry
-        .register(stub("org.rustalliance/core", "Core tools."))
+        .register(stub("core", "Core tools."))
         .expect("a distinct id registers");
     let found = registry
-        .get(&plugin_id("org.rustalliance/core"))
+        .get(&plugin_id("core"))
         .expect("the registered id resolves");
     assert_eq!(found.description(), "Core tools.");
-    assert!(registry.get(&plugin_id("promptforge/fs")).is_none());
+    assert!(registry.get(&plugin_id("fs")).is_none());
 }
 
 #[test]
 fn a_punctuation_twin_of_a_registered_id_is_rejected() {
-    for twin in ["acme/web_search", "acme/web.search"] {
+    for twin in ["user_input", "user.input"] {
         let mut registry = PluginRegistry::new();
         registry
-            .register(stub("acme/web-search", "Web tools."))
+            .register(stub("user-input", "Ask the operator."))
             .expect("the first registration succeeds");
         let error = registry
-            .register(stub(twin, "Other web tools."))
+            .register(stub(twin, "Ask someone else."))
             .expect_err("a punctuation twin is rejected");
         assert_eq!(error.kind(), RegistryErrorKind::NormalizationCollision);
-        assert_eq!(error.collides_with(), Some(&plugin_id("acme/web-search")));
+        assert_eq!(error.collides_with(), Some(&plugin_id("user-input")));
         let message = error.to_string();
         assert!(
-            message.contains("acme/web-search"),
+            message.contains("user-input"),
             "the message names the registered id: {message}"
         );
         assert!(
@@ -99,7 +99,7 @@ fn a_punctuation_twin_of_a_registered_id_is_rejected() {
         );
         // The rejected twin is not registered; the original survives.
         assert!(registry.get(&plugin_id(twin)).is_none());
-        assert!(registry.get(&plugin_id("acme/web-search")).is_some());
+        assert!(registry.get(&plugin_id("user-input")).is_some());
     }
 }
 
@@ -107,10 +107,14 @@ fn a_punctuation_twin_of_a_registered_id_is_rejected() {
 fn punctuation_distinct_non_twins_register() {
     let mut registry = PluginRegistry::new();
     registry
-        .register(stub("acme/web-search", "Web tools."))
+        .register(stub("web-search", "Web tools."))
         .expect("the first registration succeeds");
     registry
-        .register(stub("acme/web-search-extra", "Extra web tools."))
+        .register(stub("web-search-extra", "Extra web tools."))
         .expect("a punctuation-distinct non-twin registers");
-    assert!(registry.get(&plugin_id("acme/web-search-extra")).is_some());
+    registry
+        .register(stub("websearch", "Joined web tools."))
+        .expect("dropping a separator is not a twin");
+    assert!(registry.get(&plugin_id("web-search-extra")).is_some());
+    assert!(registry.get(&plugin_id("websearch")).is_some());
 }

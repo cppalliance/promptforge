@@ -118,7 +118,7 @@ fn canonical_host(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
-/// The security policy for the web fetch tool, `promptforge/web/fetch`.
+/// The security policy for the web fetch tool, `web/fetch`.
 ///
 /// The policy sets which URLs, ports, and addresses a fetch may reach and how
 /// many redirects it may follow. It also sets the size caps on the response and

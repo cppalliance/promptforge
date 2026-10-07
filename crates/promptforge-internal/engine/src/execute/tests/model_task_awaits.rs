@@ -88,7 +88,7 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content .. '|' .. #msgs"),
-        "tools.call('tests/tools/delayed')\nreturn 'child result'",
+        "tools.call('tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());

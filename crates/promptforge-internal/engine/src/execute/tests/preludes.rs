@@ -108,11 +108,11 @@ fn a_prelude_that_calls_a_tool_while_loading_fails_the_run_as_lua_before_its_fir
     assert_fails_before_any_effect(
         EFFECT_FIRST,
         vec![prelude(
-            "acme/eager",
-            "tools.call('tests/tools/echo', { value = 'early' })",
+            "eager",
+            "tools.call('tools/echo', { value = 'early' })",
         )],
         &[
-            "Plugin `acme/eager`: its prelude failed to load",
+            "Plugin `eager`: its prelude failed to load",
             "it must not call tools while loading",
         ],
     );
@@ -122,13 +122,10 @@ fn a_prelude_that_calls_a_tool_while_loading_fails_the_run_as_lua_before_its_fir
 fn two_preludes_defining_one_global_fail_the_run_as_lua_before_its_first_effect() {
     assert_fails_before_any_effect(
         EFFECT_FIRST,
-        vec![
-            prelude("acme/first", GREETER),
-            prelude("acme/second", "greeter = {}"),
-        ],
+        vec![prelude("first", GREETER), prelude("second", "greeter = {}")],
         &[
-            "Plugin `acme/second`: its prelude defines the global `greeter`",
-            "which Plugin `acme/first`'s prelude already defines",
+            "Plugin `second`: its prelude defines the global `greeter`",
+            "which Plugin `first`'s prelude already defines",
         ],
     );
 }
@@ -137,13 +134,13 @@ fn two_preludes_defining_one_global_fail_the_run_as_lua_before_its_first_effect(
 fn a_prelude_global_named_like_a_frontmatter_tool_alias_fails_the_run() {
     let md = EFFECT_FIRST.replace(
         "promptforge: 0\n",
-        "promptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n",
+        "promptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\n",
     );
     assert_fails_before_any_effect(
         &md,
-        vec![prelude("acme/echo", "echo = {}")],
+        vec![prelude("echo", "echo = {}")],
         &[
-            "Plugin `acme/echo`: its prelude defines the global `echo`",
+            "Plugin `echo`: its prelude defines the global `echo`",
             "which the prompt's frontmatter binds as a tool or model alias",
         ],
     );
@@ -157,9 +154,9 @@ fn a_prelude_global_named_like_a_frontmatter_model_alias_fails_the_run() {
     );
     assert_fails_before_any_effect(
         &md,
-        vec![prelude("acme/writer", "writer = 'mine'")],
+        vec![prelude("writer", "writer = 'mine'")],
         &[
-            "Plugin `acme/writer`: its prelude defines the global `writer`",
+            "Plugin `writer`: its prelude defines the global `writer`",
             "which the prompt's frontmatter binds as a tool or model alias",
         ],
     );
@@ -170,9 +167,9 @@ fn a_prelude_defining_ui_or_item_collides_on_a_run_that_binds_neither() {
     for name in ["ui", "item"] {
         assert_fails_before_any_effect(
             EFFECT_FIRST,
-            vec![prelude("acme/reserved", &format!("{name} = {{}}"))],
+            vec![prelude("reserved", &format!("{name} = {{}}"))],
             &[
-                &format!("Plugin `acme/reserved`: its prelude defines the global `{name}`"),
+                &format!("Plugin `reserved`: its prelude defines the global `{name}`"),
                 "which is reserved as an Engine global",
             ],
         );
@@ -199,7 +196,7 @@ fn the_shared_chunk_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
         ```lua\nreturn greeter.greet(item)\n```\n\n\
         ## Child\n\n\
         ```lua\nreturn greeter.greet('task')\n```\n";
-    let (result, _) = drive_recorded(prelude_run(md, vec![prelude("acme/greeter", GREETER)]));
+    let (result, _) = drive_recorded(prelude_run(md, vec![prelude("greeter", GREETER)]));
     assert_eq!(
         succeeded(result),
         "hello shared|hello arm|hello task",
@@ -218,7 +215,7 @@ fn a_prelude_function_called_from_a_block_reaches_the_yielding_store_shims() {
           store.write('notes.md', text)\n\
           return store.read('notes.md')\n\
         end";
-    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("acme/notes", notes)]));
+    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("notes", notes)]));
     assert_eq!(succeeded(result), "kept");
     assert_eq!(
         records,
@@ -249,15 +246,15 @@ fn a_tool_call_made_inside_a_prelude_function_records_a_script_caller() {
         ```lua\nreturn echoer.say('hi')\n```\n";
     let echoer = "echoer = {}\n\
         function echoer.say(value)\n\
-          return tools.call('tests/tools/echo', { value = value })\n\
+          return tools.call('tools/echo', { value = value })\n\
         end";
-    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("acme/echoer", echoer)]));
+    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("echoer", echoer)]));
     assert_eq!(succeeded(result), "echoed: hi");
     assert_eq!(
         records,
         vec![EffectRecord::ToolCall {
-            tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
-            alias: "tests/tools/echo".to_owned(),
+            tool: ToolId::parse("tools/echo").expect("a valid id"),
+            alias: "tools/echo".to_owned(),
             args: json!({ "value": "hi" }),
             origin: ToolCallOrigin {
                 execution: EXECUTION.to_owned(),

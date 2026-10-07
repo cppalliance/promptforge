@@ -4,10 +4,10 @@ description: Research a person from the open web and return a concise, factual s
 promptforge: 0
 max_tool_iterations: 20
 plugins:
-  - promptforge/web
+  - web
 tools:
-  search: promptforge/web/search
-  fetch: promptforge/web/fetch
+  search: web/search
+  fetch: web/fetch
 models:
   researcher: {}
 ---

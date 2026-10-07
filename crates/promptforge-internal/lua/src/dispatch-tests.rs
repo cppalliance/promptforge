@@ -15,7 +15,7 @@ const SECTION: &str = "Test";
 /// binding and a canned output; no implementation is ever called.
 fn echo_tool() -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse("tests/tools/echo").expect("valid id"),
+        ToolId::parse("tools/echo").expect("valid id"),
         "echo",
         "echo the value argument",
         json!({ "type": "object" }),
@@ -25,7 +25,7 @@ fn echo_tool() -> ToolDescriptor {
 /// The `failing` fixture tool as data.
 fn failing_tool() -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse("tests/tools/failing").expect("valid id"),
+        ToolId::parse("tools/failing").expect("valid id"),
         "failing",
         "always fail",
         json!({ "type": "object" }),

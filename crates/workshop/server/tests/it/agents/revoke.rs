@@ -16,7 +16,7 @@ name: roots
 description: The roots test agent on the unified runtime.
 promptforge: 0
 plugins:
-  - promptforge/user-input
+  - user-input
 ---
 
 # Roots

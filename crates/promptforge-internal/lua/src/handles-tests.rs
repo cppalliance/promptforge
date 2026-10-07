@@ -8,18 +8,16 @@ use serde_json::json;
 
 use super::{ToolBinding, ToolOutputKind};
 
-/// A descriptor for `tests/tools/fetch` with one declared conflict.
+/// A descriptor for `tools/fetch` with one declared conflict.
 fn descriptor(structured: bool) -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse("tests/tools/fetch").expect("the id is valid"),
+        ToolId::parse("tools/fetch").expect("the id is valid"),
         "fetch",
         "Fetch a page",
         json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )
     .structured(structured)
-    .with_conflicts(vec![
-        PluginId::parse("tests/other").expect("the id is valid"),
-    ])
+    .with_conflicts(vec![PluginId::parse("other").expect("the id is valid")])
 }
 
 #[test]

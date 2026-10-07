@@ -8,28 +8,28 @@ use promptforge::{Environment, RunErrorKind, RunResult};
 
 use super::support::{Fixture, captured_logs, context, parse, prepare_activated, run_activated};
 
-/// A prompt declaring `promptforge/web` as a required Plugin.
+/// A prompt declaring `web` as a required Plugin.
 pub(super) const DECLARES_REQUIRED: &str = concat!(
     "---\n",
     "name: declares-required\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/web\n",
+    "  - web\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` as an optional Plugin.
+/// A prompt declaring `web` as an optional Plugin.
 const DECLARES_OPTIONAL: &str = concat!(
     "---\n",
     "name: declares-optional\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - ref: promptforge/web\n",
+    "  - ref: web\n",
     "    optional: true\n",
     "---\n\n",
     "# Title\n\n",
@@ -37,7 +37,7 @@ const DECLARES_OPTIONAL: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` as required and returning a fixed
+/// A prompt declaring `web` as required and returning a fixed
 /// text from Lua, so the run completes without a model.
 const RUNS_AFTER_ACTIVATION: &str = concat!(
     "---\n",
@@ -45,7 +45,7 @@ const RUNS_AFTER_ACTIVATION: &str = concat!(
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/web\n",
+    "  - web\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -68,7 +68,7 @@ fn a_missing_required_plugin_is_reported() {
     assert!(requirements.unmet_requirements.is_empty());
     assert_eq!(
         requirements.missing_required,
-        [PluginId::parse("promptforge/web").expect("the id is valid")]
+        [PluginId::parse("web").expect("the id is valid")]
     );
     assert!(!requirements.is_satisfied());
 }
@@ -87,7 +87,7 @@ fn an_absent_optional_plugin_is_skipped_and_logged() {
         assert!(requirements.is_satisfied());
     });
     assert!(
-        logs.contains("promptforge/web"),
+        logs.contains("web"),
         "the skip log line names the Plugin: {logs}"
     );
 }
@@ -95,7 +95,7 @@ fn an_absent_optional_plugin_is_skipped_and_logged() {
 #[test]
 fn activation_receives_the_runs_own_services() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let (fixture, activations) = Fixture::new("promptforge/web", false);
+    let (fixture, activations) = Fixture::new("web", false);
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let cancel = CancelHandle::new();
@@ -120,7 +120,7 @@ fn activation_receives_the_runs_own_services() {
 #[test]
 fn a_required_activation_failure_is_logged_and_reported() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let (fixture, _activations) = Fixture::new("promptforge/web", true);
+    let (fixture, _activations) = Fixture::new("web", true);
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let logs = captured_logs(|| {
@@ -135,12 +135,12 @@ fn a_required_activation_failure_is_logged_and_reported() {
         );
         assert_eq!(
             requirements.missing_required,
-            [PluginId::parse("promptforge/web").expect("the id is valid")]
+            [PluginId::parse("web").expect("the id is valid")]
         );
         assert!(!requirements.is_satisfied());
     });
     assert!(
-        logs.contains("promptforge/web"),
+        logs.contains("web"),
         "the failure log line names the Plugin: {logs}"
     );
 }
@@ -148,7 +148,7 @@ fn a_required_activation_failure_is_logged_and_reported() {
 #[test]
 fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
     let prompt = parse(DECLARES_OPTIONAL, "declares-optional");
-    let (fixture, _activations) = Fixture::new("promptforge/web", true);
+    let (fixture, _activations) = Fixture::new("web", true);
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let logs = captured_logs(|| {
@@ -163,7 +163,7 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
         assert!(requirements.is_satisfied());
     });
     assert!(
-        logs.contains("promptforge/web"),
+        logs.contains("web"),
         "the failure log line names the Plugin: {logs}"
     );
 }
@@ -181,7 +181,7 @@ fn the_run_path_refuses_a_missing_required_plugin_with_a_notice_naming_it() {
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
-        notice.contains("missing required Plugin: promptforge/web"),
+        notice.contains("missing required Plugin: web"),
         "the notice names the missing Plugin: {notice}"
     );
 }
@@ -189,7 +189,7 @@ fn the_run_path_refuses_a_missing_required_plugin_with_a_notice_naming_it() {
 #[test]
 fn the_run_path_activates_a_declared_plugin_exactly_once() {
     let prompt = parse(RUNS_AFTER_ACTIVATION, "runs-after-activation");
-    let (fixture, activations) = Fixture::new("promptforge/web", false);
+    let (fixture, activations) = Fixture::new("web", false);
     let mut registry = PluginRegistry::new();
     registry.register(fixture).expect("the fixture registers");
     let result = run_activated(&registry, &prompt, context("activate-once"));

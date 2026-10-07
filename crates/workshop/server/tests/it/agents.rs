@@ -36,7 +36,7 @@ name: echo
 description: The echo test agent on the unified runtime.
 promptforge: 0
 plugins:
-  - promptforge/user-input
+  - user-input
 ---
 
 # Echo

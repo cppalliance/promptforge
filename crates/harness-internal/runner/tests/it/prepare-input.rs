@@ -1,7 +1,7 @@
 //! The Host's optional input broker at preparation, supplied among its
 //! services under `INPUT_BROKER`: activation hands it to every declared
 //! Plugin, or hands none when the Host has nobody to ask; and the
-//! `promptforge/user-input` Plugin's `input.ask()` reaches it, is
+//! `user-input` Plugin's `input.ask()` reaches it, is
 //! refused when required on a Host without one, and degrades when
 //! optional. A frontmatter alias named `input` collides with the
 //! Plugin's prelude global and fails the run before any effect, while
@@ -16,7 +16,7 @@ use promptforge::Prompt;
 
 /// A prompt declaring the probe Plugin, with nothing to run.
 const DECLARES_PROBE: &str = "---\nname: declares-probe\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - probe\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
@@ -88,7 +88,7 @@ async fn probe_activations(input: Option<Arc<dyn InputBroker>>) -> Vec<bool> {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Probe {
-            id: PluginId::parse("tests/probe").unwrap(),
+            id: PluginId::parse("probe").unwrap(),
             saw_broker: Arc::clone(&saw_broker),
         }))
         .unwrap();
@@ -138,12 +138,12 @@ async fn activation_hands_no_broker_to_a_plugin_when_the_host_has_none() {
     );
 }
 
-/// The frontmatter line declaring `promptforge/user-input` as required,
+/// The frontmatter line declaring `user-input` as required,
 /// the way `chat.md` declares it.
-const REQUIRED: &str = "  - promptforge/user-input\n";
+const REQUIRED: &str = "  - user-input\n";
 
-/// The frontmatter lines declaring `promptforge/user-input` as optional.
-const OPTIONAL: &str = "  - ref: promptforge/user-input\n    optional: true\n";
+/// The frontmatter lines declaring `user-input` as optional.
+const OPTIONAL: &str = "  - ref: user-input\n    optional: true\n";
 
 /// Asks once and returns the run-fixed connection flag, the answer, and
 /// the availability beside it.
@@ -198,7 +198,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert!(
         error.to_string().contains(
-            "- promptforge/user-input needs promptforge/input-broker, and the environment provides none"
+            "- user-input needs promptforge/input-broker, and the environment provides none"
         ),
         "the notice names the Plugin and the missing service: {error}"
     );
@@ -207,7 +207,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
 #[tokio::test]
 async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_broker_alone() {
     let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  ask: promptforge/user-input/ask\n");
+    let declaration = format!("{REQUIRED}tools:\n  ask: user-input/ask\n");
     let error = prepare(
         &user_input_prompt(&declaration, ASKS_ONCE),
         "",
@@ -222,12 +222,12 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
     let notice = error.to_string();
     assert!(
         notice.contains(
-            "- promptforge/user-input needs promptforge/input-broker, and the environment provides none"
+            "- user-input needs promptforge/input-broker, and the environment provides none"
         ),
         "the notice names the Plugin and the missing service: {notice}"
     );
     assert!(
-        !notice.contains("missing required Plugin: promptforge/user-input"),
+        !notice.contains("missing required Plugin: user-input"),
         "the notice does not call the registered Plugin missing: {notice}"
     );
 }
@@ -256,7 +256,7 @@ fn an_optional_user_input_declaration_without_a_broker_records_the_service_gap()
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
     let gap = &activation.service_gaps[0];
-    assert_eq!(gap.plugin.to_string(), "promptforge/user-input");
+    assert_eq!(gap.plugin.to_string(), "user-input");
     assert_eq!(gap.service, INPUT_BROKER.id());
 }
 
@@ -337,7 +337,7 @@ async fn input_ask_with_an_argument_raises() {
 #[tokio::test]
 async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_any_effect() {
     let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  input: promptforge/user-input/ask\n");
+    let declaration = format!("{REQUIRED}tools:\n  input: user-input/ask\n");
     let prepared = prepare(
         &user_input_prompt(&declaration, ASKS_ONCE),
         "",
@@ -361,7 +361,7 @@ async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_
     assert_eq!(kind, "Lua");
     assert!(
         message.contains(
-            "Plugin `promptforge/user-input`: its prelude defines the global `input`, \
+            "Plugin `user-input`: its prelude defines the global `input`, \
              which the prompt's frontmatter binds as a tool or model alias"
         ),
         "the failure names the Plugin, the global, and the alias: {message}"
@@ -377,7 +377,7 @@ async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_
 #[tokio::test]
 async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_engine_globals() {
     let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  ask: promptforge/user-input/ask\n");
+    let declaration = format!("{REQUIRED}tools:\n  ask: user-input/ask\n");
     let outcome = drive_prompt(
         &user_input_prompt(
             &declaration,

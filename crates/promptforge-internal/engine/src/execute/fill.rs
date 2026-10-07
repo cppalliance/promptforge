@@ -13,7 +13,7 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 /// Fills the prompt's declared tool slots against the caller-supplied
 /// catalog, journaling every fill into the returned bindings.
 ///
-/// Exact slots fill by identity: an exact path's first two segments name
+/// Exact slots fill by identity: an exact path's first segment names
 /// its Plugin, so a slot whose Plugin contributed nothing to the
 /// catalog - it was never activated - lands in
 /// [`Requirements::missing_required`] and the run fails until satisfied. A

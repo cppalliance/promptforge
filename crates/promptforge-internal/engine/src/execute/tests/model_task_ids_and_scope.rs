@@ -38,8 +38,8 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
              local second = msgs[9].content:match('^Task id=(%S+)')\n\
              return sys.id .. '|' .. first .. '|' .. second",
         ),
-        ("A", "tools.call('tests/tools/delayed')\nreturn sys.id"),
-        ("B", "tools.call('tests/tools/delayed')\nreturn sys.id"),
+        ("A", "tools.call('tools/delayed')\nreturn sys.id"),
+        ("B", "tools.call('tools/delayed')\nreturn sys.id"),
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());

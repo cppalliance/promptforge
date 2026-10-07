@@ -1,12 +1,12 @@
 //! The one global naming grammar.
 //!
-//! Kind is encoded by arity: Plugins are `namespace/plugin` (2 segments)
-//! and tools are `namespace/plugin/name` (3 segments), so a reader can tell
-//! the kind of any name by counting segments. A namespace is reverse-DNS
-//! (`org.rustalliance`) or the reserved first-party prefix `promptforge`.
-//! Segments are lowercase ASCII alphanumeric plus `-`, `_`, `.`, and
-//! comparison is case-sensitive. A name carries no version, so a `@` is a
-//! parse error.
+//! A name is one or more segments separated by `/`. The id types built on
+//! it add their own segment count: a [`PluginId`](crate::plugins::PluginId)
+//! is one segment, the local name a Plugin is installed under (`web`),
+//! and a [`ToolId`](crate::tools::ToolId) is two or more, its Plugin's
+//! local name first (`web/fetch`). Segments are lowercase ASCII
+//! alphanumeric plus `-`, `_`, `.`, and comparison is case-sensitive. A
+//! name carries no version, so a `@` is a parse error.
 
 use std::fmt;
 
@@ -14,44 +14,39 @@ use std::fmt;
 #[path = "names-tests.rs"]
 mod tests;
 
-/// A validated global name for a Plugin or a tool.
+/// A validated slash-separated name, such as `web` or `web/fetch`.
 ///
-/// A name has two or three segments separated by `/`. Two segments name a
-/// Plugin (`namespace/plugin`). Three segments name a tool
-/// (`namespace/plugin/name`).
+/// A name has one or more segments separated by `/`. [`PluginId`] and
+/// [`ToolId`] are built on it and each adds its own segment count.
 ///
 /// Every value comes from [`GlobalName::parse`], so each segment always
 /// consists of one or more lowercase ASCII letters, digits, `-`, `_`, and `.`.
+///
+/// [`PluginId`]: crate::plugins::PluginId
+/// [`ToolId`]: crate::tools::ToolId
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalName {
-    /// The `/`-separated segments: exactly 2 (Plugin) or 3 (tool).
+    /// The `/`-separated segments: one or more.
     segments: Vec<String>,
 }
 
 impl GlobalName {
     /// Parses a string into a global name.
     ///
-    /// The string must have 2 or 3 segments separated by `/`. Each segment must
-    /// consist of one or more lowercase ASCII letters, digits, `-`, `_`, and
-    /// `.`.
+    /// The string must have one or more segments separated by `/`. Each
+    /// segment must consist of one or more lowercase ASCII letters, digits,
+    /// `-`, `_`, and `.`.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalNameError`] when:
     ///
-    /// - the name has fewer than 2 or more than 3 segments
-    ///   ([`GlobalNameErrorKind::SegmentCount`]);
-    /// - a segment is empty ([`GlobalNameErrorKind::Empty`]);
+    /// - a segment is empty, including the whole string being empty
+    ///   ([`GlobalNameErrorKind::Empty`]);
     /// - a segment contains any other character
     ///   ([`GlobalNameErrorKind::Control`]).
     pub fn parse(s: &str) -> Result<GlobalName, GlobalNameError> {
         let segments: Vec<&str> = s.split('/').collect();
-        if !(2..=3).contains(&segments.len()) {
-            return Err(GlobalNameError {
-                kind: GlobalNameErrorKind::SegmentCount,
-                reason: "must have exactly 2 segments (namespace/plugin) or 3 (namespace/plugin/name)",
-            });
-        }
         for segment in &segments {
             validate_segment(segment)?;
         }
@@ -60,35 +55,19 @@ impl GlobalName {
         })
     }
 
-    /// Returns the namespace, which is the first segment.
+    /// Returns the segments (one or more by construction).
     ///
-    /// By convention, a namespace is a reverse-DNS name such as
-    /// `org.rustalliance`, or `promptforge` for first-party names.
-    /// `GlobalName::parse` accepts any valid segment as the namespace.
-    #[must_use]
-    pub fn namespace(&self) -> &str {
-        &self.segments[0]
-    }
-
-    /// Returns the second segment, which names the Plugin.
-    #[must_use]
-    pub fn plugin(&self) -> &str {
-        &self.segments[1]
-    }
-
-    /// Returns the segments (exactly 2 or 3 by construction).
-    ///
-    /// Crate-internal: the id newtypes in [`crate::tools`] index segments.
+    /// Crate-internal: the id newtypes count and index segments.
     pub(crate) fn segments(&self) -> &[String] {
         &self.segments
     }
 
-    /// Returns the 2-segment Plugin prefix of a 3-segment (tool) name.
+    /// Returns the first segment as a one-segment name.
     ///
     /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
-    pub(crate) fn plugin_prefix(&self) -> GlobalName {
+    pub(crate) fn first(&self) -> GlobalName {
         GlobalName {
-            segments: self.segments[..2].to_vec(),
+            segments: self.segments[..1].to_vec(),
         }
     }
 }
@@ -136,8 +115,6 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GlobalNameErrorKind {
-    /// The name had fewer than 2 or more than 3 segments.
-    SegmentCount,
     /// A segment was empty.
     Empty,
     /// A segment contained a character other than a lowercase ASCII letter, a

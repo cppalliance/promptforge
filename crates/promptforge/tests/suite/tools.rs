@@ -34,7 +34,7 @@ fn fetch(args: &Value) -> Result<ToolOutput, ToolError> {
 fn a_catalog_refuses_a_slashed_wire_name_the_descriptor_accepted() -> Result<(), Box<dyn Error>> {
     let schema = json!({"type": "object", "properties": {"url": {"type": "string"}}});
     let slashed = ToolDescriptor::new(
-        ToolId::parse("promptforge/web/fetch")?,
+        ToolId::parse("web/fetch")?,
         "web/fetch",
         "Fetch a web page over HTTP.",
         schema,

@@ -1,7 +1,7 @@
 //! harness-plugins - the Harness's Plugin layer: the registry,
 //! activation with co-activation conflict checking, the [`Plugin`]
 //! and [`Tool`] traits the first-party Plugin crates implement, and
-//! one core Plugin of its own, [`UserInput`] (`promptforge/user-input`).
+//! one core Plugin of its own, [`UserInput`] (`user-input`).
 //!
 //! The Engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
@@ -18,7 +18,7 @@
 //!
 //! - This crate depends on no Plugin provider: the provider crates
 //!   depend on it for the traits, never the reverse. The one Plugin
-//!   it holds itself, `promptforge/user-input`, needs nothing beyond this
+//!   it holds itself, `user-input`, needs nothing beyond this
 //!   crate's traits and the broker it receives through [`RunServices`].
 //! - This crate names no async runtime: `tokio` and `tokio-util` appear
 //!   only under `[dev-dependencies]` (enforced by the Harness tokio ban in

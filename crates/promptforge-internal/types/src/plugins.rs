@@ -4,9 +4,9 @@
 //!
 //! A Plugin is the activation unit: code that runs at run setup and
 //! makes services available to the run. Plugins ship in crates and are
-//! identified by a 2-segment [`GlobalName`] - kind is encoded by arity, so
-//! a Plugin id is `namespace/plugin` and every tool it contributes sits
-//! under `namespace/plugin/name`. The Engine knows Plugins by identity alone:
+//! identified by a one-segment [`PluginId`], such as `web`, and every tool
+//! one contributes sits under it, such as `web/fetch`. The Engine knows
+//! Plugins by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
 //! records the conflicts of the Plugin that contributed it. Activating a
@@ -19,78 +19,56 @@ use crate::tools::ToolId;
 #[path = "plugins-tests.rs"]
 mod tests;
 
-/// The stable identity of an installed Plugin.
+/// The local name a Plugin is installed under: one segment, such as `web`.
 ///
-/// A Plugin id is a [`GlobalName`] with exactly 2 segments
-/// (`namespace/plugin`). The segment count tells what a name refers to: 2
-/// segments name a Plugin and 3 name a tool. A Plugin's id is the
-/// prefix of every tool id it contributes: `promptforge/web` contributes
-/// `promptforge/web/fetch`. An id is the name alone, and a name resolves to
-/// the only installed Plugin of that name. A `@` version marker in the
-/// id is a parse error.
+/// A Plugin's id is the first segment of every tool id it contributes:
+/// `web` contributes `web/fetch`. An id is the name alone, and a name
+/// resolves to the only installed Plugin of that name. A `@` version
+/// marker in the id is a parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub struct PluginId(GlobalName);
 
 impl PluginId {
-    /// Parses a Plugin identity, requiring exactly 2 segments
-    /// (`namespace/plugin`).
+    /// Parses a Plugin identity, requiring exactly one segment.
     ///
     /// # Errors
-    /// Returns [`PluginIdError`] when the id has fewer or more than 2
-    /// segments ([`PluginIdErrorKind::SegmentCount`]), a segment is empty
-    /// ([`PluginIdErrorKind::Empty`]), or a segment contains a character
-    /// other than a lowercase ASCII letter, a digit, `-`, `_`, or `.`
-    /// ([`PluginIdErrorKind::Control`]).
-    pub fn parse(id: &str) -> Result<PluginId, PluginIdError> {
+    /// Returns [`PluginIdError`] when the id has more than one segment
+    /// ([`PluginIdErrorKind::SegmentCount`]), is empty or has an empty
+    /// segment ([`PluginIdErrorKind::Empty`]), or a segment contains a
+    /// character other than a lowercase ASCII letter, a digit, `-`, `_`,
+    /// or `.` ([`PluginIdErrorKind::Control`]).
+    pub fn parse(name: &str) -> Result<PluginId, PluginIdError> {
         let name =
-            GlobalName::parse(id).map_err(|e| PluginIdError::from_global_name_kind(e.kind()))?;
-        if name.segments().len() != 2 {
+            GlobalName::parse(name).map_err(|e| PluginIdError::from_global_name_kind(e.kind()))?;
+        if name.segments().len() != 1 {
             return Err(PluginIdError {
                 kind: PluginIdErrorKind::SegmentCount,
-                reason: "a Plugin id must have exactly 2 segments (namespace/plugin)",
+                reason: "a Plugin id is one segment, such as `web`, with no '/'",
             });
         }
         Ok(PluginId(name))
     }
 
-    /// Builds an identity from a 2-segment prefix split off a validated
-    /// tool id.
+    /// Builds an identity from the first segment of a validated tool id.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::plugin`]. The
-    /// source tool id was validated at parse, so its first two segments
-    /// are already a valid Plugin id.
-    pub(crate) fn from_prefix(prefix: GlobalName) -> PluginId {
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`]. The source
+    /// tool id was validated at parse, so its first segment is already a
+    /// valid Plugin id.
+    pub(crate) fn from_segment(segment: GlobalName) -> PluginId {
         debug_assert!(
-            prefix.segments().len() == 2,
-            "a tool id's Plugin prefix must have exactly 2 segments (namespace/plugin)"
+            segment.segments().len() == 1,
+            "a tool id's Plugin is exactly its first segment"
         );
-        PluginId(prefix)
-    }
-
-    /// Returns the namespace segment.
-    ///
-    /// A namespace is meant to be a reverse-DNS name such as
-    /// `org.rustalliance`, or `promptforge` for first-party Plugins.
-    /// `PluginId::parse` accepts any valid segment as the namespace.
-    #[must_use]
-    pub fn namespace(&self) -> &str {
-        self.0.namespace()
-    }
-
-    /// Returns the Plugin segment.
-    #[must_use]
-    pub fn name(&self) -> &str {
-        self.0.plugin()
+        PluginId(segment)
     }
 
     /// Returns whether `tool` belongs to this Plugin.
     ///
-    /// A tool belongs to a Plugin when dropping the last segment of the
-    /// tool's id leaves exactly the Plugin's id, so `namespace/plugin/name`
-    /// belongs to `namespace/plugin`. Every tool a Plugin contributes
-    /// belongs to it. The caller must check this when it assembles the run's
-    /// catalog.
+    /// A tool belongs to a Plugin when the tool id's first segment is the
+    /// Plugin's id, so `web/fetch` belongs to `web`. Every tool a Plugin
+    /// contributes belongs to it. The caller must check this when it
+    /// assembles the run's catalog.
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
         tool.plugin() == *self
@@ -98,21 +76,21 @@ impl PluginId {
 }
 
 impl std::fmt::Display for PluginId {
-    /// The canonical `namespace/plugin` string form.
+    /// The one-segment string form, such as `web`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl serde::Serialize for PluginId {
-    /// Serializes the id as a single `namespace/plugin` string.
+    /// Serializes the id as its one-segment string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for PluginId {
-    /// Deserializes the id from its `namespace/plugin` string and validates it
+    /// Deserializes the id from its one-segment string and validates it
     /// the same way `PluginId::parse` does. An invalid string fails
     /// deserialization.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -126,7 +104,7 @@ impl<'de> serde::Deserialize<'de> for PluginId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginIdErrorKind {
-    /// The id had fewer or more than 2 segments (`namespace/plugin`).
+    /// The id had more than one segment.
     SegmentCount,
     /// A segment was empty.
     Empty,
@@ -156,10 +134,6 @@ impl PluginIdError {
     /// Maps a global-name rejection onto the Plugin-id error vocabulary.
     fn from_global_name_kind(global_kind: GlobalNameErrorKind) -> PluginIdError {
         let (kind, reason) = match global_kind {
-            GlobalNameErrorKind::SegmentCount => (
-                PluginIdErrorKind::SegmentCount,
-                "a Plugin id must have exactly 2 segments (namespace/plugin)",
-            ),
             GlobalNameErrorKind::Empty => (PluginIdErrorKind::Empty, "segments must not be empty"),
             GlobalNameErrorKind::Control => (
                 PluginIdErrorKind::Control,

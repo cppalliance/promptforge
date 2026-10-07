@@ -100,19 +100,19 @@ fn activation_returns_each_contributed_prelude_in_declaration_order() {
     // The registry keeps its Plugins sorted by id, so declaring them
     // in reverse order tells declaration order apart from registry order.
     let activation = activate_declaring(
-        "  - acme/omega\n  - acme/quiet\n  - acme/alpha\n",
+        "  - omega\n  - quiet\n  - alpha\n",
         vec![
-            Preluder::new("acme/alpha", Some("alpha = {}")),
-            Preluder::new("acme/quiet", None),
-            Preluder::new("acme/omega", Some("omega = {}")),
+            Preluder::new("alpha", Some("alpha = {}")),
+            Preluder::new("quiet", None),
+            Preluder::new("omega", Some("omega = {}")),
         ],
     );
     assert!(activation.requirements.is_satisfied());
     assert_eq!(
         activation.preludes,
         [
-            Prelude::new(id("acme/omega"), "omega = {}"),
-            Prelude::new(id("acme/alpha"), "alpha = {}"),
+            Prelude::new(id("omega"), "omega = {}"),
+            Prelude::new(id("alpha"), "alpha = {}"),
         ],
         "one prelude per contributing Plugin, in declaration order"
     );
@@ -121,24 +121,24 @@ fn activation_returns_each_contributed_prelude_in_declaration_order() {
 #[test]
 fn an_absent_plugin_contributes_no_prelude() {
     let activation = activate_declaring(
-        "  - acme/alpha\n  - ref: acme/absent\n    optional: true\n",
-        vec![Preluder::new("acme/alpha", Some("alpha = {}"))],
+        "  - alpha\n  - ref: absent\n    optional: true\n",
+        vec![Preluder::new("alpha", Some("alpha = {}"))],
     );
     assert!(activation.requirements.is_satisfied());
     assert_eq!(
         activation.preludes,
-        [Prelude::new(id("acme/alpha"), "alpha = {}")]
+        [Prelude::new(id("alpha"), "alpha = {}")]
     );
 }
 
 #[test]
 fn a_conflicting_pair_contributes_no_prelude() {
     let activation = activate_declaring(
-        "  - acme/left\n  - acme/right\n  - acme/alpha\n",
+        "  - left\n  - right\n  - alpha\n",
         vec![
-            Preluder::new("acme/left", Some("left = {}")).conflicting_with("acme/right"),
-            Preluder::new("acme/right", Some("right = {}")),
-            Preluder::new("acme/alpha", Some("alpha = {}")),
+            Preluder::new("left", Some("left = {}")).conflicting_with("right"),
+            Preluder::new("right", Some("right = {}")),
+            Preluder::new("alpha", Some("alpha = {}")),
         ],
     );
     assert_eq!(
@@ -148,7 +148,7 @@ fn a_conflicting_pair_contributes_no_prelude() {
     );
     assert_eq!(
         activation.preludes,
-        [Prelude::new(id("acme/alpha"), "alpha = {}")],
+        [Prelude::new(id("alpha"), "alpha = {}")],
         "neither member of the conflicting pair contributes its prelude"
     );
 }
@@ -156,15 +156,15 @@ fn a_conflicting_pair_contributes_no_prelude() {
 #[test]
 fn a_plugin_whose_create_fails_contributes_no_prelude() {
     let activation = activate_declaring(
-        "  - ref: acme/broken\n    optional: true\n  - acme/alpha\n",
+        "  - ref: broken\n    optional: true\n  - alpha\n",
         vec![
-            Preluder::new("acme/broken", Some("broken = {}")).failing(),
-            Preluder::new("acme/alpha", Some("alpha = {}")),
+            Preluder::new("broken", Some("broken = {}")).failing(),
+            Preluder::new("alpha", Some("alpha = {}")),
         ],
     );
     assert!(activation.requirements.is_satisfied());
     assert_eq!(
         activation.preludes,
-        [Prelude::new(id("acme/alpha"), "alpha = {}")]
+        [Prelude::new(id("alpha"), "alpha = {}")]
     );
 }

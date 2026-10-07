@@ -10,7 +10,7 @@ pub(super) struct EchoTool;
 #[async_trait::async_trait]
 impl TestTool for EchoTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/echo").expect("valid id")
+        ToolId::parse("tools/echo").expect("valid id")
     }
 
     #[expect(
@@ -63,7 +63,7 @@ pub(super) struct UntrustedEchoTool;
 #[async_trait::async_trait]
 impl TestTool for UntrustedEchoTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/untrusted_echo").expect("valid id")
+        ToolId::parse("tools/untrusted_echo").expect("valid id")
     }
 
     #[expect(
@@ -112,7 +112,7 @@ pub(super) struct StructuredFixtureTool {
 #[async_trait::async_trait]
 impl TestTool for StructuredFixtureTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/structured").expect("valid id")
+        ToolId::parse("tools/structured").expect("valid id")
     }
 
     #[expect(
@@ -151,7 +151,7 @@ pub(super) struct FailingTool;
 #[async_trait::async_trait]
 impl TestTool for FailingTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/failing").expect("valid id")
+        ToolId::parse("tools/failing").expect("valid id")
     }
 
     #[expect(
@@ -195,7 +195,7 @@ pub(super) struct ScopedFixtureTool {
 impl ScopedFixtureTool {
     pub(super) fn new(name: &str, wire_name: &'static str, description: &'static str) -> Self {
         Self {
-            id: ToolId::parse(&format!("tests/tools/{name}")).expect("valid id"),
+            id: ToolId::parse(&format!("tools/{name}")).expect("valid id"),
             wire_name,
             description,
             calls: Arc::new(AtomicUsize::new(0)),

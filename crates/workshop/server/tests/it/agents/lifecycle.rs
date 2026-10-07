@@ -141,7 +141,7 @@ name: boom
 description: The terminally failing test agent.
 promptforge: 0
 plugins:
-  - promptforge/user-input
+  - user-input
 ---
 
 # Boom

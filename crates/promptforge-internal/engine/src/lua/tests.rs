@@ -59,7 +59,7 @@ fn test_models() -> ModelSet {
 /// yield boundary, so the tool is data alone.
 fn stub_tool() -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse("tests/tools/echo").expect("valid id"),
+        ToolId::parse("tools/echo").expect("valid id"),
         "echo",
         "echo tool",
         json!({ "type": "object" }),

@@ -14,28 +14,28 @@ use promptforge::{MissingService, RunErrorKind, RunResult};
 
 use super::support::{captured_logs, context, parse, run_activated};
 
-/// A prompt declaring `acme/asker` as a required Plugin.
+/// A prompt declaring `asker` as a required Plugin.
 const REQUIRES_ASKER: &str = concat!(
     "---\n",
     "name: requires-asker\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - acme/asker\n",
+    "  - asker\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A prompt declaring `acme/asker` as an optional Plugin.
+/// A prompt declaring `asker` as an optional Plugin.
 const OPTIONAL_ASKER: &str = concat!(
     "---\n",
     "name: optional-asker\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - ref: acme/asker\n",
+    "  - ref: asker\n",
     "    optional: true\n",
     "---\n\n",
     "# Title\n\n",
@@ -44,7 +44,7 @@ const OPTIONAL_ASKER: &str = concat!(
 );
 
 fn asker_id() -> PluginId {
-    PluginId::parse("acme/asker").expect("the fixture id is valid")
+    PluginId::parse("asker").expect("the fixture id is valid")
 }
 
 /// A fixture Plugin that needs the input service and counts how
@@ -169,7 +169,7 @@ fn an_optional_plugin_whose_service_is_missing_activates_degraded_with_a_warning
         "the gap is logged as a warning: {logs}"
     );
     assert!(
-        logs.contains("acme/asker") && logs.contains("promptforge/input-broker"),
+        logs.contains("asker") && logs.contains("promptforge/input-broker"),
         "the warning names the Plugin and the service: {logs}"
     );
 }
@@ -187,7 +187,7 @@ fn the_run_path_refuses_a_required_plugin_whose_service_is_missing() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - acme/asker needs promptforge/input-broker, and the environment provides none"
+         - asker needs promptforge/input-broker, and the environment provides none"
     );
     assert_eq!(creates.load(Ordering::SeqCst), 0);
 }

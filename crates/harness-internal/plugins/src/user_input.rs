@@ -1,5 +1,5 @@
-//! The `promptforge/user-input` Plugin: a prompt section pauses and
-//! asks the operator for their next message.
+//! The `user-input` Plugin: a prompt section pauses and asks the
+//! operator for their next message.
 //!
 //! A prompt declares the Plugin in its frontmatter, required or
 //! optional, and its sections then have an `input` table with two
@@ -7,7 +7,7 @@
 //!
 //! ````text
 //! plugins:
-//!   - promptforge/user-input
+//!   - user-input
 //! ````
 //!
 //! ````lua
@@ -57,8 +57,8 @@
 //!   Plugin's [`needs`](Plugin::needs) names
 //!   [`INPUT_BROKER`], so activation never calls
 //!   [`create`](Plugin::create) and the refusal notice holds the line
-//!   "- promptforge/user-input needs promptforge/input-broker, and the
-//!   environment provides none".
+//!   "- user-input needs promptforge/input-broker, and the environment
+//!   provides none".
 //! - An optional declaration activates anyway, and the activation
 //!   records a [`ServiceGap`](crate::ServiceGap). `input.connected()`
 //!   returns `false`. Each `input.ask()` still issues the tool call, so
@@ -89,7 +89,7 @@
 //!
 //! # Prompt-side rules
 //!
-//! - A prompt gets `input` only by declaring `promptforge/user-input`.
+//! - A prompt gets `input` only by declaring `user-input`.
 //!   Without the declaration, `input.ask()` fails with Lua's own
 //!   "attempt to index a nil value (global 'input')".
 //! - `input.ask()` takes no arguments. Calling it with any argument
@@ -98,7 +98,7 @@
 //!   it.
 //! - The model can ask the operator only when the prompt opts in: it
 //!   binds the ask tool under an alias in its `tools:` frontmatter, for
-//!   example `ask: promptforge/user-input/ask`, and advertises that alias
+//!   example `ask: user-input/ask`, and advertises that alias
 //!   with `tools.add` or `tools.always`. Declaring the Plugin alone
 //!   advertises nothing to the model.
 
@@ -121,7 +121,7 @@ mod tests;
 ///
 /// `input.ask()` calls the ask tool by this id. To let its model ask the
 /// operator, a prompt binds this id under an alias of its own.
-pub const USER_INPUT_ASK_TOOL: &str = "promptforge/user-input/ask";
+pub const USER_INPUT_ASK_TOOL: &str = "user-input/ask";
 
 /// The service key for the input broker, the Host service that carries a
 /// question to the operator.
@@ -136,7 +136,7 @@ const FALLBACK: &str = "User input is unavailable in this host; continue without
 /// The first-party Plugin that lets a prompt section pause and ask the
 /// operator for their next message.
 ///
-/// Its id is `promptforge/user-input`. It needs the input broker provided
+/// Its id is `user-input`. It needs the input broker provided
 /// under the key [`INPUT_BROKER`]. It gives each run the ask tool,
 /// [`USER_INPUT_ASK_TOOL`], and a prelude that defines `input.ask()` and
 /// `input.connected()` in every section of the run.
@@ -145,7 +145,7 @@ const FALLBACK: &str = "User input is unavailable in this host; continue without
 /// and `true`. Otherwise it returns a fixed fallback sentence and `false`.
 #[derive(Debug, Clone)]
 pub struct UserInput {
-    /// The stable identity, `promptforge/user-input`.
+    /// The stable identity, `user-input`.
     id: PluginId,
     /// The ask tool's identity, [`USER_INPUT_ASK_TOOL`].
     ask: ToolId,
@@ -165,8 +165,7 @@ impl UserInput {
             clippy::expect_used,
             reason = "the id is a literal of the Plugin id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
         )]
-        let id = PluginId::parse("promptforge/user-input")
-            .expect("the literal user-input Plugin id parses");
+        let id = PluginId::parse("user-input").expect("the literal user-input Plugin id parses");
         #[expect(
             clippy::expect_used,
             reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"

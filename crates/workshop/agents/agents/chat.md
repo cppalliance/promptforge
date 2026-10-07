@@ -3,11 +3,11 @@ name: chat
 description: The built-in Workshop chat agent on the unified runtime.
 promptforge: 0
 plugins:
-  - promptforge/web
-  - promptforge/user-input
+  - web
+  - user-input
 tools:
-  fetch: promptforge/web/fetch
-  search: promptforge/web/search
+  fetch: web/fetch
+  search: web/search
 models:
   chat:
     min_context: 32768

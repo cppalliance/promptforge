@@ -16,12 +16,12 @@ const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
 
 /// A prompt declaring the greeter Plugin, with nothing to run.
 const DECLARES_GREETER: &str = "---\nname: declares-greeter\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - greeter\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A prompt declaring the greeter Plugin as optional, with nothing to
 /// run.
 const DECLARES_GREETER_OPTIONALLY: &str = "---\nname: declares-greeter\ndescription: d\n\
-    promptforge: 0\nplugins:\n  - ref: tests/greeter\n    optional: true\n---\n\n\
+    promptforge: 0\nplugins:\n  - ref: greeter\n    optional: true\n---\n\n\
     # Title\n\n## Only\n\nDone.\n";
 
 /// A fixture Plugin needing [`GREETING`], which records the greeting
@@ -61,7 +61,7 @@ fn greeter_registry(greetings: &Arc<Mutex<Vec<Option<String>>>>) -> PluginRegist
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Greeter {
-            id: PluginId::parse("tests/greeter").unwrap(),
+            id: PluginId::parse("greeter").unwrap(),
             greetings: Arc::clone(greetings),
         }))
         .unwrap();
@@ -105,7 +105,7 @@ async fn a_plugin_whose_service_the_host_lacks_is_refused_naming_the_service() {
     assert!(
         error
             .to_string()
-            .contains("- tests/greeter needs tests/greeting, and the environment provides none"),
+            .contains("- greeter needs tests/greeting, and the environment provides none"),
         "the notice names the Plugin and the missing service: {error}"
     );
     assert!(greetings.is_empty(), "the Plugin never activated");
@@ -138,6 +138,6 @@ fn an_optional_plugin_whose_service_the_host_lacks_records_the_service_gap() {
     assert!(activation.requirements.is_satisfied());
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
     let gap = &activation.service_gaps[0];
-    assert_eq!(gap.plugin.to_string(), "tests/greeter");
+    assert_eq!(gap.plugin.to_string(), "greeter");
     assert_eq!(gap.service, GREETING.id());
 }

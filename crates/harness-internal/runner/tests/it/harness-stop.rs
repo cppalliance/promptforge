@@ -27,7 +27,7 @@ use crate::scripted::{
 /// then joins both children and returns how its own wait ended beside
 /// both children's reports.
 const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/harness\nmodels:\n  writer: {}\n---\n\n\
+    plugins:\n  - harness\nmodels:\n  writer: {}\n---\n\n\
     # Stops\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\
     local chat = tasks.spawn('## Chat')\n\
@@ -39,7 +39,7 @@ const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
     local ok, err = pcall(models.infer, 'held')\n\
     return 'chat:' .. tostring(ok) .. ':' .. err.kind\n```\n\n\
     ## Tool\n\n```lua\n\
-    local ok, err = pcall(tools.call, 'tests/harness/hold')\n\
+    local ok, err = pcall(tools.call, 'harness/hold')\n\
     return 'tool:' .. tostring(ok) .. ':' .. err.kind\n```\n";
 
 /// A prompt whose one round sits under nothing that catches.
@@ -51,8 +51,8 @@ const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\npromptforge: 
 /// The built-in chat's shape: ask the operator, run the model loop under
 /// a `pcall`, and ask again, with the held tool advertised to the model.
 const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/harness\n  - promptforge/user-input\n\
-    tools:\n  hold: tests/harness/hold\nmodels:\n  writer: {}\n---\n\n\
+    plugins:\n  - harness\n  - user-input\n\
+    tools:\n  hold: harness/hold\nmodels:\n  writer: {}\n---\n\n\
     # Chats\n\n```lua\nmodels.default('writer')\ntools.always('hold')\n```\n\n\
     ## Conversation\n\n```lua\n\
     local history = messages.new()\n\
@@ -64,7 +64,7 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
 
 /// A prompt that returns the operator's answer to one question.
 const ASKS: &str = "---\nname: asks\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - promptforge/user-input\n---\n\n\
+    plugins:\n  - user-input\n---\n\n\
     # Asks\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
 
 #[tokio::test]
@@ -208,7 +208,7 @@ async fn a_chat_shaped_prompt_returns_to_its_question_after_a_stop_during_a_tool
     );
     let records = recorder.records(report.run_id.expect("the run began"));
     assert_eq!(
-        answers_where(&records, "ToolCall", calls("tests/harness/hold")),
+        answers_where(&records, "ToolCall", calls("harness/hold")),
         [json!("Dropped")],
         "the stop answered the model's tool call Dropped"
     );

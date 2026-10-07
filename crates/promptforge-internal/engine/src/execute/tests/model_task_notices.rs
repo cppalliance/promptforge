@@ -28,7 +28,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 /// A tool that answers each call in call order after the next scripted
 /// delay, so the release of a child parked on it is timed by the test. A
-/// child calls it by its full id, `tests/tools/delayed`.
+/// child calls it by its full id, `tools/delayed`.
 pub(super) struct DelayedTool(Mutex<VecDeque<Duration>>);
 
 impl DelayedTool {
@@ -40,7 +40,7 @@ impl DelayedTool {
 #[async_trait::async_trait]
 impl TestTool for DelayedTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/delayed").expect("valid delayed tool id")
+        ToolId::parse("tools/delayed").expect("valid delayed tool id")
     }
 
     #[expect(
@@ -220,7 +220,7 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content"),
-        "tools.call('tests/tools/delayed')\nreturn 'child result'",
+        "tools.call('tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
@@ -331,9 +331,9 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
               return results[1].result .. '|' .. msgs[5].content\n\
               ```\n\n\
               ## Child\n\n\
-              ```lua\ntools.call('tests/tools/delayed')\nreturn 'child result'\n```\n\n\
+              ```lua\ntools.call('tools/delayed')\nreturn 'child result'\n```\n\n\
               ## Sibling\n\n\
-              ```lua\ntools.call('tests/tools/delayed')\nlog('sibling ran')\nreturn 'sib'\n```\n";
+              ```lua\ntools.call('tools/delayed')\nlog('sibling ran')\nreturn 'sib'\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(NoticeRecorder::default());
     let (ctx, fixture) = model_task_context_with(

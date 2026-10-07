@@ -11,14 +11,14 @@ use serde_json::json;
 /// calls the speaker's echo tool by its full id.
 const SPEAKER_PRELUDE: &str = "speaker = {}\n\
     function speaker.say(value)\n\
-      return tools.call('tests/speaker/echo', { value = value })\n\
+      return tools.call('speaker/echo', { value = value })\n\
     end\n";
 
 /// A prompt declaring the speaker, binding none of its tools, and calling
 /// its prelude from two sections; the second also tries to replace the
 /// prelude's function and reports whether the table refused.
 const SPEAKS: &str = "---\nname: speaks\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/speaker\n---\n\n# Title\n\n\
+    plugins:\n  - speaker\n---\n\n# Title\n\n\
     ## First\n\n```lua\nspeaker.say('one')\n```\n\n\
     ## Second\n\n```lua\n\
     local sealed = not pcall(function() speaker.say = nil end)\n\
@@ -46,7 +46,7 @@ impl Plugin for Speaker {
     fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Echo {
-                id: ToolId::parse("tests/speaker/echo").unwrap(),
+                id: ToolId::parse("speaker/echo").unwrap(),
             })],
             prelude: Some(SPEAKER_PRELUDE.to_owned()),
         })
@@ -58,8 +58,8 @@ impl Plugin for Speaker {
 fn script_call(value: &str, section: &str) -> serde_json::Value {
     json!({
         "ToolCall": {
-            "tool": "tests/speaker/echo",
-            "alias": "tests/speaker/echo",
+            "tool": "speaker/echo",
+            "alias": "speaker/echo",
             "args": { "value": value },
             "origin": { "execution": "session-1", "section": section, "caller": "script" },
         }
@@ -72,7 +72,7 @@ async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_tha
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Speaker {
-            id: PluginId::parse("tests/speaker").unwrap(),
+            id: PluginId::parse("speaker").unwrap(),
         }))
         .unwrap();
     let prepared = prepare(SPEAKS, "", services(&recorder, Some(Arc::new(registry))))

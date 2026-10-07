@@ -23,7 +23,7 @@ const WRITTEN: &str = "written through the context";
 /// A prompt binding `record` to the fixture tool, calling it from the
 /// section's script, and returning its answer beside the file it wrote.
 const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/context\ntools:\n  record: tests/context/record\n---\n\n\
+    plugins:\n  - context\ntools:\n  record: context/record\n---\n\n\
     # Title\n\n## Only\n\n```lua\nlocal caller = tools.call('record')\n\
     return caller .. '|' .. store.read('from-tool.md')\n```\n";
 
@@ -84,7 +84,7 @@ impl Plugin for Context {
     fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Record {
-                id: ToolId::parse("tests/context/record").unwrap(),
+                id: ToolId::parse("context/record").unwrap(),
             })],
             prelude: None,
         })
@@ -96,7 +96,7 @@ fn context_registry() -> Arc<PluginRegistry> {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Context {
-            id: PluginId::parse("tests/context").unwrap(),
+            id: PluginId::parse("context").unwrap(),
         }))
         .unwrap();
     Arc::new(registry)

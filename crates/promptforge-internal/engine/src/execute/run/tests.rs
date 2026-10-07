@@ -127,7 +127,7 @@ fn a_tool_call_effect_records_its_identity_alias_args_and_origin_and_drops_the_a
             .expect("the stock backend acquires"),
     );
     let effect = Effect::ToolCall {
-        tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+        tool: ToolId::parse("tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({ "value": "hi" }),
         origin: model_origin(),
@@ -137,7 +137,7 @@ fn a_tool_call_effect_records_its_identity_alias_args_and_origin_and_drops_the_a
     assert_eq!(
         record,
         EffectRecord::ToolCall {
-            tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+            tool: ToolId::parse("tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
             origin: model_origin(),
@@ -154,7 +154,7 @@ fn a_tool_call_effect_records_its_identity_alias_args_and_origin_and_drops_the_a
 #[test]
 fn a_tool_call_record_serializes_its_origin_in_snake_case() {
     let record = EffectRecord::ToolCall {
-        tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+        tool: ToolId::parse("tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({}),
         origin: ToolCallOrigin {

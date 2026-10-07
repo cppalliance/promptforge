@@ -55,7 +55,7 @@ impl Tool for WebSearch {
         reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
     )]
     fn id(&self) -> ToolId {
-        ToolId::parse("promptforge/web/search").expect("the literal web_search id parses")
+        ToolId::parse("web/search").expect("the literal web_search id parses")
     }
 
     #[expect(

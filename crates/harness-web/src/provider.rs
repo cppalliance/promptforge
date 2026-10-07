@@ -3,7 +3,7 @@
 //! [`SearchResults`] it answers with, and the [`SearchError`] it fails
 //! with.
 
-/// A backend that runs web searches for the `promptforge/web/search` tool.
+/// A backend that runs web searches for the `web/search` tool.
 ///
 /// The Host registers one under the key
 /// [`SEARCH_PROVIDER`](crate::SEARCH_PROVIDER). The tool validates the
@@ -20,7 +20,7 @@ pub trait SearchProvider: Send + Sync {
     async fn search(&self, query: SearchQuery) -> Result<SearchResults, SearchError>;
 }
 
-/// The validated arguments of one `promptforge/web/search` call.
+/// The validated arguments of one `web/search` call.
 ///
 /// The search tool builds one only from arguments that pass its checks:
 ///

@@ -31,7 +31,7 @@ fn echo_handle() -> LuaToolHandle {
     LuaToolHandle::from_binding(
         "echo",
         "echo tool",
-        &ToolId::parse("tests/tools/echo").expect("id"),
+        &ToolId::parse("tools/echo").expect("id"),
     )
 }
 
@@ -318,7 +318,7 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
 /// A trivial tool as data, so the counts test can bind an alias.
 fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
     promptforge_types::tools::ToolDescriptor::new(
-        ToolId::parse("tests/tools/echo").expect("valid id"),
+        ToolId::parse("tools/echo").expect("valid id"),
         "echo",
         "echo tool",
         json!({ "type": "object" }),

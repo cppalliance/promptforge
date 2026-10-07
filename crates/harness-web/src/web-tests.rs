@@ -1,4 +1,4 @@
-//! Tests for the `promptforge/web` Plugin: what activation contributes
+//! Tests for the `web` Plugin: what activation contributes
 //! with both services, without either, and on a cancelled run; the custom
 //! fetch policy; and the two service keys.
 
@@ -51,7 +51,7 @@ async fn activating_the_plugin_contributes_both_tools_under_its_full_id() {
     let plugin = Web::new();
     assert_eq!(
         plugin.id(),
-        &PluginId::parse("promptforge/web").expect("valid Plugin id")
+        &PluginId::parse("web").expect("valid Plugin id")
     );
 
     let contribution = plugin.create(&services()).expect("activation succeeds");
@@ -61,8 +61,8 @@ async fn activating_the_plugin_contributes_both_tools_under_its_full_id() {
     assert_eq!(
         ids,
         vec![
-            ToolId::parse("promptforge/web/fetch").expect("valid tool id"),
-            ToolId::parse("promptforge/web/search").expect("valid tool id"),
+            ToolId::parse("web/fetch").expect("valid tool id"),
+            ToolId::parse("web/search").expect("valid tool id"),
         ]
     );
     for tool in &contribution.tools {

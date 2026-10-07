@@ -29,7 +29,7 @@
 //! are the Lua source an activated Plugin contributes: each runs once
 //! per VM in an environment of its own before the shared library replays,
 //! and its globals are checked against the reserved-name list and raw-set
-//! into `_G`. The `input` table that `promptforge/user-input` defines is
+//! into `_G`. The `input` table that `user-input` defines is
 //! one: `input.ask()` is an ordinary tool call to that Plugin's ask
 //! tool.
 //!

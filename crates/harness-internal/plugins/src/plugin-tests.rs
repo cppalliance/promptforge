@@ -19,7 +19,7 @@ struct StubPlugin {
 impl StubPlugin {
     fn web() -> StubPlugin {
         StubPlugin {
-            id: PluginId::parse("promptforge/web").expect("a static valid id"),
+            id: PluginId::parse("web").expect("a static valid id"),
             description: "A stub Plugin that contributes nothing.".to_owned(),
         }
     }
@@ -65,7 +65,7 @@ fn a_plugin_needs_no_host_service_by_default() {
 #[test]
 fn a_plugin_is_object_safe_and_exposes_its_identity() {
     let plugin: Arc<dyn Plugin> = Arc::new(StubPlugin::web());
-    assert_eq!(plugin.id().to_string(), "promptforge/web");
+    assert_eq!(plugin.id().to_string(), "web");
     assert!(!plugin.description().is_empty());
 }
 

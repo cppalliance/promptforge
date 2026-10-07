@@ -119,7 +119,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         vec![crate::lua::ToolBinding {
             alias: "echo".to_owned(),
             description: "echo capability for live matching".to_owned(),
-            id: ToolId::parse("tests/tools/echo").expect("valid id"),
+            id: ToolId::parse("tools/echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
             schema: EchoTool.parameters_schema(),
             output_kind: ToolOutputKind::Plain,
@@ -287,7 +287,7 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // different nonces, so an envelope's tag stays unguessable from one run
     // to the next as long as the caller draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\

@@ -256,21 +256,21 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 }
 
 // ToolBindings and slot filling: exact slots fill by identity against
-// the caller-supplied catalog (an exact path's first two segments name its
+// the caller-supplied catalog (an exact path's first segment names its
 // Plugin, so a slot whose Plugin contributed nothing to the
 // catalog is reported as missing), with every fill journaled into the
 // run's tool bindings as descriptors, never implementations.
 
-/// A prompt declaring `promptforge/web` and one exact tool slot.
+/// A prompt declaring `web` and one exact tool slot.
 const DECLARES_EXACT_SLOT: &str = concat!(
     "---\n",
     "name: declares-exact-slot\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/web\n",
+    "  - web\n",
     "tools:\n",
-    "  fetch: promptforge/web/fetch\n",
+    "  fetch: web/fetch\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -285,14 +285,14 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "description: d\n",
     "promptforge: 0\n",
     "tools:\n",
-    "  fetch: promptforge/web/fetch\n",
+    "  fetch: web/fetch\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A caller-supplied descriptor for one `promptforge/web` tool.
+/// A caller-supplied descriptor for one `web` tool.
 fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     let id = ToolId::parse(id).expect("the fixture tool id is valid");
     ToolDescriptor::new(
@@ -310,7 +310,7 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 #[test]
 fn prepare_fills_a_slot_by_id_against_a_caller_supplied_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let id = ToolId::parse("web/fetch").expect("the id is valid");
     let descriptor = ToolDescriptor::new(
         id.clone(),
         "fetch",
@@ -344,10 +344,10 @@ fn an_exact_slot_whose_plugin_is_inactive_is_reported() {
     // An empty catalog and no declaration: the slot's Plugin
     // contributed nothing the Engine can fill against.
     let (ctx, requirements) = Environment::new().prepare(&prompt, context("fill-orphan"));
-    // The exact path's first two segments name its Plugin.
+    // The exact path's first segment names its Plugin.
     assert_eq!(
         requirements.missing_required,
-        [PluginId::parse("promptforge/web").expect("the id is valid")]
+        [PluginId::parse("web").expect("the id is valid")]
     );
     assert!(!requirements.is_satisfied());
     assert!(ctx.tool_bindings().is_empty());
@@ -359,7 +359,7 @@ fn an_exact_slot_absent_from_an_active_plugin_is_not_reported_missing() {
     // The Plugin is present in the catalog but contributed a different
     // tool: the slot's Plugin is not missing, so the run must not fail
     // unsatisfiably - installing changes nothing.
-    let catalog = ToolCatalog::new(&[web_descriptor("promptforge/web/search", "Search the web")])
+    let catalog = ToolCatalog::new(&[web_descriptor("web/search", "Search the web")])
         .expect("the catalog builds");
     let env = Environment::new().tools(catalog);
     let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));

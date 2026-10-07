@@ -184,20 +184,12 @@ impl fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-/// Normalizes a Plugin id for the punctuation-twin check: each
-/// separator byte (`-`, `_`, `.`) maps to one canonical byte, so two ids
-/// differing only in separator choice compare equal. The global-name
+/// Normalizes a one-segment Plugin id for the punctuation-twin check:
+/// each separator byte (`-`, `_`, `.`) maps to the canonical `-`, so two
+/// ids differing only in separator choice compare equal. The global-name
 /// charset is lowercase-only, so case needs no handling.
-fn normalize_id(id: &PluginId) -> (String, String) {
-    (
-        normalize_segment(id.namespace()),
-        normalize_segment(id.name()),
-    )
-}
-
-/// Maps every separator byte in a segment to the canonical `-`.
-fn normalize_segment(segment: &str) -> String {
-    segment
+fn normalize_id(id: &PluginId) -> String {
+    id.to_string()
         .chars()
         .map(|c| if matches!(c, '-' | '_' | '.') { '-' } else { c })
         .collect()

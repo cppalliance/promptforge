@@ -192,8 +192,8 @@ pub(crate) fn held_broker(held: &Arc<Held>) -> ScriptedBroker {
     ScriptedBroker::new(move |_round, _messages| held.hold())
 }
 
-/// The fixture Plugin `tests/harness`, contributing the one tool
-/// `tests/harness/hold`, whose every call is held.
+/// The fixture Plugin `harness`, contributing the one tool
+/// `harness/hold`, whose every call is held.
 struct HoldPlugin {
     id: PluginId,
     held: Arc<Held>,
@@ -215,7 +215,7 @@ impl Plugin for HoldPlugin {
     fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(HoldTool {
-                id: ToolId::parse("tests/harness/hold").unwrap(),
+                id: ToolId::parse("harness/hold").unwrap(),
                 held: Arc::clone(&self.held),
             })],
             prelude: None,
@@ -261,7 +261,7 @@ pub(crate) fn hold_registry(held: &Arc<Held>) -> PluginRegistry {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(HoldPlugin {
-            id: PluginId::parse("tests/harness").unwrap(),
+            id: PluginId::parse("harness").unwrap(),
             held: Arc::clone(held),
         }))
         .unwrap();

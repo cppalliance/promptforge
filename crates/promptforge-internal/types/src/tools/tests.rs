@@ -174,76 +174,62 @@ fn tool_id_error_kind(input: &str) -> super::ToolIdErrorKind {
 }
 
 #[test]
-fn a_three_segment_tool_id_parses_and_exposes_its_name() {
-    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
+fn a_two_segment_tool_id_parses_and_exposes_its_name() {
+    let id = ToolId::parse("web/fetch").expect("a valid tool id");
     assert_eq!(id.name(), "fetch");
 }
 
 #[test]
-fn a_tool_ids_plugin_is_always_its_two_segment_prefix() {
-    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
+fn a_tool_ids_plugin_is_its_first_segment() {
+    let id = ToolId::parse("web/fetch").expect("a valid tool id");
     assert_eq!(
         id.plugin(),
-        PluginId::parse("promptforge/web").expect("a valid Plugin id"),
-        "dropping the last segment must yield the contributing Plugin's id"
+        PluginId::parse("web").expect("a valid Plugin id"),
+        "the first segment must yield the contributing Plugin's local name"
     );
 }
 
 #[test]
-fn containment_holds_for_a_reverse_dns_namespace() {
-    let id = ToolId::parse("org.rustalliance/core/search").expect("a valid tool id");
-    assert_eq!(id.name(), "search");
+fn a_deeper_tool_id_names_its_plugin_first_and_its_tool_last() {
+    let id = ToolId::parse("github/issues/create").expect("a valid tool id");
+    assert_eq!(id.name(), "create");
     assert_eq!(
         id.plugin(),
-        PluginId::parse("org.rustalliance/core").expect("a valid Plugin id")
+        PluginId::parse("github").expect("a valid Plugin id")
     );
 }
 
 #[test]
-fn a_two_segment_plugin_name_is_rejected_as_a_tool_id() {
-    use super::ToolIdErrorKind;
-    assert_eq!(
-        tool_id_error_kind("promptforge/web"),
-        ToolIdErrorKind::SegmentCount
-    );
+fn four_segments_parse_as_a_tool_id() {
+    let id = ToolId::parse("github/issues/comments/create").expect("a valid tool id");
+    assert_eq!(id.name(), "create");
+    assert_eq!(id.to_string(), "github/issues/comments/create");
 }
 
 #[test]
 fn a_single_segment_is_rejected_as_a_tool_id() {
     use super::ToolIdErrorKind;
-    assert_eq!(
-        tool_id_error_kind("promptforge"),
-        ToolIdErrorKind::SegmentCount
-    );
+    assert_eq!(tool_id_error_kind("web"), ToolIdErrorKind::SegmentCount);
 }
 
 #[test]
-fn four_segments_are_rejected_as_a_tool_id() {
+fn an_empty_tool_id_is_rejected_as_an_empty_error() {
     use super::ToolIdErrorKind;
-    assert_eq!(
-        tool_id_error_kind("promptforge/web/fetch/extra"),
-        ToolIdErrorKind::SegmentCount
-    );
+    assert_eq!(tool_id_error_kind(""), ToolIdErrorKind::Empty);
 }
 
 #[test]
 fn an_empty_segment_is_rejected_as_an_empty_error() {
     use super::ToolIdErrorKind;
-    assert_eq!(
-        tool_id_error_kind("promptforge//fetch"),
-        ToolIdErrorKind::Empty
-    );
+    assert_eq!(tool_id_error_kind("web//fetch"), ToolIdErrorKind::Empty);
 }
 
 #[test]
 fn a_control_character_is_rejected_as_a_control_error() {
     use super::ToolIdErrorKind;
+    assert_eq!(tool_id_error_kind("we\tb/fetch"), ToolIdErrorKind::Control);
     assert_eq!(
-        tool_id_error_kind("promptforge/we\tb/fetch"),
-        ToolIdErrorKind::Control
-    );
-    assert_eq!(
-        tool_id_error_kind("promptforge/web/fe\u{7f}tch"),
+        tool_id_error_kind("web/fe\u{7f}tch"),
         ToolIdErrorKind::Control
     );
 }
@@ -251,34 +237,31 @@ fn a_control_character_is_rejected_as_a_control_error() {
 #[test]
 fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
     use super::ToolIdErrorKind;
-    assert_eq!(
-        tool_id_error_kind("Promptforge/web/fetch"),
-        ToolIdErrorKind::Control
-    );
+    assert_eq!(tool_id_error_kind("Web/fetch"), ToolIdErrorKind::Control);
 }
 
 #[test]
 fn the_migrated_built_in_ids_parse() {
-    // The built-in tool ids follow the 3-segment global grammar.
-    assert!(ToolId::parse("promptforge/web/fetch").is_ok());
-    assert!(ToolId::parse("promptforge/web/search").is_ok());
+    assert!(ToolId::parse("web/fetch").is_ok());
+    assert!(ToolId::parse("web/search").is_ok());
+    assert!(ToolId::parse("user-input/ask").is_ok());
 }
 
 #[test]
 fn a_tool_id_serializes_as_its_global_name_string() {
-    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
+    let id = ToolId::parse("web/fetch").expect("a valid tool id");
     assert_eq!(
         serde_json::to_string(&id).expect("serialize"),
-        "\"promptforge/web/fetch\""
+        "\"web/fetch\""
     );
-    let parsed: ToolId = serde_json::from_str("\"promptforge/web/fetch\"").expect("deserialize");
+    let parsed: ToolId = serde_json::from_str("\"web/fetch\"").expect("deserialize");
     assert_eq!(parsed, id);
 }
 
 #[test]
 fn deserializing_an_invalid_tool_id_is_a_data_error() {
-    assert!(serde_json::from_str::<ToolId>("\"promptforge/web_fetch\"").is_err());
-    assert!(serde_json::from_str::<ToolId>("\"promptforge/web/fetch/extra\"").is_err());
+    assert!(serde_json::from_str::<ToolId>("\"web_fetch\"").is_err());
+    assert!(serde_json::from_str::<ToolId>("\"web//fetch\"").is_err());
 }
 
 #[test]

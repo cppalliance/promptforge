@@ -41,11 +41,11 @@ output:
   path: out.md
   description: the result
 plugins:
-  - web/search
-  - ref: fs/local
+  - web
+  - ref: fs
     optional: true
 tools:
-  search: web/search/query
+  search: web/search
 args:
   topic:
     type: string
@@ -90,14 +90,14 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
     assert_eq!(
         json["plugins"],
         serde_json::json!([
-            { "id": "web/search", "optional": false },
-            { "id": "fs/local", "optional": true },
+            { "id": "web", "optional": false },
+            { "id": "fs", "optional": true },
         ])
     );
     assert_eq!(
         json["tools"],
         serde_json::json!([
-            { "alias": "search", "kind": "exact", "path": "web/search/query" },
+            { "alias": "search", "kind": "exact", "path": "web/search" },
         ])
     );
     assert_eq!(

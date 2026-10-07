@@ -154,7 +154,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
     // The bound slots arrive from the frontmatter: the Plugin installs
     // the tool, the exact slot binds the alias, and the captured alias
     // globals install in every section VM - H1 never runs a bind.
-    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Captured Bindings\n\n\
          ```lua shared\n\
          function binding_names() return echo.name .. ':' .. writer.name end\n\

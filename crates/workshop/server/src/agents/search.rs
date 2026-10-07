@@ -1,4 +1,4 @@
-//! The agent sessions' search provider: every `promptforge/web/search`
+//! The agent sessions' search provider: every `web/search`
 //! call runs through the current Gateway generation's web search relay.
 //!
 //! The provider holds the server's [`Registry`] and reads the gateway

@@ -98,10 +98,7 @@ fn on_this_runtime(client: &FetchClient) -> WebFetch {
 async fn descriptor_is_stable_and_faithful() {
     let tool = on_this_runtime(&FetchClient::new());
 
-    assert_eq!(
-        tool.id(),
-        ToolId::parse("promptforge/web/fetch").expect("valid id")
-    );
+    assert_eq!(tool.id(), ToolId::parse("web/fetch").expect("valid id"));
     assert_eq!(tool.wire_name(), "web_fetch");
     assert_eq!(
         tool.description(),
@@ -115,13 +112,13 @@ async fn descriptor_is_stable_and_faithful() {
 
 #[tokio::test]
 async fn the_migrated_id_names_its_contributing_plugin() {
-    // Dropping the last segment of promptforge/web/fetch must yield the
+    // Dropping the last segment of web/fetch must yield the
     // contributing Plugin's id.
     let id = on_this_runtime(&FetchClient::new()).id();
     assert_eq!(id.name(), "fetch");
     assert_eq!(
         id.plugin(),
-        promptforge::plugins::PluginId::parse("promptforge/web").expect("a valid Plugin id")
+        promptforge::plugins::PluginId::parse("web").expect("a valid Plugin id")
     );
 }
 

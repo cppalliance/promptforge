@@ -20,14 +20,14 @@ fn the_full_contract_declaration_parses_and_round_trips() {
         "name: x\n",
         "description: d\n",
         "plugins:\n",
-        "  - promptforge/web\n",
-        "  - ref: io.github.corp/mcp\n",
+        "  - web\n",
+        "  - ref: mcp\n",
         "    optional: true\n",
         "    config:\n",
         "      servers: [alpha]\n",
         "tools:\n",
-        "  search: promptforge/web/search\n",
-        "  fetch: promptforge/web/fetch\n",
+        "  search: web/search\n",
+        "  fetch: web/fetch\n",
         "args:\n",
         "  use_mcp:\n",
         "    type: boolean\n",
@@ -48,10 +48,10 @@ fn the_full_contract_declaration_parses_and_round_trips() {
 
     let caps = fm.plugins();
     assert_eq!(caps.len(), 2);
-    assert_eq!(caps[0].id().to_string(), "promptforge/web");
+    assert_eq!(caps[0].id().to_string(), "web");
     assert!(!caps[0].is_optional());
     assert!(caps[0].config().is_none());
-    assert_eq!(caps[1].id().to_string(), "io.github.corp/mcp");
+    assert_eq!(caps[1].id().to_string(), "mcp");
     assert!(caps[1].is_optional());
     let config = caps[1].config().expect("the detailed entry has config");
     assert_eq!(
@@ -62,11 +62,11 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     let tools = fm.tools();
     assert_eq!(tools.len(), 2);
     match tools.get("search") {
-        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "promptforge/web/search"),
+        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "web/search"),
         other => panic!("expected an exact slot, got {other:?}"),
     }
     match tools.get("fetch") {
-        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "promptforge/web/fetch"),
+        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "web/fetch"),
         other => panic!("expected an exact slot, got {other:?}"),
     }
 
@@ -124,7 +124,7 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     // `deny_unknown_fields` must hold inside each new key's entries too: a
     // typo'd field is an authoring error, not silently ignored.
     for yaml in [
-        "name: x\ndescription: d\nplugins:\n  - ref: promptforge/web\n    optionl: true\n",
+        "name: x\ndescription: d\nplugins:\n  - ref: web\n    optionl: true\n",
         "name: x\ndescription: d\ntools:\n  wiki:\n    wants: prose\n",
         "name: x\ndescription: d\nargs:\n  flag:\n    tipe: boolean\n",
         "name: x\ndescription: d\nmodels:\n  analyst:\n    keyword: [fast]\n",
@@ -148,7 +148,7 @@ const RESERVED_SAMPLES: [(&str, &str); 5] = [
 #[test]
 fn a_reserved_name_is_refused_as_a_tool_alias_naming_the_map_and_the_category() {
     for (name, kind) in RESERVED_SAMPLES {
-        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n");
+        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': web/search\n");
         let error = parse(&yaml).expect_err("a reserved tool alias must be rejected");
         assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
         assert!(
@@ -190,7 +190,7 @@ fn every_reserved_name_is_refused_in_both_maps() {
             "is reserved"
         };
         for yaml in [
-            format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n"),
+            format!("name: x\ndescription: d\ntools:\n  '{name}': web/search\n"),
             format!("name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n"),
         ] {
             let error = parse(&yaml).expect_err("a reserved name must be rejected");
@@ -209,7 +209,7 @@ fn a_name_that_only_resembles_a_reserved_one_still_parses() {
     // Lua names are case-sensitive, and the rule matches whole names only.
     for name in ["Store", "stores", "my_argv", "pairs2", "ending", "search"] {
         let prompt = parse(&format!(
-            "name: x\ndescription: d\ntools:\n  {name}: promptforge/web/search\n\
+            "name: x\ndescription: d\ntools:\n  {name}: web/search\n\
              models:\n  {name}_model: {{}}\n"
         ))
         .expect("a non-reserved alias and role label parse");
@@ -244,7 +244,7 @@ fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
 fn one_name_as_both_a_tool_alias_and_a_model_role_label_is_refused() {
     let error = parse(concat!(
         "name: x\ndescription: d\n",
-        "tools:\n  scout: promptforge/web/search\n  writer: promptforge/web/fetch\n",
+        "tools:\n  scout: web/search\n  writer: web/fetch\n",
         "models:\n  writer: {}\n  scout: {}\n",
     ))
     .expect_err("a name in both maps must be rejected");

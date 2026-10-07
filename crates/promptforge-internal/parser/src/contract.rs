@@ -143,18 +143,18 @@ where
     }
 }
 
-/// Parses a Plugin id: a [`GlobalName`] of exactly two segments
-/// (`namespace/plugin`).
+/// Parses a Plugin id: a [`GlobalName`] of exactly one segment, such as
+/// `web`.
 ///
-/// The grammar accepts two or three segments, so the arity check counts
-/// separators: exactly one `/` is two segments. A `@` never gets that
-/// far - the charset rejects it.
+/// The grammar accepts any number of segments, so the arity check looks
+/// for a separator: no `/` is one segment. A `@` never gets that far - the
+/// charset rejects it.
 fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
     let name =
         GlobalName::parse(text).map_err(|error| format!("invalid Plugin id `{text}`: {error}"))?;
-    if text.matches('/').count() != 1 {
+    if text.contains('/') {
         return Err(format!(
-            "invalid Plugin id `{text}`: a Plugin id has exactly 2 segments (namespace/plugin)"
+            "invalid Plugin id `{text}`: a Plugin id is one segment, such as `web`, with no '/'"
         ));
     }
     Ok(name)
@@ -172,7 +172,7 @@ fn parse_plugin_id(text: &str) -> Result<GlobalName, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PluginDecl {
-    /// The Plugin's global id (`namespace/plugin`, exactly 2 segments).
+    /// The Plugin's id: one segment, such as `web`.
     id: GlobalName,
     /// Whether an absent Plugin skips with a log line instead of
     /// failing preparation.
@@ -182,7 +182,7 @@ pub struct PluginDecl {
 }
 
 impl PluginDecl {
-    /// Returns the Plugin's global id (`namespace/plugin`).
+    /// Returns the Plugin's one-segment id, such as `web`.
     #[must_use]
     pub fn id(&self) -> &GlobalName {
         &self.id
@@ -436,8 +436,8 @@ pub(crate) fn check_slot_plugins(tools: &ToolSlots, plugins: &[PluginDecl]) -> R
     Ok(())
 }
 
-/// Whether `decl` declares `plugin`. Both ids have exactly two
-/// segments, so equal namespace and Plugin segments are equal ids.
+/// Whether `decl` declares `plugin`. Both ids are one validated segment,
+/// so equal text is equal ids.
 fn declares(decl: &PluginDecl, plugin: &PluginId) -> bool {
-    decl.id().namespace() == plugin.namespace() && decl.id().plugin() == plugin.name()
+    decl.id().to_string() == plugin.to_string()
 }

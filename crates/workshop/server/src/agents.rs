@@ -65,8 +65,8 @@ pub(crate) use state::{SessionsState, register};
 /// the `runs.db` every conversation's run is recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
 
-/// The Plugins agents may declare: `promptforge/user-input`, so they
-/// can ask the operator, and `promptforge/web`.
+/// The Plugins agents may declare: `user-input`, so they
+/// can ask the operator, and `web`.
 fn plugins() -> PluginRegistry {
     let mut plugins = PluginRegistry::new();
     // Two unrelated ids into an empty registry, so neither registration
@@ -76,7 +76,7 @@ fn plugins() -> PluginRegistry {
     plugins
 }
 
-/// The services `promptforge/web` reads: the search provider over the
+/// The services `web` reads: the search provider over the
 /// gateway `registry` holds, and the runtime the server runs on. Built
 /// outside a runtime, as a synchronous test does, the runtime is left
 /// out, and a run that requires web is refused. Each run's clone adds its

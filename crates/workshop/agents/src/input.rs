@@ -4,7 +4,7 @@
 //! operator's text.
 //!
 //! An agent prompt asks its operator for input through a Plugin that
-//! holds the run's broker: the `promptforge/user-input` Plugin's
+//! holds the run's broker: the `user-input` Plugin's
 //! `input.ask()` calls its ask tool, which waits on the broker. The
 //! broker performs each wait by registering it, announcing it with a
 //! durable [`WaitFrame::Required`], and suspending on the wait's receiver

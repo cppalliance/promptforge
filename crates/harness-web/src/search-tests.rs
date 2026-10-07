@@ -79,10 +79,7 @@ async fn refused(args: serde_json::Value) -> ToolError {
 fn descriptor_is_stable_and_faithful() {
     let (tool, _fake) = tool();
 
-    assert_eq!(
-        tool.id(),
-        ToolId::parse("promptforge/web/search").expect("valid id")
-    );
+    assert_eq!(tool.id(), ToolId::parse("web/search").expect("valid id"));
     assert_eq!(tool.wire_name(), "web_search");
     assert_eq!(
         tool.description(),
@@ -146,14 +143,14 @@ fn descriptor_is_stable_and_faithful() {
 
 #[test]
 fn the_migrated_id_names_its_contributing_plugin() {
-    // Dropping the last segment of promptforge/web/search must yield the
+    // Dropping the last segment of web/search must yield the
     // contributing Plugin's id.
     let (tool, _fake) = tool();
     let id = tool.id();
     assert_eq!(id.name(), "search");
     assert_eq!(
         id.plugin(),
-        promptforge::plugins::PluginId::parse("promptforge/web").expect("a valid Plugin id")
+        promptforge::plugins::PluginId::parse("web").expect("a valid Plugin id")
     );
 }
 

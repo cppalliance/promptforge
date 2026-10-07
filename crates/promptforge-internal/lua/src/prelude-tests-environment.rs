@@ -27,8 +27,8 @@ end";
     install_preludes(
         vm.lua(),
         &[
-            prelude("acme/first", "first_global = 1"),
-            prelude("acme/probe", probe),
+            prelude("first", "first_global = 1"),
+            prelude("probe", probe),
         ],
         &[],
     )
@@ -79,7 +79,7 @@ function probe_write(path)
   end)
   return ok, tostring(err)
 end";
-    install_preludes(vm.lua(), &[prelude("acme/probe", probe)], &[]).expect("the prelude installs");
+    install_preludes(vm.lua(), &[prelude("probe", probe)], &[]).expect("the prelude installs");
 
     let (root, nested): (String, String) = eval(&vm, "return probe_meta()");
     assert_eq!(
@@ -114,7 +114,7 @@ function probe_set(key)
   local ok, err = pcall(function() var[key] = 1 end)
   return tostring(err)
 end";
-    install_preludes(vm.lua(), &[prelude("acme/probe", probe)], &[]).expect("the prelude installs");
+    install_preludes(vm.lua(), &[prelude("probe", probe)], &[]).expect("the prelude installs");
     for (key, refusal) in [
         (
             "'mode'",
@@ -136,8 +136,8 @@ fn a_prelude_function_called_from_a_block_yields_its_tool_call() {
     install_preludes(
         vm.lua(),
         &[prelude(
-            "acme/kit",
-            "kit = {}\nfunction kit.run(script)\n  return tools.call('acme/kit/run', { script = script })\nend",
+            "kit",
+            "kit = {}\nfunction kit.run(script)\n  return tools.call('kit/run', { script = script })\nend",
         )],
         &[],
     )
@@ -162,7 +162,7 @@ fn a_prelude_function_called_from_a_block_yields_its_tool_call() {
             call_id,
             ..
         }) => {
-            assert_eq!(alias, "acme/kit/run");
+            assert_eq!(alias, "kit/run");
             assert_eq!(args, json!({ "script": "ls" }));
             assert_eq!(call_id, None, "a prelude's call is a script call");
         }

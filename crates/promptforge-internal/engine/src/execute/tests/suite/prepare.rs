@@ -227,7 +227,7 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "description: d\n",
     "promptforge: 0\n",
     "tools:\n",
-    "  fetch: promptforge/web/fetch\n",
+    "  fetch: web/fetch\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -256,6 +256,6 @@ async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required Plugin: promptforge/web"
+         - missing required Plugin: web"
     );
 }

@@ -565,14 +565,10 @@ pub fn promptforge::model::ToolCall::name(&self) -> &str
 pub fn promptforge::model::ToolSchema::description(&self) -> &str
 pub fn promptforge::model::ToolSchema::name(&self) -> &str
 pub fn promptforge::model::ToolSchema::parameters(&self) -> &serde_json::value::Value
-pub fn promptforge::plugins::GlobalName::namespace(&self) -> &str
 pub fn promptforge::plugins::GlobalName::parse(s: &str) -> core::result::Result<promptforge::plugins::GlobalName, promptforge::plugins::GlobalNameError>
-pub fn promptforge::plugins::GlobalName::plugin(&self) -> &str
 pub fn promptforge::plugins::GlobalNameError::kind(&self) -> promptforge::plugins::GlobalNameErrorKind
 pub fn promptforge::plugins::PluginId::contains(&self, tool: &promptforge::tools::ToolId) -> bool
-pub fn promptforge::plugins::PluginId::name(&self) -> &str
-pub fn promptforge::plugins::PluginId::namespace(&self) -> &str
-pub fn promptforge::plugins::PluginId::parse(id: &str) -> core::result::Result<promptforge::plugins::PluginId, promptforge::plugins::PluginIdError>
+pub fn promptforge::plugins::PluginId::parse(name: &str) -> core::result::Result<promptforge::plugins::PluginId, promptforge::plugins::PluginIdError>
 pub fn promptforge::plugins::PluginIdError::kind(&self) -> promptforge::plugins::PluginIdErrorKind
 pub fn promptforge::plugins::Prelude::new(plugin: promptforge::plugins::PluginId, source: impl core::convert::Into<alloc::string::String>) -> promptforge::plugins::Prelude
 pub fn promptforge::plugins::Prelude::plugin(&self) -> &promptforge::plugins::PluginId
@@ -1207,7 +1203,6 @@ pub promptforge::model::ThinkingMode::Never
 pub promptforge::model::ThinkingMode::Switchable
 pub promptforge::plugins::GlobalNameErrorKind::Control
 pub promptforge::plugins::GlobalNameErrorKind::Empty
-pub promptforge::plugins::GlobalNameErrorKind::SegmentCount
 pub promptforge::plugins::PluginIdErrorKind::Control
 pub promptforge::plugins::PluginIdErrorKind::Empty
 pub promptforge::plugins::PluginIdErrorKind::SegmentCount

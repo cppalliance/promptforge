@@ -25,8 +25,8 @@ const CONTRACT: &str = concat!(
     "promptforge: 0\n",
     "input: { path: names.md, description: The names to greet }\n",
     "output: { path: note.md, description: The note the greeter leaves }\n",
-    "plugins: [example/text]\n",
-    "tools: { shout: example/text/shout }\n",
+    "plugins: [text]\n",
+    "tools: { shout: text/shout }\n",
     "args:\n",
     "  times: { type: integer, optional: true, default: 1 }\n",
     "  name: { type: string }\n",
@@ -88,7 +88,7 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
         .iter()
         .map(|plugin| (plugin.id().to_string(), plugin.is_optional()))
         .collect();
-    assert_eq!(plugins, [("example/text".to_owned(), false)]);
+    assert_eq!(plugins, [("text".to_owned(), false)]);
     let slots: Vec<_> = frontmatter
         .tools()
         .iter()
@@ -97,10 +97,7 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
             _ => None,
         })
         .collect();
-    assert_eq!(
-        slots,
-        [("shout".to_owned(), "example/text/shout".to_owned())]
-    );
+    assert_eq!(slots, [("shout".to_owned(), "text/shout".to_owned())]);
     let roles: Vec<_> = frontmatter
         .models()
         .iter()

@@ -46,7 +46,7 @@ impl Drop for WaitGuard {
 }
 
 /// The conversation's wait registry behind the Harness's input broker:
-/// what the `promptforge/user-input` ask tool, called by the script-side
+/// what the `user-input` ask tool, called by the script-side
 /// `input.ask()`, suspends on.
 ///
 /// One broker per conversation: each [`wait`](InputBroker::wait) opens a

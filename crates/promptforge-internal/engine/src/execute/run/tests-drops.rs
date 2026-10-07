@@ -26,7 +26,7 @@ use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::parser::Prompt;
 
 /// A run over one section whose Lua is `body`, with the `writer` role
-/// bound to `test-model` and the `echo` slot to `tests/tools/echo`.
+/// bound to `test-model` and the `echo` slot to `tools/echo`.
 fn bound_run(body: &str) -> Run {
     bound_sections(&format!(
         "## Only\n\n```lua\nmodels.use('writer')\n{body}\n```\n"
@@ -34,11 +34,11 @@ fn bound_run(body: &str) -> Run {
 }
 
 /// A run over `sections`, the prompt's H2 sections, with the `writer` role
-/// bound to `test-model` and the `echo` slot to `tests/tools/echo`.
+/// bound to `test-model` and the `echo` slot to `tools/echo`.
 fn bound_sections(sections: &str) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {{}}\n\
-         tools:\n  echo: tests/tools/echo\n---\n\n# Run\n\n{sections}"
+         tools:\n  echo: tools/echo\n---\n\n# Run\n\n{sections}"
     );
     let prompt = Prompt::parse(&source, "run-test")
         .0
@@ -50,7 +50,7 @@ fn bound_sections(sections: &str) -> Run {
         ThinkingMode::Never,
     );
     let echo = ToolDescriptor::new(
-        ToolId::parse("tests/tools/echo").expect("a valid tool id"),
+        ToolId::parse("tools/echo").expect("a valid tool id"),
         "echo",
         "Echoes its value.",
         json!({ "type": "object" }),

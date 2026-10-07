@@ -206,7 +206,7 @@ mod tests {
     fn two_aliases_bound_to_one_tool_share_one_tool_entry() {
         // Two slots may fill to the same tool; the tool table holds it
         // once and both aliases resolve alias -> id -> tool.
-        let id = ToolId::parse("promptforge/web/fetch").expect("the test id is valid");
+        let id = ToolId::parse("web/fetch").expect("the test id is valid");
         let tool = fixture(&id);
         let mut bindings = ToolBindings::default();
         bindings.bind("fetch", tool.clone());
@@ -225,7 +225,7 @@ mod tests {
         assert!(bindings.tool(&id).is_some());
         assert!(
             bindings
-                .tool(&ToolId::parse("promptforge/web/search").expect("valid"))
+                .tool(&ToolId::parse("web/search").expect("valid"))
                 .is_none()
         );
     }

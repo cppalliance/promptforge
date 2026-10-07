@@ -229,7 +229,7 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
              local results = tasks.join(adopted)\n\
              return tostring(results[1].ok) .. '|' .. results[1].result .. '|' .. #msgs",
         ),
-        "tools.call('tests/tools/delayed')\nreturn 'child result'",
+        "tools.call('tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
@@ -299,12 +299,9 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
         &loop_owner("return msgs[7].content .. '|' .. msgs[9].content .. '|' .. #msgs"),
         (
             "Quick",
-            "tools.call('tests/tools/delayed')\nreturn 'quick result'",
+            "tools.call('tools/delayed')\nreturn 'quick result'",
         ),
-        (
-            "Slow",
-            "tools.call('tests/tools/delayed')\nreturn 'slow result'",
-        ),
+        ("Slow", "tools.call('tools/delayed')\nreturn 'slow result'"),
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());

@@ -16,7 +16,7 @@ use super::support::{
     prepare_activated, run_activated,
 };
 
-/// A prompt declaring `promptforge/bashkit` and `promptforge/terminal`,
+/// A prompt declaring `bashkit` and `terminal`,
 /// in that order.
 const DECLARES_CONFLICTING: &str = concat!(
     "---\n",
@@ -24,15 +24,15 @@ const DECLARES_CONFLICTING: &str = concat!(
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/bashkit\n",
-    "  - promptforge/terminal\n",
+    "  - bashkit\n",
+    "  - terminal\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` and `promptforge/fs`, in that
+/// A prompt declaring `web` and `fs`, in that
 /// order.
 const DECLARES_TWO: &str = concat!(
     "---\n",
@@ -40,41 +40,38 @@ const DECLARES_TWO: &str = concat!(
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/web\n",
-    "  - promptforge/fs\n",
+    "  - web\n",
+    "  - fs\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A prompt declaring `promptforge/web` and one exact tool slot.
+/// A prompt declaring `web` and one exact tool slot.
 const DECLARES_EXACT_SLOT: &str = concat!(
     "---\n",
     "name: declares-exact-slot\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
-    "  - promptforge/web\n",
+    "  - web\n",
     "tools:\n",
-    "  fetch: promptforge/web/fetch\n",
+    "  fetch: web/fetch\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// Registers `promptforge/web` contributing one described fetch tool.
+/// Registers `web` contributing one described fetch tool.
 fn web_registry() -> PluginRegistry {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(ToolFixture::new(
-            "promptforge/web",
+            "web",
             &[],
-            vec![described_tool(
-                "promptforge/web/fetch",
-                "Fetch a web page over HTTP",
-            )],
+            vec![described_tool("web/fetch", "Fetch a web page over HTTP")],
         )))
         .expect("web registers");
     registry
@@ -85,23 +82,22 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
     let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
     // The check is symmetric: the conflict is found whether the earlier-
     // or the later-declared Plugin declares it.
-    for (bashkit_conflicts, terminal_conflicts) in [
-        (vec!["promptforge/terminal"], vec![]),
-        (vec![], vec!["promptforge/bashkit"]),
-    ] {
+    for (bashkit_conflicts, terminal_conflicts) in
+        [(vec!["terminal"], vec![]), (vec![], vec!["bashkit"])]
+    {
         let mut registry = PluginRegistry::new();
         registry
             .register(Arc::new(ToolFixture::new(
-                "promptforge/bashkit",
+                "bashkit",
                 &bashkit_conflicts,
-                vec![fixture_tool("promptforge/bashkit/run")],
+                vec![fixture_tool("bashkit/run")],
             )))
             .expect("bashkit registers");
         registry
             .register(Arc::new(ToolFixture::new(
-                "promptforge/terminal",
+                "terminal",
                 &terminal_conflicts,
-                vec![fixture_tool("promptforge/terminal/run")],
+                vec![fixture_tool("terminal/run")],
             )))
             .expect("terminal registers");
         let (ctx, requirements, activation) = prepare_activated(
@@ -118,8 +114,8 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
             );
         };
         // Both Plugins are named, in declaration order.
-        assert_eq!(conflict.first.to_string(), "promptforge/bashkit");
-        assert_eq!(conflict.second.to_string(), "promptforge/terminal");
+        assert_eq!(conflict.first.to_string(), "bashkit");
+        assert_eq!(conflict.second.to_string(), "terminal");
         // A context gets one filesystem reality or the other, never
         // both: neither member of the conflicting pair activated, so
         // neither tool reached the catalog or the implementation table.
@@ -133,18 +129,10 @@ fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
     let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
     let mut registry = PluginRegistry::new();
     registry
-        .register(Arc::new(ToolFixture::new(
-            "promptforge/bashkit",
-            &["promptforge/terminal"],
-            vec![],
-        )))
+        .register(Arc::new(ToolFixture::new("bashkit", &["terminal"], vec![])))
         .expect("bashkit registers");
     registry
-        .register(Arc::new(ToolFixture::new(
-            "promptforge/terminal",
-            &[],
-            vec![],
-        )))
+        .register(Arc::new(ToolFixture::new("terminal", &[], vec![])))
         .expect("terminal registers");
     let result = run_activated(&registry, &prompt, context("refuse-conflict"));
     let RunResult::Failure(error) = result else {
@@ -153,7 +141,7 @@ fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
-        notice.contains("promptforge/bashkit") && notice.contains("promptforge/terminal"),
+        notice.contains("bashkit") && notice.contains("terminal"),
         "the notice names both conflicting Plugins: {notice}"
     );
 }
@@ -161,15 +149,12 @@ fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
 #[test]
 fn a_contributed_tool_outside_the_plugins_id_is_rejected_at_assembly() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let good = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
-    let stray = ToolId::parse("promptforge/other/fetch").expect("the id is valid");
+    let good = ToolId::parse("web/fetch").expect("the id is valid");
+    let stray = ToolId::parse("other/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
-        "promptforge/web",
+        "web",
         &[],
-        vec![
-            fixture_tool("promptforge/web/fetch"),
-            fixture_tool("promptforge/other/fetch"),
-        ],
+        vec![fixture_tool("web/fetch"), fixture_tool("other/fetch")],
     );
     let mut registry = PluginRegistry::new();
     registry
@@ -200,7 +185,7 @@ fn a_contributed_tool_outside_the_plugins_id_is_rejected_at_assembly() {
         assert!(activation.tools.get(&stray).is_none());
     });
     assert!(
-        logs.contains("promptforge/other/fetch") && logs.contains("promptforge/web"),
+        logs.contains("other/fetch") && logs.contains("web"),
         "the rejection log names the Plugin and the tool: {logs}"
     );
 }
@@ -209,18 +194,11 @@ fn a_contributed_tool_outside_the_plugins_id_is_rejected_at_assembly() {
 fn the_catalog_assembles_contributed_tools_in_declaration_order() {
     let prompt = parse(DECLARES_TWO, "declares-two");
     let web = ToolFixture::new(
-        "promptforge/web",
+        "web",
         &[],
-        vec![
-            fixture_tool("promptforge/web/fetch"),
-            fixture_tool("promptforge/web/search"),
-        ],
+        vec![fixture_tool("web/fetch"), fixture_tool("web/search")],
     );
-    let fs = ToolFixture::new(
-        "promptforge/fs",
-        &[],
-        vec![fixture_tool("promptforge/fs/read")],
-    );
+    let fs = ToolFixture::new("fs", &[], vec![fixture_tool("fs/read")]);
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(web)).expect("web registers");
     registry.register(Arc::new(fs)).expect("fs registers");
@@ -239,11 +217,7 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
         .collect();
     assert_eq!(
         ids,
-        [
-            "promptforge/web/fetch",
-            "promptforge/web/search",
-            "promptforge/fs/read"
-        ],
+        ["web/fetch", "web/search", "fs/read"],
         "declaration order, then contribution order within each Plugin"
     );
 }
@@ -251,15 +225,15 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
 #[test]
 fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let repeated = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let repeated = ToolId::parse("web/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
-        "promptforge/web",
+        "web",
         &[],
         vec![
-            fixture_tool("promptforge/web/fetch"),
-            fixture_tool("promptforge/web/search"),
+            fixture_tool("web/fetch"),
+            fixture_tool("web/search"),
             // The repeat: one Plugin contributes the same id twice.
-            fixture_tool("promptforge/web/fetch"),
+            fixture_tool("web/fetch"),
         ],
     );
     let mut registry = PluginRegistry::new();
@@ -285,7 +259,7 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
         );
     });
     assert!(
-        logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
+        logs.contains("web/fetch") && logs.contains("web"),
         "the rejection log names the Plugin and the repeated tool: {logs}"
     );
 }
@@ -293,16 +267,16 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
 #[test]
 fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let bad = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let bad = ToolId::parse("web/fetch").expect("the id is valid");
     let fixture = ToolFixture::new(
-        "promptforge/web",
+        "web",
         &[],
         vec![
             Arc::new(BadWireTool {
                 id: bad.clone(),
                 wire: "fetch/v2".to_owned(),
             }),
-            fixture_tool("promptforge/web/search"),
+            fixture_tool("web/search"),
         ],
     );
     let mut registry = PluginRegistry::new();
@@ -327,7 +301,7 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
         assert_eq!(catalog.tools().len(), 1);
     });
     assert!(
-        logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
+        logs.contains("web/fetch") && logs.contains("web"),
         "the rejection log names the Plugin and the rejected tool: {logs}"
     );
 }
@@ -346,7 +320,7 @@ fn a_plugin_both_activation_and_prepare_report_missing_is_named_once() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required Plugin: promptforge/web"
+         - missing required Plugin: web"
     );
 }
 
@@ -360,7 +334,7 @@ fn an_exact_slot_fills_against_the_activated_catalog() {
         context("fill-exact"),
     );
     assert!(requirements.is_satisfied());
-    let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let id = ToolId::parse("web/fetch").expect("the id is valid");
     let bindings = ctx.tool_bindings();
     assert_eq!(bindings.len(), 1);
     // Handles resolve alias -> id -> descriptor; the implementation is the

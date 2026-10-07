@@ -39,7 +39,7 @@ impl RunControl {
     /// lets the run go on.
     ///
     /// A question to the operator is a call to the
-    /// `promptforge/user-input/ask` tool. Every other effect in flight is
+    /// `user-input/ask` tool. Every other effect in flight is
     /// aborted and answered `Dropped`. The run's cancel flag stays clear.
     /// A `pcall` around a dropped call catches its cancelled error.
     /// Otherwise, the error ends the run cancelled.

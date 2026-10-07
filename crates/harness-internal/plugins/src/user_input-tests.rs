@@ -1,4 +1,4 @@
-//! Tests for the `promptforge/user-input` Plugin: its ask tool with
+//! Tests for the `user-input` Plugin: its ask tool with
 //! and without a broker, the prelude it writes, and the service it needs.
 
 use std::sync::Arc;
@@ -79,9 +79,9 @@ fn prelude(services: &RunServices) -> String {
 }
 
 #[test]
-fn the_plugin_is_promptforge_user_input_and_needs_the_input_broker() {
+fn the_plugin_is_user_input_and_needs_the_input_broker() {
     let plugin = UserInput::new();
-    assert_eq!(plugin.id().to_string(), "promptforge/user-input");
+    assert_eq!(plugin.id().to_string(), "user-input");
     assert_eq!(plugin.needs(), [INPUT_BROKER.id()]);
     assert_eq!(plugin.needs()[0].to_string(), "promptforge/input-broker");
     assert!(plugin.conflicts().is_empty());
@@ -98,7 +98,7 @@ fn the_input_broker_literal_is_a_namespace_name_id() {
 #[test]
 fn the_ask_tool_sits_under_its_full_id_with_an_empty_schema_and_plain_output() {
     let tool = ask_tool(&headless());
-    assert_eq!(USER_INPUT_ASK_TOOL, "promptforge/user-input/ask");
+    assert_eq!(USER_INPUT_ASK_TOOL, "user-input/ask");
     assert_eq!(
         tool.id(),
         ToolId::parse(USER_INPUT_ASK_TOOL).expect("the full id parses")
@@ -210,7 +210,7 @@ fn the_prelude_defines_input_and_calls_the_ask_tool_by_its_full_id() {
     let source = prelude(&headless());
     assert!(source.starts_with("input = {}\n"), "{source}");
     assert!(
-        source.contains("tools.call(\"promptforge/user-input/ask\")"),
+        source.contains("tools.call(\"user-input/ask\")"),
         "{source}"
     );
     assert!(

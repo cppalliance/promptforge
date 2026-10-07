@@ -2,9 +2,9 @@
 //! that fetches a page and one that searches the web.
 //!
 //! A Host registers [`Web`] in its Plugin registry. A prompt turns it
-//! on with one frontmatter line, `plugins: [promptforge/web]`. The
-//! run then gets both tools: `promptforge/web/fetch`, which fetches a URL
-//! and returns its content as text, and `promptforge/web/search`, which
+//! on with one frontmatter line, `plugins: [web]`. The
+//! run then gets both tools: `web/fetch`, which fetches a URL
+//! and returns its content as text, and `web/search`, which
 //! runs a search through the Host's [`SearchProvider`]. The two tools
 //! always come together.
 //!

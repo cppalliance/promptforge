@@ -101,7 +101,7 @@ pub(in super::super) fn arm_tools_scoped(
 }
 
 /// The test's tools as two halves: the catalog of descriptors the run's
-/// frontmatter tool slots (under `tests/tools`) fill against at prepare,
+/// frontmatter tool slots (under `tools`) fill against at prepare,
 /// and the table of implementations the driver's tool performer resolves
 /// a `ToolCall` effect's id in.
 pub(in super::super) fn fixture_tools(

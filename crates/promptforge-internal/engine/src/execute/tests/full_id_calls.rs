@@ -9,7 +9,7 @@ use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// The echo fixture's full id.
-const ECHO_ID: &str = "tests/tools/echo";
+const ECHO_ID: &str = "tools/echo";
 
 /// The echo fixture's full id as a [`ToolId`].
 fn echo_id() -> ToolId {
@@ -32,7 +32,7 @@ fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
     let tools = if slots.is_empty() {
         String::new()
     } else {
-        format!("plugins:\n  - tests/tools\ntools:\n{slots}")
+        format!("plugins:\n  - tools\ntools:\n{slots}")
     };
     parse(&format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n{tools}---\n\n# FullId\n\n## Only\n\n```lua\n{lua}\n```\n"
@@ -78,10 +78,7 @@ fn echo_and_concrete() -> Vec<Arc<dyn TestTool>> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_full_id_as_alias() {
-    let prompt = full_id_prompt(
-        "",
-        "return tools.call('tests/tools/echo', { value = 'hi' })",
-    );
+    let prompt = full_id_prompt("", "return tools.call('tools/echo', { value = 'hi' })");
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
@@ -105,9 +102,9 @@ async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_ful
 async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alias_and_added() {
     let gateway = ScriptedChat::new(vec![resp_text("before"), resp_text("after")]);
     let prompt = full_id_prompt(
-        "  echo: tests/tools/echo\n",
-        "tools.call('tests/tools/echo', { value = 'a' })\n\
-         tools.call('tests/tools/concrete', { value = 'b' })\n\
+        "  echo: tools/echo\n",
+        "tools.call('tools/echo', { value = 'a' })\n\
+         tools.call('tools/concrete', { value = 'b' })\n\
          local before = messages.new()\n\
          before:user('before')\n\
          models.loop(before)\n\
@@ -141,9 +138,9 @@ async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alia
 #[tokio::test(flavor = "current_thread")]
 async fn tools_add_and_tools_always_reject_a_full_id_as_an_invalid_alias() {
     let prompt = full_id_prompt(
-        "  echo: tests/tools/echo\n",
-        "local add_ok, add_err = pcall(tools.add, 'tests/tools/echo')\n\
-         local always_ok, always_err = pcall(tools.always, 'tests/tools/echo')\n\
+        "  echo: tools/echo\n",
+        "local add_ok, add_err = pcall(tools.add, 'tools/echo')\n\
+         local always_ok, always_err = pcall(tools.always, 'tools/echo')\n\
          assert(not add_ok and not always_ok, 'a full id is not an alias')\n\
          return tostring(add_err) .. '\\n' .. tostring(always_err)",
     );
@@ -155,7 +152,7 @@ async fn tools_add_and_tools_always_reject_a_full_id_as_an_invalid_alias() {
     let (add, always) = out.split_once('\n').expect("the block joins both errors");
     for message in [add, always] {
         assert!(
-            message.contains("invalid alias \"tests/tools/echo\""),
+            message.contains("invalid alias \"tools/echo\""),
             "a full id fails alias validation, got: {message}"
         );
     }
@@ -164,8 +161,8 @@ async fn tools_add_and_tools_always_reject_a_full_id_as_an_invalid_alias() {
 #[tokio::test(flavor = "current_thread")]
 async fn no_global_is_bound_under_a_full_id() {
     let prompt = full_id_prompt(
-        "  echo: tests/tools/echo\n",
-        "tools.call('tests/tools/concrete', { value = 'x' })\n\
+        "  echo: tools/echo\n",
+        "tools.call('tools/concrete', { value = 'x' })\n\
          local slashed = {}\n\
          for name in next, _G do\n\
            if type(name) == 'string' and name:find('/', 1, true) then\n\
@@ -190,9 +187,9 @@ async fn no_global_is_bound_under_a_full_id() {
 async fn a_frontmatter_bound_tool_issues_the_same_effect_by_alias_and_by_full_id_apart_from_the_alias()
  {
     let prompt = full_id_prompt(
-        "  echo: tests/tools/echo\n",
+        "  echo: tools/echo\n",
         "return tools.call('echo', { value = 'hi' }) .. '|' .. \
-         tools.call('tests/tools/echo', { value = 'hi' })",
+         tools.call('tools/echo', { value = 'hi' })",
     );
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
@@ -214,8 +211,8 @@ async fn a_frontmatter_bound_tool_issues_the_same_effect_by_alias_and_by_full_id
 #[tokio::test(flavor = "current_thread")]
 async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
     let prompt = full_id_prompt(
-        "  echo: tests/tools/echo\n",
-        "return tools.call('tests/tools/missing', {})",
+        "  echo: tools/echo\n",
+        "return tools.call('tools/missing', {})",
     );
     let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
@@ -226,7 +223,7 @@ async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
         .expect_err("an unknown name fails the block");
     match &error {
         Error::UnboundToolCall { name, bound } => {
-            assert_eq!(name, "tests/tools/missing");
+            assert_eq!(name, "tools/missing");
             assert_eq!(bound, &["echo".to_owned()], "only aliases are listed");
         }
         other => panic!("expected the typed unbound-tool error, got {other:?}"),
@@ -248,7 +245,7 @@ async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
 async fn a_model_issued_call_never_resolves_a_full_id() {
     let prompt = full_id_prompt(
         "",
-        "local ok, err = pcall(tools.call_as_model, 'call_1', 'tests/tools/echo', { value = 'hi' })\n\
+        "local ok, err = pcall(tools.call_as_model, 'call_1', 'tools/echo', { value = 'hi' })\n\
          assert(not ok, 'a model-issued full-id call is refused')\n\
          return err.kind .. ':' .. err.name",
     );
@@ -257,7 +254,7 @@ async fn a_model_issued_call_never_resolves_a_full_id() {
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the refusal is pcall-able");
-    assert_eq!(out, "unbound_tool:tests/tools/echo");
+    assert_eq!(out, "unbound_tool:tools/echo");
     assert!(
         records
             .lock()

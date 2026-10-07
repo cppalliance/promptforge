@@ -111,7 +111,7 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     // not refused); advertising the alias in a section is the run-time error
     // prepare promised.
     let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  search: tools/search\n---\n\n",
         "# Test prompt\n\n\
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
@@ -176,7 +176,7 @@ struct EchoTool;
 #[async_trait::async_trait]
 impl TestTool for EchoTool {
     fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/echo").expect("valid id")
+        ToolId::parse("tools/echo").expect("valid id")
     }
 
     #[expect(

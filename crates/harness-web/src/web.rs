@@ -1,4 +1,4 @@
-//! [`Web`], the `promptforge/web` Plugin, and the keys of the two
+//! [`Web`], the `web` Plugin, and the keys of the two
 //! services it reads.
 //!
 //! The fetch client is built once, at construction, with the fetch policy;
@@ -21,7 +21,7 @@ use crate::search::WebSearch;
 /// The service key for the Host's search provider.
 ///
 /// The key's id is `promptforge/search-provider`. Every
-/// `promptforge/web/search` call runs through the provider registered
+/// `web/search` call runs through the provider registered
 /// under this key.
 pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
     ServiceKey::new("promptforge/search-provider");
@@ -29,16 +29,16 @@ pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
 /// The service key for the Host's tokio runtime handle.
 ///
 /// The key's id is `promptforge/tokio-runtime`. The fetch tool spawns
-/// every `promptforge/web/fetch` call onto the runtime registered under
+/// every `web/fetch` call onto the runtime registered under
 /// this key.
 pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio-runtime");
 
 /// A Plugin that gives a run web access: one tool that fetches a page
 /// and one that searches the web.
 ///
-/// Its id is `promptforge/web`. `promptforge/web/fetch` fetches a URL
+/// Its id is `web`. `web/fetch` fetches a URL
 /// through a hardened HTTP client and returns its content as text, with
-/// an HTML page rendered as markdown. `promptforge/web/search` runs a
+/// an HTML page rendered as markdown. `web/search` runs a
 /// search through the Host's [`SearchProvider`].
 ///
 /// It needs two services: the search provider registered under the key
@@ -48,7 +48,7 @@ pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio
 /// the web tools only when both services are present.
 #[derive(Debug, Clone)]
 pub struct Web {
-    /// The stable identity, `promptforge/web`.
+    /// The stable identity, `web`.
     id: PluginId,
     /// The fetch client, built over its validated policy.
     fetch: FetchClient,
@@ -61,7 +61,7 @@ impl Web {
     /// shares it.
     ///
     /// # Panics
-    /// Panics only if the built-in Plugin id `promptforge/web` fails to
+    /// Panics only if the built-in Plugin id `web` fails to
     /// parse, or if the HTTP client fails to build for the default policy
     /// because the TLS backend failed to initialize. Either would be a
     /// defect outside the caller's control.
@@ -71,7 +71,7 @@ impl Web {
             clippy::expect_used,
             reason = "the id is a literal of the Plugin id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
         )]
-        let id = PluginId::parse("promptforge/web").expect("the literal web Plugin id parses");
+        let id = PluginId::parse("web").expect("the literal web Plugin id parses");
         Web {
             id,
             fetch: FetchClient::new(),
@@ -115,10 +115,8 @@ impl Plugin for Web {
 
     fn create(&self, services: &RunServices) -> Result<Contribution, PluginError> {
         if services.cancel.is_cancelled() {
-            return Err(
-                PluginError::message("promptforge/web: the run was cancelled")
-                    .with_kind(PluginErrorKind::Cancelled),
-            );
+            return Err(PluginError::message("web: the run was cancelled")
+                .with_kind(PluginErrorKind::Cancelled));
         }
         let (Some(provider), Some(runtime)) =
             (services.get(&SEARCH_PROVIDER), services.get(&TOKIO_RUNTIME))

@@ -13,16 +13,16 @@ use promptforge::vfs::perform_vfs_op;
 use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 
 #[test]
-fn a_plugin_holds_its_own_tools_and_a_one_part_name_is_not_one() -> Result<(), Box<dyn Error>> {
-    let web = PluginId::parse("promptforge/web")?;
-    let fetch = ToolId::parse("promptforge/web/fetch")?;
-    let other = ToolId::parse("promptforge/other/fetch")?;
+fn a_plugin_holds_its_own_tools_and_a_two_part_name_is_not_one() -> Result<(), Box<dyn Error>> {
+    let web = PluginId::parse("web")?;
+    let fetch = ToolId::parse("web/fetch")?;
+    let other = ToolId::parse("other/fetch")?;
     assert!(web.contains(&fetch));
     assert!(!web.contains(&other));
 
-    let error = PluginId::parse("greeter")
+    let error = PluginId::parse("promptforge/web")
         .err()
-        .ok_or("a one-part name is not a Plugin id")?;
+        .ok_or("a two-part name is not a Plugin id")?;
     assert_eq!(error.kind(), PluginIdErrorKind::SegmentCount);
     Ok(())
 }
@@ -45,7 +45,7 @@ fn a_prelude_on_the_environment_defines_a_function_the_section_calls() -> Result
     let (parsed, _parse_events) = Prompt::parse(source, "greeter");
     let prompt = Arc::new(parsed?);
 
-    let web = PluginId::parse("promptforge/web")?;
+    let web = PluginId::parse("web")?;
     let prelude = Prelude::new(web, "function greet(name) return 'hello ' .. name end");
     let env = Environment::new().preludes(vec![prelude]);
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH);

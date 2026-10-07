@@ -361,7 +361,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         "canonical_echo",
         "Echo a test value.",
     ));
-    let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
          tools.always('echo')\n\
          models.default('writer')\n```\n\n\

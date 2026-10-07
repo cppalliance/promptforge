@@ -28,7 +28,7 @@ use crate::support::{Clock, Offline};
 /// Asks the operator once and returns the answer.
 const ASKS: &str = concat!(
     "---\nname: asks\ndescription: Asks the operator once\npromptforge: 0\n",
-    "plugins:\n  - promptforge/user-input\n",
+    "plugins:\n  - user-input\n",
     "---\n\n# Asks\n\n## Only\n\n```lua\n",
     "return input.ask()\n",
     "```\n",

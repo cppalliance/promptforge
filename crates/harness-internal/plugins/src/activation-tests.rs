@@ -21,7 +21,7 @@ const CLOCK: ServiceKey<str> = ServiceKey::new("acme/clock");
 const CLOCK_AS_NUMBER: ServiceKey<u64> = ServiceKey::new("acme/clock");
 
 fn timed_id() -> PluginId {
-    PluginId::parse("acme/timed").expect("the fixture id is valid")
+    PluginId::parse("timed").expect("the fixture id is valid")
 }
 
 /// A fixture Plugin that needs [`CLOCK`] and counts its activations.
@@ -79,14 +79,14 @@ fn with_wrong_typed_clock() -> RunServices {
     services
 }
 
-/// Activates a prompt declaring `acme/timed`, optional when `optional`
+/// Activates a prompt declaring `timed`, optional when `optional`
 /// is set, under `services`. Returns the activation and how many times
 /// the fixture's `create` ran.
 fn activate_timed(optional: bool, services: &RunServices) -> (Activation, usize) {
     let declaration = if optional {
-        "  - ref: acme/timed\n    optional: true\n"
+        "  - ref: timed\n    optional: true\n"
     } else {
-        "  - acme/timed\n"
+        "  - timed\n"
     };
     let source = format!(
         "---\nname: timed\ndescription: d\npromptforge: 0\nplugins:\n{declaration}---\n\n\
@@ -107,12 +107,12 @@ fn activate_timed(optional: bool, services: &RunServices) -> (Activation, usize)
     (activation, creates.load(Ordering::SeqCst))
 }
 
-/// The refusal a required `acme/timed` gets without its clock.
+/// The refusal a required `timed` gets without its clock.
 fn clock_refusal() -> [MissingService; 1] {
     [MissingService::new(timed_id(), "acme/clock")]
 }
 
-/// The gap an optional `acme/timed` records without its clock.
+/// The gap an optional `timed` records without its clock.
 fn clock_gap() -> [ServiceGap; 1] {
     [ServiceGap {
         plugin: timed_id(),

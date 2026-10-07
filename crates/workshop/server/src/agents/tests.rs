@@ -1,5 +1,5 @@
 //! The agent conversations' Harness setup: a prompt declaring
-//! `promptforge/web` prepares over the server's Plugins and
+//! `web` prepares over the server's Plugins and
 //! services, a Harness without the search provider refuses it naming
 //! that service, and outside a runtime the services leave the runtime
 //! out.
@@ -24,7 +24,7 @@ use super::{plugins, services};
 
 /// A prompt that requires the web Plugin and returns a fixed text.
 const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 0\n\
-    plugins:\n  - promptforge/web\n---\n\n\
+    plugins:\n  - web\n---\n\n\
     # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n";
 
 /// Lists no model and refuses every round as `Unavailable`, so a run
@@ -105,7 +105,7 @@ async fn a_harness_without_the_search_provider_refuses_a_prompt_requiring_web() 
     };
     assert_eq!(kind, "RequirementsUnmet");
     assert!(
-        message.contains("promptforge/web") && message.contains("promptforge/search-provider"),
+        message.contains("web") && message.contains("promptforge/search-provider"),
         "the refusal names the Plugin and the missing service: {message}"
     );
 }

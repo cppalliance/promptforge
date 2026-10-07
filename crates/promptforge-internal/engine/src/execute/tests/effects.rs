@@ -118,7 +118,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
     assert_eq!(
         records[1],
         EffectRecord::ToolCall {
-            tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+            tool: ToolId::parse("tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
             origin: origin("Only", ToolCaller::Model),
@@ -146,7 +146,7 @@ async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
     assert_eq!(
         *records,
         vec![EffectRecord::ToolCall {
-            tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+            tool: ToolId::parse("tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
             origin: origin("Only", ToolCaller::Script),

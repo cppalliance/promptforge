@@ -6,7 +6,7 @@
 //! recorder when the run begins under the run's name; and the prepared tool
 //! performer resolves a `ToolCall` effect's id in the activated table. The
 //! Host's optional input broker - one of its services, handed to every
-//! activated Plugin and behind the `promptforge/user-input`
+//! activated Plugin and behind the `user-input`
 //! Plugin - sits in the `input` child module, the Host's services
 //! reaching activation sit in the `host_services` child module, a
 //! Plugin's prelude reaching the prepared run sits in the `prelude`
@@ -43,10 +43,10 @@ mod input;
 #[path = "prepare-prelude.rs"]
 mod prelude;
 
-/// A prompt declaring `promptforge/web` as a required Plugin that no
+/// A prompt declaring `web` as a required Plugin that no
 /// registry here provides.
 const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - promptforge/web\n---\n\n# Title\n\n## Only\n\nDone.\n";
+    plugins:\n  - web\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A prompt with unclosed frontmatter, so it does not parse.
 const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
@@ -57,7 +57,7 @@ const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
 
 /// A prompt binding `echo` to the fixture tool and calling it once.
 const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\n---\n\n\
+    plugins:\n  - tools\ntools:\n  echo: tools/echo\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
 
 /// An empty in-memory recorder.
@@ -169,7 +169,7 @@ impl Plugin for Tools {
     fn create(&self, _services: &RunServices) -> Result<Contribution, PluginError> {
         Ok(Contribution {
             tools: vec![Arc::new(Echo {
-                id: ToolId::parse("tests/tools/echo").unwrap(),
+                id: ToolId::parse("tools/echo").unwrap(),
             })],
             prelude: None,
         })
@@ -181,7 +181,7 @@ fn fixture_registry() -> Arc<PluginRegistry> {
     let mut registry = PluginRegistry::new();
     registry
         .register(Arc::new(Tools {
-            id: PluginId::parse("tests/tools").unwrap(),
+            id: PluginId::parse("tools").unwrap(),
         }))
         .unwrap();
     Arc::new(registry)
@@ -214,7 +214,7 @@ async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_end
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = "the environment cannot satisfy this prompt:\n\
-        - missing required Plugin: promptforge/web";
+        - missing required Plugin: web";
     assert_eq!(
         error.to_string(),
         notice,
@@ -380,7 +380,7 @@ async fn the_tool_performer_refuses_an_id_the_table_does_not_hold() {
     };
     let error = performer
         .call(
-            ToolId::parse("tests/tools/echo").unwrap(),
+            ToolId::parse("tools/echo").unwrap(),
             "echo".to_owned(),
             Arc::new(access),
             origin,
@@ -389,7 +389,7 @@ async fn the_tool_performer_refuses_an_id_the_table_does_not_hold() {
         .await
         .expect_err("an id outside the table is refused");
     assert!(
-        error.to_string().contains("tests/tools/echo"),
+        error.to_string().contains("tools/echo"),
         "the refusal names the id: {error}"
     );
 }

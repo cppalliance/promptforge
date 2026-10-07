@@ -304,7 +304,7 @@ impl Tool for WebFetch {
         reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
     )]
     fn id(&self) -> ToolId {
-        ToolId::parse("promptforge/web/fetch").expect("the literal web_fetch id parses")
+        ToolId::parse("web/fetch").expect("the literal web_fetch id parses")
     }
 
     #[expect(
