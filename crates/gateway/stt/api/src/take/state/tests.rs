@@ -9,10 +9,12 @@ use gateway_stt_engine::{EnginePolicy, TranscribeError};
 use super::{TakeFailure, TakeState};
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::{FinalRangeOutcome, SkipReason};
-use crate::take::window::AcceptedHypothesis;
+use crate::take::window::{AcceptedHypothesis, ShownHypotheses};
 
-#[path = "state-tests-live-prefix.rs"]
+#[path = "tests-live-prefix.rs"]
 mod live_prefix;
+#[path = "tests-rewrite.rs"]
+mod rewrite;
 
 #[test]
 fn finalized_snapshot_cannot_mix_text_and_sample_ownership() {
@@ -73,6 +75,7 @@ fn natural_speech_and_pause_cycles_settle_without_history_growth() {
         state.record_final_outcome(
             FinalRangeOutcome::decoded(start..decoded_end, format!("word{index}")),
             &[],
+            &ShownHypotheses::default(),
         );
         state.record_final_outcome(
             FinalRangeOutcome::skipped(
@@ -80,6 +83,7 @@ fn natural_speech_and_pause_cycles_settle_without_history_growth() {
                 SkipReason::Silence,
             ),
             &[],
+            &ShownHypotheses::default(),
         );
         assert!(state.pending_failure().is_none());
         assert_eq!(state.coverage().2, 0);
@@ -94,17 +98,20 @@ fn unresolved_skip_consumes_one_candidate_then_later_decode_settles_normally() {
     state.record_final_outcome(
         FinalRangeOutcome::skipped(0..1, SkipReason::BelowFinalWindow),
         &accepted,
+        &ShownHypotheses::default(),
     );
     assert_eq!(state.coverage(), (0, None, 1));
 
     state.record_final_outcome(
         FinalRangeOutcome::skipped(1..2, SkipReason::Silence),
         &accepted,
+        &ShownHypotheses::default(),
     );
     assert_eq!(state.coverage(), (2, None, 0));
     state.record_final_outcome(
         FinalRangeOutcome::decoded(2..3, "decoded".to_owned()),
         &accepted,
+        &ShownHypotheses::default(),
     );
 
     assert_eq!(
@@ -112,24 +119,6 @@ fn unresolved_skip_consumes_one_candidate_then_later_decode_settles_normally() {
         ("accepted decoded".to_owned(), 3)
     );
     assert!(state.pending_failure().is_none());
-}
-
-#[test]
-fn characterize_natural_final_replaces_interim_text_for_its_whole_range() {
-    let state = TakeState::default();
-    let accepted = [AcceptedHypothesis::new(
-        0..16_000,
-        "ask not what your country can do".to_owned(),
-    )];
-    state.record_final_outcome(
-        FinalRangeOutcome::decoded(0..16_000, "Ask not what your country".to_owned()),
-        &accepted,
-    );
-
-    assert_eq!(
-        state.finalized_snapshot(),
-        ("Ask not what your country".to_owned(), 16_000)
-    );
 }
 
 #[test]
@@ -141,6 +130,7 @@ fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
             "alpha beta ECHO, now".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     assert_eq!(state.finalized_snapshot(), (String::new(), 0));
 
@@ -150,6 +140,7 @@ fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
             "echo now revised ending".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     assert_eq!(
         state.finalized_snapshot(),
@@ -159,6 +150,7 @@ fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
     state.record_final_outcome(
         FinalRangeOutcome::decoded(320_000..336_000, "tail".to_owned()),
         &[],
+        &ShownHypotheses::default(),
     );
     assert_eq!(
         state.finalized_snapshot(),
@@ -178,6 +170,7 @@ fn forced_overlap_preserves_repeated_phrases_at_distinct_ranges() {
             "echo now echo now".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -185,10 +178,12 @@ fn forced_overlap_preserves_repeated_phrases_at_distinct_ranges() {
             "echo now corrected".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::skipped(320_000..320_000, SkipReason::BelowFinalWindow),
         &[],
+        &ShownHypotheses::default(),
     );
 
     assert_eq!(state.finalized(), "echo now echo now corrected");
@@ -209,6 +204,7 @@ fn five_unaligned_forced_windows_keep_order_and_flush_the_last_once() {
     state.record_final_outcome(
         FinalRangeOutcome::forced(ForcedBoundary::first(0..160_000), windows[0].clone()),
         &[],
+        &ShownHypotheses::default(),
     );
     for (index, text) in windows.iter().enumerate().skip(1) {
         let overlap_end = u64::try_from(index).expect("window index fits") * 160_000;
@@ -221,6 +217,7 @@ fn five_unaligned_forced_windows_keep_order_and_flush_the_last_once() {
                 text.clone(),
             ),
             &[],
+            &ShownHypotheses::default(),
         );
         assert!(state.pending_failure().is_none());
         assert_eq!(

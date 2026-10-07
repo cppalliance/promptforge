@@ -300,8 +300,11 @@ pub(super) fn record_outcome(
     whole_window: &Mutex<WholeWindowState>,
     outcome: FinalRangeOutcome,
 ) {
-    let accepted = TakeState::lock(whole_window).accepted_hypotheses(outcome.range.end);
-    state.record_final_outcome(outcome, &accepted);
+    let window = TakeState::lock(whole_window);
+    let accepted = window.accepted_hypotheses(outcome.range.end);
+    let shown = window.shown();
+    drop(window);
+    state.record_final_outcome(outcome, &accepted, &shown);
 }
 
 #[cfg(test)]

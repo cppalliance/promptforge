@@ -572,7 +572,7 @@ flowchart TD
 
 <step-12>
 
-### Step 12: Aligned rewrite of final text
+### Step 12: Aligned rewrite of final text [completed]
 
 - Component: Stable agreement
 - Piece: aligned rewrite

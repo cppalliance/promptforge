@@ -10,11 +10,13 @@ use super::agreement::{
 use super::final_outcome::{
     FinalBoundary, FinalRangeOutcome, FinalRangeResult, assemble_completion,
 };
-use super::live_prefix::LivePrefixSnapshot;
+use super::live_prefix::{AnchoredSuffix, LivePrefixSnapshot};
 use super::pcm::{RetainedPcmBudget, RollingPcm};
 use super::text::append_transcript;
-use super::window::AcceptedHypothesis;
+use super::window::{AcceptedHypothesis, ShownHypotheses};
 use crate::segment::{ForcedBoundary, Segmenter};
+
+mod reconcile;
 
 #[derive(Debug, Default)]
 struct FinalizedState {
@@ -23,6 +25,9 @@ struct FinalizedState {
     samples: u64,
     outcomes: Vec<FinalRangeOutcome>,
     pending_forced: Option<PendingForced>,
+    /// Displayed words after the latest natural final's last word, live only
+    /// until the next final outcome.
+    anchored: Option<AnchoredSuffix>,
 }
 
 /// One typed take failure retained for commit gating and finalization.
@@ -122,6 +127,7 @@ impl TakeState {
                 .pending_forced
                 .as_ref()
                 .map(|pending| (pending.text.clone(), pending.boundary.decode_range())),
+            state.anchored.clone(),
         )
     }
 
@@ -132,6 +138,7 @@ impl TakeState {
         samples: Option<u64>,
     ) {
         let mut state = Self::lock(&self.finalized);
+        state.anchored = None;
         match result {
             Ok(text) if state.failure.is_none() => {
                 append_transcript(&mut state.text, &text);
@@ -150,8 +157,10 @@ impl TakeState {
         &self,
         outcome: FinalRangeOutcome,
         accepted: &[AcceptedHypothesis],
+        shown: &ShownHypotheses,
     ) {
         let mut state = Self::lock(&self.finalized);
+        state.anchored = None;
         if state.failure.is_some() {
             return;
         }
@@ -163,7 +172,7 @@ impl TakeState {
             return;
         }
         match outcome.boundary.clone() {
-            FinalBoundary::Natural => record_natural_outcome(&mut state, outcome, accepted),
+            FinalBoundary::Natural => record_natural_outcome(&mut state, outcome, accepted, shown),
             FinalBoundary::Forced(boundary) => {
                 let FinalRangeResult::Decoded(text) = outcome.result else {
                     state.failure = Some(Arc::new(TakeFailure::ForcedWindowNotDecoded));
@@ -235,14 +244,14 @@ fn record_natural_outcome(
     state: &mut FinalizedState,
     outcome: FinalRangeOutcome,
     accepted: &[AcceptedHypothesis],
+    shown: &ShownHypotheses,
 ) {
     let flushed = flush_pending_forced(state, accepted);
     debug_assert!(flushed);
     match &outcome.result {
         FinalRangeResult::Decoded(text) => {
             settle_skipped(state, accepted, false);
-            append_transcript(&mut state.text, text);
-            state.samples = outcome.range.end;
+            reconcile::rewrite_natural(state, text, outcome.range.end, shown);
         }
         FinalRangeResult::Skipped(_) => {
             if let Some(previous) = state.outcomes.last_mut() {
@@ -392,9 +401,7 @@ fn settle_skipped(
 }
 
 #[cfg(test)]
-#[path = "state-alignment-tests.rs"]
 mod alignment_tests;
 
 #[cfg(test)]
-#[path = "state-tests.rs"]
 mod tests;

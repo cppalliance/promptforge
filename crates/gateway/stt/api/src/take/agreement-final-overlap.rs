@@ -29,6 +29,7 @@ struct AlignmentMetrics {
 struct AlignmentToken {
     normalized: String,
     start: usize,
+    end: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -158,6 +159,76 @@ fn range_guided_suffix_prefix_start_with_metrics(
     )
 }
 
+/// Byte end in `displayed` of the token that the last token of `final_text`
+/// aligns with, when the `anchor` displayed tokens ending there equal the
+/// final's last `anchor` tokens.
+///
+/// Both texts start at the same audio, so the final's last tokens align with
+/// the displayed tokens from the same index through an end within the token
+/// band of the final's token count. The lowest edit ratio wins, then the end
+/// nearest that count, then the later end.
+pub(in crate::take) fn anchored_final_end(
+    final_text: &str,
+    displayed: &str,
+    anchor: usize,
+) -> Option<usize> {
+    let mut metrics = AlignmentMetrics::default();
+    if anchor == 0
+        || !final_transcript_within_limit(final_text)
+        || !final_transcript_within_limit(displayed)
+    {
+        return None;
+    }
+    let final_count = scan_transcript(final_text, &mut metrics)?.tokens;
+    let displayed_count = scan_transcript(displayed, &mut metrics)?.tokens;
+    let first = final_count.saturating_sub(MAX_ALIGNMENT_TOKENS);
+    let ends = candidate_boundaries(final_count, first + anchor, displayed_count);
+    if final_count < anchor || ends.is_empty() {
+        return None;
+    }
+    let final_tokens = collect_tokens(final_text, first..final_count, &mut metrics)?;
+    let displayed_tokens = collect_tokens(displayed, first..*ends.end(), &mut metrics)?;
+    let mut best: Option<(usize, usize, usize)> = None;
+    for end in ends {
+        let Some(span) = displayed_tokens.get(..end - first) else {
+            continue;
+        };
+        let aligned = span.len().max(final_tokens.len());
+        let max_edits = aligned / MAX_EDIT_RATIO_DENOMINATOR;
+        if span.len().abs_diff(final_tokens.len()) > max_edits {
+            continue;
+        }
+        let Some(edits) = bounded_edit_distance(&final_tokens, span, max_edits, &mut metrics)
+        else {
+            continue;
+        };
+        if best.is_none_or(|(best_end, best_edits, best_aligned)| {
+            (edits * best_aligned)
+                .cmp(&(best_edits * aligned))
+                .then_with(|| {
+                    end.abs_diff(final_count)
+                        .cmp(&best_end.abs_diff(final_count))
+                })
+                .then_with(|| best_end.cmp(&end))
+                .is_lt()
+        }) {
+            best = Some((end, edits, aligned));
+        }
+    }
+    let (end, _, _) = best?;
+    let anchored = displayed_tokens.get(end - first - anchor..end - first)?;
+    let tail = final_tokens.get(final_tokens.len().checked_sub(anchor)?..)?;
+    if anchored
+        .iter()
+        .zip(tail)
+        .all(|(shown, spoken)| shown.normalized == spoken.normalized)
+    {
+        anchored.last().map(|token| token.end)
+    } else {
+        None
+    }
+}
+
 impl AlignmentSearch<'_> {
     fn candidates(&self, metrics: &mut AlignmentMetrics) -> Vec<Alignment> {
         let previous_tolerance = boundary_tolerance(self.projected_previous);
@@ -280,6 +351,7 @@ fn collect_tokens(
                     tokens.push(AlignmentToken {
                         normalized,
                         start: begin,
+                        end: index,
                     });
                 }
                 if has_alphanumeric {

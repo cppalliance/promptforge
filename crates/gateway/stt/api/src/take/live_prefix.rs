@@ -8,11 +8,34 @@ struct PendingForcedSnapshot {
     range: Range<u64>,
 }
 
+/// Displayed words a natural final left after its last word, of which those
+/// ending by byte `agreed_end` were shown agreed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AnchoredSuffix {
+    text: String,
+    agreed_end: usize,
+}
+
+impl AnchoredSuffix {
+    pub(super) const fn new(text: String, agreed_end: usize) -> Self {
+        Self { text, agreed_end }
+    }
+
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub(super) const fn agreed_end(&self) -> usize {
+        self.agreed_end
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct LivePrefixSnapshot {
     finalized: String,
     finalized_samples: u64,
     pending_forced: Option<PendingForcedSnapshot>,
+    anchored: Option<AnchoredSuffix>,
 }
 
 impl LivePrefixSnapshot {
@@ -20,17 +43,24 @@ impl LivePrefixSnapshot {
         finalized: String,
         finalized_samples: u64,
         pending_forced: Option<(String, Range<u64>)>,
+        anchored: Option<AnchoredSuffix>,
     ) -> Self {
         Self {
             finalized,
             finalized_samples,
             pending_forced: pending_forced
                 .map(|(text, range)| PendingForcedSnapshot { text, range }),
+            anchored,
         }
     }
 
     pub(super) fn finalized(&self) -> &str {
         &self.finalized
+    }
+
+    /// Displayed words the latest natural final left after its last word.
+    pub(super) const fn anchored(&self) -> Option<&AnchoredSuffix> {
+        self.anchored.as_ref()
     }
 
     #[cfg(test)]
@@ -60,6 +90,7 @@ impl LivePrefixSnapshot {
             finalized.to_owned(),
             finalized_samples,
             pending_forced.map(|(text, range)| (text.to_owned(), range)),
+            None,
         )
     }
 }

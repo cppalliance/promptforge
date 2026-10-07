@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{FinalRangeOutcome, ForcedBoundary, TakeState};
+use super::{FinalRangeOutcome, ForcedBoundary, ShownHypotheses, TakeState};
 use crate::take::TakeFailure;
 
 fn completion(
@@ -16,6 +16,7 @@ fn completion(
     state.record_final_outcome(
         FinalRangeOutcome::forced(ForcedBoundary::first(first_range), previous.to_owned()),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -23,6 +24,7 @@ fn completion(
             current.to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.completion(&[], new_audio.end)
 }
@@ -96,6 +98,7 @@ fn an_over_limit_final_transcript_fails_before_it_can_become_pending() {
     state.record_final_outcome(
         FinalRangeOutcome::forced(ForcedBoundary::first(0..160_000), "x".repeat(16 * 1024 + 1)),
         &[],
+        &ShownHypotheses::default(),
     );
 
     let failure = state

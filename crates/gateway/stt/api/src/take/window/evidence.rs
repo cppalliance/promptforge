@@ -69,6 +69,21 @@ pub(super) struct Agreement {
 }
 
 impl Agreement {
+    /// Agreement over `active` whose first `agreed_end` bytes stay agreed, as
+    /// words carried across a natural final that were agreed before it.
+    pub(super) fn seeded(active: &str, agreed_end: usize) -> Self {
+        let tokens = token_spans(&active[..agreed_end])
+            .into_iter()
+            .map(|(token, _, _)| TokenEvidence::new(normalized_token(token), 0, false))
+            .collect::<Vec<_>>();
+        Self {
+            agreed: tokens.len(),
+            tokens,
+            agreed_end,
+            ..Self::default()
+        }
+    }
+
     pub(super) const fn agreed_end(&self) -> usize {
         self.agreed_end
     }
@@ -219,13 +234,23 @@ fn common_subsequence(left: &[String], right: &[String]) -> usize {
     previous[right.len()]
 }
 
-/// Length of the hypothesis prefix that disputed agreed text covers: the one
-/// within `CUT_TOKEN_BAND` of the agreed token count with the least banded
-/// edit distance to the agreed tokens, the longer on a tie, or the whole
-/// hypothesis when it ends before the band.
+/// Length of the hypothesis prefix that disputed agreed text covers, or the
+/// whole hypothesis when it ends before the band.
 fn aligned_cut(agreed: &[TokenEvidence], hypothesis: &[String]) -> usize {
-    // Column `offset` of the row for `row` agreed tokens holds the distance to
-    // the hypothesis prefix of `row + offset - CUT_TOKEN_BAND` tokens.
+    let agreed = agreed
+        .iter()
+        .map(|token| token.normalized.as_str())
+        .collect::<Vec<_>>();
+    covering_prefix(&agreed, hypothesis).map_or(hypothesis.len(), |(_, length)| length)
+}
+
+/// Edit distance and length of the hypothesis prefix that covers `reference`:
+/// the one within `CUT_TOKEN_BAND` of the reference token count with the
+/// least banded edit distance to it, the longer on a tie, or `None` when the
+/// hypothesis ends before the band.
+pub(super) fn covering_prefix(reference: &[&str], hypothesis: &[String]) -> Option<(usize, usize)> {
+    // Column `offset` of the row for `row` reference tokens holds the distance
+    // to the hypothesis prefix of `row + offset - CUT_TOKEN_BAND` tokens.
     let prefix = |row: usize, offset: usize| {
         (row + offset)
             .checked_sub(CUT_TOKEN_BAND)
@@ -237,7 +262,7 @@ fn aligned_cut(agreed: &[TokenEvidence], hypothesis: &[String]) -> usize {
             *cell = length;
         }
     }
-    for (row, token) in (1..).zip(agreed) {
+    for (row, token) in (1..).zip(reference) {
         let mut current = [usize::MAX; CUT_BAND_WIDTH];
         for offset in 0..CUT_BAND_WIDTH {
             let Some(length) = prefix(row, offset) else {
@@ -250,14 +275,15 @@ fn aligned_cut(agreed: &[TokenEvidence], hypothesis: &[String]) -> usize {
                 .checked_sub(1)
                 .map_or(usize::MAX, |left| current[left].saturating_add(1));
             let substitution = length.checked_sub(1).map_or(usize::MAX, |last| {
-                previous[offset].saturating_add(usize::from(token.normalized != hypothesis[last]))
+                previous[offset].saturating_add(usize::from(*token != hypothesis[last]))
             });
             current[offset] = deletion.min(insertion).min(substitution);
         }
         previous = current;
     }
     (0..CUT_BAND_WIDTH)
-        .filter_map(|offset| prefix(agreed.len(), offset).map(|length| (previous[offset], length)))
+        .filter_map(|offset| {
+            prefix(reference.len(), offset).map(|length| (previous[offset], length))
+        })
         .min_by(|left, right| left.0.cmp(&right.0).then(right.1.cmp(&left.1)))
-        .map_or(hypothesis.len(), |(_, length)| length)
 }

@@ -3,8 +3,9 @@
 use super::TakeState;
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::FinalRangeOutcome;
+use crate::take::window::ShownHypotheses;
 
-#[path = "state-alignment-tests-adversaries.rs"]
+#[path = "alignment_tests-adversaries.rs"]
 mod adversaries;
 
 #[test]
@@ -16,6 +17,7 @@ fn captured_native_outputs_zero_one_two_complete_without_duplicate_phrases() {
             "The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances.".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -23,6 +25,7 @@ fn captured_native_outputs_zero_one_two_complete_without_duplicate_phrases() {
             "Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances.".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -30,6 +33,7 @@ fn captured_native_outputs_zero_one_two_complete_without_duplicate_phrases() {
             "quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
 
     assert_eq!(
@@ -50,6 +54,7 @@ fn forced_overlap_accepts_bounded_insertions_deletions_and_substitutions() {
             "settled one, two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -57,6 +62,7 @@ fn forced_overlap_accepts_bounded_insertions_deletions_and_substitutions() {
             "one two three extra four five SIX seven nine ten eleven dozen thirteen fourteen fifteen fresh".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
 
     assert_eq!(

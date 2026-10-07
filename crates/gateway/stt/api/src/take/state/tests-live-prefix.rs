@@ -3,6 +3,7 @@
 use super::super::TakeState;
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::FinalRangeOutcome;
+use crate::take::window::ShownHypotheses;
 
 #[test]
 fn pending_forced_text_is_live_without_becoming_authoritative() {
@@ -13,6 +14,7 @@ fn pending_forced_text_is_live_without_becoming_authoritative() {
             "alpha beta ECHO, now".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
 
     let live = state.live_prefix_snapshot();
@@ -39,6 +41,7 @@ fn fuzzy_reconciliation_atomically_replaces_the_pending_live_range() {
             "alpha beta ECHO, now".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -46,6 +49,7 @@ fn fuzzy_reconciliation_atomically_replaces_the_pending_live_range() {
             "echo now revised ending".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
 
     let live = state.live_prefix_snapshot();
@@ -78,6 +82,7 @@ fn estimated_reconciliation_replaces_the_prior_live_prefix() {
             "owned overlap one two three".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
     state.record_final_outcome(
         FinalRangeOutcome::forced(
@@ -85,6 +90,7 @@ fn estimated_reconciliation_replaces_the_prior_live_prefix() {
             "unrelated revision".to_owned(),
         ),
         &[],
+        &ShownHypotheses::default(),
     );
 
     let live = state.live_prefix_snapshot();

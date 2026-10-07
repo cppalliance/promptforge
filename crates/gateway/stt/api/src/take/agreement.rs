@@ -5,7 +5,9 @@ mod final_overlap;
 #[path = "agreement-projection.rs"]
 mod projection;
 
-pub(super) use final_overlap::{final_transcript_within_limit, range_guided_suffix_prefix_start};
+pub(super) use final_overlap::{
+    anchored_final_end, final_transcript_within_limit, range_guided_suffix_prefix_start,
+};
 pub(super) use projection::projected_prefix_end;
 
 pub(super) fn matching_token_prefix_end(previous: &str, current: &str) -> usize {
