@@ -17,7 +17,7 @@ use crate::WhisperConfig;
 use crate::guard::{TokenStats, guard_interim};
 use crate::profile::{RoleProfile, available_cores};
 use crate::prompt::{
-    GLOSSARY_TOKEN_BUDGET, MAX_PROMPT_TOKENS, final_prompt, fit_glossary, sanitize_prompt,
+    GLOSSARY_TOKEN_BUDGET, final_prompt, fit_glossary, interim_prompt, sanitize_prompt,
 };
 use crate::words::pass_word_ends;
 
@@ -129,20 +129,15 @@ impl Decoder for WhisperDecoder {
         {
             return Ok(DecodeOutput::default());
         }
-        let glossary_budget = if final_pass {
-            GLOSSARY_TOKEN_BUDGET
-        } else {
-            MAX_PROMPT_TOKENS
-        };
-        let glossary = fit_glossary(&self.context, request.guidance(), glossary_budget);
         let prompt = if final_pass {
+            let glossary = fit_glossary(&self.context, request.guidance(), GLOSSARY_TOKEN_BUDGET);
             Some(final_prompt(
                 &self.context,
                 glossary.as_deref(),
                 request.finalized(),
             ))
         } else {
-            glossary
+            interim_prompt(&self.context, request.guidance())
         };
         let text = transcribe_blocking(
             &mut self.state,

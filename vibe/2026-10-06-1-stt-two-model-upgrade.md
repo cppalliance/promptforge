@@ -303,6 +303,7 @@ Characterization tests pin today's behavior before anything changes, then each b
 - Deferred: Silero or whisper.cpp built-in VAD (https://github.com/ggml-org/whisper.cpp/pull/3065, streaming follow-up https://github.com/ggml-org/whisper.cpp/pull/3677). Revisit after the cheap endpointing changes, with measured per-frame CPU cost.
 - Deferred: admission control at session start. Revisit after the degrade work shows overload in practice.
 - Deferred: starting interim windows at the last agreed word, with promotion before forced start moves and evidence rebasing, and the 10 s window default tied to it. Measured during the run on a fresh native `jfk.wav` capture: UPWR 3.45 against the 1.95 baseline, partial latency 606 ms against 841 ms. `tiny.en` token end times err both ways: early ends re-decode and re-agree words ("ask not what What your country"), late or clamped ends cut into the next word ("ass", "S not!"). Interim word ends stay carried through the engine for this work. Revisit with a start margin before the agreed end, removal of words the window repeats, and clamped ends ignored, or with DTW token timestamps; gate on a fresh native capture meeting UPWR.
+- Deferred: a conclusive interim prompt seeding measurement. The Step 22 comparison was inconclusive because `jfk.wav`'s only final stays pending until commit, so no interim pass had finalized text to seed from; seeding was rejected by the keep-only-if-lower rule. Revisit with a scratch capture of audio that finalizes mid-take (for example `jfk.wav`, 2.5 s of silence, then `jfk.wav` again), never committed.
 - Out of scope: language selection and multilingual models.
 - Out of scope: batch transcription and the config UI.
 
@@ -719,7 +720,7 @@ flowchart TD
 
 <step-22>
 
-### Step 22: Interim prompt seeding experiment
+### Step 22: Interim prompt seeding experiment [completed]
 
 - Component: Interim prompt seeding
 - Piece: interim prompt

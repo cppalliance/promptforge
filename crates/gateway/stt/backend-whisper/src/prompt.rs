@@ -50,9 +50,17 @@ pub(crate) fn fit_glossary(
     vocabulary: &[String],
     budget: usize,
 ) -> Option<String> {
+    fit_glossary_counted(vocabulary, budget, |text| token_count(context, text))
+}
+
+fn fit_glossary_counted(
+    vocabulary: &[String],
+    budget: usize,
+    count: impl Fn(&str) -> usize,
+) -> Option<String> {
     let mut len = vocabulary.len();
     let mut fitted = glossary_prompt(vocabulary)?;
-    while fitted.len() > MAX_PROMPT_CHARS || token_count(context, &fitted) > budget {
+    while fitted.len() > MAX_PROMPT_CHARS || count(&fitted) > budget {
         len -= 1;
         if len == 0 {
             tracing::warn!("no voice vocabulary term fits the prompt budget");
@@ -97,6 +105,15 @@ pub(crate) fn final_prompt(
             None => "",
         };
     }
+}
+
+/// The interim prompt: the glossary alone, within the whole prompt budget.
+pub(crate) fn interim_prompt(context: &WhisperContext, vocabulary: &[String]) -> Option<String> {
+    interim_prompt_counted(vocabulary, |text| token_count(context, text))
+}
+
+fn interim_prompt_counted(vocabulary: &[String], count: impl Fn(&str) -> usize) -> Option<String> {
+    fit_glossary_counted(vocabulary, MAX_PROMPT_TOKENS, count)
 }
 
 #[cfg(test)]
@@ -164,6 +181,25 @@ mod tests {
             glossary_prompt(&vocabulary),
             Some("Glossary: tokio, axum.".to_owned())
         );
+    }
+
+    /// The interim prompt stays glossary-only. Seeding it with the finalized
+    /// tail (capped at 32 tokens, with the glossary trimmed to 64) was
+    /// measured on two native `jfk.wav` captures and rejected: UPWR was 47/22
+    /// (2.14) both unseeded and seeded, and the seeded capture re-emitted no
+    /// prompt text, because the clip's only forced final stays pending until
+    /// the commit, so no interim pass had finalized history to seed from.
+    #[test]
+    fn interim_prompt_is_the_glossary_alone_within_the_whole_prompt_budget() {
+        let one_token_per_word = |text: &str| text.split_whitespace().count();
+        let vocabulary = vec!["a".to_owned(); MAX_PROMPT_TOKENS * 2];
+        let kept = MAX_PROMPT_TOKENS - one_token_per_word("Glossary:");
+        assert_eq!(
+            interim_prompt_counted(&vocabulary, one_token_per_word),
+            glossary_prompt(&vocabulary[..kept]),
+            "the glossary keeps every term that fits the whole prompt budget"
+        );
+        assert_eq!(interim_prompt_counted(&[], one_token_per_word), None);
     }
 
     #[test]

@@ -9,8 +9,14 @@
 //! running decode finishes, whichever is later. Every event's `at_ms` is its
 //! issue time plus its measured wall time, so `at_ms` rises in the order the
 //! replay applies events.
+//!
+//! With `PROMPTFORGE_REPLAY_CAPTURE` naming a scratch `<name>.json` outside
+//! the fixture directory, the capture writes its script there and its
+//! snapshots to `<name>.snapshots.json`, prints its metrics, and leaves the
+//! fixture alone, so decode experiments compare captures without replacing it.
 
 use std::ops::Range;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -28,8 +34,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use super::{NATIVE_FIXTURE, fixture_dir, write_json};
+use super::{NATIVE_FIXTURE, fixture_dir, metrics, write_json};
 use crate::common;
+
+const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REPLAY_CAPTURE";
 
 /// The window of the fixed policy the fixture load publishes, which is the
 /// gateway default.
@@ -343,6 +351,32 @@ const fn input_samples(output: u64) -> u64 {
     output / 2 * 3 + output % 2
 }
 
+/// Refuses a scratch capture whose directory resolves inside the fixture
+/// directory, where it could replace a fixed input or plant a script the
+/// replay test runs and an update adds to the baseline.
+fn check_scratch(scratch: &Path) -> Result<(), String> {
+    let parent = match scratch.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let resolved = std::fs::canonicalize(parent).map_err(|error| {
+        format!(
+            "{CAPTURE_VARIABLE} requires an existing directory, but {} does not resolve: {error}",
+            parent.display()
+        )
+    })?;
+    let fixtures = std::fs::canonicalize(fixture_dir())
+        .map_err(|error| format!("the replay fixture directory resolves: {error}"))?;
+    if resolved.starts_with(&fixtures) {
+        return Err(format!(
+            "{CAPTURE_VARIABLE} requires a path outside {}, but names {}",
+            fixtures.display(),
+            scratch.display()
+        ));
+    }
+    Ok(())
+}
+
 fn snapshot(at_ms: u64, event: Value) -> ReplaySnapshot {
     let fields: HypothesisFields =
         serde_json::from_value(event).expect("a hypothesis event carries its snapshot fields");
@@ -361,6 +395,10 @@ fn snapshot(at_ms: u64, event: Value) -> ReplaySnapshot {
 #[tokio::test]
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once() {
+    let scratch = std::env::var_os(CAPTURE_VARIABLE).map(PathBuf::from);
+    if let Some(scratch) = &scratch {
+        check_scratch(scratch).unwrap_or_else(|reason| panic!("{reason}"));
+    }
     let model = common::require_model();
     let config = WhisperConfig::new(
         common::require_library(),
@@ -399,6 +437,13 @@ async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once(
         "replaying the capture reproduces the native session's snapshots and transcript"
     );
 
+    if let Some(scratch) = scratch {
+        write_json(&scratch, &script);
+        write_json(&scratch.with_extension("snapshots.json"), &native);
+        let metrics = metrics::compute(&replayed.snapshots, &replayed.completed, &replay.finals);
+        eprintln!("{} metrics: {metrics:?}", scratch.display());
+        return;
+    }
     let path = fixture_dir().join(format!("{NATIVE_FIXTURE}.json"));
     if path.exists() {
         eprintln!(
@@ -408,4 +453,26 @@ async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once(
     } else {
         write_json(&path, &script);
     }
+}
+
+#[test]
+fn scratch_capture_resolving_inside_the_fixture_directory_is_refused() {
+    let fixtures = fixture_dir();
+    for scratch in [
+        fixtures.join(format!("{NATIVE_FIXTURE}.json")),
+        fixtures.join("baseline.json"),
+        fixtures.join("..").join("replay").join("seeded.json"),
+    ] {
+        assert!(
+            check_scratch(&scratch).is_err(),
+            "{} resolves inside the fixture directory and is refused",
+            scratch.display()
+        );
+    }
+}
+
+#[test]
+fn scratch_capture_outside_the_fixture_directory_is_accepted() {
+    let scratch = std::env::temp_dir().join("seeded.json");
+    assert_eq!(check_scratch(&scratch), Ok(()));
 }
