@@ -285,12 +285,12 @@ async fn replay_reports_a_natural_final_ending_where_the_take_does_not_close() {
             {"at_ms": 1_150, "audio_start_ms": 0, "audio_end_ms": 1_000, "transcript": "We choose"}
         ],
         "finals": [
-            {"at_ms": 4_800, "sample_start": 1_600, "sample_end": 40_000, "text": "We chose"},
-            {"at_ms": 8_200, "sample_start": 38_400, "sample_end": 124_800, "text": "and do"}
+            {"at_ms": 4_800, "sample_start": 1_600, "sample_end": 41_600, "text": "We chose"},
+            {"at_ms": 8_200, "sample_start": 40_000, "sample_end": 124_800, "text": "and do"}
         ]
     })))
     .await
-    .expect_err("the take decodes 38,400 samples but finalizes through 38,400, not 40,000");
+    .expect_err("the take decodes 40,000 samples but finalizes through 40,000, not 41,600");
 
     assert!(
         matches!(error, ReplayError::Diverged { at_ms: 4_800, .. }),

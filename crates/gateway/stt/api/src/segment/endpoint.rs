@@ -1,0 +1,294 @@
+//! The pure endpoint rules that open and close speech segments.
+//!
+//! Three rules decide timing: silence with no tracked speech never opens a
+//! segment, silence after speech closes it once the silence lasts
+//! [`MIN_SILENCE_SAMPLES`], and speech closes at the forced stride
+//! [`FORCED_STRIDE_SAMPLES`] after its onset. Closing timing is measured on
+//! the energy gate's speech run; the finalized segment adds a pre-roll
+//! before the run and a hangover after it.
+
+use std::ops::Range;
+
+use gateway_stt_engine::EnginePolicy;
+
+use super::FRAME_SAMPLES;
+
+/// Silence must persist this long after speech to close a segment: 2 s,
+/// long enough to survive sentence-internal pauses and natural breathing
+/// gaps, short enough that the final pass starts well before the user stops
+/// talking.
+const MIN_SILENCE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 2) as u64;
+
+const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
+
+/// Closing silence kept at the end of a segment: 100 ms, so a trailing
+/// consonant the energy gate reads as silence still reaches the final pass.
+const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
+
+/// Audio kept before a segment's first speech frame: 0.5 s, so a soft onset
+/// the energy gate misses still reaches the final pass.
+const PRE_ROLL_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 2) as u64;
+
+const _: () = assert!(HANGOVER_SAMPLES < MIN_SILENCE_SAMPLES);
+
+/// Segmenter state the endpoint rules read and advance.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct EndpointState {
+    /// First sample of the speech run being tracked, if any.
+    pub(super) speech_start: Option<u64>,
+    /// First sample of the silence after the tracked speech, if one began.
+    pub(super) silence_begin: Option<u64>,
+    /// End of the last completed segment: everything before this index has
+    /// been handed to the final pass (or discarded as a click).
+    pub(super) consumed: u64,
+}
+
+impl EndpointState {
+    /// Where a segment whose speech begins at `onset` starts.
+    fn pre_rolled(self, onset: u64) -> u64 {
+        onset.saturating_sub(PRE_ROLL_SAMPLES).max(self.consumed)
+    }
+}
+
+/// The scan position the rules decide at.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Scan {
+    /// First sample of the next analysis frame.
+    pub(super) cursor: u64,
+    /// End of the audio received so far.
+    pub(super) received: u64,
+    /// Whether the energy gate reads the next frame as silence, or `None`
+    /// until that whole frame has arrived.
+    pub(super) silent: Option<bool>,
+}
+
+/// Which rule closed a segment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Rule {
+    Silence,
+    Stride,
+}
+
+/// A segment one of the closing rules ended.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Closed {
+    pub(super) rule: Rule,
+    /// The speech run the energy gate tracked, from its first speech frame.
+    pub(super) speech: Range<u64>,
+    /// The audio to finalize: the speech run with its pre-roll and hangover.
+    pub(super) segment: Range<u64>,
+}
+
+/// One decision of the rules.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Advance {
+    pub(super) state: EndpointState,
+    /// The next unscanned sample.
+    pub(super) cursor: u64,
+    pub(super) closed: Option<Closed>,
+}
+
+/// Applies the endpoint rules at `scan`, or returns `None` while the next
+/// decision needs audio that has not arrived.
+#[must_use]
+pub(super) fn endpoint(state: EndpointState, scan: Scan) -> Option<Advance> {
+    let frame_end = scan.cursor.saturating_add(FRAME_SAMPLES as u64);
+    if let Some(onset) = state.speech_start {
+        let stride_end = onset.checked_add(FORCED_STRIDE_SAMPLES)?;
+        if stride_end <= scan.received && frame_end > stride_end {
+            return Some(Advance {
+                state: EndpointState {
+                    speech_start: state.silence_begin.is_none().then_some(stride_end),
+                    silence_begin: None,
+                    consumed: stride_end,
+                },
+                cursor: stride_end,
+                closed: Some(Closed {
+                    rule: Rule::Stride,
+                    speech: onset..stride_end,
+                    segment: state.pre_rolled(onset)..stride_end,
+                }),
+            });
+        }
+    }
+    let silent = scan.silent?;
+    let mut next = state;
+    let closed = match (state.speech_start, silent) {
+        (None, true) => None,
+        (None, false) => {
+            next.speech_start = Some(scan.cursor);
+            None
+        }
+        (Some(_), false) => {
+            next.silence_begin = None;
+            None
+        }
+        (Some(onset), true) => {
+            let begin = *next.silence_begin.get_or_insert(scan.cursor);
+            (frame_end - begin >= MIN_SILENCE_SAMPLES).then(|| {
+                let end = begin + HANGOVER_SAMPLES;
+                next = EndpointState {
+                    speech_start: None,
+                    silence_begin: None,
+                    consumed: end,
+                };
+                Closed {
+                    rule: Rule::Silence,
+                    speech: onset..begin,
+                    segment: state.pre_rolled(onset)..end,
+                }
+            })
+        }
+    };
+    Some(Advance {
+        state: next,
+        cursor: frame_end,
+        closed,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FRAME: u64 = FRAME_SAMPLES as u64;
+
+    fn scan(cursor: u64, silent: bool) -> Scan {
+        Scan {
+            cursor,
+            received: cursor + FRAME,
+            silent: Some(silent),
+        }
+    }
+
+    fn speaking(onset: u64, silence_begin: Option<u64>, consumed: u64) -> EndpointState {
+        EndpointState {
+            speech_start: Some(onset),
+            silence_begin,
+            consumed,
+        }
+    }
+
+    fn closed(advance: Option<Advance>) -> Closed {
+        advance
+            .and_then(|advance| advance.closed)
+            .expect("the rule closes a segment")
+    }
+
+    #[test]
+    fn silence_with_no_speech_never_opens_a_segment() {
+        let idle = EndpointState {
+            consumed: 4_800,
+            ..EndpointState::default()
+        };
+        assert_eq!(
+            endpoint(idle, scan(96_000, true)),
+            Some(Advance {
+                state: idle,
+                cursor: 96_000 + FRAME,
+                closed: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_speech_frame_opens_a_run_at_its_first_sample() {
+        let advance = endpoint(EndpointState::default(), scan(9_600, false));
+        assert_eq!(
+            advance.map(|advance| advance.state.speech_start),
+            Some(Some(9_600))
+        );
+    }
+
+    #[test]
+    fn silence_after_speech_closes_once_a_frame_reaches_two_seconds() {
+        let state = speaking(0, Some(38_400), 0);
+        let short = endpoint(state, scan(38_400 + 32_000 - FRAME - 1, true));
+        assert_eq!(short.and_then(|advance| advance.closed), None);
+        let closing = closed(endpoint(state, scan(38_400 + 32_000 - FRAME, true)));
+        assert_eq!(closing.rule, Rule::Silence);
+        assert_eq!(closing.speech, 0..38_400);
+    }
+
+    #[test]
+    fn speech_closes_at_the_forced_stride_once_its_audio_arrives() {
+        let state = speaking(1_000, None, 0);
+        let waiting = Scan {
+            cursor: 160_800,
+            received: 160_999,
+            silent: None,
+        };
+        assert_eq!(endpoint(state, waiting), None);
+        let advance = endpoint(
+            state,
+            Scan {
+                received: 161_000,
+                ..waiting
+            },
+        )
+        .expect("the stride closes");
+        assert_eq!(advance.cursor, 161_000);
+        assert_eq!(
+            advance.state,
+            speaking(161_000, None, 161_000),
+            "speech continuing through the stride opens the next run at its end"
+        );
+        let stride = advance.closed.expect("the stride closes a segment");
+        assert_eq!(stride.rule, Rule::Stride);
+        assert_eq!(stride.speech, 1_000..161_000);
+    }
+
+    #[test]
+    fn a_stride_during_a_pause_tracks_no_speech_after_it() {
+        let advance = endpoint(speaking(0, Some(158_400), 0), scan(159_840, true))
+            .expect("the stride closes");
+        assert_eq!(
+            advance.state,
+            EndpointState {
+                consumed: 160_000,
+                ..EndpointState::default()
+            }
+        );
+    }
+
+    #[test]
+    fn hangover_keeps_100_ms_of_the_closing_silence() {
+        let advance = endpoint(
+            speaking(0, Some(38_400), 0),
+            scan(38_400 + 32_000 - FRAME, true),
+        )
+        .expect("a whole frame decides");
+        assert_eq!(
+            advance.state.consumed, 40_000,
+            "the next segment starts no earlier than the hangover's end"
+        );
+        let closing = closed(Some(advance));
+        assert_eq!(closing.speech.end, 38_400);
+        assert_eq!(closing.segment.end, 40_000);
+    }
+
+    #[test]
+    fn pre_roll_starts_a_segment_half_a_second_before_its_speech() {
+        let closing = closed(endpoint(
+            speaking(24_000, Some(62_400), 0),
+            scan(62_400 + 32_000 - FRAME, true),
+        ));
+        assert_eq!(closing.segment.start, 16_000);
+        let stride = closed(endpoint(speaking(24_000, None, 0), scan(183_840, false)));
+        assert_eq!(stride.segment, 16_000..184_000);
+    }
+
+    #[test]
+    fn pre_roll_never_reaches_before_the_consumed_cursor() {
+        let closing = closed(endpoint(
+            speaking(24_000, Some(62_400), 20_000),
+            scan(62_400 + 32_000 - FRAME, true),
+        ));
+        assert_eq!(closing.segment.start, 20_000);
+        let early = closed(endpoint(
+            speaking(2_880, Some(41_280), 0),
+            scan(41_280 + 32_000 - FRAME, true),
+        ));
+        assert_eq!(early.segment.start, 0);
+    }
+}

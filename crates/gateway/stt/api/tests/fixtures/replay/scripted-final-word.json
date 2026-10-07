@@ -8,13 +8,13 @@
     {"at_ms": 3150, "audio_start_ms": 0, "audio_end_ms": 3000, "transcript": "We choose to go to the moon"},
     {"at_ms": 3650, "audio_start_ms": 0, "audio_end_ms": 3500, "transcript": "We choose to go to the moon"},
     {"at_ms": 4150, "audio_start_ms": 0, "audio_end_ms": 4000, "transcript": "We choose to go to the moon"},
-    {"at_ms": 6050, "audio_start_ms": 2400, "audio_end_ms": 5900, "transcript": "and do"},
-    {"at_ms": 6650, "audio_start_ms": 2400, "audio_end_ms": 6500, "transcript": "and do the other"},
-    {"at_ms": 7150, "audio_start_ms": 2400, "audio_end_ms": 7000, "transcript": "and do the other things"},
-    {"at_ms": 7750, "audio_start_ms": 2400, "audio_end_ms": 7600, "transcript": "and do the other things"}
+    {"at_ms": 6050, "audio_start_ms": 2500, "audio_end_ms": 5900, "transcript": "and do"},
+    {"at_ms": 6650, "audio_start_ms": 2500, "audio_end_ms": 6500, "transcript": "and do the other"},
+    {"at_ms": 7150, "audio_start_ms": 2500, "audio_end_ms": 7000, "transcript": "and do the other things"},
+    {"at_ms": 7750, "audio_start_ms": 2500, "audio_end_ms": 7600, "transcript": "and do the other things"}
   ],
   "finals": [
-    {"at_ms": 4800, "sample_start": 0, "sample_end": 38400, "text": "We chose to go to the moon"},
-    {"at_ms": 8200, "sample_start": 38400, "sample_end": 124800, "text": "and do the other things"}
+    {"at_ms": 4800, "sample_start": 0, "sample_end": 40000, "text": "We chose to go to the moon"},
+    {"at_ms": 8200, "sample_start": 40000, "sample_end": 124800, "text": "and do the other things"}
   ]
 }

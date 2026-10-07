@@ -693,7 +693,7 @@ flowchart TD
 
 <step-20>
 
-### Step 20: Three-rule endpoint with hangover and pre-roll
+### Step 20: Three-rule endpoint with hangover and pre-roll [completed]
 
 - Component: Endpointing
 - Piece: endpoint function

@@ -137,7 +137,7 @@
   "finals": [
     {
       "at_ms": 10158,
-      "sample_start": 960,
+      "sample_start": 0,
       "sample_end": 160960,
       "text": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country."
     },
