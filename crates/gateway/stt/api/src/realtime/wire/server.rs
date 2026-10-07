@@ -110,10 +110,6 @@ impl EffectiveSession {
         &self.audio.input.transcription.prompt
     }
 
-    pub(in crate::realtime) fn includes_hypothesis(&self) -> bool {
-        !self.include.is_empty()
-    }
-
     pub(in crate::realtime) fn hypothesis_include(&self) -> HypothesisInclude {
         if self.include.is_empty() {
             HypothesisInclude::Off

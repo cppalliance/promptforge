@@ -268,7 +268,6 @@ fn append_events(
     audio: &str,
     policy: &RoutePolicy,
 ) -> Result<Vec<ServerEvent>, SessionError> {
-    session.ensure_interim_capacity()?;
     session.append_base64(audio)?;
     if let Some(failure) = policy.precommit_failure() {
         session.record_pending_failure(failure)?;
@@ -337,6 +336,7 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
             None,
             client_event_id,
         ),
+        #[cfg(any(test, feature = "test-fixtures"))]
         SessionError::InterimAtCapacity => ClientError::overload(
             "result_queue_overload",
             "The session result queue is full",

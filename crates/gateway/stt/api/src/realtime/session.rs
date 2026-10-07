@@ -71,7 +71,7 @@ impl Session {
         }
         self.input = None;
         self.last_interim_window = None;
-        self.pending_interim.clear();
+        self.standard_interim_sent.clear();
         self.standard_interim_committed.clear();
         self.hypothesis_revision = 0;
         self.last_hypothesis = None;

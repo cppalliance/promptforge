@@ -20,6 +20,7 @@ mod state;
 mod text;
 mod window;
 
+pub(crate) use agreement::token_spans;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, spawn_final_pipeline};

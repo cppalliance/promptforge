@@ -5,7 +5,7 @@ async fn producer_snapshots_partition_finalized_agreed_and_tentative_text() {
         "Why is it",
         "Why is it",
         "Why is this",
-        "is this working now",
+        "is it working now",
     ] {
         interim.push_text(transcript);
     }
@@ -45,13 +45,13 @@ async fn producer_snapshots_partition_finalized_agreed_and_tentative_text() {
     assert_eq!(hypotheses[0]["transcript"], "Why is it");
     assert_eq!(hypotheses[1]["agreed"], "Why is it");
     assert_eq!(
-        hypotheses[2]["transcript"], "Why is this",
-        "a whole-window revision retracts its former promoted suffix"
+        hypotheses[2]["transcript"], "Why is it",
+        "a whole-window revision cannot retract promoted words"
     );
     assert_eq!(hypotheses[2]["audio_start_ms"], 500);
     assert_eq!(hypotheses[2]["audio_end_ms"], 1_500);
     assert_eq!(
-        hypotheses[3]["transcript"], "Why is this working now",
+        hypotheses[3]["transcript"], "Why is it working now",
         "the sliding window retains only the prefix before explicit overlap"
     );
     assert_eq!(hypotheses[3]["audio_start_ms"], 1_000);
@@ -309,9 +309,14 @@ async fn mounted_session_errors_keep_canonical_codes_parameters_and_correlation(
     server.shutdown().await;
 }
 #[tokio::test]
-async fn standard_interims_emit_only_appendable_agreed_deltas() {
+async fn standard_interims_stream_appendable_agreed_deltas_before_commit() {
     let interim = ScriptedDecoder::new();
-    for transcript in ["Hello there", "Hello world", "Hello world again"] {
+    for transcript in [
+        "Hello there",
+        "Hello world",
+        "Hello world again",
+        "Hello world again",
+    ] {
         interim.push_text(transcript);
     }
     let final_decoder = ScriptedDecoder::new();
@@ -321,7 +326,7 @@ async fn standard_interims_emit_only_appendable_agreed_deltas() {
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
     expect_type(&mut socket, "session.created").await;
 
-    for pass in 1..=3 {
+    for pass in 1..=4 {
         for _ in 0..5 {
             append_audio(&mut socket, audio()).await;
         }
@@ -335,6 +340,15 @@ async fn standard_interims_emit_only_appendable_agreed_deltas() {
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+    let live = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.delta",
+    )
+    .await;
+    assert_eq!(
+        live["delta"], "Hello",
+        "agreed text streams before commit, holding back its last two words"
+    );
     send(
         &mut socket,
         serde_json::json!({"type": "input_audio_buffer.commit"}),
@@ -342,25 +356,20 @@ async fn standard_interims_emit_only_appendable_agreed_deltas() {
     .await;
     expect_type(&mut socket, "input_audio_buffer.committed").await;
     expect_type(&mut socket, "conversation.item.created").await;
-    let first = expect_type(
+    let rest = expect_type(
         &mut socket,
         "conversation.item.input_audio_transcription.delta",
     )
     .await;
-    let second = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.delta",
-    )
-    .await;
-    assert_eq!(first["delta"], "Hello");
-    assert_eq!(second["delta"], " world");
+    assert_eq!(rest["item_id"], live["item_id"]);
     assert_eq!(
         format!(
             "{}{}",
-            first["delta"].as_str().expect("first delta is text"),
-            second["delta"].as_str().expect("second delta is text")
+            live["delta"].as_str().expect("live delta is text"),
+            rest["delta"].as_str().expect("rest delta is text")
         ),
-        "Hello world"
+        "Hello world again",
+        "commit appends the held-back words"
     );
     expect_type(
         &mut socket,

@@ -1,5 +1,5 @@
-//! Interim task ownership, retry, canceled-join capacity, and the discard of
-//! empty interim transcripts.
+//! Interim task ownership, retry, canceled-join capacity, the discard of
+//! empty interim transcripts, and plain-session deltas during the take.
 
 use std::future::pending;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +98,43 @@ async fn an_empty_interim_transcript_leaves_the_snapshot_and_agreement_unchanged
         "the take advances as if the empty interim never arrived"
     );
     assert_eq!(after["agreed"], "alpha beta");
+}
+
+#[tokio::test]
+async fn a_plain_session_receives_agreed_deltas_before_commit() {
+    let interim = ScriptedDecoder::new();
+    for text in ["alpha beta gamma", "alpha beta gamma"] {
+        interim.push_text(text);
+    }
+    let mut session = RealtimeSessionRegistryFixture::default()
+        .register_with_scripted_engine(ScriptedModelFactory::new(interim.clone()))
+        .expect("scripted session starts");
+    let second = encoded(&vec![16_384; 24_000]);
+    session.append_base64(&second).expect("speech appends");
+    assert_eq!(
+        session.run_interim().await.expect("the interim runs"),
+        None,
+        "tentative text sends nothing"
+    );
+    session.append_base64(&second).expect("speech appends");
+    let delta = session
+        .run_interim()
+        .await
+        .expect("the interim runs")
+        .expect("agreed text streams before commit");
+    let input = session
+        .input_snapshot()
+        .expect("the input is still uncommitted");
+    assert!(!input.include_hypothesis());
+    assert_eq!(
+        delta["type"],
+        "conversation.item.input_audio_transcription.delta"
+    );
+    assert_eq!(delta["item_id"], input.item_id());
+    assert_eq!(
+        delta["delta"], "alpha",
+        "the last two agreed words wait for later agreement or commit"
+    );
 }
 
 #[tokio::test]

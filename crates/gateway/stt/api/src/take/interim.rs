@@ -28,10 +28,6 @@ impl InterimSnapshot {
         }
     }
 
-    pub(crate) fn committed(&self) -> &str {
-        &self.transcript[..self.finalized.len() + self.agreed.len()]
-    }
-
     pub(crate) fn into_parts(self) -> (String, String, String, String) {
         (self.transcript, self.finalized, self.agreed, self.tentative)
     }

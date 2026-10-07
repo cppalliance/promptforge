@@ -635,7 +635,7 @@ flowchart TD
 
 <step-16>
 
-### Step 16: Live append-only deltas for plain clients
+### Step 16: Live append-only deltas for plain clients [completed]
 
 - Component: Live rendering
 - Piece: server wire

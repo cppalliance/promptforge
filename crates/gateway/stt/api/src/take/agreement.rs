@@ -33,7 +33,8 @@ pub(super) fn normalized_token(token: &str) -> String {
     }
 }
 
-pub(super) fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
+/// Whitespace-separated tokens of `text` with their byte start and end.
+pub(crate) fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
     let mut tokens = Vec::new();
     let mut start = None;
     for (index, character) in text

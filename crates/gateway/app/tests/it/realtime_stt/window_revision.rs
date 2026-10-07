@@ -36,7 +36,7 @@ async fn schedule_hypothesis(socket: &mut Socket) -> serde_json::Value {
 #[tokio::test]
 async fn mounted_advancing_window_accepts_two_normalized_leading_tokens() {
     let (server, mut socket, _interim) =
-        mounted_hypothesis_session(&["Why, IS it", "Why, IS it", "why is this"]).await;
+        mounted_hypothesis_session(&["Well", "Why, IS it", "why is this"]).await;
 
     schedule_hypothesis(&mut socket).await;
     schedule_hypothesis(&mut socket).await;

@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::take::TakeFailure;
 
+#[cfg(any(test, feature = "test-fixtures"))]
 pub(super) const SESSION_RESULT_CAPACITY: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

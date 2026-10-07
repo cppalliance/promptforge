@@ -1,10 +1,17 @@
 //! Session-side server event emission and interim decode scheduling.
 
 use super::{Session, SessionError};
-use crate::realtime::result_mailbox::{ItemResult, SESSION_RESULT_CAPACITY};
+use crate::realtime::result_mailbox::ItemResult;
 use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::{HypothesisRanges, ServerEvent};
+use crate::take::{InterimSnapshot, token_spans};
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
+
+/// Trailing agreed words a plain client receives only once later agreement
+/// extends past them or the input commits, because an aligned final rewrite
+/// can still revise them.
+const STANDARD_HOLD_BACK_WORDS: usize = 2;
+
 impl Session {
     pub(crate) fn created_event(&self) -> ServerEvent {
         ServerEvent::session_created(self.ids.event(), self.effective.clone())
@@ -20,16 +27,6 @@ impl Session {
         self.ids.event()
     }
 
-    pub(crate) fn ensure_interim_capacity(&self) -> Result<(), SessionError> {
-        let standard_client = self.input.as_ref().map_or_else(
-            || !self.effective.includes_hypothesis(),
-            |input| !input.snapshot().include_hypothesis(),
-        );
-        if standard_client && self.pending_interim.len() == SESSION_RESULT_CAPACITY {
-            return Err(SessionError::InterimAtCapacity);
-        }
-        Ok(())
-    }
     pub(crate) fn schedule_interim(&mut self) -> Result<(), SessionError> {
         if self.interim_task.is_some() {
             return Ok(());
@@ -119,16 +116,10 @@ impl Session {
             audio_end,
         );
         if !include_hypothesis {
-            if let Some((snapshot, _)) = update {
-                let committed = snapshot.committed();
-                if let Some(delta) = committed.strip_prefix(&self.standard_interim_committed) {
-                    if !delta.is_empty() {
-                        self.pending_interim.push(delta.to_owned());
-                    }
-                    committed.clone_into(&mut self.standard_interim_committed);
-                }
-            }
-            return Ok(None);
+            let Some((snapshot, _)) = update else {
+                return Ok(None);
+            };
+            return Ok(self.standard_delta(item_id, snapshot));
         }
         let Some((snapshot, finalized)) = update else {
             return Ok(None);
@@ -159,16 +150,44 @@ impl Session {
         )))
     }
 
-    pub(crate) fn take_pending_interim(&mut self, item_id: &str) -> Vec<ServerEvent> {
+    fn standard_delta(
+        &mut self,
+        item_id: String,
+        snapshot: InterimSnapshot,
+    ) -> Option<ServerEvent> {
+        let (_, finalized, agreed, _) = snapshot.into_parts();
+        let stable_agreed_end = token_spans(&agreed)
+            .into_iter()
+            .rev()
+            .nth(STANDARD_HOLD_BACK_WORDS)
+            .map_or(0, |(_, _, end)| end);
+        let stable_len = finalized.len() + stable_agreed_end;
+        self.standard_interim_committed = finalized + &agreed;
+        let delta = self.standard_interim_committed[..stable_len]
+            .strip_prefix(self.standard_interim_sent.as_str())
+            .filter(|delta| !delta.is_empty())?
+            .to_owned();
+        self.standard_interim_sent.push_str(&delta);
+        Some(ServerEvent::transcription_delta(
+            self.ids.event(),
+            item_id,
+            delta,
+        ))
+    }
+
+    pub(crate) fn take_pending_interim(&mut self, item_id: &str) -> Option<ServerEvent> {
         self.hypothesis_revision = 0;
         self.last_hypothesis = None;
-        self.standard_interim_committed.clear();
-        self.pending_interim
-            .drain(..)
-            .map(|transcript| {
-                ServerEvent::transcription_delta(self.ids.event(), item_id.to_owned(), transcript)
-            })
-            .collect()
+        let sent = std::mem::take(&mut self.standard_interim_sent);
+        let committed = std::mem::take(&mut self.standard_interim_committed);
+        let rest = committed
+            .strip_prefix(sent.as_str())
+            .filter(|rest| !rest.is_empty())?;
+        Some(ServerEvent::transcription_delta(
+            self.ids.event(),
+            item_id.to_owned(),
+            rest.to_owned(),
+        ))
     }
     pub(crate) fn committed_events(
         &self,

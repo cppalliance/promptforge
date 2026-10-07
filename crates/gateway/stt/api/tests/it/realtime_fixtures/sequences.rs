@@ -22,7 +22,7 @@ const VALID_SEQUENCE_CASES: &[&str] = &[
     "producer_hypothesis_ownership",
     "saturated_commit_retry",
     "segment_admission_failure",
-    "standard_delta_after_item_creation",
+    "standard_live_deltas_before_commit",
 ];
 
 const INVALID_SEQUENCE_CASES: &[&str] = &[
@@ -171,6 +171,34 @@ fn canonical_realtime_sequences_cover_valid_and_invalid_contract_paths() {
         })
         .collect::<Vec<_>>();
     assert_eq!(revisions, [1, 2], "hypothesis revisions increase");
+
+    let standard = valid["standard_live_deltas_before_commit"]["events"]
+        .as_array()
+        .expect("standard delta sequence events")
+        .iter()
+        .filter(|entry| entry["direction"] == "server")
+        .map(|entry| &entry["message"])
+        .collect::<Vec<_>>();
+    let position = |event_type: &str| {
+        standard
+            .iter()
+            .position(|message| message["type"] == event_type)
+            .unwrap_or_else(|| panic!("standard delta sequence has {event_type}"))
+    };
+    assert!(
+        position("conversation.item.input_audio_transcription.delta")
+            < position("input_audio_buffer.committed"),
+        "a standard delta arrives before commit"
+    );
+    let streamed = standard
+        .iter()
+        .filter(|message| message["type"] == "conversation.item.input_audio_transcription.delta")
+        .map(|message| message["delta"].as_str().expect("delta is text"))
+        .collect::<String>();
+    assert_eq!(
+        streamed, "Hello big world",
+        "standard deltas append to one another"
+    );
 
     let invalid = fixture("invalid-sequences.json");
     assert_exact_cases(&invalid, INVALID_SEQUENCE_CASES, "invalid sequence cases");

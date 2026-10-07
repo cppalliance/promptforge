@@ -49,6 +49,7 @@ pub(crate) enum SessionError {
     #[error("transcription failed")]
     #[non_exhaustive]
     Inference(#[source] TranscribeError),
+    #[cfg(any(test, feature = "test-fixtures"))]
     #[error("the realtime session result capacity is reached")]
     InterimAtCapacity,
     #[error("{0}")]
@@ -83,7 +84,7 @@ pub(crate) struct Session {
     pub(super) canceled_task_failed: bool,
     pub(super) committed: HashMap<String, CommittedItem>,
     pub(super) previous_item_id: Option<String>,
-    pub(super) pending_interim: Vec<String>,
+    pub(super) standard_interim_sent: String,
     pub(super) standard_interim_committed: String,
     pub(super) hypothesis_revision: u64,
     pub(super) last_hypothesis: Option<(InterimSnapshot, Option<HypothesisRanges>)>,
@@ -111,7 +112,7 @@ impl Session {
             canceled_task_failed: false,
             committed: HashMap::with_capacity(MAX_COMMITTED_ITEMS_PER_SESSION),
             previous_item_id: None,
-            pending_interim: Vec::new(),
+            standard_interim_sent: String::new(),
             standard_interim_committed: String::new(),
             hypothesis_revision: 0,
             last_hypothesis: None,

@@ -1,6 +1,7 @@
 //! Tests for sample-to-millisecond conversion at the u64 boundary, for
 //! hypothesis revisions that advance only when the emitted snapshot changes,
-//! and for negotiated finalized range fields.
+//! for negotiated finalized range fields, and for the append-only deltas a
+//! plain session receives during the take.
 
 use std::ops::Range;
 
@@ -175,6 +176,146 @@ fn range_fields_appear_only_for_a_ranges_input_and_report_the_finalized_text() {
     assert_eq!(event["finalized"], "ask not");
     assert_eq!(event["finalized_through_ms"], 1_000);
     assert_eq!(event["finalized_seq"], 1);
+}
+
+fn accept_delta(
+    session: &mut Session,
+    epoch: InterimEpoch,
+    window: Range<u64>,
+    transcript: &str,
+) -> Option<String> {
+    accept_event(session, epoch, window, transcript).map(|event| {
+        assert_eq!(
+            event["type"],
+            "conversation.item.input_audio_transcription.delta"
+        );
+        event["delta"]
+            .as_str()
+            .expect("a delta carries text")
+            .to_owned()
+    })
+}
+
+fn commit_rest(session: &mut Session) -> Vec<String> {
+    let receipt = session.commit().expect("input commits");
+    session
+        .take_pending_interim(receipt.item_id())
+        .into_iter()
+        .map(|event| {
+            serde_json::to_value(event).expect("delta serializes")["delta"]
+                .as_str()
+                .expect("a delta carries text")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn a_plain_session_streams_agreed_text_before_commit_holding_back_two_words() {
+    let mut session = session_including(&[]);
+    let epoch = session.begin_interim().expect("epoch begins");
+    let mut sent = Vec::new();
+    for (window, transcript) in [
+        (0..16_000, "alpha beta"),
+        (0..24_000, "alpha beta"),
+        (0..32_000, "alpha beta gamma"),
+        (0..40_000, "alpha beta gamma"),
+        (0..48_000, "alpha beta gamma delta"),
+        (0..56_000, "alpha beta gamma delta"),
+    ] {
+        sent.push(accept_delta(&mut session, epoch, window, transcript));
+    }
+    assert_eq!(
+        sent,
+        [
+            None,
+            None,
+            None,
+            Some("alpha".to_owned()),
+            None,
+            Some(" beta".to_owned()),
+        ],
+        "two agreed words are held back and each delta appends to the last"
+    );
+    assert_eq!(
+        commit_rest(&mut session),
+        [" gamma delta"],
+        "commit sends the held-back words"
+    );
+}
+
+#[test]
+fn finalized_text_streams_whole_and_a_diverging_rewrite_sends_nothing_through_commit() {
+    for (finalized, expected) in [
+        ("alpha beta gamma delta", Some(" beta gamma delta")),
+        ("omega beta gamma delta", None),
+    ] {
+        let mut session = session_including(&[]);
+        let epoch = session.begin_interim().expect("epoch begins");
+        assert_eq!(
+            accept_delta(&mut session, epoch, 0..16_000, "alpha beta gamma"),
+            None
+        );
+        assert_eq!(
+            accept_delta(&mut session, epoch, 0..24_000, "alpha beta gamma").as_deref(),
+            Some("alpha")
+        );
+        session
+            .input()
+            .expect("input exists")
+            .take()
+            .record_finalized_through(finalized, Some(24_000));
+        assert_eq!(
+            accept_delta(&mut session, epoch, 24_000..40_000, "epsilon").as_deref(),
+            expected,
+            "{finalized}"
+        );
+        assert!(
+            commit_rest(&mut session).is_empty(),
+            "{finalized}: commit has nothing that appends to what was sent"
+        );
+    }
+}
+
+#[test]
+fn stable_text_that_falls_short_of_what_was_sent_resumes_with_only_the_words_past_it() {
+    let mut session = session_including(&[]);
+    let epoch = session.begin_interim().expect("epoch begins");
+    assert_eq!(
+        accept_delta(&mut session, epoch, 0..16_000, "alpha beta gamma delta"),
+        None
+    );
+    assert_eq!(
+        accept_delta(&mut session, epoch, 0..24_000, "alpha beta gamma delta").as_deref(),
+        Some("alpha beta")
+    );
+    session
+        .input()
+        .expect("input exists")
+        .take()
+        .record_finalized_through("alpha", Some(24_000));
+    assert_eq!(
+        accept_delta(
+            &mut session,
+            epoch,
+            24_000..40_000,
+            "beta gamma delta epsilon"
+        ),
+        None,
+        "a final covering fewer words than were sent sends nothing"
+    );
+    assert_eq!(
+        accept_delta(
+            &mut session,
+            epoch,
+            24_000..48_000,
+            "beta gamma delta epsilon"
+        )
+        .as_deref(),
+        Some(" gamma"),
+        "agreement past what was sent resumes with only the new word"
+    );
+    assert_eq!(commit_rest(&mut session), [" delta epsilon"]);
 }
 
 #[test]
