@@ -96,28 +96,6 @@ impl Session {
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn push_delta(
-        &mut self,
-        item_id: &str,
-        transcript: String,
-    ) -> Result<(), SessionError> {
-        self.results.push_delta(item_id, transcript)?;
-        Ok(())
-    }
-
-    #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn replace_hypothesis(
-        &mut self,
-        item_id: &str,
-        revision: u64,
-        transcript: String,
-    ) -> Result<(), SessionError> {
-        self.results
-            .replace_hypothesis(item_id, revision, transcript)?;
-        Ok(())
-    }
-
-    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn finalize_completed(
         &mut self,
         item_id: &str,
@@ -165,7 +143,7 @@ impl Session {
 
     pub(crate) fn drain_results(&mut self) -> Vec<ItemResult> {
         let results = self.results.drain();
-        for result in results.iter().filter(|result| result.is_terminal()) {
+        for result in &results {
             self.committed.remove(result.item_id());
         }
         results

@@ -103,14 +103,6 @@ pub enum FixtureError {
     #[error("record precommit failure")]
     #[non_exhaustive]
     RecordPrecommitFailure(#[source] BoxedSource),
-    /// The delta push failed.
-    #[error("push fixture delta")]
-    #[non_exhaustive]
-    PushDelta(#[source] BoxedSource),
-    /// The hypothesis replacement failed.
-    #[error("replace fixture hypothesis")]
-    #[non_exhaustive]
-    ReplaceHypothesis(#[source] BoxedSource),
     /// The completed terminal outcome was rejected.
     #[error("finalize fixture item completed")]
     #[non_exhaustive]

@@ -84,30 +84,6 @@ impl ServerEvent {
 
     pub(in crate::realtime) fn item_result(event_id: String, result: ItemResult) -> Self {
         match result {
-            #[cfg(any(test, feature = "test-fixtures"))]
-            ItemResult::Delta {
-                item_id,
-                transcript,
-            } => Self::transcription_delta(event_id, item_id, transcript),
-            #[cfg(any(test, feature = "test-fixtures"))]
-            ItemResult::Hypothesis {
-                item_id,
-                revision,
-                transcript,
-            } => Self::TranscriptionHypothesis {
-                event_id,
-                item_id,
-                content_index: 0,
-                revision,
-                finalized: String::new(),
-                agreed: String::new(),
-                tentative: transcript.clone(),
-                transcript,
-                audio_start_ms: 0,
-                audio_end_ms: 0,
-                finalized_through_ms: None,
-                finalized_seq: None,
-            },
             ItemResult::Completed {
                 item_id,
                 transcript,

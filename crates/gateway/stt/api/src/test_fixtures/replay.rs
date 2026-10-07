@@ -210,10 +210,9 @@ impl ReplayTake {
         let receipt = self.session.commit()?;
         self.session.finish_finalization(receipt.item_id()).await?;
         let results = self.session.session.drain_results();
-        let result = results.into_iter().find_map(|result| match result {
-            ItemResult::Completed { transcript, .. } => Some(Ok(transcript)),
-            ItemResult::Failed { failure, .. } => Some(Err(failure.diagnostic().to_owned())),
-            _ => None,
+        let result = results.into_iter().next().map(|result| match result {
+            ItemResult::Completed { transcript, .. } => Ok(transcript),
+            ItemResult::Failed { failure, .. } => Err(failure.diagnostic().to_owned()),
         });
         match result {
             Some(Ok(completed)) => {

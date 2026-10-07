@@ -48,7 +48,6 @@ const INVALID_SEQUENCE_CASES: &[&str] = &[
     "non_null_turn_detection",
     "ranges_include_without_hypothesis",
     "repeated_include",
-    "result_queue_overload",
     "session_audio_unknown_field",
     "session_input_unknown_field",
     "session_transcription_unknown_field",

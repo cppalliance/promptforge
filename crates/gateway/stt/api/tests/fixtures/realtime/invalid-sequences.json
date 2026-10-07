@@ -137,12 +137,6 @@
     "effective_session_after": "default",
     "keeps_connection_usable": true
   },
-  "result_queue_overload": {
-    "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_result_overload" }, "setup": { "buffered_audio_ms": 100, "result_queue_occupancy": 16 } },
-    "expected_error": { "event_id": "evt_result_overload", "type": "error", "error": { "type": "overload_error", "code": "result_queue_overload", "message": "The session result queue is full", "param": null, "event_id": "client_result_overload" } },
-    "effective_session_after": "default",
-    "keeps_connection_usable": true
-  },
   "session_audio_unknown_field": {
     "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": {}, "output": {} } }, "event_id": "client_audio_unknown" } },
     "expected_error": { "event_id": "evt_audio_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field session.audio.output", "param": "session.audio.output", "event_id": "client_audio_unknown" } },

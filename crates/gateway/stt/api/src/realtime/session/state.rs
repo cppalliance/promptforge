@@ -49,25 +49,12 @@ pub(crate) enum SessionError {
     #[error("transcription failed")]
     #[non_exhaustive]
     Inference(#[source] TranscribeError),
-    #[cfg(any(test, feature = "test-fixtures"))]
-    #[error("the realtime session result capacity is reached")]
-    InterimAtCapacity,
     #[error("{0}")]
     PendingPrecommitFailure(Arc<TakeFailure>),
     #[error(transparent)]
     Finalization(#[from] FinalizationError),
     #[error(transparent)]
-    Mailbox(MailboxError),
-}
-
-impl From<MailboxError> for SessionError {
-    fn from(error: MailboxError) -> Self {
-        #[cfg(any(test, feature = "test-fixtures"))]
-        if error == MailboxError::ResultAtCapacity {
-            return Self::InterimAtCapacity;
-        }
-        Self::Mailbox(error)
-    }
+    Mailbox(#[from] MailboxError),
 }
 #[derive(Debug)]
 pub(crate) struct Session {

@@ -20,7 +20,6 @@ mod lifecycle;
 const SESSION_CAPACITY: usize = 8;
 const CANCEL_JOIN_CAPACITY: usize = 8;
 const COMMITTED_ITEM_CAPACITY: usize = 4;
-const RESULT_CAPACITY: usize = 16;
 static BLOCKING_TASK_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn encoded(samples: &[i16]) -> String {

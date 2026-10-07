@@ -91,31 +91,6 @@ impl RealtimeSessionFixture {
             .map_err(|error| FixtureError::RecordPrecommitFailure(boxed(error)))
     }
 
-    /// Adds one accepted nonterminal result to bounded session capacity.
-    ///
-    /// # Errors
-    /// Returns item-state or capacity errors.
-    pub fn push_delta(&mut self, item_id: &str, transcript: &str) -> Result<(), FixtureError> {
-        self.session
-            .push_delta(item_id, transcript.to_owned())
-            .map_err(|error| FixtureError::PushDelta(boxed(error)))
-    }
-
-    /// Replaces the item's newest-wins hypothesis slot.
-    ///
-    /// # Errors
-    /// Returns item-state errors.
-    pub fn replace_hypothesis(
-        &mut self,
-        item_id: &str,
-        revision: u64,
-        transcript: &str,
-    ) -> Result<(), FixtureError> {
-        self.session
-            .replace_hypothesis(item_id, revision, transcript.to_owned())
-            .map_err(|error| FixtureError::ReplaceHypothesis(boxed(error)))
-    }
-
     /// Records the item's sole successful terminal outcome.
     ///
     /// # Errors
@@ -313,24 +288,6 @@ impl RealtimeSessionFixture {
 
 fn result_value(result: ItemResult) -> serde_json::Value {
     match result {
-        ItemResult::Delta {
-            item_id,
-            transcript,
-        } => serde_json::json!({
-            "type": "delta",
-            "item_id": item_id,
-            "transcript": transcript,
-        }),
-        ItemResult::Hypothesis {
-            item_id,
-            revision,
-            transcript,
-        } => serde_json::json!({
-            "type": "hypothesis",
-            "item_id": item_id,
-            "revision": revision,
-            "transcript": transcript,
-        }),
         ItemResult::Completed {
             item_id,
             transcript,

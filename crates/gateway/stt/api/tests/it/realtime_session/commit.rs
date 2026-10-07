@@ -3,8 +3,8 @@
 use std::future::pending;
 
 use super::{
-    CANCEL_JOIN_CAPACITY, COMMITTED_ITEM_CAPACITY, RESULT_CAPACITY, append_committable, encoded,
-    session, source_message,
+    CANCEL_JOIN_CAPACITY, COMMITTED_ITEM_CAPACITY, append_committable, encoded, session,
+    source_message,
 };
 
 #[test]
@@ -55,58 +55,6 @@ fn committed_capacity_is_reserved_before_input_detach_and_retryable() {
     session.drain_results();
     let retried = session.commit().expect("same input retries");
     assert_eq!(retried.item_id(), retry_id);
-}
-
-#[test]
-fn result_capacity_hypothesis_replacement_and_terminal_reservation_are_independent() {
-    let mut session = session();
-    append_committable(&mut session);
-    let item = session.commit().expect("item commits");
-    for index in 0..RESULT_CAPACITY {
-        session
-            .push_delta(item.item_id(), &format!("delta-{index}"))
-            .expect("result enters bounded capacity");
-    }
-    let error = session
-        .push_delta(item.item_id(), "overflow")
-        .expect_err("capacity-plus-one is rejected");
-    assert_eq!(error.to_string(), "push fixture delta");
-    assert_eq!(
-        source_message(&error).as_deref(),
-        Some("the realtime session result capacity is reached")
-    );
-
-    session
-        .replace_hypothesis(item.item_id(), 1, "old")
-        .expect("first hypothesis enters its slot");
-    session
-        .replace_hypothesis(item.item_id(), 2, "new")
-        .expect("new hypothesis replaces old");
-    session
-        .finalize_completed(item.item_id(), "authoritative")
-        .expect("terminal uses its reserved slot despite saturation");
-
-    let results = session.drain_results();
-    assert_eq!(
-        results
-            .iter()
-            .filter(|event| event["type"] == "delta")
-            .count(),
-        RESULT_CAPACITY
-    );
-    let hypothesis = results
-        .iter()
-        .find(|event| event["type"] == "hypothesis")
-        .expect("one replaceable hypothesis remains");
-    assert_eq!(hypothesis["revision"], 2);
-    assert_eq!(hypothesis["transcript"], "new");
-    assert_eq!(
-        results
-            .iter()
-            .filter(|event| event["type"] == "completed")
-            .count(),
-        1
-    );
 }
 
 #[test]

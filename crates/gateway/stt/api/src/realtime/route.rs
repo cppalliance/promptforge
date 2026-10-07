@@ -328,17 +328,6 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
             None,
             client_event_id,
         ),
-        #[cfg(any(test, feature = "test-fixtures"))]
-        SessionError::InterimAtCapacity => ClientError::overload(
-            "result_queue_overload",
-            "The session result queue is full",
-            None,
-            client_event_id,
-        ),
-        #[cfg(any(test, feature = "test-fixtures"))]
-        SessionError::Mailbox(MailboxError::ResultAtCapacity) => {
-            session_error(&SessionError::InterimAtCapacity, client_event_id)
-        }
         SessionError::PendingPrecommitFailure(_) => ClientError::request(
             "precommit_transcription_failed",
             "Further appends are rejected after accurate precommit failure",
