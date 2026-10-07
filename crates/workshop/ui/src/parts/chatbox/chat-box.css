@@ -83,6 +83,7 @@
    take's tentative words, which the next hypothesis may still rewrite. */
 .ws-stt-tentative {
   color: var(--text-muted);
+  opacity: 0.5;
 }
 
 /* The send button: the accent control on the bar. */
