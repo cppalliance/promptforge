@@ -53,7 +53,16 @@ pub(super) fn equivalent_token(left: &str, right: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{equivalent_token, range_guided_suffix_prefix_start};
+    use super::{equivalent_token, matching_token_prefix_end, range_guided_suffix_prefix_start};
+
+    #[test]
+    fn characterize_matching_token_prefix_end_stops_at_a_punctuation_or_case_difference() {
+        assert_eq!(
+            matching_token_prefix_end("ask not, what", "ask not what"),
+            "ask".len()
+        );
+        assert_eq!(matching_token_prefix_end("Ask not what", "ask not what"), 0);
+    }
 
     #[test]
     fn punctuation_only_tokens_never_establish_overlap() {

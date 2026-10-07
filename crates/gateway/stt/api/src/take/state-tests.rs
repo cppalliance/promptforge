@@ -115,6 +115,24 @@ fn unresolved_skip_consumes_one_candidate_then_later_decode_settles_normally() {
 }
 
 #[test]
+fn characterize_natural_final_replaces_interim_text_for_its_whole_range() {
+    let state = TakeState::default();
+    let accepted = [AcceptedHypothesis::new(
+        0..16_000,
+        "ask not what your country can do".to_owned(),
+    )];
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(0..16_000, "Ask not what your country".to_owned()),
+        &accepted,
+    );
+
+    assert_eq!(
+        state.finalized_snapshot(),
+        ("Ask not what your country".to_owned(), 16_000)
+    );
+}
+
+#[test]
 fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
     let state = TakeState::default();
     state.record_final_outcome(

@@ -143,6 +143,45 @@ test("captured coordinate width owns replacement and rollback independently of t
   ]);
 });
 
+test("characterize_every_hypothesis_replaces_the_whole_owned_range", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+
+  let result = server(state, hypothesis("whole", "ask not", 1));
+  assert.deepEqual(replacements(result.effects), [
+    {
+      domain: "editor",
+      command: "replace",
+      from: 0,
+      to: 0,
+      text: "ask not",
+    },
+  ]);
+  state = result.state;
+
+  result = server(state, hypothesis("whole", "ask not what", 2));
+  assert.deepEqual(replacements(result.effects), [
+    {
+      domain: "editor",
+      command: "replace",
+      from: 0,
+      to: 7,
+      text: "ask not what",
+    },
+  ]);
+  state = result.state;
+
+  result = server(state, hypothesis("whole", "ask not what", 3));
+  assert.deepEqual(replacements(result.effects), [
+    {
+      domain: "editor",
+      command: "replace",
+      from: 0,
+      to: 12,
+      text: "ask not what",
+    },
+  ]);
+});
+
 test("a precommit tombstone consumes its matching acknowledgment before the next take", () => {
   let state = start(createTakeRegistry(), context(0)).state;
   state = server(state, hypothesis("discarded", "temporary")).state;

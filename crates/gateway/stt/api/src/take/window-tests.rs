@@ -24,6 +24,25 @@ fn whole_window_revision_replaces_a_promoted_leading_phrase() {
 }
 
 #[test]
+fn characterize_agreed_text_shrinks_when_a_later_hypothesis_revises_an_agreed_word() {
+    let mut state = WholeWindowState::default();
+    state.next("", 0, 0, 0, 8_000, "Why is it");
+    let agreed = state
+        .next("", 0, 0, 0, 9_600, "Why is it")
+        .expect("a repeated hypothesis agrees on every word")
+        .into_parts()
+        .2;
+    assert_eq!(agreed, "Why is it");
+
+    let shrunk = state
+        .next("", 0, 0, 0, 11_200, "Why is this")
+        .expect("a revised hypothesis emits")
+        .into_parts()
+        .2;
+    assert_eq!(shrunk, "Why is");
+}
+
+#[test]
 fn advancing_window_replaces_a_revision_with_two_equivalent_leading_tokens() {
     let mut state = WholeWindowState::default();
     state.next("", 0, 0, 0, 16_000, "Why, IS it");

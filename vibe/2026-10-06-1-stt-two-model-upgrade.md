@@ -450,7 +450,7 @@ flowchart TD
 
 <step-4>
 
-### Step 4: Characterization tests
+### Step 4: Characterization tests [completed]
 
 - Component: Groundwork
 - Piece: characterization tests
