@@ -46,6 +46,10 @@ pub(crate) struct Segmenter {
     sentence_end: Option<u64>,
     /// End of the latest scanned frame the energy gate read as speech.
     speech_end: u64,
+    /// Where the analysis frame grid last started: zero, or the end of the
+    /// latest forced stride, where scanning resumes off the earlier grid.
+    #[cfg(feature = "test-fixtures")]
+    frame_grid_origin: u64,
 }
 
 /// What the energy gate heard before some sample: where its last speech
@@ -107,6 +111,11 @@ impl Segmenter {
         self.sentence_end == Some(self.endpoint.consumed)
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) const fn frame_grid_origin(&self) -> u64 {
+        self.frame_grid_origin
+    }
+
     /// What the energy gate heard before `end`, or `None` while a whole
     /// frame before `end` is unscanned.
     pub(crate) fn speech_before(&self, end: u64) -> Option<SpeechBefore> {
@@ -153,6 +162,14 @@ impl Segmenter {
                 sentence_end: self.ends_sentence(),
             };
             let advance = endpoint::endpoint(self.endpoint, scan)?;
+            #[cfg(feature = "test-fixtures")]
+            if advance
+                .closed
+                .as_ref()
+                .is_some_and(|closed| closed.rule == Rule::Stride)
+            {
+                self.frame_grid_origin = advance.cursor;
+            }
             self.cursor = advance.cursor;
             self.endpoint = advance.state;
             if let Some(closed) = advance.closed {

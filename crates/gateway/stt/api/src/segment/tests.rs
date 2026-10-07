@@ -212,6 +212,25 @@ fn continuous_speech_forces_exact_absolute_strides_with_bounded_overlap() {
     assert_eq!(segmenter.consumed(), 320_000);
 }
 
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn a_forced_stride_restarts_the_frame_grid_at_its_end() {
+    let buffer = take(&[silence(1), speech(11)]);
+    let mut segmenter = Segmenter::new();
+    assert_eq!(segmenter.frame_grid_origin(), 0);
+
+    let Some(SegmentOutcome::Forced(stride)) = segmenter.poll(&buffer, 0) else {
+        panic!("ten seconds of speech force a final window");
+    };
+    let stride_end = stride.new_audio().end;
+    assert_ne!(
+        stride_end % FRAME_SAMPLES as u64,
+        0,
+        "the stride ends off the first grid"
+    );
+    assert_eq!(segmenter.frame_grid_origin(), stride_end);
+}
+
 #[test]
 fn first_natural_boundary_keeps_then_resets_forced_overlap_ownership() {
     let buffer = take(&[speech(10), speech(1), silence(3), speech(10)]);

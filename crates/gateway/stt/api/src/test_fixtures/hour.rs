@@ -26,9 +26,17 @@ pub struct RealtimeTakeMetricsFixture {
     pending_final_segments: usize,
     pending_final_outcomes: usize,
     retained_hypotheses: usize,
+    frame_grid_origin: u64,
 }
 
 impl RealtimeTakeMetricsFixture {
+    /// Returns where the segmenter's 30 ms analysis frame grid last started:
+    /// zero, or the end of the latest forced stride.
+    #[must_use]
+    pub const fn frame_grid_origin(&self) -> u64 {
+        self.frame_grid_origin
+    }
+
     /// Returns exact lifetime 24 kHz input samples.
     #[must_use]
     pub const fn input_samples(&self) -> u64 {
@@ -68,6 +76,7 @@ pub(super) fn take_metrics(input: &UncommittedInput) -> RealtimeTakeMetricsFixtu
         pending_final_segments: metrics.pending_final_segments,
         pending_final_outcomes: metrics.pending_final_outcomes,
         retained_hypotheses: metrics.retained_hypotheses,
+        frame_grid_origin: metrics.frame_grid_origin,
     }
 }
 

@@ -48,6 +48,7 @@ pub(crate) struct TakeMetrics {
     pub(crate) pending_final_segments: usize,
     pub(crate) pending_final_outcomes: usize,
     pub(crate) retained_hypotheses: usize,
+    pub(crate) frame_grid_origin: u64,
 }
 
 /// All mutable and immutable state belonging to one speech take.
@@ -238,6 +239,7 @@ impl Take {
             pending_final_segments: self.pending_final_segments(),
             pending_final_outcomes,
             retained_hypotheses,
+            frame_grid_origin: TakeState::lock(&self.state.segmenter).frame_grid_origin(),
         }
     }
 
