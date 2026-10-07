@@ -294,8 +294,8 @@ impl RunState {
         Arc::clone(&self.tool_set)
     }
 
-    /// An owned snapshot of the run's tool set (bindings plus `always`),
-    /// read through the view.
+    /// An owned snapshot of the run's tool set (bindings, `always`, and
+    /// the offering), read through the view.
     ///
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
@@ -304,6 +304,7 @@ impl RunState {
         Ok(ToolSet::from_parts(
             self.tools.bindings()?,
             self.tools.always()?,
+            self.tools.offered()?,
         ))
     }
 

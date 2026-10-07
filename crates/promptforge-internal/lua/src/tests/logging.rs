@@ -16,6 +16,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
             &fixture_tool("search"),
         )],
         Vec::new(),
+        Vec::new(),
     );
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Gather")
         .expect("section VM must install captured bindings");

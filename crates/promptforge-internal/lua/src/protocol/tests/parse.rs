@@ -243,7 +243,7 @@ fn a_tool_call_with_a_non_alias_alias_is_the_calls_error() {
         YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
             assert_eq!(
                 message,
-                "tools.call alias must be a string or Tool object, got integer"
+                "tools.call alias must be a string, Tool object, or tool record, got integer"
             );
         }
         other => panic!("expected the alias call error, got {other:?}"),

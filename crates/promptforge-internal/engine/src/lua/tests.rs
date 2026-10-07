@@ -71,6 +71,7 @@ fn test_tools() -> ToolSet {
     ToolSet::for_test(
         vec![ToolBinding::for_test("echo", "echo tool", &stub_tool())],
         Vec::new(),
+        Vec::new(),
     )
 }
 

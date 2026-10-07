@@ -2,8 +2,10 @@
 //!
 //! One Lua table holds every tool operation, mirroring the `models.*`
 //! namespacing of model operations. Binding is the frontmatter's: the run's
-//! filled slots arrive in the shared [`ToolSet`], and the table scopes among
-//! them by alias - `add` scopes aliases into the section, `always` parks a
+//! filled slots arrive in the shared [`ToolSet`] beside the offering (the
+//! undeclared Plugins' tools, which `offered` lists as records), and the
+//! table scopes among them by name - `add` scopes slot aliases and offered
+//! names into the section, `always` parks a
 //! prompt-wide alias (conventionally from H1, not privileged to it),
 //! `add_local` registers a prompt-author Lua function as a tool, `call`
 //! dispatches a bound tool by alias or Tool object (installed by the
@@ -174,9 +176,11 @@ pub(crate) fn install_tools(
                 let set = lock_tools(&frozen)?;
                 for entry in &entries {
                     validate_alias(&entry.alias).map_err(mlua::Error::external)?;
-                    if set.binding(&entry.alias).is_none() {
+                    if set.binding(&entry.alias).is_none()
+                        && set.offered_binding(&entry.alias).is_none()
+                    {
                         return Err(mlua::Error::external(format!(
-                            "tools.add alias {:?} is not a bound tool slot",
+                            "tools.add alias {:?} is neither a bound tool slot nor an offered tool",
                             entry.alias
                         )));
                     }
@@ -233,10 +237,34 @@ pub(crate) fn install_tools(
         )
         .map_err(Error::lua)?;
     tools.set("always", always).map_err(Error::lua)?;
+    install_offered(lua, &tools, set)?;
     install_add_local(lua, &tools, set, local_tools)?;
     install_allow_tasks(lua, &tools, runtime)?;
 
     globals.raw_set("tools", tools).map_err(Error::lua)
+}
+
+/// Installs `tools.offered()`: a fresh list of plain records
+/// `{ id, name, plugin, description }`, one per offered binding, in the
+/// offering's tool id order.
+fn install_offered(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> Result<()> {
+    let offering = Arc::clone(set);
+    let offered = lua
+        .create_function(move |lua, ()| {
+            let set = lock_tools(&offering)?;
+            let records = lua.create_table()?;
+            for binding in set.offered() {
+                let record = lua.create_table()?;
+                record.raw_set("id", binding.id().to_string())?;
+                record.raw_set("name", binding.alias())?;
+                record.raw_set("plugin", binding.id().plugin().to_string())?;
+                record.raw_set("description", binding.description())?;
+                records.raw_push(record)?;
+            }
+            Ok(records)
+        })
+        .map_err(Error::lua)?;
+    tools.set("offered", offered).map_err(Error::lua)
 }
 
 /// Installs `tools.add_local(alias, description, params, handler)` over a

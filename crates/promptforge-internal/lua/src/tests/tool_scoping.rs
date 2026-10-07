@@ -367,9 +367,9 @@ fn unknown_scoped_alias_fails_before_scope_closure() {
     )
     .expect_err("only bound aliases may enter the section scope");
     assert!(
-        error
-            .to_string()
-            .contains("tools.add alias \"missing\" is not a bound tool slot"),
+        error.to_string().contains(
+            "tools.add alias \"missing\" is neither a bound tool slot nor an offered tool"
+        ),
         "the error names the unbound alias: {error}"
     );
     vm.teardown(&null_emitter(), "Section");
@@ -383,6 +383,7 @@ fn captured_bindings_are_installed_without_payload_reports() {
             "private capability",
             &fixture_tool("search"),
         )],
+        Vec::new(),
         Vec::new(),
     );
     let recorder = Recorder::default();
@@ -399,9 +400,9 @@ fn captured_bindings_are_installed_without_payload_reports() {
 fn add_without_declarations_fails_as_unbound_in_a_chunk() {
     let error = run("tools.add('web_search')", "").expect_err("an unbound alias must fail loudly");
     assert!(
-        error
-            .to_string()
-            .contains("tools.add alias \"web_search\" is not a bound tool slot"),
+        error.to_string().contains(
+            "tools.add alias \"web_search\" is neither a bound tool slot nor an offered tool"
+        ),
         "the error must name the unbound alias: {error}"
     );
 }
@@ -419,7 +420,9 @@ fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
     )
     .expect_err("an unbound alias must fail loudly");
     assert!(
-        error.to_string().contains("is not a bound tool slot"),
+        error
+            .to_string()
+            .contains("is neither a bound tool slot nor an offered tool"),
         "the error must report the missing slot: {error}"
     );
     vm.teardown(&null_emitter(), "Test");
@@ -440,7 +443,9 @@ fn add_with_empty_frozen_bindings_fails_as_unbound() {
     )
     .expect_err("an unbound alias must fail loudly");
     assert!(
-        error.to_string().contains("is not a bound tool slot"),
+        error
+            .to_string()
+            .contains("is neither a bound tool slot nor an offered tool"),
         "the error must report the missing slot: {error}"
     );
     vm.teardown(&null_emitter(), "Test");

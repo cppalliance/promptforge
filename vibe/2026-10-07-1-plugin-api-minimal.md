@@ -1220,7 +1220,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-6>
 
-### Step 6: The offering and `tools.offered()`
+### Step 6: The offering and `tools.offered()` [completed]
 
 - Component: The offering
 - Placement: sixth. The Engine and Lua work needs only a catalog and the declared Plugin list, but production catalogs hold undeclared Plugins only after step 5, and the runner test that proves the whole flow needs `HostContext`.

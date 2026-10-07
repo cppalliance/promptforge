@@ -229,6 +229,7 @@ fn fixture_set(bindings: &[(&str, &str, &'static str)], always: &[&str]) -> Tool
             })
             .collect(),
         always.iter().map(|alias| (*alias).to_owned()).collect(),
+        Vec::new(),
     )
 }
 

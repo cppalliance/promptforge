@@ -50,8 +50,10 @@ use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation, prompt_or
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
 /// them. A model-issued call to any of them is answered over the task
-/// arena; a script call to any of them is unbound.
-const RESERVED_TOOL_NAMES: [&str; 4] = ["task", "task_cancel", "task_status", "await_tasks"];
+/// arena; a script call to any of them is unbound. The offering leaves
+/// out a tool whose name is one of these.
+pub(in crate::execute) const RESERVED_TOOL_NAMES: [&str; 4] =
+    ["task", "task_cancel", "task_status", "await_tasks"];
 
 /// How one `tool_call` dispatch resolved: a bound call issued as an effect
 /// and parked on the pending table, an answer settled on the driver thread
@@ -175,6 +177,7 @@ impl Scheduler {
         // script call falls back to a catalog tool's full id.
         let binding = tool_set
             .binding(alias)
+            .or_else(|| tool_set.offered_binding(alias))
             .or_else(|| ctx.catalog_binding(alias).filter(|_| call_id.is_none()))
             .cloned();
         let Some(binding) = binding else {

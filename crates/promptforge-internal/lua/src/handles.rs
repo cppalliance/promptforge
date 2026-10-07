@@ -137,14 +137,19 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     }
 }
 
-/// The run's tool set: the frontmatter's filled tool slots plus the
-/// prompt-wide `always` aliases.
+/// The run's tool set: the frontmatter's filled tool slots, the
+/// prompt-wide `always` aliases, and the offering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
     /// The prompt-level bindings in declaration order.
     pub bindings: Vec<ToolBinding>,
     /// The prompt-wide `always` aliases in declaration order.
     pub always: Vec<String>,
+    /// The offering: the tools of Plugins the prompt doesn't declare, in
+    /// tool id order, each bound under its model-facing name. These never
+    /// become Lua globals and enter a section's scope only through
+    /// `tools.add`.
+    pub offered: Vec<ToolBinding>,
 }
 
 impl ToolSet {
@@ -154,15 +159,27 @@ impl ToolSet {
     /// only under `test-support`.
     #[cfg(any(test, feature = "test-support"))]
     #[must_use]
-    pub fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
-        Self { bindings, always }
+    pub fn for_test(
+        bindings: Vec<ToolBinding>,
+        always: Vec<String>,
+        offered: Vec<ToolBinding>,
+    ) -> Self {
+        Self::from_parts(bindings, always, offered)
     }
 
-    /// Reassembles a set from owned snapshots of its two lists (the
-    /// [`ToolView`] read pair).
+    /// Reassembles a set from owned snapshots of its three lists (the
+    /// [`ToolView`] reads).
     #[must_use]
-    pub fn from_parts(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
-        Self { bindings, always }
+    pub fn from_parts(
+        bindings: Vec<ToolBinding>,
+        always: Vec<String>,
+        offered: Vec<ToolBinding>,
+    ) -> Self {
+        Self {
+            bindings,
+            always,
+            offered,
+        }
     }
 
     /// Returns bindings in declaration order.
@@ -181,6 +198,18 @@ impl ToolSet {
     #[must_use]
     pub fn binding(&self, alias: &str) -> Option<&ToolBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
+    }
+
+    /// Returns the offering in tool id order.
+    #[must_use]
+    pub fn offered(&self) -> &[ToolBinding] {
+        &self.offered
+    }
+
+    /// Returns the offered binding under the model-facing `name`, if any.
+    #[must_use]
+    pub fn offered_binding(&self, name: &str) -> Option<&ToolBinding> {
+        self.offered.iter().find(|binding| binding.alias == name)
     }
 }
 
@@ -211,6 +240,18 @@ pub trait ToolView: Send + Sync {
     /// # Errors
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
     fn binding(&self, alias: &str) -> Result<Option<ToolBinding>>;
+
+    /// Returns an owned snapshot of the offering in tool id order.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn offered(&self) -> Result<Vec<ToolBinding>>;
+
+    /// Returns an owned clone of the offered binding under `name`, if any.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn offered_binding(&self, name: &str) -> Result<Option<ToolBinding>>;
 }
 
 /// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
@@ -231,6 +272,14 @@ impl ToolView for Mutex<ToolSet> {
 
     fn binding(&self, alias: &str) -> Result<Option<ToolBinding>> {
         Ok(lock_tool_set(self)?.binding(alias).cloned())
+    }
+
+    fn offered(&self) -> Result<Vec<ToolBinding>> {
+        Ok(lock_tool_set(self)?.offered.clone())
+    }
+
+    fn offered_binding(&self, name: &str) -> Result<Option<ToolBinding>> {
+        Ok(lock_tool_set(self)?.offered_binding(name).cloned())
     }
 }
 

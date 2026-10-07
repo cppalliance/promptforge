@@ -143,6 +143,7 @@ fn section_vm_value_injection_bypasses_shared_global_metatables() {
             &fixture_tool("search"),
         )],
         Vec::new(),
+        Vec::new(),
     );
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),

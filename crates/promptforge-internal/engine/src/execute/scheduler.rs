@@ -98,6 +98,7 @@ use super::run::{Effect, EffectAnswer, EffectId, Round};
 use chain_record::{Chain, ChatAnchor};
 use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
+pub(in crate::execute) use tool_call::RESERVED_TOOL_NAMES;
 
 /// Where a sibling slice sits in the prompt tree: the index of each
 /// ancestor section from the top level down to the slice's parent. The

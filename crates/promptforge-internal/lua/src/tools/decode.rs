@@ -2,29 +2,41 @@
 //!
 //! The alias-or-Tool polymorphism lives here once: `tools.add`
 //! and the `tools.call` protocol parse both accept a bare
-//! alias string or an inspectable Tool object and resolve either to the
-//! prompt-local alias. The `tools.add_local` params-table-to-JSON-Schema
-//! conversion sits beside it as the namespace's other argument decode.
+//! alias string, an inspectable Tool object, or a tool record (a table
+//! with a string `name`, such as one `tools.offered()` returns) and
+//! resolve each to the name it stands for. The `tools.add_local`
+//! params-table-to-JSON-Schema conversion sits beside it as the
+//! namespace's other argument decode.
 
-use mlua::{Value, Variadic};
+use mlua::{Table, Value, Variadic};
 use serde_json::{Value as Json, json};
 
 use super::userdata::LuaToolHandle;
 
-/// Resolves one alias-or-Tool value to its prompt-local alias.
+/// Returns the `name` a tool record stands for: its raw string `name`
+/// field, or `None` for any other table.
+fn record_name(table: &Table) -> mlua::Result<Option<String>> {
+    match table.raw_get::<Value>("name")? {
+        Value::String(name) => Ok(Some(name.to_string_lossy())),
+        _ => Ok(None),
+    }
+}
+
+/// Resolves one alias, Tool object, or tool record to the name it stands
+/// for.
 ///
 /// This is the single decode behind the namespace's argument polymorphism:
 /// a string is the alias verbatim, a Tool object contributes the alias it
-/// was bound under, and anything else is an argument error naming the two
-/// accepted forms.
+/// was bound under, a record contributes its `name`, and anything else is
+/// an argument error naming the three accepted forms.
 ///
 /// # Errors
-/// Returns an `mlua` external error when the value is neither a string nor
-/// a Tool object.
+/// Returns an `mlua` external error when the value is not a string, a Tool
+/// object, or a table with a string `name`.
 pub(crate) fn tool_alias(value: &Value) -> mlua::Result<String> {
     let rejected = || {
         mlua::Error::external(format!(
-            "tools.call alias must be a string or Tool object, got {}",
+            "tools.call alias must be a string, Tool object, or tool record, got {}",
             value.type_name()
         ))
     };
@@ -36,6 +48,7 @@ pub(crate) fn tool_alias(value: &Value) -> mlua::Result<String> {
             .borrow::<LuaToolHandle>()
             .map(|handle| handle.name().to_owned())
             .map_err(|_| rejected()),
+        Value::Table(table) => record_name(table)?.ok_or_else(rejected),
         _ => Err(rejected()),
     }
 }
@@ -46,11 +59,12 @@ pub(super) struct ToolsAddEntry {
     pub(super) description_override: Option<String>,
 }
 
-/// Reads one `tools.add` element as an alias: a string or a Tool handle.
+/// Reads one `tools.add` element as an alias: a string, a Tool handle, or
+/// a tool record.
 fn add_alias(value: &Value) -> mlua::Result<String> {
     tool_alias(value).map_err(|_| {
         mlua::Error::external(format!(
-            "tools.add expects strings, Tool objects, or arrays of either, got {}",
+            "tools.add expects strings, Tool objects, tool records, or arrays of them, got {}",
             value.type_name()
         ))
     })
@@ -58,9 +72,11 @@ fn add_alias(value: &Value) -> mlua::Result<String> {
 
 /// Flattens the `tools.add` arguments into alias/override entries.
 ///
-/// `tools.add(alias, override?)` takes one alias (string or Tool handle) with
-/// an optional model-description override. The array form
-/// `tools.add({"a", "b"})` covers bulk and takes no per-element overrides.
+/// `tools.add(alias, override?)` takes one alias (string, Tool handle, or
+/// tool record) with an optional model-description override. Any other
+/// table is the array form, `tools.add({"a", "b"})` or
+/// `tools.add(tools.offered())`, which covers bulk and takes no
+/// per-element overrides.
 pub(super) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
     let mut args = args.into_iter();
     let Some(target) = args.next() else {
@@ -83,7 +99,7 @@ pub(super) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
         )));
     }
     match target {
-        Value::Table(table) => {
+        Value::Table(table) if record_name(&table)?.is_none() => {
             if description_override.is_some() {
                 return Err(mlua::Error::external(
                     "tools.add array form takes no override",

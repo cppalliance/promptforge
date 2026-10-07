@@ -30,6 +30,7 @@ tools.always("search")
 ## Conversation
 
 ```lua
+tools.add(tools.offered())
 local history = messages.new()
 while true do
     local text = input.ask()

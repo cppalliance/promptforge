@@ -13,6 +13,9 @@ use crate::{SectionVm, ToolBinding};
 use promptforge_types::tools::ToolId;
 use std::sync::{Arc, Mutex};
 
+#[path = "tests-offering.rs"]
+mod offering;
+
 /// A fresh default handle's access capability for a test VM.
 fn fresh_access() -> Arc<crate::Access> {
     Arc::new(
@@ -61,9 +64,9 @@ fn tool_alias_rejects_other_types_and_other_userdata() {
     let lua = Lua::new();
     let number = tool_alias(&Value::Integer(42)).expect_err("a number is not an alias");
     assert!(
-        number
-            .to_string()
-            .contains("tools.call alias must be a string or Tool object, got integer"),
+        number.to_string().contains(
+            "tools.call alias must be a string, Tool object, or tool record, got integer"
+        ),
         "the rejection names the accepted forms: {number}"
     );
     // A userdata that is not a Tool object takes the same rejection; the
@@ -71,9 +74,9 @@ fn tool_alias_rejects_other_types_and_other_userdata() {
     let foreign = lua.create_userdata(Foreign).expect("userdata");
     let other = tool_alias(&Value::UserData(foreign)).expect_err("not a Tool object");
     assert!(
-        other
-            .to_string()
-            .contains("tools.call alias must be a string or Tool object, got userdata"),
+        other.to_string().contains(
+            "tools.call alias must be a string, Tool object, or tool record, got userdata"
+        ),
         "a foreign userdata gets the same rejection: {other}"
     );
 }
@@ -172,11 +175,12 @@ fn add_local_params_schema_rejects_an_unsupported_type() {
     );
 }
 
-/// Installs the tools namespace on a fresh VM and returns it with the
-/// runtime the namespace records into.
-fn lua_with_tools_and_runtime() -> (Lua, Arc<Mutex<ToolRuntime>>) {
+/// Installs the tools namespace over `set` on a fresh VM and returns it
+/// with the shared set and the runtime the namespace records into.
+fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>) {
     let lua = Lua::new();
     let globals = lua.globals();
+    let set = Arc::new(Mutex::new(set));
     let runtime = Arc::new(Mutex::new(ToolRuntime {
         added: Vec::new(),
         description_overrides: std::collections::BTreeMap::default(),
@@ -185,11 +189,18 @@ fn lua_with_tools_and_runtime() -> (Lua, Arc<Mutex<ToolRuntime>>) {
     install_tools(
         &lua,
         &globals,
-        &Arc::new(Mutex::new(ToolSet::default())),
+        &set,
         &runtime,
         &crate::vm::LocalTools::default(),
     )
     .expect("the tools install cannot fail on a fresh VM");
+    (lua, set, runtime)
+}
+
+/// Installs the tools namespace on a fresh VM and returns it with the
+/// runtime the namespace records into.
+fn lua_with_tools_and_runtime() -> (Lua, Arc<Mutex<ToolRuntime>>) {
+    let (lua, _, runtime) = lua_over(ToolSet::default());
     (lua, runtime)
 }
 
@@ -299,6 +310,7 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
     let bound = ToolSet::for_test(
         vec![ToolBinding::for_test("echo", "echo tool", &echo_tool())],
         Vec::new(),
+        Vec::new(),
     );
     let counts =
         install_tool_call_counts(&lua, &bound, bound.bindings()).expect("the counts install");
@@ -317,10 +329,15 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
 
 /// A trivial tool as data, so the counts test can bind an alias.
 fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
+    tool_at("tools/echo")
+}
+
+/// A tool as data under `id`, described as `<id> tool`.
+fn tool_at(id: &str) -> promptforge_types::tools::ToolDescriptor {
     promptforge_types::tools::ToolDescriptor::new(
-        ToolId::parse("tools/echo").expect("valid id"),
-        "echo",
-        "echo tool",
+        ToolId::parse(id).expect("valid id"),
+        "wire",
+        format!("{id} tool"),
         json!({ "type": "object" }),
     )
 }

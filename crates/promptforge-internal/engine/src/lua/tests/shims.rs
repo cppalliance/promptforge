@@ -337,9 +337,9 @@ fn tools_call_accepts_a_tool_handle_in_place_of_the_alias() {
 
 #[test]
 fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
-    // The polymorphism is alias string or Tool object; anything else is
-    // the call's own error at the protocol boundary, so an author pcall
-    // catches it at the call site.
+    // The polymorphism is alias string, Tool object, or tool record;
+    // anything else is the call's own error at the protocol boundary, so
+    // an author pcall catches it at the call site.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let (_thread, yielded) = start(&vm, "return tools.call(42, {})");
     let value = yielded.into_iter().next().expect("one yielded value");
@@ -347,7 +347,7 @@ fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
         YieldParse::Call(answer) => {
             let message = format!("{answer:?}");
             assert!(
-                message.contains("tools.call alias must be a string or Tool object"),
+                message.contains("tools.call alias must be a string, Tool object, or tool record"),
                 "the rejection names the expected forms: {message}"
             );
         }

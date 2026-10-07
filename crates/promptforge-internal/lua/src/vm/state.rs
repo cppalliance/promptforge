@@ -226,7 +226,8 @@ pub fn resolve_model_binding(
     }
 }
 
-/// Clones a frozen binding and applies any author model-description override.
+/// Clones a frozen binding, a frontmatter slot or else an offered tool,
+/// and applies any author model-description override.
 fn binding_for_scope(
     bindings: &ToolSet,
     runtime: &ToolRuntime,
@@ -234,6 +235,7 @@ fn binding_for_scope(
 ) -> Result<ToolBinding> {
     let mut binding = bindings
         .binding(alias)
+        .or_else(|| bindings.offered_binding(alias))
         .cloned()
         .ok_or_else(|| Error::Lua(format!("tool alias {alias:?} has no frozen binding")))?;
     if let Some(description) = runtime.description_overrides.get(alias) {

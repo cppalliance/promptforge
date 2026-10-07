@@ -369,3 +369,21 @@ async fn a_script_reaches_an_undeclared_plugins_tool_by_full_id_without_its_prel
         "the undeclared Plugin's tool is in the catalog, and its prelude is not installed"
     );
 }
+
+#[tokio::test]
+async fn the_offering_lists_an_undeclared_plugins_tool_and_a_script_calls_it_by_its_record() {
+    let offering = "---\nname: offering\ndescription: d\npromptforge: 0\n\
+        plugins:\n  - tools\n---\n\n# Title\n\n## Only\n\n```lua\n\
+        local offered = tools.offered()\n\
+        local record = offered[1]\n\
+        return #offered .. '|' .. record.name .. '|' .. record.plugin .. '|' .. \
+          tools.call(record, { value = 'hi' })\n```\n";
+    let mut host = installing(TOOLS);
+    host.install(echo_package("tests/extra", None), None, Value::Null)
+        .unwrap();
+    assert_eq!(
+        completed(drive_over(offering, host).await),
+        "1|extra_echo|extra|hi",
+        "the declared Plugin's tool stays out, and the undeclared one's record reaches its Plugin"
+    );
+}

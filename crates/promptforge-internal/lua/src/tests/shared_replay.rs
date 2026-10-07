@@ -84,6 +84,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
             &fixture_tool("search"),
         )],
         Vec::new(),
+        Vec::new(),
     );
     let shared = program(
         "tools.add('search')\n\
@@ -137,6 +138,7 @@ fn shared_functions_resolve_engine_globals_when_called_from_a_later_chunk() {
             "search the web",
             &fixture_tool("search"),
         )],
+        Vec::new(),
         Vec::new(),
     );
     let shared = program(

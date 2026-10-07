@@ -52,7 +52,7 @@ fn tool_description_override_appears_in_model_schema() {
     // In production the binding's description is the descriptor's, copied
     // at fill time; the test's slot text stands in for it here.
     let (binding, _) = fixture_binding("echo", "echo capability for live matching", echo);
-    let bindings = crate::lua::ToolSet::for_test(vec![binding], Vec::new());
+    let bindings = crate::lua::ToolSet::for_test(vec![binding], Vec::new(), Vec::new());
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
         &Arc::new(Mutex::new(bindings)),
@@ -124,6 +124,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             schema: EchoTool.parameters_schema(),
             output_kind: ToolOutputKind::Plain,
         }],
+        Vec::new(),
         Vec::new(),
     );
     let mut vm = SectionVm::new_for_section(
@@ -402,6 +403,7 @@ mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;
+mod offering;
 mod precheck_anchor;
 mod preludes;
 mod provenance;

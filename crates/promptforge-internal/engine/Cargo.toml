@@ -16,6 +16,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 mlua.workspace = true
+# Logs the tools the offering leaves out; the caller's subscriber decides
+# where a line goes, so the Engine still performs no I/O itself.
+tracing.workspace = true
 # The one runtime the Engine names, and only for the tokio test driver
 # behind `test-support`; the Engine proper performs no I/O.
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }

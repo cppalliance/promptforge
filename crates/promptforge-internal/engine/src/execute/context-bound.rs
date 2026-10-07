@@ -1,10 +1,13 @@
 //! The run-scoped sets built from the prepared bindings, and the `argv`
 //! derivation: the pieces `RunState::new` assembles once per run.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use promptforge_model_client::detail::tool_schema_new;
 use promptforge_parser::ModelKeyword;
+use promptforge_types::tools::ToolDescriptor;
 
+use crate::execute::scheduler::RESERVED_TOOL_NAMES;
 use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelInvocation, ModelSet};
 use crate::parser::Prompt;
@@ -16,7 +19,8 @@ use super::super::config::RunContext;
 /// schema, description, and output kind), so run-time execution never
 /// consults the catalog again and never holds an implementation. Unfilled
 /// slots produce no binding: advertising or calling the alias fails at run
-/// time, exactly as prepare's report promised.
+/// time, exactly as prepare's report promised. The offering is bound
+/// beside the slots.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
     let mut set = ToolSet::default();
     for (alias, _) in prompt.frontmatter().tools().iter() {
@@ -27,7 +31,65 @@ pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
         // text stands in as the binding's description.
         set.bindings.push(ToolBinding::from_descriptor(alias, tool));
     }
+    set.offered = offered_bindings(prompt, ctx);
     set
+}
+
+/// Binds the offering: every catalog tool whose Plugin the prompt's
+/// frontmatter doesn't declare, in tool id order, under its id with `/`
+/// and `.` replaced by `_` (`web/fetch` becomes `web_fetch`). A tool whose
+/// name can't be offered is left out with a log line.
+fn offered_bindings(prompt: &Prompt, ctx: &RunContext) -> Vec<ToolBinding> {
+    let frontmatter = prompt.frontmatter();
+    let declared = frontmatter.plugins();
+    let aliases: BTreeSet<&str> = frontmatter.tools().iter().map(|(alias, _)| alias).collect();
+    let mut tools: Vec<&ToolDescriptor> = ctx
+        .tools
+        .tools()
+        .iter()
+        .filter(|tool| !declared.contains(&tool.id.plugin()))
+        .collect();
+    tools.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut taken = BTreeSet::new();
+    let mut offered = Vec::new();
+    for tool in tools {
+        let name = tool.id.to_string().replace(['/', '.'], "_");
+        if let Some(reason) = offer_refusal(&name, tool, &aliases, &taken) {
+            tracing::warn!(tool = %tool.id, %name, %reason, "a tool is left out of the offering");
+            continue;
+        }
+        offered.push(ToolBinding::from_descriptor(&name, tool));
+        taken.insert(name);
+    }
+    offered
+}
+
+/// Why `tool` can't be offered under `name`: a frontmatter tool alias or a
+/// task built-in has the name, no model round could advertise it, or an
+/// earlier offered tool has it. `None` when it can be offered.
+fn offer_refusal(
+    name: &str,
+    tool: &ToolDescriptor,
+    aliases: &BTreeSet<&str>,
+    taken: &BTreeSet<String>,
+) -> Option<String> {
+    if aliases.contains(name) {
+        return Some("a frontmatter tool alias has the same name".to_owned());
+    }
+    if RESERVED_TOOL_NAMES.contains(&name) {
+        return Some("a task built-in has the same name".to_owned());
+    }
+    if let Err(error) = tool_schema_new(
+        name,
+        tool.description.as_str(),
+        tool.parameters_schema.clone(),
+    ) {
+        return Some(error.to_string());
+    }
+    if taken.contains(name) {
+        return Some("an earlier offered tool has the same name".to_owned());
+    }
+    None
 }
 
 /// Binds every tool in the prepared catalog under its full id, keyed by

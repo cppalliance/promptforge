@@ -196,7 +196,7 @@ async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_a
     let recorder = Arc::new(ToolRecorder::default());
     let (ctx, fixture) = tool_context(
         &prompt,
-        ToolSet::for_test(vec![binding], vec!["echo".to_owned()]),
+        ToolSet::for_test(vec![binding], vec!["echo".to_owned()], Vec::new()),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
     let out = TokioDriver::new(&ctx, fixture, None)

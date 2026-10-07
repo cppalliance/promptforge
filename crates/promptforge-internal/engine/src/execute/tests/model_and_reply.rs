@@ -243,7 +243,9 @@ async fn add_without_h1_bindings_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("is not a bound tool slot"),
+        error
+            .to_string()
+            .contains("is neither a bound tool slot nor an offered tool"),
         "the error must report the missing slot: {error}"
     );
 }
@@ -260,7 +262,9 @@ async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("is not a bound tool slot"),
+        error
+            .to_string()
+            .contains("is neither a bound tool slot nor an offered tool"),
         "the error must report the missing slot: {error}"
     );
 }

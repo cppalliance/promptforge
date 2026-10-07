@@ -63,6 +63,15 @@ pub(super) fn prepare_scoped_tools(
     let mut schemas = Vec::with_capacity(bindings.len() + local_schemas.len());
     let mut dispatch = BTreeMap::new();
     for binding in bindings {
+        // `tools.add_local` refuses a frontmatter slot's alias but not an
+        // offered name, so only an offered binding can share its name with
+        // a local tool here; the local tool wins.
+        if local_schemas
+            .iter()
+            .any(|schema| tool_schema_name(schema) == binding.alias())
+        {
+            continue;
+        }
         // Model-facing description precedence: `tools.add` override >
         // `tools.always` override > the bound tool's catalog
         // text. The first two layers are already folded together by
