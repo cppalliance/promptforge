@@ -35,6 +35,7 @@ const hypothesisInclude = "item.input_audio_transcription.hypothesis";
 const rangesInclude = "item.input_audio_transcription.hypothesis.ranges";
 const negotiableIncludes = [[], [hypothesisInclude], [hypothesisInclude, rangesInclude]];
 const rangeFields = ["finalized_seq", "finalized_through_ms"];
+const requestedRanges = { requestedRanges: true };
 
 async function fixture(name) {
   const parsed = JSON.parse(await readFile(path.join(fixtureDir, name), "utf8"));
@@ -336,58 +337,115 @@ test("canonical Realtime event fixtures satisfy the browser wire contract", asyn
   assert.ok(hypothesis.audio_end_ms >= hypothesis.audio_start_ms);
 });
 
-test("the production decoder rejects range fields it has not requested", async () => {
+test("the production decoder accepts range fields only when it requested them", async () => {
   const servers = await fixture("server-events.json");
   const ranged = Object.keys(servers).filter((name) => carriesRanges(servers[name]));
   assert.deepEqual(ranged, ["transcription_hypothesis_ranges"]);
   for (const name of ranged) {
-    assert.equal(decodeRealtimeEvent(servers[name]), null, `${name} is rejected`);
-    const base = withoutRanges(servers[name]);
+    const event = servers[name];
+    assert.equal(decodeRealtimeEvent(event), null, `${name} is rejected by default`);
+    assert.equal(
+      decodeRealtimeEvent(event, { requestedRanges: false }),
+      null,
+      `${name} is rejected when ranges were not requested`,
+    );
+    assert.deepEqual(
+      decodeRealtimeEvent(event, requestedRanges),
+      event,
+      `${name} decodes unchanged when ranges were requested`,
+    );
+    const base = withoutRanges(event);
     assert.deepEqual(decodeRealtimeEvent(base), base, `${name} without ranges decodes unchanged`);
+    assert.deepEqual(
+      decodeRealtimeEvent(base, requestedRanges),
+      base,
+      `${name} without ranges still decodes when ranges were requested`,
+    );
+    for (const field of rangeFields) {
+      const lone = structuredClone(event);
+      delete lone[field];
+      assert.equal(
+        decodeRealtimeEvent(lone, requestedRanges),
+        null,
+        `${name} rejects a range field without its pair`,
+      );
+      for (const invalid of [null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "1"]) {
+        assert.equal(
+          decodeRealtimeEvent({ ...event, [field]: invalid }, requestedRanges),
+          null,
+          `${name} rejects ${field} = ${String(invalid)}`,
+        );
+      }
+    }
   }
 
   const sessions = await fixture("effective-sessions.json");
+  const rangesUpdated = { ...servers.session_updated, session: sessions.ranges };
   assert.equal(
-    decodeRealtimeEvent({ ...servers.session_updated, session: sessions.ranges }),
+    decodeRealtimeEvent(rangesUpdated),
     null,
-    "the two-token effective session is rejected",
+    "the two-token effective session is rejected when ranges were not requested",
   );
+  assert.deepEqual(
+    decodeRealtimeEvent(rangesUpdated, requestedRanges),
+    rangesUpdated,
+    "the two-token effective session decodes when ranges were requested",
+  );
+  assert.deepEqual(
+    decodeRealtimeEvent(servers.session_updated, requestedRanges),
+    servers.session_updated,
+    "a one-token effective session still decodes when ranges were requested",
+  );
+  for (const include of [[rangesInclude], [rangesInclude, hypothesisInclude]]) {
+    assert.equal(
+      decodeRealtimeEvent(
+        { ...rangesUpdated, session: { ...sessions.ranges, include } },
+        requestedRanges,
+      ),
+      null,
+      `include ${JSON.stringify(include)} is rejected even when ranges were requested`,
+    );
+  }
 });
 
 test("the production decoder rejects every canonical field mutation", async () => {
   const servers = await fixture("server-events.json");
   for (const [name, event] of Object.entries(servers)) {
-    if (carriesRanges(event)) continue;
-    assert.deepEqual(decodeRealtimeEvent(event), event, `${name} decodes unchanged`);
-    for (const fieldPath of fieldPaths(event)) {
-      const mutated = structuredClone(event);
-      const original = valueAt(mutated, fieldPath);
-      parentAt(mutated, fieldPath)[fieldPath.at(-1)] =
-        typeof original === "number" ? Number.NaN : 7;
-      assert.equal(
-        decodeRealtimeEvent(mutated),
-        null,
-        `${name} rejects invalid ${pathName(fieldPath)}`,
-      );
-
-      if (!isOptionalErrorField(fieldPath)) {
-        const omitted = structuredClone(event);
-        delete parentAt(omitted, fieldPath)[fieldPath.at(-1)];
+    const modes = carriesRanges(event) ? [requestedRanges] : [undefined, requestedRanges];
+    for (const options of modes) {
+      const mode = options === undefined ? "unrequested" : "requested";
+      const decode = (value) => decodeRealtimeEvent(value, options);
+      assert.deepEqual(decode(event), event, `${name} (${mode}) decodes unchanged`);
+      for (const fieldPath of fieldPaths(event)) {
+        const mutated = structuredClone(event);
+        const original = valueAt(mutated, fieldPath);
+        parentAt(mutated, fieldPath)[fieldPath.at(-1)] =
+          typeof original === "number" ? Number.NaN : 7;
         assert.equal(
-          decodeRealtimeEvent(omitted),
+          decode(mutated),
           null,
-          `${name} rejects missing ${pathName(fieldPath)}`,
+          `${name} (${mode}) rejects invalid ${pathName(fieldPath)}`,
+        );
+
+        if (!isOptionalErrorField(fieldPath)) {
+          const omitted = structuredClone(event);
+          delete parentAt(omitted, fieldPath)[fieldPath.at(-1)];
+          assert.equal(
+            decode(omitted),
+            null,
+            `${name} (${mode}) rejects missing ${pathName(fieldPath)}`,
+          );
+        }
+      }
+      for (const objectPath of objectPaths(event)) {
+        const mutated = structuredClone(event);
+        valueAt(mutated, objectPath).unexpected = true;
+        assert.equal(
+          decode(mutated),
+          null,
+          `${name} (${mode}) rejects unknown ${pathName(objectPath) || "event"} field`,
         );
       }
-    }
-    for (const objectPath of objectPaths(event)) {
-      const mutated = structuredClone(event);
-      valueAt(mutated, objectPath).unexpected = true;
-      assert.equal(
-        decodeRealtimeEvent(mutated),
-        null,
-        `${name} rejects unknown ${pathName(objectPath) || "event"} field`,
-      );
     }
   }
 
@@ -484,7 +542,12 @@ test("canonical Realtime sequences cover every frozen contract path", async () =
           assert.equal(
             decodeRealtimeEvent(entry.message),
             null,
-            `${name} range server event is rejected`,
+            `${name} range server event is rejected when ranges were not requested`,
+          );
+          assert.deepEqual(
+            decodeRealtimeEvent(entry.message, requestedRanges),
+            entry.message,
+            `${name} range server event decodes when ranges were requested`,
           );
           const base = withoutRanges(entry.message);
           assert.deepEqual(

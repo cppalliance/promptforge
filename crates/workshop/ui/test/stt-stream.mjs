@@ -1024,7 +1024,19 @@ await assertNoLeaks(lifecycle, async () => {
   assert.match(sockets[0].url, /\/v1\/realtime$/);
   sockets[0].open();
   sockets[0].message(server.session_created);
-  assert.deepEqual(sockets[0].sent, [client.session_update]);
+  assert.deepEqual(
+    sockets[0].sent,
+    [
+      {
+        ...client.session_update,
+        session: {
+          ...client.session_update.session,
+          include: client.session_update_ranges.session.include,
+        },
+      },
+    ],
+    "the production service requests hypotheses together with their finalized ranges",
+  );
   sockets[0].message(server.session_updated);
   assert.equal(service.state, "ready");
   assert.deepEqual(states, [{ state: "ready", generation: 1 }]);
@@ -1040,6 +1052,7 @@ await assertNoLeaks(lifecycle, async () => {
 
   sockets[0].message(server.input_audio_buffer_committed);
   sockets[0].message(server.transcription_hypothesis);
+  sockets[0].message(server.transcription_hypothesis_ranges);
   sockets[0].message(server.transcription_delta);
   sockets[0].message(server.transcription_completed);
   sockets[0].message(server.transcription_failed);
@@ -1050,6 +1063,7 @@ await assertNoLeaks(lifecycle, async () => {
       "session.created",
       "session.updated",
       "input_audio_buffer.committed",
+      "conversation.item.input_audio_transcription.hypothesis",
       "conversation.item.input_audio_transcription.hypothesis",
       "conversation.item.input_audio_transcription.completed",
       "conversation.item.input_audio_transcription.failed",
@@ -1065,6 +1079,69 @@ await assertNoLeaks(lifecycle, async () => {
 
   service.dispose();
   assert.equal(sockets[0].readyState, ScriptedSocket.CLOSED);
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sockets = [];
+    const service = new RealtimeTranscriptionService({
+      eventId: () => "client_ranges_update",
+      socket: (url) => {
+        const socket = new ScriptedSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const events = [];
+    const errors = [];
+    service.onEvent((value) => events.push(value));
+    service.onError((value) => errors.push(value));
+    const rangesSessionUpdated = {
+      ...server.session_updated,
+      session: {
+        ...server.session_updated.session,
+        include: client.session_update_ranges.session.include,
+      },
+    };
+    const invalidEventGenerations = () =>
+      errors
+        .filter(({ code }) => code === "invalid_server_event")
+        .map(({ generation }) => generation);
+
+    for (const index of [0, 1]) {
+      const socket = sockets[index];
+      const generation = index + 1;
+      socket.open();
+      socket.message(server.transcription_hypothesis_ranges);
+      assert.deepEqual(
+        invalidEventGenerations(),
+        Array.from({ length: generation }, (_, earlier) => earlier + 1),
+        `generation ${generation} rejects range fields before it requests them`,
+      );
+      events.length = 0;
+      socket.message(server.session_created);
+      socket.message(rangesSessionUpdated);
+      assert.equal(service.state, "ready", "the two-token effective session negotiates");
+      socket.message(server.transcription_delta);
+      socket.message(server.transcription_hypothesis_ranges);
+      assert.deepEqual(
+        events.map(({ event }) => event),
+        [server.session_created, rangesSessionUpdated, server.transcription_hypothesis_ranges],
+        `generation ${generation} publishes range fields once requested and drops deltas`,
+      );
+      if (index === 0) {
+        socket.close();
+        mock.timers.tick(1_000);
+        assert.equal(sockets.length, 2, "the ranges session reconnects");
+      }
+    }
+    assert.deepEqual(invalidEventGenerations(), [1, 2]);
+
+    service.dispose();
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 await assertNoLeaks(lifecycle, async () => {

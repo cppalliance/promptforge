@@ -2,11 +2,11 @@ import { Emitter, type Event as ServiceEvent } from "@workshop/platform/event";
 import { Disposable } from "@workshop/platform/lifecycle";
 import {
   decodeRealtimeEvent,
+  HYPOTHESIS_INCLUDE,
+  HYPOTHESIS_RANGES_INCLUDE,
   type RealtimeEvent,
 } from "./realtime-event-decoder";
 import { ReconnectBackoff } from "@workshop/platform/reconnect-backoff";
-
-const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
 
 /** Readiness of the browser's Realtime transcription connection. */
 export type RealtimeTranscriptionState = "connecting" | "ready" | "unavailable";
@@ -98,6 +98,7 @@ export class RealtimeTranscriptionService extends Disposable {
   private readonly errorEmitter = this._register(new Emitter<RealtimeTranscriptionError>());
   private socket: RealtimeSocket | null = null;
   private disposed = false;
+  private requestedRanges = false;
   private negotiatedHypotheses = false;
   private currentState: RealtimeTranscriptionState = "connecting";
   private currentGeneration: RealtimeSocketGeneration = 0;
@@ -223,7 +224,7 @@ export class RealtimeTranscriptionService extends Disposable {
       this.reportError("invalid_server_event", "session", null, generation);
       return;
     }
-    const event = decodeRealtimeEvent(parsed);
+    const event = decodeRealtimeEvent(parsed, { requestedRanges: this.requestedRanges });
     if (event === null) {
       this.reportError("invalid_server_event", "session", null, generation);
       return;
@@ -238,7 +239,7 @@ export class RealtimeTranscriptionService extends Disposable {
 
     switch (event.type) {
       case "session.created":
-        this.send({
+        this.requestedRanges = this.send({
           type: "session.update",
           session: {
             type: "transcription",
@@ -253,15 +254,13 @@ export class RealtimeTranscriptionService extends Disposable {
                 turn_detection: null,
               },
             },
-            include: [HYPOTHESIS_INCLUDE],
+            include: [HYPOTHESIS_INCLUDE, HYPOTHESIS_RANGES_INCLUDE],
           },
           event_id: (this.options.eventId ?? defaultEventId)(),
         });
         return;
       case "session.updated":
-        this.negotiatedHypotheses =
-          event.session.include.length === 1 &&
-          event.session.include[0] === HYPOTHESIS_INCLUDE;
+        this.negotiatedHypotheses = event.session.include[0] === HYPOTHESIS_INCLUDE;
         this.backoff.reset();
         this.setState("ready", generation);
         return;
@@ -318,6 +317,7 @@ export class RealtimeTranscriptionService extends Disposable {
   }
 
   private resetConnectionState(): void {
+    this.requestedRanges = false;
     this.negotiatedHypotheses = false;
   }
 

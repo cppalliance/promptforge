@@ -155,6 +155,7 @@ function startTake(reduction: Reduction, context: SttInsertionContext): void {
     itemGeneration: null,
     text: context.original,
     deltaText: "",
+    hypothesisRevision: null,
   };
   const wasEmpty = reduction.state.takes.length === 0;
   reduction.state.takes.push(take);

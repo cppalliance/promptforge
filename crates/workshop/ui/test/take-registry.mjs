@@ -244,6 +244,44 @@ test("duplicate acknowledgments preserve the next FIFO owner", () => {
   );
 });
 
+test("hypotheses at or below their item's last applied revision are ignored", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+  state = stopAndCommit(state, "commit_a").state;
+  let result = server(state, hypothesis("a", "ask not", 2));
+  assert.equal(editorReplacements(result.effects)[0].text, "ask not");
+  state = server(result.state, committed("a")).state;
+
+  for (const revision of [2, 1, 0]) {
+    const stale = server(state, hypothesis("a", `stale ${revision}`, revision));
+    assert.deepEqual(stale.effects, [], `revision ${revision} emits no effects`);
+    assert.deepEqual(stale.state, state, `revision ${revision} leaves the registry unchanged`);
+  }
+
+  result = server(state, hypothesis("a", "ask not what", 5));
+  assert.equal(editorReplacements(result.effects)[0].text, "ask not what");
+  state = result.state;
+  assert.deepEqual(server(state, hypothesis("a", "stale", 4)).effects, []);
+
+  state = start(state, context(12, 12, "", " ")).state;
+  result = server(state, hypothesis("b", "your", 1));
+  assert.deepEqual(
+    editorReplacements(result.effects).map(({ from, to, text }) => ({ from, to, text })),
+    [{ from: 12, to: 12, text: " your" }],
+    "another item's revisions are tracked separately",
+  );
+  state = result.state;
+  assert.deepEqual(server(state, hypothesis("b", "stale", 1)).effects, []);
+  result = server(state, hypothesis("a", "ask not what you", 6));
+  assert.equal(editorReplacements(result.effects)[0].text, "ask not what you");
+  assert.deepEqual(
+    result.state.takes.map(({ itemId, text }) => ({ itemId, text })),
+    [
+      { itemId: "a", text: "ask not what you" },
+      { itemId: "b", text: " your" },
+    ],
+  );
+});
+
 test("decoded delta events accumulate into replacement snapshots", () => {
   let state = start(createTakeRegistry(), context(0)).state;
   for (const [index, delta] of ["one", " two"].entries()) {

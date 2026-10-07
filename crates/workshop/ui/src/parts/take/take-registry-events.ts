@@ -2,8 +2,10 @@
 // Realtime event reaches its take through the server's item id, which
 // binds when the server acknowledges a commit - commits are matched to
 // takes first in, first out - or, for a transcript under an unknown id,
-// only when exactly one take is unbound. A failed transcription keeps
-// the visible text; service errors and connection loss roll takes back.
+// only when exactly one take is unbound. A hypothesis at or below the
+// last revision applied for its item is dropped, so a repeated or
+// reordered snapshot never replaces newer text. A failed transcription
+// keeps the visible text; service errors and connection loss roll takes back.
 // Status labels are local wording: server error text never reaches the
 // status bar.
 
@@ -13,6 +15,7 @@ import {
   bindItem,
   composeTranscript,
   isRetiredItem,
+  recordHypothesisRevision,
   removeTake,
   replaceTake,
   reserveWireRequest,
@@ -45,10 +48,10 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
     case "conversation.item.created":
       return;
     case "conversation.item.input_audio_transcription.hypothesis":
-      applySnapshot(reduction, event.item_id, event.transcript, false);
+      applySnapshot(reduction, event.item_id, event.transcript, event.revision);
       return;
     case "conversation.item.input_audio_transcription.delta":
-      applySnapshot(reduction, event.item_id, event.delta, true);
+      applySnapshot(reduction, event.item_id, event.delta, null);
       return;
     case "conversation.item.input_audio_transcription.completed":
       completeTake(reduction, event.item_id, event.transcript);
@@ -261,11 +264,12 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
   });
 }
 
+/** Applies a hypothesis snapshot, or appends a delta when revision is null. */
 function applySnapshot(
   reduction: Reduction,
   itemId: string,
   incoming: string,
-  append: boolean,
+  revision: number | null,
 ): void {
   let take = takeByItem(reduction.state, itemId);
   if (take === null) {
@@ -293,7 +297,13 @@ function applySnapshot(
   if (take === null) {
     return;
   }
-  const transcript = append ? take.deltaText + incoming : incoming;
+  if (revision !== null) {
+    if (take.hypothesisRevision !== null && revision <= take.hypothesisRevision) {
+      return;
+    }
+    recordHypothesisRevision(reduction.state, take.id, revision);
+  }
+  const transcript = revision === null ? take.deltaText + incoming : incoming;
   replaceTake(reduction, take.id, composeTranscript(take, transcript), transcript);
 }
 

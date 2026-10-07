@@ -248,6 +248,7 @@ class FakeWebSocket {
     if (frame.type === "interim") {
       if (!this.itemId) {
         this.itemId = `item_${++nextItem}`;
+        this.revision = 0;
       }
       const finalized = frame.committed ?? "";
       const tentative = `${finalized && frame.tentative && !/\s$/.test(finalized) ? " " : ""}${frame.tentative ?? ""}`;
@@ -256,7 +257,7 @@ class FakeWebSocket {
         event_id: `hypothesis_${nextItem}`,
         item_id: this.itemId,
         content_index: 0,
-        revision: 1,
+        revision: ++this.revision,
         transcript: `${finalized}${tentative}`,
         finalized,
         agreed: "",

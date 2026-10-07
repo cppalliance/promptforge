@@ -30,6 +30,7 @@ export interface RegistryTake {
   readonly itemGeneration: number | null;
   readonly text: string;
   readonly deltaText: string;
+  readonly hypothesisRevision: number | null;
 }
 
 /** One wire request waiting for its client event identifier. */

@@ -647,7 +647,7 @@ flowchart TD
 
 <step-17>
 
-### Step 17: Workshop negotiation and revision guard
+### Step 17: Workshop negotiation and revision guard [completed]
 
 - Component: Live rendering
 - Piece: workshop UI

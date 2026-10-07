@@ -175,6 +175,20 @@ export function bindItem(
   };
 }
 
+/** Records the newest hypothesis revision applied to one take. */
+export function recordHypothesisRevision(
+  state: MutableRegistry,
+  takeId: number,
+  revision: number,
+): void {
+  const index = state.takes.findIndex((take) => take.id === takeId);
+  const take = state.takes[index];
+  if (index < 0 || take === undefined) {
+    return;
+  }
+  state.takes[index] = { ...take, hypothesisRevision: revision };
+}
+
 /** Records one item identifier as permanently unable to mutate a take. */
 export function retireItem(
   state: MutableRegistry,
