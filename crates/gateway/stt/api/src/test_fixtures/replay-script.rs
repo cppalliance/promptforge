@@ -50,8 +50,8 @@ pub struct ReplayFinal {
     /// End of the decoded 16 kHz sample range, exclusive.
     pub sample_end: u64,
     /// The final decoder's output, or empty for a range the take skips
-    /// without a final decode because it is silent or its speech is too
-    /// short to decode.
+    /// without a final decode: silence, a click, or a commit tail shorter
+    /// than the final window.
     pub text: String,
 }
 

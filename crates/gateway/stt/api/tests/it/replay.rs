@@ -270,10 +270,10 @@ async fn replay_completes_a_sentence_once_when_a_silent_commit_follows_its_final
 }
 
 #[tokio::test]
-async fn replay_completes_a_word_too_short_to_decode_once_from_its_accepted_text() {
+async fn replay_completes_a_short_word_once_when_a_silent_commit_follows_its_final() {
     let mut script = sentence_then_silence(&serde_json::json!([
         {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_600, "text": "Ask not what you can do."},
-        {"at_ms": 9_600, "sample_start": 120_160, "sample_end": 136_960, "text": ""},
+        {"at_ms": 9_600, "sample_start": 120_160, "sample_end": 136_960, "text": "Hey."},
         {"at_ms": 10_500, "sample_start": 136_960, "sample_end": 168_000, "text": ""}
     ]));
     script.ticks.extend(
@@ -286,18 +286,50 @@ async fn replay_completes_a_word_too_short_to_decode_once_from_its_accepted_text
     );
     let outcome = ReplayTake::run(&script)
         .await
-        .expect("a 0.45 s word skipped by the final pass replays");
+        .expect("a 0.45 s word that the final pass decodes replays");
 
-    assert_eq!(outcome.completed, "Ask not what you can do. Hey.");
+    assert_eq!(
+        outcome.completed, "Ask not what you can do. Hey.",
+        "the accepted word reaches into the silent tail, but the final already holds it"
+    );
 }
 
 #[tokio::test]
-async fn replay_keeps_a_word_too_short_to_decode_when_decoded_speech_follows() {
+async fn replay_finalizes_a_short_word_with_the_final_pass_punctuation() {
+    let script: ReplayScript = read_json(&fixture_dir().join("scripted-short-word-final.json"));
+    let outcome = ReplayTake::run(&script)
+        .await
+        .expect("a short word between two sentences replays");
+
+    assert_eq!(
+        outcome.completed,
+        "Okay, listen up. Hey. The commit rule needs two passes."
+    );
+    assert!(
+        outcome
+            .snapshots
+            .iter()
+            .any(|snapshot| snapshot.finalized.ends_with("up. Hey.")),
+        "the word's final lands with its period: {:#?}",
+        outcome.snapshots
+    );
+    assert!(
+        outcome
+            .snapshots
+            .iter()
+            .all(|snapshot| snapshot.transcript.matches("Hey").count() <= 1),
+        "the word never shows twice: {:#?}",
+        outcome.snapshots
+    );
+}
+
+#[tokio::test]
+async fn replay_keeps_a_click_with_accepted_text_when_decoded_speech_follows() {
     let script: ReplayScript =
         read_json(&fixture_dir().join("scripted-skipped-word-then-speech.json"));
     let outcome = ReplayTake::run(&script)
         .await
-        .expect("a skipped word between two sentences replays");
+        .expect("a click skipped between two sentences replays");
 
     assert_eq!(
         outcome.completed,

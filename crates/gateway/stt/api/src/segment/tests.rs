@@ -378,6 +378,30 @@ fn forced_stride_keeps_its_ten_second_timing_and_gains_the_pre_roll() {
 }
 
 #[test]
+fn a_word_shorter_than_the_final_window_decodes_with_its_pre_roll_and_hangover() {
+    let buffer = take(&[run(false, 24_000), run(true, 6_720), run(false, 48_000)]);
+    let mut segmenter = Segmenter::new();
+    assert_eq!(
+        segmenter.poll(&buffer, 0),
+        Some(SegmentOutcome::Decode(16_000..32_320)),
+        "a 420 ms run is past the click rule, so the final pass decodes it"
+    );
+    assert_eq!(segmenter.consumed(), 32_320);
+}
+
+#[test]
+fn a_short_word_without_its_whole_pre_roll_extends_into_its_closing_silence() {
+    let buffer = take(&[run(false, 960), run(true, 4_800), run(false, 48_000)]);
+    let mut segmenter = Segmenter::new();
+    assert_eq!(
+        segmenter.poll(&buffer, 0),
+        Some(SegmentOutcome::Decode(0..8_000)),
+        "a 300 ms run at the start of the take reaches the final window in scanned silence"
+    );
+    assert_eq!(segmenter.consumed(), 8_000);
+}
+
+#[test]
 fn click_length_is_measured_without_pre_roll_or_hangover() {
     let buffer = take(&[run(false, 24_000), run(true, 3_840), run(false, 48_000)]);
     let mut segmenter = Segmenter::new();

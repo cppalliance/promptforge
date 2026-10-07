@@ -184,10 +184,10 @@ impl Segmenter {
         }
     }
 
-    /// Classifies a closed segment. Overlap ownership, the click rule, and the
-    /// final-window floor read the speech run, so padding never turns a click
-    /// or a burst shorter than the final window into a decode, or a resumed
-    /// run into a successor of the stride before its pause.
+    /// Classifies a closed segment. Overlap ownership and the click rule read
+    /// the speech run, so padding never turns a click into a decode, or a
+    /// resumed run into a successor of the stride before its pause. Any other
+    /// run holds a word, so the final pass decodes it, however short.
     fn outcome(&mut self, closed: Closed) -> SegmentOutcome {
         let Closed {
             rule,
@@ -205,11 +205,20 @@ impl Segmenter {
                 SegmentOutcome::Skipped(segment)
             }
             Rule::Silence if continues => SegmentOutcome::Forced(Self::successor(segment, false)),
-            Rule::Silence if speech_samples < EnginePolicy::MIN_WINDOW_SAMPLES as u64 => {
-                SegmentOutcome::Skipped(segment)
-            }
-            Rule::Silence => SegmentOutcome::Decode(segment),
+            Rule::Silence => SegmentOutcome::Decode(self.reaching_final_window(segment)),
         }
+    }
+
+    /// `segment`, extended into the closing silence already scanned until it
+    /// holds the final window, because the final pass skips a shorter window.
+    /// Only a run whose pre-roll the take start or a stride cut short needs it.
+    fn reaching_final_window(&mut self, segment: Range<u64>) -> Range<u64> {
+        let floor = segment
+            .start
+            .saturating_add(EnginePolicy::MIN_WINDOW_SAMPLES as u64);
+        let end = segment.end.max(floor.min(self.cursor));
+        self.endpoint.consumed = end;
+        segment.start..end
     }
 
     fn successor(new_audio: Range<u64>, retain_overlap: bool) -> ForcedBoundary {

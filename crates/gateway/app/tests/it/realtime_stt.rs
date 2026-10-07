@@ -287,11 +287,22 @@ async fn expect_error(
     event
 }
 
-async fn assert_stop_reconciles_skipped_range(short_input_samples: usize) {
+/// Stops a take whose last speech run, `short_input_samples` long at 24 kHz,
+/// is shorter than the final window, after the interim pass accepted "last
+/// word" for it. `short_final` is the final text the run decodes to, or `None`
+/// for a click the final pass skips.
+async fn assert_stop_reconciles_short_range(
+    short_input_samples: usize,
+    short_final: Option<&str>,
+    expected: &str,
+) {
     let interim = ScriptedDecoder::new();
     interim.push_text("last word");
     let final_decoder = ScriptedDecoder::new();
     final_decoder.push_text("corrected first");
+    if let Some(text) = short_final {
+        final_decoder.push_text(text);
+    }
     let service = speech_with_policy(&interim, Some(&final_decoder), 15, 50);
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
@@ -353,20 +364,19 @@ async fn assert_stop_reconciles_skipped_range(short_input_samples: usize) {
         }
     };
 
+    let final_lengths = final_decoder
+        .requests()
+        .iter()
+        .map(|request| request.samples().len())
+        .collect::<Vec<_>>();
     assert_eq!(
-        completed["transcript"],
-        "corrected first last word",
-        "accepted={hypothesis}, final_lengths={:?}",
-        final_decoder
-            .requests()
-            .iter()
-            .map(|request| request.samples().len())
-            .collect::<Vec<_>>()
+        completed["transcript"], expected,
+        "accepted={hypothesis}, final_lengths={final_lengths:?}"
     );
     assert_eq!(
-        final_decoder.requests().len(),
-        1,
-        "the 300 ms final range and stop-time silence are explicit skips"
+        final_lengths.len(),
+        1 + usize::from(short_final.is_some()),
+        "a click and the stop-time silence are explicit skips: {final_lengths:?}"
     );
 
     socket.close(None).await.expect("socket closes");

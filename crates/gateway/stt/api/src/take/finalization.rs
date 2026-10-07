@@ -280,10 +280,10 @@ pub(super) fn record_outcome(
     state.record_final_outcome(outcome, &accepted, &shown);
 }
 
-/// Records a segment too short to decode that the segmenter closed after
-/// hearing silence from its end through `silent_through`. Accepted text whose
-/// window ran on into that silence holds no word from past the segment, so
-/// it counts as ending with the segment and can stand in for it.
+/// Records a click that the segmenter skipped after hearing silence from its
+/// end through `silent_through`. Accepted text whose window ran on into that
+/// silence holds no word from past the segment, so it counts as ending with
+/// the segment and can stand in for it.
 fn record_skipped_segment(
     state: &TakeState,
     whole_window: &Mutex<WholeWindowState>,
@@ -310,6 +310,6 @@ fn record_skipped_segment(
 }
 
 #[cfg(test)]
-mod skipped_tests;
+mod short_tests;
 #[cfg(test)]
 mod tests;

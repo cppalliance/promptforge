@@ -128,12 +128,13 @@ async fn consumed_boundary_rebases_before_delayed_finalization_completes() {
     server.shutdown().await;
 }
 #[tokio::test]
-async fn stop_reconciles_an_accepted_word_from_a_skipped_short_final_range() {
-    assert_stop_reconciles_skipped_range(7_200).await;
+async fn stop_reconciles_the_final_text_of_a_short_range_over_its_accepted_word() {
+    assert_stop_reconciles_short_range(7_200, Some("last word."), "corrected first last word.")
+        .await;
 }
 #[tokio::test]
 async fn stop_reconciles_an_accepted_word_from_a_click_consumed_range() {
-    assert_stop_reconciles_skipped_range(2_400).await;
+    assert_stop_reconciles_short_range(2_400, None, "corrected first last word").await;
 }
 #[tokio::test]
 async fn same_range_divergent_final_text_overrides_the_accepted_hypothesis() {
