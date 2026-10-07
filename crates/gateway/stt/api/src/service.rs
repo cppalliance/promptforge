@@ -17,10 +17,11 @@ use crate::status::SpeechStatus;
 /// Scripted workers a test-fixture facade publishes on its one initial load
 /// instead of the Whisper backend.
 #[cfg(feature = "test-fixtures")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ScriptedInitialLoad {
     factory: Arc<dyn gateway_stt_engine::ModelFactory>,
     policy: gateway_stt_engine::EnginePolicy,
+    silero: Option<crate::artifacts::ScriptedSileroPin>,
 }
 
 /// Cloneable Gateway handle for all speech behavior.
@@ -53,7 +54,30 @@ impl SpeechService {
         self.scripted = Some(Arc::new(ScriptedInitialLoad {
             factory: Arc::new(factory),
             policy,
+            silero: None,
         }));
+        self
+    }
+
+    /// Makes the armed scripted load first provision the Silero model from
+    /// `source`, pinned to `sha256`, through an artifact store at `cache`,
+    /// so a boot-path test can fail the load the way an unusable Silero
+    /// model does. Without an armed scripted load it changes nothing.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn with_scripted_silero(
+        mut self,
+        cache: std::path::PathBuf,
+        source: impl Into<String>,
+        sha256: impl Into<String>,
+    ) -> Self {
+        if let Some(scripted) = &mut self.scripted {
+            Arc::make_mut(scripted).silero = Some(crate::artifacts::ScriptedSileroPin {
+                cache,
+                source: source.into(),
+                sha256: sha256.into(),
+            });
+        }
         self
     }
 
@@ -68,9 +92,10 @@ impl SpeechService {
     /// library and speech model downloads at their next chunk.
     ///
     /// # Errors
-    /// Returns a typed store, download, verification, configuration, backend,
-    /// or worker startup error, [`SpeechError::InitialLoadCancelled`] when
-    /// cancellation fires before publication, or
+    /// Returns a typed store, download, verification, Silero, configuration,
+    /// backend, or worker startup error,
+    /// [`SpeechError::InitialLoadCancelled`] when cancellation fires before
+    /// publication, or
     /// [`SpeechError::InitialLoadAttempted`] for every call after the first.
     pub fn load_initial(
         &self,
@@ -83,6 +108,7 @@ impl SpeechService {
             return self.state.load_scripted_shared(
                 Arc::clone(&scripted.factory),
                 scripted.policy,
+                scripted.silero.as_ref(),
                 cancel,
             );
         }

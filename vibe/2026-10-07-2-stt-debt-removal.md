@@ -372,7 +372,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Require Silero at provisioning and speech load
+### Step 4: Require Silero at provisioning and speech load [completed]
 
 - Component: Required Silero
 - Component order: third. It follows Step 1 so detector failures join an already trimmed realtime error path, and it precedes Steps 7 through 10 so their tests, captures, and the re-captured native fixture reflect the final detector wiring.

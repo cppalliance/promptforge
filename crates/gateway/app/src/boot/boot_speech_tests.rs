@@ -398,6 +398,57 @@ async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
     worker.await.expect("the worker exits on shutdown");
 }
 
+/// A boot STT load whose Silero model cannot be provisioned fails the
+/// same way: the boot profile keeps serving and speech stays unavailable.
+#[tokio::test]
+async fn a_boot_speech_load_without_its_silero_model_leaves_the_gateway_serving_without_speech() {
+    let backend = fake_chat_backend().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+    let mut state = boot_state_with_paths(config, paths);
+    arm_boot_speech(
+        &mut state,
+        ScriptedModelFactory::new(ScriptedDecoder::new()),
+    );
+    let missing = temp.path().join("missing-silero.bin");
+    state.speech = std::mem::take(&mut state.speech).with_scripted_silero(
+        temp.path().join("cache"),
+        missing.display().to_string(),
+        "0".repeat(64),
+    );
+    let addr = serve_state(state.clone()).await;
+    let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+    let boot = state.commands.enqueue(Command::load_profile(
+        ProfileName::parse("alpha").expect("profile name"),
+        CancellationToken::new(),
+    ));
+
+    let outcome = tokio::time::timeout(WAIT, boot.outcome)
+        .await
+        .expect("the boot command settles")
+        .expect("the worker settles the command");
+    let chain = match &*outcome {
+        Ok(profile) => panic!("the Silero failure fails the boot command, got {profile}"),
+        Err(error) => crate::error::error_chain(error),
+    };
+    assert!(
+        chain.contains("Silero") && chain.contains("not an existing file"),
+        "the cause is preserved: {chain}"
+    );
+    assert!(!state.shutdown.is_fired(), "the gateway keeps running");
+    let health = get(addr, "/health").await;
+    assert_eq!(health.status(), reqwest::StatusCode::OK);
+    let status = get_json(addr, "/admin/status").await;
+    assert_eq!(status["profile"], "alpha", "the boot profile serves");
+    assert_eq!(
+        status["speech"],
+        serde_json::json!({"configured": false, "ready": false, "gpu": false})
+    );
+
+    state.commands.shutdown();
+    worker.await.expect("the worker exits on shutdown");
+}
+
 /// Cancelling the boot command while its STT load is parked settles the
 /// command as cancelled, spends the one attempt, and lets the worker
 /// exit on queue shutdown.

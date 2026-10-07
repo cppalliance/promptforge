@@ -13,7 +13,8 @@ use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 #[path = "artifacts-silero.rs"]
 mod silero;
 
-pub(crate) use silero::SileroModel;
+#[cfg(feature = "test-fixtures")]
+pub(crate) use silero::ScriptedSileroPin;
 use silero::SileroPin;
 
 /// Verified artifacts and policy for a runtime that has not started workers.
@@ -27,7 +28,7 @@ pub(crate) struct PreparedGeneration {
     pub(crate) library: PathBuf,
     pub(crate) interim_model: PathBuf,
     pub(crate) final_model: Option<PathBuf>,
-    pub(crate) silero: SileroModel,
+    pub(crate) silero: PathBuf,
     pub(crate) names: ModelNames,
     pub(crate) guidance: Vec<String>,
     pub(crate) window_seconds: u64,
@@ -201,6 +202,11 @@ pub enum SpeechError {
         source: gateway_local::LocalError,
     },
 
+    /// The pinned Silero VAD model could not be provisioned.
+    #[non_exhaustive]
+    #[error("provision Silero VAD model")]
+    Silero(#[source] gateway_local::LocalError),
+
     /// A final model was selected without its required interim partner.
     #[error("final STT model requires an interim model")]
     MissingInterim,
@@ -225,6 +231,11 @@ pub enum SpeechError {
     #[non_exhaustive]
     #[error("load STT engine")]
     Engine(#[source] gateway_stt_engine::TranscribeError),
+
+    /// The provisioned Silero model did not open as a speech detector.
+    #[non_exhaustive]
+    #[error("open Silero speech detector")]
+    SileroDetector(#[source] gateway_stt_engine::DetectorError),
 
     /// The one permitted initial speech load already ran.
     #[error("initial speech load was already attempted")]
@@ -320,8 +331,8 @@ mod tests {
 
     use super::*;
 
-    /// A Silero pin naming no file, so a load reaching it reports it
-    /// unavailable instead of downloading the real model.
+    /// A Silero pin naming no file, so a load reaching it fails instead of
+    /// downloading the real model.
     const NO_SILERO: SileroPin<'static> = SileroPin {
         source: "/missing-silero.bin",
         sha256: "0000000000000000000000000000000000000000000000000000000000000000",
@@ -409,7 +420,7 @@ mod tests {
             let sections = format!("[local]\ncache_dir = {cache:?}\n{stt}");
             let config = selected(&model.display().to_string(), None, &sections);
             let mut received = None;
-            let prepared = prepare_impl(
+            let error = prepare_impl(
                 &config,
                 None,
                 &CancellationToken::new(),
@@ -419,10 +430,12 @@ mod tests {
                 },
                 NO_SILERO,
             )
-            .expect("speech prepares");
+            .expect_err("the missing Silero model fails the load");
             assert_eq!(received, Some(expected), "{stt:?}");
-            let generation = prepared.generation.expect("a speech model prepares");
-            assert_eq!(generation.library, library, "{stt:?}");
+            assert!(
+                matches!(error, SpeechError::Silero(_)),
+                "{stt:?}: {error:?}"
+            );
         }
     }
 

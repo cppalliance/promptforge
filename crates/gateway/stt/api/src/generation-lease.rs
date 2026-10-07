@@ -53,13 +53,12 @@ impl GenerationLease {
     }
 
     /// The detector a new take classifies with, Silero when the generation
-    /// has a verified model that loads and loudness otherwise, and the
-    /// report its later fall back goes through. A load failure is reported
-    /// here, once for the take; a missing model was reported by the
-    /// generation's load.
+    /// carries it and it loads for this take and loudness otherwise, and
+    /// the report its later fall back goes through. A load failure is
+    /// reported here, once for the take.
     pub(crate) fn speech_detector(&self) -> (FallbackDetector, FallbackReport) {
         let Some(Silero {
-            model: Ok(model),
+            model,
             source,
             progress,
         }) = &self.runtime().silero

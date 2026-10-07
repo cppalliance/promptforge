@@ -1,4 +1,5 @@
-//! Per-take Silero detector selection and its fall back to loudness.
+//! Silero detector loading, once at the generation's load and again per
+//! take, and a take's fall back to loudness.
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,7 @@ use gateway_stt_engine::test_fixtures::ScriptedDetector;
 use gateway_stt_engine::{DetectorError, SpeechDetector};
 
 use super::Take;
+use crate::SpeechError;
 use crate::generation::{GenerationState, SileroSource};
 use crate::segment::FRAME_SAMPLES;
 use crate::test_fixtures::Warnings;
@@ -17,18 +19,29 @@ const FRAME: usize = FRAME_SAMPLES;
 const LOUD: f32 = 0.05;
 const MODEL: &str = "ggml-silero.bin";
 
-/// Loads `detector`, or fails with the scripted message, recording each
-/// model path it is asked to load.
+/// Loads `detector` until the load numbered `failure.0`, counted from
+/// zero, and fails that load and every later one with `failure.1`,
+/// recording each model path it is asked to load.
 #[derive(Debug)]
 struct ScriptedSilero {
-    detector: Result<ScriptedDetector, String>,
+    detector: ScriptedDetector,
+    failure: Option<(usize, String)>,
     loaded: Mutex<Vec<PathBuf>>,
 }
 
 impl ScriptedSilero {
-    fn new(detector: Result<ScriptedDetector, String>) -> Arc<Self> {
+    fn new(detector: ScriptedDetector) -> Arc<Self> {
         Arc::new(Self {
             detector,
+            failure: None,
+            loaded: Mutex::default(),
+        })
+    }
+
+    fn failing_from(load: usize, message: &str) -> Arc<Self> {
+        Arc::new(Self {
+            detector: ScriptedDetector::new([]),
+            failure: Some((load, message.to_owned())),
             loaded: Mutex::default(),
         })
     }
@@ -40,13 +53,13 @@ impl ScriptedSilero {
 
 impl SileroSource for ScriptedSilero {
     fn load(&self, model: &Path) -> Result<Box<dyn SpeechDetector>, DetectorError> {
-        self.loaded
-            .lock()
-            .expect("load record lock")
-            .push(model.to_path_buf());
-        match &self.detector {
-            Ok(detector) => Ok(Box::new(detector.clone())),
-            Err(message) => Err(DetectorError::load(message.clone())),
+        let mut loaded = self.loaded.lock().expect("load record lock");
+        loaded.push(model.to_path_buf());
+        match &self.failure {
+            Some((from, message)) if loaded.len() > *from => {
+                Err(DetectorError::load(message.clone()))
+            }
+            _ => Ok(Box::new(self.detector.clone())),
         }
     }
 }
@@ -57,7 +70,9 @@ impl SileroSource for ScriptedSilero {
 fn silero_take(source: Arc<ScriptedSilero>) -> (Take, GenerationState, Warnings, Arc<ProgressHub>) {
     let hub = Arc::new(ProgressHub::new());
     let state = GenerationState::default();
-    state.publish_scripted_silero(Ok(PathBuf::from(MODEL)), source, Some(Arc::clone(&hub)));
+    state
+        .publish_scripted_silero(PathBuf::from(MODEL), source, Some(Arc::clone(&hub)))
+        .expect("the scripted runtime loads");
     let lease = state.active().expect("the published runtime admits");
     let warnings = Warnings::default();
     let take =
@@ -90,14 +105,43 @@ fn frames(range: Range<usize>) -> Range<u64> {
 }
 
 #[test]
+fn a_generation_whose_silero_detector_does_not_open_fails_its_load_and_leaves_speech_unavailable() {
+    let source = ScriptedSilero::failing_from(0, "scripted load failure");
+    let state = GenerationState::default();
+
+    let error = state
+        .publish_scripted_silero(PathBuf::from(MODEL), source.clone(), None)
+        .expect_err("a Silero detector that does not open fails the load");
+
+    let SpeechError::SileroDetector(cause) = &error else {
+        panic!("expected a Silero detector failure, got {error:?}");
+    };
+    assert!(
+        cause.to_string().contains("scripted load failure"),
+        "the failure names the cause: {cause}"
+    );
+    assert_eq!(
+        source.loaded(),
+        [PathBuf::from(MODEL)],
+        "the load opens the verified model"
+    );
+    assert!(state.active().is_none(), "speech stays unavailable");
+    assert!(!state.status().ready());
+}
+
+#[test]
 fn a_take_classifies_with_the_silero_detector_its_generation_loads() {
     let detector = ScriptedDetector::new([(0, 2 * FRAME)]);
-    let source = ScriptedSilero::new(Ok(detector.clone()));
+    let source = ScriptedSilero::new(detector.clone());
     let (take, state, warnings, hub) = silero_take(Arc::clone(&source));
 
     append(&take, &warnings, &[vec![LOUD; 4 * FRAME]]);
 
-    assert_eq!(source.loaded(), [PathBuf::from(MODEL)]);
+    assert_eq!(
+        source.loaded(),
+        [PathBuf::from(MODEL), PathBuf::from(MODEL)],
+        "the generation's load proves the model, then the take opens its own"
+    );
     assert_eq!(
         take.speech_runs(),
         [frames(0..2)],
@@ -112,7 +156,7 @@ fn a_take_classifies_with_the_silero_detector_its_generation_loads() {
 
 #[test]
 fn a_silero_load_failure_falls_back_to_loudness_and_reports_once() {
-    let source = ScriptedSilero::new(Err("scripted load failure".to_owned()));
+    let source = ScriptedSilero::failing_from(1, "scripted load failure");
     let (take, state, warnings, hub) = silero_take(source);
     let started = warnings.take();
     assert_progress_names(&hub, "scripted load failure");
@@ -151,7 +195,7 @@ fn a_silero_load_failure_falls_back_to_loudness_and_reports_once() {
 #[test]
 fn a_mid_take_inference_error_falls_back_to_loudness_reports_once_and_keeps_every_chunk_in_order() {
     let detector = ScriptedDetector::new([(0, 100 * FRAME)]).with_failure_at(2);
-    let (take, state, warnings, hub) = silero_take(ScriptedSilero::new(Ok(detector.clone())));
+    let (take, state, warnings, hub) = silero_take(ScriptedSilero::new(detector.clone()));
 
     let mut audio = vec![0.0; 2 * FRAME];
     audio.extend(vec![LOUD; FRAME]);

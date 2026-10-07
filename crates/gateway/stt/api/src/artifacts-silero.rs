@@ -1,19 +1,13 @@
 //! The pinned Silero VAD model, provisioned beside the whisper models.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use gateway_config::SILERO_VAD_MODEL;
-use gateway_local::LocalError;
 use gateway_local::artifacts::ArtifactStore;
 use gateway_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
-use super::SpeechError;
-
-/// A generation's digest-verified Silero model path, or the cause it has
-/// none, which the load already reported.
-pub(crate) type SileroModel = Result<PathBuf, Arc<LocalError>>;
+use super::{SpeechError, cancelled_or};
 
 /// Where the Silero model comes from and the digest it must match.
 #[derive(Debug, Clone, Copy)]
@@ -29,63 +23,58 @@ impl SileroPin<'static> {
     };
 }
 
-/// Fetches the Silero model and checks its digest, cache hits included.
-/// Only the load's cancellation fails the load; any other failure is
-/// reported here, once, and leaves the generation without the model.
+/// Fetches the Silero model and checks its digest, cache hits included,
+/// returning the verified path. Any failure fails the load: the load's
+/// cancellation as [`SpeechError::InitialLoadCancelled`], anything else as
+/// [`SpeechError::Silero`] carrying the cause.
 pub(super) fn provision(
     store: &ArtifactStore,
     pin: SileroPin<'_>,
     activity: Option<&Activity>,
     cancel: &CancellationToken,
-) -> Result<SileroModel, SpeechError> {
-    match store.ensure_model_with_cancellation(pin.source, Some(pin.sha256), activity, Some(cancel))
-    {
-        Ok(path) => {
-            tracing::info!(path = %path.display(), "provisioned Silero VAD model");
-            Ok(Ok(path))
-        }
-        Err(LocalError::Cancelled) => Err(SpeechError::InitialLoadCancelled),
-        Err(error) => {
-            let cause = chain(&error);
-            tracing::warn!(
-                cause = %cause,
-                "Silero VAD model unavailable; speech detection uses loudness"
-            );
-            if let Some(activity) = activity {
-                activity.set_text(format!("Silero VAD model unavailable: {cause}"));
-            }
-            Ok(Err(Arc::new(error)))
-        }
-    }
+) -> Result<PathBuf, SpeechError> {
+    let path = store
+        .ensure_model_with_cancellation(pin.source, Some(pin.sha256), activity, Some(cancel))
+        .map_err(|source| cancelled_or(source, SpeechError::Silero))?;
+    tracing::info!(path = %path.display(), "provisioned Silero VAD model");
+    Ok(path)
 }
 
-/// `error` and each of its sources, joined by `: `.
-fn chain(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(next) = source {
-        text.push_str(": ");
-        text.push_str(&next.to_string());
-        source = next.source();
+/// A Silero model source and digest a scripted load provisions through an
+/// artifact store at `cache`, as the Whisper backend's load does.
+#[cfg(feature = "test-fixtures")]
+#[derive(Debug, Clone)]
+pub(crate) struct ScriptedSileroPin {
+    pub(crate) cache: PathBuf,
+    pub(crate) source: String,
+    pub(crate) sha256: String,
+}
+
+#[cfg(feature = "test-fixtures")]
+impl ScriptedSileroPin {
+    /// Provisions the pinned model, failing the way [`provision`] does.
+    pub(crate) fn provision(&self, cancel: &CancellationToken) -> Result<PathBuf, SpeechError> {
+        let store = ArtifactStore::new(self.cache.clone()).map_err(SpeechError::Store)?;
+        let pin = SileroPin {
+            source: &self.source,
+            sha256: &self.sha256,
+        };
+        provision(&store, pin, None, cancel)
     }
-    text
 }
 
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
     use std::path::Path;
-    use std::sync::Arc;
 
     use gateway_local::LocalError;
-    use gateway_progress::{Activity, ProgressHub};
     use sha2::{Digest, Sha256};
     use tokio_util::sync::CancellationToken;
 
     use super::super::tests::selected;
     use super::super::{PreparedGeneration, SpeechError, prepare_impl};
     use super::SileroPin;
-    use crate::test_fixtures::Warnings;
 
     fn hex_sha256(bytes: &[u8]) -> String {
         let mut hex = String::with_capacity(64);
@@ -100,7 +89,6 @@ mod tests {
     fn prepare_with(
         dir: &Path,
         silero: SileroPin<'_>,
-        progress: Option<&Arc<Activity>>,
         cancel: &CancellationToken,
     ) -> Result<PreparedGeneration, SpeechError> {
         let model = dir.join("model.bin");
@@ -111,7 +99,7 @@ mod tests {
         let library = dir.join("whisper-library");
         prepare_impl(
             &config,
-            progress,
+            None,
             cancel,
             |_store, _backend, _activity, _token| Ok(library.clone()),
             silero,
@@ -119,28 +107,16 @@ mod tests {
         .map(|prepared| prepared.generation.expect("a speech model prepares"))
     }
 
-    /// Prepares with an unusable Silero `pin`, returning the generation's
-    /// Silero cause, the progress text the load left, and every warning.
-    fn prepare_unavailable(
-        dir: &Path,
-        pin: SileroPin<'_>,
-    ) -> (Arc<LocalError>, String, Vec<String>) {
-        let hub = ProgressHub::new();
-        let activity = Arc::new(hub.begin("Loading speech"));
-        let warnings = Warnings::default();
-        let generation = tracing::subscriber::with_default(warnings.clone(), || {
-            prepare_with(dir, pin, Some(&activity), &CancellationToken::new())
-        })
-        .expect("the generation loads without its Silero model");
-        let cause = generation
-            .silero
-            .expect_err("an unusable Silero model leaves no path");
-        let text = hub.current().text;
-        (cause, text, warnings.take())
+    /// The provisioning failure `error` carries, or a panic naming `error`.
+    fn silero_cause(error: &SpeechError) -> &LocalError {
+        let SpeechError::Silero(cause) = error else {
+            panic!("expected a Silero provisioning failure, got {error:?}");
+        };
+        cause
     }
 
     #[test]
-    fn a_verified_silero_model_path_reaches_the_prepared_generation() {
+    fn the_whisper_library_and_verified_silero_model_paths_reach_the_prepared_generation() {
         let dir = tempfile::tempdir().expect("tempdir");
         let silero = dir.path().join("ggml-silero.bin");
         std::fs::write(&silero, b"silero bytes").expect("fixture writes");
@@ -151,14 +127,15 @@ mod tests {
             sha256: &sha256,
         };
 
-        let generation = prepare_with(dir.path(), pin, None, &CancellationToken::new())
-            .expect("speech prepares");
+        let generation =
+            prepare_with(dir.path(), pin, &CancellationToken::new()).expect("speech prepares");
 
-        assert_eq!(generation.silero.as_ref().ok(), Some(&silero));
+        assert_eq!(generation.library, dir.path().join("whisper-library"));
+        assert_eq!(generation.silero, silero);
     }
 
     #[test]
-    fn a_silero_digest_mismatch_leaves_no_path_reports_once_and_still_loads() {
+    fn a_silero_digest_mismatch_fails_the_load_naming_the_cause() {
         let dir = tempfile::tempdir().expect("tempdir");
         let silero = dir.path().join("ggml-silero.bin");
         std::fs::write(&silero, b"tampered bytes").expect("fixture writes");
@@ -169,18 +146,19 @@ mod tests {
             sha256: &sha256,
         };
 
-        let (cause, text, warnings) = prepare_unavailable(dir.path(), pin);
+        let error = prepare_with(dir.path(), pin, &CancellationToken::new())
+            .expect_err("a tampered Silero model fails the load");
 
+        let cause = silero_cause(&error);
         assert!(
-            matches!(*cause, LocalError::DigestMismatch { .. }),
+            matches!(cause, LocalError::DigestMismatch { .. }),
             "{cause}"
         );
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(text.contains("sha-256 mismatch"), "{text}");
+        assert!(cause.to_string().contains("sha-256 mismatch"), "{cause}");
     }
 
     #[test]
-    fn a_failed_silero_fetch_leaves_no_path_reports_once_and_still_loads() {
+    fn a_failed_silero_fetch_fails_the_load_naming_the_cause() {
         let dir = tempfile::tempdir().expect("tempdir");
         let source = dir.path().join("missing-silero.bin").display().to_string();
         let sha256 = hex_sha256(b"silero bytes");
@@ -189,14 +167,15 @@ mod tests {
             sha256: &sha256,
         };
 
-        let (cause, text, warnings) = prepare_unavailable(dir.path(), pin);
+        let error = prepare_with(dir.path(), pin, &CancellationToken::new())
+            .expect_err("a missing Silero model fails the load");
 
+        let cause = silero_cause(&error);
+        assert!(matches!(cause, LocalError::InvalidSource { .. }), "{cause}");
         assert!(
-            matches!(*cause, LocalError::InvalidSource { .. }),
+            cause.to_string().contains("not an existing file"),
             "{cause}"
         );
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(text.contains("not an existing file"), "{text}");
     }
 
     #[test]
@@ -217,7 +196,7 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel();
 
-        let error = prepare_with(dir.path(), pin, None, &cancel)
+        let error = prepare_with(dir.path(), pin, &cancel)
             .expect_err("a cancelled Silero fetch cancels the load");
 
         assert!(

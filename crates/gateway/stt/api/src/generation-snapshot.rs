@@ -1,7 +1,7 @@
 //! The one complete engine runtime and its immutable published facts.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use gateway_stt_engine::{
 };
 
 use crate::admission::AdmissionGate;
-use crate::artifacts::{SileroModel, SpeechError};
+use crate::artifacts::SpeechError;
 use crate::model::{ModelNames, SpeechModelInfo};
 use crate::status::SpeechStatus;
 
@@ -48,11 +48,11 @@ impl SileroSource for WhisperModelFactory {
     }
 }
 
-/// A generation's Silero model, the source each take loads it through, and
-/// the hub a take reports its fall back to loudness through.
+/// A generation's verified Silero model, the source each take loads it
+/// through, and the hub a take reports its fall back to loudness through.
 #[derive(Debug, Clone)]
 pub(super) struct Silero {
-    pub(super) model: SileroModel,
+    pub(super) model: PathBuf,
     pub(super) source: Arc<dyn SileroSource>,
     pub(super) progress: Option<Arc<ProgressHub>>,
 }
@@ -89,7 +89,7 @@ impl GenerationSpec {
 
     pub(super) fn with_silero(
         mut self,
-        model: SileroModel,
+        model: PathBuf,
         source: Arc<dyn SileroSource>,
         progress: Option<Arc<ProgressHub>>,
     ) -> Self {
@@ -115,6 +115,16 @@ impl GenerationSpec {
     }
 
     pub(super) fn build(&self) -> Result<SpeechRuntime, SpeechError> {
+        if let Some(silero) = &self.silero {
+            // Takes open their own detectors; this one only proves the
+            // model and library load.
+            drop(
+                silero
+                    .source
+                    .load(&silero.model)
+                    .map_err(SpeechError::SileroDetector)?,
+            );
+        }
         let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
             .map_err(SpeechError::Engine)?;
         let names = if self.infer_scripted_final {

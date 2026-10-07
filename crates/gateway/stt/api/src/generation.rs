@@ -96,46 +96,49 @@ impl GenerationState {
         policy: EnginePolicy,
         cancel: &CancellationToken,
     ) -> Result<(), SpeechError> {
-        self.load_scripted_shared(Arc::new(factory), policy, cancel)
+        self.load_scripted_shared(Arc::new(factory), policy, None, cancel)
     }
 
     /// [`Self::load_scripted`] over a shared factory, for the facade's armed
-    /// scripted load.
+    /// scripted load, provisioning `silero` first when it is given.
     #[cfg(feature = "test-fixtures")]
     pub(crate) fn load_scripted_shared(
         &self,
         factory: Arc<dyn ModelFactory>,
         policy: EnginePolicy,
+        silero: Option<&artifacts::ScriptedSileroPin>,
         cancel: &CancellationToken,
     ) -> Result<(), SpeechError> {
         self.claim_initial_load()?;
         if cancel.is_cancelled() {
             return Err(SpeechError::InitialLoadCancelled);
         }
+        if let Some(silero) = silero {
+            silero.provision(cancel)?;
+        }
         let runtime = GenerationSpec::scripted_inferred(SharedFactory(factory), policy).build()?;
         self.publish_initial(Some(runtime), cancel)
     }
 
-    /// Publishes scripted interim workers whose takes load their Silero
-    /// detector from `model` through `source` and report falling back to
-    /// loudness through `progress`.
+    /// Claims the one initial load and publishes scripted interim workers
+    /// whose takes load their Silero detector from `model` through `source`
+    /// and report falling back to loudness through `progress`.
     #[cfg(test)]
     pub(crate) fn publish_scripted_silero(
         &self,
-        model: crate::artifacts::SileroModel,
+        model: std::path::PathBuf,
         source: Arc<dyn SileroSource>,
         progress: Option<Arc<gateway_progress::ProgressHub>>,
-    ) {
+    ) -> Result<(), SpeechError> {
         use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
+        self.claim_initial_load()?;
         let policy = EnginePolicy::new(15, 500, false).expect("the scripted policy is valid");
         let factory = ScriptedModelFactory::new(ScriptedDecoder::new());
         let runtime = GenerationSpec::scripted_inferred(factory, policy)
             .with_silero(model, source, progress)
-            .build()
-            .expect("the scripted runtime builds");
+            .build()?;
         self.publish_initial(Some(runtime), &CancellationToken::new())
-            .expect("the scripted runtime publishes");
     }
 
     fn claim_initial_load(&self) -> Result<(), SpeechError> {
