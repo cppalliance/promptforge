@@ -1,4 +1,4 @@
-//! Native whisper fixture: the workspace-local fixture root, the JFK sample at
+//! Native whisper fixture: the workspace-local fixture root, the clip at
 //! 24 kHz, the packaged native speech service, and its incremental-span checks.
 
 use std::path::Path;
@@ -6,7 +6,13 @@ use std::path::PathBuf;
 
 use gateway::Config;
 use gateway_stt::SpeechService;
-use gateway_stt::test_fixtures::native::{fixture_whisper_backend, require_fixture};
+use gateway_stt::test_fixtures::native::{
+    fixture_final_model, fixture_whisper_backend, require_fixture,
+};
+
+/// The `[stt]` tuning the incremental-span checks expect: a four-second
+/// window, so the JFK clip slides within its eleven seconds.
+const INCREMENTAL_TUNING: &str = "window_seconds = 4\ninterval_ms = 500\n";
 
 pub(super) fn native_fixture_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../local/stt-fixtures")
@@ -20,19 +26,22 @@ fn gateway_native_realtime_keeps_its_workspace_local_fixture_root() {
     );
 }
 
-pub(super) fn native_jfk_24khz() -> Vec<i16> {
+/// The 16 kHz mono 16-bit clip `PROMPTFORGE_WHISPER_AUDIO` names, or
+/// `jfk.wav`, upsampled to the 24 kHz wire rate.
+pub(super) fn native_clip_24khz() -> Vec<i16> {
     let path = require_fixture(
         "PROMPTFORGE_WHISPER_AUDIO",
         &native_fixture_root(),
         "jfk.wav",
     );
-    let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
+    let mut reader = hound::WavReader::open(path).expect("native clip opens");
     let spec = reader.spec();
-    assert_eq!(spec.sample_rate, 16_000);
-    assert_eq!(spec.channels, 1);
+    assert_eq!(spec.sample_rate, 16_000, "native clip must be 16 kHz");
+    assert_eq!(spec.channels, 1, "native clip must be mono");
+    assert_eq!(spec.bits_per_sample, 16, "native clip must be 16-bit PCM");
     let source = reader
         .samples::<i16>()
-        .map(|sample| sample.expect("JFK sample decodes"))
+        .map(|sample| sample.expect("native clip sample decodes"))
         .collect::<Vec<_>>();
     let mut resampled = Vec::with_capacity(source.len() * 3 / 2);
     for pair in source.chunks(2) {
@@ -46,13 +55,23 @@ pub(super) fn native_jfk_24khz() -> Vec<i16> {
 }
 
 pub(super) fn native_speech_service() -> SpeechService {
+    native_speech_service_with(INCREMENTAL_TUNING)
+}
+
+/// The packaged speech service under a real interim and final
+/// `[[stt_model]]` pair, with `tuning` as the `[stt]` keys beside the
+/// whisper backend; empty tuning keeps the gateway defaults.
+pub(super) fn native_speech_service_with(tuning: &str) -> SpeechService {
     let model = require_fixture(
         "PROMPTFORGE_WHISPER_MODEL",
         &native_fixture_root(),
         "ggml-tiny.en.bin",
     );
-    let model = model.display().to_string().replace('\\', "/");
+    let final_model = fixture_final_model(&model);
+    let [model, final_model] =
+        [model, final_model].map(|path| path.display().to_string().replace('\\', "/"));
     let whisper_backend = fixture_whisper_backend();
+    let tuning = tuning.to_owned();
     std::thread::spawn(move || {
         let cache = tempfile::tempdir().expect("native test cache creates");
         let cache = cache.path().display().to_string().replace('\\', "/");
@@ -60,9 +79,9 @@ pub(super) fn native_speech_service() -> SpeechService {
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [local]\ncache_dir = {cache:?}\n\
-             [stt]\nwindow_seconds = 4\ninterval_ms = 500\nwhisper_backend = {whisper_backend:?}\n\
+             [stt]\n{tuning}whisper_backend = {whisper_backend:?}\n\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {model:?}\nvram_gb = 1.0\n\
-             [[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {model:?}\nvram_gb = 1.0\n\
+             [[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {final_model:?}\nvram_gb = 1.0\n\
              [[profile]]\nname = \"native\"\nmodels = [\"speech\", \"speech-final\"]\n"
         ))
         .expect("native fixture catalog parses");

@@ -1,8 +1,8 @@
 //! Native fixture loading: re-exports the engine's `require_fixture` and
-//! names the fixture whisper build for downstream integration tests, and adds
-//! this crate's model and audio loaders for its own ignored tests.
+//! names the fixture whisper build and final model for downstream
+//! integration tests, and adds this crate's model and audio loaders for its
+//! own ignored tests.
 
-#[cfg(all(test, not(miri)))]
 use std::path::{Path, PathBuf};
 
 pub use gateway_stt_engine::test_fixtures::native::require_fixture;
@@ -17,6 +17,26 @@ pub fn fixture_whisper_backend() -> String {
         || "cpu".to_owned(),
         |value| value.to_string_lossy().into_owned(),
     )
+}
+
+/// Returns the final-role model native fixtures load beside `interim`: the
+/// file `PROMPTFORGE_WHISPER_FINAL_MODEL` names when set, otherwise
+/// `interim` itself.
+///
+/// # Panics
+///
+/// Panics with the named path when the variable is set but names no file.
+#[must_use]
+pub fn fixture_final_model(interim: &Path) -> PathBuf {
+    let Some(path) = std::env::var_os("PROMPTFORGE_WHISPER_FINAL_MODEL").map(PathBuf::from) else {
+        return interim.to_path_buf();
+    };
+    assert!(
+        path.is_file(),
+        "PROMPTFORGE_WHISPER_FINAL_MODEL names a model file, but {} is not one",
+        path.display()
+    );
+    path
 }
 
 #[cfg(all(test, not(miri)))]

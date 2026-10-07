@@ -18,10 +18,11 @@ use tokio_tungstenite::tungstenite::{Error as SocketError, Message};
 
 use crate::support::{PHASE_TIMEOUT, TestServer, send_within};
 
+mod capture;
 mod native;
 
 use native::{
-    assert_native_incremental_spans, native_fixture_root, native_jfk_24khz, native_speech_service,
+    assert_native_incremental_spans, native_clip_24khz, native_fixture_root, native_speech_service,
 };
 
 type Socket = WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;

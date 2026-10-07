@@ -14,7 +14,11 @@
 //! final records the update the session sends for it.
 //!
 //! The final role uses the interim model unless
-//! `PROMPTFORGE_WHISPER_FINAL_MODEL` names another one.
+//! `PROMPTFORGE_WHISPER_FINAL_MODEL` names another one. The capture builds
+//! its Whisper factory from `PROMPTFORGE_WHISPER_LIBRARY` rather than
+//! loading a gateway config: a config load builds its factory internally,
+//! leaving no place for the recording wrapper, and provisions the pinned
+//! whisper build from the artifact store instead of the named library.
 //!
 //! With `PROMPTFORGE_REPLAY_CAPTURE` naming a scratch `<name>.json` outside
 //! the fixture directory, the capture writes its script there and its
@@ -30,6 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gateway_stt::SpeechService;
+use gateway_stt::test_fixtures::native::fixture_final_model;
 use gateway_stt::test_fixtures::{
     RealtimeSessionFixture, RealtimeSessionRegistryFixture, ReplayOutcome, ReplayScript,
     ReplaySnapshot, ReplayTake, load_scripted_initial_with_cancellation,
@@ -46,7 +51,6 @@ use recording::{Decode, Decodes, RecordingFactory, take_decodes};
 
 const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REPLAY_CAPTURE";
 const AUDIO_VARIABLE: &str = "PROMPTFORGE_WHISPER_AUDIO";
-const FINAL_MODEL_VARIABLE: &str = "PROMPTFORGE_WHISPER_FINAL_MODEL";
 const FIXTURE_AUDIO: &str = "jfk.wav";
 
 /// The window of the fixed policy the fixture load publishes, which is the
@@ -333,20 +337,6 @@ fn check_fixture_audio(audio: Option<&Path>) -> Result<(), String> {
     }
 }
 
-/// The final role's model: the one `PROMPTFORGE_WHISPER_FINAL_MODEL` names,
-/// or `interim` when it is unset.
-fn final_model(interim: &Path) -> PathBuf {
-    let Some(path) = std::env::var_os(FINAL_MODEL_VARIABLE).map(PathBuf::from) else {
-        return interim.to_path_buf();
-    };
-    assert!(
-        path.is_file(),
-        "{FINAL_MODEL_VARIABLE} names a model file, but {} is not one",
-        path.display()
-    );
-    path
-}
-
 fn snapshot(at_ms: u64, event: Value) -> ReplaySnapshot {
     let fields: HypothesisFields =
         serde_json::from_value(event).expect("a hypothesis event carries its snapshot fields");
@@ -376,7 +366,7 @@ async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once(
     let config = WhisperConfig::new(
         common::require_library(),
         model.clone(),
-        Some(final_model(&model)),
+        Some(fixture_final_model(&model)),
         WINDOW_SECONDS,
         None,
     );

@@ -88,7 +88,7 @@ async fn realtime_stt_native_incremental() {
     .await;
     expect_type(&mut socket, "session.updated").await;
 
-    let samples = native_jfk_24khz();
+    let samples = native_clip_24khz();
     let mut cursor = 0;
     let mut spans = Vec::new();
     for chunk_samples in [48_000, 24_000, 24_000, 24_000] {
