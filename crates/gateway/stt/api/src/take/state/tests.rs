@@ -122,6 +122,92 @@ fn unresolved_skip_consumes_one_candidate_then_later_decode_settles_normally() {
 }
 
 #[test]
+fn a_silent_tail_after_a_decoded_final_never_repeats_the_hypothesis_the_final_replaced() {
+    let state = TakeState::default();
+    let replaced = [AcceptedHypothesis::new(0..14_000, "ask not.".to_owned())];
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(0..10_000, "Ask not.".to_owned()),
+        &replaced,
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::skipped(10_000..30_000, SkipReason::Silence),
+        &replaced,
+        &ShownHypotheses::default(),
+    );
+
+    assert_eq!(
+        state.finalized_snapshot(),
+        ("Ask not.".to_owned(), 30_000),
+        "the hypothesis ends in the silent tail, but its words are the decoded final's"
+    );
+    assert_eq!(
+        state
+            .completion(&replaced, 30_000)
+            .expect("the take completes"),
+        "Ask not."
+    );
+}
+
+#[test]
+fn a_word_decoded_after_a_pause_is_settled_once_when_a_silent_tail_follows() {
+    let state = TakeState::default();
+    let hey = [AcceptedHypothesis::new(10_000..60_000, "Hey.".to_owned())];
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(0..10_000, "Ask not.".to_owned()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::skipped(10_000..40_000, SkipReason::Silence),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(40_000..52_000, "Hey.".to_owned()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::skipped(52_000..80_000, SkipReason::Silence),
+        &hey,
+        &ShownHypotheses::default(),
+    );
+
+    assert_eq!(
+        state.completion(&hey, 80_000).expect("the take completes"),
+        "Ask not. Hey."
+    );
+}
+
+#[test]
+fn a_skipped_word_after_a_silent_pause_still_takes_its_accepted_text() {
+    let state = TakeState::default();
+    let hey = [AcceptedHypothesis::new(10_000..48_000, "Hey.".to_owned())];
+    state.record_final_outcome(
+        FinalRangeOutcome::decoded(0..10_000, "Ask not.".to_owned()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::skipped(10_000..40_000, SkipReason::Silence),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::skipped(40_000..50_000, SkipReason::BelowSpeechThreshold),
+        &hey,
+        &ShownHypotheses::default(),
+    );
+
+    assert_eq!(
+        state.finalized_snapshot(),
+        ("Ask not. Hey.".to_owned(), 50_000),
+        "a hypothesis that starts in settled silence still covers the skipped word"
+    );
+}
+
+#[test]
 fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
     let state = TakeState::default();
     state.record_final_outcome(

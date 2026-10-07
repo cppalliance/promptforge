@@ -150,7 +150,7 @@ impl ReplayTake {
 
     async fn natural_final(&mut self, step: &ReplayFinal, limit: u64) -> Result<(), ReplayError> {
         let at_ms = step.at_ms;
-        self.final_decoder.push_text(step.text.clone());
+        self.script_final(step);
         while !self.segment_closed() {
             if self.appended >= limit {
                 return Err(diverged(
@@ -196,7 +196,7 @@ impl ReplayTake {
                 ),
             ));
         }
-        self.final_decoder.push_text(step.text.clone());
+        self.script_final(step);
         let receipt = self.session.commit()?;
         self.session.finish_finalization(receipt.item_id()).await?;
         let results = self.session.session.drain_results();
@@ -268,10 +268,33 @@ impl ReplayTake {
         })
     }
 
+    /// Queues the final decoder's output, unless the final scripts a range
+    /// the take skips without decoding.
+    fn script_final(&self, step: &ReplayFinal) {
+        if !step.text.is_empty() {
+            self.final_decoder.push_text(step.text.clone());
+        }
+    }
+
     fn verify_final(&mut self, step: &ReplayFinal) -> Result<(), ReplayError> {
         let requests = self.final_decoder.requests();
         let decodes = requests.get(self.final_decodes..).unwrap_or_default();
         let expected = step.sample_end.saturating_sub(step.sample_start);
+        if step.text.is_empty() {
+            return match decodes {
+                [] => Ok(()),
+                _ => Err(diverged(
+                    step.at_ms,
+                    format!(
+                        "the final scripts samples {}..{} as skipped without a decode, but the \
+                         take ran {} final decodes",
+                        step.sample_start,
+                        step.sample_end,
+                        decodes.len()
+                    ),
+                )),
+            };
+        }
         match decodes {
             [request] if sample_count(request.samples()) == expected => {
                 self.final_decodes += 1;

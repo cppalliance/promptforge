@@ -1,0 +1,95 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 1150,
+      "revision": 1,
+      "transcript": "About one tick",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "About one tick",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 1650,
+      "revision": 2,
+      "transcript": "About one tick faster than",
+      "finalized": "",
+      "agreed": "About one tick",
+      "tentative": " faster than",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500
+    },
+    {
+      "at_ms": 2150,
+      "revision": 3,
+      "transcript": "About one tick faster than the plans",
+      "finalized": "",
+      "agreed": "About one tick faster than",
+      "tentative": " the plans",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 2650,
+      "revision": 4,
+      "transcript": "About one tick faster than the plans 0.6",
+      "finalized": "",
+      "agreed": "About one tick faster than the plans",
+      "tentative": " 0.6",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500
+    },
+    {
+      "at_ms": 3150,
+      "revision": 5,
+      "transcript": "About one tick faster than the plans 0.6 seconds.",
+      "finalized": "",
+      "agreed": "About one tick faster than the plans 0.6",
+      "tentative": " seconds.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3550,
+      "revision": 5,
+      "transcript": "About one tick faster than the plans 0.6 seconds.",
+      "finalized": "",
+      "agreed": "About one tick faster than the plans 0.6",
+      "tentative": " seconds.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 8350,
+      "revision": 6,
+      "transcript": "About one tick faster than the plan's 0.6 seconds. Hey.",
+      "finalized": "About one tick faster than the plan's 0.6 seconds.",
+      "agreed": "",
+      "tentative": " Hey.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 8300
+    },
+    {
+      "at_ms": 8850,
+      "revision": 6,
+      "transcript": "About one tick faster than the plan's 0.6 seconds. Hey.",
+      "finalized": "About one tick faster than the plan's 0.6 seconds.",
+      "agreed": "",
+      "tentative": " Hey.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 8800
+    },
+    {
+      "at_ms": 9150,
+      "revision": 6,
+      "transcript": "About one tick faster than the plan's 0.6 seconds. Hey.",
+      "finalized": "About one tick faster than the plan's 0.6 seconds.",
+      "agreed": "",
+      "tentative": " Hey.",
+      "audio_start_ms": 3100,
+      "audio_end_ms": 9100
+    }
+  ],
+  "completed": "About one tick faster than the plan's 0.6 seconds. Hey."
+}

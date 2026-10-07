@@ -25,6 +25,11 @@ struct FinalizedState {
     text: String,
     failure: Option<Arc<TakeFailure>>,
     samples: u64,
+    /// End of the latest range settled with text, from a final decode or
+    /// from accepted interim text. An accepted hypothesis that starts before
+    /// it repeats text already settled, so it never stands in for a later
+    /// skipped range.
+    transcribed_samples: u64,
     applied_outcomes: u64,
     outcomes: Vec<FinalRangeOutcome>,
     pending_forced: Option<PendingForced>,
@@ -151,6 +156,7 @@ impl TakeState {
                 append_transcript(&mut state.text, &text);
                 if let Some(samples) = samples {
                     state.samples = samples;
+                    state.transcribed_samples = samples;
                 }
                 state.applied_outcomes = state.applied_outcomes.saturating_add(1);
             }
@@ -365,6 +371,7 @@ fn flush_pending_forced(state: &mut FinalizedState, accepted: &[AcceptedHypothes
 fn settle_decoded(state: &mut FinalizedState, range: std::ops::Range<u64>, text: &str) {
     append_transcript(&mut state.text, text);
     state.samples = range.end;
+    state.transcribed_samples = range.end;
 }
 
 fn settle_skipped(
@@ -383,7 +390,10 @@ fn settle_skipped(
     };
     let candidates = accepted
         .iter()
-        .filter(|candidate| candidate.range().end > state.samples)
+        .filter(|candidate| {
+            let range = candidate.range();
+            range.end > state.samples && range.start >= state.transcribed_samples
+        })
         .cloned()
         .collect::<Vec<_>>();
     let exact = candidates.iter().find(|candidate| {
@@ -395,6 +405,7 @@ fn settle_skipped(
     if let Some(candidate) = exact {
         append_transcript(&mut state.text, candidate.text());
         state.samples = coverage.end;
+        state.transcribed_samples = coverage.end;
         state.outcomes.clear();
         return;
     }

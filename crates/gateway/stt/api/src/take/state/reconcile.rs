@@ -22,6 +22,7 @@ pub(super) fn rewrite_natural(
     let (displayed, agreed_end) = shown.after(state.samples);
     append_transcript(&mut state.text, text);
     state.samples = range_end;
+    state.transcribed_samples = range_end;
     state.anchored = anchored_final_end(text, &displayed, SUFFIX_ANCHOR_TOKENS)
         .and_then(|end| anchored_suffix(&displayed, end, agreed_end));
 }

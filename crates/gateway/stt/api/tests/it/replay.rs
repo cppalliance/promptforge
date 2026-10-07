@@ -12,7 +12,9 @@ mod native_capture;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gateway_stt::test_fixtures::{ReplayError, ReplayOutcome, ReplayScript, ReplayTake};
+use gateway_stt::test_fixtures::{
+    ReplayError, ReplayOutcome, ReplayScript, ReplayTake, ReplayTick,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -235,6 +237,57 @@ async fn replay_accepts_a_forced_final_whose_range_awaits_the_next_final() {
         "unexpected completed transcript: {}",
         outcome.completed
     );
+}
+
+fn sentence_then_silence(finals: &Value) -> ReplayScript {
+    script(serde_json::json!({
+        "speech_samples": [[0, 48_000], [128_160, 135_360]],
+        "ticks": [
+            {"at_ms": 2_650, "audio_start_ms": 0, "audio_end_ms": 2_500, "transcript": "ask not"},
+            {"at_ms": 3_150, "audio_start_ms": 0, "audio_end_ms": 3_000, "transcript": "ask not what you can do."},
+            {"at_ms": 3_550, "audio_start_ms": 0, "audio_end_ms": 3_500, "transcript": "ask not what you can do."}
+        ],
+        "finals": finals
+    }))
+}
+
+#[tokio::test]
+async fn replay_completes_a_sentence_once_when_a_silent_commit_follows_its_final() {
+    let mut script = sentence_then_silence(&serde_json::json!([
+        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_600, "text": "Ask not what you can do."},
+        {"at_ms": 6_000, "sample_start": 49_600, "sample_end": 96_000, "text": ""}
+    ]));
+    script.speech_samples.truncate(1);
+    let outcome = ReplayTake::run(&script)
+        .await
+        .expect("a final and a silent commit tail replay");
+
+    assert_eq!(
+        outcome.completed, "Ask not what you can do.",
+        "the last hypothesis reaches into the silent tail, but the final already holds its words"
+    );
+}
+
+#[tokio::test]
+async fn replay_completes_a_word_too_short_to_decode_once_from_its_accepted_text() {
+    let mut script = sentence_then_silence(&serde_json::json!([
+        {"at_ms": 4_200, "sample_start": 0, "sample_end": 49_600, "text": "Ask not what you can do."},
+        {"at_ms": 9_600, "sample_start": 120_160, "sample_end": 136_960, "text": ""},
+        {"at_ms": 10_500, "sample_start": 136_960, "sample_end": 168_000, "text": ""}
+    ]));
+    script.ticks.extend(
+        [(8_350, 8_300), (8_850, 8_800)].map(|(at_ms, audio_end_ms)| ReplayTick {
+            at_ms,
+            audio_start_ms: 3_100,
+            audio_end_ms,
+            transcript: "Hey.".to_owned(),
+        }),
+    );
+    let outcome = ReplayTake::run(&script)
+        .await
+        .expect("a 0.45 s word skipped by the final pass replays");
+
+    assert_eq!(outcome.completed, "Ask not what you can do. Hey.");
 }
 
 #[tokio::test]
