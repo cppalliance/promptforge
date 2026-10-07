@@ -1,19 +1,25 @@
 //! Web access for prompts: a Plugin that gives a run two tools, one
 //! that fetches a page and one that searches the web.
 //!
-//! A Host installs [`PACKAGE`], by default under the name `web`. A prompt
-//! turns it on with one frontmatter line, `plugins: [web]`. The run then
-//! gets both tools: `web/fetch`, which fetches a URL and returns its
-//! content as text, and `web/search`, which runs a search through the
-//! Host's [`SearchProvider`]. The two tools always come together, named
-//! under whatever name the Host installed the Plugin under.
+//! A Host installs [`PACKAGE`], by default under the name `web`, and every
+//! run then receives both tools: `web/fetch`, which fetches a URL and
+//! returns its content as text, and `web/search`, which runs a search
+//! through the Host's [`SearchProvider`]. The two tools always come
+//! together, named under whatever name the Host installed the Plugin
+//! under.
+//!
+//! The Plugin has no prelude, so declaring it, as in `plugins: [web]`,
+//! only makes it required. A prompt reaches the tools by binding one in
+//! its `tools:` frontmatter, as in `fetch: web/fetch`, or, when it does
+//! not declare the Plugin, by adding them from `tools.offered()`.
 //!
 //! The Host provides two Host-wide services beside the Plugin. Its
 //! [`SearchProvider`] goes under the key [`SEARCH_PROVIDER`], and the
 //! tokio runtime handle that every fetch is spawned onto goes under the
 //! key [`TOKIO_RUNTIME`]. Install reads both; when either is missing, the
-//! Plugin is installed as unavailable and a prompt that declares it is
-//! refused naming the missing service.
+//! Plugin is installed as unavailable, no run receives its tools, and a
+//! prompt that declares it or binds one of its tools is refused naming
+//! the missing service.
 //!
 //! The fetch tool is security-critical. The model supplies the URL, so the
 //! tool is the server-side request forgery (SSRF) boundary between an
@@ -50,6 +56,8 @@
 //!   credentials.
 //! - Every fetch runs on the Host's runtime handle, and dropping the call
 //!   aborts it.
+//! - Install accepts only a `null` or `{}` configuration; any other value
+//!   leaves the Plugin unavailable.
 
 mod address;
 #[cfg_attr(

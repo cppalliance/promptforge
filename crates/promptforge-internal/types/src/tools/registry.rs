@@ -8,8 +8,10 @@ use super::ids::{ToolId, validate_identifier};
 
 /// A catalog of the tools a run may bind, given as tool descriptors.
 ///
-/// The caller builds the catalog and keeps the tool implementations itself.
-/// The Engine fills a prompt's tool slots from these descriptors.
+/// The caller builds the catalog from every Plugin it can serve, declared
+/// by the prompt or not, and keeps the tool implementations itself. The
+/// Engine fills a prompt's tool slots from these descriptors and offers the
+/// tools of Plugins the prompt does not declare to the prompt's Lua.
 ///
 /// Every tool in a catalog has a unique [`ToolId`] and a wire name of one or
 /// more characters, free of `/` and control characters. Construction checks

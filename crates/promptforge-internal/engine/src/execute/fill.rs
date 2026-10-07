@@ -15,10 +15,11 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 ///
 /// Exact slots fill by identity: an exact path's first segment names
 /// its Plugin, so a slot whose Plugin contributed nothing to the
-/// catalog - it was never activated - lands in
+/// catalog - it is not installed, cannot serve this run, or offers no
+/// valid tool - lands in
 /// [`Requirements::missing_required`] and the run fails until satisfied. A
 /// slot whose Plugin DID contribute to the catalog but not the named
-/// tool - the contribution was rejected at assembly, or the Plugin
+/// tool - the tool failed the caller's validation, or the Plugin
 /// never offered that name - is not a missing Plugin: installing
 /// changes nothing. The tool lands in [`Requirements::missing_tools`]
 /// instead, and the run fails until the prompt or the Plugin changes.

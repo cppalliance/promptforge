@@ -55,11 +55,14 @@
 //!   raises a Lua error with the message `input.ask takes no arguments`,
 //!   so a prompt that passes a question fails loudly instead of losing
 //!   it.
-//! - The model can ask the operator only when the prompt opts in: it
-//!   binds the ask tool under an alias in its `tools:` frontmatter, for
-//!   example `ask: user-input/ask`, and advertises that alias with
-//!   `tools.add` or `tools.always`. Declaring the Plugin alone advertises
-//!   nothing to the model.
+//! - The model can ask the operator only when the prompt's Lua opts in.
+//!   A prompt binds the ask tool under an alias in its `tools:`
+//!   frontmatter, for example `ask: user-input/ask`, and advertises that
+//!   alias with `tools.add` or `tools.always`. A prompt that does not
+//!   declare the Plugin can instead add the ask tool from
+//!   `tools.offered()`, where it is named `user-input_ask`. Neither
+//!   installing nor declaring the Plugin advertises anything to the
+//!   model.
 //!
 //! ## Invariants
 //!
@@ -69,6 +72,8 @@
 //! - The crate names no async runtime. The Harness polls the ask call
 //!   inside the run's own future, so an [`InputBroker`] must not block
 //!   while polled.
+//! - The ask tool's descriptor sets `survives_stop`, so a stop leaves the
+//!   operator's question open, and only a cancel drops it.
 
 mod ask;
 

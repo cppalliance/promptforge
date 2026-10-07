@@ -13,13 +13,13 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
-/** Every line of `file` (relative to the repo root) matching `phrase`, tagged with its number. */
+/** Every line of `file` (relative to the repo root) matching `phrase`, a string or a RegExp, tagged with its number. */
 async function offendingLines(file, phrase) {
   const text = await readFile(path.join(repoRoot, file), "utf8");
   return text
     .split("\n")
     .map((line, index) => ({ line, number: index + 1 }))
-    .filter(({ line }) => line.includes(phrase))
+    .filter(({ line }) => (phrase instanceof RegExp ? phrase.test(line) : line.includes(phrase)))
     .map(({ line, number }) => `${file}:${number}: ${line.trim()}`);
 }
 
@@ -164,4 +164,36 @@ test("Engine crates name the caller, never the Host or the Harness's crates and 
     }
   }
   assert.deepEqual(offenders, [], "Engine crate lines break the root AGENTS.md Engine rule");
+});
+
+// A Host installs each Plugin once, and every run receives every usable
+// Plugin's tools, so nothing activates a Plugin when a run starts. Comment
+// lines are checked, not code, so a local variable keeps its name.
+const PLUGIN_DOC_DIRS = [
+  "crates/promptforge",
+  "crates/promptforge-internal",
+  "crates/promptforge-plugin",
+  "crates/harness",
+  "crates/harness-internal",
+  "crates/harness-gateway-client",
+  "crates/plugin-web",
+  "crates/plugin-user-input",
+];
+
+test("the root AGENTS.md and the Plugin-facing crates' comments never describe Plugin activation", async () => {
+  const offenders = await offendingLines("AGENTS.md", /activat/i);
+  for (const dir of PLUGIN_DOC_DIRS) {
+    for await (const full of walk(path.join(repoRoot, dir))) {
+      if (!full.endsWith(".rs")) {
+        continue;
+      }
+      const file = path.relative(repoRoot, full).split(path.sep).join("/");
+      (await readFile(full, "utf8")).split("\n").forEach((line, index) => {
+        if (line.trimStart().startsWith("//") && /activat/i.test(line)) {
+          offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+        }
+      });
+    }
+  }
+  assert.deepEqual(offenders, [], "a doc still says Plugins are activated; say installed, snapshotted, or declared");
 });

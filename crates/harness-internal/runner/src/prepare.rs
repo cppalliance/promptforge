@@ -128,8 +128,9 @@ pub enum PrepareError {
         #[source]
         source: ParseError,
     },
-    /// The environment cannot satisfy the prompt: a declared Plugin
-    /// is missing, unavailable, or lacks a service it needs, or the current
+    /// The environment cannot satisfy the prompt: a Plugin the prompt
+    /// declares or slots is missing, unavailable, or lacks a service it
+    /// needs, its Plugin does not offer a slotted tool, or the current
     /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run is
     /// ended as failed with that notice.

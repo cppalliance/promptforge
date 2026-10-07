@@ -12,12 +12,13 @@ use super::ids::ToolId;
 /// the model reads, its parameter schema, whether its output is
 /// structured, and whether a stop leaves its calls running.
 ///
-/// The caller collects the descriptors of its activated Plugins into a
-/// [`ToolCatalog`](super::ToolCatalog). The implementations stay in the
-/// caller's own table, keyed by [`ToolId`]. The Engine binds its tool slots
-/// to the descriptors and advertises them to the model. It issues each tool
-/// call as an effect that names the tool's id. The caller resolves that id
-/// to the implementation.
+/// The caller collects the descriptors of every Plugin it can serve into a
+/// [`ToolCatalog`](super::ToolCatalog). The implementations stay with the
+/// caller, keyed by [`ToolId`]. The Engine binds its tool slots to the
+/// descriptors, offers the tools of Plugins the prompt does not declare,
+/// and advertises to the model whatever the prompt's Lua scopes in. It
+/// issues each tool call as an effect that names the tool's id. The caller
+/// resolves that id to the implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {

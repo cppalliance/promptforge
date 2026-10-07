@@ -1,5 +1,6 @@
-//! Plugin preludes: the Lua source an activated Plugin contributes,
-//! installed into every section VM before the shared library replays.
+//! Plugin preludes: the Lua source each Plugin the prompt declares
+//! contributes, installed into every section VM before the shared library
+//! replays.
 //!
 //! A prelude runs once per VM as a main chunk whose `...` is its Plugin's
 //! local name, in an environment table of its own. That table's metatable `__index` is a lookup table of the base

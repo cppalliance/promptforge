@@ -25,23 +25,22 @@ pub struct Requirements {
     pub unmet_requirements: Vec<UnmetRequirement>,
     /// The required Plugins that the run lacks.
     ///
-    /// Plugin activation adds a Plugin that is missing from the
-    /// registry. `Environment::prepare` adds the Plugin of an exact tool
+    /// The caller adds a Plugin the prompt declares or slots that is not
+    /// installed. `Environment::prepare` adds the Plugin of an exact tool
     /// slot when that Plugin is absent from the tool catalog. The run
     /// fails until every one is satisfied.
     pub missing_required: Vec<PluginId>,
-    /// The required Plugins that are registered but need a service
-    /// the application lacks.
+    /// The required Plugins that are installed but need a service
+    /// the run lacks.
     ///
-    /// There is one entry for each Plugin and missing service.
-    /// Plugin activation adds these and skips each such Plugin.
+    /// There is one entry for each Plugin and missing service. The caller
+    /// adds these and leaves each such Plugin's tools out of the catalog.
     /// The run fails until the application provides the service.
     pub missing_services: Vec<MissingService>,
     /// The required Plugins that are installed but cannot serve, each
     /// with the reason, such as a failure to build.
     ///
-    /// Plugin activation adds these. The run fails until the Plugin can
-    /// serve.
+    /// The caller adds these. The run fails until the Plugin can serve.
     pub unavailable: Vec<UnavailablePlugin>,
     /// The tools the prompt's slots name that their Plugin, present in the
     /// catalog, does not offer.
@@ -68,15 +67,15 @@ impl Requirements {
 
     /// Adds the entries of `other` to this report.
     ///
-    /// Use it to combine the Plugin activation report with the report
+    /// Use it to combine the caller's Plugin report with the report
     /// from `Environment::prepare`, so that one refusal names every gap.
     /// The merge skips an entry the report already holds.
     ///
     /// The merge drops the `missing_required` entry of a Plugin that
     /// lacks a service or is unavailable. That entry can come only from
     /// the tool slot check in `Environment::prepare`. That check finds an
-    /// exact slot whose Plugin is absent from the catalog, because
-    /// activation skipped the Plugin. The service or unavailable entry
+    /// exact slot whose Plugin is absent from the catalog, because the
+    /// caller left the Plugin's tools out. The service or unavailable entry
     /// already names the real cause.
     pub fn merge(&mut self, other: Requirements) {
         push_new(&mut self.missing_required, other.missing_required);
@@ -184,7 +183,7 @@ impl UnavailablePlugin {
     /// Creates an entry stating that `plugin` cannot serve, because of
     /// `reason`.
     ///
-    /// Only Plugin activation reports these.
+    /// Only the caller's Plugin report holds these.
     #[must_use]
     pub fn new(plugin: PluginId, reason: impl Into<String>) -> UnavailablePlugin {
         UnavailablePlugin {
@@ -202,7 +201,7 @@ impl UnavailablePlugin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MissingService {
-    /// The registered, required Plugin that needs the service.
+    /// The installed, required Plugin that needs the service.
     pub plugin: PluginId,
     /// The name of the missing service.
     ///
@@ -215,7 +214,7 @@ impl MissingService {
     /// Creates an entry stating that `plugin` needs the service named
     /// `service`, which the application lacks.
     ///
-    /// Only Plugin activation reports these.
+    /// Only the caller's Plugin report holds these.
     #[must_use]
     pub fn new(plugin: PluginId, service: impl Into<String>) -> MissingService {
         MissingService {

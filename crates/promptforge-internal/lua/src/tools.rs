@@ -1,20 +1,25 @@
 //! The `tools` namespace: scoping, invocation, and counts.
 //!
 //! One Lua table holds every tool operation, mirroring the `models.*`
-//! namespacing of model operations. Binding is the frontmatter's: the run's
-//! filled slots arrive in the shared [`ToolSet`] beside the offering (the
-//! undeclared Plugins' tools, which `offered` lists as records), and the
-//! table scopes among them by name - `add` scopes slot aliases and offered
-//! names into the section, `always` parks a
-//! prompt-wide alias (conventionally from H1, not privileged to it),
-//! `add_local` registers a prompt-author Lua function as a tool, `call`
-//! dispatches a bound tool by alias or Tool object (installed by the
-//! coroutine shim prelude, since dispatch suspends), `allow_tasks` records
-//! the section's allowlist for the model's task built-ins, and `calls` is
-//! the read-only per-alias dispatch counter surface. Only filled slots are
-//! visible: scoping or advertising an unfilled alias is a hard error. The
-//! installation logic sits here, out of the VM driver; the VM only calls
-//! the installers in setup order.
+//! namespacing of model operations. The run's filled frontmatter slots
+//! arrive in the shared [`ToolSet`] beside the offering: every catalog
+//! tool of a Plugin the prompt does not declare, each under its id with
+//! `/` and `.` replaced by `_`, such as `web_fetch`. The table scopes
+//! among them by name - `offered` returns the offering as fresh plain
+//! records `{ id, name, plugin, description }`, `add` scopes slot aliases
+//! and offered names into the section, `always` parks a prompt-wide slot
+//! alias (conventionally from H1, not privileged to it), `add_local`
+//! registers a prompt-author Lua function as a tool, `call` dispatches a
+//! bound or offered tool (installed by the coroutine shim prelude, since
+//! dispatch suspends), `allow_tasks` records the section's allowlist for
+//! the model's task built-ins, and `calls` is the read-only per-alias
+//! dispatch counter surface. `add` and `call` take an alias, a Tool
+//! object, or a record, which stands for its `name`; any other table
+//! passed to `add` is a list of those. An offered tool never becomes a
+//! Lua global and reaches the model only once `add` names it. Scoping or
+//! advertising a name that is neither a filled slot nor offered is a hard
+//! error. The installation logic sits here, out of the VM driver; the VM
+//! only calls the installers in setup order.
 
 use std::sync::{Arc, Mutex};
 

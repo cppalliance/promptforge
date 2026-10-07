@@ -75,7 +75,7 @@ pub(crate) struct RunState {
     emitter: Arc<Emitter>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
-    /// same flag the activated Plugins and the run's `cancel` share.
+    /// same flag the caller watches and the run's `cancel` sets.
     cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
     /// the values themselves - their provenance included - without

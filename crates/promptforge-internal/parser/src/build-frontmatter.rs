@@ -64,8 +64,8 @@ pub struct Frontmatter {
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
     output: Option<FileDecl>,
-    /// Plugins the prompt activates at prepare, by plain name, in
-    /// declaration order.
+    /// Plugins the prompt declares, by plain name, in declaration order:
+    /// each is required, and its prelude runs in every section.
     #[serde(default)]
     plugins: Vec<PluginId>,
     /// Declared tool slots: alias to exact path.

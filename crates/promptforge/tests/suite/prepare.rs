@@ -306,7 +306,7 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 }
 
 /// `prepare` fills a slot by identity against a catalog the caller
-/// supplied directly - no registry, no activation, no
+/// supplied directly - no installed Plugin and no tool
 /// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]

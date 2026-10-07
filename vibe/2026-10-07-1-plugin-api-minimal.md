@@ -1239,7 +1239,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-7>
 
-### Step 7: Rewrite Plugin docs and Invariants
+### Step 7: Rewrite Plugin docs and Invariants [completed]
 
 - Component: Docs and invariants
 - Placement: last. Step 5 fixes the crate names and the install shape, and step 6 the offering.

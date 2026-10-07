@@ -68,7 +68,8 @@ pub struct RunContext {
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
-    /// flag reaches them all.
+    /// flag reaches them all; the caller watches the same flag to drop the
+    /// effects it has in flight.
     pub(super) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     /// The application-state snapshot the `ui()` global serves, taken by
@@ -87,18 +88,19 @@ pub struct RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function: which concrete model each declared role is bound to.
     pub(super) model_bindings: ModelBindings,
-    /// The run's assembled tool catalog: the activated Plugins'
-    /// contributed tools in declaration order, with tool
-    /// prefix-containment enforced at assembly. Written by
+    /// The run's tool catalog: every tool of every Plugin the caller can
+    /// serve, declared by the prompt or not, with each tool under its
+    /// Plugin's name. Written by
     /// [`Environment::prepare`](super::Environment::prepare); the
-    /// slot-filling step fills the prompt's tool slots against it.
+    /// slot-filling step fills the prompt's tool slots against it, and the
+    /// offering draws the undeclared Plugins' tools from it.
     pub(super) tools: ToolCatalog,
     /// The run's tool bindings, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s slot
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
     pub(super) tool_bindings: ToolBindings,
-    /// The run's Plugin preludes, in install order. Written by
+    /// The run's Plugin preludes, in declaration order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before the
     /// shared library replays. Empty on a caller-built context that was
@@ -159,9 +161,7 @@ impl RunContext {
     /// The flag is a synchronous [`CancelHandle`] that the Engine polls
     /// between chain steps and from the Lua instruction hook. A caller that
     /// cancels through an awaitable token must bridge the token to this
-    /// flag by setting the flag when the token fires. The caller hands the
-    /// same flag to the Plugins it activates, so one cancel reaches
-    /// them all.
+    /// flag by setting the flag when the token fires.
     #[must_use]
     pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
         self.cancel = handle;
@@ -236,10 +236,8 @@ impl RunContext {
     /// fresh memory store at `/`.
     ///
     /// [`Environment::prepare`](super::Environment::prepare) keeps a handle
-    /// set here as given. So a caller that activates Plugins builds
-    /// the run's handle first, then passes it both to the services that
-    /// Plugin activation receives and to this builder. The
-    /// Plugins and the run then share one filesystem.
+    /// set here as given. Every tool call effect carries an access to this
+    /// same filesystem, so the tools and the run share one set of files.
     /// The caller seeds files before the run and extracts output after it
     /// through the prepared handle, returned by
     /// [`vfs_handle`](RunContext::vfs_handle).
@@ -268,8 +266,8 @@ impl RunContext {
 
     /// Returns the run's cancel flag.
     ///
-    /// The caller hands this flag to the Plugins it activates, so one
-    /// cancel reaches them and the run. Replace the flag with
+    /// The caller watches this flag, so one cancel reaches the run and the
+    /// effects the caller has in flight. Replace the flag with
     /// [`cancel`](RunContext::cancel).
     #[must_use]
     pub fn cancel_handle(&self) -> CancelHandle {
@@ -288,12 +286,12 @@ impl RunContext {
         &self.model_bindings
     }
 
-    /// Returns the run's assembled tool catalog.
+    /// Returns the run's tool catalog.
     ///
-    /// [`Environment::prepare`](super::Environment::prepare) writes the
-    /// catalog from the activated Plugins' contributions, in
-    /// declaration order. On a caller-built context, the catalog is empty
-    /// until prepare runs.
+    /// [`Environment::prepare`](super::Environment::prepare) copies the
+    /// environment's catalog here: every tool of every Plugin the caller
+    /// can serve, declared by the prompt or not. On a caller-built context,
+    /// the catalog is empty until prepare runs.
     #[must_use]
     pub fn tools(&self) -> &ToolCatalog {
         &self.tools

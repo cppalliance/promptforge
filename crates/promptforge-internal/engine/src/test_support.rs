@@ -132,8 +132,8 @@ pub fn drive(
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on `fixture` ([`RunFixture::tools`]). Plugin activation
-/// is the Harness's and never happens here.
+/// implementations on `fixture` ([`RunFixture::tools`]). Plugins live
+/// outside the Engine, and none is installed here.
 ///
 /// An unsatisfiable prompt - a missing required Plugin or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding

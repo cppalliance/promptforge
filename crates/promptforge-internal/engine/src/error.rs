@@ -274,8 +274,8 @@ pub(crate) enum Error {
     UnsupportedVersion(u32),
 
     /// The environment cannot satisfy the prompt: a required Plugin is
-    /// missing, a required Plugin needs a service that was not provided,
-    /// two declared Plugins conflict, the filled model
+    /// missing, unavailable, or needs a service the run lacks, a slotted
+    /// tool is not offered by its Plugin, the filled model
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
     ///

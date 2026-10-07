@@ -15,25 +15,27 @@ use super::requirements::Requirements;
 /// its runs.
 ///
 /// An environment holds the catalog of tools the caller has made
-/// available and the Lua preludes its activated Plugins contributed.
+/// available and the Lua preludes of the Plugins the prompt declares.
 /// It is safe to share across concurrent runs (it is `Sync`). Everything
 /// that can change per run sits on the [`RunContext`]. The catalog holds
 /// tool descriptors only. The tool implementations stay with the caller,
-/// which activates them. The run's model arrives on the context.
+/// which performs every call. The run's model arrives on the context.
 ///
 /// [`prepare`](Environment::prepare) fills a prompt's tool slots by
 /// identity against the catalog and binds its model roles to the
-/// context's current model.
+/// context's current model. The run offers the catalog tools of Plugins
+/// the prompt does not declare to the prompt's Lua.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// The tools a run may bind, as descriptors, as the caller set them
-    /// with [`tools`](Environment::tools). The default is empty, so every
-    /// exact slot's Plugin is reported missing.
+    /// The tools a run may bind or be offered, as descriptors: every tool
+    /// of every Plugin the caller can serve, declared by the prompt or not.
+    /// The default is empty, so every exact slot's Plugin is reported
+    /// missing.
     tools: ToolCatalog,
-    /// The Lua source the caller's activated Plugins contributed, in
-    /// install order: every section VM of a run installs each one before
-    /// the shared library replays. The default is empty.
+    /// The Lua source of the Plugins the prompt declares, in declaration
+    /// order: every section VM of a run installs each one before the shared
+    /// library replays. The default is empty.
     preludes: Vec<Prelude>,
 }
 
@@ -48,13 +50,14 @@ impl Environment {
         }
     }
 
-    /// Sets the catalog of tools that a run may bind.
+    /// Sets the catalog of tools that a run may bind or be offered.
     ///
-    /// The catalog holds the tool descriptors the caller assembled from its
-    /// activated Plugins. The caller activates its Plugins and
-    /// installs the resulting catalog here before it calls
-    /// [`prepare`](Environment::prepare). `prepare` then fills the prompt's
-    /// exact slots against the catalog by identity.
+    /// The catalog holds the tool descriptors of every Plugin the caller
+    /// can serve, whether or not the prompt declares it. The caller
+    /// installs it here before it calls [`prepare`](Environment::prepare).
+    /// `prepare` then fills the prompt's exact slots against the catalog by
+    /// identity, and the run offers the tools of the Plugins the prompt
+    /// does not declare.
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
         self.tools = tools;
@@ -63,9 +66,9 @@ impl Environment {
 
     /// Sets the Plugin preludes that every section VM of a run installs.
     ///
-    /// A prelude is Lua source that one of the caller's activated
-    /// Plugins contributed. The caller passes them in install order,
-    /// which is the order the prompt declares the Plugins.
+    /// A prelude is Lua source that a Plugin the prompt declares
+    /// contributed. The caller passes them in the order the prompt
+    /// declares the Plugins.
     /// [`prepare`](Environment::prepare) copies them onto the context.
     /// Every section VM of the run installs each prelude after the Engine
     /// globals and before the shared library replays, so the shared library
@@ -98,9 +101,9 @@ impl Environment {
     /// [`Requirements::missing_required`]. If the Plugin is in the catalog
     /// but the named tool is absent, the tool is listed in
     /// [`Requirements::missing_tools`]. Every fill is recorded in the
-    /// context's tool bindings. Plugin resolution and activation happen in the caller
-    /// before `prepare`, and the caller
-    /// merges that report into the one `prepare` returns.
+    /// context's tool bindings. The caller checks before `prepare` that
+    /// each Plugin the prompt declares or slots can serve, and merges that
+    /// report into the one `prepare` returns.
     ///
     /// Every declared model role binds to the context's current model.
     /// `prepare` then checks each role's hard keywords (`thinking`,

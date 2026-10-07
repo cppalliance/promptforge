@@ -1,16 +1,17 @@
 //! The Plugin identity vocabulary: [`PluginId`] and its parse
-//! error, plus [`Prelude`], the Lua source an activated Plugin hands
+//! error, plus [`Prelude`], the Lua source a declared Plugin hands
 //! the Engine.
 //!
-//! A Plugin is the activation unit: code that runs at run setup and
-//! makes services available to the run. Plugins ship in crates and are
-//! identified by a one-segment [`PluginId`], such as `web`, and every tool
-//! one contributes sits under it, such as `web/fetch`. The Engine knows
-//! Plugins by identity alone: a prompt declares them by plain name, and
-//! an exact tool slot names one through its [`ToolId`] prefix. The
-//! Plugin contract - the `Package` label, the `Plugin` trait, and the
-//! services a Plugin reads - is in `promptforge-plugin`, and installing
-//! Plugins is the Harness's; the Engine never builds a Plugin.
+//! A Plugin ships in a crate and is installed under a local, one-segment
+//! [`PluginId`], such as `web`, and every tool it offers sits under that
+//! name, such as `web/fetch`. The Engine knows Plugins by identity alone:
+//! a prompt declares them by plain name, which makes each one required
+//! and runs its prelude, and an exact tool slot names one through its
+//! [`ToolId`] prefix. A run's catalog holds the tools of every Plugin the
+//! caller can serve, declared or not. The Plugin contract - the `Package`
+//! label, the `Plugin` trait, and the services a Plugin reads - is in
+//! `promptforge-plugin`, and installing Plugins is the caller's; the
+//! Engine never builds a Plugin.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
@@ -162,7 +163,7 @@ impl PluginIdError {
     }
 }
 
-/// Lua source that an activated Plugin adds to the Lua VM of every
+/// Lua source that a declared Plugin adds to the Lua VM of every
 /// section in a run.
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that

@@ -26,6 +26,25 @@
 //!   the product and container boundaries.
 //! - Only `[dev-dependencies]` enable `test-support`, which the
 //!   `test-support` leak guard enforces.
+//! - A Host builds each Plugin object once, through
+//!   [`Package::construct`], and every run shares it. Host-wide services
+//!   reach only `construct`, and a run's own services reach only calls,
+//!   through [`ToolContext::service`]. Cleanup goes in the Plugin's
+//!   `Drop`; there is no shutdown hook.
+//! - Every tool a Plugin offers sits under the name `construct` receives,
+//!   as `web/fetch` sits under `web`. A tool that does not is dropped from
+//!   every run's catalog.
+//! - [`Plugin::call`] must not block while polled. Every effect of a run
+//!   is polled on the same task, so blocking or CPU-heavy work goes to the
+//!   Host's runtime.
+//! - [`Plugin::call`] must not panic. A panicking call's effect is
+//!   answered `Dropped`, and the panic is logged.
+//! - [`Plugin::call`] marks the trust of every output correctly: output
+//!   that embeds data an attacker can influence is
+//!   [`ToolOutput::untrusted`].
+//! - [`Plugin::call`] is cancellation-aware. Its future is dropped on a
+//!   stop or a cancel, except that a stop spares a call whose tool's
+//!   descriptor sets `survives_stop`.
 
 mod context;
 mod plugin;
