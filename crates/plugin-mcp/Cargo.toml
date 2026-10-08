@@ -16,7 +16,6 @@ promptforge-plugin.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest", "reqwest"] }
 # Header names and values, because the workspace has no `http` crate.
 reqwest.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 # The Host's runtime handle every connection and call is spawned onto.
