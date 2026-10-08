@@ -21,14 +21,16 @@ either = { version = "1", features = ["use_std"] }
 erased-serde = { version = "0.4" }
 fastrand = { version = "2" }
 form_urlencoded = { version = "1" }
+futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
-futures-util = { version = "0.3", features = ["io", "sink"] }
+futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 icu_locale_core = { version = "2", default-features = false, features = ["alloc", "zerovec"] }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
+indexmap = { version = "2", features = ["serde"] }
 itertools = { version = "0.10" }
 libc = { version = "0.2" }
 litemap = { version = "0.8", default-features = false, features = ["alloc"] }
@@ -65,6 +67,7 @@ tauri-utils = { version = "2", default-features = false, features = ["build-2", 
 time = { version = "0.3", features = ["macros", "serde-human-readable"] }
 tinystr = { version = "0.8", default-features = false, features = ["alloc", "zerovec"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "test-util"] }
+tokio-util = { version = "0.7" }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -90,14 +93,16 @@ either = { version = "1", features = ["use_std"] }
 erased-serde = { version = "0.4" }
 fastrand = { version = "2" }
 form_urlencoded = { version = "1" }
+futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
-futures-util = { version = "0.3", features = ["io", "sink"] }
+futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 icu_locale_core = { version = "2", default-features = false, features = ["alloc", "zerovec"] }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
+indexmap = { version = "2", features = ["serde"] }
 itertools = { version = "0.10" }
 libc = { version = "0.2" }
 litemap = { version = "0.8", default-features = false, features = ["alloc"] }
@@ -135,6 +140,7 @@ tauri-utils = { version = "2", default-features = false, features = ["build-2", 
 time = { version = "0.3", features = ["macros", "serde-human-readable"] }
 tinystr = { version = "0.8", default-features = false, features = ["alloc", "zerovec"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "test-util"] }
+tokio-util = { version = "0.7" }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -152,13 +158,14 @@ zerovec = { version = "0.11", default-features = false, features = ["alloc", "de
 [target.x86_64-pc-windows-msvc.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 windows-sys-73dcd821b1037cfd = { package = "windows-sys", version = "0.59", features = ["Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
@@ -168,13 +175,14 @@ windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", feat
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 windows-sys-73dcd821b1037cfd = { package = "windows-sys", version = "0.59", features = ["Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
@@ -183,7 +191,8 @@ windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", feat
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
-futures-channel = { version = "0.3", features = ["sink"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
@@ -194,6 +203,7 @@ rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -205,7 +215,8 @@ zbus = { version = "5" }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-futures-channel = { version = "0.3", features = ["sink"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
@@ -216,6 +227,7 @@ rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -227,7 +239,8 @@ zbus_macros = { version = "5", features = ["blocking-api"] }
 [target.aarch64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
-futures-channel = { version = "0.3", features = ["sink"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
@@ -238,6 +251,7 @@ rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -249,7 +263,8 @@ zbus = { version = "5" }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-futures-channel = { version = "0.3", features = ["sink"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
@@ -260,6 +275,7 @@ rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -272,9 +288,9 @@ zbus_macros = { version = "5", features = ["blocking-api"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
@@ -287,6 +303,7 @@ objc2-foundation = { version = "0.3" }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 
@@ -295,9 +312,9 @@ bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
@@ -310,6 +327,7 @@ objc2-foundation = { version = "0.3" }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 
@@ -317,9 +335,9 @@ tower-http = { version = "0.6", default-features = false, features = ["decompres
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
@@ -332,6 +350,7 @@ objc2-foundation = { version = "0.3" }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 
@@ -340,9 +359,9 @@ bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+chrono = { version = "0.4", features = ["serde"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
-futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
@@ -355,6 +374,7 @@ objc2-foundation = { version = "0.3" }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4", default-features = false, features = ["std"] }
 tar = { version = "0.4" }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
 

@@ -560,7 +560,7 @@ Rules for every step:
 
 <step-3>
 
-### Step 3: Add the MCP client Plugin
+### Step 3: Add the MCP client Plugin [completed]
 
 - Component: MCP client Plugin
 - Placement: third. It reads the runtime through Step 1's name and overrides Step 2's `ready`, and Step 4 installs it.

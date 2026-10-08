@@ -49,7 +49,7 @@ pub(crate) const DOCS_VAR: &str = "PROMPTFORGE_DOCS";
 /// The rustdoc sites: the folder under `target/site/`, the crate it
 /// documents, with default features, the facade as dependents read it, and
 /// the few broad words its landing row shows under Covers.
-const RUSTDOC_SITES: [(&str, &str, &str); 4] = [
+const RUSTDOC_SITES: [(&str, &str, &str); 5] = [
     (
         "promptforge",
         "promptforge",
@@ -66,6 +66,7 @@ const RUSTDOC_SITES: [(&str, &str, &str); 4] = [
         "Model calls through the Gateway",
     ),
     ("plugin-web", "plugin-web", "Web fetch and web search tools"),
+    ("plugin-mcp", "plugin-mcp", "Tools from remote MCP servers"),
 ];
 
 /// Link targets the link check never resolves.

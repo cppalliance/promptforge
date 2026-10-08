@@ -1,0 +1,33 @@
+[package]
+name = "plugin-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The Plugin contract: the package label, the Plugin trait, the context a
+# call is lent, and the tool, error, and service vocabulary.
+promptforge-plugin.workspace = true
+# The official MCP client. `client` is the handshake and the peer, the
+# reqwest transport is the Streamable HTTP client, and `reqwest` adds
+# rustls with the OS trust store.
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest", "reqwest"] }
+# Header names and values, because the workspace has no `http` crate.
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+# The Host's runtime handle every connection and call is spawned onto.
+tokio.workspace = true
+workspace-hack.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+# `testing::TestCall`, which lends the Plugin a context without a Harness.
+promptforge-plugin = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

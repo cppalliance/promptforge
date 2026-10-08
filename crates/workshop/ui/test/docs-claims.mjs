@@ -178,6 +178,7 @@ const PLUGIN_DOC_DIRS = [
   "crates/harness-gateway-client",
   "crates/plugin-web",
   "crates/plugin-user-input",
+  "crates/plugin-mcp",
 ];
 
 test("the root AGENTS.md and the Plugin-facing crates' comments never describe Plugin activation", async () => {
