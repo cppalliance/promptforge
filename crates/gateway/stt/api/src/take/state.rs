@@ -170,8 +170,18 @@ impl TakeState {
 
     /// The finalized text that final decodes produced, the history a final
     /// decode is conditioned on.
+    ///
+    /// This is empty while a forced window is pending. A pending window's text
+    /// is not settled, so the settled text ends well before the next window
+    /// starts. Whisper treats a prompt as the text just before the audio, and
+    /// a prompt that does not touch the audio makes the final pass, which runs
+    /// without timestamps, end the decode after a word or two.
     pub(super) fn decoded_text(&self) -> String {
-        Self::lock(&self.finalized).decoded_text.clone()
+        let state = Self::lock(&self.finalized);
+        if state.pending_forced.is_some() {
+            return String::new();
+        }
+        state.decoded_text.clone()
     }
 
     /// The count of final outcomes applied to the take.

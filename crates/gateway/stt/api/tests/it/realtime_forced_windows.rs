@@ -133,7 +133,39 @@ async fn one_item_reconciles_bounded_forced_windows() {
     assert_eq!(requests[2].samples().len(), LATER_FORCED_SAMPLES);
     assert_eq!(requests[0].finalized(), "");
     assert_eq!(requests[1].finalized(), "");
-    assert_eq!(requests[2].finalized(), "alpha beta");
+    assert_eq!(requests[2].finalized(), "");
+}
+
+#[tokio::test]
+async fn forced_windows_keep_their_words_when_history_would_end_the_decode() {
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_history_sensitive_text("alpha beta ECHO, now", "alpha");
+    final_decoder.push_history_sensitive_text("echo now revised ending", "echo");
+    final_decoder.push_history_sensitive_text("revised ending final words", "words");
+    let mut session = scripted_session(&final_decoder);
+    let payload = encoded_speech();
+
+    session
+        .append_base64(&payload)
+        .expect("the first continuous stride appends");
+    wait_for_decodes(&final_decoder, 1).await;
+    append_after_retirement(&mut session, &payload).await;
+    wait_for_decodes(&final_decoder, 2).await;
+    append_after_retirement(&mut session, &payload).await;
+    wait_for_decodes(&final_decoder, 3).await;
+
+    let committed = session.commit().expect("the one input commits");
+    session
+        .finish_finalization(committed.item_id())
+        .await
+        .expect("forced windows complete through the existing item");
+    let results = session.drain_results();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["type"], "completed");
+    assert_eq!(
+        results[0]["transcript"], "alpha beta echo now revised ending final words",
+        "a window decoded after an unsettled predecessor keeps its whole text"
+    );
 }
 
 #[tokio::test]
