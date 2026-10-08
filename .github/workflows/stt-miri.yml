@@ -86,10 +86,28 @@ jobs:
           if ($audioHash -ne '59DFB9A4ACB36FE2A2AFFC14BACBEE2920FF435CB13CC314A08C13F66BA7860E') {
             throw "unexpected Whisper audio hash: $audioHash"
           }
+          # Speech spans of jfk.wav that the Silero tests score against.
+          @'
+          [
+            { "text": "And so my fellow Americans,", "start_ms": 330, "end_ms": 2130 },
+            { "text": "ask not", "start_ms": 3270, "end_ms": 4290 },
+            { "text": "what your country can do for you,", "start_ms": 5400, "end_ms": 7530 },
+            { "text": "ask what you can do for your country.", "start_ms": 8190, "end_ms": 10200 }
+          ]
+          '@ | Set-Content -Path (Join-Path $fixture 'jfk-lines.json') -Encoding ascii
+          $silero = Join-Path $fixture 'ggml-silero-v6.2.0.bin'
+          Invoke-WebRequest `
+            -Uri 'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin' `
+            -OutFile $silero
+          $sileroHash = (Get-FileHash $silero -Algorithm SHA256).Hash
+          if ($sileroHash -ne '2AA269B785EEB53A82983A20501DDF7C1D9C48E33AB63A41391AC6C9F7FB6987') {
+            throw "unexpected Silero model hash: $sileroHash"
+          }
           $fixture | Add-Content $env:GITHUB_PATH
           "PROMPTFORGE_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
+          "PROMPTFORGE_SILERO_MODEL=$silero" | Add-Content $env:GITHUB_ENV
           # Native speech fixture configs default to the CPU build; this runner tests CUDA.
           "PROMPTFORGE_WHISPER_BACKEND=cuda" | Add-Content $env:GITHUB_ENV
 
