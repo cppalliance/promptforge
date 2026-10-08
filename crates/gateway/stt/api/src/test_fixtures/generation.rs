@@ -1,12 +1,27 @@
 //! Deterministic generation lifecycle fixtures.
 
-use gateway_stt_engine::{EnginePolicy, ModelFactory};
+use std::path::Path;
+
+use gateway_stt_engine::{
+    DetectorError, EnergyDetector, EnginePolicy, ModelFactory, SpeechDetector,
+};
 use tokio_util::sync::CancellationToken;
 
-use crate::generation::{GenerationJob, GenerationLease};
+use crate::generation::{GenerationJob, GenerationLease, SileroSource};
 use crate::{SpeechError, SpeechService};
 
 use super::ScriptedModelFactory;
+
+/// Stands in for Silero in scripted runtimes: its detectors hear speech
+/// wherever the audio is loud, whatever model path they are opened from.
+#[derive(Debug)]
+pub(crate) struct LoudnessSilero;
+
+impl SileroSource for LoudnessSilero {
+    fn load(&self, _model: &Path) -> Result<Box<dyn SpeechDetector>, DetectorError> {
+        Ok(Box::new(EnergyDetector))
+    }
+}
 
 /// Builds a speech service whose one initial load publishes scripted workers.
 ///

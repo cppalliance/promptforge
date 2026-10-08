@@ -29,7 +29,7 @@ async fn settle(take: &Take) {
 /// request's sample count and history.
 fn scripted_take(outputs: &[&'static str]) -> (Take, mpsc::UnboundedReceiver<(usize, String)>) {
     let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
-    let mut take = Take::new(Vec::new(), None);
+    let mut take = Take::without_final(Vec::new());
     let (report, requests) = mpsc::unbounded_channel();
     let mut outputs = outputs.iter().copied().collect::<VecDeque<_>>();
     let task = tokio::spawn(run_final_pipeline(

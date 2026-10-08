@@ -43,7 +43,7 @@ fn hear(state: &TakeState, samples: Vec<f32>) {
     TakeState::lock(&state.buffer)
         .append(samples)
         .expect("resident PCM reserves");
-    state.classify(true);
+    state.classify(true).expect("classified");
 }
 
 fn saturate(pending: &Arc<AtomicUsize>) -> Vec<FinalSegmentOwner> {

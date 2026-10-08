@@ -53,7 +53,7 @@ impl Session {
     pub(crate) fn append_base64_detecting(
         &mut self,
         payload: &str,
-        detector: gateway_stt_engine::FallbackDetector,
+        detector: Box<dyn gateway_stt_engine::SpeechDetector>,
     ) -> Result<(), SessionError> {
         if self.input.is_some() {
             return self.append_base64(payload);

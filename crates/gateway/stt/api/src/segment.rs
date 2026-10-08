@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use gateway_stt_engine::{DetectorError, EnginePolicy, FallbackDetector};
+use gateway_stt_engine::{DetectorError, EnginePolicy, SpeechDetector};
 
 mod boundary;
 mod endpoint;
@@ -36,7 +36,9 @@ const _: () = assert!(SHORT_BURST_SAMPLES > MIN_SPEECH_SAMPLES as u64);
 /// classified since the last poll. Ranges are indices into that buffer.
 #[derive(Debug)]
 pub(crate) struct Segmenter {
-    detector: FallbackDetector,
+    /// The take's detector, dropped at its first error so that no later
+    /// frame is classified.
+    detector: Option<Box<dyn SpeechDetector>>,
     /// End of the latest classified frame.
     classified: u64,
     /// The speech runs classified at or after `cursor`, oldest first.
@@ -82,7 +84,18 @@ impl SpeechBefore {
 impl Segmenter {
     /// A fresh segmenter positioned at the start of a take buffer.
     #[must_use]
-    pub(crate) fn new(detector: FallbackDetector) -> Self {
+    pub(crate) fn new(detector: Box<dyn SpeechDetector>) -> Self {
+        Self::from_detector(Some(detector))
+    }
+
+    /// A segmenter for a take whose detector never opened: it classifies
+    /// nothing.
+    #[must_use]
+    pub(crate) fn without_detector() -> Self {
+        Self::from_detector(None)
+    }
+
+    fn from_detector(detector: Option<Box<dyn SpeechDetector>>) -> Self {
         Self {
             detector,
             classified: 0,
@@ -159,17 +172,36 @@ impl Segmenter {
     /// Classifies every frame completed since the last call, in order, and
     /// queues the decisions for [`poll`](Self::poll) when `closes_segments`.
     /// A take without a final pipeline never polls, so it queues nothing.
-    pub(crate) fn classify(&mut self, buffer: &[f32], buffer_origin: u64, closes_segments: bool) {
+    ///
+    /// # Errors
+    /// Returns the detector's error on the frame it fails on, once. That
+    /// frame and every later one stay unclassified.
+    pub(crate) fn classify(
+        &mut self,
+        buffer: &[f32],
+        buffer_origin: u64,
+        closes_segments: bool,
+    ) -> Result<(), DetectorError> {
         debug_assert!(self.classified >= buffer_origin);
+        let Some(detector) = self.detector.as_mut() else {
+            return Ok(());
+        };
         while let Some(frame) = self
             .classified
             .checked_sub(buffer_origin)
             .and_then(|start| usize::try_from(start).ok())
             .and_then(|start| buffer.get(start..start.checked_add(FRAME_SAMPLES)?))
         {
+            let speech = match detector.classify(frame) {
+                Ok(speech) => speech,
+                Err(error) => {
+                    self.detector = None;
+                    return Err(error);
+                }
+            };
             let start = self.classified;
             self.classified += FRAME_SAMPLES as u64;
-            if !self.detector.classify(frame) {
+            if !speech {
                 continue;
             }
             self.speech_end = self.classified;
@@ -185,11 +217,7 @@ impl Segmenter {
                 _ => self.speech_runs.push(start..self.classified),
             }
         }
-    }
-
-    /// Hands out the detector's first failure once, for reporting.
-    pub(crate) fn take_fault(&mut self) -> Option<DetectorError> {
-        self.detector.take_fault()
+        Ok(())
     }
 
     /// Every speech run classified so far, on the frame grid from sample 0.

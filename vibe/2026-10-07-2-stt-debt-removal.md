@@ -390,7 +390,7 @@ isProject: false
 
 <step-5>
 
-### Step 5: Fail the take on detector errors and delete the loudness fallback
+### Step 5: Fail the take on detector errors and delete the loudness fallback [completed]
 
 - Component: Required Silero
 - Piece: take detection, second. It relies on Step 4's guarantee and leaves the remaining loudness surface dead or test-only for Step 6.
@@ -404,6 +404,7 @@ isProject: false
   - `realtime/input.rs` (`from_audio`): a detector that cannot open records a pending `TakeFailure`, and the take never starts. Confirm production sessions always carry a lease (`realtime/session.rs::new`, `realtime/session/state.rs:75`). Any production path still lacking one fails the take like an open failure rather than detecting by loudness.
   - Test-only call sites switch to `Box<dyn SpeechDetector>`: `realtime/input.rs::first_append_with_detector`, `realtime/session.rs:56`, `test_fixtures/replay-script.rs::speech_detector`, `test_fixtures/replay.rs`, `test_fixtures/segment.rs`, `realtime/session/route-tests-interim.rs`, `take/tests.rs`, `segment/tests.rs`, `take/interim-tests.rs`, and `take/finalization/speech_tests.rs`.
   - Tests: in `take/detector_tests.rs`, replace `a_silero_load_failure_falls_back_to_loudness_and_reports_once` and the other fallback tests. With a scripted primary, show that a take whose detector fails to open does not start, and that a mid-take detector error fails the take, keeps finalized text, and classifies no chunk by loudness afterward. A realtime session test shows both failures reach the client as the existing decode-failure error event.
+  - Log each take detector failure, open or mid-take, once at warn level with its cause, in addition to the client's error event, so the failure is visible in server logs.
   - Update the doc comments these files carry about the fallback, including `speech_detector`'s.
 - Verify: `cargo nextest run --locked -p gateway-stt -p gateway-stt-engine --all-features` passes, and `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_` and the same for `gateway-stt-engine` pass in WSL.
 - Commit: `Fail the take on speech detector errors`.

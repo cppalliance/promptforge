@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use base64::Engine as _;
-use gateway_stt_engine::FallbackDetector;
+use gateway_stt_engine::SpeechDetector;
 use serde::Deserialize;
 
 use super::{
@@ -55,7 +55,7 @@ pub struct ReplayTake {
     final_decoder: ScriptedDecoder,
     speech: Vec<Range<u64>>,
     /// The detector the first append hands the take it starts.
-    detector: Option<FallbackDetector>,
+    detector: Option<Box<dyn SpeechDetector>>,
     appended: u64,
     interim_decodes: usize,
     final_decodes: usize,

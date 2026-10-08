@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use gateway_stt_engine::{DetectorError, FallbackDetector, TranscribeError};
+use gateway_stt_engine::{DetectorError, SpeechDetector, TranscribeError};
 
 use super::agreement::{
     final_transcript_within_limit, projected_prefix_end, range_guided_suffix_prefix_start,
@@ -71,6 +71,8 @@ pub(crate) enum TakeFailure {
     WorkerUnavailable,
     #[error(transparent)]
     Transcribe(#[from] TranscribeError),
+    #[error(transparent)]
+    Detector(#[from] DetectorError),
     #[cfg(any(test, feature = "test-fixtures"))]
     #[error("{0}")]
     Recorded(String),
@@ -92,18 +94,19 @@ pub(super) struct TakeState {
     finalized: Mutex<FinalizedState>,
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 impl Default for TakeState {
     fn default() -> Self {
-        Self::new(RetainedPcmBudget::default(), FallbackDetector::energy())
+        Self::with_detector(Box::new(gateway_stt_engine::EnergyDetector))
     }
 }
 
 impl TakeState {
-    fn new(budget: RetainedPcmBudget, detector: FallbackDetector) -> Self {
+    fn new(budget: RetainedPcmBudget, segmenter: Segmenter) -> Self {
         Self {
             held: Mutex::default(),
             buffer: Mutex::new(RollingPcm::new(budget)),
-            segmenter: Mutex::new(Segmenter::new(detector)),
+            segmenter: Mutex::new(segmenter),
             finalized: Mutex::new(FinalizedState::default()),
         }
     }
@@ -112,12 +115,19 @@ impl TakeState {
     pub(super) fn with_pcm_limit(limit: usize) -> Self {
         Self::new(
             RetainedPcmBudget::with_limit(limit),
-            FallbackDetector::energy(),
+            Segmenter::new(Box::new(gateway_stt_engine::EnergyDetector)),
         )
     }
 
-    pub(super) fn with_detector(detector: FallbackDetector) -> Self {
-        Self::new(RetainedPcmBudget::default(), detector)
+    pub(super) fn with_detector(detector: Box<dyn SpeechDetector>) -> Self {
+        Self::new(RetainedPcmBudget::default(), Segmenter::new(detector))
+    }
+
+    /// A state that failed with `failure` before classifying anything.
+    pub(super) fn failed(failure: TakeFailure) -> Self {
+        let state = Self::new(RetainedPcmBudget::default(), Segmenter::without_detector());
+        state.record_failure(failure);
+        state
     }
 
     pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -125,14 +135,13 @@ impl TakeState {
     }
 
     /// Classifies the audio appended since the last call, queueing the
-    /// decisions for segment closing only when `closes_segments`. Returns
-    /// the detector's first failure once, for reporting; classification
-    /// continues by loudness.
-    pub(super) fn classify(&self, closes_segments: bool) -> Option<DetectorError> {
+    /// decisions for segment closing only when `closes_segments`.
+    ///
+    /// # Errors
+    /// Returns the detector's error once; no later audio is classified.
+    pub(super) fn classify(&self, closes_segments: bool) -> Result<(), DetectorError> {
         let buffer = Self::lock(&self.buffer);
-        let mut segmenter = Self::lock(&self.segmenter);
-        segmenter.classify(buffer.samples(), buffer.origin(), closes_segments);
-        segmenter.take_fault()
+        Self::lock(&self.segmenter).classify(buffer.samples(), buffer.origin(), closes_segments)
     }
 
     pub(super) fn finalized(&self) -> String {

@@ -21,12 +21,16 @@ mod segment;
 #[cfg(feature = "test-fixtures")]
 mod session;
 #[cfg(test)]
+mod silero;
+#[cfg(test)]
 mod warnings;
 
 #[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 #[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::{DecodeMode, Decoder, EnginePolicy, ModelFactory, TranscribeError};
+#[cfg(feature = "test-fixtures")]
+pub(crate) use generation::LoudnessSilero;
 #[cfg(feature = "test-fixtures")]
 pub use generation::{
     GenerationOwnershipFixture, GenerationWorkerJobFixture, generation_counts,
@@ -45,6 +49,8 @@ pub use replay::{
 };
 #[cfg(feature = "test-fixtures")]
 pub use segment::segment_ranges;
+#[cfg(test)]
+pub(crate) use silero::{SCRIPTED_SILERO_MODEL, ScriptedSilero, scripted_silero_generation};
 #[cfg(test)]
 pub(crate) use warnings::Warnings;
 

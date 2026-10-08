@@ -3,7 +3,6 @@
 
 use std::ops::Range;
 
-use gateway_stt_engine::FallbackDetector;
 use gateway_stt_engine::test_fixtures::ScriptedDetector;
 
 use super::SPEECH_TAIL_SAMPLES;
@@ -22,7 +21,7 @@ const fn at(frames: usize) -> u64 {
 fn take_hearing(speech: Range<usize>, appended: usize) -> Take {
     let detector =
         ScriptedDetector::new([(speech.start * FRAME_SAMPLES, speech.end * FRAME_SAMPLES)]);
-    let take = Take::with_detector(Vec::new(), None, FallbackDetector::new(Box::new(detector)));
+    let take = Take::with_detector(Vec::new(), None, Box::new(detector));
     take.append(vec![0.0; appended * FRAME_SAMPLES])
         .expect("audio appends");
     take

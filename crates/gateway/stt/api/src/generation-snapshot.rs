@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gateway_progress::ProgressHub;
 use gateway_stt_backend_whisper::{SileroDetector, WhisperModelFactory};
 use gateway_stt_engine::{
     DecodeMode, DecodeOutput, DecodeRequest, DetectorError, EnginePolicy, ModelFactory,
@@ -48,13 +47,12 @@ impl SileroSource for WhisperModelFactory {
     }
 }
 
-/// A generation's verified Silero model, the source each take loads it
-/// through, and the hub a take reports its fall back to loudness through.
+/// A generation's verified Silero model and the source each take loads it
+/// through.
 #[derive(Debug, Clone)]
 pub(super) struct Silero {
     pub(super) model: PathBuf,
     pub(super) source: Arc<dyn SileroSource>,
-    pub(super) progress: Option<Arc<ProgressHub>>,
 }
 
 #[derive(Debug)]
@@ -64,7 +62,7 @@ pub(super) struct GenerationSpec {
     policy: EnginePolicy,
     names: ModelNames,
     guidance: Vec<String>,
-    silero: Option<Silero>,
+    silero: Silero,
     infer_scripted_final: bool,
 }
 
@@ -75,6 +73,7 @@ impl GenerationSpec {
         policy: EnginePolicy,
         names: ModelNames,
         guidance: Vec<String>,
+        silero: Silero,
     ) -> Self {
         Self {
             backend,
@@ -82,49 +81,38 @@ impl GenerationSpec {
             policy,
             names,
             guidance,
-            silero: None,
+            silero,
             infer_scripted_final: false,
         }
     }
 
-    pub(super) fn with_silero(
-        mut self,
-        model: PathBuf,
-        source: Arc<dyn SileroSource>,
-        progress: Option<Arc<ProgressHub>>,
-    ) -> Self {
-        self.silero = Some(Silero {
-            model,
-            source,
-            progress,
-        });
-        self
-    }
-
     #[cfg(feature = "test-fixtures")]
-    pub(super) fn scripted_inferred(factory: impl ModelFactory, policy: EnginePolicy) -> Self {
+    pub(super) fn scripted_inferred(
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        silero: Silero,
+    ) -> Self {
         let mut spec = Self::new(
             Backend::Scripted,
             factory,
             policy,
             ModelNames::scripted(false),
             Vec::new(),
+            silero,
         );
         spec.infer_scripted_final = true;
         spec
     }
 
     pub(super) fn build(&self) -> Result<SpeechRuntime, SpeechError> {
-        if let Some(silero) = &self.silero {
-            // Takes open their own detectors; this one only proves the
-            // model and library load.
-            drop(
-                silero
-                    .source
-                    .load(&silero.model)
-                    .map_err(SpeechError::SileroDetector)?,
-            );
-        }
+        // Takes open their own detectors; this one only proves the model
+        // and library load.
+        drop(
+            self.silero
+                .source
+                .load(&self.silero.model)
+                .map_err(SpeechError::SileroDetector)?,
+        );
         let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
             .map_err(SpeechError::Engine)?;
         let names = if self.infer_scripted_final {
@@ -152,8 +140,7 @@ pub(super) struct SpeechRuntime {
     engine: SttEngine,
     names: ModelNames,
     pub(super) guidance: Arc<[String]>,
-    /// `None` for a backend that provisions no Silero model.
-    pub(super) silero: Option<Silero>,
+    pub(super) silero: Silero,
     pub(super) admission: Arc<AdmissionGate>,
 }
 

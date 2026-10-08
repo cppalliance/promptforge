@@ -1,16 +1,16 @@
 //! Tests for final decodes gated on the speech the take's detector heard:
-//! a commit over loud audio without detected speech decodes nothing, while
-//! detected speech and the loudness fallback still decode.
+//! a commit over loud audio without detected speech decodes nothing,
+//! detected speech still decodes, and a failed detector fails the commit.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
 use gateway_stt_engine::test_fixtures::ScriptedDetector;
-use gateway_stt_engine::{DecodeRequest, EnginePolicy, FallbackDetector};
+use gateway_stt_engine::{DecodeRequest, EnginePolicy};
 use tokio::sync::mpsc;
 
 use super::{FINAL_SEGMENT_CAPACITY, FinalPipeline, run_final_pipeline};
-use crate::take::Take;
+use crate::take::{Take, TakeFailure};
 
 const SECOND: usize = EnginePolicy::SAMPLE_RATE;
 const LOUD: f32 = 0.5;
@@ -22,8 +22,7 @@ fn take_hearing(
     text: &'static str,
 ) -> (Take, mpsc::UnboundedReceiver<usize>) {
     let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
-    let detector = FallbackDetector::new(Box::new(detector));
-    let mut take = Take::with_detector(Vec::new(), None, detector);
+    let mut take = Take::with_detector(Vec::new(), None, Box::new(detector));
     let (report, requests) = mpsc::unbounded_channel();
     let task = tokio::spawn(run_final_pipeline(
         receiver,
@@ -80,14 +79,26 @@ async fn a_commit_over_a_scripted_speech_run_still_decodes_it() {
 }
 
 #[tokio::test]
-async fn a_take_that_fell_back_to_loudness_decodes_its_loud_audio_as_before() {
+async fn a_commit_over_a_take_whose_detector_failed_fails_and_decodes_nothing() {
     let detector = ScriptedDetector::new([]).with_failure_at(2);
     let (take, mut requests) = take_hearing(detector, "Ask not.");
+    take.append(vec![LOUD; 3 * SECOND])
+        .expect("the audio appends");
+    take.submit_closed_segments();
 
-    assert_eq!(
-        commit_loud_take(&take).await,
-        "Ask not.",
-        "loudness hears speech in every chunk after the failure"
+    let failure = take
+        .finalization()
+        .expect("the take owns a final pipeline")
+        .await
+        .expect_err("the detector failure fails the commit");
+
+    assert!(
+        matches!(failure.as_ref(), TakeFailure::Detector(_)),
+        "{failure:?}"
     );
-    assert_eq!(decodes(&mut requests), 1);
+    assert_eq!(
+        decodes(&mut requests),
+        0,
+        "loudness never stands in for the failed detector"
+    );
 }

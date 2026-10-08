@@ -1,3 +1,4 @@
+use gateway_stt_engine::EnergyDetector;
 use gateway_stt_engine::test_fixtures::ScriptedDetector;
 
 use super::*;
@@ -21,20 +22,20 @@ fn take(blocks: &[Vec<f32>]) -> Vec<f32> {
 
 /// A segmenter that reads speech by loudness.
 fn energy() -> Segmenter {
-    Segmenter::new(FallbackDetector::energy())
+    Segmenter::new(Box::new(EnergyDetector))
 }
 
 /// A segmenter whose detector hears speech only in the half-open sample
 /// `runs`, whatever the audio holds, and a clone of that detector.
 fn scripted(runs: &[(usize, usize)]) -> (Segmenter, ScriptedDetector) {
     let detector = ScriptedDetector::new(runs.iter().copied());
-    let segmenter = Segmenter::new(FallbackDetector::new(Box::new(detector.clone())));
+    let segmenter = Segmenter::new(Box::new(detector.clone()));
     (segmenter, detector)
 }
 
 /// Classifies `buffer`, which starts at sample 0, and closes the next segment.
 fn poll(segmenter: &mut Segmenter, buffer: &[f32]) -> Option<SegmentOutcome> {
-    segmenter.classify(buffer, 0, true);
+    segmenter.classify(buffer, 0, true).expect("classified");
     segmenter.poll()
 }
 
@@ -45,7 +46,7 @@ fn hear(segmenter: &mut Segmenter, end: usize) -> Option<SegmentOutcome> {
 
 /// Drains every segment the segmenter can close over `buffer`.
 fn close_all(segmenter: &mut Segmenter, buffer: &[f32]) -> Vec<Range<u64>> {
-    segmenter.classify(buffer, 0, true);
+    segmenter.classify(buffer, 0, true).expect("classified");
     let mut ranges = Vec::new();
     while let Some(outcome) = segmenter.poll() {
         match outcome {
@@ -173,7 +174,9 @@ fn compacted_buffers_keep_absolute_segment_ranges() {
     buffer.drain(..first_end);
     buffer.extend(take(&[speech(1), silence(3)]));
 
-    segmenter.classify(&buffer, first.end, true);
+    segmenter
+        .classify(&buffer, first.end, true)
+        .expect("classified");
     let SegmentOutcome::Decode(second) = segmenter.poll().expect("the compacted segment closes")
     else {
         panic!("ordinary speech decodes");
@@ -414,7 +417,7 @@ fn every_chunk_is_classified_once_in_order_across_two_strides() {
     let mut strides = Vec::new();
     while buffer.len() < 336_000 {
         buffer.resize(buffer.len() + 1_000, 0.0);
-        segmenter.classify(&buffer, 0, true);
+        segmenter.classify(&buffer, 0, true).expect("classified");
         while let Some(outcome) = segmenter.poll() {
             if let SegmentOutcome::Forced(stride) = outcome {
                 strides.push(stride.new_audio());
@@ -431,7 +434,9 @@ fn every_chunk_is_classified_once_in_order_across_two_strides() {
 #[test]
 fn speech_before_reads_classified_speech_without_a_poll() {
     let (mut segmenter, _) = scripted(&[(0, 24_000)]);
-    segmenter.classify(&vec![0.0; 32_000], 0, false);
+    segmenter
+        .classify(&vec![0.0; 32_000], 0, false)
+        .expect("classified");
     let speech = segmenter
         .speech_before(32_000)
         .expect("every whole frame before the end is classified");
@@ -450,14 +455,14 @@ fn speech_before_reads_classified_speech_without_a_poll() {
 fn the_speech_record_holds_every_classified_speech_frame_merged_into_runs() {
     let (mut segmenter, _) = scripted(&[(600, 1_100), (2_100, 2_200)]);
     let mut buffer = vec![0.0; 1_100];
-    segmenter.classify(&buffer, 0, false);
+    segmenter.classify(&buffer, 0, false).expect("classified");
     assert_eq!(
         segmenter.speech_runs(),
         std::slice::from_ref(&(FRAME..2 * FRAME)),
         "the first call classifies frames 0 and 1, so the run straddles the calls"
     );
     buffer.resize(5 * FRAME_SAMPLES + 100, 0.0);
-    segmenter.classify(&buffer, 0, false);
+    segmenter.classify(&buffer, 0, false).expect("classified");
     assert_eq!(
         segmenter.speech_runs(),
         [FRAME..3 * FRAME, 4 * FRAME..5 * FRAME],
@@ -470,14 +475,14 @@ fn the_speech_record_holds_every_classified_speech_frame_merged_into_runs() {
 fn a_take_without_a_final_pipeline_queues_no_decisions() {
     let audio = vec![0.0; 84_000];
     let (mut queued, _) = scripted(&[(0, 24_000)]);
-    queued.classify(&audio, 0, true);
+    queued.classify(&audio, 0, true).expect("classified");
     assert_eq!(
         queued.poll(),
         Some(SegmentOutcome::Decode(0..25_664)),
         "queued, the run closes two seconds into its silence"
     );
     let (mut unqueued, _) = scripted(&[(0, 24_000)]);
-    unqueued.classify(&audio, 0, false);
+    unqueued.classify(&audio, 0, false).expect("classified");
     assert_eq!(
         unqueued.poll(),
         None,

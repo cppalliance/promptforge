@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use gateway_stt_engine::DetectorError;
+
 use super::wire::HypothesisInclude;
 use crate::audio::{AudioBuffer, AudioError};
 use crate::generation::GenerationLease;
@@ -118,7 +120,7 @@ impl UncommittedInput {
         snapshot: InputSnapshot,
         engine: Option<GenerationLease>,
         payload: &str,
-        detector: gateway_stt_engine::FallbackDetector,
+        detector: Box<dyn gateway_stt_engine::SpeechDetector>,
     ) -> Result<Self, AudioError> {
         let mut audio = AudioBuffer::default();
         audio.append_base64(payload)?;
@@ -126,14 +128,35 @@ impl UncommittedInput {
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
+    /// A take whose detector does not open never starts; its failure is
+    /// pending for the next append and the commit to report.
     fn from_audio(
         item_id: String,
         snapshot: InputSnapshot,
         engine: Option<GenerationLease>,
         audio: AudioBuffer,
     ) -> Result<Self, AudioError> {
-        let take = Take::new(Self::guidance(&snapshot), engine);
+        let take = Self::start_take(Self::guidance(&snapshot), engine).unwrap_or_else(|error| {
+            Take::failed(Self::guidance(&snapshot), TakeFailure::Detector(error))
+        });
         Self::from_audio_and_take(item_id, snapshot, audio, take)
+    }
+
+    /// Production sessions always hold a generation. Only tests start a
+    /// take without one, which detects speech by loudness.
+    fn start_take(
+        guidance: Vec<String>,
+        engine: Option<GenerationLease>,
+    ) -> Result<Take, DetectorError> {
+        match engine {
+            Some(engine) => Take::new(guidance, engine),
+            #[cfg(any(test, feature = "test-fixtures"))]
+            None => Ok(Take::without_final(guidance)),
+            #[cfg(not(any(test, feature = "test-fixtures")))]
+            None => Err(DetectorError::load(
+                "the session holds no speech generation",
+            )),
+        }
     }
 
     fn guidance(snapshot: &InputSnapshot) -> Vec<String> {

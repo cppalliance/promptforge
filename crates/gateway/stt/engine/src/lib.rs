@@ -15,7 +15,7 @@ mod translation;
 mod worker;
 
 pub use decoder::{DecodeMode, DecodeOutput, DecodeRequest, Decoder, ModelFactory};
-pub use detector::{EnergyDetector, FallbackDetector, SpeechDetector};
+pub use detector::{EnergyDetector, SpeechDetector};
 pub use engine::SttEngine;
 pub use error::{DetectorError, TranscribeError};
 pub use policy::EnginePolicy;

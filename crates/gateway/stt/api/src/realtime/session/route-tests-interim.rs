@@ -4,7 +4,6 @@
 use std::ops::Range;
 
 use base64::Engine as _;
-use gateway_stt_engine::FallbackDetector;
 use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedDetector, ScriptedModelFactory};
 
 use super::{HYPOTHESIS, Session, sample_millis};
@@ -77,10 +76,7 @@ impl GatedSession {
         let payload =
             base64::engine::general_purpose::STANDARD.encode(vec![0_u8; input_samples * 2]);
         self.session
-            .append_base64_detecting(
-                &payload,
-                FallbackDetector::new(Box::new(self.detector.clone())),
-            )
+            .append_base64_detecting(&payload, Box::new(self.detector.clone()))
             .expect("audio appends");
         self.appended = through;
     }

@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use gateway_stt_engine::FallbackDetector;
 use gateway_stt_engine::test_fixtures::ScriptedDetector;
 use tokio::sync::{mpsc, oneshot};
 
@@ -95,7 +94,7 @@ fn a_sentence_end_hint_decoded_from_a_closed_segment_is_ignored() {
 #[test]
 fn a_take_without_a_final_pipeline_cuts_a_repeat_over_scripted_silence() {
     let detector = ScriptedDetector::new([(0, 24_000)]);
-    let take = Take::with_detector(Vec::new(), None, FallbackDetector::new(Box::new(detector)));
+    let take = Take::with_detector(Vec::new(), None, Box::new(detector));
     take.append(vec![0.5; 24_000]).expect("audio appends");
     take.next_window_snapshot("create a plan.", &[], 0, 0, 24_000)
         .expect("the sentence is accepted");

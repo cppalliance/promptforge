@@ -1,12 +1,16 @@
 //! Tests for session configuration snapshots, interim epochs, commit
-//! capacity, canceled task joins, and clear.
+//! capacity, canceled task joins, clear, and speech detector failures.
 
 use std::future::pending;
+use std::sync::Arc;
 
 use base64::Engine as _;
+use gateway_stt_engine::test_fixtures::ScriptedDetector;
 
 use super::{MAX_COMMITTED_ITEMS_PER_SESSION, SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError};
+use crate::generation::GenerationState;
 use crate::realtime::registry::SessionRegistry;
+use crate::test_fixtures::{ScriptedSilero, scripted_silero_generation};
 
 fn encoded(samples: &[i16]) -> String {
     let bytes = samples
@@ -52,6 +56,43 @@ fn session() -> Session {
         .register()
         .expect("session registers");
     Session::new(registration, None)
+}
+
+/// A session on a scripted generation whose takes load Silero through
+/// `source`, and the generation to shut down.
+fn silero_session(source: Arc<ScriptedSilero>) -> (Session, GenerationState) {
+    let (state, lease) = scripted_silero_generation(source);
+    let registration = SessionRegistry::default()
+        .register()
+        .expect("session registers");
+    (Session::new(registration, Some(lease)), state)
+}
+
+/// Asserts that the input rejects further audio naming `cause`, and that
+/// its commit settles the event a failed decode sends.
+fn assert_fails_as_a_decode(session: &mut Session, cause: &str) {
+    let error = session
+        .append_base64(&encoded(&[0, 0]))
+        .expect_err("the failed input rejects later audio");
+    assert!(
+        matches!(&error, SessionError::PendingPrecommitFailure(failure)
+            if failure.to_string().contains(cause)),
+        "{error:?}"
+    );
+    session.commit().expect("the failed input still commits");
+    let events = session.drain_events();
+    let [event] = events.as_slice() else {
+        panic!("the commit settles one terminal event: {events:?}");
+    };
+    let event = serde_json::to_value(event).expect("the event serializes");
+    assert_eq!(
+        event["type"], "conversation.item.input_audio_transcription.failed",
+        "{event}"
+    );
+    assert_eq!(
+        event["error"]["code"], "precommit_transcription_failed",
+        "{event}"
+    );
 }
 
 #[test]
@@ -276,4 +317,52 @@ fn clear_resets_partial_pcm_and_resampler_state() {
             .take()
             .uncommitted_snapshot(usize::MAX)
     );
+}
+
+#[test]
+fn a_take_whose_detector_does_not_open_reaches_the_client_as_a_decode_failure() {
+    let source = ScriptedSilero::failing_from(1, "scripted load failure");
+    let (mut session, state) = silero_session(source);
+
+    session
+        .append_base64(&encoded(&vec![16_384; 2_400]))
+        .expect("the first append opens the input");
+    assert!(
+        session
+            .input()
+            .expect("the input exists")
+            .take()
+            .speech_runs()
+            .is_empty(),
+        "the take never starts, so its loud audio is never classified"
+    );
+
+    assert_fails_as_a_decode(&mut session, "scripted load failure");
+    drop(session);
+    state.shutdown();
+}
+
+#[test]
+fn a_mid_take_detector_error_reaches_the_client_as_a_decode_failure() {
+    let detector = ScriptedDetector::new([]).with_failure_at(2);
+    let (mut session, state) = silero_session(ScriptedSilero::new(detector));
+
+    session
+        .append_base64(&encoded(&vec![16_384; 1_200]))
+        .expect("audio appends");
+    assert!(
+        session
+            .input()
+            .expect("the input exists")
+            .pending_failure()
+            .is_none(),
+        "the take starts"
+    );
+    session
+        .append_base64(&encoded(&vec![16_384; 2_400]))
+        .expect("the append the detector fails on still appends");
+
+    assert_fails_as_a_decode(&mut session, "scripted detector failure at chunk 2");
+    drop(session);
+    state.shutdown();
 }

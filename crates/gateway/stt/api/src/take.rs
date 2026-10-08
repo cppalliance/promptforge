@@ -3,7 +3,9 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use gateway_stt_engine::FallbackDetector;
+use gateway_stt_engine::DetectorError;
+#[cfg(any(test, feature = "test-fixtures"))]
+use gateway_stt_engine::SpeechDetector;
 #[cfg(test)]
 use gateway_stt_engine::TranscribeError;
 
@@ -11,7 +13,6 @@ use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 
 mod agreement;
-mod fallback;
 mod final_decode;
 mod final_outcome;
 mod finalization;
@@ -23,7 +24,6 @@ mod text;
 mod window;
 
 pub(crate) use agreement::token_spans;
-pub(crate) use fallback::FallbackReport;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, append_releasing, spawn_final_pipeline};
@@ -53,28 +53,38 @@ pub(crate) struct Take {
     state: Arc<TakeState>,
     whole_window: Arc<Mutex<WholeWindowState>>,
     final_pipeline: Option<FinalPipeline>,
-    fallback: FallbackReport,
 }
 
 impl Take {
-    pub(crate) fn new(guidance: Vec<String>, engine: Option<GenerationLease>) -> Self {
-        let (detector, fallback) = engine.as_ref().map_or_else(
-            || (FallbackDetector::energy(), FallbackReport::default()),
-            GenerationLease::speech_detector,
-        );
-        Self::with_state(
+    /// A take that classifies with its generation's Silero detector.
+    ///
+    /// # Errors
+    /// Returns the [`DetectorError`] when the detector does not open, after
+    /// logging it; the take does not start.
+    pub(crate) fn new(
+        guidance: Vec<String>,
+        engine: GenerationLease,
+    ) -> Result<Self, DetectorError> {
+        let detector = engine.speech_detector().inspect_err(|error| {
+            tracing::warn!(%error, "the take's Silero speech detector did not open; the take fails");
+        })?;
+        Ok(Self::with_state(
             guidance,
-            engine,
+            Some(engine),
             TakeState::with_detector(detector),
-            fallback,
-        )
+        ))
+    }
+
+    /// A take that failed with `failure` before it started: it classifies
+    /// nothing and runs no final pass.
+    pub(crate) fn failed(guidance: Vec<String>, failure: TakeFailure) -> Self {
+        Self::with_state(guidance, None, TakeState::failed(failure))
     }
 
     fn with_state(
         guidance: Vec<String>,
         engine: Option<GenerationLease>,
         state: TakeState,
-        fallback: FallbackReport,
     ) -> Self {
         let guidance = Arc::<[String]>::from(guidance);
         let state = Arc::new(state);
@@ -94,7 +104,6 @@ impl Take {
             state,
             whole_window,
             final_pipeline,
-            fallback,
         }
     }
 
@@ -104,44 +113,35 @@ impl Take {
         engine: Option<GenerationLease>,
         limit: usize,
     ) -> Self {
-        Self::with_state(
-            guidance,
-            engine,
-            TakeState::with_pcm_limit(limit),
-            FallbackReport::default(),
-        )
+        Self::with_state(guidance, engine, TakeState::with_pcm_limit(limit))
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn with_detector(
         guidance: Vec<String>,
         engine: Option<GenerationLease>,
-        detector: FallbackDetector,
+        detector: Box<dyn SpeechDetector>,
     ) -> Self {
-        Self::with_state(
-            guidance,
-            engine,
-            TakeState::with_detector(detector),
-            FallbackReport::default(),
-        )
+        Self::with_state(guidance, engine, TakeState::with_detector(detector))
     }
 
-    #[cfg(test)]
-    fn without_final(guidance: Vec<String>) -> Self {
-        Self::new(guidance, None)
+    /// A take without a generation, which detects speech by loudness.
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(crate) fn without_final(guidance: Vec<String>) -> Self {
+        Self::with_state(guidance, None, TakeState::default())
     }
 
     pub(crate) fn guidance(&self) -> &[String] {
         &self.guidance
     }
 
+    /// Appends `samples` and classifies them. A detector error is logged and
+    /// fails the take; the text finalized before it stays.
     pub(crate) fn append(&self, samples: Vec<f32>) -> Result<(), AudioError> {
         append_releasing(&self.state, samples)?;
-        if let Some(error) = self.state.classify(self.final_pipeline.is_some()) {
-            self.fallback.report(
-                "Silero speech detection failed; the rest of this take detects speech by loudness",
-                &error,
-            );
+        if let Err(error) = self.state.classify(self.final_pipeline.is_some()) {
+            tracing::warn!(%error, "the take's Silero speech detector failed; the take fails");
+            self.state.record_failure(TakeFailure::Detector(error));
         }
         Ok(())
     }

@@ -4,11 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gateway_stt_engine::{
-    DecodeMode, DecodeOutput, DecodeRequest, FallbackDetector, TranscribeError,
+    DecodeMode, DecodeOutput, DecodeRequest, DetectorError, SpeechDetector, TranscribeError,
 };
 
 use crate::admission::{AdmissionLease, JobLease, SessionEpoch};
-use crate::take::FallbackReport;
 
 use super::snapshot::{Silero, SpeechRuntime};
 
@@ -52,30 +51,14 @@ impl GenerationLease {
         &self.runtime().guidance
     }
 
-    /// The detector a new take classifies with, Silero when the generation
-    /// carries it and it loads for this take and loudness otherwise, and
-    /// the report its later fall back goes through. A load failure is
-    /// reported here, once for the take.
-    pub(crate) fn speech_detector(&self) -> (FallbackDetector, FallbackReport) {
-        let Some(Silero {
-            model,
-            source,
-            progress,
-        }) = &self.runtime().silero
-        else {
-            return (FallbackDetector::energy(), FallbackReport::default());
-        };
-        let report = FallbackReport::new(progress.clone());
-        match source.load(model) {
-            Ok(primary) => (FallbackDetector::new(primary), report),
-            Err(error) => {
-                report.report(
-                    "Silero speech detector did not load; this take detects speech by loudness",
-                    &error,
-                );
-                (FallbackDetector::energy(), report)
-            }
-        }
+    /// Opens the Silero detector a new take classifies with, its own
+    /// instance of the generation's model.
+    ///
+    /// # Errors
+    /// Returns the [`DetectorError`] when the detector does not open.
+    pub(crate) fn speech_detector(&self) -> Result<Box<dyn SpeechDetector>, DetectorError> {
+        let Silero { model, source } = &self.runtime().silero;
+        source.load(model)
     }
 
     pub(super) fn select(&self, name: &str) -> Option<DecodeMode> {
