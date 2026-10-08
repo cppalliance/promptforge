@@ -191,6 +191,23 @@ mod tests {
     }
 
     #[test]
+    fn bye_and_a_bare_you_after_a_sentence_are_never_cut_even_without_speech() {
+        let before = ["Can", "you", "check", "the", "gateway?"];
+        for hypothesis in ["Bye.", "you"] {
+            assert_eq!(
+                spoken(hypothesis, &before, &[], HANGOVER_SAMPLES),
+                hypothesis,
+                "{hypothesis} repeats no word right before it"
+            );
+        }
+        assert_eq!(
+            spoken("gateway", &before, &[], HANGOVER_SAMPLES),
+            "",
+            "with no speech heard, a word that repeats the one before it is cut"
+        );
+    }
+
+    #[test]
     fn a_tail_that_repeats_nothing_is_kept_after_silence() {
         let seen = [80_000; 4];
         assert_eq!(

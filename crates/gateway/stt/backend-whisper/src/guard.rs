@@ -8,14 +8,6 @@ const LOG_PROBABILITY_THRESHOLD: f32 = -1.0;
 /// Consecutive copies of one n-gram that mark a decoder loop; two copies are
 /// common in real speech.
 const LOOP_COPIES: usize = 3;
-/// Whole hypotheses whisper emits for silence or noise, in compared form.
-/// Short phrases people often say, such as "thank you", "you", and "bye",
-/// stay out, so a spoken one shows during the take.
-const SILENCE_HALLUCINATIONS: [&str; 3] = [
-    "please subscribe",
-    "thanks for watching",
-    "thank you for watching",
-];
 
 /// Token evidence from one interim pass.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,17 +64,13 @@ fn mean_log_probability(probabilities: impl IntoIterator<Item = f32>) -> Option<
     (count > 0.0).then(|| sum / count)
 }
 
-/// `text` with repeated n-gram loops collapsed, or empty when `stats` or the
-/// collapsed text marks it as a hallucination.
+/// `text` with repeated n-gram loops collapsed, or empty when `stats` marks
+/// it as a hallucination.
 pub(crate) fn guard_interim(text: &str, stats: TokenStats) -> String {
     if stats.vetoes() {
         return String::new();
     }
-    let collapsed = collapse_loops(text);
-    if SILENCE_HALLUCINATIONS.contains(&normalized(&collapsed).as_str()) {
-        return String::new();
-    }
-    collapsed
+    collapse_loops(text)
 }
 
 /// `text` with every run of at least [`LOOP_COPIES`] consecutive copies of an
@@ -305,48 +293,9 @@ mod tests {
     }
 
     #[test]
-    fn a_hypothesis_of_only_a_listed_silence_phrase_is_vetoed() {
-        for text in [
-            "Thanks for watching!",
-            "Thank you for watching.",
-            "Please subscribe.",
-        ] {
-            assert_eq!(guard_interim(text, confident()), "", "{text} vetoes");
-        }
-    }
-
-    #[test]
     fn short_phrases_people_often_say_are_kept_alone() {
         for text in ["Thank you.", "you", "Bye.", "Thank you. Thank you."] {
             assert_eq!(guard_interim(text, confident()), text, "{text} stays");
-        }
-    }
-
-    #[test]
-    fn a_listed_phrase_inside_longer_speech_is_kept() {
-        for text in [
-            "Thanks for watching the demo with me.",
-            "please subscribe to the feed",
-        ] {
-            assert_eq!(guard_interim(text, confident()), text, "{text} stays");
-        }
-    }
-
-    #[test]
-    fn a_looped_silence_phrase_collapses_and_then_vetoes() {
-        assert_eq!(
-            guard_interim(
-                "Thanks for watching. Thanks for watching. Thanks for watching.",
-                confident()
-            ),
-            ""
-        );
-    }
-
-    #[test]
-    fn every_listed_phrase_is_written_in_its_compared_form() {
-        for phrase in SILENCE_HALLUCINATIONS {
-            assert_eq!(normalized(phrase), phrase);
         }
     }
 }

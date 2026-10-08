@@ -466,7 +466,7 @@ isProject: false
 
 <step-9>
 
-### Step 9: Pin short echo phrases and trial-remove the phrase veto
+### Step 9: Pin short echo phrases and trial-remove the phrase veto [completed]
 
 - Component: Phrase veto trial
 - Component order: fifth. Its keep-or-restore decision rests on scored captures, which must run on the final detector wiring (Steps 4 through 6) and settlement (Step 7).
