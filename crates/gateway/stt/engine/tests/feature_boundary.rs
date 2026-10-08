@@ -36,7 +36,8 @@ fn default_dependency_does_not_expose_test_fixtures() {
     .expect("consumer manifest writes");
     std::fs::write(
         source.join("lib.rs"),
-        "pub use gateway_stt_engine::test_fixtures::native::require_fixture;\n",
+        "pub use gateway_stt_engine::test_fixtures::native::require_fixture;\n\
+         pub use gateway_stt_engine::EnergyDetector;\n",
     )
     .expect("consumer source writes");
 
@@ -55,6 +56,10 @@ fn default_dependency_does_not_expose_test_fixtures() {
     assert!(
         stderr.contains("could not find `test_fixtures` in `gateway_stt_engine`"),
         "failure must prove fixture symbols are absent: {stderr}"
+    );
+    assert!(
+        stderr.contains("no `EnergyDetector` in the root"),
+        "failure must prove the loudness detector is absent: {stderr}"
     );
 }
 

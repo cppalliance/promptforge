@@ -131,16 +131,6 @@ fn a_subscriber_outlives_the_hub_owner_through_the_activity() {
     assert_eq!(*rx.borrow(), snapshot(false, ""));
 }
 
-#[test]
-fn an_activity_hub_begins_later_activities_on_the_same_snapshot() {
-    let hub = ProgressHub::new();
-    let activity = hub.begin("Loading speech");
-    let later = activity.hub();
-    drop(activity);
-    let _report = later.begin("Silero failed");
-    assert_eq!(hub.current(), snapshot(true, "Silero failed"));
-}
-
 const _: () = {
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<ProgressHub>();

@@ -15,7 +15,9 @@ mod translation;
 mod worker;
 
 pub use decoder::{DecodeMode, DecodeOutput, DecodeRequest, Decoder, ModelFactory};
-pub use detector::{EnergyDetector, SpeechDetector};
+#[cfg(any(test, feature = "test-fixtures"))]
+pub use detector::EnergyDetector;
+pub use detector::SpeechDetector;
 pub use engine::SttEngine;
 pub use error::{DetectorError, TranscribeError};
 pub use policy::EnginePolicy;

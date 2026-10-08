@@ -10,7 +10,7 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use serde_json::Value;
 
 use super::capture::{Recorder, negotiate, stream_and_commit};
-use super::native::{clip_24khz, native_speech_service_with, recording_fallbacks};
+use super::native::{clip_24khz, native_speech_service_with};
 use super::{connect, server};
 
 const CLIPS_VARIABLE: &str = "PROMPTFORGE_NOISE_CLIPS";
@@ -82,42 +82,39 @@ fn hypothesis_source(event: &Value) -> String {
 
 // The client paces on its own worker, apart from the route's task, as the
 // native capture does.
-#[test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
-fn native_realtime_shows_no_text_for_noise_clips() {
-    recording_fallbacks(|fallbacks| async move {
-        let clips = noise_clips();
-        let (service, cache) = native_speech_service_with("");
-        let server = server(true, &service).await;
-        let mut shown = Vec::new();
-        for clip in &clips {
-            let audio = clip_24khz(clip);
-            let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
-                .await
-                .split();
-            let mut recorder = Recorder::new(stream);
-            negotiate(&mut sink, &mut recorder).await;
-            let recording = tokio::spawn(recorder.until_result());
-            stream_and_commit(&mut sink, &audio).await;
-            let recorder = recording.await.expect("the recorder joins");
-            sink.close().await.expect("socket closes");
-            shown.extend(
-                shown_text(&recorder)
-                    .into_iter()
-                    .map(|text| format!("{}: {text}", clip.display())),
-            );
-        }
-        server.shutdown().await;
-        tokio::task::spawn_blocking(move || service.shutdown())
+async fn native_realtime_shows_no_text_for_noise_clips() {
+    let clips = noise_clips();
+    let (service, cache) = native_speech_service_with("");
+    let server = server(true, &service).await;
+    let mut shown = Vec::new();
+    for clip in &clips {
+        let audio = clip_24khz(clip);
+        let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
             .await
-            .expect("native shutdown thread joins");
-        drop(cache);
-
-        fallbacks.assert_none();
-        assert!(
-            shown.is_empty(),
-            "noise without speech shows text:\n{}",
-            shown.join("\n")
+            .split();
+        let mut recorder = Recorder::new(stream);
+        negotiate(&mut sink, &mut recorder).await;
+        let recording = tokio::spawn(recorder.until_result());
+        stream_and_commit(&mut sink, &audio).await;
+        let recorder = recording.await.expect("the recorder joins");
+        sink.close().await.expect("socket closes");
+        shown.extend(
+            shown_text(&recorder)
+                .into_iter()
+                .map(|text| format!("{}: {text}", clip.display())),
         );
-    });
+    }
+    server.shutdown().await;
+    tokio::task::spawn_blocking(move || service.shutdown())
+        .await
+        .expect("native shutdown thread joins");
+    drop(cache);
+
+    assert!(
+        shown.is_empty(),
+        "noise without speech shows text:\n{}",
+        shown.join("\n")
+    );
 }

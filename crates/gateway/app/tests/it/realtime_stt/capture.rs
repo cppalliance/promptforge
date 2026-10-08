@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::native::{native_clip_24khz, native_speech_service_with, recording_fallbacks};
+use super::native::{native_clip_24khz, native_speech_service_with};
 use super::{Socket, audio_samples, connect, server};
 
 const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REALTIME_CAPTURE";
@@ -280,35 +280,30 @@ fn check_output(output: &Path) -> Result<(), String> {
 
 // The client paces and stamps on its own worker, apart from the route's
 // task, as a separate Workshop process would.
-#[test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
-fn native_realtime_capture_records_every_server_event_at_real_time_pace() {
+async fn native_realtime_capture_records_every_server_event_at_real_time_pace() {
     let output = std::env::var_os(CAPTURE_VARIABLE).map(PathBuf::from);
     if let Some(output) = &output {
         check_output(output).unwrap_or_else(|reason| panic!("{reason}"));
     }
     let clip = native_clip_24khz();
-    let audio = clip.as_slice();
-    let (schedule, recorder) = recording_fallbacks(|fallbacks| async move {
-        let (service, cache) = native_speech_service_with("");
-        let server = server(true, &service).await;
-        let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
-            .await
-            .split();
-        let mut recorder = Recorder::new(stream);
-        negotiate(&mut sink, &mut recorder).await;
-        let recording = tokio::spawn(recorder.until_result());
-        let schedule = stream_and_commit(&mut sink, audio).await;
-        let recorder = recording.await.expect("the recorder joins");
-        sink.close().await.expect("socket closes");
-        server.shutdown().await;
-        tokio::task::spawn_blocking(move || service.shutdown())
-            .await
-            .expect("native shutdown thread joins");
-        drop(cache);
-        fallbacks.assert_none();
-        (schedule, recorder)
-    });
+    let (service, cache) = native_speech_service_with("");
+    let server = server(true, &service).await;
+    let (mut sink, stream) = connect(server.addr, Some("test-token"), None, None)
+        .await
+        .split();
+    let mut recorder = Recorder::new(stream);
+    negotiate(&mut sink, &mut recorder).await;
+    let recording = tokio::spawn(recorder.until_result());
+    let schedule = stream_and_commit(&mut sink, &clip).await;
+    let recorder = recording.await.expect("the recorder joins");
+    sink.close().await.expect("socket closes");
+    server.shutdown().await;
+    tokio::task::spawn_blocking(move || service.shutdown())
+        .await
+        .expect("native shutdown thread joins");
+    drop(cache);
 
     if let Some(output) = &output {
         let capture = capture_json(&clip, &schedule, &recorder);

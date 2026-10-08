@@ -413,7 +413,7 @@ isProject: false
 
 <step-6>
 
-### Step 6: Purge the remaining loudness and fallback surface
+### Step 6: Purge the remaining loudness and fallback surface [completed]
 
 - Component: Required Silero
 - Piece: loudness remnants, last. Each item here became dead or test-only in Step 5.
