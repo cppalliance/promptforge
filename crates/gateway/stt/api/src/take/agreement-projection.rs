@@ -4,8 +4,10 @@ use std::ops::Range;
 
 use super::final_overlap::MAX_FINAL_TRANSCRIPT_BYTES;
 
+/// Tokens after the projected one that a punctuation boundary may snap to.
 const PUNCTUATION_TOKEN_BAND: usize = 3;
-const MAX_PUNCTUATION_TOKENS: usize = PUNCTUATION_TOKEN_BAND * 2 + 1;
+/// The projected token and the band after it.
+const MAX_PUNCTUATION_TOKENS: usize = PUNCTUATION_TOKEN_BAND + 1;
 const MAX_PROJECTION_TOKENS: usize = MAX_FINAL_TRANSCRIPT_BYTES.div_ceil(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,9 +100,13 @@ struct LocatedCut {
     punctuation_candidates: usize,
 }
 
+/// Cuts after the projected token, or after the one punctuated token within
+/// the band after it. Never before the projected token: the successor window
+/// starts at the overlap, so words before the projection exist only in this
+/// text, and a cut ahead of the projection drops them.
 fn locate_cut(text: &str, tokens: usize, projected: usize) -> LocatedCut {
     let prefer_punctuation = projected > 0 && projected < tokens;
-    let candidate_start = projected.saturating_sub(PUNCTUATION_TOKEN_BAND).max(1);
+    let candidate_start = projected.max(1);
     let candidate_end = projected.saturating_add(PUNCTUATION_TOKEN_BAND).min(tokens);
     let mut token_start = None;
     let mut token_index = 0;
@@ -199,7 +205,7 @@ mod tests {
 
     #[test]
     fn ambiguous_or_distant_punctuation_keeps_the_projected_boundary() {
-        let ambiguous = projected_prefix_end("one, two three, four five", 0..50, 20)
+        let ambiguous = projected_prefix_end("one two, three four, five six", 0..60, 20)
             .expect("ambiguous projection succeeds");
         assert_eq!(ambiguous.metrics.rounded_tokens, 2);
         assert_eq!(ambiguous.metrics.selected_tokens, 2);
@@ -210,6 +216,26 @@ mod tests {
         assert_eq!(distant.metrics.selected_tokens, 2);
         assert_eq!(distant.metrics.punctuation_candidates, 0);
         assert!(distant.metrics.punctuation_examined <= MAX_PUNCTUATION_TOKENS);
+    }
+
+    #[test]
+    fn locate_cut_never_picks_a_token_before_the_projected_one() {
+        let text = "one, two three four five six seven";
+        let projected = projected_prefix_end(text, 0..70, 30).expect("bounded projection succeeds");
+        assert_eq!(projected.metrics.rounded_tokens, 3);
+        assert_eq!(
+            projected.metrics.punctuation_candidates, 0,
+            "the comma at token 1 lies before the projected token 3"
+        );
+        assert_eq!(projected.metrics.selected_tokens, 3);
+        assert_eq!(&text[..projected.byte_end], "one, two three");
+
+        let at_projected = projected_prefix_end("one two three, four five six seven", 0..70, 30)
+            .expect("bounded projection succeeds");
+        assert_eq!(at_projected.metrics.rounded_tokens, 3);
+        assert_eq!(at_projected.metrics.selected_tokens, 3);
+        assert_eq!(at_projected.metrics.punctuation_candidates, 1);
+        assert_eq!(at_projected.metrics.punctuation_examined, 4);
     }
 
     #[test]
