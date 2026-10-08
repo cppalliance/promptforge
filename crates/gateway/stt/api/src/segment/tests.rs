@@ -3,6 +3,9 @@ use gateway_stt_engine::test_fixtures::ScriptedDetector;
 
 use super::*;
 
+#[path = "tests-pause.rs"]
+mod pause;
+
 const FRAME: u64 = FRAME_SAMPLES as u64;
 
 /// One second of loud synthetic speech (a constant 0.5 tone).

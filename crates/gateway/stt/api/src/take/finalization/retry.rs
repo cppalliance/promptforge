@@ -64,10 +64,15 @@ impl ClosedRange {
                 silent_through: scanned,
             },
             SegmentOutcome::Forced(boundary) => Self::Segment {
+                // A stride may cut behind the scan, where speech resumed.
+                silent_through: if boundary.retains_overlap() {
+                    range.end
+                } else {
+                    scanned
+                },
                 range,
                 forced: Some(boundary),
                 leading_silence,
-                silent_through: scanned,
             },
             SegmentOutcome::Skipped(_) => Self::Skipped {
                 range,
