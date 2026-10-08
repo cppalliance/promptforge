@@ -1,9 +1,9 @@
 /* Styles for zones.ts, which imports this file; esbuild bundles it into
-   dist/app.css. Covers the dock scaffolding the zones place panels into
-   and the tree's Add Folder dialog, plus the shared panel plumbing rules
-   (.ws-panel-lazy, .ws-panel-error, .ws-panel-unknown from
-   panel-types.ts). Themed values come from the :root tokens in
-   @workshop/look/tokens.css. */
+   dist/app.css. Covers the dock scaffolding the zones place panels into,
+   plus the shared panel plumbing rules (.ws-panel-lazy, .ws-panel-error,
+   .ws-panel-unknown from panel-types.ts). The tree's Add Folder dialog
+   has no rules here: it opens the form modal from @workshop/look/modal.
+   Themed values come from the :root tokens in @workshop/look/tokens.css. */
 
 .ws-desk {
   display: flex;
@@ -27,110 +27,6 @@
 .dv-split-view-container.dv-animation .dv-view,
 .dv-split-view-container.dv-animation .dv-sash {
   transition: none;
-}
-
-/* The Add Folder dialog (browser mode, no native picker): the shared
-   panel-dialog shape from editor-panel.css, plus a labeled path input. */
-.ws-workspace-add-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ws-overlay-scrim);
-}
-
-/* The shared modal's base skin (@workshop/look/modal.css) would size this
-   dialog to a fixed width and add a drop shadow; it stays content-sized
-   and shadowless, as before the extraction. */
-.ws-workspace-add {
-  width: auto;
-  min-width: var(--ws-workspace-dialog-min-width);
-  max-width: 90%;
-  padding: var(--space-xl);
-  background: var(--bg-raised);
-  border: var(--ws-border-width) solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: none;
-}
-
-.ws-workspace-add__title {
-  margin: 0 0 var(--space-md);
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.ws-workspace-add__line {
-  margin: 0 0 var(--space-lg);
-  font-size: var(--font-size-base);
-  color: var(--text-muted);
-}
-
-.ws-workspace-add__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  margin: 0 0 var(--space-lg);
-}
-
-.ws-workspace-add__label {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
-}
-
-.ws-workspace-add__input {
-  padding: var(--space-sm) var(--space-md);
-  background: var(--bg);
-  color: var(--text);
-  border: var(--ws-border-width) solid var(--border);
-  border-radius: var(--radius);
-  font: inherit;
-  font-size: var(--font-size-base);
-}
-
-.ws-workspace-add__input:focus-visible {
-  outline: none;
-  border-color: var(--prompt-input-border-focus);
-}
-
-.ws-workspace-add__actions {
-  display: flex;
-  gap: var(--space-md);
-  justify-content: flex-end;
-  /* The shared modal's actions row sets a 1rem top margin; the field
-     above already supplies this dialog's spacing. */
-  margin-block-start: 0;
-}
-
-.ws-workspace-add__button {
-  padding: var(--space-sm) var(--space-lg);
-  background: var(--bg);
-  color: var(--text);
-  border: var(--ws-border-width) solid var(--border);
-  border-radius: var(--radius);
-  font: inherit;
-  font-size: var(--font-size-base);
-  cursor: pointer;
-}
-
-.ws-workspace-add__button:hover {
-  background: var(--bg-hover);
-}
-
-.ws-workspace-add__button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ws-workspace-add__button:disabled:hover {
-  background: var(--bg);
-}
-
-.ws-workspace-add__button:focus-visible {
-  outline: none;
-  background: var(--bg-hover);
 }
 
 /* The placeholder sits between dockview's content container and the

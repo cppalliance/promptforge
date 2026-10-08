@@ -36,10 +36,11 @@
 	.menu-item:hover {
 		background: var(--bg-hover);
 	}
-	/* Keyboard focus reads through the same state background; Cursor
-	   menus draw no focus frame. */
+	/* Keyboard focus reads through the same state background, plus
+	   Cursor's 1px outline drawn inside the row. */
 	.menu-item:focus-visible {
-		outline: none;
+		outline: var(--focus-outline);
+		outline-offset: var(--focus-outline-offset);
 		background: var(--bg-hover);
 	}
 	.menu-item[aria-selected="true"],
@@ -64,6 +65,27 @@
 	.menu-item__check {
 		margin-inline-start: auto;
 		color: var(--cursor-icon-primary);
+	}
+
+	/* The select menu (add .menu-select beside .menu): the surface a .select
+	   control opens - #181818 with a hairline border and a 6px radius, at
+	   least 160px wide, its rows padded 5px 8px and dimmed to 0.6 opacity
+	   until hovered. */
+	.menu-select {
+		min-width: 160px;
+		padding: 0;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--cursor-editor);
+	}
+	.menu-select .menu-item {
+		min-height: 0;
+		padding: 5px var(--space-2);
+		border-radius: 0;
+		opacity: 0.6;
+	}
+	.menu-select .menu-item:hover {
+		opacity: 1;
 	}
 
 	/* The floating action menu: fixed against the viewport, fading in. */

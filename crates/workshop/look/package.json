@@ -3,13 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Workshop family look: the Cursor Dark palette, the size and semantic token tiers, the lucide icon strings, and the behavioral components (modal, dropdown, toast stack, status bar view, progress bar, button/input bases) shared by the Workshop's UIs.",
+  "description": "PromptForge Workshop family look: the Cursor Dark palette, the size and semantic token tiers, the codicon icon strings, the shimmer, and the behavioral components (modal, dropdown, toast stack, status bar view, progress bar, button/input/select/switch bases) shared by the Workshop's UIs.",
   "exports": {
     "./tokens.css": "./tokens.css",
     "./sizes.css": "./sizes.css",
     "./semantic.css": "./semantic.css",
     "./controls.css": "./controls.css",
     "./shimmer.css": "./shimmer.css",
+    "./shimmer": "./shimmer.ts",
     "./icons": "./icons.ts",
     "./modal": "./modal.ts",
     "./modal.css": "./modal.css",
@@ -26,7 +27,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.mjs\""
   },
-  "dependencies": {
-    "lucide": "^1.37.0"
+  "devDependencies": {
+    "@vscode/codicons": "^0.0.46-24"
   }
 }

@@ -2,11 +2,13 @@
 // focus-trapped modal (@workshop/look/modal): an overlay inside the panel
 // element, a role="dialog" surface, an optional labeled text field, a
 // Tab focus trap, Escape dismissal, and focus return to the invoker.
-// The editor's conflict and close prompts and the workshop tree's Add
-// Folder prompt are built through this one helper so their behavior
-// never diverges.
+// The editor's conflict, revert, and close prompts and the workshop tree's
+// Add Folder prompt are built through this one helper so their behavior
+// never diverges. The `skin` picks Cursor's confirmation prompt (save,
+// revert, overwrite) or its form modal (Add Folder); the skin owns the
+// dialog's look, so a caller carries no per-dialog stylesheet.
 
-import { openModal } from "@workshop/look/modal";
+import { openModal, type ModalSkin } from "@workshop/look/modal";
 
 import { toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 
@@ -17,6 +19,8 @@ import { toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 export interface PanelDialogButton {
   readonly label: string;
   readonly danger?: boolean;
+  /** The dialog's main action: it takes first focus, and the skin places it. */
+  readonly primary?: boolean;
   /** Disables the button while the field's trimmed value is empty. */
   readonly requiresValue?: boolean;
   readonly run: (value: string) => void;
@@ -38,6 +42,8 @@ export interface PanelDialogOptions {
   readonly titleId: string;
   readonly title: string;
   readonly message: string;
+  /** Cursor's confirmation or form skin; without one the dialog is unskinned. */
+  readonly skin?: ModalSkin;
   readonly field?: PanelDialogField;
   readonly buttons: readonly PanelDialogButton[];
   /** Called when Escape dismisses the dialog; no button's run fires then. */

@@ -17,16 +17,21 @@
 }
 
 /* --------------------------------------------------------------------------
-   Custom scrollbars, applied globally: a thin rounded translucent thumb on
-   a transparent track, so the bar reads as an overlay on whatever surface
-   scrolls. WebView2 is Chromium, so the ::-webkit-scrollbar pseudoelements
-   are the styled surface; the standard `scrollbar-width`/`scrollbar-color`
-   pair applies the same intent to any future non-Chromium webview. Widths
-   and colors are variables so a skin can retune them from the token sheet.
+   Custom scrollbars, applied globally: Cursor's view bars - a square
+   translucent thumb on a transparent track that shows while the scroller
+   is hovered, so the bar reads as an overlay on whatever surface scrolls.
+   WebView2 is Chromium, so the ::-webkit-scrollbar pseudoelements are the
+   styled surface. Chromium ignores them on any element that sets
+   `scrollbar-width` or `scrollbar-color`, so that standard pair applies
+   the same intent only to engines without the pseudoelements. Widths and
+   colors are variables so a skin can retune them from the token sheet;
+   menus take the narrower bar from .scrollbar-menu in @workshop/look.
    -------------------------------------------------------------------------- */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -39,8 +44,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 0;
+}
+
+:hover::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: calc(var(--scrollbar-width) / 2);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -70,8 +79,4 @@ body {
   height: 100vh;
   overflow: hidden;
   margin: 0;
-}
-
-:focus {
-  outline: none !important;
 }

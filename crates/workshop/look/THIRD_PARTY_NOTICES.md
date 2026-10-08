@@ -2,6 +2,16 @@
 
 Source in this directory that derives from another project, with the notice its license requires.
 
+## Codicons
+
+`icons.ts` holds the artwork of 14 icons from the Visual Studio Code codicon set - add, arrow-up, check, chevron-down, chevron-right, close, ellipsis, error, info, mic, new-folder, stop-circle, trash, and warning - as inline SVG strings. Each string is the icon's `src/icons/<name>.svg` file from `@vscode/codicons` with only the `width` and `height` attributes changed. `@vscode/codicons` is a `devDependency` that only `test/icons.mjs` reads, to check every string against its source file.
+
+- Project: <https://github.com/microsoft/vscode-codicons>
+- Package: `@vscode/codicons` 0.0.46-24
+- Copyright: (c) Microsoft Corporation
+- License: Creative Commons Attribution 4.0 International (CC-BY-4.0), <https://creativecommons.org/licenses/by/4.0/legalcode>. The codicon font and icon artwork are licensed CC-BY-4.0; the package's code is MIT.
+- Changes: the `width` and `height` attributes of each string are set to the size the consumer needs. The paths are unmodified.
+
 ## murm-ui
 
 `dropdown.ts` and `dropdown.css` are ported from the `components/dropdown.ts` and `styles/dropdown.css` files of murm-ui 0.2.0 (commit `336ff7db79d928373e83c3672db6041a0adbc868`), cut to the shared action-menu's needs and restyled onto the Cursor Dark tokens. (Moved here from the workshop UI package, now `crates/workshop/ui/src/parts/`, where the port first landed.)

@@ -1,27 +1,68 @@
-/* The inline progress bar from progress.ts: a thin rounded track whose
-   fill scales by --progress (transform, compositor-only). The fill reads
+/* The inline progress bar from progress.ts: a thin track whose fill scales
+   by --progress (transform, compositor-only). The fill reads
    --progress-fill, so a consumer recolors by state with its own modifier
-   class. Rules live in the components layer so consumer overrides win. */
+   class. Rules live in the components layer so consumer overrides win.
+
+   Settings variant (the default): a 4px bar with a 2px radius on a 12%
+   track, the fill easing its transform over 200ms. Indeterminate mode,
+   used when the fraction is null, slides a 34% bar across the track over
+   1.35s.
+
+   Workbench variant (.progress--workbench): 2px, square ends, the fill
+   green and moving over 0.1s linear. */
 
 @layer components {
 	.progress {
-		height: 0.375rem;
-		border-radius: 9999px;
-		background: var(--progress-track);
+		height: 4px;
+		border-radius: var(--radius-xs);
+		background: var(--cursor-stroke-secondary);
 		overflow: hidden;
 	}
 	.progress__fill {
 		height: 100%;
-		border-radius: 9999px;
+		border-radius: inherit;
 		background: var(--progress-fill);
 		transform-origin: 0 50%;
 		transform: scaleX(var(--progress, 0));
-		transition: transform 300ms ease-out;
+		transition: transform var(--duration-slow) ease-out;
+	}
+
+	.progress--indeterminate .progress__fill {
+		width: 34%;
+		transform: none;
+		transition: none;
+		animation: progress-indeterminate 1.35s ease-in-out infinite;
+	}
+
+	@keyframes progress-indeterminate {
+		from {
+			transform: translateX(-100%);
+		}
+		to {
+			transform: translateX(294%);
+		}
+	}
+
+	.progress--workbench {
+		height: 2px;
+		border-radius: 0;
+		background: transparent;
+	}
+	.progress--workbench .progress__fill {
+		border-radius: 0;
+		background: var(--progress-fill);
+		transition: transform 0.1s linear;
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.progress__fill {
+		.progress__fill,
+		.progress--workbench .progress__fill {
 			transition: none;
+		}
+		.progress--indeterminate .progress__fill {
+			width: 100%;
+			animation: none;
+			opacity: 0.5;
 		}
 	}
 }

@@ -1,11 +1,15 @@
-// Unit test for the lucide-backed icon strings (icons.ts). Bundles the
-// module with esbuild, imports it via a data URL under jsdom (lucide's
-// createElement needs a document at module load), and asserts every
-// exported icon is a parseable inline SVG string holding the dimensions
-// and stroke attributes the tree panel's CSS sizes against - the panel
-// assigns these strings to innerHTML.
+// Unit test for the codicon icon strings (icons.ts). Bundles the module with
+// esbuild, imports it via a data URL under jsdom, and asserts that every
+// exported icon is a parseable inline SVG string that equals its
+// @vscode/codicons source file (src/icons/<name>.svg) apart from the size
+// attributes, and that the four names the panels already import keep
+// their pixel sizes - the panels assign these strings to innerHTML and
+// their CSS sizes against the attributes. The package is a devDependency
+// that only this test reads: the shipped strings are inline.
 // Run: node test/icons.mjs (from crates/workshop/look).
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
@@ -33,24 +37,53 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Every export the workbench panels import, with its pixel size.
-const expectedSizes = {
-  ICON_TRASH_2: 15,
-  ICON_FOLDER_PLUS: 15,
-  ICON_MIC: 16,
-  ICON_SEND: 16,
+// Every export, with the codicon it renders and its pixel size. The four
+// names the panels already import keep their sizes (15, 15, 16, 16) and
+// switch to new-folder, trash, mic, and arrow-up; the rest are 16px.
+const expected = {
+  ICON_FOLDER_PLUS: { codicon: "new-folder", size: 15 },
+  ICON_TRASH_2: { codicon: "trash", size: 15 },
+  ICON_MIC: { codicon: "mic", size: 16 },
+  ICON_SEND: { codicon: "arrow-up", size: 16 },
+  ICON_CLOSE: { codicon: "close", size: 16 },
+  ICON_CHEVRON_RIGHT: { codicon: "chevron-right", size: 16 },
+  ICON_CHEVRON_DOWN: { codicon: "chevron-down", size: 16 },
+  ICON_STOP_CIRCLE: { codicon: "stop-circle", size: 16 },
+  ICON_ADD: { codicon: "add", size: 16 },
+  ICON_ELLIPSIS: { codicon: "ellipsis", size: 16 },
+  ICON_WARNING: { codicon: "warning", size: 16 },
+  ICON_INFO: { codicon: "info", size: 16 },
+  ICON_ERROR: { codicon: "error", size: 16 },
+  ICON_CHECK: { codicon: "check", size: 16 },
 };
 
 check(
-  "the module exports exactly the icon names the panels import",
-  Object.keys(icons).sort().join(",") === Object.keys(expectedSizes).sort().join(","),
+  "the module exports exactly the icon names the surfaces import",
+  Object.keys(icons).sort().join(",") === Object.keys(expected).sort().join(","),
+);
+check(
+  "the set covers the fourteen codicons the specifications use",
+  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 14,
 );
 
+// The codicon package root, found through its package.json.
+const require = createRequire(path.join(lookDir, "package.json"));
+const codiconDir = path.dirname(require.resolve("@vscode/codicons/package.json"));
+
+// The size attributes are the only thing the strings may change.
+const withoutSize = (svg) => svg.replace(/\s(?:width|height)="[^"]*"/g, "").trim();
+
 const container = dom.window.document.createElement("div");
-for (const [name, size] of Object.entries(expectedSizes)) {
+for (const [name, { codicon, size }] of Object.entries(expected)) {
   const value = icons[name];
   check(`${name} is a non-empty string`, typeof value === "string" && value.length > 0);
   if (typeof value !== "string") continue;
+
+  const source = await readFile(path.join(codiconDir, "src", "icons", `${codicon}.svg`), "utf8");
+  check(
+    `${name} equals ${codicon}.svg apart from the size attributes`,
+    withoutSize(value) === withoutSize(source),
+  );
 
   container.innerHTML = value;
   const svg = container.firstElementChild;
@@ -59,11 +92,10 @@ for (const [name, size] of Object.entries(expectedSizes)) {
 
   check(`${name} keeps its width of ${size}`, svg.getAttribute("width") === String(size));
   check(`${name} keeps its height of ${size}`, svg.getAttribute("height") === String(size));
-  check(`${name} keeps the 24-unit lucide viewBox`, svg.getAttribute("viewBox") === "0 0 24 24");
-  check(`${name} is an outline icon with no fill`, svg.getAttribute("fill") === "none");
-  check(`${name} keeps stroke-width 2`, svg.getAttribute("stroke-width") === "2");
+  check(`${name} keeps the 16-unit codicon viewBox`, svg.getAttribute("viewBox") === "0 0 16 16");
+  check(`${name} is a filled glyph in currentColor`, svg.getAttribute("fill") === "currentColor");
+  check(`${name} carries no stroke attributes`, svg.getAttribute("stroke") === null);
   check(`${name} contains at least one drawing element`, svg.children.length > 0);
-  check(`${name} strokes with currentColor`, svg.getAttribute("stroke") === "currentColor");
 }
 
 if (failures.length > 0) {

@@ -245,6 +245,11 @@ check(
   overlay?.querySelector(".ws-editor-conflict")?.getAttribute("role") === "dialog" &&
     overlay.querySelector(".ws-editor-conflict")?.getAttribute("aria-modal") === "true",
 );
+check(
+  "the conflict dialog wears Cursor's confirmation skin",
+  overlay?.classList.contains("modal-overlay--confirmation") === true &&
+    overlay.querySelector(".ws-editor-conflict")?.classList.contains("modal-dialog--confirmation") === true,
+);
 check("the conflicted save did not write", disk.text === "hello world\n");
 
 // Escape dismisses without resolving the conflict.
@@ -306,6 +311,17 @@ check(
 );
 document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
 panel.element.remove();
+
+// Revert File on a dirty editor asks first, in the same confirmation skin.
+panel.requestRevert();
+const revertOverlay = panel.element.querySelector(".ws-editor-revert-overlay");
+check(
+  "Revert File on a dirty editor opens the confirmation prompt",
+  revertOverlay?.classList.contains("modal-overlay--confirmation") === true &&
+    revertOverlay.querySelector(".ws-editor-revert")?.classList.contains("modal-dialog--confirmation") === true,
+);
+document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+check("Escape dismisses the revert prompt", !panel.element.querySelector(".ws-editor-revert-overlay"));
 
 // --- The real CodeMirrorSurface honors the EditorSurface contract ---------
 

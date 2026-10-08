@@ -27,12 +27,8 @@
   --ws-update-screen-width: var(--ws-size-560);
   --ws-update-log-max-height: var(--ws-size-180);
 
-  /* Editor dialogs */
-  --ws-editor-dialog-max-width: var(--ws-size-360);
-
-  /* Layout: workshop tree and workspace dialog */
+  /* Layout: workshop tree */
   --ws-tree-indent: var(--ws-size-8);
-  --ws-workspace-dialog-min-width: var(--ws-size-260);
 
   /* Menus */
   --ws-menu-item-radius: var(--ws-size-5);

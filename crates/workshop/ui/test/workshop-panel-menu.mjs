@@ -283,6 +283,16 @@ panelA.dispose();
     (button) => button.textContent === "Add",
   );
   check("the Add button starts disabled while the input is empty", addButton?.disabled === true);
+  check(
+    "the Add Folder dialog opens Cursor's form modal",
+    overlay?.classList.contains("modal-overlay--form") === true &&
+      overlay.querySelector(".ws-workspace-add")?.classList.contains("modal-dialog--form") === true,
+  );
+  check(
+    "the form modal puts Cancel first and the primary Add last",
+    [...overlay.querySelectorAll(".ws-workspace-add__actions button")]
+      .map((button) => button.textContent).join("|") === "Cancel|Add",
+  );
   addButton?.click();
   await flush();
   check("a disabled Add grants nothing", grants.length === 1);

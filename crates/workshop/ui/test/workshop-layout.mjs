@@ -739,7 +739,7 @@ await flush();
 check("closing a clean editor skips the prompt",
   cleanClose.answer === true && cleanPanel.element.querySelector(".ws-editor-close-overlay") === null);
 
-// A dirty panel prompts; Cancel keeps it, Discard lets it close.
+// A dirty panel prompts; Cancel keeps it, Don't Save lets it close.
 const dirtyStub = createStubSurface();
 const dirtyPanel = new EditorPanel({ createSurface: () => dirtyStub });
 dirtyPanel.init(fakeParameters(`${ROOT}\\dirty.txt`));
@@ -757,6 +757,21 @@ const closeButton = (label) =>
   [...dirtyPanel.element.querySelectorAll(".ws-editor-close__button")].find(
     (button) => button.textContent === label,
   );
+// Cursor's confirmation prompt: its wording, the Windows button order, and the skin.
+check("the close prompt asks Cursor's question",
+  closeOverlay?.querySelector(".ws-editor-close__title")?.textContent ===
+    "Do you want to save the changes you made to dirty.txt?");
+check("the close prompt warns that changes will be lost",
+  closeOverlay?.querySelector(".ws-editor-close__line")?.textContent ===
+    "Your changes will be lost if you don't save them.");
+check("the close prompt's buttons run Save, Don't Save, Cancel",
+  [...dirtyPanel.element.querySelectorAll(".ws-editor-close__button")]
+    .map((button) => button.textContent).join("|") === "Save|Don't Save|Cancel");
+check("the close prompt wears the confirmation skin",
+  closeOverlay?.classList.contains("modal-overlay--confirmation") === true &&
+    closeOverlay.querySelector(".ws-editor-close")?.classList.contains("modal-dialog--confirmation") === true);
+check("Save is the close prompt's primary button",
+  closeButton("Save")?.classList.contains("ws-editor-close__button--primary") === true);
 closeButton("Cancel").click();
 await flush();
 check("Cancel keeps the dirty editor open",
@@ -764,9 +779,9 @@ check("Cancel keeps the dirty editor open",
 check("Cancel leaves the editor dirty", dirtyPanel.isDirty());
 const discardClose = watchAnswer(dirtyPanel.confirmClose());
 await flush();
-closeButton("Discard").click();
+closeButton("Don't Save").click();
 await flush();
-check("Discard closes the dirty editor", discardClose.answer === true);
+check("Don't Save closes the dirty editor", discardClose.answer === true);
 
 // Save writes, then confirms once the write succeeds.
 const saveStub = createStubSurface();

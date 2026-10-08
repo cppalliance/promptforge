@@ -1,8 +1,12 @@
 /* Default skin for modal.ts's base classes, on the Cursor Dark tokens.
    Every rule sits in the components layer, so a consumer's own per-prefix
-   dialog styles (the workshop's editor dialogs are absolute-positioned
-   inside their panel) override these defaults regardless of bundle
-   order. */
+   dialog styles override these defaults regardless of bundle order.
+
+   Two skins sit on top of the base, chosen with openModal's `skin`
+   option: the confirmation prompt (save, revert, overwrite) and the form
+   modal (Add Folder, Choose Prompt). Both cover the window; they need no
+   per-dialog copy in a consumer's stylesheet. Their buttons and field
+   take the controls.css classes. */
 
 @layer components {
 	/* Dimmed full-container overlay centering the card, by default over
@@ -28,5 +32,119 @@
 		justify-content: flex-end;
 		gap: 0.5rem;
 		margin-block-start: 1rem;
+	}
+
+	/* Confirmation skin: Cursor's workbench dialog. A 0.5 scrim, the card
+	   200px from the top, 300px to min(560px, 92vw) wide, #181818 with a
+	   hairline border and an 8px radius, 12px padding and text, and the
+	   buttons 4px apart. The title is the message and the paragraph its
+	   detail. */
+	.modal-overlay--confirmation {
+		z-index: 2600;
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		padding-top: 200px;
+		background: rgba(0,0,0,.5);
+	}
+	.modal-dialog--confirmation {
+		box-sizing: border-box;
+		width: auto;
+		min-width: 300px;
+		max-width: min(560px, 92vw);
+		padding: var(--space-3);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		background: var(--cursor-editor);
+		box-shadow: 0 4px 20px rgba(0,0,0,.15);
+		color: var(--cursor-text-primary);
+		font-size: var(--font-size-sm);
+	}
+	.modal-dialog--confirmation > h2 {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+	}
+	.modal-dialog--confirmation > p {
+		margin: var(--space-1) 0 0;
+		color: var(--cursor-text-secondary);
+	}
+	.modal-dialog--confirmation .modal-actions {
+		gap: var(--space-1);
+		margin-block-start: var(--space-3);
+	}
+
+	/* Form skin: the card Cursor's settings pages and quick prompts open.
+	   A 320px card with a 12px radius and a 12% stroke and no shadow; a
+	   14px title in a 12px 16px header, a body padded 12px 16px 16px, and
+	   a footer padded 10px over an 8% top border. It opens in 300ms,
+	   scaling up from 0.97. */
+	.modal-overlay--form {
+		z-index: 2600;
+		background: rgba(0,0,0,.5);
+	}
+	.modal-dialog--form {
+		box-sizing: border-box;
+		width: 320px;
+		max-width: calc(100vw - 2rem);
+		padding: 0;
+		border: 1px solid var(--cursor-stroke-secondary);
+		border-radius: var(--radius-xl);
+		background: var(--cursor-editor);
+		box-shadow: none;
+		color: var(--cursor-text-primary);
+		animation: modal-form-open var(--duration-slower) var(--ease-out-cubic) both;
+	}
+	.modal-dialog--form > h2 {
+		margin: 0;
+		padding: var(--space-3) var(--space-4);
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-medium);
+	}
+	.modal-dialog--form > p {
+		margin: 0;
+		padding: var(--space-3) var(--space-4) 0;
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-base);
+	}
+	.modal-dialog--form > div:not(.modal-actions) {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-3) var(--space-4) var(--space-4);
+	}
+	.modal-dialog--form > div:not(.modal-actions) label {
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+	}
+	.modal-dialog--form > div:not(.modal-actions) .input {
+		box-sizing: border-box;
+		width: 100%;
+	}
+	.modal-dialog--form > p + .modal-actions {
+		margin-block-start: var(--space-4);
+	}
+	.modal-dialog--form .modal-actions {
+		gap: var(--space-2);
+		margin: 0;
+		padding: 10px;
+		border-top: 1px solid var(--cursor-stroke-tertiary);
+	}
+
+	@keyframes modal-form-open {
+		from {
+			opacity: 0;
+			transform: scale(0.97);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.modal-dialog--form {
+			animation: none;
+		}
 	}
 }

@@ -1,11 +1,11 @@
 // The look boundary guard: `@workshop/look` is the family's base visual
-// layer, so its sources import only their own files and `lucide`. Walks
+// layer, so its sources import only their own files. Walks
 // every `.ts` and `.css` file outside `test/` and `node_modules/` and
 // fails on any import, re-export, dynamic import, triple-slash reference,
-// or CSS `@import` whose specifier is neither a relative path that stays
-// inside the package nor `lucide`, naming the offending file and
+// or CSS `@import` whose specifier is not a relative path that stays
+// inside the package, naming the offending file and
 // specifier. `shared-ui`, the Workshop UI, other `@workshop/*` packages,
-// and escaping relative paths all fail. Type-only imports count: the scan
+// `lucide`, and escaping relative paths all fail. Type-only imports count: the scan
 // reads source text, so nothing is elided before it looks. No jsdom: this
 // is a source-text check.
 // Run: node test/boundary.mjs (from crates/workshop/look).
@@ -44,9 +44,8 @@ export function importSpecifiers(file, text) {
 }
 
 export function violation(file, specifier) {
-  if (specifier === "lucide") return null;
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
-    return "not a relative path or lucide";
+    return "not a relative path";
   }
   const relative = path.relative(lookDir, path.resolve(path.dirname(file), specifier));
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
@@ -99,12 +98,14 @@ test("the scan reads every import form", () => {
   assert.deepEqual(importSpecifiers(path.join(lookDir, "probe.css"), css), ["./a.css", "./b.css", "./c.css"]);
 });
 
-test("the classifier admits own files and lucide and rejects everything else", () => {
+test("the classifier admits own files and rejects everything else, lucide included", () => {
   const from = path.join(lookDir, "toast.ts");
-  for (const specifier of ["./toast.css", "./icons", "../look/modal", "lucide"]) {
+  for (const specifier of ["./toast.css", "./icons", "../look/modal"]) {
     assert.equal(violation(from, specifier), null, `${specifier} should be allowed`);
   }
   for (const specifier of [
+    "lucide",
+    "@vscode/codicons",
     "shared-ui/toast",
     "@workshop/ui",
     "@workshop/shell",
@@ -117,7 +118,7 @@ test("the classifier admits own files and lucide and rejects everything else", (
   }
 });
 
-test("no look source imports outside the package or lucide", async () => {
+test("no look source imports outside the package", async () => {
   const offenders = [];
   for (const file of files) {
     for (const specifier of importSpecifiers(file, await readFile(file, "utf8"))) {

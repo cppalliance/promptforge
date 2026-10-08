@@ -43,10 +43,12 @@ export function addFolderToWorkspace(
     titleId: "workspace-add-title",
     title: "Add Folder to Workspace",
     message: "Enter the full path of a folder to browse in the Workshop.",
+    skin: "form",
     field: { id: "workspace-add-path", label: "Folder path" },
     buttons: [
       {
         label: "Add",
+        primary: true,
         requiresValue: true,
         run: (value) => {
           void grantFolder(value, statusBar);

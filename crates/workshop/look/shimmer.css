@@ -1,33 +1,63 @@
 /* The shimmering text treatment: a clone of Cursor's own agent-panel
    status shimmer (the .make-shine class on its "Thinking" / "Planning
    next moves" spans), recovered verbatim from the installed workbench
-   stylesheet and mapped onto the shared tokens. The base is the
-   foreground token at 60%; the bright stop is the primary text token.
-   The sweep runs left to right on a 2s loop over a 200% background.
+   stylesheet and mapped onto the shared tokens. The sweep runs left to
+   right over a 200% background and reads three variables, so a surface
+   tunes it without a new keyframe:
 
-   A consumer that re-renders the labelled element (a dock tab title)
-   keeps the sweep continuous by setting a negative animation-delay
-   computed against a module-level epoch:
-   el.style.animationDelay = `-${(Date.now() - epoch) % 2000}ms`.
+   --shimmer-base      the resting color the sweep runs through
+   --shimmer-peak      the bright stop at the sweep's center
+   --shimmer-duration  the length of one loop
+
+   The defaults are the original treatment: a 2s loop from the primary
+   text token at 60% to the primary text token. The three tone modifiers
+   below are the transcript's 1s variants.
+
+   Keep the sweep continuous across re-renders and in phase between
+   elements with setShimmer from shimmer.ts, which sets the negative
+   animation-delay from one module start time.
 
    Under prefers-reduced-motion the animation, gradient, clip, and
-   transparent fill all come off and the text renders as solid muted
-   foreground (Cursor's glass variant's behavior). */
+   transparent fill all come off and the text renders in the row's own
+   color (Cursor's glass variant's behavior). */
 
 .ws-shimmer-text {
 	background-image: linear-gradient(
 		90deg,
-		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 0,
-		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 25%,
-		var(--cursor-text-primary) 60%,
-		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 75%,
-		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 100%
+		var(--shimmer-base, color-mix(in srgb, var(--cursor-text-primary) 60%, transparent)) 0,
+		var(--shimmer-base, color-mix(in srgb, var(--cursor-text-primary) 60%, transparent)) 25%,
+		var(--shimmer-peak, var(--cursor-text-primary)) 60%,
+		var(--shimmer-base, color-mix(in srgb, var(--cursor-text-primary) 60%, transparent)) 75%,
+		var(--shimmer-base, color-mix(in srgb, var(--cursor-text-primary) 60%, transparent)) 100%
 	);
 	background-size: 200% 100%;
 	background-clip: text;
 	-webkit-background-clip: text;
 	-webkit-text-fill-color: transparent;
-	animation: shine 2s linear infinite;
+	animation: shine var(--shimmer-duration, 2s) linear infinite;
+}
+
+/* The transcript's tail status ("Planning next moves", "Reconnecting..."):
+   secondary at 60% to secondary. */
+.ws-shimmer-text--status {
+	--shimmer-base: color-mix(in srgb, var(--cursor-text-secondary) 60%, transparent);
+	--shimmer-peak: var(--cursor-text-secondary);
+	--shimmer-duration: 1s;
+}
+
+/* A thinking header: tertiary at 60% to secondary. */
+.ws-shimmer-text--thinking {
+	--shimmer-base: color-mix(in srgb, var(--cursor-text-tertiary) 60%, transparent);
+	--shimmer-peak: var(--cursor-text-secondary);
+	--shimmer-duration: 1s;
+}
+
+/* A running tool's verb: secondary at 60% (tertiary inside the muted
+   scope, where the tiers shift down) to the primary text at 60%. */
+.ws-shimmer-text--tool {
+	--shimmer-base: color-mix(in srgb, var(--cursor-text-secondary) 60%, transparent);
+	--shimmer-peak: color-mix(in srgb, var(--cursor-text-primary) 60%, transparent);
+	--shimmer-duration: 1s;
 }
 
 @keyframes shine {
@@ -46,6 +76,5 @@
 		background-clip: unset;
 		-webkit-background-clip: unset;
 		-webkit-text-fill-color: unset;
-		color: var(--text-muted);
 	}
 }

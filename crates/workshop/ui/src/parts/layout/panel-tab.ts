@@ -9,10 +9,10 @@
 // call, then focus the neighbouring tab once the panel closes, and do
 // nothing on a `closable: false` type.
 //
-// The loading shimmer: while its panel is loading, the title span takes
-// @workshop/look's .ws-shimmer-text; the negative animation-delay against
-// the module-level epoch keeps the sweep continuous across the re-renders
-// a tab title goes through (the same trick upstream VS Code uses). Header
+// The loading shimmer: while its panel is loading, the title span shimmers
+// through @workshop/look's setShimmer, whose shared phase keeps the sweep
+// continuous across the re-renders a tab title goes through and in step
+// with every other shimmering element. Header
 // tabs register themselves by panel id in the module map below on init
 // and remove themselves on dispose; a panel drives its shimmer through
 // setTabLoading without holding a reference to the tab. Dockview's
@@ -22,6 +22,7 @@
 
 import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
+import { setShimmer } from "@workshop/look/shimmer";
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { MenuId } from "@workshop/platform/menu-registry";
 import { DOCK, panelTypeEntry } from "@workshop/platform/panel-registry";
@@ -62,12 +63,6 @@ function closeAndRefocus(panelId: string): void {
       reportCommandFailure("workbench.action.closeActiveEditor", error);
     });
 }
-
-/** The shimmer period, matching the 2s loop in @workshop/look/shimmer.css. */
-const SHIMMER_PERIOD_MS = 2000;
-// The epoch the negative animation-delay is computed against, so a
-// re-rendered title continues the sweep instead of restarting it.
-const SHIMMER_EPOCH = Date.now();
 
 /** The live tabs, by panel id. */
 const tabs = new Map<string, PanelTab>();
@@ -186,13 +181,7 @@ export class PanelTab extends Disposable implements ITabRenderer {
   }
 
   private applyLoading(): void {
-    if (this.loading) {
-      this.content.classList.add("ws-shimmer-text");
-      this.content.style.animationDelay = `-${((Date.now() - SHIMMER_EPOCH) % SHIMMER_PERIOD_MS + SHIMMER_PERIOD_MS) % SHIMMER_PERIOD_MS}ms`;
-    } else {
-      this.content.classList.remove("ws-shimmer-text");
-      this.content.style.animationDelay = "";
-    }
+    setShimmer(this.content, this.loading);
   }
 
   public override dispose(): void {

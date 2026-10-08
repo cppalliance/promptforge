@@ -377,9 +377,9 @@ check(
   "a second Close while the prompt is up declines at once and opens no second prompt",
   again.settled && !asking.settled && promptsIn(unsaved) === 1 && isOpen(unsaved),
 );
-check("the prompt offers Discard", clickPrompt(unsaved, "Discard"));
+check("the prompt offers Don't Save", clickPrompt(unsaved, "Don't Save"));
 await flush();
-check("Discard closes the unsaved editor", !isOpen(unsaved) && asking.settled);
+check("Don't Save closes the unsaved editor", !isOpen(unsaved) && asking.settled);
 check("closing the unsaved editor leaves the other editor open", isOpen(other));
 
 // --- Close Others: confirm the batch in turn, then close it together ----------
@@ -437,9 +437,9 @@ check("Close Others settles after the second Cancel", cancelSecond.settled);
 surfaces.get("one.txt").type("one again\n");
 const answered = track(Commands.execute(CLOSE_OTHERS, { panelId: keep.id }));
 await flush();
-clickPrompt(one, "Discard");
+clickPrompt(one, "Don't Save");
 await flush();
-clickPrompt(two, "Discard");
+clickPrompt(two, "Don't Save");
 await flush();
 check(
   "answering both prompts closes every other closable panel, clean ones included",
@@ -457,7 +457,7 @@ const voided = track(Commands.execute(CLOSE_OTHERS, { panelId: keep.id }));
 await flush();
 check("the batch reaches the unsaved editor's prompt", promptsIn(three) === 1);
 surfaces.get("edited.txt").type("typed during the prompt\n");
-clickPrompt(three, "Discard");
+clickPrompt(three, "Don't Save");
 await flush();
 check(
   "an editor edited after its confirmation voids the batch",
@@ -477,7 +477,7 @@ const skipping = track(Commands.execute(CLOSE_OTHERS, { panelId: keep.id }));
 await flush();
 check("the batch reaches the last unsaved editor's prompt", promptsIn(four) === 1);
 dock.removePanel(gone);
-clickPrompt(four, "Discard");
+clickPrompt(four, "Don't Save");
 await flush();
 check(
   "a panel that left the dock mid-batch is skipped while the rest close",

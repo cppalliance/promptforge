@@ -1,58 +1,71 @@
-/* Button, input, and select base classes for the Workshop family's UIs,
-   on the Cursor Dark tokens from tokens.css. The rules live in the
+/* Button, input, select, and switch base classes for the Workshop family's
+   UIs, on the Cursor Dark tokens from tokens.css. The rules live in the
    components cascade layer: a consuming UI that declares its own layer
    order keeps its overrides winning on specificity, and a consuming UI
    with no layers (the workshop) lets its unlayered rules override these.
-   Interactive classes inherit the consuming UI's focus convention - no
-   focus frames are added here. */
+   The menu scrollbar rules at the end are the one exception.
+
+   Focus follows Cursor: inputs, selects, list rows, and tree rows draw the
+   1px --focus-outline inside their box (offset -1px); every other control
+   uses its state background. */
 
 @layer components {
-	/* Buttons: rounded-full, h-9 default / h-8 sm / h-6 xs. */
+	/* Buttons: 24px tall, 8px padding, 6px radius, 13px weight 400. -sm is
+	   20px tall with a 4px radius. A variant class picks the fill. */
 	.button {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.375rem;
-		height: 2.25rem;
-		padding-inline: 0.75rem;
+		gap: var(--space-1);
+		height: var(--height-sm);
+		padding-inline: var(--space-2);
 		border: 1px solid transparent;
-		border-radius: 9999px;
+		border-radius: var(--radius);
 		background: transparent;
 		color: var(--cursor-text-primary);
-		font-size: 0.8125rem;
-		font-weight: 500;
+		font-size: var(--font-size-base);
+		font-weight: 400;
 		white-space: nowrap;
 		cursor: pointer;
-		transition: background-color 140ms ease-out, color 140ms ease-out,
-			border-color 140ms ease-out;
+		transition: background-color var(--duration-normal) ease-out, color var(--duration-normal) ease-out,
+			border-color var(--duration-normal) ease-out;
 	}
 	.button:disabled {
-		opacity: 0.5;
+		border-color: transparent;
+		background: var(--cursor-control-disabled-bg);
+		color: var(--cursor-control-disabled-text);
 		pointer-events: none;
 	}
 	.button-sm {
-		height: 2rem;
+		height: var(--height-xs);
+		border-radius: var(--radius-sm);
 	}
-	.button-xs {
-		height: 1.5rem;
-		padding-inline: 0.625rem;
-		font-size: 0.75rem;
-	}
-	/* Dark label on the gold accent: the chrome color on --accent
-	   measures well past WCAG AA. */
+	/* Dark label on Cursor's accent; hover mixes 10% white into it. */
 	.button-primary {
-		background: var(--accent);
-		color: var(--cursor-chrome);
+		background: var(--cursor-accent);
+		color: var(--cursor-text-invert);
 	}
 	.button-primary:hover {
-		background: var(--accent-bright);
+		background: var(--cursor-accent-hover);
+	}
+	.button-secondary {
+		background: var(--cursor-bg-tertiary);
+	}
+	.button-secondary:hover {
+		background: var(--cursor-bg-secondary);
+	}
+	.button-ghost {
+		background: transparent;
+	}
+	.button-ghost:hover {
+		background: var(--cursor-bg-tertiary);
 	}
 	.button-outline {
-		border-color: var(--border);
-		background: var(--cursor-bg-quaternary);
+		border-color: var(--cursor-stroke-secondary);
+		background: transparent;
 	}
 	.button-outline:hover {
-		background: var(--cursor-bg-tertiary);
+		background: var(--cursor-bg-quaternary);
 	}
 	.button-danger {
 		border-color: var(--danger);
@@ -63,15 +76,19 @@
 		background: color-mix(in srgb, var(--danger) 15%, transparent);
 	}
 
-	/* Text input: rounded-full on the Cursor input surface. */
+	/* Text input: 24px tall, 4px 5px padding, a 1px border at 12% that rises
+	   to 20% on focus, a 6px radius, a 3% fill, 13px/18px text, 150ms
+	   transitions. */
 	.input {
-		height: 2.25rem;
-		padding-inline: 0.875rem;
-		border: 1px solid transparent;
-		border-radius: 9999px;
-		background: var(--cursor-bg-input-surface);
+		height: var(--height-sm);
+		padding: var(--space-1) 5px;
+		border: 1px solid var(--cursor-stroke-secondary);
+		border-radius: var(--radius);
+		background: var(--cursor-bg-input-field);
 		color: var(--cursor-text-primary);
-		font-size: 0.8125rem;
+		font-size: var(--font-size-base);
+		line-height: var(--line-height-base);
+		transition: border-color var(--duration-normal) ease, background-color var(--duration-normal) ease;
 	}
 	.input::placeholder {
 		color: var(--input-placeholder);
@@ -79,52 +96,134 @@
 	input::-ms-reveal {
 		display: none;
 	}
-	.input:hover {
-		background: var(--cursor-bg-tertiary);
+	.input:focus {
+		border-color: var(--cursor-stroke-primary);
+	}
+	.input:disabled {
+		background: var(--cursor-control-disabled-bg);
+		color: var(--cursor-control-disabled-text);
 	}
 	textarea.input {
 		height: auto;
-		padding-block: 0.625rem;
-		border-radius: 0.75rem;
 	}
 
-	/* Select trigger: same pill-and-soft-surface family as .input. */
+	/* Select trigger: 12px text, a 12% border, a 6px radius, and room on the
+	   right for the caret. */
 	.select {
 		display: inline-flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.5rem;
-		height: 2.25rem;
-		padding-inline: 0.875rem;
-		border: 1px solid transparent;
-		border-radius: 9999px;
-		background: var(--cursor-bg-input-surface);
+		gap: var(--space-2);
+		padding: 3px 2px 3px 6px;
+		border: 1px solid var(--cursor-stroke-secondary);
+		border-radius: var(--radius);
+		background: transparent;
 		color: var(--cursor-text-primary);
-		font-size: 0.8125rem;
+		font-size: var(--font-size-sm);
 		cursor: pointer;
+		transition: border-color var(--duration-normal) ease, background-color var(--duration-normal) ease;
 	}
 	.select::after {
 		content: "";
 		width: 0.4rem;
 		height: 0.4rem;
+		margin-inline-end: var(--space-1);
 		border-inline-end: 1px solid currentcolor;
 		border-block-end: 1px solid currentcolor;
 		transform: translateY(-0.125rem) rotate(45deg);
 	}
 	.select:hover {
-		background: var(--cursor-bg-tertiary);
+		background: var(--cursor-bg-quaternary);
 	}
 	.select:disabled {
+		background: var(--cursor-control-disabled-bg);
+		color: var(--cursor-control-disabled-text);
+		cursor: not-allowed;
+	}
+
+	/* Switch, on a <button role="switch" aria-checked>: a 32x20 track, 14%
+	   white when off and green when on, with a 16px white thumb that moves
+	   12px over 200ms. The thumb is the ::after. */
+	.switch {
+		position: relative;
+		display: inline-flex;
+		flex-shrink: 0;
+		align-items: center;
+		width: 32px;
+		height: 20px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-full);
+		background: var(--cursor-bg-secondary);
+		cursor: pointer;
+		transition: background-color var(--duration-slow) ease;
+	}
+	.switch::after {
+		content: "";
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: white;
+		transform: translateX(0);
+		transition: transform var(--duration-slow) ease;
+	}
+	.switch[aria-checked="true"] {
+		background: var(--cursor-green);
+	}
+	.switch[aria-checked="true"]::after {
+		transform: translateX(12px);
+	}
+	.switch:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
-	.select-sm {
-		height: 2rem;
+
+	/* The shared focus outline: 1px inside the box, on inputs, selects, and
+	   the list and tree rows a view marks with .list-row or .tree-row. Menu
+	   rows draw it from dropdown.css. */
+	.input:focus-visible,
+	.select:focus-visible,
+	.list-row:focus-visible,
+	.tree-row:focus-visible {
+		outline: var(--focus-outline);
+		outline-offset: var(--focus-outline-offset);
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.button {
+		.button,
+		.input,
+		.select,
+		.switch,
+		.switch::after {
 			transition: none;
 		}
 	}
+}
+
+/* Menu scrollbars: 7px. These rules sit outside the components layer on
+   purpose. The view scrollbars (::-webkit-scrollbar in the consuming UI's
+   base sheet, through the same tokens) are unlayered, and an unlayered rule
+   beats a layered one whatever the specificity, so a layered menu rule would
+   leave a .scrollbar-menu element on the 10px hover-only view bar. Unlayered
+   here, the extra class wins on specificity. Chromium ignores
+   ::-webkit-scrollbar on an element that sets scrollbar-width, so the
+   standard property is only for engines without the pseudo-elements. */
+@supports not selector(::-webkit-scrollbar) {
+	.scrollbar-menu {
+		scrollbar-width: thin;
+	}
+}
+.scrollbar-menu::-webkit-scrollbar {
+	width: var(--scrollbar-width-menu);
+	height: var(--scrollbar-width-menu);
+}
+.scrollbar-menu::-webkit-scrollbar-thumb {
+	border-radius: 0;
+	background: var(--scrollbar-thumb);
+}
+.scrollbar-menu::-webkit-scrollbar-thumb:hover {
+	background: var(--scrollbar-thumb-hover);
 }

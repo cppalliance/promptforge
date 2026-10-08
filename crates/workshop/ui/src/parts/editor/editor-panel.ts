@@ -294,6 +294,7 @@ export class EditorPanel extends WorkshopPart {
         titleId: "editor-revert-title",
         title: "Revert file",
         message: `${this.title} has unsaved changes. Reverting to the on-disk text discards them.`,
+        skin: "confirmation",
         buttons: [
           {
             label: "Revert",
@@ -419,6 +420,7 @@ export class EditorPanel extends WorkshopPart {
       titleId: "editor-conflict-title",
       title: "File changed on disk",
       message,
+      skin: "confirmation",
       buttons: [
         {
           label: "Reload",
@@ -446,7 +448,7 @@ export class EditorPanel extends WorkshopPart {
   /**
    * Whether the panel may close. A clean panel answers true at once; a
    * dirty one opens the unsaved-changes dialog, answering true after a
-   * successful Save or after Discard and false on Cancel, Escape, a
+   * successful Save or after Don't Save and false on Cancel, Escape, a
    * failed save, or the panel's disposal before any of those. A request
    * made while the dialog's answer is pending answers false instead of
    * opening a second dialog.
@@ -470,10 +472,10 @@ export class EditorPanel extends WorkshopPart {
   }
 
   /**
-   * The unsaved-changes modal. Save answers once the write settles, true
-   * only when it left the panel clean; Discard answers true without
-   * writing; Cancel and Escape answer false, as does disposing the panel
-   * before any answer. `answer` runs once.
+   * The unsaved-changes modal, Cursor's save prompt. Save answers once the
+   * write settles, true only when it left the panel clean; Don't Save
+   * answers true without writing; Cancel and Escape answer false, as does
+   * disposing the panel before any answer. `answer` runs once.
    */
   private showCloseDialog(answer: (confirmed: boolean) => void): void {
     let answered = false;
@@ -487,12 +489,14 @@ export class EditorPanel extends WorkshopPart {
       container: this.element,
       classPrefix: "ws-editor-close",
       titleId: "editor-close-title",
-      title: "Unsaved changes",
-      message: `${this.title} has unsaved changes. Save before closing, or discard them.`,
+      title: `Do you want to save the changes you made to ${this.title}?`,
+      message: "Your changes will be lost if you don't save them.",
+      skin: "confirmation",
       onDismiss: () => reply(false),
       buttons: [
         {
           label: "Save",
+          primary: true,
           run: () => {
             void this.save()
               // A failed or conflicted save, or a keystroke typed during
@@ -504,7 +508,7 @@ export class EditorPanel extends WorkshopPart {
               });
           },
         },
-        { label: "Discard", danger: true, run: () => reply(true) },
+        { label: "Don't Save", run: () => reply(true) },
         { label: "Cancel", run: () => reply(false) },
       ],
     });
