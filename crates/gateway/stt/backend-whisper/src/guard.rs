@@ -5,9 +5,9 @@
 const NO_SPEECH_THRESHOLD: f32 = 0.6;
 /// A pass below this mean token log-probability is a low-confidence guess.
 const LOG_PROBABILITY_THRESHOLD: f32 = -1.0;
-/// Consecutive copies of one n-gram that mark a decoder loop; two copies are
-/// common in real speech.
-const LOOP_COPIES: usize = 3;
+/// Consecutive copies of one n-gram that mark a decoder loop; people repeat
+/// a word or short phrase up to three times for emphasis, as in "no no no".
+const LOOP_COPIES: usize = 4;
 
 /// Token evidence from one interim pass.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn a_word_repeated_three_times_collapses_to_one() {
+    fn a_word_repeated_four_times_collapses_to_one() {
         assert_eq!(
             guard_interim("the the the the cat sat", confident()),
             "the cat sat"
@@ -273,12 +273,12 @@ mod tests {
     #[test]
     fn a_phrase_loop_collapses_to_one_copy_ending_with_the_last_copy() {
         assert_eq!(
-            guard_interim("And I said, I said, I said. Hello", confident()),
+            guard_interim("And I said, I said, I said, I said. Hello", confident()),
             "And I said. Hello"
         );
         assert_eq!(
             guard_interim(
-                "Then we go there, We go there, we go THERE. Done",
+                "Then we go there, We go there, we go there, we go THERE. Done",
                 confident()
             ),
             "Then we go THERE. Done",
@@ -290,6 +290,13 @@ mod tests {
     fn two_copies_are_not_a_loop() {
         let text = "it was very very good, good";
         assert_eq!(guard_interim(text, confident()), text);
+    }
+
+    #[test]
+    fn three_copies_are_emphasis_not_a_loop() {
+        for text in ["No no no, stop", "And I said, I said, I said. Hello"] {
+            assert_eq!(guard_interim(text, confident()), text, "{text} stays");
+        }
     }
 
     #[test]
