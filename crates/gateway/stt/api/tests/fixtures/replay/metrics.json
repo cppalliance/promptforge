@@ -3,14 +3,14 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 12,
     "changed_words": 41,
-    "commit_lag_ms": 626.0909090909091,
+    "commit_lag_ms": 511.8181818181818,
     "completed_words": 22,
-    "lag_sum_ms": 13774.0,
+    "lag_sum_ms": 11260.0,
     "lag_words": 22,
-    "latency_sum_ms": 20766.0,
+    "latency_sum_ms": 23280.0,
     "latency_words": 22,
     "pairs": 22,
-    "partial_latency_ms": 943.9090909090909,
+    "partial_latency_ms": 1058.1818181818182,
     "upsr": 0.5454545454545454,
     "upwr": 1.8636363636363635
   },
@@ -18,14 +18,14 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 11,
     "changed_words": 46,
-    "commit_lag_ms": 691.3636363636364,
+    "commit_lag_ms": 463.45454545454544,
     "completed_words": 22,
-    "lag_sum_ms": 15210.0,
+    "lag_sum_ms": 10196.0,
     "lag_words": 22,
-    "latency_sum_ms": 19225.0,
+    "latency_sum_ms": 31052.0,
     "latency_words": 22,
     "pairs": 22,
-    "partial_latency_ms": 873.8636363636364,
+    "partial_latency_ms": 1411.4545454545455,
     "upsr": 0.5,
     "upwr": 2.090909090909091
   },
@@ -42,12 +42,12 @@
     "changed_words": 4,
     "commit_lag_ms": 500.0,
     "completed_words": 5,
-    "lag_sum_ms": 2000.0,
-    "lag_words": 4,
-    "latency_sum_ms": -350.0,
-    "latency_words": 5,
+    "lag_sum_ms": 1500.0,
+    "lag_words": 3,
+    "latency_sum_ms": 420.0,
+    "latency_words": 4,
     "pairs": 6,
-    "partial_latency_ms": -70.0,
+    "partial_latency_ms": 105.0,
     "upsr": 0.3333333333333333,
     "upwr": 0.8
   },
@@ -55,14 +55,14 @@
     "agreed_shrink_events": 0,
     "changed_pairs": 1,
     "changed_words": 6,
-    "commit_lag_ms": 662.5,
+    "commit_lag_ms": 620.8333333333334,
     "completed_words": 12,
-    "lag_sum_ms": 7950.0,
+    "lag_sum_ms": 7450.0,
     "lag_words": 12,
-    "latency_sum_ms": 6700.0,
+    "latency_sum_ms": 10350.0,
     "latency_words": 12,
     "pairs": 9,
-    "partial_latency_ms": 558.3333333333334,
+    "partial_latency_ms": 862.5,
     "upsr": 0.1111111111111111,
     "upwr": 0.5
   },
@@ -172,14 +172,6 @@
     "upwr": 0.0
   },
   "ui": {
-    "jfk-native-recaptured": {
-      "changed_pairs": 3,
-      "changed_words": 35,
-      "completed_words": 22,
-      "pairs": 22,
-      "upsr": 0.13636363636363635,
-      "upwr": 1.5909090909090908
-    },
     "jfk-native": {
       "changed_pairs": 4,
       "changed_words": 29,
@@ -187,6 +179,14 @@
       "pairs": 22,
       "upsr": 0.18181818181818182,
       "upwr": 1.3181818181818181
+    },
+    "jfk-native-recaptured": {
+      "changed_pairs": 3,
+      "changed_words": 35,
+      "completed_words": 22,
+      "pairs": 22,
+      "upsr": 0.13636363636363635,
+      "upwr": 1.5909090909090908
     },
     "scripted-agreed-shrink": {
       "changed_pairs": 1,
@@ -244,7 +244,7 @@
       "upsr": 0.1111111111111111,
       "upwr": 0.8666666666666667
     },
-    "scripted-trailing-echo-same-pass": {
+    "scripted-trailing-echo": {
       "changed_pairs": 0,
       "changed_words": 0,
       "completed_words": 15,
@@ -252,7 +252,7 @@
       "upsr": 0,
       "upwr": 0
     },
-    "scripted-trailing-echo": {
+    "scripted-trailing-echo-same-pass": {
       "changed_pairs": 0,
       "changed_words": 0,
       "completed_words": 15,

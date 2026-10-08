@@ -6,12 +6,21 @@ use gateway_stt::test_fixtures::{ReplayFinal, ReplaySnapshot};
 use serde::{Deserialize, Serialize};
 
 /// One take's metrics plus the sums and counts that aggregate them across takes.
+///
+/// The latency metrics are regression proxies, not measured recognition
+/// latency: a word's audio end is estimated by [`audio_end_ms`], and a word
+/// counts as shown only at its position in the transcript.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Metrics {
     pub(super) upwr: f64,
     pub(super) upsr: f64,
+    /// Mean time from each completed word's estimated audio end to the first
+    /// snapshot that shows that word, ignoring case and punctuation, at its
+    /// position.
     pub(super) partial_latency_ms: f64,
+    /// Mean time from that first showing to the first snapshot whose
+    /// finalized and agreed text holds the word at its position.
     pub(super) commit_lag_ms: f64,
     pub(super) agreed_shrink_events: usize,
     pub(super) changed_words: usize,
@@ -57,18 +66,25 @@ pub(super) fn compute(
         .collect::<Vec<_>>();
     let changed = counts.iter().sum();
     let changed_pairs = counts.iter().filter(|count| **count > 0).count();
-    let completed_words = words(completed).len();
+    let targets = words(completed)
+        .into_iter()
+        .map(normalized)
+        .collect::<Vec<_>>();
+    let completed_words = targets.len();
 
     let mut latency = Mean::default();
     let mut lag = Mean::default();
-    for position in 0..completed_words {
+    for (position, target) in targets.iter().enumerate() {
         let first = snapshots
             .iter()
-            .find(|snapshot| words(&snapshot.transcript).len() > position)
+            .find(|snapshot| holds(&snapshot.transcript, position, target))
             .map(|snapshot| millis(snapshot.at_ms));
         let stable = snapshots
             .iter()
-            .find(|snapshot| stable_words(snapshot) > position)
+            .find(|snapshot| {
+                let stable = format!("{}{}", snapshot.finalized, snapshot.agreed);
+                holds(&stable, position, target)
+            })
             .map(|snapshot| millis(snapshot.at_ms));
         if let (Some(first), Some(end)) = (first, audio_end_ms(finals, position)) {
             latency.add(first - end);
@@ -168,8 +184,19 @@ fn changed_words(earlier: &str, later: &str) -> usize {
     earlier.len() - common
 }
 
-fn stable_words(snapshot: &ReplaySnapshot) -> usize {
-    words(&format!("{}{}", snapshot.finalized, snapshot.agreed)).len()
+/// Whether `text` shows the normalized word `target` at word `position`.
+fn holds(text: &str, position: usize, target: &str) -> bool {
+    words(text)
+        .get(position)
+        .is_some_and(|word| normalized(word) == target)
+}
+
+/// `word` lowercased to its letters and digits.
+fn normalized(word: &str) -> String {
+    word.chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn agreed_shrink_events(snapshots: &[ReplaySnapshot]) -> usize {
@@ -183,8 +210,9 @@ fn agreed_shrink_events(snapshots: &[ReplaySnapshot]) -> usize {
         .count()
 }
 
-/// Interpolates the audio end of `position` within the final that covers it:
-/// the j-th of n words of a final over [s, e] ends at s + (e - s) * j / n.
+/// Estimates the audio end of `position` within the final that covers it:
+/// the j-th of n words of a final over [s, e] ends at s + (e - s) * j / n,
+/// as if every word of the final took the same time.
 #[expect(
     clippy::cast_precision_loss,
     reason = "fixture sample positions and word counts are far below 2^53"
@@ -311,6 +339,25 @@ fn partial_latency_and_commit_lag_follow_word_positions() {
     );
     assert_exact(metrics.lag_sum_ms, 900.0 + 900.0 + 1_500.0, "lag sum");
     assert_exact(metrics.commit_lag_ms, 1_100.0, "commit lag");
+}
+
+#[test]
+fn a_position_earns_latency_only_once_it_shows_the_completed_word() {
+    let snapshots = [
+        snapshot(1_000, "", "", "ass"),
+        snapshot(1_500, "", "", "Ask not,"),
+        snapshot(2_000, "", "ask not", ""),
+    ];
+    let finals = [final_text(0, 16_000, "Ask not")];
+    let metrics = compute(&snapshots, "Ask not", &finals);
+
+    assert_eq!(metrics.latency_words, 2);
+    assert_exact(
+        metrics.latency_sum_ms,
+        (1_500.0 - 500.0) + (1_500.0 - 1_000.0),
+        "the wrong word at 1000 ms earns no credit; case and punctuation do not count",
+    );
+    assert_exact(metrics.lag_sum_ms, 500.0 + 500.0, "lag sum");
 }
 
 #[test]
