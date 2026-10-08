@@ -5,7 +5,11 @@
 // them; late deltas after their round settled are dropped; the input pin
 // follows input_required / input_cancelled / respond; a session
 // acknowledgment resets the pin and a new session id resets the
-// transcript; errors fold as items. Run: node test/agent-session-service.mjs
+// transcript; errors fold as items. The turn's liveness rides along: an
+// injected clock stamps each thought's start and end, `generating` and
+// `reconnecting` follow their rules, `cancelTurn` settles the service's
+// own view, tool rows carry their bound tool id, and errors carry their
+// popup title. Run: node test/agent-session-service.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +58,7 @@ function makeWire() {
     inputRequired: new Emitter(),
     inputCancelled: new Emitter(),
     error: new Emitter(),
+    disconnect: new Emitter(),
   };
   return {
     onAgents: emitters.agents.event,
@@ -63,10 +68,13 @@ function makeWire() {
     onInputRequired: emitters.inputRequired.event,
     onInputCancelled: emitters.inputCancelled.event,
     onError: emitters.error.event,
+    onDisconnect: emitters.disconnect.event,
     launched: [],
     responses: [],
+    cancels: 0,
     launchResult: true,
     respondResult: true,
+    cancelResult: true,
     launch(agent) {
       this.launched.push(agent);
       return this.launchResult;
@@ -75,7 +83,12 @@ function makeWire() {
       this.responses.push([token, text]);
       return this.respondResult;
     },
+    cancelTurn() {
+      this.cancels++;
+      return this.cancelResult;
+    },
     fire: {
+      disconnect: () => emitters.disconnect.fire(undefined),
       agents: (list) => emitters.agents.fire(list),
       session: (session, agent = "chat") =>
         emitters.session.fire({ type: "agent_session", session, agent }),
@@ -137,7 +150,7 @@ await assertNoLeaks(lifecycle, () => {
     check(
       "the tool-call batch parses into one row per call",
       isDeepStrictEqual(service.items[3].calls, [
-        { id: "call_1", name: "read", args: '{"path":"a"}' },
+        { id: "call_1", name: "read", args: '{"path":"a"}', tool: null },
       ]),
     );
     check(
@@ -347,6 +360,282 @@ await assertNoLeaks(lifecycle, () => {
     );
     check("launch forwards to the wire", service.launch("chat") === true);
     check("the launch named its agent", isDeepStrictEqual(wire.launched, ["chat"]));
+    service.dispose();
+  }
+
+  // --- Reasoning timing: stamps come from the injected clock -----------------
+
+  {
+    const wire = makeWire();
+    const clock = { now: 100 };
+    const service = new AgentSessionService(wire, () => clock.now);
+    wire.fire.delta("reasoning", "hmm", 0);
+    check(
+      "the first reasoning delta stamps startedAt and leaves endedAt open",
+      service.items[0].startedAt === 100 && service.items[0].endedAt === null,
+    );
+    clock.now = 150;
+    wire.fire.delta("reasoning", " ok", 0);
+    check(
+      "a later reasoning delta keeps the round's startedAt",
+      service.items[0].text === "hmm ok" &&
+        service.items[0].startedAt === 100 &&
+        service.items[0].endedAt === null,
+    );
+    clock.now = 250;
+    wire.fire.delta("text", "other round", 1);
+    check(
+      "a text delta of another reply leaves the thinking open",
+      service.items[0].endedAt === null,
+    );
+    clock.now = 400;
+    wire.fire.delta("text", "Hel", 0);
+    check(
+      "the same reply's first text delta ends the thinking",
+      service.items[0].endedAt === 400 && service.items[0].startedAt === 100,
+    );
+    clock.now = 600;
+    wire.fire.delta("text", "lo", 0);
+    check("a later text delta does not move endedAt", service.items[0].endedAt === 400);
+    clock.now = 700;
+    wire.fire.event("agent_thought", "hmm ok settled", { model: "m", reply: 0 });
+    const durable = service.items.find((item) => item.kind === "reasoning" && !item.pending);
+    check(
+      "the durable thought copies both stamps from the pending item",
+      durable !== undefined && durable.startedAt === 100 && durable.endedAt === 400,
+    );
+    wire.fire.event("agent_thought", "replayed", { model: "m", reply: 7 });
+    const replayed = service.items[service.items.length - 1];
+    check(
+      "a durable thought with no pending item has no stamps",
+      replayed.startedAt === null && replayed.endedAt === null,
+    );
+    service.dispose();
+  }
+
+  {
+    const wire = makeWire();
+    const clock = { now: 1000 };
+    const service = new AgentSessionService(wire, () => clock.now);
+    wire.fire.delta("reasoning", "planning", 0);
+    clock.now = 1300;
+    wire.fire.event("agent_thought", "planning", { model: "m", reply: 0 });
+    check(
+      "a round that never streamed text ends its thinking at the durable thought",
+      service.items[0].startedAt === 1000 && service.items[0].endedAt === 1300,
+    );
+
+    clock.now = 2000;
+    wire.fire.delta("reasoning", "thinking about an error", 1);
+    clock.now = 2500;
+    wire.fire.error("boom");
+    const afterError = service.items.find((item) => item.kind === "reasoning" && item.reply === 1);
+    check("an error ends the open thinking", afterError.endedAt === 2500);
+
+    clock.now = 3000;
+    wire.fire.delta("reasoning", "waiting on input", 2);
+    clock.now = 3400;
+    wire.fire.inputRequired("tok1");
+    const afterInput = service.items.find((item) => item.kind === "reasoning" && item.reply === 2);
+    check("input_required ends the open thinking", afterInput.endedAt === 3400);
+    clock.now = 9000;
+    wire.fire.error("again");
+    check(
+      "an error does not move an already-ended thinking",
+      afterInput === service.items.find((item) => item.kind === "reasoning" && item.reply === 2) &&
+        service.items.find((item) => item.kind === "reasoning" && item.reply === 1).endedAt === 2500,
+    );
+    service.dispose();
+  }
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.delta("reasoning", "default clock", 0);
+    check(
+      "without an injected clock the stamp is a finite performance.now() value",
+      Number.isFinite(service.items[0].startedAt) && service.items[0].startedAt >= 0,
+    );
+    service.dispose();
+  }
+
+  // --- generating: respond and answered tool calls turn it on ---------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const seen = [];
+    service.onDidChangeGenerating((value) => seen.push(value));
+    check("generating is off at construction", service.generating === false);
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    check("a wait opening leaves generating off", service.generating === false);
+    wire.respondResult = false;
+    service.respond("fails");
+    check("a failed respond does not turn generating on", service.generating === false);
+    wire.respondResult = true;
+    service.respond("go");
+    check("a successful respond turns generating on", service.generating === true);
+    wire.fire.event("user_message", "go");
+    wire.fire.event("tool_call", '[{"id":"c1","name":"fetch","arguments":{},"tool":"web/fetch"}]', {
+      reply: 0,
+    });
+    check("a tool-call batch alone leaves generating as it was", service.generating === true);
+    wire.fire.event("agent_message", "done", { reply: 1 });
+    check("an agent_message turns generating off", service.generating === false);
+    check("only real changes fired", isDeepStrictEqual(seen, [true, false]));
+    service.dispose();
+  }
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.session("s1");
+    wire.fire.event("user_message", "first turn");
+    wire.fire.event("tool_call", '[{"id":"c1","name":"ask","arguments":{},"tool":"user-input/ask"}]', {
+      reply: 0,
+    });
+    wire.fire.inputRequired("tok1");
+    check("an open wait keeps generating off", service.generating === false);
+    wire.fire.event("tool_call_update", "operator answer", { tool_call_id: "c1" });
+    check(
+      "a tool_call_update answering a model batch call turns generating on",
+      service.generating === true,
+    );
+    wire.fire.inputRequired("tok2");
+    check("input_required turns generating off", service.generating === false);
+    wire.fire.event("user_message", "second turn");
+    wire.fire.event("tool_call_update", "stray", { tool_call_id: "c1" });
+    check(
+      "a tool_call_update whose call is in an earlier turn does not turn generating on",
+      service.generating === false,
+    );
+    wire.fire.event("tool_call_update", "no id");
+    check("a tool_call_update with no call id does not turn generating on", service.generating === false);
+    wire.fire.event("tool_call", '[{"id":"c2","name":"read","arguments":{}}]', { reply: 1 });
+    wire.fire.event("tool_call_update", "body", { tool_call_id: "c2" });
+    check("a result for the current turn's call turns generating on", service.generating === true);
+    wire.fire.error("server said no");
+    check("an error turns generating off", service.generating === false);
+    wire.fire.event("tool_call_update", "body", { tool_call_id: "c2" });
+    check("an answered call turns it back on", service.generating === true);
+    wire.fire.session("s1");
+    check("a same-session acknowledgment leaves generating alone", service.generating === true);
+    wire.fire.session("s2");
+    check("an acknowledgment with a new session id turns generating off", service.generating === false);
+    service.dispose();
+  }
+
+  // --- reconnecting: disconnect on, next acknowledgment off ------------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const seen = [];
+    service.onDidChangeReconnecting((value) => seen.push(value));
+    check("reconnecting is off at construction", service.reconnecting === false);
+    wire.fire.disconnect();
+    check("a disconnect turns reconnecting on", service.reconnecting === true);
+    wire.fire.disconnect();
+    wire.fire.session("s1");
+    check("the next acknowledgment turns reconnecting off", service.reconnecting === false);
+    wire.fire.disconnect();
+    wire.fire.session("s1");
+    check(
+      "a same-session reattach acknowledgment also clears it",
+      service.reconnecting === false && isDeepStrictEqual(seen, [true, false, true, false]),
+    );
+    service.dispose();
+  }
+
+  // --- ToolCallRow.tool: the batch entry's tool string, or null ---------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.event(
+      "tool_call",
+      JSON.stringify([
+        { id: "a", name: "search", arguments: { query: "x" }, tool: "web/search" },
+        { id: "b", name: "local", arguments: {} },
+        { id: "c", name: "odd", arguments: {}, tool: 5 },
+        { id: "d", name: "empty", arguments: {}, tool: "" },
+        { id: "e", name: "nul", arguments: {}, tool: null },
+      ]),
+      { reply: 0 },
+    );
+    check(
+      "a batch entry's tool string parses onto its row",
+      isDeepStrictEqual(
+        service.items[0].calls.map((row) => row.tool),
+        ["web/search", null, null, null, null],
+      ),
+    );
+    wire.fire.event("tool_call", "[1, null, [], \"x\"]", { reply: 1 });
+    check("malformed entries produce no rows", service.items[1].calls.length === 0);
+    service.dispose();
+  }
+
+  // --- cancelTurn: forwards, then settles the service's own view --------------
+
+  {
+    const wire = makeWire();
+    const clock = { now: 10 };
+    const service = new AgentSessionService(wire, () => clock.now);
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    service.respond("go");
+    wire.fire.delta("reasoning", "thinking", 0);
+    clock.now = 90;
+    wire.respondResult = true;
+    wire.cancelResult = false;
+    check("a cancel on a down socket reports false", service.cancelTurn() === false);
+    check(
+      "a failed cancel leaves generating and the thinking open",
+      service.generating === true && service.items[0].endedAt === null,
+    );
+    wire.cancelResult = true;
+    let transcriptFires = 0;
+    service.onDidChangeTranscript(() => transcriptFires++);
+    check("a sent cancel reports true", service.cancelTurn() === true);
+    check("the cancel frame went to the wire", wire.cancels === 2);
+    check("a sent cancel turns generating off", service.generating === false);
+    check("a sent cancel ends the open thinking", service.items[0].endedAt === 90);
+    check("closing the thinking announced a transcript change", transcriptFires === 1);
+    clock.now = 500;
+    service.cancelTurn();
+    check(
+      "a second cancel does not move the ended thinking or announce a change",
+      service.items[0].endedAt === 90 && transcriptFires === 1,
+    );
+    service.dispose();
+  }
+
+  // --- Error titles: server errors have none; a downed socket is titled -------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const heard = [];
+    service.onError((message) => heard.push(message));
+    wire.fire.error("unknown agent: bad");
+    check("a server error carries no title", service.items[0].title === null);
+    wire.fire.inputRequired("tok1");
+    wire.respondResult = false;
+    service.respond("hello");
+    const local = service.items[service.items.length - 1];
+    check(
+      "a send on a down socket folds the titled connection error",
+      local.kind === "error" &&
+        local.title === "Connection failed" &&
+        local.message ===
+          "The connection was interrupted. Please check your network connection and try again.",
+    );
+    check(
+      "the local failure announces the message as shown",
+      heard[1] ===
+        "The connection was interrupted. Please check your network connection and try again.",
+    );
     service.dispose();
   }
 

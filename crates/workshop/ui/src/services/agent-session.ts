@@ -8,6 +8,13 @@
 // ACP chunk-vs-upsert rule the wire layer documents). Views subscribe to
 // the change events and read the snapshots; nothing here touches the
 // DOM.
+//
+// Beyond the items, the service keeps the turn's liveness: `generating`
+// (the agent is working, so the composer offers stop and the transcript
+// shows a tail status), `reconnecting` (the socket dropped and the
+// reattach has not been acknowledged), and the reasoning clock that
+// times each thought. The clock is injectable so tests stamp exact
+// durations.
 
 import { Emitter, type Event } from "@workshop/platform/event";
 import { Disposable } from "@workshop/platform/lifecycle";
@@ -31,16 +38,27 @@ export interface AgentSessionWire {
   readonly onInputRequired: Event<string>;
   readonly onInputCancelled: Event<string>;
   readonly onError: Event<string>;
+  /** Fires when the socket drops; the socket reconnects on its own. */
+  readonly onDisconnect: Event<void>;
   launch(agent: string): boolean;
   respond(token: string, text: string): boolean;
+  /** Fires the turn-cancel; false when the socket is down and nothing was sent. */
+  cancelTurn(): boolean;
 }
 
-/** One call of a tool-call batch: its id, name, and rendered arguments. */
+/** One call of a tool-call batch: its id, name, rendered arguments, and bound tool. */
 export interface ToolCallRow {
   readonly id: string;
   readonly name: string;
   /** The call arguments as compact JSON, or "" when the call had none. */
   readonly args: string;
+  /**
+   * The bound tool id the call resolved to, as the wire's one
+   * slash-separated string (`web/search`), or null for a Lua-local tool,
+   * a task built-in, or an entry the wire did not stamp. Views render a
+   * null tool as a generic tool.
+   */
+  readonly tool: string | null;
 }
 
 /** Text the operator sent, as the durable `user_message` event recorded it. */
@@ -64,13 +82,21 @@ export interface ReplyItem {
   readonly reply: number | null;
 }
 
-/** A model reasoning block, streamed and settled exactly as a reply is. */
+/**
+ * A model reasoning block, streamed and settled exactly as a reply is.
+ * `startedAt` and `endedAt` are readings of the service's clock: the
+ * round's first reasoning delta, and the moment the thinking stopped.
+ * Both are null for a thought the service never watched stream (a replay
+ * after a reattach), whose duration is therefore unknown.
+ */
 export interface ReasoningItem {
   readonly kind: "reasoning";
   readonly text: string;
   readonly model: string | null;
   readonly pending: boolean;
   readonly reply: number | null;
+  readonly startedAt: number | null;
+  readonly endedAt: number | null;
 }
 
 /** A batch of tool calls the model requested, one row per call. */
@@ -94,6 +120,11 @@ export interface ToolResultItem {
 export interface ErrorItem {
   readonly kind: "error";
   readonly message: string;
+  /**
+   * The popup title a local failure carries ("Connection failed"), or
+   * null for a server error, which the popup titles "Connection Error".
+   */
+  readonly title: string | null;
 }
 
 /** One renderable entry of the session transcript, in display order. */
@@ -107,6 +138,11 @@ export type TranscriptItem =
 
 /** The two delta channels a round streams, as transcript item kinds. */
 type StreamKind = "reply" | "reasoning";
+
+/** The title and message of the local failure a send on a down socket folds. */
+const CONNECTION_FAILED_TITLE = "Connection failed";
+const CONNECTION_FAILED_MESSAGE =
+  "The connection was interrupted. Please check your network connection and try again.";
 
 /**
  * Parses a `tool_call` event's content - the JSON array of the batch's
@@ -135,6 +171,9 @@ function parseToolCalls(content: string): readonly ToolCallRow[] {
       id: typeof record.id === "string" ? record.id : "",
       name: typeof record.name === "string" ? record.name : "",
       args: "arguments" in record ? JSON.stringify(record.arguments) : "",
+      // A tool id is never empty, so an empty string is as malformed as a
+      // number: both read as the generic tool.
+      tool: typeof record.tool === "string" && record.tool !== "" ? record.tool : null,
     });
   }
   return rows;
@@ -144,7 +183,8 @@ function parseToolCalls(content: string): readonly ToolCallRow[] {
  * The state behind one agent session surface. Reads arrive as socket
  * events; the service folds them into snapshots and fires the matching
  * change event after every fold, so a view repaints from `agents`,
- * `session`, `items`, and `pendingInputToken` alone.
+ * `session`, `items`, `pendingInputToken`, `generating`, and
+ * `reconnecting` alone.
  */
 export class AgentSessionService extends Disposable {
   private agentList: readonly string[] = [];
@@ -158,6 +198,8 @@ export class AgentSessionService extends Disposable {
    */
   private settled = -1;
   private pinnedToken: string | null = null;
+  private working = false;
+  private dropped = false;
 
   private readonly _onDidChangeAgents = this._register(new Emitter<readonly string[]>());
   /** Fires with every pushed agent list - a complete snapshot per connect. */
@@ -175,11 +217,26 @@ export class AgentSessionService extends Disposable {
   /** Fires with the pinned wait token, or null when no wait is open. */
   readonly onDidChangePendingInput: Event<string | null> = this._onDidChangePendingInput.event;
 
+  private readonly _onDidChangeGenerating = this._register(new Emitter<boolean>());
+  /** Fires with the new value whenever `generating` really changes. */
+  readonly onDidChangeGenerating: Event<boolean> = this._onDidChangeGenerating.event;
+
+  private readonly _onDidChangeReconnecting = this._register(new Emitter<boolean>());
+  /** Fires with the new value whenever `reconnecting` really changes. */
+  readonly onDidChangeReconnecting: Event<boolean> = this._onDidChangeReconnecting.event;
+
   private readonly _onError = this._register(new Emitter<string>());
   /** Fires for every error folded into the transcript, message as shown. */
   readonly onError: Event<string> = this._onError.event;
 
-  constructor(private readonly wire: AgentSessionWire) {
+  /**
+   * `now` is the clock the reasoning stamps read; it defaults to
+   * `performance.now()`, and tests inject their own so durations are exact.
+   */
+  constructor(
+    private readonly wire: AgentSessionWire,
+    private readonly now: () => number = () => performance.now(),
+  ) {
     super();
     this._register(
       wire.onAgents((agents) => {
@@ -190,7 +247,18 @@ export class AgentSessionService extends Disposable {
     this._register(wire.onSession((frame) => this.acknowledge(frame)));
     this._register(wire.onEvent((frame) => this.foldEvent(frame)));
     this._register(wire.onDelta((frame) => this.foldDelta(frame)));
-    this._register(wire.onInputRequired((token) => this.setPinnedToken(token)));
+    this._register(
+      wire.onInputRequired((token) => {
+        // The agent is waiting on the operator: no thinking is still
+        // running, and nothing is generating until the answer lands.
+        const closed = this.closeThinking(null);
+        this.setGenerating(false);
+        this.setPinnedToken(token);
+        if (closed) {
+          this._onDidChangeTranscript.fire();
+        }
+      }),
+    );
     this._register(
       wire.onInputCancelled((token) => {
         // Only the announced wait dies; a newer pin stays.
@@ -199,7 +267,8 @@ export class AgentSessionService extends Disposable {
         }
       }),
     );
-    this._register(wire.onError((message) => this.foldError(message)));
+    this._register(wire.onError((message) => this.foldError(message, null)));
+    this._register(wire.onDisconnect(() => this.setReconnecting(true)));
   }
 
   /** The discovered agent names, as last pushed by the server. */
@@ -223,6 +292,23 @@ export class AgentSessionService extends Disposable {
   }
 
   /**
+   * True while the agent is working on the operator's last message: on
+   * after a send (and after an answered tool call), off when the reply
+   * lands, a wait opens, an error arrives, or a cancel is sent.
+   */
+  get generating(): boolean {
+    return this.working;
+  }
+
+  /**
+   * True from a socket drop until the reattach is acknowledged; the
+   * transcript can't advance meanwhile.
+   */
+  get reconnecting(): boolean {
+    return this.dropped;
+  }
+
+  /**
    * Asks the server to launch the named agent; the acknowledgment (or an
    * error frame for a refused launch) arrives on the wire. False when
    * the socket is down and nothing was sent.
@@ -238,7 +324,8 @@ export class AgentSessionService extends Disposable {
    * what the log holds. False when no wait is pinned or the socket is
    * down; a failed send keeps the pin (the wait is still open
    * server-side) and folds a local error item, because a downed socket
-   * is the one failure the server can never report.
+   * is the one failure the server can never report. A sent answer starts
+   * the turn's work, so `generating` turns on.
    */
   respond(text: string): boolean {
     const token = this.pinnedToken;
@@ -246,11 +333,31 @@ export class AgentSessionService extends Disposable {
       return false;
     }
     if (!this.wire.respond(token, text)) {
-      this.foldError("The message was not sent: the agent socket is down.");
+      this.foldError(CONNECTION_FAILED_MESSAGE, CONNECTION_FAILED_TITLE);
       return false;
     }
     // The token is single-use; the response just spent it.
     this.setPinnedToken(null);
+    this.setGenerating(true);
+    return true;
+  }
+
+  /**
+   * Cancels the running turn. The server answers a cancel with nothing -
+   * cancellation is a stop reason, not an error - so after a successful
+   * send the service settles its own view: `generating` turns off and any
+   * open thinking ends. False when the socket is down, with nothing
+   * changed.
+   */
+  cancelTurn(): boolean {
+    if (!this.wire.cancelTurn()) {
+      return false;
+    }
+    const closed = this.closeThinking(null);
+    this.setGenerating(false);
+    if (closed) {
+      this._onDidChangeTranscript.fire();
+    }
     return true;
   }
 
@@ -260,7 +367,8 @@ export class AgentSessionService extends Disposable {
    * resets with it; a same-session reattach keeps the transcript (the
    * socket's cursor already deduplicates the replay). Wait pinning
    * resets on every acknowledgment: the server resends unresolved waits
-   * right after, so a stale prompt vanishes by its token's absence.
+   * right after, so a stale prompt vanishes by its token's absence. The
+   * acknowledgment also ends a reconnect.
    */
   private acknowledge(frame: AgentSessionFrame): void {
     const changedSession =
@@ -269,9 +377,11 @@ export class AgentSessionService extends Disposable {
     if (changedSession) {
       this.transcript = [];
       this.settled = -1;
+      this.setGenerating(false);
       this._onDidChangeTranscript.fire();
     }
     this.setPinnedToken(null);
+    this.setReconnecting(false);
     this._onDidChangeSession.fire(frame);
   }
 
@@ -293,11 +403,20 @@ export class AgentSessionService extends Disposable {
           pending: false,
           reply,
         });
+        // A reply always ends the turn: the chat agent loops ask, then
+        // model, so nothing runs after one.
+        this.setGenerating(false);
         break;
       }
       case "agent_thought": {
         // A thought settles only its own channel: the round stays open
-        // and its text deltas keep streaming toward the reply.
+        // and its text deltas keep streaming toward the reply. The
+        // durable item inherits the pending item's clock; a round that
+        // never streamed text (a tool-call round) has no text delta to
+        // end its thinking, so the durable thought ends it.
+        const pending = this.pendingReasoning(reply);
+        const startedAt = pending?.startedAt ?? null;
+        const endedAt = pending?.endedAt ?? (startedAt === null ? null : this.now());
         this.dropPending(reply, "reasoning");
         this.transcript.push({
           kind: "reasoning",
@@ -305,6 +424,8 @@ export class AgentSessionService extends Disposable {
           model: event.model ?? null,
           pending: false,
           reply,
+          startedAt,
+          endedAt,
         });
         break;
       }
@@ -319,9 +440,17 @@ export class AgentSessionService extends Disposable {
         break;
       }
       case "tool_call_update": {
+        // An answered model call means the agent has its result and is
+        // working again - this is also what ends the wait of a model's
+        // own ask. Checked before the result lands so the scan reads
+        // only the calls.
+        const toolCallId = event.tool_call_id ?? null;
+        if (toolCallId !== null && this.answersModelCall(toolCallId)) {
+          this.setGenerating(true);
+        }
         this.transcript.push({
           kind: "tool-result",
-          toolCallId: event.tool_call_id ?? null,
+          toolCallId,
           text: event.content,
         });
         break;
@@ -339,7 +468,8 @@ export class AgentSessionService extends Disposable {
   /**
    * Folds one ephemeral chunk: appended to its round's pending item on
    * the matching channel, or opening that item when the chunk is the
-   * round's first.
+   * round's first. A reasoning chunk that opens its item starts the
+   * round's clock; a text chunk ends the same round's thinking.
    */
   private foldDelta(frame: AgentDeltaFrame): void {
     if (frame.reply <= this.settled) {
@@ -347,11 +477,22 @@ export class AgentSessionService extends Disposable {
       return;
     }
     const kind: StreamKind = frame.kind === "reasoning" ? "reasoning" : "reply";
+    if (kind === "reply") {
+      this.closeThinking(frame.reply);
+    }
     const index = this.findPending(frame.reply, kind);
     if (index === -1) {
       this.transcript.push(
         kind === "reasoning"
-          ? { kind: "reasoning", text: frame.content, model: null, pending: true, reply: frame.reply }
+          ? {
+              kind: "reasoning",
+              text: frame.content,
+              model: null,
+              pending: true,
+              reply: frame.reply,
+              startedAt: this.now(),
+              endedAt: null,
+            }
           : { kind: "reply", text: frame.content, model: null, pending: true, reply: frame.reply },
       );
     } else {
@@ -364,9 +505,14 @@ export class AgentSessionService extends Disposable {
     this._onDidChangeTranscript.fire();
   }
 
-  /** Folds an error into the transcript and announces it. */
-  private foldError(message: string): void {
-    this.transcript.push({ kind: "error", message });
+  /**
+   * Folds an error into the transcript and announces it. An error ends
+   * the turn, so open thinking ends and `generating` turns off.
+   */
+  private foldError(message: string, title: string | null): void {
+    this.closeThinking(null);
+    this.setGenerating(false);
+    this.transcript.push({ kind: "error", message, title });
     this._onDidChangeTranscript.fire();
     this._onError.fire(message);
   }
@@ -395,6 +541,63 @@ export class AgentSessionService extends Disposable {
     }
   }
 
+  /** The pending reasoning item of one round, or undefined. */
+  private pendingReasoning(reply: number | null): ReasoningItem | undefined {
+    if (reply === null) {
+      return undefined;
+    }
+    const item = this.transcript[this.findPending(reply, "reasoning")];
+    return item?.kind === "reasoning" ? item : undefined;
+  }
+
+  /**
+   * Ends every open thinking - the pending reasoning items that have no
+   * end yet - for one round, or for every round when `reply` is null.
+   * Items are replaced, not mutated. Returns whether anything changed;
+   * the caller owns announcing it.
+   */
+  private closeThinking(reply: number | null): boolean {
+    let changed = false;
+    let at: number | null = null;
+    for (let index = 0; index < this.transcript.length; index++) {
+      const item = this.transcript[index];
+      if (
+        item !== undefined &&
+        item.kind === "reasoning" &&
+        item.pending &&
+        item.endedAt === null &&
+        (reply === null || item.reply === reply)
+      ) {
+        at ??= this.now();
+        this.transcript[index] = { ...item, endedAt: at };
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * True when `toolCallId` names a call of a model tool-call batch in the
+   * current turn: the scan runs back from the tail and stops at the
+   * turn's user item, because providers recycle ids like `call_1` across
+   * turns.
+   */
+  private answersModelCall(toolCallId: string): boolean {
+    for (let index = this.transcript.length - 1; index >= 0; index--) {
+      const item = this.transcript[index];
+      if (item === undefined) {
+        continue;
+      }
+      if (item.kind === "user") {
+        return false;
+      }
+      if (item.kind === "tool-call" && item.calls.some((call) => call.id === toolCallId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * The index of the pending item for one round's channel, or -1. Scans
    * from the tail: pending items always sit near it, because rounds are
@@ -417,5 +620,23 @@ export class AgentSessionService extends Disposable {
     }
     this.pinnedToken = token;
     this._onDidChangePendingInput.fire(token);
+  }
+
+  /** Sets `generating`, firing only on a real change. */
+  private setGenerating(value: boolean): void {
+    if (this.working === value) {
+      return;
+    }
+    this.working = value;
+    this._onDidChangeGenerating.fire(value);
+  }
+
+  /** Sets `reconnecting`, firing only on a real change. */
+  private setReconnecting(value: boolean): void {
+    if (this.dropped === value) {
+      return;
+    }
+    this.dropped = value;
+    this._onDidChangeReconnecting.fire(value);
   }
 }

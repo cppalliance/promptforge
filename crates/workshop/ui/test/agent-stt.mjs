@@ -343,6 +343,7 @@ function makeWire() {
     inputRequired: new Emitter(),
     inputCancelled: new Emitter(),
     error: new Emitter(),
+    disconnect: new Emitter(),
   };
   return {
     onAgents: emitters.agents.event,
@@ -352,12 +353,16 @@ function makeWire() {
     onInputRequired: emitters.inputRequired.event,
     onInputCancelled: emitters.inputCancelled.event,
     onError: emitters.error.event,
+    onDisconnect: emitters.disconnect.event,
     responses: [],
     launch() {
       return true;
     },
     respond(token, text) {
       this.responses.push([token, text]);
+      return true;
+    },
+    cancelTurn() {
       return true;
     },
     fire: {

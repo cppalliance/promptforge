@@ -1006,7 +1006,7 @@ Rules for every step:
 
 <step-2>
 
-### Step 2: Time reasoning and model the agent transcript
+### Step 2: Time reasoning and model the agent transcript [completed]
 
 - Component: Agent pane
 - Placement: second. Step 3 renders this model's rows and tail, and Step 4's stop button and placeholder read `generating` and call `cancelTurn()`.
