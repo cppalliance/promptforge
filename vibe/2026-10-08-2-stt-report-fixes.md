@@ -358,7 +358,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-4>
 
-### Step 4: Accept realtime-transcribe on the batch route (S5)
+### Step 4: Accept realtime-transcribe on the batch route (S5) [completed]
 
 - Component: Prompt and model routing
 - Piece: S5 model name, after S2 because both edit the batch files.

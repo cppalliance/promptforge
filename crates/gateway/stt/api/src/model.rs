@@ -62,10 +62,15 @@ impl ModelNames {
         }
     }
 
+    /// Maps a caller-facing model name to its decode mode. The logical
+    /// `realtime-transcribe` name decodes with the final pass, and exists only
+    /// while a final model is configured.
     pub(crate) fn select(&self, name: &str) -> Option<DecodeMode> {
         if self.interim == name {
             Some(DecodeMode::Interim)
-        } else if self.final_model.as_deref() == Some(name) {
+        } else if self.final_model.as_deref() == Some(name)
+            || (name == REALTIME_TRANSCRIBE_MODEL && self.final_model.is_some())
+        {
             Some(DecodeMode::Final)
         } else {
             None
@@ -85,7 +90,28 @@ impl ModelNames {
 
 #[cfg(test)]
 mod tests {
+    use gateway_stt_engine::DecodeMode;
+
     use super::ModelNames;
+
+    #[test]
+    fn the_logical_name_selects_the_final_pass_when_a_final_model_is_set() {
+        let names = ModelNames::scripted(true);
+        assert_eq!(names.select("realtime-transcribe"), Some(DecodeMode::Final));
+    }
+
+    #[test]
+    fn the_logical_name_selects_nothing_without_a_final_model() {
+        let names = ModelNames::scripted(false);
+        assert_eq!(names.select("realtime-transcribe"), None);
+    }
+
+    #[test]
+    fn physical_names_still_select_their_own_roles() {
+        let names = ModelNames::scripted(true);
+        assert_eq!(names.select("scripted-interim"), Some(DecodeMode::Interim));
+        assert_eq!(names.select("scripted-final"), Some(DecodeMode::Final));
+    }
 
     #[test]
     fn logical_name_is_reserved_from_single_physical_role() {
