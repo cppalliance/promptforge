@@ -463,7 +463,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-8>
 
-### Step 8: Run the long-speech test on the CUDA runner (S4 CI)
+### Step 8: Run the long-speech test on the CUDA runner (S4 CI) [completed]
 
 - Component: Long-speech CI job
 - Component placement: last. Do not start until the operator confirms the `stt-long-speech-1` release asset is uploaded on `cppalliance/promptforge`. Before that, the download would fail every run. It needs the zip SHA256 that Step 5 recorded in `crates/gateway/stt/README.md`.

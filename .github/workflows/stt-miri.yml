@@ -103,11 +103,45 @@ jobs:
           if ($sileroHash -ne '2AA269B785EEB53A82983A20501DDF7C1D9C48E33AB63A41391AC6C9F7FB6987') {
             throw "unexpected Silero model hash: $sileroHash"
           }
+          # The long-speech test runs base.en for captions and small.en for finals.
+          $baseModel = Join-Path $fixture 'ggml-base.en.bin'
+          Invoke-WebRequest `
+            -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' `
+            -OutFile $baseModel
+          $baseHash = (Get-FileHash $baseModel -Algorithm SHA256).Hash
+          if ($baseHash -ne 'A03779C86DF3323075F5E796CB2CE5029F00EC8869EEE3FDFB897AFE36C6D002') {
+            throw "unexpected Whisper base model hash: $baseHash"
+          }
+          $smallModel = Join-Path $fixture 'ggml-small.en.bin'
+          Invoke-WebRequest `
+            -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin' `
+            -OutFile $smallModel
+          $smallHash = (Get-FileHash $smallModel -Algorithm SHA256).Hash
+          if ($smallHash -ne 'C6138D6D58ECC8322097E0F987C32F1BE8BB0A18532A3F88F734D1BBF9C41E5D') {
+            throw "unexpected Whisper small model hash: $smallHash"
+          }
+          # Six LibriSpeech test-clean clips (CC BY 4.0) with a clips.json of their reference text.
+          $speechArchive = Join-Path $fixture 'long-speech.zip'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/cppalliance/promptforge/releases/download/stt-long-speech-1/stt-long-speech-1.zip' `
+            -OutFile $speechArchive
+          $speechHash = (Get-FileHash $speechArchive -Algorithm SHA256).Hash
+          if ($speechHash -ne 'C8BB0618630D5FA76026F2B6CEC5EC3A0227DC12F710FB0BF01D12FDF1ED3FC7') {
+            throw "unexpected long-speech clips hash: $speechHash"
+          }
+          $speechDir = Join-Path $fixture 'long-speech'
+          Expand-Archive -Path $speechArchive -DestinationPath $speechDir -Force
           $fixture | Add-Content $env:GITHUB_PATH
           "PROMPTFORGE_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_SILERO_MODEL=$silero" | Add-Content $env:GITHUB_ENV
+          # PROMPTFORGE_WHISPER_MODEL stays at tiny.en for the steps below. Only the
+          # long-speech step points the test at these paths, and it exports
+          # PROMPTFORGE_LONG_SPEECH_CLIPS itself so no other ignored test sees it.
+          "PROMPTFORGE_WHISPER_BASE_MODEL=$baseModel" | Add-Content $env:GITHUB_ENV
+          "PROMPTFORGE_WHISPER_SMALL_MODEL=$smallModel" | Add-Content $env:GITHUB_ENV
+          "PROMPTFORGE_LONG_SPEECH_DIR=$speechDir" | Add-Content $env:GITHUB_ENV
           # Native speech fixture configs default to the CPU build; this runner tests CUDA.
           "PROMPTFORGE_WHISPER_BACKEND=cuda" | Add-Content $env:GITHUB_ENV
 
@@ -135,3 +169,13 @@ jobs:
 
       - name: Test native Gateway STT integration
         run: cargo test --locked -p gateway-stt --test it -- --ignored --test-threads=1
+
+      # The long-speech test needs base.en for captions and small.en for finals, so
+      # it sets its own environment here instead of using the job-wide tiny.en model.
+      - name: Test native long-speech transcription
+        shell: powershell
+        run: |
+          $env:PROMPTFORGE_LONG_SPEECH_CLIPS = $env:PROMPTFORGE_LONG_SPEECH_DIR
+          $env:PROMPTFORGE_WHISPER_MODEL = $env:PROMPTFORGE_WHISPER_BASE_MODEL
+          $env:PROMPTFORGE_WHISPER_FINAL_MODEL = $env:PROMPTFORGE_WHISPER_SMALL_MODEL
+          cargo test --locked -p gateway-stt --test it realtime_long_speech -- --ignored --test-threads=1
