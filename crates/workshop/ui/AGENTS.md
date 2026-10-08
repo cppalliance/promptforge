@@ -1,5 +1,3 @@
 # workshop-ui
 
-- Shared state lives in a service with a change emitter. Do not store application state in mutable module globals.
-- Workshop agent controls target Cursor's workspace-sidebar agent surface, not the Glass Agents Window or editor-tab agent.
-- Never `export *` from a feature `index.ts`; importers point at source files directly.
+- Copy Cursor. Cursor's IDE answers every UI question - look, layout, wording, and behavior - read from its installed `workbench.desktop.main.css` and `workbench.desktop.main.js`. The agent panel copies Cursor's workspace-sidebar agent, not the Glass Agents Window (`workbench.glass.main.*`) or the editor-tab agent.
