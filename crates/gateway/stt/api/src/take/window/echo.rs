@@ -92,11 +92,10 @@ pub(super) fn spoken_end(
 #[cfg(test)]
 mod tests {
     use super::{MIN_WORD_SAMPLES, spoken_end};
-    use crate::segment::SpeechBefore;
+    use crate::segment::{HANGOVER_SAMPLES, SpeechBefore};
 
     const WINDOW_START: u64 = 0;
     const SPEECH_END: u64 = 88_000;
-    const HANGOVER: u64 = 1_600;
 
     fn spoken<'text>(
         hypothesis: &'text str,
@@ -129,7 +128,7 @@ mod tests {
 
     #[test]
     fn a_repeat_the_speaker_says_after_the_words_it_repeats_stays() {
-        let seen = [SPEECH_END - HANGOVER - 5 * MIN_WORD_SAMPLES; 7];
+        let seen = [SPEECH_END - HANGOVER_SAMPLES - 5 * MIN_WORD_SAMPLES; 7];
         let hypothesis = "I want you to create a plan. I want you to create";
         assert_eq!(spoken(hypothesis, &[], &seen, SPEECH_END), hypothesis);
     }
@@ -140,7 +139,7 @@ mod tests {
             spoken("create a plan. Plan.", &[], &[87_000; 3], SPEECH_END),
             "create a plan."
         );
-        let said = SPEECH_END - HANGOVER - MIN_WORD_SAMPLES;
+        let said = SPEECH_END - HANGOVER_SAMPLES - MIN_WORD_SAMPLES;
         assert_eq!(
             spoken("create a plan. Plan.", &[], &[said; 3], SPEECH_END),
             "create a plan. Plan."
@@ -155,14 +154,14 @@ mod tests {
             spoken(hypothesis, &[], &seen, 84_000),
             "I want you to create a plan."
         );
-        let room = 80_000 + HANGOVER + 6 * MIN_WORD_SAMPLES;
+        let room = 80_000 + HANGOVER_SAMPLES + 6 * MIN_WORD_SAMPLES;
         assert_eq!(spoken(hypothesis, &[], &seen, room), hypothesis);
     }
 
     #[test]
     fn a_hypothesis_that_only_repeats_the_shown_words_before_it_is_cut_whole() {
         let before = ["create", "a", "plan."];
-        assert_eq!(spoken("a plan", &before, &[], HANGOVER), "");
+        assert_eq!(spoken("a plan", &before, &[], HANGOVER_SAMPLES), "");
         assert_eq!(spoken("a plan", &before, &[], SPEECH_END), "a plan");
     }
 

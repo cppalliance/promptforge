@@ -17,7 +17,8 @@ mod boundary;
 mod endpoint;
 
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
-use endpoint::{Closed, EndpointState, HANGOVER_SAMPLES, Rule, SHORT_BURST_SAMPLES, Scan};
+pub(crate) use endpoint::HANGOVER_SAMPLES;
+use endpoint::{Closed, EndpointState, Rule, SHORT_BURST_SAMPLES, Scan};
 
 /// Analysis frame length: one detector chunk, 32 ms at 16 kHz.
 pub(crate) const FRAME_SAMPLES: usize = EnginePolicy::DETECTOR_CHUNK_SAMPLES;

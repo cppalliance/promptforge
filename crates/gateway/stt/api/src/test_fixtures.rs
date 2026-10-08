@@ -49,6 +49,13 @@ pub use replay::{
 };
 #[cfg(feature = "test-fixtures")]
 pub use segment::segment_ranges;
+
+/// Closing silence kept at the end of a segment.
+#[cfg(feature = "test-fixtures")]
+pub const HANGOVER_SAMPLES: u64 = crate::segment::HANGOVER_SAMPLES;
+/// Silence an interim window keeps after the last speech.
+#[cfg(feature = "test-fixtures")]
+pub const SPEECH_TAIL_SAMPLES: u64 = crate::take::SPEECH_TAIL_SAMPLES;
 #[cfg(test)]
 pub(crate) use silero::{SCRIPTED_SILERO_MODEL, ScriptedSilero, scripted_silero_generation};
 #[cfg(test)]

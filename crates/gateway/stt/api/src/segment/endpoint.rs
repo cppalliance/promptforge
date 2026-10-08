@@ -42,7 +42,7 @@ const FORCED_STRIDE_SAMPLES: u64 =
 
 /// Closing silence kept at the end of a segment: 100 ms, so a trailing
 /// consonant the detector reads as silence still reaches the final pass.
-pub(super) const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
+pub(crate) const HANGOVER_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE / 10) as u64;
 
 /// Audio kept before a segment's first speech frame: 0.5 s, so a soft onset
 /// the detector misses still reaches the final pass.
@@ -186,6 +186,7 @@ mod tests {
     use super::*;
 
     const FRAME: u64 = FRAME_SAMPLES as u64;
+    const SENTENCE_END: u64 = SENTENCE_END_SILENCE_SAMPLES;
 
     fn scan(cursor: u64, silent: bool) -> Scan {
         Scan {
@@ -253,13 +254,13 @@ mod tests {
             sentence_end: true,
             ..scan(cursor, true)
         };
-        let short = endpoint(state, hinted(38_400 + 3_200 - FRAME - 1));
+        let short = endpoint(state, hinted(38_400 + SENTENCE_END - FRAME - 1));
         assert_eq!(short.and_then(|advance| advance.closed), None);
-        let closing = closed(endpoint(state, hinted(38_400 + 3_200 - FRAME)));
+        let closing = closed(endpoint(state, hinted(38_400 + SENTENCE_END - FRAME)));
         assert_eq!(closing.rule, Rule::Silence);
         assert_eq!(closing.speech, 0..38_400);
         assert_eq!(closing.segment, 0..40_000);
-        let unhinted = endpoint(state, scan(38_400 + 3_200 - FRAME, true));
+        let unhinted = endpoint(state, scan(38_400 + SENTENCE_END - FRAME, true));
         assert_eq!(
             unhinted.and_then(|advance| advance.closed),
             None,
@@ -270,9 +271,9 @@ mod tests {
     #[test]
     fn a_burst_under_one_second_closes_once_a_frame_reaches_two_tenths_of_a_second() {
         let state = speaking(0, Some(15_999), 0);
-        let short = endpoint(state, scan(15_999 + 3_200 - FRAME - 1, true));
+        let short = endpoint(state, scan(15_999 + SENTENCE_END - FRAME - 1, true));
         assert_eq!(short.and_then(|advance| advance.closed), None);
-        let closing = closed(endpoint(state, scan(15_999 + 3_200 - FRAME, true)));
+        let closing = closed(endpoint(state, scan(15_999 + SENTENCE_END - FRAME, true)));
         assert_eq!(closing.rule, Rule::Silence);
         assert_eq!(closing.speech, 0..15_999);
         assert_eq!(closing.segment, 0..17_599);
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn a_burst_of_one_second_waits_for_two_seconds_of_silence() {
         let state = speaking(0, Some(16_000), 0);
-        let paused = endpoint(state, scan(16_000 + 3_200 - FRAME, true));
+        let paused = endpoint(state, scan(16_000 + SENTENCE_END - FRAME, true));
         assert_eq!(
             paused.and_then(|advance| advance.closed),
             None,
@@ -301,9 +302,9 @@ mod tests {
                 sentence_end: true,
                 ..scan(cursor, true)
             };
-            let short = endpoint(state, hinted(run + 3_200 - FRAME - 1));
+            let short = endpoint(state, hinted(run + SENTENCE_END - FRAME - 1));
             assert_eq!(short.and_then(|advance| advance.closed), None);
-            let closing = closed(endpoint(state, hinted(run + 3_200 - FRAME)));
+            let closing = closed(endpoint(state, hinted(run + SENTENCE_END - FRAME)));
             assert_eq!(closing.speech, 0..run);
         }
     }
@@ -353,7 +354,7 @@ mod tests {
             silence_begin: Some(168_448),
             ..stride
         };
-        let breath = endpoint(paused, scan(168_448 + 3_200 - FRAME, true));
+        let breath = endpoint(paused, scan(168_448 + SENTENCE_END - FRAME, true));
         assert_eq!(
             breath.and_then(|advance| advance.closed),
             None,
@@ -374,7 +375,7 @@ mod tests {
         assert_eq!(closing.speech, 160_256..168_448);
         let hinted = Scan {
             sentence_end: true,
-            ..scan(168_448 + 3_200 - FRAME, true)
+            ..scan(168_448 + SENTENCE_END - FRAME, true)
         };
         assert_eq!(
             closed(endpoint(paused, hinted)).speech,

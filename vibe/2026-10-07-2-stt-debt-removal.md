@@ -450,7 +450,7 @@ isProject: false
 
 <step-8>
 
-### Step 8: Spell timing constants by name in tests
+### Step 8: Spell timing constants by name in tests [completed]
 
 - Component: Take timing guards
 - Piece: timing constants in tests (D1-23), after Step 7.

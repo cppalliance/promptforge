@@ -1,7 +1,9 @@
 //! Replays of repeats the fast pass decodes from trailing silence, which no
 //! snapshot shows, and of repeats the speaker says, which stay shown.
 
-use gateway_stt::test_fixtures::{ReplayOutcome, ReplayScript, ReplayTake};
+use gateway_stt::test_fixtures::{
+    HANGOVER_SAMPLES, ReplayOutcome, ReplayScript, ReplayTake, SPEECH_TAIL_SAMPLES,
+};
 
 use super::{fixture_dir, read_json, script};
 
@@ -92,8 +94,8 @@ async fn a_short_phrase_after_a_sentence_is_never_cut_as_an_echo_of_its_words() 
 }
 
 async fn repeated_word(speech_end: u64, final_text: &str) -> ReplayOutcome {
-    let final_end = speech_end.next_multiple_of(512) + 1_600;
-    let speech_tail_ms = (speech_end.next_multiple_of(512) + 1_600) / 16;
+    let final_end = speech_end.next_multiple_of(512) + HANGOVER_SAMPLES;
+    let speech_tail_ms = (speech_end.next_multiple_of(512) + SPEECH_TAIL_SAMPLES) / 16;
     ReplayTake::run(&script(serde_json::json!({
         "speech_samples": [[0, speech_end]],
         "ticks": [
