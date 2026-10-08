@@ -167,6 +167,9 @@ async fn run_socket(
                     if !send_update(&mut socket, &session, update, &policy).await {
                         return;
                     }
+                    if session.catch_up_interim().is_err() {
+                        return;
+                    }
                 }
                 let update = session.finalized_update();
                 if !send_update(&mut socket, &session, update, &policy).await {

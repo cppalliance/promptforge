@@ -29,8 +29,12 @@ impl Session {
 
     pub(crate) fn schedule_interim(&mut self) -> Result<(), SessionError> {
         if self.interim_task.is_some() {
+            self.missed_interim_tick = true;
             return Ok(());
         }
+        // A commit or clear retires the task without a catch-up, so the next
+        // attempt that finds none in flight retires the flag.
+        self.missed_interim_tick = false;
         let Some(input) = self.input.as_ref() else {
             return Ok(());
         };
@@ -65,6 +69,15 @@ impl Session {
             }
         }));
         Ok(())
+    }
+    /// Schedules the interim decode a tick skipped while the decode this
+    /// completion pass reaped was in flight.
+    pub(crate) fn catch_up_interim(&mut self) -> Result<(), SessionError> {
+        if self.missed_interim_tick {
+            self.schedule_interim()
+        } else {
+            Ok(())
+        }
     }
     pub(super) fn accept_scheduled_interim(
         &mut self,

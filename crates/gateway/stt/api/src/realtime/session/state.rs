@@ -66,6 +66,9 @@ pub(crate) struct Session {
     pub(super) current_epoch: Option<InterimEpoch>,
     pub(super) next_epoch: u64,
     pub(super) interim_task: Option<InterimTask>,
+    /// An interim tick found `interim_task` in flight, so the completion
+    /// pass that reaps the task schedules in that tick's place.
+    pub(super) missed_interim_tick: bool,
     /// End of the latest interim window submitted for decoding. Window ends
     /// only move forward, so a window ending no later holds no new speech.
     pub(super) last_interim_end: Option<u64>,
@@ -101,6 +104,7 @@ impl Session {
             current_epoch: None,
             next_epoch: 1,
             interim_task: None,
+            missed_interim_tick: false,
             last_interim_end: None,
             canceled_tasks: Vec::with_capacity(SESSION_CANCEL_JOIN_CAPACITY),
             canceled_task_failed: false,
