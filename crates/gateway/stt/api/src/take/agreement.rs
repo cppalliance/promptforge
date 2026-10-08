@@ -10,6 +10,55 @@ pub(super) use final_overlap::{
 };
 pub(super) use projection::projected_prefix_end;
 
+/// Bounded work that one range-guided alignment attempt did.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct AlignmentMetrics {
+    pub(super) input_bytes: usize,
+    pub(super) tokens: usize,
+    pub(super) normalization_work: usize,
+    pub(super) dp_cells: usize,
+}
+
+/// Why range-guided alignment of two overlapping final windows located no
+/// overlap.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AlignmentReason {
+    /// A transcript is over the final transcript byte limit.
+    TranscriptBytes,
+    /// A transcript has more tokens than alignment considers, or a token
+    /// longer than it normalizes.
+    TokenLimit,
+    /// Normalizing the tokens to align went over the normalization bounds.
+    NormalizationLimit,
+    /// The overlap does not lie inside one window's decode range.
+    OverlapOutsideRange,
+    /// No pair of boundaries aligns within the edit and coverage bounds.
+    NoCandidate,
+    /// Several distinct boundary pairs score alike, so none is trusted.
+    AmbiguousCandidates,
+}
+
+impl AlignmentReason {
+    /// The stable code that logs carry for this reason.
+    pub(super) const fn code(self) -> &'static str {
+        match self {
+            Self::TranscriptBytes => "transcript_bytes",
+            Self::TokenLimit => "token_limit",
+            Self::NormalizationLimit => "normalization_limit",
+            Self::OverlapOutsideRange => "overlap_outside_range",
+            Self::NoCandidate => "no_candidate",
+            Self::AmbiguousCandidates => "ambiguous_candidates",
+        }
+    }
+}
+
+/// A failed range-guided alignment: the reason and the work it did first.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AlignmentFailure {
+    pub(super) reason: AlignmentReason,
+    pub(super) metrics: AlignmentMetrics,
+}
+
 pub(super) fn matching_token_prefix_end(previous: &str, current: &str) -> usize {
     let previous = token_spans(previous);
     let current = token_spans(current);
@@ -69,7 +118,7 @@ fn folded(token: &str) -> impl Iterator<Item = char> {
 #[cfg(test)]
 mod tests {
     use super::{
-        equivalent_token, matching_token_prefix_end, normalized_token,
+        AlignmentReason, equivalent_token, matching_token_prefix_end, normalized_token,
         range_guided_suffix_prefix_start,
     };
 
@@ -123,8 +172,9 @@ mod tests {
                 "?! replacement",
                 50..150,
                 50..100,
-            ),
-            None
+            )
+            .map_err(|failure| failure.reason),
+            Err(AlignmentReason::NoCandidate)
         );
     }
 }

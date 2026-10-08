@@ -402,7 +402,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-6>
 
-### Step 6: Keep predecessor words when forced-overlap alignment fails (S1)
+### Step 6: Keep predecessor words when forced-overlap alignment fails (S1) [completed]
 
 - Component: Forced-overlap reconciliation
 - Component placement: fourth. It follows the long-speech test so the native run can compare before and after. It is the last code component because its threshold has medium confidence, and its commit is the one that runs the full workspace gates.

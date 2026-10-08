@@ -3,6 +3,8 @@
 use std::cmp::Ordering;
 use std::ops::{Range, RangeInclusive};
 
+use super::{AlignmentFailure, AlignmentMetrics, AlignmentReason};
+
 const ALIGNMENT_TOKEN_BAND: usize = 8;
 const MAX_ALIGNMENT_TOKENS: usize = 96;
 const MAX_CONSIDERED_TOKENS: usize = 256;
@@ -16,14 +18,6 @@ const MAX_ALIGNMENT_DP_CELLS: usize = (ALIGNMENT_TOKEN_BAND * 2 + 1)
     * (ALIGNMENT_TOKEN_BAND * 2 + 1)
     * MAX_ALIGNMENT_TOKENS
     * MAX_ALIGNMENT_TOKENS;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct AlignmentMetrics {
-    input_bytes: usize,
-    tokens: usize,
-    normalization_work: usize,
-    dp_cells: usize,
-}
 
 #[derive(Debug)]
 struct AlignmentToken {
@@ -63,21 +57,26 @@ pub(in crate::take) const fn final_transcript_within_limit(text: &str) -> bool {
     text.len() <= MAX_FINAL_TRANSCRIPT_BYTES
 }
 
+/// Byte offset in `previous` where the overlap with `current` begins, found by
+/// aligning the tail of `previous` with the head of `current`.
+///
+/// # Errors
+/// Returns why no single alignment was found, with the work the attempt did.
 pub(in crate::take) fn range_guided_suffix_prefix_start(
     previous: &str,
     previous_range: Range<u64>,
     current: &str,
     current_range: Range<u64>,
     overlap: Range<u64>,
-) -> Option<usize> {
-    range_guided_suffix_prefix_start_with_metrics(
+) -> Result<usize, AlignmentFailure> {
+    let (start, metrics) = range_guided_suffix_prefix_start_with_metrics(
         previous,
         previous_range,
         current,
         current_range,
         overlap,
-    )
-    .0
+    );
+    start.map_err(|reason| AlignmentFailure { reason, metrics })
 }
 
 fn range_guided_suffix_prefix_start_with_metrics(
@@ -86,29 +85,29 @@ fn range_guided_suffix_prefix_start_with_metrics(
     current: &str,
     current_range: Range<u64>,
     overlap: Range<u64>,
-) -> (Option<usize>, AlignmentMetrics) {
+) -> (Result<usize, AlignmentReason>, AlignmentMetrics) {
     let mut metrics = AlignmentMetrics {
         input_bytes: previous.len().saturating_add(current.len()),
         ..AlignmentMetrics::default()
     };
     if !final_transcript_within_limit(previous) || !final_transcript_within_limit(current) {
-        return (None, metrics);
+        return (Err(AlignmentReason::TranscriptBytes), metrics);
     }
     let Some(previous_shape) = scan_transcript(previous, &mut metrics) else {
-        return (None, metrics);
+        return (Err(AlignmentReason::TokenLimit), metrics);
     };
     let Some(current_shape) = scan_transcript(current, &mut metrics) else {
-        return (None, metrics);
+        return (Err(AlignmentReason::TokenLimit), metrics);
     };
     let Some(previous_estimate) =
         projected_boundary(overlap.start, &previous_range, previous_shape.tokens)
     else {
-        return (None, metrics);
+        return (Err(AlignmentReason::OverlapOutsideRange), metrics);
     };
     let Some(current_estimate) =
         projected_boundary(overlap.end, &current_range, current_shape.tokens)
     else {
-        return (None, metrics);
+        return (Err(AlignmentReason::OverlapOutsideRange), metrics);
     };
     let previous_candidates = candidate_boundaries(
         previous_estimate,
@@ -124,10 +123,10 @@ fn range_guided_suffix_prefix_start_with_metrics(
         previous_first..previous_shape.tokens,
         &mut metrics,
     ) else {
-        return (None, metrics);
+        return (Err(AlignmentReason::NormalizationLimit), metrics);
     };
     let Some(current_tokens) = collect_tokens(current, 0..current_last, &mut metrics) else {
-        return (None, metrics);
+        return (Err(AlignmentReason::NormalizationLimit), metrics);
     };
     let search = AlignmentSearch {
         previous_tokens: &previous_tokens,
@@ -143,7 +142,7 @@ fn range_guided_suffix_prefix_start_with_metrics(
     let mut candidates = search.candidates(&mut metrics);
     candidates.sort_by(|left, right| compare_alignment(*left, *right));
     let Some(best) = candidates.first().copied() else {
-        return (None, metrics);
+        return (Err(AlignmentReason::NoCandidate), metrics);
     };
     if candidates
         .iter()
@@ -151,10 +150,10 @@ fn range_guided_suffix_prefix_start_with_metrics(
         .copied()
         .any(|candidate| similarly_scored_distinct(best, candidate))
     {
-        return (None, metrics);
+        return (Err(AlignmentReason::AmbiguousCandidates), metrics);
     }
     (
-        Some(search.previous_tokens[best.previous_start - search.previous_first].start),
+        Ok(search.previous_tokens[best.previous_start - search.previous_first].start),
         metrics,
     )
 }

@@ -88,7 +88,7 @@ fn estimated_reconciliation_replaces_the_prior_live_prefix() {
     state.record_final_outcome(
         FinalRangeOutcome::forced(
             ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
-            "unrelated revision".to_owned(),
+            "unrelated revision of text".to_owned(),
         ),
         &[],
         &ShownHypotheses::default(),
@@ -99,7 +99,7 @@ fn estimated_reconciliation_replaces_the_prior_live_prefix() {
     assert_eq!(live.finalized_samples(), 32_000);
     assert_eq!(
         live.pending_forced(),
-        Some(("unrelated revision", 32_000..320_000))
+        Some(("unrelated revision of text", 32_000..320_000))
     );
     assert!(state.pending_failure().is_none());
 }

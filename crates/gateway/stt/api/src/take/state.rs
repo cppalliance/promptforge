@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use gateway_stt_engine::{DetectorError, SpeechDetector, TranscribeError};
 
-use super::agreement::{
-    final_transcript_within_limit, projected_prefix_end, range_guided_suffix_prefix_start,
-};
+use super::agreement::{final_transcript_within_limit, range_guided_suffix_prefix_start};
 use super::final_outcome::{
     FinalBoundary, FinalRangeOutcome, FinalRangeResult, assemble_completion,
 };
@@ -17,6 +15,7 @@ use super::pcm::{RetainedPcmBudget, RollingPcm};
 use super::text::append_transcript;
 use super::window::{AcceptedHypothesis, ShownHypotheses};
 use crate::segment::{ForcedBoundary, Segmenter};
+use reconcile::Settlement;
 
 mod reconcile;
 
@@ -83,7 +82,26 @@ pub(crate) enum TakeFailure {
 #[derive(Debug)]
 struct PendingForced {
     boundary: ForcedBoundary,
+    /// First sample `text` covers: the window's decode start, or its overlap
+    /// end when the window followed a predecessor that settled whole.
+    text_start: u64,
     text: String,
+}
+
+impl PendingForced {
+    fn new(boundary: ForcedBoundary, text: String) -> Self {
+        Self {
+            text_start: boundary.decode_range().start,
+            boundary,
+            text,
+        }
+    }
+
+    /// The audio `text` covers, which is what any reader pairing the text
+    /// with a range needs, not the whole decode range.
+    fn text_range(&self) -> std::ops::Range<u64> {
+        self.text_start..self.boundary.decode_range().end
+    }
 }
 
 #[derive(Debug)]
@@ -183,7 +201,7 @@ impl TakeState {
             state
                 .pending_forced
                 .as_ref()
-                .map(|pending| (pending.text.clone(), pending.boundary.decode_range())),
+                .map(|pending| (pending.text.clone(), pending.text_range())),
             state.anchored.clone(),
         )
     }
@@ -266,10 +284,7 @@ impl TakeState {
         let state = Self::lock(&self.finalized);
         (
             state.samples,
-            state
-                .pending_forced
-                .as_ref()
-                .map(|pending| pending.boundary.decode_range()),
+            state.pending_forced.as_ref().map(PendingForced::text_range),
             state.outcomes.len(),
         )
     }
@@ -343,7 +358,7 @@ fn record_forced_outcome(
             state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
             return;
         }
-        state.pending_forced = Some(PendingForced { boundary, text });
+        state.pending_forced = Some(PendingForced::new(boundary, text));
         return;
     };
     let Some(previous) = state.pending_forced.take() else {
@@ -357,52 +372,48 @@ fn record_forced_outcome(
         state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
         return;
     }
-    let previous_range = previous.boundary.decode_range();
+    let previous_range = previous.text_range();
     let current_range = boundary.decode_range();
-    let prefix_end = if let Some(prefix_end) = range_guided_suffix_prefix_start(
+    let settlement = match range_guided_suffix_prefix_start(
         &previous.text,
         previous_range.clone(),
         &text,
         current_range.clone(),
         overlap.clone(),
     ) {
-        prefix_end
-    } else {
-        let Some(projection) =
-            projected_prefix_end(&previous.text, previous_range.clone(), overlap.start)
-        else {
-            state.pending_forced = Some(previous);
-            state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
-            return;
-        };
-        tracing::warn!(
-            warning_code = "forced_final_overlap_estimated",
-            prior_decode_start = previous_range.start,
-            prior_decode_end = previous_range.end,
-            current_decode_start = current_range.start,
-            current_decode_end = current_range.end,
-            overlap_start = overlap.start,
-            overlap_end = overlap.end,
-            projection_input_bytes = projection.metrics.input_bytes,
-            projection_tokens = projection.metrics.tokens,
-            projection_audio_before_overlap = projection.metrics.audio_before_overlap,
-            projection_audio_total = projection.metrics.audio_total,
-            projection_rounded_tokens = projection.metrics.rounded_tokens,
-            projection_selected_tokens = projection.metrics.selected_tokens,
-            projection_punctuation_examined = projection.metrics.punctuation_examined,
-            projection_punctuation_candidates = projection.metrics.punctuation_candidates,
-            projection_rounding = "nearest_ties_earlier",
-            "estimated forced final overlap reconciliation"
-        );
-        projection.byte_end
+        Ok(prefix_end) => Some(Settlement::Prefix(prefix_end)),
+        Err(failure) => reconcile::estimate(
+            &previous.text,
+            &previous_range,
+            &text,
+            &current_range,
+            &overlap,
+            &failure,
+        ),
+    };
+    let Some(settlement) = settlement else {
+        state.pending_forced = Some(previous);
+        state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
+        return;
     };
     settle_skipped(state, accepted, false);
-    settle_decoded(
-        state,
-        previous.boundary.decode_range().start..overlap.start,
-        previous.text[..prefix_end].trim_end(),
-    );
-    state.pending_forced = Some(PendingForced { boundary, text });
+    state.pending_forced = Some(match settlement {
+        Settlement::Prefix(prefix_end) => {
+            settle_decoded(
+                state,
+                previous_range.start..overlap.start,
+                previous.text[..prefix_end].trim_end(),
+            );
+            PendingForced::new(boundary, text)
+        }
+        Settlement::SparseSuccessor(successor_start) => {
+            settle_decoded(state, previous_range, &previous.text);
+            let mut pending =
+                PendingForced::new(boundary, text[successor_start..].trim_start().to_owned());
+            pending.text_start = overlap.end;
+            pending
+        }
+    });
 }
 
 fn flush_pending_forced(state: &mut FinalizedState, accepted: &[AcceptedHypothesis]) -> bool {
@@ -410,7 +421,7 @@ fn flush_pending_forced(state: &mut FinalizedState, accepted: &[AcceptedHypothes
         return true;
     };
     settle_skipped(state, accepted, false);
-    settle_decoded(state, pending.boundary.decode_range(), &pending.text);
+    settle_decoded(state, pending.text_range(), &pending.text);
     true
 }
 
