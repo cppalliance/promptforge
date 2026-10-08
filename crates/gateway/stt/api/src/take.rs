@@ -27,7 +27,6 @@ pub(crate) use agreement::token_spans;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, append_releasing, spawn_final_pipeline};
-#[cfg(test)]
 pub(crate) use interim::SPEECH_TAIL_SAMPLES;
 pub(crate) use interim::{FinalizedRange, InterimSnapshot};
 #[cfg(test)]

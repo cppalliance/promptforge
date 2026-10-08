@@ -11,12 +11,11 @@ use super::{
     ClosedRange, FINAL_SEGMENT_CAPACITY, FinalCommand, FinalPipeline, FinalSegmentOwner,
     run_final_pipeline,
 };
-use crate::audio::AudioError;
 use crate::take::state::TakeState;
 use crate::take::window::AcceptedHypothesis;
 use crate::take::{Take, TakeFailure};
 
-fn queue(
+pub(super) fn queue(
     commands: mpsc::Sender<FinalCommand>,
     task: tokio::task::JoinHandle<()>,
     pending_segments: Arc<AtomicUsize>,
@@ -30,7 +29,7 @@ fn queue(
 
 /// One second of speech followed by three of silence, which closes one
 /// natural segment.
-fn closed_speech() -> Vec<f32> {
+pub(super) fn closed_speech() -> Vec<f32> {
     let mut samples = Vec::with_capacity(64_000);
     samples.resize(16_000, 0.5);
     samples.resize(64_000, 0.0);
@@ -46,7 +45,7 @@ fn hear(state: &TakeState, samples: Vec<f32>) {
     state.classify(true).expect("classified");
 }
 
-fn saturate(pending: &Arc<AtomicUsize>) -> Vec<FinalSegmentOwner> {
+pub(super) fn saturate(pending: &Arc<AtomicUsize>) -> Vec<FinalSegmentOwner> {
     (0..FINAL_SEGMENT_CAPACITY)
         .map(|_| FinalSegmentOwner::reserve(pending).expect("the queue has a free slot"))
         .collect()
@@ -323,121 +322,4 @@ async fn a_held_range_decodes_once_the_final_queue_has_room() {
         decodes.try_recv().is_err(),
         "the silent tail is not decoded"
     );
-}
-
-/// A take whose final queue stays full, so every closed range is held, and
-/// whose pipeline reports each decode's sample count once completion drains
-/// the held ranges.
-fn held_take(limit: usize) -> (Take, Vec<FinalSegmentOwner>, mpsc::UnboundedReceiver<usize>) {
-    let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
-    let pending = Arc::new(AtomicUsize::new(0));
-    let mut take = Take::with_pcm_limit(Vec::new(), None, limit);
-    let (report, decodes) = mpsc::unbounded_channel();
-    let task = tokio::spawn(run_final_pipeline(
-        receiver,
-        Arc::from([]),
-        Arc::clone(&take.state),
-        Arc::clone(&take.whole_window),
-        move |request: DecodeRequest| {
-            let _ = report.send(request.samples().len());
-            async { Some(Ok("decoded".to_owned())) }
-        },
-    ));
-    take.final_pipeline = Some(queue(commands, task, Arc::clone(&pending)));
-    (take, saturate(&pending), decodes)
-}
-
-/// Appends continuous speech in 200 ms chunks through `end`, polling the
-/// segmenter after each so forced strides close and are held.
-fn speak_through(take: &Take, end: u64) {
-    let mut appended = TakeState::lock(&take.state.buffer).end();
-    while appended < end {
-        take.append(vec![0.5; 3_200])
-            .expect("the cap releases the oldest held range");
-        take.submit_closed_segments();
-        appended += 3_200;
-    }
-    assert!(take.pending_failure().is_none());
-}
-
-async fn finish(take: &Take) -> String {
-    take.finalization()
-        .expect("the take owns a final pipeline")
-        .await
-        .expect("completion succeeds")
-}
-
-#[tokio::test]
-async fn the_pcm_cap_releases_a_held_range_and_keeps_its_interim_text_final() {
-    let (take, _held, mut decodes) = held_take(120_000);
-    take.append(closed_speech()).expect("speech PCM reserves");
-    take.next_window_snapshot("keep these words", &[], 0, 0, 16_000)
-        .expect("the interim hypothesis is accepted");
-    take.submit_closed_segments();
-
-    let mut appended = 64_000;
-    while take.append(vec![0.0; 1_600]).is_ok() {
-        appended += 1_600;
-    }
-    assert!(
-        appended > 120_000,
-        "small appends release the held range at the cap, appended {appended}"
-    );
-    assert!(take.pending_failure().is_none());
-    assert!(
-        matches!(
-            take.append(vec![0.0; 1_600]),
-            Err(AudioError::BufferTooLong { .. })
-        ),
-        "with no held range left the cap rejects the append"
-    );
-
-    assert_eq!(finish(&take).await, "keep these words");
-    assert!(decodes.try_recv().is_err(), "nothing decodes");
-}
-
-#[tokio::test]
-async fn the_pcm_cap_releases_a_held_stride_and_its_held_successor_decodes_alone() {
-    let (take, _held, mut decodes) = held_take(400_000);
-    speak_through(&take, 320_512);
-    assert_eq!(TakeState::lock(&take.state.held).len(), 2);
-    speak_through(&take, 400_000);
-    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 160_256);
-    take.next_window_snapshot("first stride words", &[], 0, 0, 160_256)
-        .expect("the first stride's hypothesis is accepted");
-
-    let transcript = finish(&take).await;
-    assert!(
-        transcript.starts_with("first stride words "),
-        "{transcript}"
-    );
-    assert!(transcript.ends_with("decoded"), "{transcript}");
-    assert_eq!(
-        decodes.recv().await,
-        Some(160_256),
-        "the successor decodes its new audio without the released overlap"
-    );
-    assert_eq!(decodes.recv().await, Some(207_488), "the tail overlaps it");
-}
-
-#[tokio::test]
-async fn a_stride_after_a_released_stride_starts_without_overlap() {
-    let (take, _held, mut decodes) = held_take(240_000);
-    speak_through(&take, 416_000);
-    assert_eq!(TakeState::lock(&take.state.buffer).origin(), 320_512);
-    take.next_window_snapshot("first stride words", &[], 0, 0, 160_256)
-        .expect("the first stride's hypothesis is accepted");
-    take.next_window_snapshot("second stride words", &[], 160_256, 160_256, 320_512)
-        .expect("the second stride's hypothesis is accepted");
-
-    assert_eq!(
-        finish(&take).await,
-        "first stride words second stride words decoded"
-    );
-    assert_eq!(
-        decodes.recv().await,
-        Some(95_488),
-        "the tail after the released strides decodes as a natural segment"
-    );
-    assert_eq!(decodes.recv().await, None);
 }

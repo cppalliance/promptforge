@@ -11,6 +11,8 @@ use std::ops::Range;
 
 use gateway_stt_engine::{DetectorError, EnginePolicy, SpeechDetector};
 
+use crate::take::SPEECH_TAIL_SAMPLES;
+
 mod boundary;
 mod endpoint;
 
@@ -26,6 +28,8 @@ pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
 
 const _: () = assert!(SHORT_BURST_SAMPLES > MIN_SPEECH_SAMPLES as u64);
+// An interim window's speech tail ends inside the closed segment's hangover.
+const _: () = assert!(SPEECH_TAIL_SAMPLES <= HANGOVER_SAMPLES);
 
 /// Incremental speech segmenter over one take's PCM buffer.
 ///

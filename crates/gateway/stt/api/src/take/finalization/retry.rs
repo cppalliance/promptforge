@@ -26,6 +26,9 @@ pub(in crate::take) enum ClosedRange {
         range: Range<u64>,
         forced: Option<ForcedBoundary>,
         leading_silence: Option<Range<u64>>,
+        /// End of the silence the segmenter heard after `range` before it
+        /// closed the segment, or the end of `range` when a stride cut it.
+        silent_through: u64,
     },
     Skipped {
         range: Range<u64>,
@@ -40,6 +43,8 @@ pub(in crate::take) enum ClosedRange {
     Released {
         range: Range<u64>,
         leading_silence: Option<Range<u64>>,
+        /// End of the accepted windows that may stand in for `range`.
+        text_through: u64,
     },
 }
 
@@ -56,11 +61,13 @@ impl ClosedRange {
                 range,
                 forced: None,
                 leading_silence,
+                silent_through: scanned,
             },
             SegmentOutcome::Forced(boundary) => Self::Segment {
                 range,
                 forced: Some(boundary),
                 leading_silence,
+                silent_through: scanned,
             },
             SegmentOutcome::Skipped(_) => Self::Skipped {
                 range,
@@ -102,16 +109,39 @@ impl ClosedRange {
     }
 
     /// A released forced window keeps only its new audio, because its
-    /// predecessor's final text covers the overlap.
+    /// predecessor's final text covers the overlap. Accepted text running
+    /// past a silence close ran on only into that silence, and past a stride
+    /// cut into audio the successor decodes, so either stands in for the
+    /// released range.
     fn release(&mut self) {
-        let range = if let Self::Segment {
-            forced: Some(boundary),
-            ..
-        } = self
-        {
-            boundary.new_audio()
-        } else {
-            self.range()
+        let (range, text_through) = match self {
+            Self::Segment {
+                forced: Some(boundary),
+                silent_through,
+                ..
+            } => (
+                boundary.new_audio(),
+                if boundary.retains_overlap() {
+                    u64::MAX
+                } else {
+                    *silent_through
+                },
+            ),
+            Self::Segment {
+                range,
+                silent_through,
+                ..
+            }
+            | Self::Skipped {
+                range,
+                silent_through,
+                ..
+            } => (range.clone(), *silent_through),
+            Self::Released {
+                range,
+                text_through,
+                ..
+            } => (range.clone(), *text_through),
         };
         let (Self::Segment {
             leading_silence, ..
@@ -125,6 +155,7 @@ impl ClosedRange {
         let released = Self::Released {
             range,
             leading_silence: leading_silence.take(),
+            text_through,
         };
         *self = released;
     }

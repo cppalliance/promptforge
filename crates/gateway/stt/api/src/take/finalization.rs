@@ -207,6 +207,7 @@ async fn process_closed<D, F>(
             range,
             forced,
             leading_silence,
+            ..
         } => {
             record_leading_silence(state, whole_window, leading_silence);
             let samples = TakeState::lock(&state.buffer)
@@ -233,7 +234,7 @@ async fn process_closed<D, F>(
             TakeState::lock(&state.buffer)
                 .compact_to(range.end)
                 .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
-            record_skipped_segment(
+            record_clipped(
                 state,
                 whole_window,
                 FinalRangeOutcome::skipped(range, reason),
@@ -243,12 +244,14 @@ async fn process_closed<D, F>(
         ClosedRange::Released {
             range,
             leading_silence,
+            text_through,
         } => {
             record_leading_silence(state, whole_window, leading_silence);
-            record_outcome(
+            record_clipped(
                 state,
                 whole_window,
                 FinalRangeOutcome::skipped(range, SkipReason::Released),
+                text_through,
             );
         }
     }
@@ -280,20 +283,20 @@ pub(super) fn record_outcome(
     state.record_final_outcome(outcome, &accepted, &shown);
 }
 
-/// Records a click that the segmenter skipped after hearing silence from its
-/// end through `silent_through`. Accepted text whose window ran on into that
-/// silence holds no word from past the segment, so it counts as ending with
-/// the segment and can stand in for it.
-fn record_skipped_segment(
+/// Records a range that settles from accepted text without a final decode: a
+/// skipped click or a range the PCM cap released. Accepted text whose window
+/// ran on past the range end through `text_through` counts as ending with the
+/// range and can stand in for it.
+fn record_clipped(
     state: &TakeState,
     whole_window: &Mutex<WholeWindowState>,
     outcome: FinalRangeOutcome,
-    silent_through: u64,
+    text_through: u64,
 ) {
     let end = outcome.range.end;
     let window = TakeState::lock(whole_window);
     let accepted = window
-        .accepted_hypotheses(silent_through.max(end))
+        .accepted_hypotheses(text_through.max(end))
         .into_iter()
         .map(|hypothesis| {
             let range = hypothesis.range();
@@ -309,6 +312,8 @@ fn record_skipped_segment(
     state.record_final_outcome(outcome, &accepted, &shown);
 }
 
+#[cfg(test)]
+mod release_tests;
 #[cfg(test)]
 mod short_tests;
 #[cfg(test)]

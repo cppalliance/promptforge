@@ -236,8 +236,13 @@ isProject: false
     - The echo cut already requires detector speech evidence, and the Silero plan keeps it with a revisit trigger. The confidence veto reads decoder no-speech statistics. Loop collapse guards decoder loops that also occur during speech. `repeats_final` changes only the display.
     - Rejected: gating the veto on detector silence. Interim windows now always hold detected speech, so the gated veto would never fire.
   - D1-2:
-    - Guard with a compile-time assertion and boundary tests rather than change settlement now.
-    - Rejected: close-kind-aware clipping up front (more logic in a mechanism slated for a word-level redesign), and the word-level redesign itself.
+    - Guard with a compile-time assertion and boundary tests.
+    - The forced-stride release test failed before any fix: a released stride lost all its words from the completed transcript.
+    - So, as the step allowed, released ranges now settle by close kind, in the released-range path (`ClosedRange::release` and `record_clipped`) rather than in `record_outcome`, so leading silence and skipped decodes are unaffected:
+      - A silence close keeps accepted windows that run into the silence heard at its close, as clicks already do.
+      - A stride cut keeps windows running past the cut and leaves the audio past it to the successor's decode.
+    - The stride test builds a window crossing the cut directly. No production path producing that window was found, so the clipping is defensive there.
+    - Rejected: the word-level settlement redesign, which still waits for the interim word-end work.
   - D1-3:
     - Re-capture under a new name.
     - Rejected:
@@ -276,7 +281,6 @@ isProject: false
 ### Deferred and Out of Scope
 
 - Word-level coverage for skipped and released settlement (the two-model plan's Step 14 design). Revisit when the interim word-end work reserved by the `94386b591` and `3fdf7f001` `Deferred:` trailers lands.
-- Close-kind-aware clipping for released ranges. Revisit if the forced-stride release test fails, or if the speech tail must exceed the hangover.
 - A Workshop consumer for `finalized_through_ms` and `finalized_seq`. Revisit when a plan names one, and request the extension again then.
 - Running the native replay capture on Silero. Revisit if replay fixtures need real Silero speech runs.
 - Per-fixture replay thresholds in place of the aggregate rule. Revisit if a per-fixture regression reaches users.
@@ -429,7 +433,7 @@ isProject: false
 
 <step-7>
 
-### Step 7: Guard released-range settlement
+### Step 7: Guard released-range settlement [completed]
 
 - Component: Take timing guards
 - Component order: fourth. Its new finalization tests build takes through the detector API that Step 5 changes, and it precedes the scored captures (Step 9) and the native re-capture (Step 10) in case it changes settlement.
