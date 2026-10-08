@@ -57,7 +57,9 @@ pub const HANGOVER_SAMPLES: u64 = crate::segment::HANGOVER_SAMPLES;
 #[cfg(feature = "test-fixtures")]
 pub const SPEECH_TAIL_SAMPLES: u64 = crate::take::SPEECH_TAIL_SAMPLES;
 #[cfg(test)]
-pub(crate) use silero::{SCRIPTED_SILERO_MODEL, ScriptedSilero, scripted_silero_generation};
+pub(crate) use silero::{
+    SCRIPTED_SILERO_MODEL, ScriptedSilero, scripted_guided_generation, scripted_silero_generation,
+};
 #[cfg(test)]
 pub(crate) use warnings::Warnings;
 

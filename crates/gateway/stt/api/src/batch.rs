@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::artifacts::SpeechError;
 use crate::generation::GenerationState;
+use crate::guidance::prompt_terms;
 
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 const BODY_LIMIT: usize = MAX_AUDIO_BYTES + 1024 * 1024;
@@ -29,6 +30,7 @@ enum ResponseFormat {
 struct TranscriptionForm {
     file: Vec<u8>,
     model: String,
+    prompt: String,
     format: ResponseFormat,
     granularities: Vec<TimestampGranularity>,
 }
@@ -128,13 +130,10 @@ async fn transcribe(
         return Err(SpeechError::ModelNotFound(form.model));
     };
     let (samples, duration) = decode_wav(&form.file)?;
+    let mut guidance = generation.guidance().to_vec();
+    guidance.extend(prompt_terms(&form.prompt));
     let text = generation
-        .decode(DecodeRequest::new(
-            mode,
-            samples,
-            generation.guidance().to_vec(),
-            String::new(),
-        ))
+        .decode(DecodeRequest::new(mode, samples, guidance, String::new()))
         .await
         .map_err(SpeechError::Inference)?
         .into_text();
@@ -144,6 +143,7 @@ async fn transcribe(
 async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, SpeechError> {
     let mut file = None;
     let mut model = None;
+    let mut prompt = String::new();
     let mut format = ResponseFormat::Json;
     let mut granularities = default_granularities();
     while let Some(mut field) = multipart
@@ -208,17 +208,16 @@ async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, Speec
                     });
                 }
             }
-            // OpenAI-compatible hints accepted by the dialect. The English
-            // whisper workers own their prompt policy.
-            "prompt" => {
-                let _ignored = field_text(field).await?;
-            }
+            // The prompt's comma-separated terms join the configured
+            // vocabulary as decode guidance.
+            "prompt" => prompt = field_text(field).await?,
             _ => {}
         }
     }
     Ok(TranscriptionForm {
         file: file.ok_or(SpeechError::MissingField("file"))?,
         model: model.ok_or(SpeechError::MissingField("model"))?,
+        prompt,
         format,
         granularities,
     })

@@ -335,7 +335,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-3>
 
-### Step 3: Send prompt terms to both STT routes (S2)
+### Step 3: Send prompt terms to both STT routes (S2) [completed]
 
 - Component: Prompt and model routing
 - Component placement: second. It does not depend on the other components. It lands before the long-speech test so that runs before and after Step 6 differ only by the S1 change.

@@ -135,13 +135,29 @@ impl GenerationState {
         model: std::path::PathBuf,
         source: Arc<dyn SileroSource>,
     ) -> Result<(), SpeechError> {
-        use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+        use gateway_stt_engine::test_fixtures::ScriptedDecoder;
+
+        self.publish_scripted_guided(ScriptedDecoder::new(), model, source, Vec::new())
+    }
+
+    /// [`Self::publish_scripted_silero`] over `decoder`, for a runtime that
+    /// holds `guidance` as its configured `[stt] vocabulary`.
+    #[cfg(test)]
+    pub(crate) fn publish_scripted_guided(
+        &self,
+        decoder: gateway_stt_engine::test_fixtures::ScriptedDecoder,
+        model: std::path::PathBuf,
+        source: Arc<dyn SileroSource>,
+        guidance: Vec<String>,
+    ) -> Result<(), SpeechError> {
+        use gateway_stt_engine::test_fixtures::ScriptedModelFactory;
 
         self.claim_initial_load()?;
         let policy = EnginePolicy::new(15, 500, false).expect("the scripted policy is valid");
-        let factory = ScriptedModelFactory::new(ScriptedDecoder::new());
-        let runtime =
-            GenerationSpec::scripted_inferred(factory, policy, Silero { model, source }).build()?;
+        let factory = ScriptedModelFactory::new(decoder);
+        let runtime = GenerationSpec::scripted_inferred(factory, policy, Silero { model, source })
+            .with_guidance(guidance)
+            .build()?;
         self.publish_initial(Some(runtime), &CancellationToken::new())
     }
 

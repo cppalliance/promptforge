@@ -104,6 +104,13 @@ impl GenerationSpec {
         spec
     }
 
+    /// Gives the runtime the `[stt] vocabulary` a configured generation holds.
+    #[cfg(test)]
+    pub(super) fn with_guidance(mut self, guidance: Vec<String>) -> Self {
+        self.guidance = guidance;
+        self
+    }
+
     pub(super) fn build(&self) -> Result<SpeechRuntime, SpeechError> {
         // Takes open their own detectors; this one only proves the model
         // and library load.

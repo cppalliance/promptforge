@@ -20,7 +20,8 @@ pub struct SttPipelineConfig {
     window_seconds: u64,
     /// Milliseconds between interim passes while a take is recording.
     interval_ms: u64,
-    /// Domain terms whisper is biased toward. Empty disables biasing.
+    /// Domain terms whisper is biased toward on both the batch and realtime
+    /// routes, ahead of any terms in the client's prompt. Empty adds none.
     vocabulary: Vec<String>,
     /// Which whisper runtime build to download. Defaults to `auto`.
     #[serde(default, skip_serializing_if = "WhisperBackend::is_auto")]

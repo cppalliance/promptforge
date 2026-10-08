@@ -1,8 +1,11 @@
 //! Tests for the batch transcription endpoint and its response formats.
 
 use super::*;
+use crate::test_fixtures::{SCRIPTED_SILERO_MODEL, ScriptedSilero};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedDetector};
+use std::path::PathBuf;
 use tower::ServiceExt;
 
 fn wav(samples: &[i16]) -> Vec<u8> {
@@ -40,6 +43,7 @@ fn verbose_json_honors_segment_granularity() {
         &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
+            prompt: String::new(),
             format: ResponseFormat::VerboseJson,
             granularities: vec![TimestampGranularity::Segment],
         },
@@ -60,6 +64,7 @@ fn verbose_json_defaults_to_segment_timestamps() {
         &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
+            prompt: String::new(),
             format: ResponseFormat::VerboseJson,
             granularities,
         },
@@ -76,6 +81,7 @@ fn compact_json_contains_only_text() {
         &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
+            prompt: String::new(),
             format: ResponseFormat::Json,
             granularities: Vec::new(),
         },
@@ -132,8 +138,15 @@ async fn an_unloaded_model_is_not_found() {
 }
 
 async fn post(fields: &[(&str, &str)]) -> (StatusCode, serde_json::Value) {
+    post_to(&GenerationState::default(), fields).await
+}
+
+async fn post_to(
+    state: &GenerationState,
+    fields: &[(&str, &str)],
+) -> (StatusCode, serde_json::Value) {
     let (boundary, body) = multipart_body(&wav(&vec![0; 16_000]), fields);
-    let response = routes(GenerationState::default())
+    let response = routes(state.clone())
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -201,4 +214,52 @@ async fn an_audio_file_over_25_mib_is_rejected_before_decode() {
         json["error"]["message"],
         "audio file exceeds the 25 MiB limit"
     );
+}
+
+/// A generation whose runtime holds `[stt] vocabulary = ["WG21"]`, and the
+/// decoder that records the requests it serves.
+fn guided_generation() -> (GenerationState, ScriptedDecoder) {
+    let decoder = ScriptedDecoder::new();
+    let state = GenerationState::default();
+    state
+        .publish_scripted_guided(
+            decoder.clone(),
+            PathBuf::from(SCRIPTED_SILERO_MODEL),
+            ScriptedSilero::new(ScriptedDetector::new([])),
+            vec!["WG21".to_owned()],
+        )
+        .expect("the scripted runtime loads");
+    (state, decoder)
+}
+
+#[tokio::test]
+async fn prompt_terms_follow_the_configured_vocabulary_into_the_decode_request() {
+    let (state, decoder) = guided_generation();
+
+    let (status, json) = post_to(
+        &state,
+        &[("model", "scripted-interim"), ("prompt", " MCP, , GGUF ")],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let requests = decoder.requests();
+    assert_eq!(requests.len(), 1, "one decode serves the request");
+    assert_eq!(
+        requests[0].guidance(),
+        ["WG21", "MCP", "GGUF"],
+        "the configured terms lead the client's prompt terms"
+    );
+    state.shutdown();
+}
+
+#[tokio::test]
+async fn a_request_without_a_prompt_decodes_with_the_configured_vocabulary_alone() {
+    let (state, decoder) = guided_generation();
+
+    let (status, json) = post_to(&state, &[("model", "scripted-interim")]).await;
+
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(decoder.requests()[0].guidance(), ["WG21"]);
+    state.shutdown();
 }

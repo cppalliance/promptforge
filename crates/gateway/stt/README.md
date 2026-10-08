@@ -58,6 +58,8 @@ A hypothesis snapshot shows `finalized + agreed + tentative`. These states feed 
 | Prompt (`backend-whisper/src/prompt.rs`) | The glossary alone | The glossary and the decoded history |
 | Guard (`backend-whisper/src/guard.rs`) | Drops a pass that is likely silent and low in confidence, and collapses 4 or more copies of a word or phrase | None |
 
+The glossary lists the `[stt] vocabulary` first, then the comma-separated terms of the client's prompt - a Realtime session's transcription prompt or a batch request's `prompt` field (`api/src/guidance.rs`). A glossary trimmed to fit the prompt budget drops the client's trailing terms first.
+
 Both passes decode English only (`backend-whisper/src/model.rs`), and the batch endpoint rejects any other `language`.
 
 ## Workers and backpressure

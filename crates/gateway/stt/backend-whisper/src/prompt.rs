@@ -202,6 +202,33 @@ mod tests {
         assert_eq!(interim_prompt_counted(&[], one_token_per_word), None);
     }
 
+    /// The gateway hands whisper the configured vocabulary first and the
+    /// client's prompt terms after it, so an oversized list must lose its
+    /// trailing terms and keep the leading ones.
+    #[test]
+    fn an_oversized_comma_list_keeps_its_leading_terms() {
+        let one_token_per_word = |text: &str| text.split_whitespace().count();
+        let terms: Vec<String> = (0..GLOSSARY_TOKEN_BUDGET * 2)
+            .map(|index| format!("t{index}"))
+            .collect();
+        let kept = GLOSSARY_TOKEN_BUDGET - one_token_per_word("Glossary:");
+
+        let fitted = fit_glossary_counted(&terms, GLOSSARY_TOKEN_BUDGET, one_token_per_word);
+
+        assert_eq!(
+            fitted,
+            glossary_prompt(&terms[..kept]),
+            "the glossary keeps the leading terms that fit the budget"
+        );
+        let fitted = fitted.expect("the leading terms fit");
+        assert!(fitted.starts_with("Glossary: t0, t1, "));
+        assert!(
+            fitted.ends_with(&format!("t{}.", kept - 1)),
+            "the last kept term is the last one that fit: {fitted}"
+        );
+        assert!(!fitted.contains(&format!("t{kept},")));
+    }
+
     #[test]
     #[ignore = "requires packaged whisper and model fixtures"]
     fn fit_glossary_enforces_character_and_token_boundaries() {
