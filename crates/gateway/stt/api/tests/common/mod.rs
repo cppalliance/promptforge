@@ -31,12 +31,17 @@ pub(crate) fn require_library() -> PathBuf {
 }
 
 pub(crate) fn jfk_pcm16() -> Vec<i16> {
-    let path = require_fixture(
+    wav_pcm16(&require_fixture(
         "PROMPTFORGE_WHISPER_AUDIO",
         &native_fixture_root(),
         "jfk.wav",
-    );
-    let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
+    ))
+}
+
+/// Reads the 16 kHz mono 16-bit PCM clip at `path`.
+pub(crate) fn wav_pcm16(path: &Path) -> Vec<i16> {
+    let mut reader = hound::WavReader::open(path)
+        .unwrap_or_else(|error| panic!("{} opens as a WAV: {error}", path.display()));
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
     assert_eq!(spec.channels, 1, "fixture must be mono");
