@@ -12,6 +12,10 @@ use crate::{DecodeOutput, DecodeRequest, Decoder, TranscribeError};
 #[derive(Debug)]
 enum ScriptedOutcome {
     Text(String),
+    HistorySensitive {
+        unconditioned: String,
+        conditioned: String,
+    },
     Error(String),
     Overloaded,
     Panic,
@@ -78,6 +82,26 @@ impl ScriptedDecoder {
         self.state()
             .outcomes
             .push_back(ScriptedOutcome::Text(text.into()));
+    }
+
+    /// Appends one successful decode result that depends on the request's
+    /// finalized history: `unconditioned` when the history is empty and
+    /// `conditioned` otherwise.
+    ///
+    /// This models a decoder that ends early when its prompt does not touch
+    /// the audio, so a short `conditioned` text stands for the lost rest of
+    /// the window.
+    pub fn push_history_sensitive_text(
+        &self,
+        unconditioned: impl Into<String>,
+        conditioned: impl Into<String>,
+    ) {
+        self.state()
+            .outcomes
+            .push_back(ScriptedOutcome::HistorySensitive {
+                unconditioned: unconditioned.into(),
+                conditioned: conditioned.into(),
+            });
     }
 
     /// Appends one backend-neutral decode failure.
@@ -309,6 +333,14 @@ impl Decoder for WorkerDecoder {
         }
         let outcome = match state.outcomes.pop_front() {
             Some(ScriptedOutcome::Text(text)) => Ok(DecodeOutput::new(text)),
+            Some(ScriptedOutcome::HistorySensitive {
+                unconditioned,
+                conditioned,
+            }) => Ok(DecodeOutput::new(if request.finalized().is_empty() {
+                unconditioned
+            } else {
+                conditioned
+            })),
             Some(ScriptedOutcome::Error(message)) => {
                 Err(TranscribeError::inference(std::io::Error::other(message)))
             }

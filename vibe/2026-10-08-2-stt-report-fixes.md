@@ -45,6 +45,7 @@ The gateway's speech-to-text has six defects. An external evaluation found them 
   - S2: the config vocabulary and the client prompt reach both the realtime and batch routes. An oversized prompt loses only its trailing terms.
   - S5: the batch route accepts the `realtime-transcribe` name it advertises.
   - S4: a native CI test catches dropped spans of long speech when it runs the recommended models.
+  - S7: a final decode of a forced window is no longer conditioned on history that ends well before the window starts, so the last window of a long answer keeps its words. The native long-speech test found this after the first six steps landed.
 - Non-goals:
   - Talktron's own defects: its gateway entry model name, stereo decoding, sending hints as the session prompt, and capping append size.
   - Changing the 0.2 s sentence-end close.
@@ -92,6 +93,7 @@ Each fix changes behavior a client can observe on the realtime WebSocket route o
   - A 12.7 s successor decoding to 5 words, and one decoding to "The", both keep the predecessor's words.
   - A batch request with `prompt` passes its terms to the decode.
   - A batch request naming `realtime-transcribe` returns 200 when a final model is configured.
+  - While an earlier forced window is still pending, a final decode of the next window gets an empty history. The terminal window of a long answer keeps the words of its new audio, and `realtime_long_speech` finds no run of 5 or more missing reference words on any of its six clips.
 
 </product-contract>
 <implementation-contract>
@@ -141,6 +143,7 @@ Every change stays inside the gateway STT crates, apart from one config doc comm
     - Realtime: `start_take` (`realtime/input.rs:147-160`) builds guidance as `engine.guidance()` (`generation-lease.rs:50-52`) followed by `prompt_terms(&snapshot.prompt)`. This replaces `Self::guidance` (`input.rs:162-168`).
     - Batch: `parse_form` keeps `prompt` (`batch.rs:211-215`) in `TranscriptionForm`, and `transcribe` (`batch.rs:122-142`) builds guidance as `generation.guidance()` followed by `prompt_terms(&form.prompt)`.
   - S5: `ModelNames::select` (`crates/gateway/stt/api/src/model.rs:65-73`) returns `DecodeMode::Final` for `REALTIME_TRANSCRIBE_MODEL` when `final_model` is set.
+  - S7 forced-window history: `TakeState::decoded_text` (`crates/gateway/stt/api/src/take/state.rs`, around line 173) returns an empty string while `pending_forced` is set, and the settled text otherwise. Both callers in `crates/gateway/stt/api/src/take/final_decode.rs` (lines 84 and 104) pass the result to the final decode as its history, so they need no edit. While a window is pending, the settled text ends well before the next window starts. Whisper treats a prompt as the text just before the audio, and the final pass runs without timestamps, so it ends the decode after a word or two and drops the rest of the window.
   - S4 test support:
     - The only native session driver is the private `Capture` in `crates/gateway/stt/api/tests/it/replay/native_capture.rs` (~107-296), behind the private `mod native_capture` in `tests/it/replay.rs`. Its clock is audio position plus measured decode time, not real-time sleeps.
     - Move its session setup into a shared test-support module under `crates/gateway/stt/api/tests/it/` that both the replay capture and the new long-speech test call.
@@ -188,6 +191,7 @@ Each finding gets deterministic unit or integration tests that fail before the f
     - The realtime guidance test in `realtime/input.rs` (~264-278, which today asserts `["first"]`) now expects the config vocabulary followed by the prompt terms.
     - A `backend-whisper/src/prompt.rs` test shows an oversized comma list keeping its leading terms.
   - S5: `ModelNames::select("realtime-transcribe")` returns `Final` with a final model and `None` without one.
+  - S7: in `crates/gateway/stt/api/tests/it/realtime_forced_windows.rs`, `one_item_reconciles_bounded_forced_windows` (line 136) asserts the third request's `finalized()` is empty instead of `"alpha beta"`. A new test there uses a scripted final decoder that returns one word whenever `finalized()` is non-empty on a forced window and the full text otherwise, and asserts the completed transcript still holds the terminal window's new words. Both fail before the fix.
 - Integration and end-to-end:
   - S6:
     - Add a `RoutePolicy` test fixture (`route.rs:43-92`) that forces the `finish_ready` branch to fail. Expose it on the STT service the way `fail_realtime_precommit` is exposed (`crates/gateway/stt/api/src/service.rs:146-149`).
@@ -221,12 +225,18 @@ These decisions settle the choices the evaluation left open, favoring the smalle
   - Use a deletion-run property (5 or more consecutive reference words missing) as the long-speech gate. It targets the silent-drop failure and is yes/no.
   - Use milliseconds for the `BufferTooLong` detail fields. The input buffer and the PCM budget count in different units.
   - Close gateway-ended sessions with WebSocket code 1011 (internal error).
+  - Fix the end-of-clip word loss before the CI job, as a new Step 7. Step 5's native test found it, Step 6's guard did not remove it, and the CI job would fail without it. The user chose "Add a prerequisite step: diagnose and fix the last-window decode loss, then run Step 7", where Step 7 then meant the CI job and is now Step 8.
+  - Fix it in `TakeState::decoded_text`: a final decode gets no history while a forced window is pending. A throwaway spike decoded the same production samples both ways. With the stale history the terminal windows returned 1, 1 and 8 words, and with an empty history 28, 36 and 38. With the change applied, all six clips of `realtime_long_speech` passed with no missing run.
   - Run the work in the `promptforge2` worktree on branch `vibe2`, not in the main checkout. The user's words: "yeah lets move it to promptforge2, which is at the same commit". The worktree is at the same commit as `master`, and an earlier plan there (`mcp-client-plugin`) was closed in `020292701`, so nothing else holds it. The commits land on `vibe2`, which tracks `origin/vibe2`. They reach `master` by a later fast-forward or merge, which this plan does not perform.
 - Rejected alternatives:
   - Rejecting the batch `prompt` with a 400 error. It would break talktron's fallback outright. Revisit if a client depends on the prompt being ignored.
   - Leaving silent exits in place and only adding logs. The client still could not tell why its session ended. Revisit never.
   - Treating the whole session prompt as one glossary term. That is today's behavior, and it drops 307-character hint strings entirely from the final pass. Revisit never.
+  - Enabling timestamps for the final pass. With the stale history left in place it recovered 29, 26 and 32 words in the spike, but it changes the backend's decode behavior for every final pass. Revisit if a decode still ends early with an empty history.
+  - Making the sparse-successor guard stop projecting words onto the overlap when a decode is clearly short. It is not needed for the failing test and would hide the decode failure. Revisit if a real capture still loses words after Step 7.
 - Assumptions, risks, and notes:
+  - Forced windows lose style conditioning from history, so punctuation and casing at window seams may be slightly less consistent. The glossary path in `crates/gateway/stt/backend-whisper/src/model.rs` is unchanged, and a non-empty glossary was not exercised in the spike.
+  - The evidence for Step 7 is one run on six LibriSpeech clips, shown by decoding identical samples with and without the history. Why whisper ends the decode early after a stale prompt is empirical, not traced in whisper's internals. Confidence is high that the fix removes the loss on these clips and medium in general.
   - Behavior change: deployments that set `[stt] vocabulary` will now see it bias realtime captions and finals too. Until now it affected batch only (`batch.rs:131-137`).
   - The forward-only snap can repeat up to 3 words at a forced-window seam where it previously dropped them.
   - The one-third density threshold is a judgment call until the long-speech test runs. Confidence is medium, because it rests on few clips.
@@ -391,7 +401,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
     - Source: LibriSpeech test-clean (CC BY 4.0) from `https://www.openslr.org/resources/12/test-clean.tar.gz`.
     - Start from `2961-960-0010`, `3570-5695-0001`, `260-123288-0015`, `5142-36600-0001`, `3729-6852-0017` and `1320-122617-0007`. Replace any clip under 12 s or whose reference has numerals or number words, keeping six clips.
     - Convert each FLAC to 16 kHz mono 16-bit WAV with ffmpeg. Write `clips.json` as `{ "id", "file", "text" }` entries. Pack everything into `stt-long-speech-1.zip` and compute its SHA256.
-    - Record the final clip ids, the asset name `stt-long-speech-1.zip` and its uppercase SHA256 in the native-tests part of `crates/gateway/stt/README.md`, next to the `PROMPTFORGE_LONG_SPEECH_CLIPS` description. Step 7 reads the hash from there.
+    - Record the final clip ids, the asset name `stt-long-speech-1.zip` and its uppercase SHA256 in the native-tests part of `crates/gateway/stt/README.md`, next to the `PROMPTFORGE_LONG_SPEECH_CLIPS` description. Step 8 reads the hash from there.
     - Tell the operator where the zip is, so a maintainer can upload it as release asset `stt-long-speech-1` on `cppalliance/promptforge`.
   - If native fixtures are available locally, run the test once on this commit and record any deletion runs as the baseline for Step 6.
 - Tests: `realtime_long_speech` compiles and is ignored by default. The existing replay tests in `crates/gateway/stt/api/tests/it/replay.rs`, including the baseline gates, still pass after the extraction. This native test is exempt from the fail-before-fix rule.
@@ -433,7 +443,27 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-7>
 
-### Step 7: Run the long-speech test on the CUDA runner (S4 CI)
+### Step 7: Stop conditioning forced windows on unsettled history (S7) [completed]
+
+- Component: Forced-window decode history
+- Component placement: after the forced-overlap component and before the CI job. Step 5's native test found this loss and Step 6 did not remove it, so the CI job in Step 8 cannot pass without it.
+- Piece: one piece, the history argument of a final decode.
+- Artifacts:
+  - `TakeState::decoded_text` in `crates/gateway/stt/api/src/take/state.rs` (around line 173) returns an empty string while `pending_forced` is set, and the settled `decoded_text` otherwise. Both callers in `crates/gateway/stt/api/src/take/final_decode.rs` (lines 84 and 104) pick this up with no edit. Update its doc comment: a pending window's text is not settled, so the settled text ends well before the next window starts, and a prompt that does not touch the audio makes the final pass end the decode after a word or two.
+  - Leave timestamps off for the final pass, and leave the sparse-successor guard in `crates/gateway/stt/api/src/take/state/reconcile.rs` as Step 6 left it.
+- Tests:
+  - In `crates/gateway/stt/api/tests/it/realtime_forced_windows.rs`, change the assertion at line 136 of `one_item_reconciles_bounded_forced_windows` so the third request's `finalized()` is `""` instead of `"alpha beta"`. It fails before the fix.
+  - A new integration test in the same file with a scripted final decoder that returns one word whenever `finalized()` is non-empty on a forced window and the full text otherwise. After the commit, the completed transcript still holds the words of the terminal window's new audio. It fails before the fix.
+- Verification:
+  - Confirm both tests fail with the fix reverted. Run the STT crate tests (`cargo nextest run --locked -p gateway-stt -p gateway-stt-engine -p gateway-stt-backend-whisper -p gateway-whisper-ffi --all-features`) and `cargo fmt --all --check`.
+  - Run the native test on this machine, which has a CUDA build, and expect no run of 5 or more missing words on any of the six clips: `cargo test --locked -p gateway-stt --all-features --test it realtime_long_speech -- --ignored --test-threads=1`, with the output redirected to a file. Set these environment variables first: `PROMPTFORGE_WHISPER_LIBRARY` to `C:\Users\Vinnie\.promptforge\whisper.cpp\b4938-windows-x86_64-cuda\whisper.dll`, `PROMPTFORGE_WHISPER_MODEL` to `C:\Users\Vinnie\.promptforge\models\e922de510e76c373\ggml-base.en.bin`, `PROMPTFORGE_WHISPER_FINAL_MODEL` to `C:\Users\Vinnie\.promptforge\models\4ecc88617e5be84c\ggml-small.en.bin`, `PROMPTFORGE_SILERO_MODEL` to `C:\Users\Vinnie\.promptforge\models\9a828abd96a0a3ca\ggml-silero-v6.2.0.bin`, `PROMPTFORGE_WHISPER_BACKEND` to `cuda`, and `PROMPTFORGE_LONG_SPEECH_CLIPS` to the unzipped fixture directory from Step 5. That directory holds `clips.json` and the six WAV files and sits beside `stt-long-speech-1.zip` on this machine. If it is gone, unzip the zip whose SHA256 is recorded in `crates/gateway/stt/README.md`.
+- Commit: `Stop conditioning forced final windows on unsettled history` (local only)
+
+</step-7>
+
+<step-8>
+
+### Step 8: Run the long-speech test on the CUDA runner (S4 CI)
 
 - Component: Long-speech CI job
 - Component placement: last. Do not start until the operator confirms the `stt-long-speech-1` release asset is uploaded on `cppalliance/promptforge`. Before that, the download would fail every run. It needs the zip SHA256 that Step 5 recorded in `crates/gateway/stt/README.md`.
@@ -454,7 +484,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 - Verification: the YAML parses, each pinned hash matches a local download, and the env var names match what `realtime_long_speech` reads.
 - Commit: `Run the native long-speech test on the CUDA runner` (local only)
 
-</step-7>
+</step-8>
 
 Before the run's first commit, the session that runs the steps checks `c:\Users\Vinnie\cursor\promptforge2`. Nothing here is committed:
 
