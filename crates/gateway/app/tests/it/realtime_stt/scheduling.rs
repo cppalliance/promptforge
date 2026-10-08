@@ -88,3 +88,53 @@ async fn interim_scheduler_enforces_cadence_minimum_silence_and_coalescing() {
     drop(socket);
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn interim_tick_skipped_by_a_slow_decode_runs_as_soon_as_that_decode_finishes() {
+    const INTERVAL_MS: u64 = 1_000;
+    let interval = Duration::from_millis(INTERVAL_MS);
+    let interim = ScriptedDecoder::new();
+    let service = speech_with_policy(&interim, Some(&ScriptedDecoder::new()), 15, INTERVAL_MS);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+
+    let released = interim
+        .with_next_decode_blocked(
+            PHASE_TIMEOUT,
+            || async {
+                for _ in 0..5 {
+                    append_audio(&mut socket, audio()).await;
+                }
+                &mut socket
+            },
+            |socket| async {
+                append_audio(socket, audio()).await;
+                // The decode parked just after the tick that started it, so
+                // this outlasts the following tick and releases the decode
+                // three quarters of an interval before the one after that.
+                tokio::time::sleep(interval + interval / 4).await;
+                std::time::Instant::now()
+            },
+        )
+        .await
+        .expect("the first eligible interim reaches the blocked scenario");
+    let caught_up = interim.clone();
+    let started_after = tokio::task::spawn_blocking(move || {
+        caught_up
+            .wait_for_requests(2, PHASE_TIMEOUT)
+            .then(|| released.elapsed())
+    })
+    .await
+    .expect("catch-up request observer joins")
+    .expect("an interim decode follows the released one");
+    assert!(
+        started_after < interval / 4,
+        "the tick skipped mid-decode starts its decode when the slow decode is reaped, \
+         not at the next tick: it started {started_after:?} after release"
+    );
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
