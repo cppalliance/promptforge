@@ -172,9 +172,12 @@ pub(super) async fn run_final_pipeline<D, F>(
                 let range = forced
                     .as_ref()
                     .map_or(start..committed_samples, ForcedBoundary::decode_range);
-                let tail = TakeState::lock(&state.buffer)
-                    .transfer_range(range.clone())
-                    .unwrap_or_else(|_| panic!("ordered final tail must remain resident"));
+                let transferred = TakeState::lock(&state.buffer).transfer_range(range.clone());
+                let Ok(tail) = transferred else {
+                    state.record_failure(TakeFailure::FinalTailEvicted);
+                    drop(reply.send(state.completion(&accepted, committed_samples)));
+                    break;
+                };
                 process_samples(
                     &state,
                     &whole_window,

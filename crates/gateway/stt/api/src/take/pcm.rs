@@ -10,6 +10,19 @@ use crate::audio::AudioError;
 
 const MAX_RETAINED_SECONDS: usize = 30;
 const MAX_RETAINED_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * MAX_RETAINED_SECONDS;
+const SAMPLES_PER_MS: usize = EnginePolicy::SAMPLE_RATE / 1_000;
+
+/// The error for a request of `requested_samples` against a budget already
+/// holding `retained_samples`, in milliseconds so it reads the same as the
+/// input buffer's. A partial millisecond of the request counts as a whole
+/// one.
+fn buffer_too_long(retained_samples: usize, requested_samples: usize) -> AudioError {
+    AudioError::BufferTooLong {
+        maximum_seconds: MAX_RETAINED_SECONDS,
+        retained_ms: retained_samples / SAMPLES_PER_MS,
+        requested_ms: requested_samples.div_ceil(SAMPLES_PER_MS),
+    }
+}
 
 #[derive(Debug, Default)]
 struct BudgetState {
@@ -46,9 +59,7 @@ impl RetainedPcmBudget {
                     .checked_add(capacity)
                     .filter(|total| *total <= self.state.limit)
             })
-            .map_err(|_| AudioError::BufferTooLong {
-                maximum_seconds: MAX_RETAINED_SECONDS,
-            })?;
+            .map_err(|retained| buffer_too_long(retained, capacity))?;
         Ok(RetainedPcmOwner {
             budget: self.clone(),
             capacity,
@@ -76,7 +87,6 @@ impl RetainedPcmBudget {
         }
     }
 
-    #[cfg(any(test, feature = "test-fixtures"))]
     fn retained_samples(&self) -> usize {
         self.state.retained.load(Ordering::Acquire)
     }
@@ -198,10 +208,16 @@ impl RollingPcm {
 
     /// Appends `samples`, handing them back with the error when the cap
     /// rejects them.
+    ///
+    /// The cap counts each allocation once. The batch's own capacity is
+    /// reserved only when it becomes the buffer, because otherwise it is
+    /// copied in and dropped within this call. The copy reserves the
+    /// destination's growth alone, and spare capacity the buffer already
+    /// holds is already counted.
     pub(super) fn try_append(&mut self, samples: Vec<f32>) -> Result<(), (AudioError, Vec<f32>)> {
-        let too_long = || AudioError::BufferTooLong {
-            maximum_seconds: MAX_RETAINED_SECONDS,
-        };
+        let retained = self.owner.budget.retained_samples();
+        let requested = samples.len();
+        let too_long = || buffer_too_long(retained, requested);
         let Some(next_len) = self
             .samples
             .len()
@@ -219,14 +235,15 @@ impl RollingPcm {
         if samples.is_empty() {
             return Ok(());
         }
-        let incoming = match self.owner.budget.reserve(samples.capacity()) {
-            Ok(incoming) => incoming,
-            Err(error) => return Err((error, samples)),
-        };
         if self.samples.is_empty() && self.samples.capacity() == 0 {
-            self.samples = samples;
-            self.owner.absorb(incoming);
-            return Ok(());
+            return match self.owner.budget.reserve(samples.capacity()) {
+                Ok(incoming) => {
+                    self.samples = samples;
+                    self.owner.absorb(incoming);
+                    Ok(())
+                }
+                Err(error) => Err((error, samples)),
+            };
         }
 
         let old_capacity = self.samples.capacity();
@@ -247,7 +264,6 @@ impl RollingPcm {
             self.owner.absorb(headroom);
         }
         self.samples.extend(samples);
-        drop(incoming);
         Ok(())
     }
 
@@ -294,17 +310,15 @@ impl RollingPcm {
 
     pub(super) fn copy_range(&self, range: Range<u64>) -> Result<RetainedPcm, AudioError> {
         let local = self.local_range(&range);
+        let retained = self.owner.budget.retained_samples();
+        let too_long = || buffer_too_long(retained, local.len());
         let mut owner = self.owner.budget.reserve_remaining();
         if local.len() > owner.capacity {
-            return Err(AudioError::BufferTooLong {
-                maximum_seconds: MAX_RETAINED_SECONDS,
-            });
+            return Err(too_long());
         }
         let mut samples = Vec::new();
         if samples.try_reserve_exact(local.len()).is_err() || samples.capacity() > owner.capacity {
-            return Err(AudioError::BufferTooLong {
-                maximum_seconds: MAX_RETAINED_SECONDS,
-            });
+            return Err(too_long());
         }
         owner.release(owner.capacity - samples.capacity());
         samples.extend_from_slice(&self.samples[local]);

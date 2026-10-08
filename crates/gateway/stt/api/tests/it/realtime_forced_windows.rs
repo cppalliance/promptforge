@@ -245,7 +245,7 @@ async fn blocked_forced_decode_enforces_the_thirty_second_aggregate_budget() {
                 assert_eq!(error.to_string(), "append fixture audio");
                 assert_eq!(
                     source_message(&error).as_deref(),
-                    Some("audio buffer exceeds 30 seconds")
+                    Some("audio buffer exceeds 30 seconds: 26016 ms retained, 10016 ms requested")
                 );
                 assert_eq!(
                     session

@@ -310,7 +310,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-2>
 
-### Step 2: Count PCM once and name causes in STT errors (S3)
+### Step 2: Count PCM once and name causes in STT errors (S3) [completed]
 
 - Component: Realtime failure reporting
 - Piece: S3 PCM count and error detail, after S6 because both edit `session_error`.

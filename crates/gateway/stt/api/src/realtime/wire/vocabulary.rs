@@ -102,7 +102,7 @@ impl ClientError {
 
     pub(in crate::realtime) fn request(
         code: &'static str,
-        message: &'static str,
+        message: impl Into<String>,
         param: Option<&'static str>,
         client_event_id: Option<String>,
     ) -> Self {
@@ -116,7 +116,7 @@ impl ClientError {
 
     pub(in crate::realtime) fn overload(
         code: &'static str,
-        message: &'static str,
+        message: impl Into<String>,
         param: Option<&'static str>,
         client_event_id: Option<String>,
     ) -> Self {
@@ -127,7 +127,7 @@ impl ClientError {
 
     pub(in crate::realtime) fn server(
         code: &'static str,
-        message: &'static str,
+        message: impl Into<String>,
         param: Option<&'static str>,
         client_event_id: Option<String>,
     ) -> Self {

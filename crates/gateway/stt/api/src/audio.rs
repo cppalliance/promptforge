@@ -24,8 +24,14 @@ pub(super) enum AudioError {
     AppendTooLarge { max_bytes: usize },
     #[error("audio ended with an incomplete PCM16 sample")]
     IncompletePcm16Sample,
-    #[error("audio buffer exceeds {maximum_seconds} seconds")]
-    BufferTooLong { maximum_seconds: usize },
+    #[error(
+        "audio buffer exceeds {maximum_seconds} seconds: {retained_ms} ms retained, {requested_ms} ms requested"
+    )]
+    BufferTooLong {
+        maximum_seconds: usize,
+        retained_ms: usize,
+        requested_ms: usize,
+    },
     #[error("committed audio must be at least {minimum_ms} milliseconds")]
     CommitTooShort { minimum_ms: usize },
 }
@@ -71,29 +77,20 @@ pub(super) struct AudioBuffer {
 impl AudioBuffer {
     pub(super) fn append_base64(&mut self, payload: &str) -> Result<(), AudioError> {
         let bytes = decode_base64(payload)?;
-        let next_bytes =
-            self.input_bytes
-                .checked_add(bytes.len())
-                .ok_or(AudioError::BufferTooLong {
-                    maximum_seconds: MAX_BUFFERED_SECONDS,
-                })?;
+        let too_long = || buffer_too_long(self.input_bytes, bytes.len());
+        let next_bytes = self
+            .input_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(too_long)?;
         if next_bytes > MAX_BUFFERED_AUDIO_BYTES {
-            return Err(AudioError::BufferTooLong {
-                maximum_seconds: MAX_BUFFERED_SECONDS,
-            });
+            return Err(too_long());
         }
         let held = usize::from(self.odd_byte.is_some());
         let complete_samples = (bytes.len() + held) / BYTES_PER_SAMPLE;
         let _ = self
             .input_samples
-            .checked_add(u64::try_from(complete_samples).map_err(|_| {
-                AudioError::BufferTooLong {
-                    maximum_seconds: MAX_BUFFERED_SECONDS,
-                }
-            })?)
-            .ok_or(AudioError::BufferTooLong {
-                maximum_seconds: MAX_BUFFERED_SECONDS,
-            })?;
+            .checked_add(u64::try_from(complete_samples).map_err(|_| too_long())?)
+            .ok_or_else(too_long)?;
 
         self.input_bytes = next_bytes;
         let mut bytes = bytes.into_iter();
@@ -168,6 +165,18 @@ impl AudioBuffer {
     fn push_sample(&mut self, sample: i16) {
         self.resampler.push(f32::from(sample) / 32_768.0);
         self.input_samples += 1;
+    }
+}
+
+/// The error for an append of `requested_bytes` onto `retained_bytes` of
+/// buffered input, in milliseconds so it reads the same as the PCM budget's.
+/// A partial millisecond of the request counts as a whole one.
+fn buffer_too_long(retained_bytes: usize, requested_bytes: usize) -> AudioError {
+    const BYTES_PER_MS: usize = INPUT_SAMPLE_RATE_USIZE / 1_000 * BYTES_PER_SAMPLE;
+    AudioError::BufferTooLong {
+        maximum_seconds: MAX_BUFFERED_SECONDS,
+        retained_ms: retained_bytes / BYTES_PER_MS,
+        requested_ms: requested_bytes.div_ceil(BYTES_PER_MS),
     }
 }
 

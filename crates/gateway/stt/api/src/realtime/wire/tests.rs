@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use super::{EffectiveSession, IdGenerator, ServerEvent, parse_client_event};
+use crate::realtime::result_mailbox::{ItemFailure, ItemResult};
 
 const WIRE_INVALID_CASES: &[&str] = &[
     "append_unknown_field",
@@ -336,5 +337,36 @@ fn invalid_duration_usage_and_hypothesis_shapes_are_rejected() {
                 "event_id": null
             }
         })
+    );
+}
+
+#[test]
+fn a_failed_authoritative_transcription_names_its_cause_and_a_precommit_failure_keeps_its_text() {
+    let failed = |failure| {
+        let event = ServerEvent::item_result(
+            "evt_failed".to_owned(),
+            ItemResult::Failed {
+                item_id: "item_failed".to_owned(),
+                failure,
+            },
+        );
+        serde_json::to_value(event).unwrap_or_else(|error| panic!("failure serializes: {error}"))
+    };
+
+    let authoritative = failed(ItemFailure::TranscriptionFailed(
+        "forced final window was not decodable".to_owned(),
+    ));
+    assert_eq!(authoritative["error"]["code"], "transcription_failed");
+    assert_eq!(
+        authoritative["error"]["message"],
+        "Authoritative transcription failed: forced final window was not decodable"
+    );
+
+    let precommit = failed(ItemFailure::PrecommitTranscriptionFailed(
+        "worker detail".to_owned(),
+    ));
+    assert_eq!(
+        precommit["error"]["message"], "Accurate precommit transcription failed",
+        "the precommit text stays fixed"
     );
 }

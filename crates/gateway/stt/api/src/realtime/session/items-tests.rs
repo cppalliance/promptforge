@@ -152,12 +152,18 @@ async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_r
                     "epoch cancellation cannot release worker-owned PCM"
                 );
 
-                assert!(matches!(
-                    session.commit(),
-                    Err(SessionError::Audio(AudioError::BufferTooLong {
-                        maximum_seconds: 30,
-                    }))
-                ));
+                let rejected = session.commit().err();
+                assert!(
+                    matches!(
+                        rejected,
+                        Some(SessionError::Audio(AudioError::BufferTooLong {
+                            maximum_seconds: 30,
+                            retained_ms: 1_000,
+                            requested_ms: 1,
+                        }))
+                    ),
+                    "{rejected:?}"
+                );
                 assert_eq!(session.results.reserved_items(), 0);
                 assert_eq!(session.committed.len(), 0);
                 assert_eq!(

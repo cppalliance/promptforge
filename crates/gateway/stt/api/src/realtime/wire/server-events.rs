@@ -113,20 +113,20 @@ fn item_failure_error(failure: &ItemFailure) -> WireError {
         ItemFailure::PrecommitTranscriptionFailed(_) => (
             "server_error",
             "precommit_transcription_failed",
-            "Accurate precommit transcription failed",
+            "Accurate precommit transcription failed".to_owned(),
             OptionalNullable::Null,
         ),
-        ItemFailure::TranscriptionFailed(_) => (
+        ItemFailure::TranscriptionFailed(cause) => (
             "server_error",
             "transcription_failed",
-            "Authoritative transcription failed",
+            format!("Authoritative transcription failed: {cause}"),
             OptionalNullable::Value("audio".to_owned()),
         ),
     };
     WireError {
         r#type: kind.to_owned(),
         code: code.to_owned(),
-        message: message.to_owned(),
+        message,
         param,
         event_id: OptionalNullable::Missing,
     }

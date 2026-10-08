@@ -85,7 +85,7 @@
   },
   "maximum_unfinalized_audio": {
     "input": { "message": { "type": "input_audio_buffer.append", "audio": "AAA=", "event_id": "client_audio_limit" }, "setup": { "unfinalized_audio_ms": 30000 } },
-    "expected_error": { "event_id": "evt_audio_limit", "type": "error", "error": { "type": "overload_error", "code": "too_much_unfinalized_audio", "message": "Unfinalized audio exceeds 30 seconds", "param": "audio", "event_id": "client_audio_limit" } },
+    "expected_error": { "event_id": "evt_audio_limit", "type": "error", "error": { "type": "overload_error", "code": "too_much_unfinalized_audio", "message": "Unfinalized audio exceeds 30 seconds: 30000 ms retained, 1 ms requested", "param": "audio", "event_id": "client_audio_limit" } },
     "effective_session_after": "default",
     "keeps_connection_usable": true
   },

@@ -67,6 +67,8 @@ pub(crate) enum TakeFailure {
     RetirementFailed,
     #[error("forced final PCM ownership became inconsistent")]
     OwnershipInconsistent,
+    #[error("final window audio was released before its decode")]
+    FinalTailEvicted,
     #[error("final transcription worker is unavailable")]
     WorkerUnavailable,
     #[error(transparent)]

@@ -365,9 +365,15 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
             Some("audio"),
             client_event_id,
         ),
-        SessionError::Audio(AudioError::BufferTooLong { .. }) => ClientError::overload(
+        SessionError::Audio(AudioError::BufferTooLong {
+            maximum_seconds,
+            retained_ms,
+            requested_ms,
+        }) => ClientError::overload(
             "too_much_unfinalized_audio",
-            "Unfinalized audio exceeds 30 seconds",
+            format!(
+                "Unfinalized audio exceeds {maximum_seconds} seconds: {retained_ms} ms retained, {requested_ms} ms requested"
+            ),
             Some("audio"),
             client_event_id,
         ),
@@ -470,3 +476,7 @@ async fn send_message(socket: &mut WebSocket, message: Message, policy: &RoutePo
     .await
     .is_ok_and(|result| result.is_ok())
 }
+
+#[cfg(test)]
+#[path = "route-tests.rs"]
+mod tests;

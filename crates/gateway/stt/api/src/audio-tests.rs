@@ -332,7 +332,39 @@ fn buffered_audio_accepts_thirty_seconds_and_rejects_one_more_sample() {
         audio.append_base64(&encoded(&0_i16.to_le_bytes())),
         Err(AudioError::BufferTooLong {
             maximum_seconds: 30,
+            retained_ms: 30_000,
+            requested_ms: 1,
         })
+    );
+}
+
+#[test]
+fn a_rejected_append_names_the_retained_and_requested_durations_and_the_limit() {
+    const SECOND_BYTES: usize = 24_000 * 2;
+    let mut audio = AudioBuffer::default();
+    audio
+        .append_base64(&encoded(&vec![0_u8; 25 * SECOND_BYTES]))
+        .expect("twenty-five seconds fit");
+
+    let error = audio
+        .append_base64(&encoded(&vec![0_u8; 10 * SECOND_BYTES]))
+        .expect_err("ten more seconds pass the thirty-second limit");
+
+    assert_eq!(
+        error,
+        AudioError::BufferTooLong {
+            maximum_seconds: 30,
+            retained_ms: 25_000,
+            requested_ms: 10_000,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "audio buffer exceeds 30 seconds: 25000 ms retained, 10000 ms requested"
+    );
+    assert!(
+        (audio.buffered_duration_seconds() - 25.0).abs() < f64::EPSILON,
+        "the rejected append leaves the buffer unchanged"
     );
 }
 
@@ -417,11 +449,12 @@ fn odd_byte_and_drained_output_cross_the_u64_lifetime_boundary_without_phase_ove
         .expect("the ordinary held byte's sample appends");
     assert_eq!(actual, ordinary.take_resampled());
     assert_eq!(near_limit.input_samples, u64::MAX);
-    assert_eq!(
+    assert!(matches!(
         near_limit.append_base64(&encoded(&0_i16.to_le_bytes())),
         Err(AudioError::BufferTooLong {
             maximum_seconds: 30,
+            ..
         })
-    );
+    ));
     assert!(near_limit.take_resampled().is_empty());
 }

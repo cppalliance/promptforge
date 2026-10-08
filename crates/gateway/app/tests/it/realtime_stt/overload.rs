@@ -74,7 +74,7 @@ async fn mounted_slower_than_capture_overload_preserves_the_committable_input() 
                     socket,
                     "overload_error",
                     "too_much_unfinalized_audio",
-                    "Unfinalized audio exceeds 30 seconds",
+                    "Unfinalized audio exceeds 30 seconds: 20032 ms retained, 10016 ms requested",
                     serde_json::json!("audio"),
                     "capture_outpaced_final",
                 )

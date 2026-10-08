@@ -1,6 +1,7 @@
 //! Tests for the retained PCM budget and rolling buffer accounting.
 
 use super::{RetainedPcm, RetainedPcmBudget, RollingPcm};
+use crate::audio::AudioError;
 
 #[test]
 fn miri_resident_queue_and_decode_charge_each_live_allocation() {
@@ -152,7 +153,7 @@ fn miri_eighteen_second_decode_and_ten_second_resident_count_allocation_capacity
 }
 
 #[test]
-fn allocation_slack_is_charged_before_another_sample_is_admitted() {
+fn allocation_slack_is_charged_once_and_admits_samples_without_a_second_charge() {
     let budget = RetainedPcmBudget::with_limit(30);
     let mut resident = RollingPcm::new(budget.clone());
     let mut decode_allocation = Vec::with_capacity(19);
@@ -171,15 +172,72 @@ fn allocation_slack_is_charged_before_another_sample_is_admitted() {
         .append(next_stride)
         .expect("the exact remaining allocation fits");
     assert_eq!(budget.retained_samples(), 30);
+    resident
+        .append(vec![0.5])
+        .expect("the destination's spare capacity is already counted");
+    assert_eq!(resident.len(), 11);
+    assert_eq!(budget.retained_samples(), 30, "the append charges nothing");
     assert!(
         resident.append(vec![0.5]).is_err(),
-        "the incoming resampler allocation is charged even when destination slack exists"
+        "growth past the spare capacity needs headroom the cap no longer has"
     );
 }
 
 #[test]
-fn transient_source_and_destination_growth_obey_the_exact_peak_budget() {
-    fn append_with_limit(limit: usize) -> Result<usize, crate::audio::AudioError> {
+fn a_rejected_pcm_append_names_the_retained_and_requested_durations_and_the_limit() {
+    const SECOND: usize = 16_000;
+    let mut resident = RollingPcm::new(RetainedPcmBudget::default());
+    resident
+        .append(vec![0.0; 20 * SECOND])
+        .expect("twenty seconds fit the cap");
+
+    let (error, rejected) = resident
+        .try_append(vec![0.0; 11 * SECOND])
+        .expect_err("eleven more seconds pass the thirty-second cap");
+
+    assert_eq!(
+        error,
+        AudioError::BufferTooLong {
+            maximum_seconds: 30,
+            retained_ms: 20_000,
+            requested_ms: 11_000,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "audio buffer exceeds 30 seconds: 20000 ms retained, 11000 ms requested"
+    );
+    assert_eq!(
+        rejected.len(),
+        11 * SECOND,
+        "the rejected samples come back"
+    );
+    assert_eq!(resident.len(), 20 * SECOND);
+}
+
+#[test]
+fn twenty_seconds_retained_admit_a_six_second_append() {
+    const SECOND: usize = 16_000;
+    let budget = RetainedPcmBudget::default();
+    let mut resident = RollingPcm::new(budget.clone());
+    resident
+        .append(vec![0.0; 20 * SECOND])
+        .expect("twenty seconds fit the cap");
+
+    resident
+        .append(vec![0.0; 6 * SECOND])
+        .expect("the batch counts once, so six more seconds fit the thirty-second cap");
+    assert_eq!(resident.len(), 26 * SECOND);
+    assert_eq!(
+        budget.retained_samples(),
+        26 * SECOND,
+        "the append leaves exactly the buffer's own allocation counted"
+    );
+}
+
+#[test]
+fn destination_growth_obeys_the_exact_headroom_budget() {
+    fn append_with_limit(limit: usize) -> Result<usize, AudioError> {
         let budget = RetainedPcmBudget::with_limit(limit);
         let mut resident = RollingPcm::new(budget.clone());
         let mut first = Vec::with_capacity(2);
@@ -192,11 +250,11 @@ fn transient_source_and_destination_growth_obey_the_exact_peak_budget() {
     }
 
     assert_eq!(
-        append_with_limit(6).expect("source, old destination, and growth fit exactly"),
+        append_with_limit(4).expect("old destination and growth fit exactly"),
         4
     );
     assert!(
-        append_with_limit(5).is_err(),
-        "one sample below the physical allocation peak rejects before growth and copy"
+        append_with_limit(3).is_err(),
+        "one sample below the destination's growth rejects before growth and copy"
     );
 }
