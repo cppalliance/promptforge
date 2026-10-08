@@ -13,6 +13,7 @@ use gateway_stt::test_fixtures::{
 };
 
 mod commit;
+mod end_session;
 mod finalization;
 mod interim;
 mod lifecycle;

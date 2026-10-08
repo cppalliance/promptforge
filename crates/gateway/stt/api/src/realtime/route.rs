@@ -9,13 +9,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures_util::StreamExt as _;
 
 use super::Session;
+#[cfg(feature = "test-fixtures")]
+use super::item::FinalizationError;
 use super::query;
 use super::registry::{RegisterError, SessionRegistry};
 use super::result_mailbox::MailboxError;
@@ -46,6 +48,8 @@ pub(crate) struct RoutePolicy {
     blocked_send: Option<Arc<BlockedSend>>,
     #[cfg(feature = "test-fixtures")]
     forced_precommit_failure: Option<ForcedPrecommitFailure>,
+    #[cfg(feature = "test-fixtures")]
+    forced_finish_ready_failure: bool,
 }
 
 #[cfg(feature = "test-fixtures")]
@@ -64,12 +68,30 @@ impl RoutePolicy {
                 attempted: AtomicUsize::new(0),
             })),
             forced_precommit_failure: None,
+            forced_finish_ready_failure: false,
         }
     }
 
     #[cfg(feature = "test-fixtures")]
     pub(crate) fn force_precommit_failure(&mut self, failure: ForcedPrecommitFailure) {
         self.forced_precommit_failure = Some(failure);
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn force_finish_ready_failure(&mut self) {
+        self.forced_finish_ready_failure = true;
+    }
+
+    /// The failure that replaces the completion pass's `finish_ready` once
+    /// the session holds a committed item.
+    fn finish_ready_failure(&self, session: &Session) -> Option<SessionError> {
+        #[cfg(feature = "test-fixtures")]
+        if self.forced_finish_ready_failure && session.committed_count() > 0 {
+            return Some(SessionError::Finalization(FinalizationError::NotFinalizing));
+        }
+        #[cfg(not(feature = "test-fixtures"))]
+        let _ = session;
+        None
     }
 
     fn precommit_failure(&self) -> Option<TakeFailure> {
@@ -167,7 +189,8 @@ async fn run_socket(
                     if !send_update(&mut socket, &session, update, &policy).await {
                         return;
                     }
-                    if session.catch_up_interim().is_err() {
+                    if let Err(error) = session.catch_up_interim() {
+                        end_session(&mut socket, &session, &error, &policy).await;
                         return;
                     }
                 }
@@ -175,15 +198,24 @@ async fn run_socket(
                 if !send_update(&mut socket, &session, update, &policy).await {
                     return;
                 }
-                let Ok(events) = session.finish_ready().await else {
-                    return;
+                let ready = match policy.finish_ready_failure(&session) {
+                    Some(error) => Err(error),
+                    None => session.finish_ready().await,
+                };
+                let events = match ready {
+                    Ok(events) => events,
+                    Err(error) => {
+                        end_session(&mut socket, &session, &error, &policy).await;
+                        return;
+                    }
                 };
                 if !send_events(&mut socket, &events, &policy).await {
                     return;
                 }
             }
             _ = interims.tick() => {
-                if session.schedule_interim().is_err() {
+                if let Err(error) = session.schedule_interim() {
+                    end_session(&mut socket, &session, &error, &policy).await;
                     return;
                 }
             }
@@ -196,6 +228,26 @@ async fn run_socket(
                 }
             }
         }
+    }
+}
+
+/// Ends a session the gateway cannot continue. The client gets a
+/// `server_error` event naming the cause and then a close frame with code
+/// 1011, and the end is logged once at error level.
+async fn end_session(
+    socket: &mut WebSocket,
+    session: &Session,
+    error: &SessionError,
+    policy: &RoutePolicy,
+) {
+    let client_error = session_error(error, None).into_session_end(&error.to_string());
+    session.log_end(client_error.code(), error);
+    if send_client_error(socket, session, client_error, policy).await {
+        let close = CloseFrame {
+            code: close_code::ERROR,
+            reason: "the gateway ended the session".into(),
+        };
+        send_message(socket, Message::Close(Some(close)), policy).await;
     }
 }
 

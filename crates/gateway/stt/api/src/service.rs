@@ -148,6 +148,13 @@ impl SpeechService {
             .force_precommit_failure(ForcedPrecommitFailure::Transcription);
     }
 
+    /// Makes the Realtime completion pass fail as soon as a session holds a
+    /// committed item, for tests of gateway-ended sessions.
+    #[cfg(feature = "test-fixtures")]
+    pub fn fail_realtime_finish_ready(&mut self) {
+        self.realtime_policy.force_finish_ready_failure();
+    }
+
     /// Closes admission on the published runtime the way [`Self::shutdown`]
     /// does - cancelling the session epoch - without draining or retiring
     /// it, so a test can observe cancelled work while worker ownership
