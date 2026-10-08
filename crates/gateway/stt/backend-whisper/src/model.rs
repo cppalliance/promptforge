@@ -21,6 +21,9 @@ use crate::prompt::{
 };
 use crate::words::pass_word_ends;
 
+#[path = "model-warm-up.rs"]
+mod warm_up;
+
 const PREWARM_CHUNK: usize = 4 * 1024 * 1024;
 
 /// Factory for safe Whisper decoders backed by provisioned runtime artifacts.
@@ -29,12 +32,15 @@ pub struct WhisperModelFactory {
     config: WhisperConfig,
     library: WhisperLibrary,
     gpu_available: bool,
+    #[cfg(feature = "test-fixtures")]
+    skip_warm_up: bool,
 }
 
 impl WhisperModelFactory {
     /// Loads the runtime library and validates the configured model paths.
     ///
-    /// Model contexts are created later on their owning engine workers.
+    /// Model contexts are created later on their owning engine workers, and
+    /// each decoder runs one discarded warm-up decode before it is ready.
     ///
     /// # Errors
     /// Returns a backend or model construction failure translated into the
@@ -55,7 +61,18 @@ impl WhisperModelFactory {
             config,
             library,
             gpu_available,
+            #[cfg(feature = "test-fixtures")]
+            skip_warm_up: false,
         })
+    }
+
+    /// Builds every decoder without its warm-up decode, so a test can time
+    /// a cold first decode.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn without_warm_up(mut self) -> Self {
+        self.skip_warm_up = true;
+        self
     }
 
     /// Whether the loaded runtime reports hardware acceleration.
@@ -89,8 +106,16 @@ impl ModelFactory for WhisperModelFactory {
             _ => return Ok(None),
         };
         let progress = self.config.live_progress();
-        WhisperDecoder::load(&self.library, path, role, profile, progress.as_deref())
-            .map(|decoder| Some(Box::new(decoder) as Box<dyn Decoder>))
+        let mut decoder =
+            WhisperDecoder::load(&self.library, path, role, profile, progress.as_deref())?;
+        #[cfg(feature = "test-fixtures")]
+        if self.skip_warm_up {
+            return Ok(Some(Box::new(decoder)));
+        }
+        decoder
+            .warm_up()
+            .map_err(|source| load_model_error(path, source))?;
+        Ok(Some(Box::new(decoder)))
     }
 }
 
