@@ -105,7 +105,10 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     std::fs::create_dir(&agents_dir).expect("the agents directory creates");
     std::fs::write(agents_dir.join("echo.md"), ECHO_MD).expect("the echo agent writes");
     let config = Config {
-        agents: AgentsConfig { path: agents_dir },
+        agents: AgentsConfig {
+            path: agents_dir,
+            mcp: None,
+        },
         ..test_config(&base_url, dir.path())
     };
     let (state, base) = spawn_router(&config).await;

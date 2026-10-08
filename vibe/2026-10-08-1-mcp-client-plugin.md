@@ -636,7 +636,7 @@ Rules for every step:
 
 <step-4>
 
-### Step 4: Install MCP servers in Workshop from a named mcp.json
+### Step 4: Install MCP servers in Workshop from a named mcp.json [completed]
 
 - Component: Workshop MCP install
 - Placement: fourth. It installs Step 3's `PACKAGE`, and its first chat after startup relies on Step 2's wait.

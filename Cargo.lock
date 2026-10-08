@@ -8667,6 +8667,7 @@ dependencies = [
  "gateway-api-discovery",
  "harness",
  "harness-gateway-client",
+ "plugin-mcp",
  "plugin-user-input",
  "plugin-web",
  "promptforge",

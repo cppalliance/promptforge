@@ -10,7 +10,8 @@
 //! recorder tee on a handle of the run log's [`TursoRecorder`] that names
 //! the launched agent, a per-run broker over
 //! the server's inference broker ([`broker`]), the tokio timer, the
-//! server's [`HostContext`] with web and user-input installed, and the
+//! server's [`HostContext`] with web, user-input, and the MCP servers of
+//! the configured `mcp.json` installed, and the
 //! conversation's own services, which hold its input broker. The Harness reaches the gateway
 //! only through that broker, which follows the live gateway binding and
 //! sends each round to the dropdown's current pick. The
@@ -39,7 +40,7 @@ mod wire;
 
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harness::plugin::{HostContext, HostServices};
@@ -48,7 +49,7 @@ use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
 use plugin_web::SEARCH_PROVIDER;
 use promptforge::tools::ToolId;
-use promptforge_plugin::ServiceKey;
+use promptforge_plugin::{PluginId, ServiceKey};
 use serde_json::Value;
 use workshop_agents::{
     Conversation, ConversationId, Conversations, LaunchError, TokioTimer, discover_agents,
@@ -74,17 +75,81 @@ const RUNTIME: ServiceKey<tokio::runtime::Handle> =
     ServiceKey::new(promptforge_plugin::TOKIO_RUNTIME);
 
 /// The server's installed Plugins over its Host-wide [`services`], beside
-/// the ask tool's id.
-fn host_context(registry: &Registry) -> (HostContext, Option<ToolId>) {
-    with_plugins(services(registry))
+/// the ask tool's id. `mcp` is the `[agents] mcp` setting: the servers of
+/// the file it names are installed too.
+fn host_context(registry: &Registry, mcp: Option<&Path>) -> (HostContext, Option<ToolId>) {
+    with_plugins(services(registry), read_mcp_servers(mcp))
+}
+
+/// The `mcpServers` entries of the `mcp.json`-format file at `setting`,
+/// sorted by server name, with every other top-level key ignored. No
+/// setting or a missing file gives no entries, and so does a file that
+/// cannot be read or is not an `mcpServers` object, with a warning that
+/// names the file and the rule and holds no entry value. An entry is
+/// handed on as it stands: `plugin-mcp` refuses a malformed one at its
+/// install.
+fn read_mcp_servers(setting: Option<&Path>) -> Vec<(String, Value)> {
+    let Some(path) = setting else {
+        return Vec::new();
+    };
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "the MCP file could not be read; no MCP servers are installed"
+            );
+            return Vec::new();
+        }
+    };
+    let document = match serde_json::from_str::<Value>(&text) {
+        Ok(document) => document,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "the MCP file is not valid JSON; no MCP servers are installed"
+            );
+            return Vec::new();
+        }
+    };
+    let Value::Object(mut top) = document else {
+        tracing::warn!(
+            path = %path.display(),
+            "the MCP file must be a JSON object; no MCP servers are installed"
+        );
+        return Vec::new();
+    };
+    let servers = top.remove("mcpServers");
+    match servers {
+        None => Vec::new(),
+        // The map is ordered by key because `preserve_order` is off.
+        Some(Value::Object(servers)) => servers.into_iter().collect(),
+        Some(_) => {
+            tracing::warn!(
+                path = %path.display(),
+                "the MCP file's `mcpServers` must be a JSON object; no MCP servers are installed"
+            );
+            Vec::new()
+        }
+    }
 }
 
 /// A Host over the Host-wide `services` with the Plugins agents may
-/// declare installed under their default names: `web`, and `user-input`,
-/// so they can ask the operator. The ask tool's id is `<name>/ask` under
-/// the name the user-input install returned, and `None` only if that
-/// install was refused.
-fn with_plugins(services: HostServices) -> (HostContext, Option<ToolId>) {
+/// declare installed: `web`, and `user-input`, so they can ask the
+/// operator, under their default names, then each of `servers` as an MCP
+/// Plugin under its name lowercased in ASCII, with its entry as the
+/// configuration. A name that does not parse as a Plugin id, or that is
+/// taken or differs from an installed name only by punctuation, is skipped
+/// with a warning, and the other servers still install. The ask tool's id
+/// is `<name>/ask` under the name the user-input install returned, and
+/// `None` only if that install was refused.
+fn with_plugins(
+    services: HostServices,
+    servers: Vec<(String, Value)>,
+) -> (HostContext, Option<ToolId>) {
     let mut host = HostContext::new(services);
     if let Err(error) = host.install(plugin_web::PACKAGE, None, Value::Null) {
         tracing::warn!(%error, "the web Plugin was not installed");
@@ -98,6 +163,18 @@ fn with_plugins(services: HostServices) -> (HostContext, Option<ToolId>) {
             None
         }
     };
+    for (server, entry) in servers {
+        let id = match PluginId::parse(&server.to_ascii_lowercase()) {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::warn!(%server, %error, "the MCP server was skipped");
+                continue;
+            }
+        };
+        if let Err(error) = host.install(plugin_mcp::PACKAGE, Some(id), entry) {
+            tracing::warn!(%server, %error, "the MCP server was not installed");
+        }
+    }
     (host, ask)
 }
 
@@ -170,12 +247,15 @@ impl fmt::Debug for AgentSessions {
 
 impl AgentSessions {
     /// Builds the launcher for `config` over the subsystem registry and
-    /// the server's reconnect backoff. Nothing is spawned and nothing
-    /// touches the filesystem here: the run log opens under the state
-    /// directory when the first run starts.
+    /// the server's reconnect backoff. The only file this reads is the
+    /// `[agents] mcp` file, when the setting names one, and the only
+    /// connections it starts are the background ones to that file's MCP
+    /// servers, on the server's runtime. Nothing else is spawned and
+    /// nothing else touches the filesystem here: the run log opens under
+    /// the state directory when the first run starts.
     #[must_use]
     pub fn new(config: &Config, registry: Registry, backoff: ReconnectBackoff) -> Self {
-        let (host, ask) = host_context(&registry);
+        let (host, ask) = host_context(&registry, config.agents.mcp.as_deref());
         Self {
             inner: Arc::new(Inner {
                 agents_path: config.agents.path.clone(),

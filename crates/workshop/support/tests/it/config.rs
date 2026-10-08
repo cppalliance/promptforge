@@ -249,3 +249,27 @@ fn debug_redacts_the_gateway_api_key() {
         );
     }
 }
+
+#[test]
+fn the_agents_mcp_setting_parses_to_its_path_and_is_kept_verbatim() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let path = dir.path().join("workshop.toml");
+    std::fs::write(
+        &path,
+        "[gateway]\nbase_url = \"http://x\"\napi_key = \"k\"\n\n[agents]\nmcp = \"servers/mcp.json\"\n",
+    )
+    .expect("write fixture");
+    let config = Config::load(&path).expect("fixture loads");
+    assert_eq!(
+        config.agents.mcp,
+        Some(PathBuf::from("servers/mcp.json")),
+        "an explicit mcp path is not re-anchored beside the config file"
+    );
+}
+
+#[test]
+fn an_absent_agents_mcp_setting_is_none() {
+    let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"k\"\n";
+    let config = Config::from_toml_str(raw).expect("fixture parses");
+    assert_eq!(config.agents.mcp, None, "no setting means no MCP servers");
+}

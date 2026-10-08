@@ -129,6 +129,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     let config = Config {
         agents: AgentsConfig {
             path: dir.path().join("missing-agents"),
+            mcp: None,
         },
         ..test_config(&gateway_url, dir.path())
     };

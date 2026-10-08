@@ -23,6 +23,9 @@ harness-gateway-client.workspace = true
 # `promptforge/user-input`, whose ask tool id the agent socket frames by.
 plugin-user-input.workspace = true
 plugin-web.workspace = true
+# The MCP client Plugin, installed once per server of the configured
+# `mcp.json`.
+plugin-mcp.workspace = true
 # The Engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.
