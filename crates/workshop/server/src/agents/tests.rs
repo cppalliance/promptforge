@@ -13,16 +13,21 @@ use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use harness_gateway_client::{CompletionError, CompletionErrorKind};
-use plugin_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
+use plugin_web::SEARCH_PROVIDER;
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::tools::ToolId;
+use promptforge_plugin::{ServiceKey, TOKIO_RUNTIME};
 use workshop_agents::{Conversations, SessionState, TokioTimer};
 use workshop_registry::Registry;
 
 use super::{host_context, services, with_plugins};
+
+/// The runtime's key, built from the Plugin contract's name as any Host
+/// builds it.
+const RUNTIME: ServiceKey<tokio::runtime::Handle> = ServiceKey::new(TOKIO_RUNTIME);
 
 /// A prompt that requires the web Plugin and returns a fixed text.
 const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 0\n\
@@ -98,7 +103,7 @@ async fn a_prompt_declaring_web_prepares_on_the_servers_installed_plugins() {
 async fn a_host_without_the_search_provider_refuses_a_prompt_requiring_web() {
     let mut runtime_only = HostServices::new();
     runtime_only
-        .provide(&TOKIO_RUNTIME, Arc::new(tokio::runtime::Handle::current()))
+        .provide(&RUNTIME, Arc::new(tokio::runtime::Handle::current()))
         .expect("an empty map takes the runtime");
     let (host, _ask) = with_plugins(runtime_only);
 
@@ -130,7 +135,7 @@ fn outside_a_runtime_the_services_leave_the_runtime_out() {
     let services = services(&Registry::new());
     assert!(services.provides(&SEARCH_PROVIDER.id()));
     assert!(
-        !services.provides(&TOKIO_RUNTIME.id()),
+        !services.provides(&RUNTIME.id()),
         "a synchronous caller has no runtime to provide"
     );
 }

@@ -23,8 +23,9 @@ use crate::search::WebSearch;
 ///
 /// Its name is `promptforge/web`, so a Host that picks no name installs it
 /// as `web`. It has no prelude and needs no per-run service; its
-/// `construct` reads [`SEARCH_PROVIDER`] and [`TOKIO_RUNTIME`] from the
-/// Host-wide services and takes no configuration but `null` or `{}`.
+/// `construct` reads [`SEARCH_PROVIDER`] and the Plugin contract's
+/// [`promptforge_plugin::TOKIO_RUNTIME`] service from the Host-wide
+/// services and takes no configuration but `null` or `{}`.
 pub const PACKAGE: Package = Package::new("promptforge/web", construct);
 
 /// The service key for the Host's search provider.
@@ -34,11 +35,9 @@ pub const PACKAGE: Package = Package::new("promptforge/web", construct);
 pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
     ServiceKey::new("promptforge/search-provider");
 
-/// The service key for the Host's tokio runtime handle.
-///
-/// The key's id is `promptforge/tokio-runtime`. A Host provides it among
-/// its Host-wide services, and every fetch is spawned onto it.
-pub const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new("promptforge/tokio-runtime");
+/// The key `construct` reads the Host's runtime through. Every fetch is
+/// spawned onto it.
+const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new(promptforge_plugin::TOKIO_RUNTIME);
 
 /// The one object every run shares: its two-tool list and the two tools.
 #[derive(Debug)]

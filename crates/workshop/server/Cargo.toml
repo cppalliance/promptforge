@@ -27,6 +27,9 @@ plugin-web.workspace = true
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.
 promptforge.workspace = true
+# The Plugin contract's tokio runtime service name, which the agent
+# sessions provide the server's runtime under.
+promptforge-plugin.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
 serde.workspace = true

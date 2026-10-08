@@ -16,10 +16,10 @@
 //! The Host provides two Host-wide services beside the Plugin. Its
 //! [`SearchProvider`] goes under the key [`SEARCH_PROVIDER`], and the
 //! tokio runtime handle that every fetch is spawned onto goes under the
-//! key [`TOKIO_RUNTIME`]. Install reads both; when either is missing, the
-//! Plugin is installed as unavailable, no run receives its tools, and a
-//! prompt that declares it or binds one of its tools is refused naming
-//! the missing service.
+//! Plugin contract's [`promptforge_plugin::TOKIO_RUNTIME`] service.
+//! Install reads both; when either is missing, the Plugin is installed as
+//! unavailable, no run receives its tools, and a prompt that declares it
+//! or binds one of its tools is refused naming the missing service.
 //!
 //! The fetch tool is security-critical. The model supplies the URL, so the
 //! tool is the server-side request forgery (SSRF) boundary between an
@@ -82,4 +82,4 @@ pub use crate::provider::{
     Freshness, SafeSearch, SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult,
     SearchResults,
 };
-pub use crate::web::{PACKAGE, SEARCH_PROVIDER, TOKIO_RUNTIME};
+pub use crate::web::{PACKAGE, SEARCH_PROVIDER};

@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{HostServices, ServiceError, ServiceId, ServiceKey};
+use super::{HostServices, ServiceError, ServiceId, ServiceKey, TOKIO_RUNTIME};
 
 /// A text service, built in a `const` as every key is.
 const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
@@ -14,6 +14,13 @@ const GREETING_AS_NUMBER: ServiceKey<u32> = ServiceKey::new("acme/greeting");
 
 /// A static slice of ids, the shape `Package::needs` holds.
 const NEEDS: &[ServiceId] = &[GREETING.id()];
+
+/// Stands in for the runtime handle, which this crate cannot name.
+struct StandInRuntime(u32);
+
+/// The key a Host provides its runtime under, built from the contract's
+/// name in a `const`.
+const PROVIDED_RUNTIME: ServiceKey<StandInRuntime> = ServiceKey::new(TOKIO_RUNTIME);
 
 #[test]
 fn a_provided_service_is_found_under_its_key() {
@@ -27,6 +34,22 @@ fn a_provided_service_is_found_under_its_key() {
     assert_eq!(services.get(&GREETING).as_deref(), Some("hello"));
     assert!(services.provides(&GREETING.id()));
     assert!(services.provides(&NEEDS[0]));
+}
+
+#[test]
+fn a_runtime_provided_under_the_contracts_name_reads_back_through_a_second_key_built_from_it() {
+    assert_eq!(
+        PROVIDED_RUNTIME.id().to_string(),
+        "promptforge/tokio-runtime"
+    );
+    let mut services = HostServices::new();
+    services
+        .provide(&PROVIDED_RUNTIME, Arc::new(StandInRuntime(7)))
+        .expect("the runtime service's name is a namespace/name id");
+
+    let read: ServiceKey<StandInRuntime> = ServiceKey::new(TOKIO_RUNTIME);
+    assert!(services.provides(&read.id()));
+    assert_eq!(services.get(&read).map(|runtime| runtime.0), Some(7));
 }
 
 #[test]

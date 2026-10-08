@@ -6,15 +6,21 @@
 use std::sync::Arc;
 
 use promptforge_plugin::testing::TestCall;
-use promptforge_plugin::{HostServices, Plugin, PluginId, ToolError, ToolErrorKind, ToolId};
+use promptforge_plugin::{
+    HostServices, Plugin, PluginId, ServiceKey, TOKIO_RUNTIME, ToolError, ToolErrorKind, ToolId,
+};
 use serde_json::{Value, json};
 use tokio::runtime::Handle;
 
-use super::{PACKAGE, SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
+use super::{PACKAGE, SEARCH_PROVIDER, Web};
 use crate::config::FetchConfig;
 use crate::fetch::FetchClient;
 use crate::provider::{SearchError, SearchProvider, SearchQuery, SearchResults};
 use crate::search::WebSearch;
+
+/// The key a Host provides its runtime under, built from the Plugin
+/// contract's name.
+const RUNTIME: ServiceKey<Handle> = ServiceKey::new(TOKIO_RUNTIME);
 
 /// A provider that finds nothing.
 struct NoResults;
@@ -38,7 +44,7 @@ fn services_with(provider: bool, runtime: bool) -> HostServices {
             .expect("an empty map takes the provider");
     }
     if runtime {
-        host.provide(&TOKIO_RUNTIME, Arc::new(Handle::current()))
+        host.provide(&RUNTIME, Arc::new(Handle::current()))
             .expect("an empty map takes the runtime");
     }
     host
@@ -166,6 +172,6 @@ async fn each_service_key_literal_is_a_namespace_name_id() {
     let mut host = HostServices::new();
     host.provide(&SEARCH_PROVIDER, Arc::new(NoResults))
         .expect("provide accepts the search provider's literal");
-    host.provide(&TOKIO_RUNTIME, Arc::new(Handle::current()))
+    host.provide(&RUNTIME, Arc::new(Handle::current()))
         .expect("provide accepts the runtime's literal");
 }

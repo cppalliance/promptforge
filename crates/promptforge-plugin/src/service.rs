@@ -119,6 +119,16 @@ impl<T: ?Sized + Send + Sync + 'static> fmt::Debug for ServiceKey<T> {
     }
 }
 
+/// The id literal of the Host-wide service that supplies the Host's
+/// runtime as a `tokio::runtime::Handle`.
+///
+/// A Plugin that runs on tokio, and the Host that provides the service,
+/// each build `ServiceKey::<Handle>::new(TOKIO_RUNTIME)`. This crate
+/// names no tokio type, so nothing here checks the provider's type: a
+/// provider supplied as any other type reads as missing, because
+/// [`HostServices::get`] returns `None` on a type mismatch.
+pub const TOKIO_RUNTIME: &str = "promptforge/tokio-runtime";
+
 /// One provider in a [`HostServices`] map, with the type it was supplied
 /// as.
 #[derive(Clone)]

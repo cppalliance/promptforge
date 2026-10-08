@@ -46,8 +46,9 @@ use harness::plugin::{HostContext, HostServices};
 use harness::record::RunId;
 use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
-use plugin_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
+use plugin_web::SEARCH_PROVIDER;
 use promptforge::tools::ToolId;
+use promptforge_plugin::ServiceKey;
 use serde_json::Value;
 use workshop_agents::{
     Conversation, ConversationId, Conversations, LaunchError, TokioTimer, discover_agents,
@@ -66,6 +67,11 @@ pub(crate) use state::{SessionsState, register};
 /// The directory under the server's state directory the run log sits in:
 /// the `runs.db` every conversation's run is recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
+
+/// The key the server provides its runtime under: the Plugin contract's
+/// tokio runtime service, as the handle it supplies.
+const RUNTIME: ServiceKey<tokio::runtime::Handle> =
+    ServiceKey::new(promptforge_plugin::TOKIO_RUNTIME);
 
 /// The server's installed Plugins over its Host-wide [`services`], beside
 /// the ask tool's id.
@@ -96,11 +102,11 @@ fn with_plugins(services: HostServices) -> (HostContext, Option<ToolId>) {
 }
 
 /// The Host-wide services `web`'s install reads: the search provider over
-/// the gateway `registry` holds, and the runtime the server runs on. Built
-/// outside a runtime, as a synchronous test does, the runtime is left
-/// out, web installs as unavailable, and a run that requires web is
-/// refused. Each run's input broker is the run's own, so these leave it
-/// out.
+/// the gateway `registry` holds, and the runtime the server runs on,
+/// under the Plugin contract's tokio runtime service. Built outside a
+/// runtime, as a synchronous test does, the runtime is left out, web
+/// installs as unavailable, and a run that requires web is refused. Each
+/// run's input broker is the run's own, so these leave it out.
 fn services(registry: &Registry) -> HostServices {
     let mut services = HostServices::new();
     // Two valid, distinct literals into an empty map, so neither call
@@ -110,7 +116,7 @@ fn services(registry: &Registry) -> HostServices {
         Arc::new(GatewaySearchProvider::new(registry.clone())),
     );
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-        let _ = services.provide(&TOKIO_RUNTIME, Arc::new(runtime));
+        let _ = services.provide(&RUNTIME, Arc::new(runtime));
     }
     services
 }

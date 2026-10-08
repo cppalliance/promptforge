@@ -54,7 +54,7 @@ pub mod testing;
 
 pub use context::ToolContext;
 pub use plugin::{Package, Plugin, PluginFuture};
-pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
+pub use service::{HostServices, ServiceError, ServiceId, ServiceKey, TOKIO_RUNTIME};
 
 pub use promptforge_types::plugins::{PluginId, PluginIdError, PluginIdErrorKind};
 pub use promptforge_types::tools::{

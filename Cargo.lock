@@ -8585,6 +8585,7 @@ dependencies = [
  "plugin-user-input",
  "plugin-web",
  "promptforge",
+ "promptforge-plugin",
  "reqwest",
  "rust-embed",
  "serde",
