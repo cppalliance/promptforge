@@ -3,6 +3,7 @@
 //! unavailable, the requirements a run reports, the tools its catalog
 //! keeps, the preludes it installs, and where each call goes.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use promptforge::effect::{ToolCallOrigin, ToolCaller};
@@ -117,7 +118,7 @@ fn prompt(frontmatter: &str) -> Prompt {
 
 /// The ids in a run's catalog, in catalog order.
 fn catalog_ids(host: &HostContext, services: HostServices, prompt: &Prompt) -> Vec<String> {
-    let (run, _env, _requirements) = host.begin_run(services, prompt);
+    let (run, _env, _requirements) = host.begin_run(services, BTreeMap::new(), prompt);
     run.catalog()
         .tools()
         .iter()
@@ -192,8 +193,11 @@ fn a_construct_failure_is_stored_and_reported_as_unavailable_with_its_reason() {
         Ok(name("backed")),
         "a construct failure is not an install error"
     );
-    let (_run, _env, requirements) =
-        bare.begin_run(HostServices::new(), &prompt("plugins:\n  - backed\n"));
+    let (_run, _env, requirements) = bare.begin_run(
+        HostServices::new(),
+        BTreeMap::new(),
+        &prompt("plugins:\n  - backed\n"),
+    );
     assert_eq!(
         requirements.unavailable,
         [UnavailablePlugin::new(
@@ -207,8 +211,11 @@ fn a_construct_failure_is_stored_and_reported_as_unavailable_with_its_reason() {
     wide.provide(&BACKEND, Arc::from("up")).unwrap();
     let mut provided = HostContext::new(wide);
     provided.install(backed_package, None, Value::Null).unwrap();
-    let (_run, _env, requirements) =
-        provided.begin_run(HostServices::new(), &prompt("plugins:\n  - backed\n"));
+    let (_run, _env, requirements) = provided.begin_run(
+        HostServices::new(),
+        BTreeMap::new(),
+        &prompt("plugins:\n  - backed\n"),
+    );
     assert!(
         requirements.is_satisfied(),
         "construct reads the Host-wide services: {requirements:?}"
@@ -227,6 +234,7 @@ fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
 
     let (_run, _env, requirements) = host.begin_run(
         HostServices::new(),
+        BTreeMap::new(),
         &prompt("plugins:\n  - needy\n  - absent\n  - fine\ntools:\n  b: broken/use\n"),
     );
     assert_eq!(requirements.missing_required, [name("absent")]);
@@ -279,7 +287,7 @@ fn an_undeclared_plugins_tools_reach_the_catalog_but_its_prelude_does_not() {
         catalog_ids(&host, HostServices::new(), &prompt),
         ["declared/a", "extra/b"]
     );
-    let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt);
+    let (run, _env, _requirements) = host.begin_run(HostServices::new(), BTreeMap::new(), &prompt);
     let preludes: Vec<String> = run
         .preludes(&prompt)
         .iter()
@@ -299,7 +307,7 @@ fn preludes_follow_the_prompts_declaration_order_and_carry_the_installed_name() 
     host.install(renamed, Some(name("third")), Value::Null)
         .unwrap();
     let prompt = prompt("plugins:\n  - third\n  - second\n  - first\n");
-    let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt);
+    let (run, _env, _requirements) = host.begin_run(HostServices::new(), BTreeMap::new(), &prompt);
     let order: Vec<String> = run
         .preludes(&prompt)
         .iter()
@@ -334,7 +342,8 @@ async fn a_call_goes_to_the_plugin_its_tool_ids_first_segment_names() {
         .unwrap();
     host.install(package("acme/two"), None, json!([tool("two/echo")]))
         .unwrap();
-    let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));
+    let (run, _env, _requirements) =
+        host.begin_run(HostServices::new(), BTreeMap::new(), &prompt(""));
 
     let answer = |result: Result<ToolOutput, ToolError>| result.unwrap().text().to_owned();
     assert_eq!(answer(call(&run, "one/echo").await), "one:one/echo");
@@ -351,7 +360,8 @@ async fn a_call_to_a_plugin_the_run_cannot_use_fails_naming_the_tool() {
     let needy = package("acme/needy").needs(NEEDS_SESSION);
     host.install(needy, None, json!([tool("needy/use")]))
         .unwrap();
-    let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));
+    let (run, _env, _requirements) =
+        host.begin_run(HostServices::new(), BTreeMap::new(), &prompt(""));
     let error = call(&run, "needy/use")
         .await
         .expect_err("the run lacks the Plugin's needs");
@@ -366,7 +376,8 @@ fn survives_stop_answers_from_the_runs_snapshot_of_descriptors() {
         tool("kit/fetch"),
     ]);
     host.install(package("acme/kit"), None, config).unwrap();
-    let (run, _env, _requirements) = host.begin_run(HostServices::new(), &prompt(""));
+    let (run, _env, _requirements) =
+        host.begin_run(HostServices::new(), BTreeMap::new(), &prompt(""));
     let survives = |id: &str| run.survives_stop(&ToolId::parse(id).unwrap());
     assert!(survives("kit/ask"));
     assert!(!survives("kit/fetch"));

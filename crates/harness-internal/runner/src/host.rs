@@ -6,15 +6,21 @@
 //! object every run shares. A construct failure is not an install error:
 //! the Plugin is stored as unavailable with the failure as its reason, and
 //! every run that needs it is refused naming that reason. Before each run,
-//! the Harness's preparation takes a snapshot of every installed Plugin
-//! with the run's own services: the catalog the Engine fills slots
-//! against, the preludes of the Plugins the prompt declares, the
-//! requirements the snapshot cannot meet, and the performer that sends
-//! each tool call to the Plugin its id names.
+//! the Harness's preparation waits for every built Plugin to be ready, and
+//! a Plugin whose `ready` fails is unavailable to that run the same way.
+//! Then it takes a snapshot of every installed Plugin with the run's own
+//! services: the catalog the Engine fills slots against, the preludes of
+//! the Plugins the prompt declares, the requirements the snapshot cannot
+//! meet, and the performer that sends each tool call to the Plugin its id
+//! names.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::pin::pin;
 use std::sync::Arc;
 
+use futures_util::future::{Either, join_all, select};
+use promptforge::cancel::CancelHandle;
 use promptforge::{Environment, Prompt, Requirements};
 use promptforge_plugin::{HostServices, Package, Plugin, PluginId};
 
@@ -112,18 +118,53 @@ impl HostContext {
         Ok(name)
     }
 
+    /// Waits until every built Plugin's `ready` resolves, polling them
+    /// together, and returns the reason of each one that will not be
+    /// ready, by name.
+    ///
+    /// A cancel on `cancel` ends the wait with no failures, so each Plugin
+    /// is snapshotted as it stands, and a run cancelled here ends
+    /// cancelled whatever the snapshot holds.
+    pub(crate) async fn wait_ready(&self, cancel: &CancelHandle) -> BTreeMap<PluginId, String> {
+        let waits = self.installed.iter().filter_map(|installed| {
+            let plugin = installed.plugin.as_ref().ok()?;
+            Some(async move { (&installed.name, plugin.ready().await) })
+        });
+        let joined = pin!(join_all(waits));
+        // The cancel arm is polled first, so a run cancelled already does
+        // not wait.
+        match select(cancel.cancelled(), joined).await {
+            Either::Left(((), _)) => BTreeMap::new(),
+            Either::Right((results, _)) => results
+                .into_iter()
+                .filter_map(|(name, result)| {
+                    let error = result.err()?;
+                    tracing::warn!(
+                        plugin = %name,
+                        %error,
+                        "Plugin will not be ready; this run treats it as unavailable"
+                    );
+                    Some((name.clone(), error.to_string()))
+                })
+                .collect(),
+        }
+    }
+
     /// Takes one run's snapshot of every installed Plugin with `services`,
     /// the run's own services, and builds what the Engine needs for
     /// `prompt`.
     ///
-    /// The environment's catalog holds every usable Plugin's tools,
-    /// declared or not, and its preludes are the declared, usable Plugins',
-    /// in declaration order. The requirements cover every Plugin the
-    /// prompt declares or names in a tool slot. The returned context
-    /// performs the run's tool calls.
+    /// `failures` holds the reason of each Plugin whose `ready` failed
+    /// before this run, which the run treats as unavailable. The
+    /// environment's catalog holds every usable Plugin's tools, declared
+    /// or not, and its preludes are the declared, usable Plugins', in
+    /// declaration order. The requirements cover every Plugin the prompt
+    /// declares or names in a tool slot. The returned context performs the
+    /// run's tool calls.
     pub(crate) fn begin_run(
         &self,
         services: HostServices,
+        failures: BTreeMap<PluginId, String>,
         prompt: &Prompt,
     ) -> (HostRunContext, Environment, Requirements) {
         let run = HostRunContext::snapshot(
@@ -131,6 +172,7 @@ impl HostContext {
                 .iter()
                 .map(|installed| (&installed.name, installed.package, &installed.plugin)),
             services,
+            failures,
         );
         let env = Environment::new()
             .tools(run.catalog())

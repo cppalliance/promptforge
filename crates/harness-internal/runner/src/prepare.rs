@@ -8,7 +8,8 @@
 //! the ceremony the Engine's `Environment` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
-//! directories and the declared store, to the context as given; take the
+//! directories and the declared store, to the context as given; wait for
+//! every built Plugin to be ready, or for the run's cancel; take the
 //! run's snapshot of the Host's Plugins with the run's own services,
 //! which yields the catalog, the preludes, and the tool performer;
 //! install the catalog and the preludes and prepare the context; merge
@@ -20,8 +21,11 @@
 //! cannot be put in place) is a run that ended before
 //! it began: the recorder ends it as failed with the refusal as the
 //! message, so the record answers "why did this run fail" for a run the
-//! loop never saw. `Harness::run_to_end` reports that ended run, and its
-//! caller reads the events recorded so far from the recorder.
+//! loop never saw. A refusal after the run's cancel fired, as when a
+//! cancel cuts the wait short while a needed Plugin is still starting,
+//! ends the run as cancelled instead. `Harness::run_to_end` reports that
+//! ended run, and its caller reads the events recorded so far from the
+//! recorder.
 //!
 //! The input staging is store work and runs inline, like every other VFS
 //! operation of the run.
@@ -133,7 +137,8 @@ pub enum PrepareError {
     /// needs, its Plugin does not offer a slotted tool, or the current
     /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run is
-    /// ended as failed with that notice.
+    /// ended as failed with that notice, or as cancelled when the run's
+    /// cancel had fired.
     #[error("the environment cannot satisfy the prompt")]
     Refused {
         /// The run, ended with this refusal.
@@ -168,9 +173,11 @@ pub enum PrepareError {
 }
 
 impl PrepareError {
-    /// The run this failure ended at the recorder, beside the outcome it
-    /// was ended with, or, for a recorder refusal, which ends nothing, the
-    /// run the recorder issued and its refusal.
+    /// The run this failure ended at the recorder, beside the failed
+    /// outcome it was ended with, or, for a recorder refusal, which ends
+    /// nothing, the run the recorder issued and its refusal. A refusal
+    /// that [`prepare_noting_cancel`] says it ended `Cancelled` was not
+    /// ended as failed, and its caller reports it without asking here.
     pub(crate) fn ended(self) -> Result<(RunId, RunOutcome), (Option<RunId>, RecorderError)> {
         match self {
             PrepareError::Parse { run_id, source } => Ok((run_id, failed("Parse", &source))),
@@ -183,16 +190,21 @@ impl PrepareError {
 
 /// Prepares the prompt `source` for one run with `args`: draws the run's
 /// seed and start and begins the run at its recorder, parses the prompt,
-/// puts its declared input file in place, takes the run's snapshot of
-/// the Host's Plugins, prepares the context,
-/// refuses an unsatisfiable prompt, and builds the `Run` and its
-/// performers.
+/// puts its declared input file in place, waits for every built Plugin
+/// to be ready or for the run's cancel, takes the run's snapshot of the
+/// Host's Plugins, prepares the context, refuses an unsatisfiable prompt,
+/// and builds the `Run` and its performers.
+///
+/// A Plugin whose `ready` fails is unavailable to this run, with its
+/// error as the reason. A cancel ends the wait, and each Plugin is
+/// snapshotted as it stands.
 ///
 /// # Errors
 /// Returns [`PrepareError::Parse`] when the source does not parse,
 /// [`PrepareError::Input`] when its declared input file cannot be put in
 /// place, and [`PrepareError::Refused`] when the environment cannot
-/// satisfy it (in these three cases the run is ended as failed, and
+/// satisfy it (in these three cases the run is ended as failed, except
+/// that a refusal after the run's cancel fired ends it as cancelled, and
 /// `Harness::run_to_end` reports it while the events recorded so far stay
 /// at the recorder), and [`PrepareError::Recorder`] when the recorder
 /// refuses a write.
@@ -201,6 +213,26 @@ pub async fn prepare(
     args: &str,
     services: Services,
 ) -> Result<Prepared, PrepareError> {
+    prepare_noting_cancel(source, args, services)
+        .await
+        .map_err(|(error, _)| error)
+}
+
+/// [`prepare`], whose failure comes beside whether it ended the run
+/// `Cancelled`, which only a refusal after the run's cancel fired does.
+/// That one reading of the cancel decides the record, and the caller
+/// reports from it rather than reading the cancel again, so a cancel
+/// landing while the refusal is recorded cannot split the report from
+/// the record.
+#[expect(
+    clippy::result_large_err,
+    reason = "the error is returned once per launch and carries the failure's source beside the one cancel reading"
+)]
+pub(crate) async fn prepare_noting_cancel(
+    source: &str,
+    args: &str,
+    services: Services,
+) -> Result<Prepared, (PrepareError, bool)> {
     let Services {
         host,
         services,
@@ -228,10 +260,15 @@ pub async fn prepare(
             started_at: started_at.unix_millis(),
         })
         .await
-        .map_err(|source| PrepareError::Recorder { run: None, source })?;
-    let recorded = |source| PrepareError::Recorder {
-        run: Some(run_id),
-        source,
+        .map_err(|source| (PrepareError::Recorder { run: None, source }, false))?;
+    let recorded = |source| {
+        (
+            PrepareError::Recorder {
+                run: Some(run_id),
+                source,
+            },
+            false,
+        )
     };
 
     // Parse-time events are the run's first records, whether or not the
@@ -248,7 +285,7 @@ pub async fn prepare(
                 .end_run(run_id, failed("Parse", &source))
                 .await
                 .map_err(recorded)?;
-            return Err(PrepareError::Parse { run_id, source });
+            return Err((PrepareError::Parse { run_id, source }, false));
         }
     };
 
@@ -260,7 +297,7 @@ pub async fn prepare(
             .end_run(run_id, failed("Input", &source))
             .await
             .map_err(recorded)?;
-        return Err(PrepareError::Input { run_id, source });
+        return Err((PrepareError::Input { run_id, source }, false));
     }
     let output_path = prompt
         .frontmatter()
@@ -272,7 +309,7 @@ pub async fn prepare(
     // is unique across every record of the run.
     let provenance_start = u32::try_from(parse_events.len()).unwrap_or(u32::MAX);
     let mut ctx = RunContext::new(name, seed, started_at)
-        .cancel(cancel)
+        .cancel(cancel.clone())
         .provenance_start(provenance_start);
     if let Some(ui) = ui {
         ctx = ctx.ui(ui);
@@ -280,21 +317,28 @@ pub async fn prepare(
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    // The snapshot-prepare-refuse ceremony: the run's whole filesystem,
-    // the real directories and the declared store, goes to the context as
-    // given; the snapshot's catalog is what prepare fills slots against,
-    // its preludes go to every section VM, and the snapshot itself stays
-    // here as the tool performer, lending each call the run's services.
+    // The wait-snapshot-prepare-refuse ceremony: the run's whole
+    // filesystem, the real directories and the declared store, goes to
+    // the context as given; the snapshot is taken once every Plugin is
+    // ready or the run is cancelled, its catalog is what prepare fills
+    // slots against, its preludes go to every section VM, and the
+    // snapshot itself stays here as the tool performer, lending each call
+    // the run's services. A refusal after a cancel ends the run cancelled,
+    // as `Harness::run_to_end` reports it.
     let ctx = ctx.vfs(vfs);
-    let (snapshot, env, unmet) = host.begin_run(services, &prompt);
+    let failures = host.wait_ready(&cancel).await;
+    let (snapshot, env, unmet) = host.begin_run(services, failures, &prompt);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);
     requirements.merge(unmet);
     if let Some(error) = requirements.refusal() {
-        recorder
-            .end_run(run_id, failed_outcome(&error))
-            .await
-            .map_err(recorded)?;
-        return Err(PrepareError::Refused { run_id, error });
+        let cancelled = cancel.is_cancelled();
+        let outcome = if cancelled {
+            RunOutcome::Cancelled
+        } else {
+            failed_outcome(&error)
+        };
+        recorder.end_run(run_id, outcome).await.map_err(recorded)?;
+        return Err((PrepareError::Refused { run_id, error }, cancelled));
     }
 
     let run = Run::new(Arc::new(prompt), args, ctx);

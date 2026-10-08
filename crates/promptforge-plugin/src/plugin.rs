@@ -13,8 +13,8 @@ use crate::{HostServices, ServiceId, ToolContext};
 /// A boxed future that may borrow for `'a`, the same type as
 /// `futures::future::BoxFuture`.
 ///
-/// [`Plugin::call`] returns one, so the Harness can hold Plugins as
-/// `dyn Plugin`. An implementation wraps its body in
+/// [`Plugin::call`] and [`Plugin::ready`] return one, so the Harness can
+/// hold Plugins as `dyn Plugin`. An implementation wraps its body in
 /// `Box::pin(async move { ... })`.
 pub type PluginFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -28,11 +28,40 @@ pub type PluginFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait Plugin: Send + Sync {
     /// Returns the tools the Plugin offers now.
     ///
-    /// The Harness reads the list once when each run starts, so a Plugin
-    /// whose tools change returns its current list, and a Plugin still
-    /// coming up returns what it has so far. Each tool's id sits under the
-    /// name the Plugin was installed under, as in `web/fetch`.
+    /// The Harness reads the list once when each run starts, after it
+    /// awaits [`ready`](Plugin::ready), so a Plugin whose tools change
+    /// returns its current list, and a Plugin still coming up returns what
+    /// it has so far. Each tool's id sits under the name the Plugin was
+    /// installed under, as in `web/fetch`.
     fn tools(&self) -> Vec<ToolDescriptor>;
+
+    /// Resolves once the Plugin's tool list is complete, or with the
+    /// reason it never will be.
+    ///
+    /// The Harness awaits every Plugin's `ready` together before each run
+    /// reads [`tools`](Plugin::tools). A Plugin whose `ready` fails is
+    /// unavailable to that run, with the error's message as the reason.
+    /// The default resolves `Ok(())` at once, for a Plugin whose tools are
+    /// known when `construct` returns.
+    ///
+    /// # Invariants
+    ///
+    /// - `ready` resolves `Ok` once [`tools`](Plugin::tools) is complete,
+    ///   or `Err` with a reason a model can read when it never will be.
+    /// - `ready` resolves within a bound the Plugin owns. The Plugin's own
+    ///   task enforces that bound, and `ready` uses no runtime timer,
+    ///   because it may be polled outside any particular runtime.
+    /// - `ready` is cancellation-safe: a cancel drops it unresolved. After
+    ///   its first resolution it answers at once unless the Plugin's state
+    ///   has changed.
+    ///
+    /// # Errors
+    /// Returns a [`ToolError`], whose message is safe to show the model,
+    /// when the Plugin will never offer its tools, such as when the
+    /// backend it connects to refuses it.
+    fn ready(&self) -> PluginFuture<'_, Result<(), ToolError>> {
+        Box::pin(async { Ok(()) })
+    }
 
     /// Performs one tool call.
     ///

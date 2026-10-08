@@ -9,8 +9,9 @@
 //! tool call and behind the fixture ask Plugin - sits in the `input`
 //! child module, the run's services meeting a Plugin's needs sit in the
 //! `host_services` child module, a Plugin's prelude reaching the prepared
-//! run sits in the `prelude` child module, and the prompt's declared input
-//! and output files sit in the `files` child module.
+//! run sits in the `prelude` child module, the prompt's declared input
+//! and output files sit in the `files` child module, and the wait for
+//! each Plugin to be ready sits in the `ready` child module.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,6 +39,8 @@ mod host_services;
 mod input;
 #[path = "prepare-prelude.rs"]
 mod prelude;
+#[path = "prepare-ready.rs"]
+mod ready;
 
 /// A prompt declaring `web` as a required Plugin that no
 /// Host here installs.

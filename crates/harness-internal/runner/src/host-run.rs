@@ -2,9 +2,10 @@
 //! holds what each installed Plugin looks like to the run and performs
 //! the run's tool calls.
 //!
-//! The snapshot reads each usable Plugin's tool list once, so the run's
-//! catalog and the tools its calls may reach stay fixed for the run. A
-//! tool call goes to the Plugin its id's first segment names.
+//! The snapshot reads each usable Plugin's tool list once, after the wait
+//! for every Plugin to be ready, so the run's catalog and the tools its
+//! calls may reach stay fixed for the run. A tool call goes to the Plugin
+//! its id's first segment names.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -38,7 +39,8 @@ enum RunPlugin {
         plugin: Arc<dyn Plugin>,
         tools: Vec<ToolDescriptor>,
     },
-    /// Its `construct` failed, for this reason.
+    /// Its `construct` failed, or its `ready` did before this run, for
+    /// this reason.
     Unavailable(String),
     /// The run lacks these services from its package's needs.
     NeedsUnmet(Vec<ServiceId>),
@@ -48,18 +50,22 @@ impl HostRunContext {
     /// Takes the snapshot of the `installed` Plugins, in install order,
     /// with `services` as the run's own.
     ///
-    /// A built Plugin is usable when `services` provide every id its
-    /// package needs; only then is its tool list read and validated.
+    /// A built Plugin named in `failures` is unavailable with the reason
+    /// it maps to. Any other built Plugin is usable when `services`
+    /// provide every id its package needs; only then is its tool list read
+    /// and validated.
     pub(super) fn snapshot<'a>(
         installed: impl Iterator<Item = (&'a PluginId, Package, &'a Result<Arc<dyn Plugin>, String>)>,
         services: HostServices,
+        mut failures: BTreeMap<PluginId, String>,
     ) -> HostRunContext {
         let mut seen = BTreeSet::new();
         let plugins = installed
             .map(|(name, package, built)| {
-                let state = match built {
-                    Err(reason) => RunPlugin::Unavailable(reason.clone()),
-                    Ok(plugin) => {
+                let state = match (built, failures.remove(name)) {
+                    (Err(reason), _) => RunPlugin::Unavailable(reason.clone()),
+                    (Ok(_), Some(reason)) => RunPlugin::Unavailable(reason),
+                    (Ok(plugin), None) => {
                         let unmet: Vec<ServiceId> = package
                             .needs
                             .iter()

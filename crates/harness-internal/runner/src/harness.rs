@@ -23,7 +23,7 @@ use crate::environment::{CurrentModelError, HostSnapshot, current_model};
 use crate::files::{OutputError, report_output};
 use crate::host::HostContext;
 use crate::performers::{InferenceBroker, Timer};
-use crate::prepare::{Services, prepare};
+use crate::prepare::{PrepareError, Services, prepare_noting_cancel};
 use crate::recorder::{RecorderError, RunId, RunOutcome, RunRecorder};
 
 #[path = "harness-control.rs"]
@@ -160,16 +160,20 @@ impl Harness {
     /// Runs `request` to its end and reports how it ended.
     ///
     /// It resolves the run's model through the inference broker, prepares
-    /// the prompt from its source, drives the run, and reads the declared
-    /// output file if the run completed. The returned future is `Send`. Its
-    /// only runtime needs are those of the Host's performers.
+    /// the prompt from its source, waits for the Host's Plugins to be
+    /// ready, drives the run, and reads the declared output file if the
+    /// run completed. The returned future is `Send`. Its only runtime needs
+    /// are those of the Host's performers and Plugins.
     ///
     /// Three problems end the run as failed and still return a report with
     /// that outcome: a source that fails to parse, a declared input file
     /// the Harness fails to put in place, and an environment that falls
     /// short of the prompt's requirements. A cancel raised before calling
     /// `run`, or while the broker lists its models, returns a report with
-    /// the outcome `Cancelled` and `run_id` set to `None`.
+    /// the outcome `Cancelled` and `run_id` set to `None`. An environment
+    /// that falls short after a cancel was raised, as when the cancel cuts
+    /// short the wait for a Plugin that is still starting, ends the run as
+    /// `Cancelled` instead, and the report carries the run's `run_id`.
     ///
     /// # Errors
     /// Returns [`HarnessError::Model`] when the broker fails to list its
@@ -228,9 +232,16 @@ impl Harness {
             model,
             ui: Some(host.ui()),
         };
-        let prepared = match prepare(&source, &args, services).await {
+        let prepared = match prepare_noting_cancel(&source, &args, services).await {
             Ok(prepared) => prepared,
-            Err(error) => {
+            Err((PrepareError::Refused { run_id, .. }, true)) => {
+                return Ok(RunReport {
+                    run_id: Some(run_id),
+                    outcome: RunOutcome::Cancelled,
+                    output: Err(OutputError::NotCompleted),
+                });
+            }
+            Err((error, _)) => {
                 return match error.ended() {
                     Ok((run_id, outcome)) => Ok(RunReport {
                         run_id: Some(run_id),

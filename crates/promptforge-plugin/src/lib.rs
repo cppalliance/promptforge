@@ -34,6 +34,15 @@
 //! - Every tool a Plugin offers sits under the name `construct` receives,
 //!   as `web/fetch` sits under `web`. A tool that does not is dropped from
 //!   every run's catalog.
+//! - [`Plugin::ready`] resolves `Ok` once [`Plugin::tools`] is complete,
+//!   or `Err` with a reason a model can read when it never will be. The
+//!   Harness awaits it before each run's snapshot, and a Plugin whose
+//!   `ready` fails is unavailable to that run.
+//! - [`Plugin::ready`] resolves within a bound the Plugin owns and
+//!   enforces in its own task. It uses no runtime timer, because it may be
+//!   polled outside any particular runtime.
+//! - [`Plugin::ready`] is cancellation-safe, and after its first
+//!   resolution it answers at once unless the Plugin's state has changed.
 //! - [`Plugin::call`] must not block while polled. Every effect of a run
 //!   is polled on the same task, so blocking or CPU-heavy work goes to the
 //!   Host's runtime.

@@ -518,7 +518,7 @@ Rules for every step:
 
 <step-2>
 
-### Step 2: Wait for Plugins to be ready before each run's snapshot
+### Step 2: Wait for Plugins to be ready before each run's snapshot [completed]
 
 - Component: Plugin contract additions
 - Placement: second. Step 3's `ready` override needs the method, and Step 4's first chat after startup needs the wait. It follows Step 1 only because both pieces belong to one component.
