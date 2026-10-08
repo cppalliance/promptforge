@@ -217,10 +217,6 @@ impl Request {
             // `drain_task_notices` yield is always the unit request.
             "drain_task_notices" => YieldParse::Request(Request::DrainTaskNotices),
             "store" => classify(parse_store(table), |error| Answer::Store(Err(error))),
-            "mcp" => match parse_mcp(lua, table) {
-                Ok(request) => YieldParse::Request(request),
-                Err(_) => YieldParse::Malformed(direct_yield_error()),
-            },
             _ => YieldParse::Malformed(direct_yield_error()),
         }
     }
@@ -428,13 +424,4 @@ fn parse_local_tool_done(table: &mlua::Table) -> Option<Request> {
         _ => return None,
     };
     Some(Request::LocalToolDone { outcome })
-}
-
-/// Parses a reserved `mcp` request. No call surface produces one, so every
-/// field is shim-internal by construction.
-fn parse_mcp(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let server = call_string(table, "server")?;
-    let tool = call_string(table, "tool")?;
-    let args = json_field(lua, table, "args").map_err(|_| FieldFailure::Malformed)?;
-    Ok(Request::Mcp { server, tool, args })
 }

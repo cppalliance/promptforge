@@ -1,5 +1,5 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `tool_call`, `local_tool_done`, the reserved `mcp`), and the
+//! `call`, `tool_call`, `local_tool_done`), and the
 //! malformed-yield rejections shared by every op. The task-operation
 //! requests (`spawn`, `timer`, `drain_task_notices`) are in `parse_tasks`.
 
@@ -342,33 +342,6 @@ fn a_local_tool_done_without_a_boolean_ok_is_a_malformed_yield() {
     truthy.raw_set("ok", 1).expect("raw_set");
     truthy.raw_set("value", "hi").expect("raw_set");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(truthy)));
-}
-
-#[test]
-fn mcp_reserved_fields_parse() {
-    let lua = Lua::new();
-    let table = request_table(&lua, "mcp");
-    table.raw_set("server", "srv").expect("raw_set");
-    table.raw_set("tool", "tl").expect("raw_set");
-    let args = lua.create_table().expect("table creation cannot fail");
-    table.raw_set("args", args).expect("raw_set");
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
-    match request {
-        Request::Mcp { server, tool, args } => {
-            assert_eq!(server, "srv");
-            assert_eq!(tool, "tl");
-            assert_eq!(args, json!({}));
-        }
-        other => panic!("expected an mcp request, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_received_mcp_request_is_a_typed_protocol_error() {
-    match Request::mcp_reserved() {
-        Error::Lua(message) => assert!(message.contains("mcp")),
-        other => panic!("expected a typed Lua protocol error, got {other:?}"),
-    }
 }
 
 #[test]

@@ -5,8 +5,7 @@
 //! lands. Every store operation is a leaf yield, handed to the caller
 //! uniformly for all backends - no inline fast path - so interleaving
 //! behavior never depends on which backend serves the mount.
-//! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call`, `local_tool_done`, `chat`, `spawn`, `timer`,
+//! The `tool_call`, `local_tool_done`, `chat`, `spawn`, `timer`,
 //! `drain_task_notices`, and task wait, inspection, note, concurrency, and
 //! cancel arms
 //! are defined in their own modules.
@@ -96,8 +95,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         | Request::Note { .. }
         | Request::Cancel { .. }
         | Request::DrainTaskNotices
-        | Request::LocalToolDone { .. }
-        | Request::Mcp { .. } => None,
+        | Request::LocalToolDone { .. } => None,
     }
 }
 
@@ -120,10 +118,9 @@ impl Scheduler {
     /// Dispatches one validated request from a suspended chain.
     ///
     /// # Errors
-    /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces, the store arm's error when the
-    /// chain's access capability is gone, or the `local_tool_done` arm's
-    /// error when no local tool call is open.
+    /// Returns the store arm's error when the chain's access capability is
+    /// gone, or the `local_tool_done` arm's error when no local tool call is
+    /// open.
     pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {
         self.chains[id.index()].blocked = blocked_on(&request);
         match request {
@@ -206,7 +203,6 @@ impl Scheduler {
                 self.dispatch_chat(id, &messages, binding);
                 Ok(())
             }
-            Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
         }
     }
 

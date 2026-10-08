@@ -197,15 +197,6 @@ pub enum Request {
         /// The validated operation and its author-supplied arguments.
         op: VfsOp,
     },
-    /// Reserved. Never dispatched: receiving one is a typed protocol error.
-    Mcp {
-        /// The reserved server name.
-        server: String,
-        /// The reserved tool name.
-        tool: String,
-        /// The reserved argument payload.
-        args: serde_json::Value,
-    },
 }
 
 /// How a local tool's handler ended, as its `local_tool_done` yield
@@ -221,18 +212,6 @@ pub enum LocalToolOutcome {
     /// The handler raised. The shim raises the handler's own value again
     /// at the call site, so no error crosses the boundary here.
     Raised,
-}
-
-impl Request {
-    /// The typed protocol error for a received `mcp` request.
-    ///
-    /// The `mcp` fields are reserved and no call surface produces the request,
-    /// so the driver never dispatches one; receiving it fails the chain with
-    /// this error rather than reaching an unimplemented path.
-    #[must_use]
-    pub fn mcp_reserved() -> Error {
-        Error::Lua("mcp requests are reserved: no dispatcher exists yet".to_owned())
-    }
 }
 
 /// One `store.*` call from a prompt script: which operation it is and the

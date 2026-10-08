@@ -673,7 +673,7 @@ Rules for every step:
 
 <step-5>
 
-### Step 5: Remove the reserved Lua mcp request
+### Step 5: Remove the reserved Lua mcp request [completed]
 
 - Component: Lua reserved request removal
 - Placement: last, for the reasons in the component list.
