@@ -37,10 +37,9 @@ fn wav_decode_accepts_the_stt_wire_sample_rate() {
 #[test]
 fn verbose_json_honors_segment_granularity() {
     let response = response(
-        TranscriptionForm {
+        &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
-            language: Some("en".to_owned()),
             format: ResponseFormat::VerboseJson,
             granularities: vec![TimestampGranularity::Segment],
         },
@@ -48,6 +47,7 @@ fn verbose_json_honors_segment_granularity() {
         1.25,
     );
     let json = serde_json::to_value(response).expect("response serializes");
+    assert_eq!(json["language"], "en");
     assert_eq!(json["text"], "hello");
     assert_eq!(json["duration"], 1.25);
     assert_eq!(json["segments"][0]["end"], 1.25);
@@ -57,10 +57,9 @@ fn verbose_json_honors_segment_granularity() {
 fn verbose_json_defaults_to_segment_timestamps() {
     let granularities = default_granularities();
     let response = response(
-        TranscriptionForm {
+        &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
-            language: None,
             format: ResponseFormat::VerboseJson,
             granularities,
         },
@@ -74,10 +73,9 @@ fn verbose_json_defaults_to_segment_timestamps() {
 #[test]
 fn compact_json_contains_only_text() {
     let response = response(
-        TranscriptionForm {
+        &TranscriptionForm {
             file: Vec::new(),
             model: "speech".to_owned(),
-            language: None,
             format: ResponseFormat::Json,
             granularities: Vec::new(),
         },
@@ -131,6 +129,50 @@ async fn an_unloaded_model_is_not_found() {
         .await
         .expect("route answers");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+async fn post(fields: &[(&str, &str)]) -> (StatusCode, serde_json::Value) {
+    let (boundary, body) = multipart_body(&wav(&vec![0; 16_000]), fields);
+    let response = routes(GenerationState::default())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/audio/transcriptions")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("route answers");
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body reads");
+    (status, serde_json::from_slice(&body).expect("body is JSON"))
+}
+
+#[tokio::test]
+async fn a_language_other_than_en_is_rejected_before_model_selection() {
+    let (status, json) = post(&[("model", "not-loaded"), ("language", "fr")]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "malformed_request");
+    assert_eq!(
+        json["error"]["message"],
+        "malformed request: unsupported transcription language fr; only en is transcribed"
+    );
+}
+
+#[tokio::test]
+async fn the_en_language_passes_validation() {
+    let (status, json) = post(&[("model", "not-loaded"), ("language", "en")]).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "en reaches model selection: {json}"
+    );
 }
 
 #[tokio::test]

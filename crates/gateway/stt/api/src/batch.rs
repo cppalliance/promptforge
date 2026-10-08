@@ -16,6 +16,8 @@ use crate::generation::GenerationState;
 
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 const BODY_LIMIT: usize = MAX_AUDIO_BYTES + 1024 * 1024;
+/// The whisper workers decode with this language fixed.
+const LANGUAGE: &str = "en";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResponseFormat {
@@ -27,7 +29,6 @@ enum ResponseFormat {
 struct TranscriptionForm {
     file: Vec<u8>,
     model: String,
-    language: Option<String>,
     format: ResponseFormat,
     granularities: Vec<TimestampGranularity>,
 }
@@ -67,8 +68,8 @@ struct TranscriptionSegment {
 struct VerboseJsonTranscription {
     /// Requested task name.
     pub task: &'static str,
-    /// Detected or caller-supplied language.
-    pub language: String,
+    /// The transcription language, always `en`.
+    pub language: &'static str,
     /// Audio duration in seconds.
     pub duration: f64,
     /// The decoded transcript.
@@ -137,13 +138,12 @@ async fn transcribe(
         .await
         .map_err(SpeechError::Inference)?
         .into_text();
-    Ok(axum::Json(response(form, text, duration)).into_response())
+    Ok(axum::Json(response(&form, text, duration)).into_response())
 }
 
 async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, SpeechError> {
     let mut file = None;
     let mut model = None;
-    let mut language = None;
     let mut format = ResponseFormat::Json;
     let mut granularities = default_granularities();
     while let Some(mut field) = multipart
@@ -166,7 +166,12 @@ async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, Speec
                 file = Some(bytes);
             }
             "model" => model = Some(field_text(field).await?),
-            "language" => language = Some(field_text(field).await?),
+            "language" => {
+                let value = field_text(field).await?;
+                if value != LANGUAGE {
+                    return Err(SpeechError::UnsupportedLanguage(value));
+                }
+            }
             "response_format" => {
                 format = match field_text(field).await?.as_str() {
                     "json" => ResponseFormat::Json,
@@ -214,7 +219,6 @@ async fn parse_form(mut multipart: Multipart) -> Result<TranscriptionForm, Speec
     Ok(TranscriptionForm {
         file: file.ok_or(SpeechError::MissingField("file"))?,
         model: model.ok_or(SpeechError::MissingField("model"))?,
-        language,
         format,
         granularities,
     })
@@ -260,7 +264,7 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, f64), SpeechError> {
     Ok((samples, duration))
 }
 
-fn response(form: TranscriptionForm, text: String, duration: f64) -> TranscriptionResponse {
+fn response(form: &TranscriptionForm, text: String, duration: f64) -> TranscriptionResponse {
     match form.format {
         ResponseFormat::Json => TranscriptionResponse::Json(JsonTranscription { text }),
         ResponseFormat::VerboseJson => {
@@ -276,7 +280,7 @@ fn response(form: TranscriptionForm, text: String, duration: f64) -> Transcripti
             };
             TranscriptionResponse::VerboseJson(VerboseJsonTranscription {
                 task: "transcribe",
-                language: form.language.unwrap_or_else(|| "en".to_owned()),
+                language: LANGUAGE,
                 duration,
                 text,
                 segments,
