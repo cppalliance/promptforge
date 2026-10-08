@@ -6,6 +6,7 @@ use base64::Engine as _;
 use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
 use crate::audio::AudioError;
+use crate::realtime::ItemResult;
 use crate::realtime::input::{InputSnapshot, UncommittedInput};
 use crate::realtime::item::FinalizationError;
 use crate::realtime::registry::SessionRegistry;
@@ -229,6 +230,52 @@ async fn blocked_final_keeps_budget_after_epoch_cancellation_until_worker_retire
 
     wait_for_decode_retirement(final_decoder, &service).await;
     assert_eq!(probe.retained_samples(), 0);
+    drop(session);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn a_caption_the_pcm_budget_cannot_hold_is_skipped_and_the_item_still_transcribes() {
+    let interim = ScriptedDecoder::new();
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text("final words");
+    let service = scripted_service(
+        ScriptedModelFactory::new(interim.clone()).with_final(final_decoder),
+        15,
+        500,
+    )
+    .expect("scripted generation starts");
+    let payload = encoded(&vec![16_384; 12_000]);
+    let mut session = session_with_audio(&service, &payload, 8_000);
+
+    for tick in 1..=2 {
+        session
+            .schedule_interim()
+            .expect("a caption the budget cannot hold is skipped, not an error");
+        assert!(
+            session.interim_task.is_none(),
+            "tick {tick} starts no caption decode"
+        );
+    }
+    assert!(
+        interim.requests().is_empty(),
+        "no caption window was decoded"
+    );
+
+    let item_id = session
+        .commit()
+        .expect("the starved caption leaves the input committable")
+        .item_id()
+        .to_owned();
+    session
+        .finish_finalization(&item_id)
+        .await
+        .expect("the final pass settles the item");
+    let results = session.drain_results();
+    let [ItemResult::Completed { transcript, .. }] = results.as_slice() else {
+        panic!("the item completes after its skipped captions: {results:?}");
+    };
+    assert_eq!(transcript, "final words");
     drop(session);
     service.shutdown();
 }

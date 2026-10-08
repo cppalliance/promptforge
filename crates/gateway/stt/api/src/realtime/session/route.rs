@@ -1,6 +1,8 @@
 //! Session-side server event emission and interim decode scheduling.
 
 use super::{Session, SessionError};
+use crate::audio::AudioError;
+use crate::realtime::input::UncommittedInput;
 use crate::realtime::result_mailbox::ItemResult;
 use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::{HypothesisRanges, ServerEvent};
@@ -27,6 +29,26 @@ impl Session {
         self.ids.event()
     }
 
+    /// Logs once, at error level, that the gateway ended this session. The
+    /// fields are ids, the error code and sample ranges; the line carries
+    /// no transcript text and no audio.
+    pub(crate) fn log_end(&self, code: &str, error: &SessionError) {
+        let retained = self
+            .input
+            .as_ref()
+            .map(|input| input.take().retained_range());
+        tracing::error!(
+            %error,
+            code,
+            item_id = self.input.as_ref().map_or("none", UncommittedInput::item_id),
+            committed_items = ?self.committed.keys().collect::<Vec<_>>(),
+            retained_start = retained.as_ref().map(|range| range.start),
+            retained_end = retained.as_ref().map(|range| range.end),
+            last_interim_end = self.last_interim_end,
+            "the gateway ended a realtime session"
+        );
+    }
+
     pub(crate) fn schedule_interim(&mut self) -> Result<(), SessionError> {
         if self.interim_task.is_some() {
             self.missed_interim_tick = true;
@@ -42,7 +64,20 @@ impl Session {
             .engine
             .as_ref()
             .ok_or(SessionError::GenerationUnavailable)?;
-        let window = input.take().interim_window(engine.window_samples())?;
+        let window = match input.take().interim_window(engine.window_samples()) {
+            Ok(window) => window,
+            Err(AudioError::BufferTooLong { .. }) => {
+                // The caption's copy of the window does not fit the take's PCM
+                // budget. The next tick tries again, and a commit still
+                // transcribes the retained audio.
+                tracing::debug!(
+                    item_id = %input.item_id(),
+                    "skipped an interim tick: the PCM budget cannot hold the caption window"
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
         if window.samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES
             || self.last_interim_end.is_some_and(|end| window.end <= end)
         {

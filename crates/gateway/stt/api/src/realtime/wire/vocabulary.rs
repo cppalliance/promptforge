@@ -135,6 +135,20 @@ impl ClientError {
         error.kind = "server_error";
         error
     }
+
+    /// The stable error code.
+    pub(in crate::realtime) const fn code(&self) -> &'static str {
+        self.code
+    }
+
+    /// Turns this error into the `server_error` that tells a client the
+    /// gateway ended its session, replacing the message with one naming
+    /// `cause`.
+    pub(in crate::realtime) fn into_session_end(mut self, cause: &str) -> Self {
+        self.kind = "server_error";
+        self.message = format!("The gateway ended the session: {cause}");
+        self
+    }
 }
 
 impl std::fmt::Display for ClientError {

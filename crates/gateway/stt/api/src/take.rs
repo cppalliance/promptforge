@@ -167,6 +167,12 @@ impl Take {
         self.state.finalized()
     }
 
+    /// The absolute sample range of audio the take still holds, for logs.
+    pub(crate) fn retained_range(&self) -> std::ops::Range<u64> {
+        let buffer = TakeState::lock(&self.state.buffer);
+        buffer.origin()..buffer.end()
+    }
+
     /// `_word_ends` holds where each word of `hypothesis` ends, in samples
     /// from `window_start`, or nothing when the decode timed no words. A tail
     /// the fast pass repeated from the silence after speech is cut first, and
