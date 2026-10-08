@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use gateway_stt_engine::test_fixtures::ScriptedDetector;
+use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedDetector};
 use gateway_stt_engine::{DetectorError, SpeechDetector};
 
 use crate::generation::{GenerationLease, GenerationState, SileroSource};
@@ -62,9 +62,23 @@ impl SileroSource for ScriptedSilero {
 pub(crate) fn scripted_silero_generation(
     source: Arc<ScriptedSilero>,
 ) -> (GenerationState, GenerationLease) {
+    scripted_guided_generation(source, Vec::new())
+}
+
+/// [`scripted_silero_generation`] for a runtime that holds `guidance` as its
+/// configured `[stt] vocabulary`.
+pub(crate) fn scripted_guided_generation(
+    source: Arc<ScriptedSilero>,
+    guidance: Vec<String>,
+) -> (GenerationState, GenerationLease) {
     let state = GenerationState::default();
     state
-        .publish_scripted_silero(PathBuf::from(SCRIPTED_SILERO_MODEL), source)
+        .publish_scripted_guided(
+            ScriptedDecoder::new(),
+            PathBuf::from(SCRIPTED_SILERO_MODEL),
+            source,
+            guidance,
+        )
         .expect("the scripted runtime loads");
     let lease = state.active().expect("the published runtime admits");
     (state, lease)

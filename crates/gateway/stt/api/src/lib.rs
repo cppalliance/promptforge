@@ -8,6 +8,7 @@ mod artifacts;
 mod audio;
 mod batch;
 mod generation;
+mod guidance;
 mod model;
 mod realtime;
 mod segment;

@@ -7,6 +7,7 @@ use gateway_stt_engine::DetectorError;
 use super::wire::HypothesisInclude;
 use crate::audio::{AudioBuffer, AudioError};
 use crate::generation::GenerationLease;
+use crate::guidance::prompt_terms;
 use crate::take::{Take, TakeFailure};
 const INPUT_FORMAT: &str = "audio/pcm";
 const INPUT_RATE: u32 = 24_000;
@@ -61,6 +62,18 @@ impl InputSnapshot {
     }
 }
 
+/// The terms every decode of a take is guided by: the generation's
+/// configured vocabulary, then the session prompt's terms. The configured
+/// terms lead so a glossary trimmed to fit whisper's budget keeps them.
+///
+/// Only tests start a take without a generation, and it has no configured
+/// vocabulary.
+fn guidance(engine: Option<&GenerationLease>, snapshot: &InputSnapshot) -> Vec<String> {
+    let mut guidance = engine.map_or_else(Vec::new, |engine| engine.guidance().to_vec());
+    guidance.extend(prompt_terms(&snapshot.prompt));
+    guidance
+}
+
 #[derive(Debug)]
 pub(crate) struct UncommittedInput {
     item_id: String,
@@ -109,7 +122,7 @@ impl UncommittedInput {
     ) -> Result<Self, AudioError> {
         let mut audio = AudioBuffer::default();
         audio.append_base64(payload)?;
-        let guidance = Self::guidance(&snapshot);
+        let guidance = guidance(engine.as_ref(), &snapshot);
         let take = Take::with_pcm_limit(guidance, engine, limit);
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
@@ -124,7 +137,7 @@ impl UncommittedInput {
     ) -> Result<Self, AudioError> {
         let mut audio = AudioBuffer::default();
         audio.append_base64(payload)?;
-        let take = Take::with_detector(Self::guidance(&snapshot), engine, detector);
+        let take = Take::with_detector(guidance(engine.as_ref(), &snapshot), engine, detector);
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
@@ -136,9 +149,9 @@ impl UncommittedInput {
         engine: Option<GenerationLease>,
         audio: AudioBuffer,
     ) -> Result<Self, AudioError> {
-        let take = Self::start_take(Self::guidance(&snapshot), engine).unwrap_or_else(|error| {
-            Take::failed(Self::guidance(&snapshot), TakeFailure::Detector(error))
-        });
+        let guidance = guidance(engine.as_ref(), &snapshot);
+        let take = Self::start_take(guidance.clone(), engine)
+            .unwrap_or_else(|error| Take::failed(guidance, TakeFailure::Detector(error)));
         Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
@@ -156,14 +169,6 @@ impl UncommittedInput {
             None => Err(DetectorError::load(
                 "the session holds no speech generation",
             )),
-        }
-    }
-
-    fn guidance(snapshot: &InputSnapshot) -> Vec<String> {
-        if snapshot.prompt.is_empty() {
-            Vec::new()
-        } else {
-            vec![snapshot.prompt.clone()]
         }
     }
 
@@ -246,8 +251,10 @@ impl UncommittedInput {
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
+    use gateway_stt_engine::test_fixtures::ScriptedDetector;
 
     use super::{HypothesisInclude, InputSnapshot, UncommittedInput};
+    use crate::test_fixtures::{ScriptedSilero, scripted_guided_generation};
 
     fn encoded(samples: &[i16]) -> String {
         let bytes = samples
@@ -277,5 +284,34 @@ mod tests {
         assert!((input.buffered_duration_seconds() - 0.1).abs() < f64::EPSILON);
         assert_eq!(input.take().guidance(), ["first"]);
         assert!(!input.take().uncommitted_snapshot(usize::MAX).is_empty());
+    }
+
+    #[test]
+    fn guidance_is_the_configured_vocabulary_then_the_prompt_terms() {
+        let vocabulary = vec!["WG21".to_owned(), "MCP".to_owned()];
+        let (state, lease) =
+            scripted_guided_generation(ScriptedSilero::new(ScriptedDetector::new([])), vocabulary);
+
+        let prompted = UncommittedInput::new(
+            "item_prompted".to_owned(),
+            snapshot(" GGUF, , Lua ,"),
+            Some(lease.clone()),
+        );
+        assert_eq!(
+            prompted.take().guidance(),
+            ["WG21", "MCP", "GGUF", "Lua"],
+            "the configured terms lead, so a truncated glossary keeps them"
+        );
+
+        let unprompted =
+            UncommittedInput::new("item_unprompted".to_owned(), snapshot(""), Some(lease));
+        assert_eq!(
+            unprompted.take().guidance(),
+            ["WG21", "MCP"],
+            "an empty prompt still carries the configured vocabulary"
+        );
+
+        drop((prompted, unprompted));
+        state.shutdown();
     }
 }
