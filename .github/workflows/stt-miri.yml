@@ -114,6 +114,16 @@ jobs:
       - name: Test safe Whisper backend integration
         run: cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1
 
+      # The noise test reads PROMPTFORGE_NOISE_CLIPS, which this runner does not provision.
+      - name: Test native Silero speech detection
+        run: cargo test --locked -p gateway-stt-backend-whisper --test native_silero -- --ignored --test-threads=1 --skip noise_clips_hold_no_speech_decision
+
+      - name: Test native interim decode timing
+        run: cargo test --locked -p gateway-stt-backend-whisper --test native_interim_timing -- --ignored --test-threads=1
+
+      - name: Test native decoder warm-up
+        run: cargo test --locked -p gateway-stt-backend-whisper --features test-fixtures --test native_warm_up -- --ignored --test-threads=1
+
       - name: Test native prompt budgets
         run: 'cargo test --locked -p gateway-stt-backend-whisper --lib prompt::tests:: -- --ignored --test-threads=1'
 
