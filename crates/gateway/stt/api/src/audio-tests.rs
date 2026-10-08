@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::{
     AudioBuffer, AudioError, MAX_APPEND_AUDIO_BYTES, MAX_BUFFERED_AUDIO_BYTES, MIN_COMMIT_SAMPLES,
-    Resampler24To16, decode_base64,
+    Resampler24To16, decode_base64, resampled_inputs, resampled_sample,
 };
 
 #[derive(Deserialize)]
@@ -125,18 +125,136 @@ fn held_odd_byte_and_resampling_match_unsplit_input() {
     }
 }
 
-#[test]
-fn resampler_uses_one_continuous_linear_timeline() {
+const INPUT_RATE_HZ: f64 = 24_000.0;
+const OUTPUT_RATE_HZ: f64 = 16_000.0;
+/// Outputs skipped before a measurement, past the filter's start transient.
+const SETTLE_OUTPUTS: usize = 160;
+/// 100 ms at 16 kHz: whole cycles of every measured frequency, so one DFT
+/// bin reads a tone's amplitude without leakage from the others.
+const MEASURED_OUTPUTS: usize = 1_600;
+/// -55 dB, a margin under the filter's 60 dB stopband.
+const STOPBAND_AMPLITUDE: f64 = 0.001_778;
+
+/// The 16 kHz outputs of a 24 kHz tone long enough to settle and measure.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the tone is computed in f64 and pushed as an f32 sample"
+)]
+fn resampled_tone(frequency_hz: f64, amplitude: f64) -> Vec<f32> {
     let mut resampler = Resampler24To16::default();
-    for sample in [0.0, 2.0, 4.0, 6.0, 8.0] {
-        resampler.push(sample);
+    for index in 0..4_000_u32 {
+        let time = f64::from(index) / INPUT_RATE_HZ;
+        resampler.push((amplitude * (std::f64::consts::TAU * frequency_hz * time).sin()) as f32);
     }
     resampler.flush();
-    assert_eq!(resampler.output, [0.0, 3.0, 6.0, 8.0]);
+    resampler.output
+}
+
+/// The amplitude of `frequency_hz` in the measured span of 16 kHz `output`.
+fn amplitude(output: &[f32], frequency_hz: f64) -> f64 {
+    let span = &output[SETTLE_OUTPUTS..SETTLE_OUTPUTS + MEASURED_OUTPUTS];
+    let (real, imaginary) =
+        span.iter()
+            .zip(0_u32..)
+            .fold((0.0, 0.0), |(real, imaginary), (sample, index)| {
+                let phase =
+                    std::f64::consts::TAU * frequency_hz * f64::from(index) / OUTPUT_RATE_HZ;
+                let sample = f64::from(*sample);
+                (
+                    real + sample * phase.cos(),
+                    imaginary - sample * phase.sin(),
+                )
+            });
+    2.0 * real.hypot(imaginary) / f64::from(u32::try_from(span.len()).expect("span fits u32"))
 }
 
 #[test]
-fn commit_flushes_the_last_resampler_position() {
+fn a_position_resampled_alone_matches_the_stream_bit_for_bit() {
+    let input =
+        |index: u64| f32::from(u16::try_from(index * 7_919 % 4_096).expect("fits")) / 4_096.0;
+    let mut resampler = Resampler24To16::default();
+    for index in 0..301 {
+        resampler.push(input(index));
+    }
+    resampler.flush();
+    for (position, sample) in (0_u64..).zip(&resampler.output) {
+        assert_eq!(
+            resampled_sample(position, input).to_bits(),
+            sample.to_bits(),
+            "output {position}"
+        );
+        assert!(
+            *resampled_inputs(position).end() <= 300,
+            "output {position}"
+        );
+    }
+}
+
+#[test]
+fn each_odd_output_waits_for_the_input_after_it_or_the_flush() {
+    for pushed in 1..=12_usize {
+        let mut resampler = Resampler24To16::default();
+        for _ in 0..pushed {
+            resampler.push(0.25);
+        }
+        let pending = usize::from(pushed % 3 == 2);
+        assert_eq!(
+            resampler.output.len() + pending,
+            (pushed * 2).div_ceil(3),
+            "{pushed}"
+        );
+        resampler.flush();
+        assert_eq!(resampler.output.len(), (pushed * 2).div_ceil(3), "{pushed}");
+    }
+}
+
+#[test]
+fn a_passband_tone_passes_at_unit_gain_one_millisecond_late() {
+    let output = resampled_tone(1_000.0, 0.5);
+    for (index, sample) in output
+        .iter()
+        .enumerate()
+        .skip(SETTLE_OUTPUTS)
+        .take(MEASURED_OUTPUTS)
+    {
+        let late = f64::from(u32::try_from(index).expect("index fits u32")) - 16.0;
+        let expected = 0.5 * (std::f64::consts::TAU * 1_000.0 * late / OUTPUT_RATE_HZ).sin();
+        assert!(
+            (f64::from(*sample) - expected).abs() < 1e-3,
+            "output {index} is {sample}, expected {expected}"
+        );
+    }
+}
+
+#[test]
+fn a_tone_near_the_passband_edge_keeps_its_level_and_casts_no_image() {
+    let output = resampled_tone(6_000.0, 1.0);
+    let level = amplitude(&output, 6_000.0);
+    assert!(
+        (0.9886..1.0116).contains(&level),
+        "6 kHz stays within 0.1 dB, got {level}"
+    );
+    let image = amplitude(&output, 2_000.0);
+    assert!(
+        image < STOPBAND_AMPLITUDE,
+        "6 kHz casts a 2 kHz image of {image}"
+    );
+}
+
+#[test]
+fn a_tone_above_the_output_nyquist_rate_does_not_fold_into_speech() {
+    let output = resampled_tone(10_000.0, 1.0);
+    for heard_hz in [6_000.0, 2_000.0] {
+        let folded = amplitude(&output, heard_hz);
+        assert!(
+            folded < STOPBAND_AMPLITUDE,
+            "10 kHz folds to {heard_hz} Hz at {folded}"
+        );
+    }
+}
+
+#[test]
+fn commit_resamples_constant_audio_unchanged() {
     let samples = vec![i16::MIN; MIN_COMMIT_SAMPLES + 1];
     let mut audio = AudioBuffer::default();
     audio
@@ -148,7 +266,8 @@ fn commit_flushes_the_last_resampler_position() {
         committed
             .samples()
             .iter()
-            .all(|sample| (*sample - -1.0).abs() < f32::EPSILON)
+            .all(|sample| (*sample - -1.0).abs() < 1e-5),
+        "unit-sum phases pass a constant within f32 rounding"
     );
 }
 

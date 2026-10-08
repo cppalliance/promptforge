@@ -1,5 +1,7 @@
 //! Base64 PCM16 audio buffering, resampling, and commit validation for realtime input.
 
+use std::sync::LazyLock;
+
 use base64::Engine as _;
 
 const INPUT_SAMPLE_RATE: u64 = 24_000;
@@ -187,36 +189,199 @@ fn decode_base64(payload: &str) -> Result<Vec<u8>, AudioError> {
     Ok(decoded)
 }
 
-#[derive(Clone, Debug, Default)]
+/// Taps of the low-pass prototype, which runs at the 48 kHz rate between
+/// interpolating 24 kHz by two and decimating by three.
+const PROTOTYPE_TAPS: usize = 97;
+/// The prototype's half length, the tap offset of its center.
+const PROTOTYPE_CENTER: i32 = 48;
+const UPSAMPLED_RATE_HZ: f64 = 48_000.0;
+/// Below the 8 kHz output Nyquist rate, so the transition band ends near
+/// 8.5 kHz and content above it folds back at least 60 dB down.
+const CUTOFF_HZ: f64 = 7_600.0;
+/// The Kaiser window shape for about 60 dB of stopband attenuation.
+const KAISER_BETA: f64 = 5.65;
+const EVEN_TAPS: usize = PROTOTYPE_TAPS.div_ceil(2);
+const ODD_TAPS: usize = PROTOTYPE_TAPS / 2;
+const HISTORY: usize = EVEN_TAPS;
+
+static TAPS: LazyLock<PolyphaseTaps> = LazyLock::new(PolyphaseTaps::design);
+
+/// The prototype split by output phase: output `2p` weighs inputs `3p`,
+/// `3p - 1`, and so on with the even prototype taps, and output `2p + 1`
+/// weighs inputs `3p + 1`, `3p`, and so on with the odd ones.
+#[derive(Debug)]
+struct PolyphaseTaps {
+    even: [f32; EVEN_TAPS],
+    odd: [f32; ODD_TAPS],
+}
+
+impl PolyphaseTaps {
+    /// A Kaiser-windowed sinc low-pass, each phase scaled to unit sum so a
+    /// constant passes unchanged and the two phases agree in gain.
+    fn design() -> Self {
+        let window_norm = bessel_i0(KAISER_BETA);
+        let tap = |offset: i32| {
+            let t = f64::from(offset);
+            let cutoff = CUTOFF_HZ / UPSAMPLED_RATE_HZ;
+            let sinc = if offset == 0 {
+                2.0 * cutoff
+            } else {
+                (2.0 * std::f64::consts::PI * cutoff * t).sin() / (std::f64::consts::PI * t)
+            };
+            let ratio = t / f64::from(PROTOTYPE_CENTER);
+            sinc * bessel_i0(KAISER_BETA * (1.0 - ratio * ratio).sqrt()) / window_norm
+        };
+        Self {
+            even: unit_sum(-PROTOTYPE_CENTER, tap),
+            odd: unit_sum(1 - PROTOTYPE_CENTER, tap),
+        }
+    }
+}
+
+/// The `N` taps at offsets `first`, `first + 2`, and so on, scaled to sum
+/// to one.
+fn unit_sum<const N: usize>(first: i32, tap: impl Fn(i32) -> f64) -> [f32; N] {
+    let mut taps = [0.0_f64; N];
+    let mut offset = first;
+    for slot in &mut taps {
+        *slot = tap(offset);
+        offset += 2;
+    }
+    let sum = taps.iter().sum::<f64>();
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "filter taps are designed in f64 and stored in the f32 sample type"
+    )]
+    taps.map(|tap| (tap / sum) as f32)
+}
+
+/// The zeroth-order modified Bessel function of the first kind, by its
+/// power series.
+fn bessel_i0(x: f64) -> f64 {
+    let half = x / 2.0;
+    let mut term = 1.0;
+    let mut sum = 1.0;
+    for k in 1..=40_u32 {
+        term *= half / f64::from(k);
+        sum += term * term;
+    }
+    sum
+}
+
+/// Streams 24 kHz input to 16 kHz output through a polyphase low-pass, so
+/// input above the 8 kHz output Nyquist rate does not fold into speech
+/// frequencies.
+///
+/// Output `2p` is emitted with input `3p`, and output `2p + 1` with input
+/// `3p + 2` or by [`Self::flush`], so `n` flushed inputs yield exactly
+/// `ceil(2n / 3)` outputs and the take's timeline, which counts output
+/// samples from input samples, needs no lookahead. The price is the
+/// prototype's delay: output `n` carries the input at time `1.5 n - 24`, so
+/// the audio runs 1 ms behind its timeline and a take's last millisecond is
+/// not emitted.
+#[derive(Clone, Debug)]
 struct Resampler24To16 {
     phase: u8,
-    previous: Option<f32>,
+    /// The latest [`HISTORY`] inputs, stored twice so that
+    /// `history[cursor..cursor + HISTORY]` holds them newest first.
+    history: [f32; 2 * HISTORY],
+    cursor: usize,
+    primed: bool,
     output: Vec<f32>,
+}
+
+impl Default for Resampler24To16 {
+    fn default() -> Self {
+        Self {
+            phase: 0,
+            history: [0.0; 2 * HISTORY],
+            cursor: 0,
+            primed: false,
+            output: Vec::new(),
+        }
+    }
 }
 
 impl Resampler24To16 {
     fn push(&mut self, sample: f32) {
+        // The first input stands in for the audio before it, so a take
+        // does not open with a ramp up from zero.
+        if !self.primed {
+            self.history.fill(sample);
+            self.primed = true;
+        }
+        self.cursor = self.cursor.checked_sub(1).unwrap_or(HISTORY - 1);
+        self.history[self.cursor] = sample;
+        self.history[self.cursor + HISTORY] = sample;
         match self.phase {
-            0 => self.emit(sample),
+            0 => self.emit(&TAPS.even, 0),
             1 => {}
-            2 => self.emit(self.previous.unwrap_or(sample).midpoint(sample)),
+            2 => self.emit(&TAPS.odd, 1),
             _ => unreachable!("the resampler phase is modulo three"),
         }
-        self.previous = Some(sample);
         self.phase = if self.phase == 2 { 0 } else { self.phase + 1 };
     }
 
+    /// Emits the odd output whose input group ended after its second input.
     fn flush(&mut self) {
-        if self.phase == 2
-            && let Some(sample) = self.previous
-        {
-            self.emit(sample);
+        if self.phase == 2 {
+            self.emit(&TAPS.odd, 0);
         }
     }
 
-    fn emit(&mut self, sample: f32) {
-        self.output.push(sample);
+    /// Emits `taps` weighed over the inputs newest first, after skipping the
+    /// newest `skip`.
+    fn emit(&mut self, taps: &[f32], skip: usize) {
+        let start = self.cursor + skip;
+        self.output
+            .push(weigh(&self.history[start..start + taps.len()], taps));
     }
+}
+
+/// `taps` weighed over `inputs`, both newest first.
+fn weigh(inputs: &[f32], taps: &[f32]) -> f32 {
+    // An index loop, because unoptimized test builds run iterator adapters
+    // several times slower, and their fixtures resample hours of audio.
+    let mut sum = 0.0;
+    let mut index = 0;
+    while index < taps.len() {
+        sum += inputs[index] * taps[index];
+        index += 1;
+    }
+    sum
+}
+
+/// The newest input that output `position` weighs, and its phase's taps.
+#[cfg(any(test, feature = "test-fixtures"))]
+fn output_taps(position: u64) -> (u64, &'static [f32]) {
+    let group = position / 2 * 3;
+    if position.is_multiple_of(2) {
+        (group, &TAPS.even)
+    } else {
+        (group + 1, &TAPS.odd)
+    }
+}
+
+/// The inputs that output `position` weighs, where an index before 0
+/// stands for input 0 as the resampler's first input does.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub(crate) fn resampled_inputs(position: u64) -> std::ops::RangeInclusive<u64> {
+    let (newest, taps) = output_taps(position);
+    newest.saturating_sub(taps.len() as u64 - 1)..=newest
+}
+
+/// Output `position` of the stream whose input `index` is `input(index)`,
+/// bit for bit as [`Resampler24To16`] emits it.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub(crate) fn resampled_sample(position: u64, input: impl Fn(u64) -> f32) -> f32 {
+    let (newest, taps) = output_taps(position);
+    let mut inputs = [0.0; HISTORY];
+    let mut index = newest;
+    for slot in &mut inputs[..taps.len()] {
+        *slot = input(index);
+        index = index.saturating_sub(1);
+    }
+    weigh(&inputs, taps)
 }
 
 #[cfg(test)]

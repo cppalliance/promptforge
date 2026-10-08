@@ -7,6 +7,7 @@ use gateway_stt_engine::{
     DecodeMode, DecodeOutput, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 
+use crate::audio::{resampled_inputs, resampled_sample};
 use crate::realtime::UncommittedInput;
 use crate::{SpeechError, SpeechService};
 
@@ -15,9 +16,12 @@ const FINAL_STRIDE_SAMPLES: u64 = 160_256;
 const FINAL_OVERLAP_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 8) as u64;
 /// The simulated speaker says this many words per forced stride.
 const WORDS_PER_STRIDE: u64 = 10;
-const MARKER_START: u16 = 0x6a5a;
-const MARKER_END: u16 = 0xa5a6;
-const SPEECH_SAMPLE: i16 = 8_192;
+/// 16 kHz output samples per second of fixture audio, each second one level.
+const SECOND: u64 = EnginePolicy::SAMPLE_RATE as u64;
+/// Second `s` holds the PCM16 level `LEVEL_BASE + s`, positive in even
+/// seconds and negative in odd ones, so every second opens with a step of
+/// half full scale that the resampler's low-pass keeps sharp to the sample.
+const LEVEL_BASE: i16 = 8_192;
 
 /// A bounded snapshot of one production take's retained ownership.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,11 +93,15 @@ pub fn hour_marker_input(start: u64, samples: usize) -> Vec<i16> {
     (0..samples)
         .map(|offset| {
             let offset = u64::try_from(offset).unwrap_or(u64::MAX);
-            let input = start.saturating_add(offset);
-            let output = input / 3 * 2 + u64::from(input % 3 != 0);
-            marker_sample(output)
+            marker_sample(input_position(start.saturating_add(offset)))
         })
         .collect()
+}
+
+/// The 16 kHz position whose level input `input` holds: input `3k` holds
+/// position `2k`, and inputs `3k + 1` and `3k + 2` hold position `2k + 1`.
+fn input_position(input: u64) -> u64 {
+    input / 3 * 2 + u64::from(!input.is_multiple_of(3))
 }
 
 /// Constant-memory observations from one deterministic hour-equivalent engine.
@@ -240,82 +248,99 @@ impl Decoder for HourSimulationDecoder {
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "each shifted marker word is explicitly masked to sixteen bits"
-)]
+/// The PCM16 level of output position `output`; levels stay distinct for
+/// the first 24 575 seconds.
 fn marker_sample(output: u64) -> i16 {
-    let second = output / EnginePolicy::SAMPLE_RATE as u64;
-    let offset = output % EnginePolicy::SAMPLE_RATE as u64;
-    let word = match offset {
-        0 => MARKER_START,
-        1 => (second & u64::from(u16::MAX)) as u16,
-        2 => ((second >> 16) & u64::from(u16::MAX)) as u16,
-        3 => ((second >> 32) & u64::from(u16::MAX)) as u16,
-        4 => ((second >> 48) & u64::from(u16::MAX)) as u16,
-        5 => MARKER_END,
-        _ => return SPEECH_SAMPLE,
+    let second = output / SECOND;
+    let level = i16::try_from(second)
+        .ok()
+        .and_then(|second| LEVEL_BASE.checked_add(second))
+        .unwrap_or(i16::MAX);
+    if second.is_multiple_of(2) {
+        level
+    } else {
+        -level
+    }
+}
+
+/// The 16 kHz samples the production resampler emits at `start..start +
+/// len` from [`hour_marker_input`] audio, computing each position once per
+/// second and phase where it weighs only that second's level.
+fn expected_window(start: u64, len: u64) -> Vec<f32> {
+    let sample = |position| {
+        resampled_sample(position, |input| {
+            f32::from(marker_sample(input_position(input))) / 32_768.0
+        })
     };
-    i16::from_le_bytes(word.to_le_bytes())
+    let mut plateau_second = u64::MAX;
+    let mut plateau = [None; 2];
+    (start..start + len)
+        .map(|position| {
+            let second = position / SECOND;
+            if input_position(*resampled_inputs(position).start()) / SECOND != second {
+                return sample(position);
+            }
+            if plateau_second != second {
+                plateau_second = second;
+                plateau = [None; 2];
+            }
+            *plateau[usize::from(position % 2 == 1)].get_or_insert_with(|| sample(position))
+        })
+        .collect()
 }
 
 fn marked_window(samples: &[f32]) -> Result<(u64, u64), TranscribeError> {
-    let Some((marker_offset, second)) = samples
-        .windows(6)
-        .enumerate()
-        .find_map(|(offset, marker)| decode_marker(marker).map(|second| (offset, second)))
-    else {
-        return Err(marker_error("absolute PCM marker is missing"));
-    };
-    let marker_position = second
-        .checked_mul(EnginePolicy::SAMPLE_RATE as u64)
-        .ok_or_else(|| marker_error("absolute PCM marker overflowed"))?;
-    let start = marker_position
-        .checked_sub(
-            u64::try_from(marker_offset).map_err(|_| marker_error("marker offset overflowed"))?,
-        )
-        .ok_or_else(|| marker_error("absolute PCM marker precedes the window"))?;
-    for (offset, actual) in samples.iter().enumerate() {
-        let position = start
-            .checked_add(
-                u64::try_from(offset).map_err(|_| marker_error("sample offset overflowed"))?,
-            )
-            .ok_or_else(|| marker_error("absolute sample position overflowed"))?;
-        let expected = f32::from(marker_sample(position)) / 32_768.0;
-        if actual.to_bits() != expected.to_bits() {
-            return Err(marker_error("absolute PCM marker sequence is corrupt"));
-        }
-    }
+    let start =
+        window_start(samples).ok_or_else(|| marker_error("absolute PCM marker is missing"))?;
+    let len = u64::try_from(samples.len()).map_err(|_| marker_error("window length overflowed"))?;
     let end = start
-        .checked_add(
-            u64::try_from(samples.len()).map_err(|_| marker_error("window length overflowed"))?,
-        )
+        .checked_add(len)
         .ok_or_else(|| marker_error("absolute PCM window overflowed"))?;
+    let expected = expected_window(start, len);
+    if samples
+        .iter()
+        .zip(&expected)
+        .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+    {
+        return Err(marker_error("absolute PCM marker sequence is corrupt"));
+    }
     Ok((start, end))
 }
 
-fn decode_marker(samples: &[f32]) -> Option<u64> {
-    if sample_word(samples[0])? != MARKER_START || sample_word(samples[5])? != MARKER_END {
-        return None;
-    }
-    let mut second = 0_u64;
-    for (index, sample) in samples[1..5].iter().enumerate() {
-        second |= u64::from(sample_word(*sample)?) << [0_u32, 16, 32, 48][index];
-    }
-    Some(second)
+/// The absolute position of `samples[0]`. A plateau, where both phases
+/// repeat, names its second by its level, and the first sample after it
+/// that differs from the sample two before is the next second's first.
+fn window_start(samples: &[f32]) -> Option<u64> {
+    let same = |left: usize, right: usize| samples[left].to_bits() == samples[right].to_bits();
+    let flat = (4..samples.len()).find(|&index| {
+        same(index, index - 2) && same(index - 2, index - 4) && same(index - 1, index - 3)
+    })?;
+    let second = level_second(samples[flat])?;
+    let boundary = (flat + 1..samples.len()).find(|&index| !same(index, index - 2))?;
+    (second + 1)
+        .checked_mul(SECOND)?
+        .checked_sub(u64::try_from(boundary).ok()?)
 }
 
+/// The second whose level a plateau sample holds, within the rounding of
+/// the resampler's unit-sum taps.
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "validated normalized PCM16 fixture samples are converted back to their exact words"
+    reason = "a plateau sample is rounded to the PCM16 level it holds"
 )]
-fn sample_word(sample: f32) -> Option<u16> {
-    let scaled = sample * 32_768.0;
-    if !scaled.is_finite() || scaled.fract() != 0.0 {
+fn level_second(sample: f32) -> Option<u64> {
+    let scaled = f64::from(sample) * 32_768.0;
+    let rounded = scaled.round();
+    if !rounded.is_finite() || (scaled - rounded).abs() >= 0.25 {
         return None;
     }
-    let signed = i16::try_from(scaled as i32).ok()?;
-    Some(u16::from_le_bytes(signed.to_le_bytes()))
+    let level = i16::try_from(rounded as i32).ok()?;
+    let second = u64::from(
+        level
+            .unsigned_abs()
+            .checked_sub(LEVEL_BASE.unsigned_abs())?,
+    );
+    (u64::from(level < 0) == second % 2).then_some(second)
 }
 
 fn marker_error(_message: &'static str) -> TranscribeError {
@@ -349,20 +374,20 @@ pub fn hour_simulation_service(probe: HourSimulationProbe) -> Result<SpeechServi
 
 #[cfg(test)]
 mod tests {
-    use gateway_stt_engine::{DecodeMode, DecodeRequest, Decoder, EnginePolicy};
+    use base64::Engine as _;
+    use gateway_stt_engine::{DecodeMode, DecodeRequest, Decoder};
 
     use super::{
-        FINAL_STRIDE_SAMPLES, HourSimulationDecoder, HourSimulationProbe, hour_marker_input,
-        marker_sample,
+        FINAL_STRIDE_SAMPLES, HourSimulationDecoder, HourSimulationProbe, SECOND, expected_window,
+        hour_marker_input, window_start,
     };
+    use crate::audio::AudioBuffer;
 
     fn output(start: u64, samples: usize) -> Vec<f32> {
-        (0..samples)
-            .map(|offset| {
-                let position = start + u64::try_from(offset).expect("fixture offset fits");
-                f32::from(marker_sample(position)) / 32_768.0
-            })
-            .collect()
+        expected_window(
+            start,
+            u64::try_from(samples).expect("fixture length fits u64"),
+        )
     }
 
     fn decoder() -> HourSimulationDecoder {
@@ -377,23 +402,32 @@ mod tests {
     }
 
     #[test]
-    fn input_markers_survive_the_production_resampler_mapping() {
-        let input = hour_marker_input(0, 24_000);
-        let actual = input
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|group| {
-                [
-                    f32::from(group[0]) / 32_768.0,
-                    f32::midpoint(
-                        f32::from(group[1]) / 32_768.0,
-                        f32::from(group[2]) / 32_768.0,
-                    ),
-                ]
-            })
+    fn marker_audio_resamples_to_the_expected_window_bit_for_bit() {
+        let bytes = hour_marker_input(0, 60_000)
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
             .collect::<Vec<_>>();
-        assert_eq!(actual, output(0, EnginePolicy::SAMPLE_RATE));
+        let mut audio = AudioBuffer::default();
+        audio
+            .append_base64(&base64::engine::general_purpose::STANDARD.encode(bytes))
+            .expect("marker audio appends");
+        let actual = audio.commit_validated().into_samples();
+        let expected = output(0, 40_000);
+        assert_eq!(actual.len(), expected.len());
+        assert!(
+            actual
+                .iter()
+                .zip(&expected)
+                .all(|(actual, expected)| actual.to_bits() == expected.to_bits()),
+            "the production resampler emits the fixture's expected samples"
+        );
+    }
+
+    #[test]
+    fn a_window_names_its_own_start_from_its_first_second_boundary() {
+        for start in [0, 1, 12_345, 3 * SECOND - 7, 3_599 * SECOND] {
+            assert_eq!(window_start(&output(start, 40_000)), Some(start), "{start}");
+        }
     }
 
     #[test]
@@ -416,7 +450,9 @@ mod tests {
         );
 
         let mut reordered = output(0, stride);
-        reordered.swap(1, 5);
+        let (step, later) = (16_002, 16_010);
+        assert_ne!(reordered[step], reordered[later], "both lie in a step");
+        reordered.swap(step, later);
         assert!(
             decoder().decode(request(reordered)).is_err(),
             "reordered PCM fails"

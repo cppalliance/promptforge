@@ -340,8 +340,9 @@ impl ReplayTake {
     }
 }
 
-/// Encodes the 24 kHz PCM16 input that the production resampler turns into
-/// exactly the 16 kHz samples in `output`.
+/// Encodes the 24 kHz PCM16 input for the 16 kHz samples in `output`: loud
+/// inside the `speech` runs and silent outside them, apart from the
+/// resampler's 2 ms ramps at their edges.
 fn pcm_payload(speech: &[Range<u64>], output: Range<u64>) -> String {
     let bytes = (input_samples(output.start)..input_samples(output.end))
         .flat_map(|input| {
@@ -358,8 +359,8 @@ fn pcm_payload(speech: &[Range<u64>], output: Range<u64>) -> String {
 }
 
 /// Input samples whose resampling emits the first `output` 16 kHz samples:
-/// output `2k` comes from input `3k`, and output `2k + 1` from inputs `3k + 1`
-/// and `3k + 2`.
+/// output `2k` is emitted with input `3k`, and output `2k + 1` with input
+/// `3k + 2`.
 const fn input_samples(output: u64) -> u64 {
     output / 2 * 3 + output % 2
 }
