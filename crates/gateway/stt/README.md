@@ -66,7 +66,7 @@ Both passes decode English only (`backend-whisper/src/model.rs`), and the batch 
 - Each worker's queue holds 8 jobs. A full queue fails the request with `TranscribeError::Overloaded` instead of blocking, and the session skips that interim tick and sends the same window again later.
 - Each take keeps up to 4 closed segments in its final pipeline. Further closed ranges wait in the held queue.
 - Dropping a request's reply skips its decode, and a request's cancellation flag aborts whisper during a pass. Shutdown closes the queue and joins the thread.
-- A take retains at most 30 s of PCM (`api/src/take/pcm.rs`), and the budget counts allocated capacity.
+- A take retains at most 30 s of PCM (`api/src/take/pcm.rs`), and the budget counts allocated capacity once. An append reserves only the buffer's growth, or its own capacity when it becomes the buffer, and spare capacity the buffer already holds is not charged again. A rejected append reports the retained and requested durations against the 30 s limit.
 
 ## Testing
 

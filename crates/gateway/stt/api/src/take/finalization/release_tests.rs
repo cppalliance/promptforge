@@ -11,7 +11,12 @@ use super::tests::{closed_speech, queue, saturate};
 use super::{ClosedRange, FINAL_SEGMENT_CAPACITY, FinalSegmentOwner, run_final_pipeline};
 use crate::audio::AudioError;
 use crate::take::state::TakeState;
-use crate::take::{SPEECH_TAIL_SAMPLES, Take};
+use crate::take::{SPEECH_TAIL_SAMPLES, Take, TakeFailure};
+
+/// A cap that releases a held range for the last of the 125 chunks of 3_200
+/// samples that `speak_through` appends to reach 400_000. An append counts
+/// once against the cap, so it must sit one chunk under that total.
+const CAP_REJECTING_THE_LAST_CHUNK: usize = 400_000 - 3_200;
 
 /// A take whose final queue stays full, so every closed range is held, and
 /// whose pipeline reports each decode's sample count once completion drains
@@ -81,6 +86,36 @@ async fn the_pcm_cap_releases_a_held_range_and_keeps_its_interim_text_final() {
     );
 
     assert_eq!(finish(&take).await, "keep these words");
+    assert!(decodes.try_recv().is_err(), "nothing decodes");
+}
+
+#[tokio::test]
+async fn a_final_tail_released_before_its_decode_fails_the_take_without_a_panic() {
+    let (take, _held, mut decodes) = held_take(120_000);
+    take.append(vec![0.5; 16_000]).expect("one second reserves");
+    TakeState::lock(&take.state.buffer)
+        .release_prefix(8_000)
+        .expect("the resident prefix releases");
+    assert_eq!(
+        TakeState::lock(&take.state.segmenter).consumed(),
+        0,
+        "the final tail still starts before the released audio"
+    );
+
+    let failure = take
+        .finalization()
+        .expect("the take owns a final pipeline")
+        .await
+        .expect_err("the released tail fails the take");
+
+    assert!(
+        matches!(&*failure, TakeFailure::FinalTailEvicted),
+        "{failure:?}"
+    );
+    assert_eq!(
+        failure.to_string(),
+        "final window audio was released before its decode"
+    );
     assert!(decodes.try_recv().is_err(), "nothing decodes");
 }
 
@@ -176,7 +211,7 @@ async fn a_released_silence_close_keeps_the_text_of_a_window_running_into_its_si
 
 #[tokio::test]
 async fn the_pcm_cap_releases_a_held_stride_and_its_held_successor_decodes_alone() {
-    let (take, _held, mut decodes) = held_take(400_000);
+    let (take, _held, mut decodes) = held_take(CAP_REJECTING_THE_LAST_CHUNK);
     speak_through(&take, 320_512);
     assert_eq!(TakeState::lock(&take.state.held).len(), 2);
     speak_through(&take, 400_000);
@@ -200,7 +235,7 @@ async fn the_pcm_cap_releases_a_held_stride_and_its_held_successor_decodes_alone
 
 #[tokio::test]
 async fn a_released_stride_keeps_the_text_of_a_window_running_past_its_end() {
-    let (take, _held, mut decodes) = held_take(400_000);
+    let (take, _held, mut decodes) = held_take(CAP_REJECTING_THE_LAST_CHUNK);
     speak_through(&take, 400_000);
     assert_eq!(TakeState::lock(&take.state.buffer).origin(), 160_256);
     take.next_window_snapshot("first stride words", &[], 0, 0, 163_200)
