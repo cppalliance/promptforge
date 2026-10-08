@@ -1,0 +1,225 @@
+{
+  "snapshots": [
+    {
+      "at_ms": 632,
+      "revision": 1,
+      "transcript": "And...",
+      "finalized": "",
+      "agreed": "",
+      "tentative": "And...",
+      "audio_start_ms": 0,
+      "audio_end_ms": 500
+    },
+    {
+      "at_ms": 1014,
+      "revision": 2,
+      "transcript": "And so...",
+      "finalized": "",
+      "agreed": "And",
+      "tentative": " so...",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    },
+    {
+      "at_ms": 1517,
+      "revision": 3,
+      "transcript": "And so my fell",
+      "finalized": "",
+      "agreed": "And so",
+      "tentative": " my fell",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1500
+    },
+    {
+      "at_ms": 2021,
+      "revision": 4,
+      "transcript": "And so my fellow American...",
+      "finalized": "",
+      "agreed": "And so my",
+      "tentative": " fellow American...",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2000
+    },
+    {
+      "at_ms": 2529,
+      "revision": 5,
+      "transcript": "And so my fellow Americans.",
+      "finalized": "",
+      "agreed": "And so my fellow",
+      "tentative": " Americans.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 2500
+    },
+    {
+      "at_ms": 3023,
+      "revision": 5,
+      "transcript": "And so my fellow Americans.",
+      "finalized": "",
+      "agreed": "And so my fellow",
+      "tentative": " Americans.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3000
+    },
+    {
+      "at_ms": 3523,
+      "revision": 5,
+      "transcript": "And so my fellow Americans.",
+      "finalized": "",
+      "agreed": "And so my fellow",
+      "tentative": " Americans.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 3500
+    },
+    {
+      "at_ms": 4023,
+      "revision": 6,
+      "transcript": "And so my fellow Americans asked",
+      "finalized": "",
+      "agreed": "And so my fellow Americans",
+      "tentative": " asked",
+      "audio_start_ms": 0,
+      "audio_end_ms": 4000
+    },
+    {
+      "at_ms": 4525,
+      "revision": 7,
+      "transcript": "And so my fellow Americans asked not",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked",
+      "tentative": " not",
+      "audio_start_ms": 0,
+      "audio_end_ms": 4500
+    },
+    {
+      "at_ms": 5032,
+      "revision": 8,
+      "transcript": "And so my fellow Americans asked not",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not",
+      "tentative": "",
+      "audio_start_ms": 0,
+      "audio_end_ms": 5000
+    },
+    {
+      "at_ms": 5540,
+      "revision": 9,
+      "transcript": "And so my fellow Americans asked not what happened.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not",
+      "tentative": " what happened.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 5500
+    },
+    {
+      "at_ms": 6046,
+      "revision": 10,
+      "transcript": "And so my fellow Americans asked not what you are coming to.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what",
+      "tentative": " you are coming to.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 6000
+    },
+    {
+      "at_ms": 6543,
+      "revision": 11,
+      "transcript": "And so my fellow Americans asked not what your country can",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what",
+      "tentative": " your country can",
+      "audio_start_ms": 0,
+      "audio_end_ms": 6500
+    },
+    {
+      "at_ms": 7039,
+      "revision": 12,
+      "transcript": "And so my fellow Americans asked not what your country can do for",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can",
+      "tentative": " do for",
+      "audio_start_ms": 0,
+      "audio_end_ms": 7000
+    },
+    {
+      "at_ms": 7554,
+      "revision": 13,
+      "transcript": "And so my fellow Americans asked not what your country can do for you.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for",
+      "tentative": " you.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 7500
+    },
+    {
+      "at_ms": 8058,
+      "revision": 13,
+      "transcript": "And so my fellow Americans asked not what your country can do for you.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for",
+      "tentative": " you.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 8000
+    },
+    {
+      "at_ms": 8546,
+      "revision": 14,
+      "transcript": "And so my fellow Americans asked not what your country can do for you asked",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for you",
+      "tentative": " asked",
+      "audio_start_ms": 0,
+      "audio_end_ms": 8500
+    },
+    {
+      "at_ms": 9056,
+      "revision": 15,
+      "transcript": "And so my fellow Americans asked not what your country can do for you asked what you",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for you asked",
+      "tentative": " what you",
+      "audio_start_ms": 0,
+      "audio_end_ms": 9000
+    },
+    {
+      "at_ms": 9557,
+      "revision": 16,
+      "transcript": "And so my fellow Americans asked not what your country can do for you asked what you can do.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for you asked what you",
+      "tentative": " can do.",
+      "audio_start_ms": 0,
+      "audio_end_ms": 9500
+    },
+    {
+      "at_ms": 10058,
+      "revision": 17,
+      "transcript": "And so my fellow Americans asked not what your country can do for you asked what you can do for your",
+      "finalized": "",
+      "agreed": "And so my fellow Americans asked not what your country can do for you asked what you can do",
+      "tentative": " for your",
+      "audio_start_ms": 0,
+      "audio_end_ms": 10000
+    },
+    {
+      "at_ms": 10197,
+      "revision": 18,
+      "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+      "tentative": "",
+      "audio_start_ms": 10000,
+      "audio_end_ms": 10000
+    },
+    {
+      "at_ms": 11013,
+      "revision": 19,
+      "transcript": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country. country.",
+      "finalized": "",
+      "agreed": "And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+      "tentative": " country.",
+      "audio_start_ms": 10080,
+      "audio_end_ms": 11000
+    }
+  ],
+  "completed": "And so my fellow Americans Ask not what your country can do for you. Ask what you can do for your country."
+}

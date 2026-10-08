@@ -25,6 +25,10 @@
 //! snapshots to `<name>.snapshots.json`, prints its metrics, and leaves the
 //! fixture alone, so decode experiments compare captures without replacing it.
 //! A clip other than `jfk.wav` is captured only to a scratch path.
+//!
+//! A native fixture is never hand-edited. To replace one, capture to a scratch
+//! path, copy the script and snapshots unchanged under a new fixture name, and
+//! point `NATIVE_FIXTURE` at it.
 
 mod audio;
 mod recording;

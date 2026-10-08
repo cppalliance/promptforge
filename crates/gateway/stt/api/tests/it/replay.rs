@@ -1,5 +1,10 @@
 //! Speech-sandbox replay of scripted and natively captured takes against
 //! golden snapshots, the current metrics, and the baseline thresholds.
+//!
+//! A native fixture is a native capture copied unchanged and is never
+//! hand-edited. A pipeline change that needs new native input is re-captured
+//! under a new name, which `NATIVE_FIXTURE` selects; the earlier fixture and
+//! its baseline section stay as frozen history.
 
 #![expect(
     clippy::expect_used,
@@ -24,7 +29,7 @@ use metrics::Metrics;
 
 const UPDATE_VARIABLE: &str = "PROMPTFORGE_REPLAY_UPDATE";
 const SCRIPTED_PREFIX: &str = "scripted-";
-const NATIVE_FIXTURE: &str = "jfk-native";
+const NATIVE_FIXTURE: &str = "jfk-native-recaptured";
 /// Sections no replay produces, kept as written: the native interim decode
 /// timing and the Workshop take reducer's rendered-text metrics, which
 /// `crates/workshop/ui/test/stt-replay.mjs` owns.

@@ -14,6 +14,21 @@
     "upsr": 0.6190476190476191,
     "upwr": 1.9545454545454546
   },
+  "jfk-native-recaptured": {
+    "agreed_shrink_events": 0,
+    "changed_pairs": 11,
+    "changed_words": 46,
+    "commit_lag_ms": 691.3636363636364,
+    "completed_words": 22,
+    "lag_sum_ms": 15210.0,
+    "lag_words": 22,
+    "latency_sum_ms": 19225.0,
+    "latency_words": 22,
+    "pairs": 22,
+    "partial_latency_ms": 873.8636363636364,
+    "upsr": 0.5,
+    "upwr": 2.090909090909091
+  },
   "native": {
     "gpu_available": true,
     "interim_decode_max_ms": 53.736,
@@ -164,6 +179,14 @@
       "pairs": 21,
       "upsr": 0.6190476190476191,
       "upwr": 1.9545454545454546
+    },
+    "jfk-native-recaptured": {
+      "changed_pairs": 3,
+      "changed_words": 35,
+      "completed_words": 22,
+      "pairs": 22,
+      "upsr": 0.13636363636363635,
+      "upwr": 1.5909090909090908
     },
     "scripted-agreed-shrink": {
       "changed_pairs": 3,
