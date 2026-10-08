@@ -14,11 +14,9 @@
 //! final records the update the session sends for it.
 //!
 //! The final role uses the interim model unless
-//! `PROMPTFORGE_WHISPER_FINAL_MODEL` names another one. The capture builds
-//! its Whisper factory from `PROMPTFORGE_WHISPER_LIBRARY` rather than
-//! loading a gateway config: a config load builds its factory internally,
-//! leaving no place for the recording wrapper, and provisions the pinned
-//! whisper build from the artifact store instead of the named library.
+//! `PROMPTFORGE_WHISPER_FINAL_MODEL` names another one. The session setup
+//! lives in `native_session`, shared with the long-speech test; the capture
+//! wraps its Whisper factory with the recording one.
 //!
 //! With `PROMPTFORGE_REPLAY_CAPTURE` naming a scratch `<name>.json` outside
 //! the fixture directory, the capture writes its script there and its
@@ -30,44 +28,31 @@
 //! path, copy the script and snapshots unchanged under a new fixture name, and
 //! point `NATIVE_FIXTURE` at it.
 
-mod audio;
 mod recording;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gateway_stt::SpeechService;
-use gateway_stt::test_fixtures::native::fixture_final_model;
 use gateway_stt::test_fixtures::{
-    RealtimeSessionFixture, RealtimeSessionRegistryFixture, ReplayOutcome, ReplayScript,
-    ReplaySnapshot, ReplayTake, load_scripted_initial_with_cancellation,
+    RealtimeSessionFixture, ReplayOutcome, ReplayScript, ReplaySnapshot, ReplayTake,
 };
-use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::DecodeMode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
 use super::{NATIVE_FIXTURE, fixture_dir, metrics, write_json};
 use crate::common;
+use crate::native_session::audio;
+use crate::native_session::{self, CHUNK_SAMPLES, SAMPLES_PER_MS, TICK_SAMPLES, WINDOW_SECONDS};
 use recording::{Decode, Decodes, RecordingFactory, take_decodes};
 
 const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REPLAY_CAPTURE";
 const AUDIO_VARIABLE: &str = "PROMPTFORGE_WHISPER_AUDIO";
 const FIXTURE_AUDIO: &str = "jfk.wav";
 
-/// The window of the fixed policy the fixture load publishes, which is the
-/// gateway default.
-const WINDOW_SECONDS: u64 = 15;
-const SAMPLES_PER_MS: u64 = 16;
-/// 100 ms of 16 kHz audio, the chunk the client streams.
-const CHUNK_SAMPLES: u64 = 1_600;
-/// An interim tick follows every 500 ms of appended audio.
-const TICK_SAMPLES: u64 = 8_000;
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(60);
 const SETTLE_POLL: Duration = Duration::from_millis(1);
-const HYPOTHESIS_UPDATE: &str = r#"{"type":"session.update","session":{"type":"transcription","include":["item.input_audio_transcription.hypothesis"]}}"#;
 
 #[derive(Debug, Serialize)]
 struct Script {
@@ -359,28 +344,13 @@ async fn native_jfk_capture_replays_exactly_and_records_the_native_fixture_once(
         let audio = std::env::var_os(AUDIO_VARIABLE).map(PathBuf::from);
         check_fixture_audio(audio.as_deref()).unwrap_or_else(|reason| panic!("{reason}"));
     }
-    let model = common::require_model();
-    let config = WhisperConfig::new(
-        common::require_library(),
-        model.clone(),
-        Some(fixture_final_model(&model)),
-        WINDOW_SECONDS,
-        None,
-    );
     let decodes = Decodes::default();
     let factory = RecordingFactory {
-        inner: WhisperModelFactory::new(config).expect("the packaged runtime loads"),
+        inner: native_session::whisper_factory(),
         decodes: Arc::clone(&decodes),
     };
-    let service = SpeechService::new();
-    load_scripted_initial_with_cancellation(&service, factory, &CancellationToken::new())
-        .expect("the native interim and final models load");
-    let mut session = RealtimeSessionRegistryFixture::default()
-        .register_with_service(&service)
-        .expect("a native session registers");
-    session
-        .update_text(HYPOTHESIS_UPDATE)
-        .expect("the hypothesis include applies");
+    let service = native_session::load(factory);
+    let session = native_session::register(&service);
 
     let mut capture = Capture::new(session, decodes, common::jfk_pcm16());
     capture.stream().await;

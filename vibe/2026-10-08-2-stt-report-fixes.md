@@ -374,7 +374,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 <step-5>
 
-### Step 5: Add the native long-speech deletion test (S4 test)
+### Step 5: Add the native long-speech deletion test (S4 test) [completed]
 
 - Component: Long-speech regression test
 - Component placement: third. It must come before Step 6 so it can run on the commits before and after the S1 guard. It comes after Steps 1-4 so those runs see sessions that report their failures and receive prompt terms.
