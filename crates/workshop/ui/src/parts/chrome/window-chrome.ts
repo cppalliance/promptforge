@@ -4,15 +4,26 @@
 // desktop-only, since they need the Tauri window API. Every control calls
 // the current window through @tauri-apps/api, which esbuild bundles the
 // same way as the rest of the UI.
+//
+// The bar also carries two toolbars of icon buttons, built here from a
+// fixed list of commands: Toggle Primary Side Bar after the menus on the
+// left, and Toggle Agents and the settings gear before the window controls
+// on the right. A press runs the command through the command registry, and
+// the tooltip names its chord. The bar follows the window's focus too: while
+// the window is blurred it wears the inactive modifier, which dims its text.
 
 import "./window-chrome.css";
 
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 
+import { ICON_GEAR, ICON_LAYOUT_SIDEBAR_LEFT, ICON_LAYOUT_SIDEBAR_RIGHT } from "@workshop/look/icons";
+import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
 import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import { detectPlatform } from "@workshop/platform/keybinding-parser";
-import { getService } from "@workshop/platform/service-registry";
+import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 
 declare global {
   interface Window {
@@ -65,16 +76,88 @@ export function toggleFullScreen(): void {
   });
 }
 
+/** Registry overrides; tests inject their own. */
+export interface WindowChromeDependencies {
+  readonly commands?: CommandRegistry;
+  readonly keybindings?: KeybindingsRegistry;
+}
+
+/** One toolbar icon button: the command it runs, its accessible name, and its glyph. */
+interface ToolButtonSpec {
+  readonly commandId: string;
+  readonly label: string;
+  readonly icon: string;
+}
+
+/** The left toolbar, after the menubar. */
+const LEFT_TOOLS: readonly ToolButtonSpec[] = [
+  { commandId: "workbench.action.toggleSidebarVisibility", label: "Toggle Primary Side Bar", icon: ICON_LAYOUT_SIDEBAR_LEFT },
+];
+
+/** The right toolbar, before the window controls: Toggle Agents (the right zone) and the settings gear. */
+const RIGHT_TOOLS: readonly ToolButtonSpec[] = [
+  { commandId: "workbench.action.toggleAuxiliaryBar", label: "Toggle Agents", icon: ICON_LAYOUT_SIDEBAR_RIGHT },
+  { commandId: "workbench.action.openSettings", label: "Settings", icon: ICON_GEAR },
+];
+
+/** The active-window state's modifier class on the bar. */
+const INACTIVE_CLASS = "ws-window-titlebar--inactive";
+
+/**
+ * Builds one toolbar of icon buttons. A press runs the command; a failure
+ * posts to the status bar, the way every other surface reports one. The
+ * tooltip is the label plus the command's chord, re-read on hover and focus
+ * because the contributions that bind chords may register after boot.
+ */
+function buildToolbar(
+  tools: readonly ToolButtonSpec[],
+  commands: CommandRegistry,
+  keybindings: KeybindingsRegistry,
+): HTMLElement {
+  const toolbar = document.createElement("div");
+  toolbar.className = "ws-window-titlebar__toolbar";
+  for (const tool of tools) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ws-window-titlebar__tool";
+    button.dataset["commandId"] = tool.commandId;
+    button.setAttribute("aria-label", tool.label);
+    button.innerHTML = tool.icon;
+    const refreshTooltip = (): void => {
+      const chord = keybindings.lookupKeybinding(tool.commandId)?.getLabel();
+      button.title = chord === undefined ? tool.label : `${tool.label} (${chord})`;
+    };
+    refreshTooltip();
+    button.addEventListener("pointerenter", refreshTooltip);
+    button.addEventListener("focus", refreshTooltip);
+    button.addEventListener("click", () => {
+      void commands.execute(tool.commandId).catch((error: unknown) => {
+        const statusBar = getServiceOrNull(STATUS_BAR);
+        if (statusBar === null) {
+          // No composition root (a widget test): keep the failure loud.
+          console.error(`title bar command '${tool.commandId}' failed`, error);
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        statusBar.showLocal(`Could not run '${tool.commandId}': ${message}`, "error");
+      });
+    });
+    toolbar.appendChild(button);
+  }
+  return toolbar;
+}
+
 /**
  * Reveals the custom title bar in every mode: the bar holds the
  * application menus, so it must show in a plain browser too. The drag
  * region, the window controls, and the maximized-state sync are wired
  * only inside the desktop app; in a browser the control cluster is
  * hidden instead, since the commands would have no window to reach.
+ * The toolbars and the inactive-window mark are wired in every mode.
  * The menu buttons are wired to their popovers by `setupWindowMenus` in
  * parts/menu/index.ts. Returns the disposable owning every listener wired here.
  */
-export function setupWindowChrome(): IDisposable {
+export function setupWindowChrome(deps: WindowChromeDependencies = {}): IDisposable {
   const store = new DisposableStore();
   const bar = document.querySelector<HTMLElement>(".ws-window-titlebar");
   if (!bar) {
@@ -84,8 +167,43 @@ export function setupWindowChrome(): IDisposable {
   if (!controls) {
     throw new Error("DOM Error: the title bar is missing its window-control cluster.");
   }
+  const leftRegion = bar.querySelector<HTMLElement>(".ws-window-titlebar__left");
+  const rightRegion = bar.querySelector<HTMLElement>(".ws-window-titlebar__right");
+  if (!leftRegion || !rightRegion) {
+    throw new Error("DOM Error: the title bar is missing its left or right region.");
+  }
 
   bar.hidden = false;
+
+  const commands = deps.commands ?? Commands;
+  const keybindings = deps.keybindings ?? KeybindingsRegistry;
+  const leftToolbar = buildToolbar(LEFT_TOOLS, commands, keybindings);
+  const rightToolbar = buildToolbar(RIGHT_TOOLS, commands, keybindings);
+  leftRegion.appendChild(leftToolbar);
+  rightRegion.insertBefore(rightToolbar, controls);
+  store.add(
+    toDisposable(() => {
+      leftToolbar.remove();
+      rightToolbar.remove();
+    }),
+  );
+
+  // Inactive window: the bar dims while the window is blurred. The bar
+  // starts active; the first blur or focus event is the first signal.
+  const onBlur = (): void => {
+    bar.classList.add(INACTIVE_CLASS);
+  };
+  const onFocus = (): void => {
+    bar.classList.remove(INACTIVE_CLASS);
+  };
+  window.addEventListener("blur", onBlur);
+  window.addEventListener("focus", onFocus);
+  store.add(
+    toDisposable(() => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    }),
+  );
 
   const win = currentWindow();
   // The platform context keys the menu rows read: isWeb gates the

@@ -8,7 +8,7 @@ import "./transcript.css";
 
 import { ICON_CHECK, ICON_COPY } from "@workshop/look/icons";
 import type { IDisposable } from "@workshop/platform/lifecycle";
-import { copyToClipboard } from "./motion";
+import { copyToClipboard } from "../../shared/clipboard";
 
 /** How long the check shows before the copy icon returns. */
 const CHECK_MS = 2000;

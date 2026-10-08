@@ -1,8 +1,12 @@
 // Unit test for the menu popover widget (src/parts/menu/menu.ts): one
 // popover rebuilt at every open from the menu registry's getMenuItems,
 // command rows versus submenu rows, a single child-submenu slot opened
-// on hover or ArrowRight and closed on ArrowLeft (recursive for nested
-// flyouts), group-boundary separators, empty submenus dropped, rows
+// on hover (after 250ms) or ArrowRight (at once) and closed on ArrowLeft or
+// 750ms after the pointer moves to another row (recursive for nested
+// flyouts), rows firing on mouseup (press, drag, release) with the click a
+// press ends ignored, flyouts and context menus flipping to stay on
+// screen, a max height that leaves the menu room to scroll under a 7px
+// bar, group-boundary separators, empty submenus dropped, rows
 // hidden by a failing when, aria-disabled by a failing precondition,
 // menuitemcheckbox with aria-checked from toggled, shortcut labels from
 // the keybinding registry, the context value passed as the first run
@@ -112,6 +116,12 @@ function pointerDownOn(target) {
 function hover(target) {
   target.dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
 }
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function mouse(target, type, init = {}) {
+  return target.dispatchEvent(
+    new window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1, ...init }),
+  );
+}
 
 // --- Open renders command and submenu rows, separators, shortcuts -------------
 
@@ -202,12 +212,16 @@ menu.open("menubar/file", anchor);
   );
 }
 
-// --- Flyout open on hover, close on sibling hover ------------------------------
+// --- Flyout: opens 250ms after hover, closes 750ms after the pointer leaves ----
 
 {
   const popover = popovers()[0];
   hover(rowByLabel(popover, "Recent"));
-  check("hovering a submenu row opens its flyout", popovers().length === 2);
+  check("hovering a submenu row does not open its flyout at once", popovers().length === 1);
+  await sleep(100);
+  check("the flyout is still closed before the 250ms show delay", popovers().length === 1);
+  await sleep(250);
+  check("hovering a submenu row opens its flyout after 250ms", popovers().length === 2);
   check(
     "the parent row reports the flyout expanded",
     rowByLabel(popover, "Recent")?.getAttribute("aria-expanded") === "true",
@@ -217,12 +231,73 @@ menu.open("menubar/file", anchor);
     "the flyout renders the child menu's rows",
     rowByLabel(flyout, "Reopen Closed Editor") !== undefined && rowByLabel(flyout, "Deep") !== undefined,
   );
+  check(
+    "a hover-opened flyout leaves the keyboard focus where it was",
+    window.document.activeElement !== rowByLabel(flyout, "Reopen Closed Editor"),
+  );
+
   hover(rowByLabel(popover, "New File"));
-  check("hovering a command row closes the flyout", popovers().length === 1);
+  check("hovering a command row leaves the flyout open at first", popovers().length === 2);
+  await sleep(400);
+  check("the flyout survives well inside the 750ms hide delay", popovers().length === 2);
+  await sleep(450);
+  check("the flyout closes 750ms after the pointer moved to a command row", popovers().length === 1);
   check(
     "the parent row reports the flyout collapsed",
     rowByLabel(popover, "Recent")?.getAttribute("aria-expanded") === "false",
   );
+}
+
+// --- Leaving a submenu row before 250ms cancels its open ------------------------
+
+{
+  const popover = popovers()[0];
+  hover(rowByLabel(popover, "Recent"));
+  await sleep(100);
+  hover(rowByLabel(popover, "New File"));
+  await sleep(300);
+  check("moving off a submenu row inside the show delay opens nothing", popovers().length === 1);
+}
+
+// --- Entering the flyout cancels the pending hide -------------------------------
+
+{
+  const popover = popovers()[0];
+  hover(rowByLabel(popover, "Recent"));
+  await sleep(300);
+  const flyout = popovers()[1];
+  hover(rowByLabel(popover, "New File"));
+  await sleep(300);
+  hover(flyout);
+  await sleep(700);
+  check("the pointer reaching the flyout inside the hide delay keeps it open", popovers().length === 2);
+  hover(rowByLabel(popover, "Word Wrap"));
+  await sleep(900);
+  check("leaving to a command row afterwards closes it after the delay", popovers().length === 1);
+}
+
+// --- Click on a submenu row opens at once; a sibling submenu replaces it after the delay ---
+
+{
+  const second = menus.appendMenuItem("menubar/file", { submenu: "menubar/file/other", title: "Other", group: "1_recent" });
+  const otherRow = menus.appendMenuItem("menubar/file/other", { command: "file.otherAction", title: "Other Action" });
+  commands.register("file.otherAction", { title: "Other Action", run: () => runs.push(["file.otherAction"]) });
+  menu.close();
+  menu.open("menubar/file", anchor);
+  const popover = popovers()[0];
+  rowByLabel(popover, "Recent").click();
+  check("clicking a submenu row opens its flyout immediately", popovers().length === 2);
+  hover(rowByLabel(popover, "Other"));
+  check("hovering a sibling submenu row keeps the first flyout until the delay", rowByLabel(popovers()[1], "Reopen Closed Editor") !== undefined);
+  await sleep(350);
+  check(
+    "after the delay the sibling's flyout replaces it",
+    popovers().length === 2 && rowByLabel(popovers()[1], "Other Action") !== undefined,
+  );
+  menu.close();
+  second.dispose();
+  otherRow.dispose();
+  menu.open("menubar/file", anchor);
 }
 
 // --- ArrowRight opens, ArrowLeft closes, nested flyouts recurse -----------------
@@ -275,6 +350,122 @@ menu.open("menubar/file", anchor, { path: "src/a.ts" });
     "the context value is the run's first argument",
     runs.length === 1 && runs[0][0] === "file.new" && runs[0][1]?.path === "src/a.ts",
   );
+}
+
+// --- Rows fire on mouseup: press, drag, release ---------------------------------
+
+menu.close();
+runs.length = 0;
+menu.open("menubar/file", anchor);
+
+{
+  const row = rowByLabel(popovers()[0], "New File");
+  mouse(row, "mousedown");
+  check("pressing a row fires nothing yet", runs.length === 0 && popovers().length === 1);
+  mouse(row, "mouseup");
+  check(
+    "releasing on the row fires its command and closes the menu",
+    runs.length === 1 && runs[0][0] === "file.new" && popovers().length === 0,
+  );
+  mouse(row, "click");
+  check("the click that ends a press does not fire the command again", runs.length === 1);
+}
+
+menu.open("menubar/file", anchor);
+{
+  mouse(anchor, "mousedown");
+  mouse(rowByLabel(popovers()[0], "New File"), "mouseup");
+  check("press on the anchor, drag onto a row, release fires that row", runs.length === 2 && popovers().length === 0);
+}
+
+canOpen.set(false);
+menu.open("menubar/file", anchor);
+{
+  const popover = popovers()[0];
+  mouse(rowByLabel(popover, "New File"), "mouseup", { button: 2 });
+  check("a non-primary release fires nothing", runs.length === 2 && popovers().length === 1);
+  mouse(rowByLabel(popover, "Open"), "mouseup");
+  check("releasing on a disabled row runs nothing and keeps the menu open", runs.length === 2 && popovers().length === 1);
+  mouse(popover, "mouseup");
+  check("releasing on the popover's dead space runs nothing", runs.length === 2 && popovers().length === 1);
+  rowByLabel(popover, "New File").click();
+  check("a keyboard-style click (detail 0) still fires", runs.length === 3);
+}
+
+// --- Flipping and the max height --------------------------------------------------
+
+{
+  const rects = new WeakMap();
+  const rect = (left, top, width, height) => ({
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON() {},
+  });
+  const originalRect = window.HTMLElement.prototype.getBoundingClientRect;
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (rects.has(this)) return rects.get(this);
+    if (this.classList.contains("ws-window-titlebar__popover")) return rect(0, 0, 200, 300);
+    return originalRect.call(this);
+  };
+  window.innerWidth = 1000;
+  window.innerHeight = 800;
+  const at = (popover) => [popover.style.left, popover.style.top, popover.style.maxHeight].join(" ");
+
+  menu.close();
+  menu.open("menubar/file", { x: 100, y: 100 });
+  check("a context menu with room opens at the pointer", at(popovers()[0]) === "100px 100px 665px");
+  check(
+    "a context menu is marked as one, for its fade",
+    popovers()[0].classList.contains("ws-window-titlebar__popover--context"),
+  );
+  menu.close();
+  menu.open("menubar/file", { x: 900, y: 700 });
+  check(
+    "a context menu flips left and up when it would leave the window",
+    at(popovers()[0]) === "700px 400px 365px",
+  );
+  menu.close();
+
+  rects.set(anchor, rect(950, 0, 40, 35));
+  menu.open("menubar/file", anchor);
+  check("a dropdown from the bar slides left to stay on screen", at(popovers()[0]) === "800px 35px 730px");
+  check(
+    "a dropdown has no fade and a menu scrollbar",
+    !popovers()[0].classList.contains("ws-window-titlebar__popover--context") &&
+      popovers()[0].classList.contains("scrollbar-menu"),
+  );
+  menu.close();
+
+  rects.set(anchor, rect(100, 0, 40, 35));
+  menu.open("menubar/file", anchor);
+  check("a dropdown with room opens under its button", at(popovers()[0]) === "100px 35px 730px");
+  const recentRow = rowByLabel(popovers()[0], "Recent");
+  rects.set(recentRow, rect(100, 120, 200, 22));
+  recentRow.click();
+  check("a flyout with room opens beside its parent row", at(popovers()[1]) === "300px 120px 645px");
+  menu.close();
+
+  menu.open("menubar/file", anchor);
+  const crowdedRow = rowByLabel(popovers()[0], "Recent");
+  rects.set(crowdedRow, rect(700, 120, 200, 22));
+  crowdedRow.click();
+  check("a flyout flips to the parent row's left side when the right has no room", at(popovers()[1]) === "500px 120px 645px");
+  menu.close();
+
+  menu.open("menubar/file", anchor);
+  const lowRow = rowByLabel(popovers()[0], "Recent");
+  rects.set(lowRow, rect(100, 700, 200, 22));
+  lowRow.click();
+  check("a flyout near the bottom shifts up to fit", at(popovers()[1]) === "300px 500px 265px");
+  menu.close();
+
+  window.HTMLElement.prototype.getBoundingClientRect = originalRect;
 }
 
 // --- A failed command reports to the status bar --------------------------------

@@ -1,10 +1,11 @@
 // Unit test for the command center (src/parts/chrome/command-center.ts): the
 // title-bar toolbar over MenuId.CommandCenter, mounted inside the center
-// drag region with the no-drag marker. The built-in pill shows the
-// search icon and window title and dispatches the menu's first command
-// row; the ? chevron runs workbench.action.quickOpenHelp; further
-// command rows render as toolbar buttons. Also covers the pill's
-// aria-label and the WindowTitle helper showing the first granted root's
+// drag region with the no-drag marker. The built-in folder-name button
+// shows the window title and dispatches the menu's first command row on
+// mousedown (a keyboard-synthesized click does the same, and the click
+// that follows a mouse press does not run it twice); there is no search
+// icon and no ? chevron; further command rows render as toolbar buttons.
+// Also covers the button's tooltip and the WindowTitle helper showing the first granted root's
 // folder name (falling back to "PromptForge" when no root is granted or
 // the listing fails), re-rendering on the workspace-changed event, and
 // tracking document.title. The default listRoots reads the roots through
@@ -90,34 +91,52 @@ check(
   container?.classList.contains("ws-window-titlebar__no-drag") === true,
 );
 
-const pill = container.querySelector(".ws-command-center__pill");
-check("the pill is a button", pill?.tagName === "BUTTON");
-check("the pill is a type=button control", pill?.type === "button");
+const folder = container.querySelector(".ws-command-center__folder");
+check("the folder-name button is a button", folder?.tagName === "BUTTON");
+check("the folder-name button is a type=button control", folder?.type === "button");
 check(
-  "the pill has its aria-label",
-  pill?.getAttribute("aria-label") === "Search files, commands, and more",
+  "the folder-name button explains itself in its tooltip",
+  folder?.getAttribute("title") === "Search files, commands, and more",
 );
 check(
-  "the pill opens with a decorative search icon",
-  pill?.querySelector(".ws-command-center__search")?.getAttribute("aria-hidden") === "true",
+  "the folder-name button keeps its visible text as its accessible name",
+  !folder?.hasAttribute("aria-label"),
 );
+check("the pill, its search icon, and its ? chevron are gone", container.querySelector(
+  ".ws-command-center__pill, .ws-command-center__search, .ws-command-center__chevron",
+) === null);
 
 // --- Window title: first granted root, then document.title -----------------
 
-check("the pill shows the first granted root's folder name", pill.textContent.includes("promptforge"));
+check("the button shows the first granted root's folder name", folder.textContent === "promptforge");
 check("document.title tracks the folder name", window.document.title === "promptforge");
 
-// --- Click routing ----------------------------------------------------------
+// --- Press routing: mousedown opens quick open --------------------------------
 
-pill.click();
-await flush();
-check("clicking the pill opens quick open with modes", ran.length === 1 && ran[0] === "modes");
+const press = (init) => folder.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, ...init }));
+const clickEvent = (detail) => folder.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail }));
 
-const chevron = container.querySelector(".ws-command-center__chevron");
-check("the chevron is a type=button control", chevron?.tagName === "BUTTON" && chevron?.type === "button");
-chevron.click();
+// The press's default action would move focus to the button after quick
+// open has focused its box; jsdom skips default actions, so the check is
+// that the handler cancels the event.
+const primaryPress = press({ button: 0, detail: 1 });
 await flush();
-check("clicking the chevron opens the ? help", ran.length === 2 && ran[1] === "help");
+check("mousedown on the button opens quick open with modes", ran.length === 1 && ran[0] === "modes");
+check(
+  "the primary press cancels its default focus change so quick open keeps focus",
+  primaryPress === false,
+);
+clickEvent(1);
+await flush();
+check("the click that follows a mouse press does not open it twice", ran.length === 1);
+const secondaryPress = press({ button: 2, detail: 1 });
+await flush();
+check("a non-primary press opens nothing", ran.length === 1);
+check("a non-primary press keeps its default action", secondaryPress === true);
+folder.click();
+await flush();
+check("a keyboard-synthesized click (detail 0) opens quick open", ran.length === 2 && ran[1] === "modes");
+ran.length = 0;
 
 // --- Extra menu rows render as toolbar buttons ------------------------------
 
@@ -129,20 +148,20 @@ check(
 check("the extra row takes the command's title", extraRow?.textContent === "Extra Row");
 extraRow.click();
 await flush();
-check("clicking the extra row dispatches its command", ran.length === 3 && ran[2] === "extra");
+check("clicking the extra row dispatches its command", ran.length === 1 && ran[0] === "extra");
 
 // --- Grant changes re-render the title --------------------------------------
 
 roots = [{ name: "other-folder" }];
 window.dispatchEvent(new window.CustomEvent(WORKSPACE_CHANGED_EVENT));
 await flush();
-check("a grant change re-renders the title", pill.textContent.includes("other-folder"));
+check("a grant change re-renders the title", folder.textContent === "other-folder");
 check("document.title follows the grant change", window.document.title === "other-folder");
 
 roots = [];
 window.dispatchEvent(new window.CustomEvent(WORKSPACE_CHANGED_EVENT));
 await flush();
-check("no granted roots falls back to PromptForge", pill.textContent.includes("PromptForge"));
+check("no granted roots falls back to PromptForge", folder.textContent === "PromptForge");
 check("document.title falls back to PromptForge", window.document.title === "PromptForge");
 
 // --- A failing roots listing keeps the fallback -----------------------------
@@ -156,12 +175,12 @@ const failing = new CommandCenter(secondCenter, {
   },
 });
 await flush();
-const failingPill = secondCenter.querySelector(".ws-command-center__pill");
-check("a failed listing falls back to PromptForge", failingPill.textContent.includes("PromptForge"));
+const failingFolder = secondCenter.querySelector(".ws-command-center__folder");
+check("a failed listing falls back to PromptForge", failingFolder.textContent === "PromptForge");
 failing.dispose();
 check("dispose removes the command center", secondCenter.querySelector(".ws-command-center") === null);
 
-// --- No registered rows: the pill's click dispatches nothing -----------------
+// --- No registered rows: a press dispatches nothing --------------------------
 
 const emptyContainer = window.document.createElement("div");
 window.document.body.appendChild(emptyContainer);
@@ -171,9 +190,11 @@ const noRows = new CommandCenter(emptyContainer, {
   listRoots: async () => roots,
 });
 await flush();
-emptyContainer.querySelector(".ws-command-center__pill").click();
+const inert = emptyContainer.querySelector(".ws-command-center__folder");
+inert.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
+inert.click();
 await flush();
-check("an empty menu leaves the pill inert", ran.length === 3);
+check("an empty menu leaves the folder button inert", ran.length === 1);
 noRows.dispose();
 
 // --- WindowTitle stands alone ------------------------------------------------

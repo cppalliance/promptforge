@@ -1,10 +1,10 @@
 // The workspace-document contribution: the eager module registering the
 // File menu's workspace-document rows at module scope, before any
 // service exists. Open Workspace from File..., Save
-// Workspace As..., and Duplicate Workspace... take over the stub table's
-// rows under the same command ids and labels (Duplicate gaining the
-// ellipsis its save picker warrants), so no menu, test, or keybinding
-// wiring changes; the rows are desktop-only (precondition !isWeb)
+// Workspace As..., and Duplicate Workspace take over the stub table's
+// rows under the same command ids and labels (Duplicate without an
+// ellipsis, Cursor's own label despite its save picker), so no menu, test,
+// or keybinding wiring changes; the rows are desktop-only (precondition !isWeb)
 // because their pickers are the native Tauri dialogs.
 //
 // The run bodies lazy-import the Tauri dialog plugin and the Tauri event API,
@@ -341,7 +341,7 @@ function saveWorkspaceAs(): Promise<void> {
 }
 
 /**
- * Duplicate Workspace...: a copy of the current file and its siblings,
+ * Duplicate Workspace: a copy of the current file and its siblings,
  * then the switch onto it. The copy already holds the file's UI state,
  * so nothing is written here.
  */
@@ -369,7 +369,7 @@ addAction({
 
 addAction({
   id: "workbench.action.duplicateWorkspace",
-  title: "Duplicate Workspace...",
+  title: "Duplicate Workspace",
   f1: true,
   precondition: "!isWeb",
   menu: [{ id: MenuId.MenubarFileMenu, group: "3_workspace", order: 3 }],

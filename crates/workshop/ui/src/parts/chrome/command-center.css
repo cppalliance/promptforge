@@ -18,72 +18,50 @@
   min-inline-size: 0;
 }
 
-/* The pill: search icon, window title, then the ? chevron as a sibling
-   button, together reading as one control. Inline size is clamped to 38vw
-   with a 600px ceiling, matching the quick input panel that opens from it. */
-.ws-command-center__pill,
-.ws-command-center__chevron,
+/* The folder-name button: the window title as a quiet 12px label that
+   washes on hover. Inline size is clamped so a long folder name truncates
+   instead of crowding the bar. */
+.ws-command-center__folder,
 .ws-command-center__item {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-sm);
-  block-size: var(--ws-control-height);
-  padding: 0 var(--space-md);
-  background: var(--bg-raised);
-  border: var(--ws-border-width) solid var(--border);
-  color: var(--text);
+  padding: var(--ws-size-1) var(--ws-size-6);
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
   font: inherit;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   user-select: none;
 }
 
-.ws-command-center__pill {
-  inline-size: 38vw;
-  max-inline-size: var(--ws-size-600);
+.ws-command-center__folder {
+  max-inline-size: 38vw;
   min-inline-size: 0;
-  border-start-start-radius: var(--radius);
-  border-end-start-radius: var(--radius);
-  border-inline-end: none;
 }
 
-.ws-command-center__chevron {
-  flex: none;
-  border-start-end-radius: var(--radius);
-  border-end-end-radius: var(--radius);
-  color: var(--text-muted);
-}
-
-/* Extra MenuId.CommandCenter rows: plain toolbar buttons beside the pill. */
+/* Extra MenuId.CommandCenter rows: plain toolbar buttons beside the folder-name button. */
 .ws-command-center__item {
   flex: none;
-  border-radius: var(--radius);
 }
 
-.ws-command-center__pill:hover,
-.ws-command-center__chevron:hover,
+.ws-command-center__folder:hover,
 .ws-command-center__item:hover {
-  background: var(--bg-hover);
+  background: var(--titlebar-folder-hover);
 }
 
-.ws-command-center__pill:focus-visible,
-.ws-command-center__chevron:focus-visible,
+/* Focus takes the hover state, like the window controls: no ring. */
+.ws-command-center__folder:focus-visible,
 .ws-command-center__item:focus-visible {
-  outline: var(--ws-border-width) solid var(--titlebar-accent);
-  outline-offset: calc(-1 * var(--ws-border-width));
+  outline: none;
+  background: var(--titlebar-folder-hover);
 }
 
-.ws-command-center__search {
-  flex: none;
-  display: inline-flex;
-  color: var(--text-muted);
-}
-
-/* The window title truncates with an ellipsis inside the clamped pill. */
+/* The window title truncates with an ellipsis inside the clamped button. */
 .ws-command-center__title {
-  flex: 1;
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: center;
 }

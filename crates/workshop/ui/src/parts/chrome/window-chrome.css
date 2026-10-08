@@ -28,13 +28,22 @@
   display: none;
 }
 
-/* The program icon is decorative and noninteractive. */
+/* A blurred window dims the bar to its inactive text color
+   (window-chrome.ts toggles the class from the window's blur and focus). */
+.ws-window-titlebar--inactive {
+  color: var(--titlebar-foreground-inactive);
+}
+
+/* The program icon is decorative and noninteractive: 16px, centered in a
+   box as tall as the bar, flush to the left edge. */
 .ws-window-titlebar__icon {
   flex: none;
   align-self: center;
+  box-sizing: content-box;
   width: var(--titlebar-icon-size);
   height: var(--titlebar-icon-size);
-  margin-inline: var(--space-lg) var(--space-xs);
+  padding: calc((var(--titlebar-icon-box) - var(--titlebar-icon-size)) / 2);
+  margin: 0;
 }
 
 /* macOS overlay chrome (the desktop app's titleBarStyle Overlay + hiddenTitle):
@@ -59,6 +68,48 @@
   flex: none;
   display: flex;
   align-items: stretch;
+  /* The controls keep their physical size when the window is zoomed:
+     zoom.ts publishes the factor, and dividing it out cancels the zoom
+     the rest of the page (and the native webview) applies. */
+  zoom: calc(1 / var(--ws-zoom-factor, 1));
+}
+
+/* The toolbars: icon buttons, a left one after the menus and a right one
+   before the window controls. They are the title bar's own toolbars, so
+   they take the IDE's toolbar-button hover wash. */
+.ws-window-titlebar__toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+}
+
+.ws-window-titlebar__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--titlebar-tool-size);
+  height: var(--titlebar-tool-size);
+  padding: 0;
+  color: var(--titlebar-glyph);
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-window-titlebar__tool:hover {
+  color: var(--cursor-icon-primary);
+  background: var(--cursor-toolbar-hover);
+}
+
+/* Focus takes the hover state, like the window controls: no ring. */
+.ws-window-titlebar__tool:focus-visible {
+  outline: none;
+  color: var(--cursor-icon-primary);
+  background: var(--cursor-toolbar-hover);
 }
 
 /* Browser mode hides the cluster via the hidden attribute; the flex
@@ -83,12 +134,12 @@
 
 .ws-window-titlebar__control:focus-visible {
   outline: none;
-  background: var(--titlebar-hover);
+  background: var(--titlebar-control-hover);
 }
 
 .ws-window-titlebar__control--minimize:hover,
 .ws-window-titlebar__control--maximize:hover {
-  background: var(--titlebar-hover);
+  background: var(--titlebar-control-hover);
 }
 
 .ws-window-titlebar__control--close:hover {

@@ -6,14 +6,18 @@
 // share one zoom state - with "@tauri-apps/api/window" and
 // "@tauri-apps/api/webviewWindow" aliased to recording stubs in
 // test/helpers, and drives them against jsdom built from the real
-// index.html. Covers: the zoom math (0.1 steps, clamped to 0.5-2.0, reset
-// to 1.0), the browser fallback's CSS zoom application, the write-through
+// index.html. Covers: the zoom math (a factor of 1.2 per level, levels
+// -8 to 8, reset to level 0), the browser fallback's CSS zoom application,
+// the zoom factor custom property the title bar's window controls divide
+// by to keep their physical size, the write-through
 // to the UI-state adapter's user bucket and the restore from it across a
-// reload, corrupt and out-of-range stored values falling back to the
+// reload (a stored factor snaps to the nearest level), corrupt and
+// out-of-range stored values falling back to the
 // default, a failing writer leaving the zoom applied and logged, the
 // Appearance flyout's zoom rows with their shortcut hints, and the
 // desktop path routing zoom to the native webview. The Ctrl+= /
-// Ctrl+Shift+= / Ctrl+- / Ctrl+NumPad0 / Ctrl+0 keybinding assertions
+// Ctrl+Shift+= / Ctrl+- / Ctrl+NumPad+ / Ctrl+NumPad- / Ctrl+NumPad0 /
+// Ctrl+0 keybinding assertions
 // live in test/gateway-config-menu.mjs with the dispatcher.
 // Overlay anchoring at non-1.0 zoom is a visual check,
 // deferred out of jsdom scope.
@@ -35,6 +39,7 @@ const bundle = await esbuild.build({
       export { Menu } from "./src/parts/menu/menu.ts";
       export {
         getZoom,
+        getZoomLevel,
         persistZoom,
         restoreZoom,
         resetZoom,
@@ -108,27 +113,43 @@ async function scenario({ desktop = false } = {}) {
   return { window, module, webviewZooms };
 }
 
-// --- Zoom math: 0.1 steps, clamped to 0.5-2.0, reset to 1.0 ----------------
+// --- Zoom math: 1.2 per level, levels -8 to 8, reset to level 0 -------------
 
 {
   const { window, module } = await scenario();
-  check("zoom starts at 100%", module.getZoom() === 1);
+  check("zoom starts at 100%", module.getZoom() === 1 && module.getZoomLevel() === 0);
   module.zoomIn();
-  check("zoomIn steps up by 0.1", module.getZoom() === 1.1);
-  module.zoomOut();
-  module.zoomOut();
-  check("zoomOut steps down by 0.1 without float drift", module.getZoom() === 0.9);
-  for (let i = 0; i < 20; i++) module.zoomIn();
-  check("zoomIn clamps at 2.0", module.getZoom() === 2);
-  for (let i = 0; i < 30; i++) module.zoomOut();
-  check("zoomOut clamps at 0.5", module.getZoom() === 0.5);
+  check("zoomIn steps up one level, a factor of 1.2", module.getZoom() === 1.2 && module.getZoomLevel() === 1);
+  module.zoomIn();
+  check("the factor compounds per level: 1.2 squared", module.getZoom() === 1.44 && module.getZoomLevel() === 2);
+  module.zoomIn();
+  check("the factor is rounded to four decimals", module.getZoom() === 1.728);
   module.resetZoom();
-  check("resetZoom returns to 100%", module.getZoom() === 1);
+  module.zoomOut();
+  check("zoomOut steps down one level, a factor of 1/1.2", module.getZoom() === 0.8333 && module.getZoomLevel() === -1);
+  module.zoomOut();
+  check("zoomOut compounds below 100%", module.getZoom() === 0.6944 && module.getZoomLevel() === -2);
+  for (let i = 0; i < 20; i++) module.zoomIn();
+  check("zoomIn clamps at level 8", module.getZoomLevel() === 8 && module.getZoom() === 4.2998);
+  for (let i = 0; i < 30; i++) module.zoomOut();
+  check("zoomOut clamps at level -8", module.getZoomLevel() === -8 && module.getZoom() === 0.2326);
+  module.resetZoom();
+  check("resetZoom returns to level 0 and 100%", module.getZoom() === 1 && module.getZoomLevel() === 0);
   module.zoomIn();
   check(
     "the browser fallback applies CSS zoom to the root element",
-    window.document.documentElement.style.zoom === "1.1",
+    window.document.documentElement.style.zoom === "1.2",
   );
+  check(
+    "the zoom factor custom property tracks the level so window controls can divide it out",
+    window.document.documentElement.style.getPropertyValue("--ws-zoom-factor") === "1.2",
+  );
+  module.resetZoom();
+  check(
+    "resetting zoom resets the custom property",
+    window.document.documentElement.style.getPropertyValue("--ws-zoom-factor") === "1",
+  );
+  module.zoomIn();
   check(
     "the browser fallback positions body for the overlay workaround",
     window.document.body.style.position === "relative",
@@ -146,7 +167,7 @@ async function scenario({ desktop = false } = {}) {
     "each zoom step writes the bare factor to the user bucket",
     storage.sets.length === 2 &&
       storage.sets.every((entry) => entry.bucket === "user" && entry.key === KEY) &&
-      storage.sets.map((entry) => entry.value).join(",") === "1.1,1.2",
+      storage.sets.map((entry) => entry.value).join(",") === "1.2,1.44",
   );
   // A reload: a fresh module instance over the same window, seeded from
   // the value the last write stored.
@@ -154,10 +175,10 @@ async function scenario({ desktop = false } = {}) {
   check("a reload boots at the default until restored", reloaded.getZoom() === 1);
   const reloadedStorage = bindStorage(reloaded, { user: { [KEY]: storage.get("user", KEY) } });
   reloaded.restoreZoom(reloadedStorage.get("user", KEY));
-  check("a reload restores the persisted factor", reloaded.getZoom() === 1.2);
+  check("a reload restores the persisted factor as its level", reloaded.getZoom() === 1.44 && reloaded.getZoomLevel() === 2);
   check(
     "the restore re-applies CSS zoom to the root element",
-    first.window.document.documentElement.style.zoom === "1.2",
+    first.window.document.documentElement.style.zoom === "1.44",
   );
   check("the restore does not echo the factor back to the writer", reloadedStorage.sets.length === 0);
 }
@@ -174,7 +195,7 @@ async function scenario({ desktop = false } = {}) {
   module.zoomIn();
   check(
     "disposing an installed writer restores the no-op, not an earlier writer",
-    first.sets.length === 0 && module.getZoom() === 1.1,
+    first.sets.length === 0 && module.getZoom() === 1.2,
   );
 }
 
@@ -182,17 +203,36 @@ async function scenario({ desktop = false } = {}) {
 
 {
   const { module } = await scenario();
-  for (const bad of ["garbage", "1.2", 5, 0.1, Number.NaN, null, undefined, { factor: 1.2 }, [1.2]]) {
+  for (const bad of [
+    "garbage",
+    "1.2",
+    5,
+    0.1,
+    0,
+    -1.2,
+    Number.POSITIVE_INFINITY,
+    Number.NaN,
+    null,
+    undefined,
+    { factor: 1.2 },
+    [1.2],
+  ]) {
     module.restoreZoom(bad);
     check(
       `a corrupt stored value (${String(bad)}) falls back to 100%`,
       module.getZoom() === 1,
     );
   }
-  module.restoreZoom(0.5);
-  check("the lower bound restores", module.getZoom() === 0.5);
-  module.restoreZoom(2);
-  check("the upper bound restores", module.getZoom() === 2);
+  module.restoreZoom(0.2326);
+  check("the lower bound restores", module.getZoom() === 0.2326 && module.getZoomLevel() === -8);
+  module.restoreZoom(4.2998);
+  check("the upper bound restores", module.getZoom() === 4.2998 && module.getZoomLevel() === 8);
+  module.resetZoom();
+  // A factor an older build persisted (0.1 steps) snaps to the nearest level.
+  module.restoreZoom(1.1);
+  check("an off-grid factor snaps up to the nearest level", module.getZoomLevel() === 1 && module.getZoom() === 1.2);
+  module.restoreZoom(0.7);
+  check("an off-grid factor snaps down to the nearest level", module.getZoomLevel() === -2 && module.getZoom() === 0.6944);
 }
 
 // --- Persistence: a failing writer does not block the zoom -------------------
@@ -215,10 +255,10 @@ async function scenario({ desktop = false } = {}) {
   }
   console.error = originalError;
   check("a writer failure does not escape the zoom", escaped === false);
-  check("the zoom still applies when the writer fails", module.getZoom() === 1.1);
+  check("the zoom still applies when the writer fails", module.getZoom() === 1.2);
   check(
     "the CSS fallback still applies when the writer fails",
-    window.document.documentElement.style.zoom === "1.1",
+    window.document.documentElement.style.zoom === "1.2",
   );
   check("a writer failure is logged", errors.length === 1);
 }
@@ -252,7 +292,7 @@ async function scenario({ desktop = false } = {}) {
       resetRow?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+NumPad0",
   );
   zoomInRow.click();
-  check("the menu's Zoom In zooms in", module.getZoom() === 1.1);
+  check("the menu's Zoom In zooms in", module.getZoom() === 1.2);
   check("running Zoom In closes the menu", popover() === undefined);
   menu.open("menubar/view/appearance", anchor);
   rowByLabel("Zoom Out").click();
@@ -271,21 +311,25 @@ async function scenario({ desktop = false } = {}) {
   const { window, module, webviewZooms } = await scenario({ desktop: true });
   const storage = bindStorage(module);
   module.zoomIn();
-  check("desktop zoom goes to the native webview", webviewZooms().join(",") === "1.1");
+  check("desktop zoom goes to the native webview", webviewZooms().join(",") === "1.2");
   check(
     "desktop zoom leaves CSS zoom untouched",
     window.document.documentElement.style.zoom === "" &&
       window.document.body.style.position === "",
   );
   check(
+    "desktop zoom still publishes the factor for the window controls to divide out",
+    window.document.documentElement.style.getPropertyValue("--ws-zoom-factor") === "1.2",
+  );
+  check(
     "desktop zoom still persists the factor",
-    storage.sets.length === 1 && storage.get("user", KEY) === 1.1,
+    storage.sets.length === 1 && storage.get("user", KEY) === 1.2,
   );
   const reloaded = await freshModule();
   reloaded.restoreZoom(storage.get("user", KEY));
   check(
     "a desktop boot restores zoom through the native webview",
-    webviewZooms().join(",") === "1.1,1.1",
+    webviewZooms().join(",") === "1.2,1.2",
   );
 }
 

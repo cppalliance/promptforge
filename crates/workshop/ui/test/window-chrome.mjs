@@ -7,7 +7,11 @@
 // control calls its window method; the drag region only drags on the
 // primary button; double-click toggles maximize; and the maximized state
 // read back on resize switches the glyph and aria-label on transitions
-// only, with the listener dying at dispose.
+// only, with the listener dying at dispose. Also covers the title bar's
+// toolbars (Toggle Primary Side Bar on the left, Toggle Agents and the
+// settings gear on the right: icon buttons that run their command and
+// carry the chord in their tooltip) and the inactive-window class that
+// follows the window's blur and focus.
 // Run: node test/window-chrome.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -19,7 +23,15 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "parts", "chrome", "window-chrome.ts")],
+  stdin: {
+    contents: `
+      export { setupWindowChrome } from "./src/parts/chrome/window-chrome.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+    `,
+    resolveDir: path.join(uiDir, ".."),
+    loader: "ts",
+  },
   bundle: true,
   write: false,
   format: "esm",
@@ -34,9 +46,23 @@ const bundle = await esbuild.build({
   },
 });
 const code = bundle.outputFiles[0].text;
-const { setupWindowChrome } = await import(
+const { setupWindowChrome, CommandRegistry, createKeybindingsRegistry } = await import(
   `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
 );
+
+// The toolbars dispatch through a recording command registry and label their
+// tooltips from a private keybinding registry, so no global state is shared.
+const ran = [];
+const commands = new CommandRegistry();
+for (const id of [
+  "workbench.action.toggleSidebarVisibility",
+  "workbench.action.toggleAuxiliaryBar",
+  "workbench.action.openSettings",
+]) {
+  commands.register(id, { run: () => ran.push(id) });
+}
+const keybindings = createKeybindingsRegistry("windows");
+keybindings.registerKeybindingRule({ id: "workbench.action.toggleSidebarVisibility", keybinding: "ctrl+b" });
 
 const failures = [];
 function check(name, condition) {
@@ -61,7 +87,7 @@ function scenario({ desktop }) {
   globalThis.window = window;
   globalThis.document = window.document;
   globalThis.CustomEvent = window.CustomEvent;
-  const chrome = setupWindowChrome();
+  const chrome = setupWindowChrome({ commands, keybindings });
   return {
     window,
     chrome,
@@ -187,6 +213,82 @@ function scenario({ desktop }) {
       !maximizeGlyph.hasAttribute("hidden") &&
       restoreGlyph.hasAttribute("hidden"),
   );
+}
+
+// --- Toolbars: Toggle Primary Side Bar left; Toggle Agents and the gear right ---
+
+for (const desktop of [false, true]) {
+  const mode = desktop ? "desktop" : "browser";
+  const { bar, chrome } = scenario({ desktop });
+
+  const left = bar.querySelector(".ws-window-titlebar__left");
+  const leftToolbar = left.querySelector(":scope > .ws-window-titlebar__toolbar");
+  check(`${mode}: the left region holds a toolbar after the menubar`, leftToolbar !== null && leftToolbar.previousElementSibling === left.querySelector(".ws-window-titlebar__menus"));
+  const leftButtons = [...(leftToolbar?.querySelectorAll("button") ?? [])];
+  check(
+    `${mode}: the left toolbar is exactly Toggle Primary Side Bar`,
+    leftButtons.length === 1 &&
+      leftButtons[0].dataset.commandId === "workbench.action.toggleSidebarVisibility" &&
+      leftButtons[0].getAttribute("aria-label") === "Toggle Primary Side Bar",
+  );
+  check(`${mode}: the left toolbar button draws an icon`, leftButtons[0]?.querySelector("svg") !== null);
+  check(
+    `${mode}: the tooltip names the chord`,
+    leftButtons[0]?.getAttribute("title") === "Toggle Primary Side Bar (Ctrl+B)",
+  );
+
+  const right = bar.querySelector(".ws-window-titlebar__right");
+  const rightToolbar = right.querySelector(":scope > .ws-window-titlebar__toolbar");
+  check(
+    `${mode}: the right region's toolbar sits before the window controls`,
+    rightToolbar !== null && rightToolbar.nextElementSibling === right.querySelector(".ws-window-titlebar__controls"),
+  );
+  const rightButtons = [...(rightToolbar?.querySelectorAll("button") ?? [])];
+  check(
+    `${mode}: the right toolbar is Toggle Agents then Settings`,
+    rightButtons.map((button) => `${button.dataset.commandId}:${button.getAttribute("aria-label")}`).join(",") ===
+      "workbench.action.toggleAuxiliaryBar:Toggle Agents,workbench.action.openSettings:Settings",
+  );
+  check(
+    `${mode}: a tooltip without a chord is the bare name`,
+    rightButtons[0]?.getAttribute("title") === "Toggle Agents",
+  );
+  check(`${mode}: every toolbar button is a type=button control with an icon`, [...leftButtons, ...rightButtons].every((button) => button.type === "button" && button.querySelector("svg") !== null));
+
+  ran.length = 0;
+  for (const button of [...leftButtons, ...rightButtons]) button.click();
+  await flush();
+  check(
+    `${mode}: each toolbar button runs its command`,
+    ran.join(",") ===
+      "workbench.action.toggleSidebarVisibility,workbench.action.toggleAuxiliaryBar,workbench.action.openSettings",
+  );
+
+  chrome.dispose();
+  check(`${mode}: dispose removes the toolbars`, bar.querySelector(".ws-window-titlebar__toolbar") === null);
+}
+
+// --- Inactive window: the bar follows the window's blur and focus ---------------
+
+{
+  const { window, bar, chrome } = scenario({ desktop: false });
+  check("a fresh bar is active", !bar.classList.contains("ws-window-titlebar--inactive"));
+  window.dispatchEvent(new window.Event("blur"));
+  check("a blurred window marks the bar inactive", bar.classList.contains("ws-window-titlebar--inactive"));
+  window.dispatchEvent(new window.Event("focus"));
+  check("a refocused window clears the mark", !bar.classList.contains("ws-window-titlebar--inactive"));
+  window.dispatchEvent(new window.Event("blur"));
+  chrome.dispose();
+  window.dispatchEvent(new window.Event("focus"));
+  check("after dispose the focus listener is gone", bar.classList.contains("ws-window-titlebar--inactive"));
+}
+
+// --- The program icon is 16px in a 35px box ------------------------------------
+
+{
+  const { bar } = scenario({ desktop: false });
+  const icon = bar.querySelector(".ws-window-titlebar__icon");
+  check("the program icon is declared 16px", icon.getAttribute("width") === "16" && icon.getAttribute("height") === "16");
 }
 
 if (failures.length > 0) {

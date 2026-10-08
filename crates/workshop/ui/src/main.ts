@@ -216,8 +216,8 @@ disposables.add(getService(EDITOR_SETTINGS_SERVICE));
 const quickInput = disposables.add(new QuickInputService());
 registerService(QUICK_INPUT_SERVICE, () => quickInput);
 
-// The command center: the title bar's center drag region holds the pill
-// (search icon, window title, quick-access chevron) as a no-drag child.
+// The command center: the title bar's center drag region holds the
+// folder-name button (the window title, opening quick open) as a no-drag child.
 const titleCenter = document.querySelector<HTMLElement>(".ws-window-titlebar__center");
 if (!titleCenter) {
   throw new Error("DOM Error: .ws-window-titlebar__center not found in the page.");

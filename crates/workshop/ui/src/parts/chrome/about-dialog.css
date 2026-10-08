@@ -1,8 +1,8 @@
 /* Styles for about-dialog.ts, which imports this file; esbuild bundles it
    into dist/app.css. Themed values come from the :root tokens in @workshop/look/tokens.css. */
 
-/* About dialog: a centered modal over a dimmed backdrop. Structural only,
-   like the title-bar popovers in window-menu.css. */
+/* About dialog: a centered 380px card over a dimmed backdrop, in the form
+   modal's skin (a 12px radius and a 12% stroke, no shadow). */
 .ws-about-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -14,32 +14,92 @@
 }
 
 .ws-about-dialog {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-md);
-  min-width: var(--ws-about-min-width);
+  box-sizing: border-box;
+  inline-size: min(var(--ws-about-width), calc(100vw - 2 * var(--space-xl)));
   padding: var(--space-xl);
-  background: var(--bg-raised);
-  border: var(--ws-border-width) solid var(--border);
-  border-radius: var(--radius);
+  color: var(--cursor-text-primary);
+  background: var(--bg-elevated);
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-xl);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+}
+
+.ws-about-dialog__icon {
+  inline-size: var(--ws-about-icon-size);
+  block-size: var(--ws-about-icon-size);
+  align-self: flex-start;
 }
 
 .ws-about-dialog__title,
 .ws-about-dialog__line {
-  grid-column: 1 / -1;
   margin: 0;
 }
 
-.ws-about-dialog__check,
-.ws-about-dialog__close {
-  min-height: var(--ws-button-min-height);
-  padding: 0 var(--space-md);
-  color: var(--text);
-  background: var(--bg-hover);
+.ws-about-dialog__title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+}
+
+.ws-about-dialog__line {
+  color: var(--cursor-text-secondary);
+}
+
+/* Version and Date: a label, the value, and a copy button pushed to the right. */
+.ws-about-dialog__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-block-size: var(--height-sm);
+}
+
+.ws-about-dialog__label {
+  flex: none;
+  inline-size: var(--ws-about-label-width);
+  color: var(--cursor-text-tertiary);
+}
+
+.ws-about-dialog__value {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.ws-about-dialog__copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--height-sm);
+  block-size: var(--height-sm);
+  padding: 0;
+  color: var(--cursor-icon-secondary);
+  background: none;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.ws-about-dialog__copy:hover {
+  color: var(--cursor-icon-primary);
+  background: var(--cursor-toolbar-hover);
+}
+
+/* The action row: Copy version info (the primary button) sits last, at the right. */
+.ws-about-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-block-start: var(--space-md);
 }
 
 .ws-about-dialog__check:disabled {
-  color: var(--text-tertiary);
+  color: var(--cursor-control-disabled-text);
 }

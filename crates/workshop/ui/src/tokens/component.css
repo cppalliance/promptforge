@@ -55,8 +55,10 @@
   --ws-typeahead-width: var(--ws-size-240);
   --ws-typeahead-max-height: var(--ws-size-280);
 
-  /* Chrome: about dialog, model picker, update view */
-  --ws-about-min-width: var(--ws-size-320);
+  /* Chrome: about dialog (a 380px card), model picker, update view */
+  --ws-about-width: var(--ws-size-380);
+  --ws-about-icon-size: var(--ws-size-48);
+  --ws-about-label-width: var(--ws-size-60);
   --ws-model-trigger-max-width: var(--ws-size-200);
   --ws-update-banner-offset: var(--ws-size-22);
   --ws-update-banner-width: var(--ws-size-360);
@@ -66,8 +68,9 @@
   /* Layout: workshop tree */
   --ws-tree-indent: var(--ws-size-8);
 
-  /* Menus */
+  /* Menus: bar buttons and popovers share a 5px radius */
   --ws-menu-item-radius: var(--ws-size-5);
+  --ws-menu-radius: var(--ws-size-5);
 
   /* STT mic recording ring and bloom */
   --ws-stt-mic-shadow:

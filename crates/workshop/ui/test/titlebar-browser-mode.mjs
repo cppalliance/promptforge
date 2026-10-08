@@ -48,6 +48,23 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
         failures.push("the title bar icon must set width and height");
       }
     }
+    if (icon && (icon.getAttribute("width") !== "16" || icon.getAttribute("height") !== "16")) {
+      failures.push("the title bar icon must be declared 16px");
+    }
+    const toolLabels = [...titlebar.querySelectorAll(".ws-window-titlebar__tool")].map((button) =>
+      button.getAttribute("aria-label"),
+    );
+    if (toolLabels.join(",") !== "Toggle Primary Side Bar,Toggle Agents,Settings") {
+      failures.push(
+        `title bar toolbars are "${toolLabels.join(",")}", expected "Toggle Primary Side Bar,Toggle Agents,Settings"`,
+      );
+    }
+    if (titlebar.querySelector(".ws-command-center__folder") === null) {
+      failures.push("the command center's folder-name button is missing from the title bar");
+    }
+    if (titlebar.querySelector(".ws-command-center__pill, .ws-command-center__chevron") !== null) {
+      failures.push("the command center's pill and ? chevron must be gone");
+    }
     const menuLabels = [...titlebar.querySelectorAll(".ws-window-titlebar__menu")].map(
       (button) => button.textContent,
     );
@@ -75,6 +92,16 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
         failures.push("the open File menu button is not announced expanded");
       }
       fileButton.click();
+      // A mouse press opens the menu on mousedown; the click that ends it leaves it open.
+      fileButton.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
+      if (![...document.querySelectorAll(".ws-window-titlebar__popover")].some((popover) => !popover.hidden)) {
+        failures.push("a mousedown on the File menu button does not open its popover in browser mode");
+      }
+      fileButton.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+      if (fileButton.getAttribute("aria-expanded") !== "true") {
+        failures.push("the click that ends a press must not close the File menu");
+      }
+      fileButton.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
     }
     if (!titlebar.querySelector(".ws-window-titlebar__drag")) {
       failures.push("title bar drag region missing");

@@ -3,14 +3,17 @@
 // (window-chrome.ts starts a native drag only when the pointer lands on
 // the region itself, so any child element is already exempt; the class
 // documents the intent and is the styling hook). The toolbar's
-// built-in item is the pill: two sibling buttons styled as one control.
-// The body shows the search icon and the window title and dispatches
-// the menu's first command row (workbench.action.quickOpenWithModes,
-// registered by the quickinput contribution); the ? chevron runs
-// workbench.action.quickOpenHelp. Any further command rows render as
-// plain toolbar buttons beside the pill. Neither names the quick input
-// widget; both dispatch through the command registry like every other
-// surface.
+// built-in item is the folder-name button: the window title as a quiet
+// label, with no search icon and no ? chevron. A mouse press on it
+// dispatches the menu's first command row
+// (workbench.action.quickOpenWithModes, registered by the quickinput
+// contribution) on mousedown, the way Cursor's title bar opens quick
+// open; a click with no preceding press (detail 0, the keyboard's Enter
+// or Space) does the same, and the click that ends a mouse press is
+// ignored so one gesture never opens it twice. Any further command rows
+// render as plain toolbar buttons beside it. Neither names the quick
+// input widget; both dispatch through the command registry like every
+// other surface.
 //
 // The WindowTitle helper owns the title text: the first granted root's
 // folder name, or "PromptForge" when no root is granted or the listing
@@ -56,7 +59,7 @@ export interface CommandCenterDependencies {
  * failed listing renders the fallback rather than throwing at boot.
  */
 export class WindowTitle extends Disposable {
-  /** The label element; the command center appends it inside the pill. */
+  /** The label element; the command center appends it inside the folder-name button. */
   readonly element: HTMLSpanElement;
 
   private readonly listRoots: ListRoots;
@@ -101,8 +104,8 @@ export class WindowTitle extends Disposable {
 /**
  * The command center toolbar over MenuId.CommandCenter. Mounts into the
  * title bar's center drag region; the menu's first command row is the
- * pill's dispatch, and any further command rows render as toolbar
- * buttons beside the pill.
+ * folder-name button's dispatch, and any further command rows render as
+ * toolbar buttons beside it.
  */
 export class CommandCenter extends Disposable {
   private readonly commands: CommandRegistry;
@@ -119,40 +122,42 @@ export class CommandCenter extends Disposable {
     const rows = this.menus
       .getMenuItems(MenuId.CommandCenter)
       .filter((row): row is MenuItem => !("submenu" in row));
-    const pillRow = rows[0];
+    const folderRow = rows[0];
 
-    const pill = document.createElement("button");
-    pill.type = "button";
-    pill.className = "ws-command-center__pill";
-    pill.setAttribute("aria-label", "Search files, commands, and more");
-
-    const search = document.createElement("span");
-    search.className = "ws-command-center__search";
-    search.setAttribute("aria-hidden", "true");
-    // A magnifier glyph, drawn inline like the window-control glyphs.
-    search.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">' +
-      '<circle cx="6" cy="6" r="4" /><path d="M9.2 9.2L13 13" /></svg>';
-    pill.appendChild(search);
+    // The tooltip, not an aria-label: the visible folder name is the
+    // accessible name, and a label that dropped it would fail label-in-name.
+    const folder = document.createElement("button");
+    folder.type = "button";
+    folder.className = "ws-command-center__folder";
+    folder.title = "Search files, commands, and more";
 
     const title = this._register(new WindowTitle({ listRoots: deps.listRoots }));
-    pill.appendChild(title.element);
+    folder.appendChild(title.element);
 
-    const chevron = document.createElement("button");
-    chevron.type = "button";
-    chevron.className = "ws-command-center__chevron";
-    chevron.setAttribute("aria-label", "Show all quick access modes");
-    chevron.textContent = "?";
-
-    pill.addEventListener("click", () => {
-      if (pillRow !== undefined) {
-        this.run(pillRow.command, ...(pillRow.args ?? []));
+    const open = (): void => {
+      if (folderRow !== undefined) {
+        this.run(folderRow.command, ...(folderRow.args ?? []));
+      }
+    };
+    folder.addEventListener("mousedown", (event) => {
+      if (event.button === 0) {
+        // The press's default action moves focus to this button, and it
+        // lands after open() has already focused the quick input's box;
+        // cancelling it keeps the panel's keyboard focus.
+        event.preventDefault();
+        open();
       }
     });
-    chevron.addEventListener("click", () => this.run("workbench.action.quickOpenHelp"));
+    folder.addEventListener("click", (event) => {
+      // A mouse press already opened quick open on mousedown and carries
+      // a click count of 1 or more; only a keyboard-synthesized click
+      // (Enter or Space, detail 0) still needs to open it.
+      if (event.detail === 0) {
+        open();
+      }
+    });
 
-    container.appendChild(pill);
-    container.appendChild(chevron);
+    container.appendChild(folder);
     for (const row of rows.slice(1)) {
       container.appendChild(this.renderRow(row));
     }
@@ -160,7 +165,7 @@ export class CommandCenter extends Disposable {
     this._register(toDisposable(() => container.remove()));
   }
 
-  /** Renders one extra menu row as a toolbar button beside the pill. */
+  /** Renders one extra menu row as a toolbar button beside the folder-name button. */
   private renderRow(row: MenuItem): HTMLButtonElement {
     const item = document.createElement("button");
     item.type = "button";

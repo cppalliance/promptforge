@@ -71,6 +71,10 @@ const expected = {
   ICON_GLOBE: { codicon: "globe", size: 16 },
   ICON_LINK: { codicon: "link", size: 16 },
   ICON_SYMBOL_KEYWORD: { codicon: "symbol-keyword", size: 16 },
+  // The title bar's toolbars: Toggle Primary Side Bar, Toggle Agents, and the settings gear.
+  ICON_LAYOUT_SIDEBAR_LEFT: { codicon: "layout-sidebar-left", size: 16 },
+  ICON_LAYOUT_SIDEBAR_RIGHT: { codicon: "layout-sidebar-right", size: 16 },
+  ICON_GEAR: { codicon: "gear", size: 16 },
 };
 
 check(
@@ -78,8 +82,8 @@ check(
   Object.keys(icons).sort().join(",") === Object.keys(expected).sort().join(","),
 );
 check(
-  "every export is a different codicon, twenty-eight in all",
-  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 28,
+  "every export is a different codicon, thirty-one in all",
+  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 31,
 );
 
 // The codicon package root, found through its package.json.

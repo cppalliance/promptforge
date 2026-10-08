@@ -4,8 +4,8 @@
 // cmd), and ctrlcmd, which resolves to meta on macOS and ctrl everywhere
 // else, so one catalog row binds Cmd+S on macOS and Ctrl+S elsewhere
 // without a per-OS table. The key vocabulary is letters, digits,
-// f1-f12, the named editing and navigation keys, numpad0-numpad9, and
-// punctuation by unshifted glyph.
+// f1-f12, the named editing and navigation keys, numpad0-numpad9,
+// numpad_add and numpad_subtract, and punctuation by unshifted glyph.
 //
 // A KeyboardEvent maps through event.code, never event.key: the code
 // names the physical key, so Ctrl+Shift+= and Ctrl+= both read as "="
@@ -71,6 +71,10 @@ const NAMED_KEYS: ReadonlySet<string> = new Set([
   "left",
   "right",
   ...Array.from({ length: 10 }, (_, i) => `numpad${i}`),
+  // VS Code's names for the numpad plus and minus keys. A bare "+" cannot
+  // be a key token because "+" separates the chord's parts.
+  "numpad_add",
+  "numpad_subtract",
 ]);
 
 /** Punctuation keys, named by their unshifted glyph. */
@@ -204,6 +208,12 @@ function keyFromCode(code: string): string | undefined {
   if (/^Numpad[0-9]$/.test(code)) {
     return code.toLowerCase();
   }
+  if (code === "NumpadAdd") {
+    return "numpad_add";
+  }
+  if (code === "NumpadSubtract") {
+    return "numpad_subtract";
+  }
   if (/^F([1-9]|1[0-2])$/.test(code)) {
     return code.toLowerCase();
   }
@@ -245,6 +255,8 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
   down: "Down",
   left: "Left",
   right: "Right",
+  numpad_add: "NumPad_Add",
+  numpad_subtract: "NumPad_Subtract",
 };
 
 function keyLabel(key: string): string {
@@ -255,7 +267,9 @@ function keyLabel(key: string): string {
   if (/^f(?:[1-9]|1[0-2])$/.test(key)) {
     return key.toUpperCase();
   }
-  if (key.startsWith("numpad")) {
+  // The digit keys label by suffix ("NumPad0"); plus and minus have their
+  // own table entries, VS Code's "NumPad_Add" and "NumPad_Subtract".
+  if (/^numpad[0-9]$/.test(key)) {
     return `NumPad${key.slice(6)}`;
   }
   return KEY_LABELS[key] ?? key;

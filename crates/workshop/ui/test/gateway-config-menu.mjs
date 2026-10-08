@@ -286,9 +286,8 @@ function rowByLabel(popover, label) {
 function openPreferences() {
   menu.open("menubar/file", anchor);
   const filePopover = popovers().at(-1);
-  rowByLabel(filePopover, "Preferences").dispatchEvent(
-    new window.Event("pointerenter", { bubbles: false }),
-  );
+  // A click opens the flyout at once; a hover waits 250ms (menubar-submenu.mjs).
+  rowByLabel(filePopover, "Preferences").click();
   return popovers().at(-1);
 }
 
@@ -336,15 +335,21 @@ function press(key, init = {}) {
 {
   check("zoom starts at 100%", getZoom() === 1);
   const equal = press("=", { code: "Equal", ctrlKey: true });
-  check("Ctrl+= dispatches zoomIn", getZoom() === 1.1);
+  check("Ctrl+= dispatches zoomIn", getZoom() === 1.2);
   check("Ctrl+= is consumed", equal.defaultPrevented === true);
   const shifted = press("+", { code: "Equal", ctrlKey: true, shiftKey: true });
-  check("Ctrl+Shift+= dispatches zoomIn through the shifted + key", getZoom() === 1.2);
+  check("Ctrl+Shift+= dispatches zoomIn through the shifted + key", getZoom() === 1.44);
   check("Ctrl+Shift+= is consumed", shifted.defaultPrevented === true);
   press("-", { code: "Minus", ctrlKey: true });
-  check("Ctrl+- dispatches zoomOut", getZoom() === 1.1);
+  check("Ctrl+- dispatches zoomOut", getZoom() === 1.2);
   press("0", { code: "Numpad0", ctrlKey: true });
   check("Ctrl+NumPad0 dispatches zoomReset", getZoom() === 1);
+  const numpadPlus = press("+", { code: "NumpadAdd", ctrlKey: true });
+  check("Ctrl+NumPad+ dispatches zoomIn", getZoom() === 1.2);
+  check("Ctrl+NumPad+ is consumed", numpadPlus.defaultPrevented === true);
+  const numpadMinus = press("-", { code: "NumpadSubtract", ctrlKey: true });
+  check("Ctrl+NumPad- dispatches zoomOut", getZoom() === 1);
+  check("Ctrl+NumPad- is consumed", numpadMinus.defaultPrevented === true);
   press("=", { code: "Equal", ctrlKey: true });
   press("0", { code: "Digit0", ctrlKey: true });
   check("Ctrl+0 is the second zoomReset rule", getZoom() === 1);

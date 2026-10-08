@@ -153,6 +153,39 @@ function menubarScenario() {
   check("the closed button collapses", button("file").getAttribute("aria-expanded") === "false");
 }
 
+// --- A mouse press opens on mousedown; rows fire on mouseup -------------------------
+
+{
+  const { window, button, popovers, rowByLabel, runs } = menubarScenario();
+  const mouse = (target, type, init = {}) =>
+    target.dispatchEvent(
+      new window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1, ...init }),
+    );
+  mouse(button("file"), "mousedown");
+  check(
+    "mousedown on a bar button opens its menu and announces it expanded",
+    popovers().length === 1 && button("file").getAttribute("aria-expanded") === "true",
+  );
+  mouse(button("file"), "mouseup");
+  mouse(button("file"), "click");
+  check("the mouseup and click that end the press leave the menu open", popovers().length === 1);
+  mouse(button("file"), "mousedown");
+  check("a press on the open menu's own button closes it", popovers().length === 0);
+  mouse(button("file"), "mouseup");
+  mouse(button("file"), "click");
+  check("the click that ends that press does not reopen it", popovers().length === 0);
+
+  mouse(button("file"), "mousedown");
+  mouse(rowByLabel(popovers()[0], "New File"), "mouseup");
+  check(
+    "press on a bar button, drag onto a row, release fires the row and closes the menu",
+    runs.join(",") === "file.new" && popovers().length === 0,
+  );
+
+  mouse(button("file"), "mousedown", { button: 2 });
+  check("a non-primary press opens nothing", popovers().length === 0);
+}
+
 // --- One menu at a time -----------------------------------------------------------
 
 {

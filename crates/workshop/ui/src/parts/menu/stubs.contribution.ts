@@ -48,14 +48,13 @@ interface StubRow {
 const stubRows = [
   // File
   { id: "workbench.action.newWindow", title: "New Window", menu: MenuId.MenubarFileMenu, group: "1_new", order: 2, keybinding: "ctrlcmd+shift+n" },
-  // Open Workspace from File..., Save Workspace As..., and Duplicate Workspace... are wired by the workspace-document contribution.
-  { id: "workbench.action.toggleAutoSave", title: "Auto Save", menu: MenuId.MenubarFileMenu, group: "5_share", order: 2, toggled: "false" },
+  // Open Workspace from File..., Save Workspace As..., and Duplicate Workspace are wired by the workspace-document contribution.
+  { id: "workbench.action.toggleAutoSave", title: "Auto Save", menu: MenuId.MenubarFileMenu, group: "5_settings", order: 2, toggled: "false" },
   { id: "workbench.action.closeFolder", title: "Close Folder", menu: MenuId.MenubarFileMenu, group: "6_close", order: 3, keybinding: "ctrlcmd+m f" },
   // File > New Window with Profile (the dynamic profile rows have no backing store)
   { id: "workbench.profiles.actions.createProfile", title: "New Profile...", menu: "menubar/file/newWindowWithProfile", group: "2_new", order: 1 },
-  // File > Share
-  { id: "workbench.profiles.actions.exportProfile", title: "Export Profile...", menu: "menubar/file/share", group: "1_profiles", order: 1 },
-  { id: "workbench.profiles.actions.importProfile", title: "Import Profile...", menu: "menubar/file/share", group: "1_profiles", order: 2 },
+  // File > Share (Cursor offers only the export, labeled for the Default profile)
+  { id: "workbench.profiles.actions.exportProfile", title: "Export Profile (Default)...", menu: "menubar/file/share", group: "1_profiles", order: 1 },
   // File > Preferences (Settings is wired by the gateway contribution; Extensions and Tasks land here as second placements below)
   { id: "workbench.profiles.actions.manageProfiles", title: "Profiles", menu: "menubar/file/preferences", group: "1_settings", order: 1 },
   { id: "workbench.action.openGlobalKeybindings", title: "Keyboard Shortcuts", menu: "menubar/file/preferences", group: "1_settings", order: 4, keybinding: "ctrlcmd+m ctrlcmd+s" },
@@ -72,7 +71,8 @@ const stubRows = [
   // Selection
   { id: "editor.action.toggleMultiCursorModifier", title: "Switch to Ctrl+Click for Multi-Cursor", menu: MenuId.MenubarSelectionMenu, group: "4_config", order: 1 },
   // View
-  { id: "workbench.action.quickOpenView", title: "Open View...", menu: MenuId.MenubarViewMenu, group: "1_open", order: 2 },
+  // Ctrl+Q, not the quit chord: the native menu's quit accelerator is macOS-only, so Open View claims it elsewhere.
+  { id: "workbench.action.quickOpenView", title: "Open View...", menu: MenuId.MenubarViewMenu, group: "1_open", order: 2, keybinding: "ctrl+q" },
   { id: "workbench.view.search", title: "Search", menu: MenuId.MenubarViewMenu, group: "3_views", order: 2, keybinding: "ctrlcmd+shift+f" },
   { id: "workbench.view.scm", title: "Source Control", menu: MenuId.MenubarViewMenu, group: "3_views", order: 3, keybinding: "ctrlcmd+shift+g" },
   { id: "workbench.view.debug", title: "Run", menu: MenuId.MenubarViewMenu, group: "3_views", order: 4, keybinding: "ctrlcmd+shift+d" },
@@ -110,6 +110,7 @@ const stubRows = [
   { id: "workbench.action.editorActionsPositionTitleBar", title: "Title Bar", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 2, toggled: "false" },
   { id: "workbench.action.editorActionsPositionHidden", title: "Hidden", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 3, toggled: "false" },
   // View > Editor Layout (Move Editor into New Window is in the editor tab menu too, as a second placement below)
+  { id: "workbench.action.splitEditorInGroup", title: "Split in Group", menu: "menubar/view/editorLayout", group: "1_split_in_group", order: 1 },
   { id: "workbench.action.moveEditorToNewWindow", title: "Move Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 1 },
   { id: "workbench.action.copyEditorToNewWindow", title: "Copy Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 2, keybinding: "ctrlcmd+m o" },
   { id: "workbench.action.editorLayoutSingle", title: "Single", menu: "menubar/view/editorLayout", group: "3_layout", order: 1 },
@@ -192,12 +193,14 @@ const stubRows = [
   { id: "workbench.action.tasks.configureTaskRunner", title: "Configure Tasks...", menu: MenuId.MenubarTerminalMenu, group: "4_configure", order: 1 },
   { id: "workbench.action.tasks.configureDefaultBuildTask", title: "Configure Default Build Task...", menu: MenuId.MenubarTerminalMenu, group: "4_configure", order: 2 },
   // Help (Show All Commands is the wired showCommands' second placement, registered by the quickinput contribution)
-  { id: "update.showCurrentReleaseNotes", title: "Show Release Notes", menu: MenuId.MenubarHelpMenu, group: "2_notes", order: 1 },
+  { id: "update.showCurrentReleaseNotes", title: "Show Release Notes", menu: MenuId.MenubarHelpMenu, group: "1_welcome", order: 2 },
   { id: "workbench.action.openIssueReporter", title: "Report Issue", menu: MenuId.MenubarHelpMenu, group: "3_feedback", order: 1, keybinding: "ctrlcmd+m ctrlcmd+g" },
   { id: "workbench.action.giveFeedback", title: "Give Feedback...", menu: MenuId.MenubarHelpMenu, group: "3_feedback", order: 2 },
   { id: "workbench.action.openLicenseUrl", title: "View License", menu: MenuId.MenubarHelpMenu, group: "4_license", order: 1 },
-  { id: "workbench.action.toggleDevTools", title: "Toggle Developer Tools", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 1 },
+  // The chat pane's Ctrl+Shift+I (New Chat) wins this chord at dispatch; the row still shows it, as Cursor's menu does.
+  { id: "workbench.action.toggleDevTools", title: "Toggle Developer Tools", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 1, keybinding: "ctrlcmd+shift+i" },
   { id: "workbench.action.openProcessExplorer", title: "Open Process Explorer", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 2 },
+  { id: "workbench.action.openExtensionMonitor", title: "Open Extension Monitor", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 3 },
   // Editor tab menu (Close and Close Others are wired by the editor contribution; the split rows wait for commands that take a target)
   { id: "workbench.action.closeEditorsToTheRight", title: "Close to the Right", menu: MenuId.EditorTitleContext, group: "1_close", order: 3 },
   { id: "workbench.action.closeUnmodifiedEditors", title: "Close Saved", menu: MenuId.EditorTitleContext, group: "1_close", order: 4, keybinding: "ctrlcmd+m u" },

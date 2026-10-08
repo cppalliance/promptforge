@@ -589,7 +589,10 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "Add Previous Occurrence has no keybinding",
     KeybindingsRegistry.lookupKeybinding("editor.action.addSelectionToPreviousFindMatch") === undefined,
   );
-  check("Select All Occurrences has no keybinding", KeybindingsRegistry.lookupKeybinding("editor.action.selectHighlights") === undefined);
+  check(
+    "Select All Occurrences shows Ctrl+Shift+L, the chord the chat pane wins at dispatch",
+    KeybindingsRegistry.lookupKeybinding("editor.action.selectHighlights")?.getLabel() === "Ctrl+Shift+L",
+  );
 
   // Executing through the command registry exercises the run body's
   // lazy import of editor-commands.

@@ -209,6 +209,7 @@ const CODES = {
   i: "KeyI",
   t: "KeyT",
   n: "KeyN",
+  q: "KeyQ",
   w: "KeyW",
   ".": "Period",
   "/": "Slash",
@@ -259,6 +260,20 @@ async function press(key, { activeEditor, textFocus = false, shift = false, ctrl
   check(
     "Ctrl+Shift+I starts a chat from anywhere",
     (await press("i", { activeEditor: "editor", shift: true })).command === "workbench.action.chat.new",
+  );
+  check(
+    "Ctrl+Shift+L with the editor's text focused still starts a chat, not Select All Occurrences",
+    (await press("l", { activeEditor: "editor", shift: true, textFocus: true })).command === "workbench.action.chat.new",
+  );
+  const ctrlQ = await press("q", { activeEditor: "editor" });
+  check(
+    "Ctrl+Q reaches no command (Open View is a disabled stub) but is swallowed, so nothing quits",
+    ctrlQ.command === null && ctrlQ.consumed === true,
+  );
+  check(
+    "Toggle Developer Tools and Select All Occurrences still show the chords the chat wins",
+    KeybindingsRegistry.lookupKeybinding("workbench.action.toggleDevTools")?.getLabel() === "Ctrl+Shift+I" &&
+      KeybindingsRegistry.lookupKeybinding("editor.action.selectHighlights")?.getLabel() === "Ctrl+Shift+L",
   );
   check(
     "the Go menu's Add Symbol rows no longer carry the chords the chat took",

@@ -1,7 +1,8 @@
 // The menubar: the title bar's top-level menu buttons, generated from
 // the MenubarMainMenu submenu rows in registry sort order, plus the
 // bar-level interaction - click toggles a menu, rollover switches while
-// one is open, ArrowLeft/ArrowRight move between menus. The popovers
+// one is open (a press opens a menu on mousedown, a keyboard click on the
+// focused button toggles it), ArrowLeft/ArrowRight move between menus. The popovers
 // belong to the Menu widget (menu.ts); the bar composes one Menu and
 // never tracks dismissal, which the widget owns (Escape, outside
 // pointer, window blur).
@@ -92,13 +93,29 @@ export class Menubar extends Disposable {
       }),
     );
     for (const entry of this.entries) {
-      const onClick = (): void => {
+      const toggle = (): void => {
         if (this.openEntry === entry && this.menu.isOpen) {
           this.menu.close();
         } else {
           this.openMenu(entry, false);
         }
       };
+      // A menu opens on mousedown, so the same press can drag onto a row
+      // and release to run it. The click that ends a mouse press carries a
+      // click count and is skipped; a click with none (Enter or Space on
+      // the focused button) still toggles.
+      const onMouseDown = (event: MouseEvent): void => {
+        if (event.button === 0) {
+          toggle();
+        }
+      };
+      const onClick = (event: MouseEvent): void => {
+        if (!(event.detail > 0)) {
+          toggle();
+        }
+      };
+      entry.button.addEventListener("mousedown", onMouseDown);
+      this._register(toDisposable(() => entry.button.removeEventListener("mousedown", onMouseDown)));
       entry.button.addEventListener("click", onClick);
       this._register(toDisposable(() => entry.button.removeEventListener("click", onClick)));
       // Menubar rollover: while any menu is open, hovering another

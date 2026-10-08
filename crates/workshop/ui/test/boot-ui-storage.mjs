@@ -90,7 +90,8 @@ function checkRootsFetch(fetchLog, failures) {
 // The user bucket (ui-state.json), every key set off its default.
 const USER_DOC = {
   editor_settings: { wordWrap: true, renderWhitespace: true, renderControlCharacters: false, columnSelection: true },
-  zoom: 1.3,
+  // Level 2 of the 1.2-per-level zoom: a stored factor restores to its nearest level.
+  zoom: 1.44,
   recent_files: ["C:\\seed\\a.md", "C:\\seed\\b.md"],
   commands_history: ["workbench.action.zoomIn", "workbench.action.files.save"],
 };

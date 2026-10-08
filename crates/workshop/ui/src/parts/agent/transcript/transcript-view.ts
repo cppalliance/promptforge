@@ -21,9 +21,9 @@ import "./transcript.css";
 
 import { DropdownMenu, type DropdownItem } from "@workshop/look/dropdown";
 import type { IDisposable } from "@workshop/platform/lifecycle";
+import { copyToClipboard } from "../../shared/clipboard";
 import { FeedScroll } from "./feed-scroll";
 import { HumanMessage } from "./human-message";
-import { copyToClipboard } from "./motion";
 import { reconcile, type KeyedComponent } from "./reconcile";
 import {
   carryRowState,

@@ -1114,7 +1114,7 @@ Rules for every step:
 
 <step-5>
 
-### Step 5: Copy Cursor's title bar and menus
+### Step 5: Copy Cursor's title bar and menus [completed]
 
 - Component: Workbench shell
 - Placement: fifth, first in the shell. Its menu shortcut labels share Ctrl+Shift+I and Ctrl+Shift+L with Step 4's agent bindings, and it holds the plan's only Rust change.

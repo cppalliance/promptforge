@@ -75,12 +75,15 @@ export class UpdateView extends Disposable {
     actions.className = "ws-update-banner__actions";
     const later = document.createElement("button");
     later.type = "button";
+    later.className = "button button-secondary";
     later.textContent = "Remind me later";
     later.addEventListener("click", () => this.service.remindLater());
     const install = document.createElement("button");
     install.type = "button";
-    install.className = "ws-update-banner__primary";
-    install.textContent = "Update now";
+    install.className = "ws-update-banner__primary button button-primary";
+    // Cursor's label for an update that is available for download: the
+    // click starts the download, then installs and restarts on its own.
+    install.textContent = "Download Update";
     install.addEventListener("click", () => {
       this.installing = true;
       this.render(this.service.snapshot);
@@ -111,9 +114,9 @@ export class UpdateView extends Disposable {
     const progressValue = percentage(snapshot);
     if (snapshot.phase === "downloading") {
       status.textContent =
-        progressValue === null ? "Downloading update..." : `Downloading update... ${progressValue}%`;
+        progressValue === null ? "Downloading Update..." : `Downloading Update... ${progressValue}%`;
     } else if (snapshot.phase === "installing") {
-      status.textContent = "Installing update...";
+      status.textContent = "Installing Update...";
     } else if (snapshot.phase === "restarting") {
       status.textContent = "Restarting PromptForge...";
     } else {
@@ -131,6 +134,7 @@ export class UpdateView extends Disposable {
     if (snapshot.phase === "error") {
       const close = document.createElement("button");
       close.type = "button";
+      close.className = "button button-secondary";
       close.textContent = "Close";
       close.addEventListener("click", () => {
         this.installing = false;

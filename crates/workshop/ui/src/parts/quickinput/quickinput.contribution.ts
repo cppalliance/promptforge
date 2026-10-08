@@ -9,7 +9,8 @@
 // Menu placements follow the catalog: showCommands sits in View (as
 // "Command Palette...") and Help (as "Show All Commands", a second
 // placement with its own title), quickOpen in Go; quickOpenWithModes is
-// the command-center pill's row and quickOpenHelp its chevron, so
+// the command center's folder-name button row, and quickOpenHelp the ?
+// help (the title bar's ? chevron is gone, the command stays), so
 // neither is f1. The ctrl-based chords bind ctrlcmd so macOS gets
 // Cmd+Shift+P and Cmd+P; showCommands' second chord (F1) is a separate
 // rule, and the first registered rule owns the palette's keybinding

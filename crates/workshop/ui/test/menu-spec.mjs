@@ -45,6 +45,7 @@ const bundle = await esbuild.build({
       import "./src/parts/quickinput/quickinput.contribution.ts";
       export { Commands } from "@workshop/platform/command-registry";
       export { Menus, MenuId } from "@workshop/platform/menu-registry";
+      export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { registerService } from "@workshop/platform/service-registry";
       export { TREE_STATE } from "./src/services/tree-state-service.ts";
       export { RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
@@ -87,7 +88,7 @@ console.error = (...args) => {
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-step20-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { Commands, Menus, registerService, TREE_STATE, RECENT_FILES_STORE } = await import(
+const { Commands, Menus, KeybindingsRegistry, registerService, TREE_STATE, RECENT_FILES_STORE } = await import(
   pathToFileURL(bundlePath).href
 );
 console.error = realConsoleError;
@@ -133,13 +134,13 @@ const SPEC = {
     ["menubar/file/recent", "2_open", "sub", "Open Recent"],
     ["workbench.action.addRootFolder", "3_workspace", "wired"],
     ["workbench.action.saveWorkspaceAs", "3_workspace", "wired", "Save Workspace As..."],
-    ["workbench.action.duplicateWorkspace", "3_workspace", "wired", "Duplicate Workspace..."],
+    ["workbench.action.duplicateWorkspace", "3_workspace", "wired", "Duplicate Workspace"],
     ["workbench.action.files.save", "4_save", "wired"],
     ["workbench.action.files.saveAs", "4_save", "wired"],
     ["workbench.action.files.saveAll", "4_save", "wired"],
-    ["menubar/file/share", "5_share", "sub", "Share"],
-    ["workbench.action.toggleAutoSave", "5_share", "stub", "Auto Save", "false"],
-    ["menubar/file/preferences", "5_share", "sub", "Preferences"],
+    ["menubar/file/share", "4_share", "sub", "Share"],
+    ["workbench.action.toggleAutoSave", "5_settings", "stub", "Auto Save", "false"],
+    ["menubar/file/preferences", "5_settings", "sub", "Preferences"],
     ["workbench.action.files.revert", "6_close", "wired"],
     ["workbench.action.closeActiveEditor", "6_close", "wired"],
     ["workbench.action.closeFolder", "6_close", "stub", "Close Folder"],
@@ -155,8 +156,7 @@ const SPEC = {
     ["workbench.action.clearRecentFiles", "z_clear", "wired"],
   ],
   "menubar/file/share": [
-    ["workbench.profiles.actions.exportProfile", "1_profiles", "stub", "Export Profile..."],
-    ["workbench.profiles.actions.importProfile", "1_profiles", "stub", "Import Profile..."],
+    ["workbench.profiles.actions.exportProfile", "1_profiles", "stub", "Export Profile (Default)..."],
   ],
   "menubar/file/preferences": [
     ["workbench.profiles.actions.manageProfiles", "1_settings", "stub", "Profiles"],
@@ -272,6 +272,7 @@ const SPEC = {
     ["workbench.action.splitEditorDown", "1_split", "wired"],
     ["workbench.action.splitEditorLeft", "1_split", "wired"],
     ["workbench.action.splitEditorRight", "1_split", "wired"],
+    ["workbench.action.splitEditorInGroup", "1_split_in_group", "stub", "Split in Group"],
     ["workbench.action.moveEditorToNewWindow", "2_new_window", "stub", "Move Editor into New Window"],
     ["workbench.action.copyEditorToNewWindow", "2_new_window", "stub", "Copy Editor into New Window"],
     ["workbench.action.editorLayoutSingle", "3_layout", "stub", "Single"],
@@ -372,12 +373,13 @@ const SPEC = {
   ],
   "menubar/help": [
     ["workbench.action.showCommands", "1_welcome", "wired", "Show All Commands"],
-    ["update.showCurrentReleaseNotes", "2_notes", "stub", "Show Release Notes"],
+    ["update.showCurrentReleaseNotes", "1_welcome", "stub", "Show Release Notes"],
     ["workbench.action.openIssueReporter", "3_feedback", "stub", "Report Issue"],
     ["workbench.action.giveFeedback", "3_feedback", "stub", "Give Feedback..."],
     ["workbench.action.openLicenseUrl", "4_license", "stub", "View License"],
     ["workbench.action.toggleDevTools", "5_devtools", "stub", "Toggle Developer Tools"],
     ["workbench.action.openProcessExplorer", "5_devtools", "stub", "Open Process Explorer"],
+    ["workbench.action.openExtensionMonitor", "5_devtools", "stub", "Open Extension Monitor"],
     ["workbench.action.showAboutDialog", "z_about", "wired"],
   ],
   "editor/title/context": [
@@ -460,6 +462,26 @@ for (const rows of Object.values(SPEC)) {
     }
   }
 }
+
+// --- Shortcut labels the menu shows ---------------------------------------------------
+//
+// Three rows show a chord another command wins at dispatch: the chat pane's
+// Ctrl+Shift+I and Ctrl+Shift+L beat Toggle Developer Tools and Select All
+// Occurrences (agent-keybindings.mjs drives the presses), and Ctrl+Q opens
+// Open View... where the native menu once quit. The labels are still shown.
+
+const labelOf = (id) => KeybindingsRegistry.lookupKeybinding(id)?.getLabel();
+check("Toggle Developer Tools shows Ctrl+Shift+I", labelOf("workbench.action.toggleDevTools") === "Ctrl+Shift+I");
+check("Open View... shows Ctrl+Q", labelOf("workbench.action.quickOpenView") === "Ctrl+Q");
+check("Select All Occurrences shows Ctrl+Shift+L", labelOf("editor.action.selectHighlights") === "Ctrl+Shift+L");
+check(
+  "the Share flyout holds only Export Profile (Default)...",
+  Menus.getMenuItems("menubar/file/share").length === 1 && Commands.lookup("workbench.profiles.actions.importProfile") === undefined,
+);
+check(
+  "Share is alone in its group, between Save and Auto Save",
+  Menus.getMenuItems("menubar/file").filter((row) => row.group === "4_share").length === 1,
+);
 
 if (failures.length > 0) {
   console.error(`menu-spec: ${failures.length} failure(s)`);

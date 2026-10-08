@@ -12,7 +12,8 @@
 // descriptor's keybinding omits the mac field, so those rules register
 // directly with the precondition ANDed in by hand. Zoom In also binds
 // ctrlcmd+shift+= - the shifted plus is the same physical key, and both
-// are the conventional zoom-in chord. The first rule registered for a
+// are the conventional zoom-in chord - and ctrlcmd+numpad_add, with
+// Zoom Out on ctrlcmd+numpad_subtract. The first rule registered for a
 // command becomes its menu label, so Reset Zoom shows Ctrl+NumPad0.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
@@ -80,6 +81,10 @@ KeybindingsRegistry.registerKeybindingRule({
   id: "workbench.action.zoomIn",
   keybinding: "ctrlcmd+shift+=",
 });
+KeybindingsRegistry.registerKeybindingRule({
+  id: "workbench.action.zoomIn",
+  keybinding: "ctrlcmd+numpad_add",
+});
 
 addAction({
   id: "workbench.action.zoomOut",
@@ -88,6 +93,10 @@ addAction({
   keybinding: { keybinding: "ctrlcmd+-" },
   menu: [{ id: APPEARANCE_MENU, group: "5_zoom", order: 2 }],
   run: zoomOut,
+});
+KeybindingsRegistry.registerKeybindingRule({
+  id: "workbench.action.zoomOut",
+  keybinding: "ctrlcmd+numpad_subtract",
 });
 
 addAction({

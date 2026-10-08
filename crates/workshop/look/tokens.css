@@ -285,19 +285,28 @@
   --titlebar-height: 35px;
   --titlebar-bg: #141414;
   --titlebar-foreground: #F0F0F084;
+  /* Cursor's inactive-window title-bar text is brighter than its active text */
+  --titlebar-foreground-inactive: #F0F0F099;
   --titlebar-divider: #F0F0F013;
   --titlebar-accent: var(--accent);
-  --titlebar-glyph: #F0F0F05C;
+  --titlebar-glyph: #F0F0F084;
   --titlebar-hover: #F0F0F011;
+  --titlebar-control-hover: #FFFFFF1A;
+  --titlebar-folder-hover: #FFFFFF14;
   --titlebar-control-width: 46px;
-  --titlebar-close-hover: #E34671;
+  --titlebar-close-hover: #E81123E6;
   --titlebar-close-glyph-hover: #ffffff;
-  --titlebar-icon-size: 20px;
+  /* The app icon is 16px, centered in a box as tall as the bar and flush to the left edge */
+  --titlebar-icon-size: 16px;
+  --titlebar-icon-box: var(--titlebar-height);
+  --titlebar-tool-size: 22px;
   --titlebar-font-size: 13px;
   /* left inset clearing the native traffic lights under macOS overlay chrome */
   --titlebar-macos-inset: 78px;
   --titlebar-popover-min-width: 160px;
   --titlebar-popover-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  /* A disabled menu row's label, dimmer than the row's own half opacity leaves it */
+  --menu-disabled-label: #CCCCCC80;
 
   /* Scrollbars: views use square bars shown while the scroller is hovered
      (applied globally by the consuming UI's base sheet); menus use the

@@ -104,7 +104,8 @@ const editorActions = [
   { id: "editor.action.insertCursorAtEndOfEachLineSelected", title: "Add Cursors to Line Ends", menu: MenuId.MenubarSelectionMenu, group: "3_multi", order: 3, keybinding: "shift+alt+i", pick: (c) => c.insertCursorAtLineEnds },
   { id: "editor.action.addSelectionToNextFindMatch", title: "Add Next Occurrence", menu: MenuId.MenubarSelectionMenu, group: "3_multi", order: 4, keybinding: "ctrlcmd+d", pick: (c) => c.selectNextOccurrence },
   { id: "editor.action.addSelectionToPreviousFindMatch", title: "Add Previous Occurrence", menu: MenuId.MenubarSelectionMenu, group: "3_multi", order: 5, pick: (c) => c.selectPreviousOccurrence },
-  { id: "editor.action.selectHighlights", title: "Select All Occurrences", menu: MenuId.MenubarSelectionMenu, group: "3_multi", order: 6, pick: (c) => c.selectSelectionMatches },
+  // Ctrl+Shift+L is the row's label, as in Cursor's menu; the chat pane's New Chat (BuiltinExtension weight) wins the chord at dispatch.
+  { id: "editor.action.selectHighlights", title: "Select All Occurrences", menu: MenuId.MenubarSelectionMenu, group: "3_multi", order: 6, keybinding: "ctrlcmd+shift+l", pick: (c) => c.selectSelectionMatches },
   { id: "editor.action.jumpToBracket", title: "Go to Bracket", menu: MenuId.MenubarGoMenu, group: "5_infile_nav", order: 2, keybinding: "ctrlcmd+shift+\\", pick: (c) => c.cursorMatchingBracket },
   { id: "editor.action.marker.nextInFiles", title: "Next Problem", menu: MenuId.MenubarGoMenu, group: "6_problem_nav", order: 1, keybinding: "f8", pick: (c) => c.nextDiagnostic },
   { id: "editor.action.marker.prevInFiles", title: "Previous Problem", menu: MenuId.MenubarGoMenu, group: "6_problem_nav", order: 2, keybinding: "shift+f8", pick: (c) => c.previousDiagnostic },

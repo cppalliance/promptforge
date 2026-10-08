@@ -45,7 +45,8 @@ import langToml from "@shikijs/langs/toml";
 import langTypescript from "@shikijs/langs/typescript";
 import langYaml from "@shikijs/langs/yaml";
 
-import { copyToClipboard, prefersReducedMotion } from "./transcript/motion";
+import { copyToClipboard } from "../shared/clipboard";
+import { prefersReducedMotion } from "./transcript/motion";
 
 const THEME_NAME = "workshop-dark";
 

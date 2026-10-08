@@ -16,8 +16,20 @@
 // from the keybinding registry, a failing when hides the row, a failing
 // precondition renders aria-disabled, and a toggled expression renders
 // role=menuitemcheckbox with aria-checked. A submenu row owns the single
-// child-flyout slot - one child Menu at a time, opened on hover or
-// ArrowRight, closed on ArrowLeft, recursive for nested flyouts.
+// child-flyout slot - one child Menu at a time, opened 250ms after a hover
+// (at once on a click or ArrowRight), closed on ArrowLeft or 750ms after the
+// pointer moves to another row, recursive for nested flyouts. The delays
+// let the pointer cross a neighboring row on its way into the flyout.
+//
+// Rows fire on mouseup, so one gesture can press on the menubar button, drag
+// onto a row, and release to run it. The click that ends a mouse press
+// carries a click count and is ignored; a click with none (the keyboard's
+// Enter or Space, or a programmatic click) still activates the row.
+//
+// The popover stays on screen: a flyout flips to its parent row's left when
+// the right has no room, a context menu flips left and up, and a menubar
+// dropdown slides left. Its max height is the window height minus its top
+// minus 35px, and it scrolls under the 7px menu scrollbar past that.
 //
 // While open the widget subscribes to context-key changes and rebuilds
 // only when a key its rows reference changes, restoring focus by row key
@@ -25,6 +37,7 @@
 
 import "./window-menu.css";
 
+import { ICON_CHECK, ICON_CHEVRON_RIGHT } from "@workshop/look/icons";
 import { Emitter } from "@workshop/platform/event";
 import { Disposable, DisposableStore, toDisposable } from "@workshop/platform/lifecycle";
 import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
@@ -37,6 +50,15 @@ import { STATUS_BAR } from "@workshop/platform/status-bar";
 
 /** Where the popover opens: below an element, or at a pointer position. */
 export type MenuAnchor = HTMLElement | { readonly x: number; readonly y: number };
+
+/** How long a hover rests on a submenu row before its flyout opens. */
+export const SUBMENU_SHOW_DELAY_MS = 250;
+/** How long an open flyout lingers after the pointer moves to another row. */
+export const SUBMENU_HIDE_DELAY_MS = 750;
+/** The gap a menu leaves under itself: its max height is the window's, minus its top, minus this. */
+const MENU_BOTTOM_MARGIN = 35;
+/** A floor for the max height, so a menu opened near the bottom edge never collapses to nothing. */
+const MIN_MENU_HEIGHT = 10;
 
 /** Context keys one open evaluates before the global context-key service. */
 export type MenuContextOverlay = Readonly<Record<string, unknown>>;
@@ -95,6 +117,9 @@ export class Menu extends Disposable {
   private childRow: HTMLButtonElement | null = null;
   private parent: Menu | null = null;
   private parentRow: HTMLButtonElement | null = null;
+  // The hover timers: a pending flyout open and a pending flyout close.
+  private showTimer: ReturnType<typeof setTimeout> | null = null;
+  private hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(deps: MenuDependencies = {}) {
     super();
@@ -147,9 +172,13 @@ export class Menu extends Disposable {
     this.context = context;
     this.overlay = overlay;
     const popover = this.ensurePopover();
+    // A menu opened at a point is a context menu; one under an element is a
+    // dropdown. Only the context menu and the flyouts fade in.
+    popover.classList.toggle("ws-window-titlebar__popover--context", !(anchor instanceof HTMLElement));
     this.rebuildRows();
-    this.positionPopover(anchor);
+    // Shown before it is placed: a hidden element has no size to flip against.
     popover.hidden = false;
+    this.positionPopover(anchor);
 
     const store = new DisposableStore();
     this.openStore = store;
@@ -181,6 +210,8 @@ export class Menu extends Disposable {
 
   /** Dismisses the popover and any open flyout. Safe when closed. */
   close(): void {
+    this.clearShowTimer();
+    this.clearHideTimer();
     if (this.openMenuId === null) {
       return;
     }
@@ -197,11 +228,15 @@ export class Menu extends Disposable {
   private ensurePopover(): HTMLElement {
     if (this.popover === null) {
       const popover = document.createElement("div");
-      popover.className = "ws-window-titlebar__popover";
+      // scrollbar-menu is the look sheet's 7px menu bar, for a menu taller than the window.
+      popover.className = "ws-window-titlebar__popover scrollbar-menu";
       if (this.parentRow !== null) {
         // A flyout opens beside its parent row; the class sets the
         // alignment offset (window-menu.css).
         popover.classList.add("ws-window-titlebar__popover--flyout");
+        // The pointer reaching the flyout cancels the close its parent
+        // scheduled when the pointer left the submenu row.
+        popover.addEventListener("pointerenter", () => this.parent?.cancelHide());
       }
       popover.setAttribute("role", "menu");
       popover.hidden = true;
@@ -211,22 +246,41 @@ export class Menu extends Disposable {
     return this.popover;
   }
 
+  /**
+   * Places the shown popover so it stays on screen. A flyout opens beside
+   * its parent row and flips to the row's left when the right has no room,
+   * shifting up when it would run off the bottom; a context menu opens at
+   * the pointer and flips left and up; a dropdown opens under its element
+   * and slides left. The max height is then what the window leaves under
+   * the menu's top, less a 35px margin.
+   */
   private positionPopover(anchor: MenuAnchor): void {
     const popover = this.ensurePopover();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    // Measure the natural size, so a stale max height never shrinks it.
+    popover.style.maxHeight = "";
+    const size = popover.getBoundingClientRect();
+    let left: number;
+    let top: number;
     if (anchor instanceof HTMLElement) {
       const rect = anchor.getBoundingClientRect();
       if (this.parentRow !== null) {
-        // A flyout opens beside its parent row.
-        popover.style.left = `${rect.right}px`;
-        popover.style.top = `${rect.top}px`;
+        left = rect.right + size.width > viewportWidth ? rect.left - size.width : rect.right;
+        top = Math.min(rect.top, viewportHeight - size.height);
       } else {
-        popover.style.left = `${rect.left}px`;
-        popover.style.top = `${rect.bottom}px`;
+        left = Math.min(rect.left, viewportWidth - size.width);
+        top = rect.bottom;
       }
     } else {
-      popover.style.left = `${anchor.x}px`;
-      popover.style.top = `${anchor.y}px`;
+      left = anchor.x + size.width > viewportWidth ? anchor.x - size.width : anchor.x;
+      top = anchor.y + size.height > viewportHeight ? anchor.y - size.height : anchor.y;
     }
+    left = Math.max(0, left);
+    top = Math.max(0, top);
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+    popover.style.maxHeight = `${Math.max(MIN_MENU_HEIGHT, viewportHeight - top - MENU_BOTTOM_MARGIN)}px`;
   }
 
   /**
@@ -243,7 +297,9 @@ export class Menu extends Disposable {
     const popover = this.ensurePopover();
     const focusedKey = this.rows.find((row) => row.element === document.activeElement)?.key;
     // The flyout's rows derive from the old row set; it reopens on the
-    // next hover or ArrowRight.
+    // next hover or ArrowRight. A pending hover open belongs to a row about
+    // to be replaced, so it goes too.
+    this.clearShowTimer();
     this.closeChild();
     popover.textContent = "";
     this.rows = [];
@@ -347,7 +403,7 @@ export class Menu extends Disposable {
       const check = document.createElement("span");
       check.className = "ws-window-titlebar__item-check";
       check.setAttribute("aria-hidden", "true");
-      check.textContent = checked ? "✓" : "";
+      check.innerHTML = checked ? ICON_CHECK : "";
       element.appendChild(check);
     } else {
       element.setAttribute("role", "menuitem");
@@ -364,8 +420,21 @@ export class Menu extends Disposable {
       element.appendChild(hint);
     }
     const handle: RowHandle = { key: item.command, element, row: item };
-    element.addEventListener("click", () => this.activateCommand(handle));
-    element.addEventListener("pointerenter", () => this.closeChild());
+    // A command fires on a primary-button release, so a press can start on
+    // the menubar button and end on the row. The click a mouse press ends
+    // carries a click count and is skipped; a keyboard or programmatic
+    // click has none and activates here.
+    element.addEventListener("mouseup", (event) => {
+      if (event.button === 0) {
+        this.activateCommand(handle);
+      }
+    });
+    element.addEventListener("click", (event) => {
+      if (!(event.detail > 0)) {
+        this.activateCommand(handle);
+      }
+    });
+    element.addEventListener("pointerenter", () => this.onRowEnter(handle));
     return handle;
   }
 
@@ -384,12 +453,61 @@ export class Menu extends Disposable {
     const chevron = document.createElement("span");
     chevron.className = "ws-window-titlebar__chevron";
     chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "›";
+    chevron.innerHTML = ICON_CHEVRON_RIGHT;
     element.appendChild(chevron);
     const handle: RowHandle = { key: item.submenu, element, row: item };
-    element.addEventListener("pointerenter", () => this.openChild(handle, false));
+    element.addEventListener("pointerenter", () => this.onRowEnter(handle));
     element.addEventListener("click", () => this.openChild(handle, true));
     return handle;
+  }
+
+  /**
+   * The pointer entered a row. A submenu row schedules its flyout 250ms out
+   * (replacing a pending open for another row; an already open flyout for
+   * this row just cancels any pending close). A command row cancels a
+   * pending open and, when a flyout is open, schedules its close 750ms out.
+   */
+  private onRowEnter(handle: RowHandle): void {
+    this.clearShowTimer();
+    if ("submenu" in handle.row) {
+      this.clearHideTimer();
+      if (this.child !== null && this.childRow === handle.element) {
+        return;
+      }
+      this.showTimer = setTimeout(() => {
+        this.showTimer = null;
+        this.openChild(handle, false);
+      }, SUBMENU_SHOW_DELAY_MS);
+      return;
+    }
+    if (this.child !== null && this.hideTimer === null) {
+      // The earliest departure wins: moving between command rows does not
+      // push the close back.
+      this.hideTimer = setTimeout(() => {
+        this.hideTimer = null;
+        this.closeChild();
+      }, SUBMENU_HIDE_DELAY_MS);
+    }
+  }
+
+  private clearShowTimer(): void {
+    if (this.showTimer !== null) {
+      clearTimeout(this.showTimer);
+      this.showTimer = null;
+    }
+  }
+
+  private clearHideTimer(): void {
+    if (this.hideTimer !== null) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = null;
+    }
+  }
+
+  /** The pointer reached this menu's flyout: cancel the pending close, up the chain. */
+  private cancelHide(): void {
+    this.clearHideTimer();
+    this.parent?.cancelHide();
   }
 
   private activateCommand(handle: RowHandle): void {
@@ -415,6 +533,7 @@ export class Menu extends Disposable {
     if (this.child !== null && this.childRow === handle.element) {
       return;
     }
+    this.clearShowTimer();
     this.closeChild();
     const child = new Menu({
       menus: this.menus,
@@ -434,6 +553,7 @@ export class Menu extends Disposable {
   }
 
   private closeChild(): void {
+    this.clearHideTimer();
     const child = this.child;
     this.child = null;
     if (child !== null) {
@@ -450,6 +570,7 @@ export class Menu extends Disposable {
     if (this.child !== child) {
       return;
     }
+    this.clearHideTimer();
     this.child = null;
     child.dispose();
     this.childRow?.setAttribute("aria-expanded", "false");

@@ -112,6 +112,14 @@ check("ctrlcmd is ctrl on linux", sameChord(parseOk("ctrlcmd+s", "linux")[0], ch
 check("a digit key parses", sameChord(parseOk("ctrl+0", "windows")[0], chord(true, false, false, false, "0")));
 check("a function key parses", sameChord(parseOk("f5", "windows")[0], chord(false, false, false, false, "f5")));
 check("a numpad key parses", sameChord(parseOk("ctrl+numpad0", "windows")[0], chord(true, false, false, false, "numpad0")));
+check("numpad_add parses", sameChord(parseOk("ctrl+numpad_add", "windows")[0], chord(true, false, false, false, "numpad_add")));
+check(
+  "numpad_subtract parses",
+  sameChord(parseOk("ctrl+numpad_subtract", "windows")[0], chord(true, false, false, false, "numpad_subtract")),
+);
+check("numpad_add parses under ctrlcmd on mac", sameChord(parseOk("ctrlcmd+numpad_add", "mac")[0], chord(false, false, false, true, "numpad_add")));
+check("a bare numpad+ glyph is not a key name", !parseKeybinding("ctrl+numpad+", "windows").ok);
+check("numpad_multiply stays outside the vocabulary", !parseKeybinding("ctrl+numpad_multiply", "windows").ok);
 check("a named key parses", sameChord(parseOk("ctrl+pagedown", "windows")[0], chord(true, false, false, false, "pagedown")));
 check("punctuation parses by glyph", sameChord(parseOk("ctrl+shift+=", "windows")[0], chord(true, true, false, false, "=")));
 check("backquote parses", sameChord(parseOk("ctrl+`", "windows")[0], chord(true, false, false, false, "`")));
@@ -140,6 +148,15 @@ check(
 );
 check("Numpad0 is distinct from Digit0", sameChord(chordFromKeyboardEvent(keyEvent("Numpad0", { ctrl: true })), chord(true, false, false, false, "numpad0")));
 check("Digit0 maps to 0", sameChord(chordFromKeyboardEvent(keyEvent("Digit0", { ctrl: true })), chord(true, false, false, false, "0")));
+check(
+  "NumpadAdd maps to numpad_add, distinct from the shifted = key",
+  sameChord(chordFromKeyboardEvent(keyEvent("NumpadAdd", { ctrl: true })), chord(true, false, false, false, "numpad_add")),
+);
+check(
+  "NumpadSubtract maps to numpad_subtract, distinct from the - key",
+  sameChord(chordFromKeyboardEvent(keyEvent("NumpadSubtract", { ctrl: true })), chord(true, false, false, false, "numpad_subtract")),
+);
+check("NumpadMultiply is unmapped", chordFromKeyboardEvent(keyEvent("NumpadMultiply", { ctrl: true })) === undefined);
 check("ArrowDown maps to down", sameChord(chordFromKeyboardEvent(keyEvent("ArrowDown", { alt: true })), chord(false, false, true, false, "down")));
 check("a modifier-only event maps to undefined", chordFromKeyboardEvent(keyEvent("ControlLeft", { ctrl: true })) === undefined);
 check("an unmapped code maps to undefined", chordFromKeyboardEvent(keyEvent("AudioVolumeUp")) === undefined);
@@ -154,6 +171,11 @@ check(
 check("meta renders Cmd on mac", formatChord(chord(false, false, false, true, "s"), "mac") === "Cmd+S");
 check("meta does not render Cmd off mac", formatChord(chord(false, false, false, true, "s"), "windows") !== "Cmd+S");
 check("numpad0 labels as NumPad0", formatChord(chord(true, false, false, false, "numpad0"), "windows") === "Ctrl+NumPad0");
+check("numpad_add labels as NumPad_Add", formatChord(chord(true, false, false, false, "numpad_add"), "windows") === "Ctrl+NumPad_Add");
+check(
+  "numpad_subtract labels as NumPad_Subtract",
+  formatChord(chord(true, false, false, false, "numpad_subtract"), "windows") === "Ctrl+NumPad_Subtract",
+);
 check("pagedown labels as PageDown", formatChord(chord(true, false, false, false, "pagedown"), "windows") === "Ctrl+PageDown");
 check("punctuation labels as its glyph", formatChord(chord(true, true, false, false, "="), "windows") === "Ctrl+Shift+=");
 

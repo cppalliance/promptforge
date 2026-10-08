@@ -28,20 +28,8 @@
   gap: var(--space-sm);
 }
 
-.ws-update-banner button,
-.ws-update-screen button {
-  min-height: var(--ws-button-min-height);
-  padding: 0 var(--space-md);
-  color: var(--text);
-  background: var(--bg-hover);
-  border: 0;
-  border-radius: var(--radius-sm);
-}
-
-.ws-update-banner__primary {
-  color: var(--bg);
-  background: var(--accent);
-}
+/* The banner's and overlay's buttons wear the shared look controls
+   (.button-primary for Download Update, .button-secondary for the rest). */
 
 .ws-update-screen {
   position: fixed;
