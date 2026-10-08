@@ -1,10 +1,13 @@
 // The agent toolbar (src/parts/agent/agent-toolbar.ts) in jsdom: a role=toolbar
 // flex row composing ModeChip, ModelPickerTrigger, and TokenRing. The picker
-// reads the constructor's ModelService; dispose() cascades to all three
-// children. Runs under the shared leak check: an undisposed toolbar or child
-// fails.
+// reads the constructor's ModelService; the toolbar forwards the chip's mode
+// and change event and the two menu openers the composer's keys use;
+// dispose() cascades to all three children. The stylesheet's side - a fixed
+// 28px row with 4px gaps, the model button pushing the ring and the action
+// button to the trailing edge - is read from the source text. Runs under the
+// shared leak check: an undisposed toolbar or child fails.
 // Run: node test/agent-toolbar.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,8 +38,8 @@ const bundle = await esbuild.build({
   loader: { ".css": "empty" },
 });
 
-// lucide's createElement renders the chip and picker icons against the
-// DOM, so the jsdom globals must exist before the bundle is imported.
+// The children read the DOM globals when they build, so the jsdom globals
+// must exist before the bundle is imported.
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
 });
@@ -107,8 +110,7 @@ await assertNoLeaks(lifecycle, async () => {
       toolbar.element.querySelector(".ws-mode-chip__label")?.textContent === "Agent" &&
         toolbar.element.querySelector(".ws-model-picker-trigger__label")?.textContent ===
           "Select model" &&
-        toolbar.element.querySelector(".ws-token-ring")?.getAttribute("aria-valuenow") ===
-          "0",
+        toolbar.element.querySelector(".ws-token-ring")?.hasAttribute("hidden") === true,
     );
     for (const button of toolbar.element.querySelectorAll("button")) {
       button.focus();
@@ -134,6 +136,32 @@ await assertNoLeaks(lifecycle, async () => {
       toolbar.element.querySelector(".ws-model-picker-trigger__label")?.textContent ===
         "alpha",
     );
+    toolbar.dispose();
+    service.dispose();
+    toolbar.element.remove();
+  }
+
+  // --- The mode and the menu openers ---------------------------------------------------
+
+  {
+    const service = new ModelService(() => true);
+    service.setModels([{ id: "alpha" }]);
+    const toolbar = new AgentToolbar(service);
+    document.body.appendChild(toolbar.element);
+    const seen = [];
+    toolbar.onDidChangeMode((mode) => seen.push(mode));
+    check("the toolbar reports the chip's mode", toolbar.mode === "agent");
+    toolbar.openModeMenu();
+    check("openModeMenu opens the mode menu", menuEl()?.classList.contains("ws-mode-menu") === true);
+    toolbar.openModeMenu();
+    check(
+      "a second openModeMenu cycles the mode and the change event follows",
+      toolbar.mode === "plan" && seen.join(",") === "plan",
+    );
+    toolbar.element.querySelector(".ws-mode-chip")?.click();
+    check("the menu closes before the model menu opens", menuEl() === null);
+    toolbar.openModelMenu();
+    check("openModelMenu opens the model menu", menuEl()?.classList.contains("ws-model-menu") === true);
     toolbar.dispose();
     service.dispose();
     toolbar.element.remove();
@@ -166,6 +194,24 @@ await assertNoLeaks(lifecycle, async () => {
     toolbar.element.remove();
   }
 });
+
+// --- The stylesheet --------------------------------------------------------------------
+
+{
+  const css = (
+    await readFile(path.join(testDir, "..", "src", "parts", "agent", "agent-toolbar.css"), "utf8")
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const componentCss = await readFile(path.join(testDir, "..", "src", "tokens", "component.css"), "utf8");
+  check("the toolbar is a fixed 28px row", /\.ws-agent-toolbar\s*\{[^}]*block-size:\s*var\(--height-base\)/.test(css));
+  check(
+    "the toolbar's children sit 4px apart",
+    /gap:\s*var\(--ws-agent-toolbar-gap\)/.test(css) && /--ws-agent-toolbar-gap:\s*var\(--ws-size-4\)/.test(componentCss),
+  );
+  check(
+    "the model button pushes the ring and the action button to the trailing edge",
+    /\.ws-agent-toolbar > \.ws-model-picker-trigger\s*\{[^}]*margin-inline-end:\s*auto/.test(css),
+  );
+}
 
 if (failures.length > 0) {
   console.error(`ws-agent-toolbar: ${failures.length} failure(s)`);

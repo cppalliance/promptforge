@@ -1,22 +1,24 @@
 // The mode selector chip: a toolbar button showing the current agent
-// mode's icon and label. Clicking opens a DropdownMenu of the four
-// modes; picking one updates the chip and fires "agent-mode-changed" on
-// document. UI-only by design - nothing here talks to the backend; the
-// event is the seam for wiring the mode to the backend, and nothing in
-// the app listens to it yet.
+// mode's icon and label. Clicking it (or Ctrl+. and Shift+Tab, through
+// openOrCycle) opens a DropdownMenu of the five modes on the composer's
+// menu surface: check-only selection, a description on each row, opening
+// upward at the chip's left edge minus 6px. Picking one updates the chip
+// and fires "agent-mode-changed" on document and onDidChangeMode.
+// UI-only by design - nothing here talks to the backend; the event is the
+// seam for wiring the mode to the backend, and the session view listens
+// to onDidChangeMode to color its action button.
 
 import "./mode-chip.css";
 
 import {
-  Bug,
-  ChevronDown,
-  Infinity as InfinityIcon,
-  ListTodo,
-  MessageSquare,
-  Orbit,
-  createElement,
-} from "lucide";
-import type { IconNode } from "lucide";
+  ICON_AGENT,
+  ICON_ASK,
+  ICON_BUG,
+  ICON_CHECKLIST,
+  ICON_CHEVRON_DOWN,
+  ICON_LAYERS,
+} from "@workshop/look/icons";
+import { Emitter, type Event } from "@workshop/platform/event";
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { DropdownMenu } from "@workshop/look/dropdown";
 import type { DropdownItem } from "@workshop/look/dropdown";
@@ -50,19 +52,29 @@ const MODE_LABEL_BY_MODE: Record<UnifiedMode, string> = {
   [UNIFIED_MODES.Ask]: "Ask",
 };
 
-const svg = (icon: IconNode, size: number): string =>
-  createElement(icon, { width: size, height: size }).outerHTML;
-
-/** Mode glyphs, rendered once at module load (the icons.ts pattern). */
-const MODE_ICON_HTML: Record<UnifiedMode, string> = {
-  [UNIFIED_MODES.Agent]: svg(InfinityIcon, 14),
-  [UNIFIED_MODES.Plan]: svg(ListTodo, 14),
-  [UNIFIED_MODES.Debug]: svg(Bug, 14),
-  [UNIFIED_MODES.Multitask]: svg(Orbit, 14),
-  [UNIFIED_MODES.Ask]: svg(MessageSquare, 14),
+/** The line under each label in the menu, in Cursor's own words. */
+const MODE_DESCRIPTION: Record<UnifiedMode, string> = {
+  [UNIFIED_MODES.Agent]: "Plan, search, build anything",
+  [UNIFIED_MODES.Plan]: "Create detailed plans for accomplishing tasks",
+  [UNIFIED_MODES.Debug]: "Systematically diagnose and fix bugs using runtime traces",
+  [UNIFIED_MODES.Multitask]: "Run and coordinate multiple tasks in parallel",
+  [UNIFIED_MODES.Ask]: "Ask Cursor questions about your codebase",
 };
 
-const CHEVRON_HTML = svg(ChevronDown, 12);
+/** Mode glyphs: static codicon strings from @workshop/look, never data. */
+const MODE_ICON_HTML: Record<UnifiedMode, string> = {
+  [UNIFIED_MODES.Agent]: ICON_AGENT,
+  [UNIFIED_MODES.Plan]: ICON_CHECKLIST,
+  [UNIFIED_MODES.Debug]: ICON_BUG,
+  [UNIFIED_MODES.Multitask]: ICON_LAYERS,
+  [UNIFIED_MODES.Ask]: ICON_ASK,
+};
+
+/** The chip's tooltip. */
+const CHIP_TITLE = "Switch Agent Mode (Ctrl+.)";
+
+/** The menu opens above the chip, its left edge 6px left of the chip's. */
+const MENU_OFFSET_X = -6;
 
 /**
  * The chip trigger plus its dropdown. Disposable: dispose() closes an
@@ -75,13 +87,18 @@ export class ModeChip extends Disposable {
   private readonly dropdown: DropdownMenu;
   private readonly iconSlot: HTMLSpanElement;
   private readonly labelSlot: HTMLSpanElement;
+  private readonly modeEmitter = this._register(new Emitter<UnifiedMode>());
   private current: UnifiedMode = UNIFIED_MODES.Agent;
+
+  /** Fires with the new mode each time the selection changes. */
+  readonly onDidChangeMode: Event<UnifiedMode> = this.modeEmitter.event;
 
   constructor() {
     super();
     this.element = document.createElement("button");
     this.element.type = "button";
     this.element.className = "ws-mode-chip";
+    this.element.title = CHIP_TITLE;
 
     this.iconSlot = document.createElement("span");
     this.iconSlot.className = "ws-mode-chip__icon";
@@ -91,7 +108,7 @@ export class ModeChip extends Disposable {
     const chevron = document.createElement("span");
     chevron.className = "ws-mode-chip__chevron";
     chevron.setAttribute("aria-hidden", "true");
-    chevron.innerHTML = CHEVRON_HTML;
+    chevron.innerHTML = ICON_CHEVRON_DOWN;
     this.element.append(this.iconSlot, this.labelSlot, chevron);
 
     this.dropdown = this._register(new DropdownMenu());
@@ -102,6 +119,21 @@ export class ModeChip extends Disposable {
       toDisposable(() => this.element.removeEventListener("click", onClick)),
     );
 
+    // Shift+Tab again, with the menu open and focus in it, cycles the mode:
+    // the menu would otherwise treat Tab as its dismissal. Ctrl+. is a
+    // registered keybinding, so it reaches openOrCycle through its command.
+    const onShiftTab = (event: KeyboardEvent): void => {
+      if (this.dropdown.isOpen && event.key === "Tab" && event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openOrCycle();
+      }
+    };
+    document.addEventListener("keydown", onShiftTab, true);
+    this._register(
+      toDisposable(() => document.removeEventListener("keydown", onShiftTab, true)),
+    );
+
     this.renderMode();
   }
 
@@ -110,17 +142,42 @@ export class ModeChip extends Disposable {
     return this.current;
   }
 
+  /**
+   * Ctrl+. and Shift+Tab: opens the menu, and while it is open selects the
+   * next mode in menu order (wrapping), leaving the menu open on the new
+   * choice so the next press keeps cycling.
+   */
+  openOrCycle(): void {
+    if (!this.dropdown.isOpen) {
+      this.showMenu();
+      return;
+    }
+    const index = MODE_LABELS.findIndex((label) => UNIFIED_MODES[label] === this.current);
+    const next = MODE_LABELS[(index + 1) % MODE_LABELS.length];
+    this.dropdown.close();
+    if (next !== undefined) {
+      this.select(UNIFIED_MODES[next]);
+    }
+    this.showMenu();
+  }
+
   private showMenu(): void {
     const items: DropdownItem[] = MODE_LABELS.map((label) => {
       const mode = UNIFIED_MODES[label];
       return {
         label,
+        description: MODE_DESCRIPTION[mode],
         iconHtml: MODE_ICON_HTML[mode],
         selected: mode === this.current,
         onClick: () => this.select(mode),
       };
     });
-    this.dropdown.show(this.element, items);
+    this.dropdown.show(this.element, items, undefined, {
+      skin: "composer",
+      className: "ws-mode-menu",
+      placement: "above",
+      offsetX: MENU_OFFSET_X,
+    });
   }
 
   private select(mode: UnifiedMode): void {
@@ -130,6 +187,7 @@ export class ModeChip extends Disposable {
     }
     this.current = mode;
     this.renderMode();
+    this.modeEmitter.fire(mode);
     document.dispatchEvent(
       new CustomEvent<UnifiedMode>(AGENT_MODE_CHANGED_EVENT, { detail: mode }),
     );

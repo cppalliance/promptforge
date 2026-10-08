@@ -14,13 +14,34 @@
 
 import "./dropdown.css";
 
+import { ICON_CHECK } from "./icons";
+
 /** One action row in a dropdown menu. */
 export interface DropdownItem {
   label: string;
+  /** A second line under the label, in the composer skin's quieter tier. */
+  description?: string;
   iconHtml?: string;
   selected?: boolean;
   danger?: boolean;
   onClick: () => void;
+}
+
+/** How one menu opens. Every field is optional; the default is the shared action menu. */
+export interface DropdownOptions {
+  /**
+   * `composer` is the menu surface of the composer's mode, model, and
+   * `@` menus: #181818 with a 15% border, a 6px radius, 2px padding, 12px
+   * rows, a highlight instead of a selected fill, and a check-only
+   * selection mark drawn as a codicon.
+   */
+  readonly skin?: "composer";
+  /** An extra class on the menu, so the owner can size it. */
+  readonly className?: string;
+  /** Which side of the trigger the menu opens on; default below, flipping above at the bottom edge. */
+  readonly placement?: "above" | "below";
+  /** Pixels added to the trigger's left edge (negative moves left); default 0. */
+  readonly offsetX?: number;
 }
 
 /**
@@ -34,11 +55,17 @@ export class DropdownMenu {
   private active: { trigger: HTMLElement; close: (restoreFocus?: boolean) => void } | null = null;
   private nextMenuId = 0;
 
+  /** Whether this instance has a menu open. */
+  get isOpen(): boolean {
+    return this.active !== null;
+  }
+
   /** Opens a menu of `items` anchored to `trigger`. */
   show(
     trigger: HTMLElement,
     items: readonly DropdownItem[],
     point?: Readonly<{ x: number; y: number }>,
+    options: DropdownOptions = {},
   ): void {
     if (this.active !== null) {
       const wasSameTrigger = this.active.trigger === trigger;
@@ -50,6 +77,12 @@ export class DropdownMenu {
 
     const menu = document.createElement("div");
     menu.className = "menu menu-popup";
+    if (options.skin === "composer") {
+      menu.classList.add("menu-composer", "scrollbar-menu");
+    }
+    if (options.className !== undefined) {
+      menu.classList.add(...options.className.split(" ").filter((name) => name !== ""));
+    }
     menu.id = `menu-popup-${++this.nextMenuId}`;
     menu.tabIndex = -1;
     menu.setAttribute("role", "menu");
@@ -75,12 +108,27 @@ export class DropdownMenu {
       const label = document.createElement("span");
       label.className = "menu-item__label";
       label.textContent = item.label;
-      button.appendChild(label);
+      if (item.description === undefined) {
+        button.appendChild(label);
+      } else {
+        const text = document.createElement("span");
+        text.className = "menu-item__text";
+        const description = document.createElement("span");
+        description.className = "menu-item__description";
+        description.textContent = item.description;
+        text.append(label, description);
+        button.appendChild(text);
+      }
       if (item.selected === true) {
         const check = document.createElement("span");
         check.className = "menu-item__check";
         check.setAttribute("aria-hidden", "true");
-        check.textContent = "✓";
+        if (options.skin === "composer") {
+          // A static string from ./icons, never data.
+          check.innerHTML = ICON_CHECK;
+        } else {
+          check.textContent = "✓";
+        }
         button.appendChild(check);
       }
       button.addEventListener("click", (event) => {
@@ -113,17 +161,21 @@ export class DropdownMenu {
       menu.style.left = `${Math.max(4, Math.min(point.x, window.innerWidth - menuWidth - 4))}px`;
       menu.style.right = "auto";
       menu.style.top = `${Math.max(4, Math.min(point.y, window.innerHeight - menuHeight - 4))}px`;
-    } else if (triggerRect.bottom + 4 + menuHeight > window.innerHeight) {
+    } else if (
+      options.placement === "above" ||
+      triggerRect.bottom + 4 + menuHeight > window.innerHeight
+    ) {
       menu.style.top = `${triggerRect.top - menuHeight - 4}px`;
     } else {
       menu.style.top = `${triggerRect.bottom + 4}px`;
     }
     if (point === undefined) {
-      if (triggerRect.left + menuWidth > window.innerWidth - 16) {
+      const left = triggerRect.left + (options.offsetX ?? 0);
+      if (left + menuWidth > window.innerWidth - 16) {
         menu.style.right = `${window.innerWidth - triggerRect.right}px`;
         menu.style.left = "auto";
       } else {
-        menu.style.left = `${triggerRect.left}px`;
+        menu.style.left = `${Math.max(0, left)}px`;
         menu.style.right = "auto";
       }
     }

@@ -15,9 +15,12 @@
 // rendered HTML (copy and paste) restores data-payload; renderChip
 // (src/parts/chatbox/chip-view.ts) draws the same pill standalone. Runs
 // under the shared leak check: a ChatBox that is never disposed
-// fails.
+// fails. The pill's icons are codicons; its stylesheet values (6px radius,
+// padding 1px 4px, the 24% blue fill, a label of at most 200px, the close X
+// taking the icon's cell on hover while the editor is focused) are read from
+// the source text.
 // Run: node test/mention-chip.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -392,7 +395,102 @@ await assertNoLeaks(lifecycle, () => {
         byExtension.querySelector(".ws-mention-chip__icon svg")?.outerHTML,
     );
   }
+
+  // --- The pill's icons are codicons, and the X shares the icon's cell ----------------
+
+  {
+    const codeIcon = renderChip({ id: "a.ts", label: "a.ts", data: null }).querySelector(".ws-mention-chip__icon svg");
+    check(
+      "a codicon is drawn at the pill's 12px size, decorative",
+      codeIcon?.getAttribute("viewBox") === "0 0 16 16" &&
+        codeIcon.getAttribute("width") === "12" &&
+        codeIcon.getAttribute("height") === "12" &&
+        codeIcon.getAttribute("aria-hidden") === "true" &&
+        codeIcon.getAttribute("fill") === "currentColor",
+    );
+    const iconOf = (chip) => renderChip({ id: "x", label: "x", data: null, ...chip }).querySelector(".ws-mention-chip__icon svg")?.innerHTML;
+    check("a source file and a text file draw different glyphs", iconOf({ label: "a.ts" }) !== iconOf({ label: "a.md" }));
+    check("an image file draws the media glyph, and so does the named image icon", iconOf({ label: "a.png" }) === iconOf({ label: "a", icon: "image" }));
+    check("a folder and a link draw their own glyphs", iconOf({ icon: "folder" }) !== iconOf({ icon: "link" }) && iconOf({ icon: "folder" }) !== iconOf({}));
+    check("a command and a terminal share the keyword glyph", iconOf({ icon: "command" }) === iconOf({ icon: "terminal" }));
+    const pill = renderChip({ id: "a.ts", label: "a.ts", data: null });
+    const remove = pill.querySelector(".ws-mention-chip__remove");
+    check(
+      "the remove button draws the close codicon beside the label, after it in the DOM",
+      remove?.querySelector("svg")?.getAttribute("width") === "12" &&
+        pill.lastElementChild === remove &&
+        pill.children.length === 3,
+    );
+  }
 });
+
+// --- The stylesheet: the pill's values ---------------------------------------------------
+
+{
+  const css = (
+    await readFile(path.join(testDir, "..", "src", "parts", "chatbox", "chat-box.css"), "utf8")
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const lookTokens = await readFile(path.join(testDir, "..", "..", "look", "tokens.css"), "utf8");
+  const componentCss = await readFile(path.join(testDir, "..", "src", "tokens", "component.css"), "utf8");
+  const rule = (selector) => {
+    const match = new RegExp(`${selector.replace(/[.[\]"=():>~+*]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    return match === null ? "" : match[1].replace(/\s+/g, " ");
+  };
+  const pill = rule(".ws-mention-chip");
+  check("the pill has a 6px radius", /border-radius:\s*var\(--radius\)/.test(pill) && /--radius:\s*6px/.test(lookTokens));
+  check("the pill pads 1px 4px", /padding:\s*var\(--ws-size-1\) var\(--space-1\)/.test(pill));
+  check("the pill's fill is the blue at 24%", /--mention-bg:\s*color-mix\(in srgb, var\(--cursor-blue\) 24%, transparent\)/.test(lookTokens) && /background:\s*var\(--mention-bg\)/.test(pill));
+  check(
+    "the label is at most 200px wide",
+    /max-inline-size:\s*var\(--ws-prompt-chip-label-max-width\)/.test(rule(".ws-mention-chip__label")) &&
+      /--ws-prompt-chip-label-max-width:\s*var\(--ws-size-200\)/.test(componentCss),
+  );
+  check(
+    "the icon and the remove button share the pill's first grid cell",
+    /grid-area:\s*1 \/ 1/.test(rule(".ws-mention-chip__icon")) && /grid-area:\s*1 \/ 1/.test(rule(".ws-mention-chip__remove")),
+  );
+  check(
+    "the X replaces the icon on hover only while the editor is focused",
+    /\.ws-prompt-input__editor\.ProseMirror-focused \.ws-mention-chip:hover \.ws-mention-chip__icon\s*\{[^}]*opacity:\s*0/.test(css) &&
+      /\.ws-prompt-input__editor\.ProseMirror-focused \.ws-mention-chip:hover \.ws-mention-chip__remove[^{]*\{[^}]*opacity:\s*1/.test(css) &&
+      /opacity:\s*0/.test(rule(".ws-mention-chip__remove")),
+  );
+
+  // The X sits over the icon and is hidden by opacity alone, which still takes
+  // clicks: until the focused-hover or keyboard-focus rule reveals it, it must
+  // be inert and show no pointer cursor.
+  const revealRule = /\.ws-prompt-input__editor\.ProseMirror-focused \.ws-mention-chip:hover \.ws-mention-chip__remove,\s*\.ws-mention-chip__remove:focus-visible\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  check(
+    "the hidden X takes no pointer events and shows no pointer cursor",
+    /pointer-events:\s*none/.test(rule(".ws-mention-chip__remove")) &&
+      !/cursor:\s*pointer/.test(rule(".ws-mention-chip__remove")),
+  );
+  check(
+    "the revealing rule (focused hover or keyboard focus) restores pointer events and the pointer cursor",
+    /pointer-events:\s*auto/.test(revealRule) && /cursor:\s*pointer/.test(revealRule),
+  );
+
+  // Under the real rules in jsdom: an unfocused editor's pill has an inert X,
+  // and clicking its icon keeps the pill.
+  const style = document.createElement("style");
+  style.textContent = css.slice(css.indexOf(".ws-mention-chip {"), css.indexOf(".ws-draft-view {"));
+  document.head.appendChild(style);
+  const editor = createEditor();
+  document.body.appendChild(editor.options.element);
+  const remove = editor.view.dom.querySelector(".ws-mention-chip__remove");
+  check(
+    "in an unfocused editor the pill's X computes to pointer-events none",
+    remove !== null && getComputedStyle(remove).pointerEvents === "none",
+  );
+  editor.view.dom.querySelector(".ws-mention-chip__icon")?.click();
+  check(
+    "clicking the icon of a pill in an unfocused editor keeps the pill",
+    editor.view.dom.querySelector(".ws-mention-chip") !== null && mentionInDoc(editor),
+  );
+  editor.destroy();
+  editor.options.element.remove();
+  style.remove();
+}
 
 if (failures.length > 0) {
   console.error(`ws-mention-chip: ${failures.length} failure(s)`);

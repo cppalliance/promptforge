@@ -41,6 +41,75 @@
   min-height: 0;
 }
 
+/* The right zone's group (data-ws-zone="right", stamped by zones.ts): the
+   chat pane. Its header is a 35px row on #181818 holding the chat tabs and
+   the header buttons (agent-pane-header.css). A chat tab is padded 3px 6px
+   with a 6px radius and 13px/18px weight-400 text; tabs run 60 to 120px wide
+   and the active one can grow to 200px, on about #252525 (a 6% wash on the
+   #181818 header); inactive labels read #F0F0F0BD. The close X shows on hover
+   only. */
+[data-ws-zone="right"] .dv-tabs-and-actions-container {
+  block-size: var(--ws-pane-header-height);
+  background: var(--cursor-editor);
+}
+
+[data-ws-zone="right"] .dv-tab {
+  flex: 0 1 auto;
+  min-inline-size: var(--ws-chat-tab-min-width);
+  max-inline-size: var(--ws-chat-tab-max-width);
+  padding: 0;
+  background: transparent;
+}
+
+[data-ws-zone="right"] .dv-tab.dv-active-tab {
+  max-inline-size: var(--ws-chat-tab-active-max-width);
+}
+
+[data-ws-zone="right"] .dv-tab .dv-default-tab {
+  padding: var(--ws-chat-tab-padding);
+  border-radius: var(--radius);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  font-weight: normal;
+}
+
+[data-ws-zone="right"] .dv-tab.dv-active-tab .dv-default-tab {
+  background: var(--cursor-bg-quaternary);
+  color: var(--text);
+}
+
+[data-ws-zone="right"] .dv-tab.dv-inactive-tab .dv-default-tab {
+  color: var(--text-muted);
+}
+
+[data-ws-zone="right"] .dv-tab .dv-default-tab-content {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The close X: hidden until the tab is hovered, active or not. */
+[data-ws-zone="right"] .dv-tab .dv-default-tab .dv-default-tab-action,
+[data-ws-zone="right"] .dv-tab.dv-active-tab .dv-default-tab .dv-default-tab-action {
+  visibility: hidden;
+}
+
+[data-ws-zone="right"] .dv-tab .dv-default-tab:hover .dv-default-tab-action {
+  visibility: visible;
+}
+
+/* The inline rename field replaces the tab's text. */
+.ws-tab-rename {
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
 .ws-panel-unknown,
 .ws-panel-error {
   height: 100%;

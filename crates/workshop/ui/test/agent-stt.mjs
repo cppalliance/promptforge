@@ -413,7 +413,30 @@ async function setup(speechCapture, host) {
   const view = new AgentSessionView(service, status, undefined, speechCapture, host);
   window.document.body.appendChild(view.element);
   const realtime = await negotiateLatestRealtime();
-  const mic = view.element.querySelector(".ws-agent-session__mic");
+  // The one round button is the mic over an empty box (or while a take records)
+  // and the send arrow once there is text, so a take that starts over a draft
+  // - a second take, a take after typing - presses the mic from the keyboard,
+  // Ctrl+Shift+Space. This handle clicks the real button wherever it is the mic
+  // and takes the keyboard path elsewhere; everything else reads the button.
+  const button = view.element.querySelector(".ws-agent-session__action");
+  const mic = {
+    element: button,
+    click: () => (button.getAttribute("data-state") === "mic" ? button.click() : view.toggleVoiceInput()),
+    getAttribute: (name) => button.getAttribute(name),
+    get classList() {
+      return button.classList;
+    },
+    get disabled() {
+      return button.disabled;
+    },
+    get title() {
+      return button.title;
+    },
+    get type() {
+      return button.type;
+    },
+    querySelector: (selector) => button.querySelector(selector),
+  };
   // The chat box: content and selection are driven through the component
   // (the DOM alone sets neither on a ProseMirror editor). The pending-wait
   // gate and a take's read-only both show on the editor's contenteditable
@@ -423,7 +446,7 @@ async function setup(speechCapture, host) {
   const editorEl = view.element.querySelector(".ws-prompt-input__editor");
   const editable = () => editorEl.getAttribute("contenteditable") === "true";
   const recording = () => frame.classList.contains("ws-stt-input--recording");
-  const send = view.element.querySelector(".ws-agent-session__send");
+  const send = button;
   // Clicks the mic and waits for the take's Realtime socket to open and
   // send "start"; null when no take began within the wait.
   async function startTake() {
@@ -710,7 +733,7 @@ await assertNoLeaks(lifecycle, async () => {
       "a cancelled wait releases the mic button to idle",
       mic.getAttribute("data-mic") === "idle" &&
         mic.getAttribute("aria-pressed") === "false" &&
-        mic.title === "Push to talk",
+        mic.title === "Voice Input (Ctrl+Shift+Space)",
     );
     check("a cancelled wait keeps the reusable Realtime socket open", !socket.closed);
     check(
@@ -1271,7 +1294,13 @@ await assertNoLeaks(lifecycle, async () => {
     }
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     check("the recording LED is lit before the send", status.recording);
-    send.click();
+    // The round button is the mic while a take records, so a press on it ends
+    // the take; sending mid-take is the keyboard's Enter, and the read-only
+    // editor drops its keydown, so the frame's own listener answers.
+    check("a recording take keeps the button the mic, not the send arrow", send.getAttribute("data-state") === "mic");
+    editorEl.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
     check("the send submits the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
     check("the send dims the recording LED", !status.recording);
     check("the send keeps the reusable Realtime socket open", !socket.closed);

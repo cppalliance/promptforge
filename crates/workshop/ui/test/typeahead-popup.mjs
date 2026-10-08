@@ -22,9 +22,13 @@
 // and gives way to the results; Tab accepts like Enter; a space closes
 // the popup leaving the typed text; Backspace directly after a pill
 // restores the literal "@" and reopens the popup. Runs under the shared
-// leak check: a popup or ChatBox that is never disposed fails.
+// leak check: a popup or ChatBox that is never disposed fails. The @ menu
+// wears the composer's shared menu surface (look's .menu-composer); the
+// stylesheet's own values - 240px wide, at most 280px tall, the 11px
+// left-truncated path subtitle at 0.4 opacity, plain section headers - are
+// read from the source text.
 // Run: node test/typeahead-popup.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -432,6 +436,21 @@ await assertNoLeaks(lifecycle, async () => {
       items[1]?.querySelector(".ws-typeahead-popup__description") === null,
     );
     check(
+      "the popup wears the composer's shared menu surface, and its rows are menu rows",
+      popup()?.classList.contains("menu") === true &&
+        popup()?.classList.contains("menu-composer") === true &&
+        items.every((item) => item.classList.contains("menu-item")) &&
+        items.every((item) => item.querySelector(".menu-item__icon svg") !== null),
+    );
+    check(
+      "the row's icon is 14px",
+      items[0]?.querySelector(".ws-typeahead-popup__icon svg")?.getAttribute("width") === "14",
+    );
+    check(
+      "the path subtitle holds its text left to right, so truncating from the left keeps the end",
+      description?.querySelector('bdi[dir="ltr"]')?.textContent === "src",
+    );
+    check(
       "the description is not stored on the inserted node",
       (() => {
         pressKey(box.editorDom, "Enter");
@@ -539,6 +558,47 @@ await assertNoLeaks(lifecycle, async () => {
     box.dispose();
   }
 });
+
+// --- The stylesheet: the @ menu's own values --------------------------------------------
+
+{
+  const css = (
+    await readFile(path.join(testDir, "..", "src", "parts", "chatbox", "typeahead-popup.css"), "utf8")
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const componentCss = await readFile(path.join(testDir, "..", "src", "tokens", "component.css"), "utf8");
+  const rule = (selector) => {
+    const match = new RegExp(`${selector.replace(/[.[\]"=]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    return match === null ? "" : match[1].replace(/\s+/g, " ");
+  };
+  check(
+    "the @ menu is 240px wide and at most 280px tall",
+    /inline-size:\s*var\(--ws-typeahead-width\)/.test(rule(".ws-typeahead-popup")) &&
+      /max-block-size:\s*var\(--ws-typeahead-max-height\)/.test(rule(".ws-typeahead-popup")) &&
+      /--ws-typeahead-width:\s*var\(--ws-size-240\)/.test(componentCss) &&
+      /--ws-typeahead-max-height:\s*var\(--ws-size-280\)/.test(componentCss),
+  );
+  const description = rule(".ws-typeahead-popup__description");
+  check(
+    "the path is an 11px right-aligned subtitle at 0.4 opacity, truncated from the left",
+    /font-size:\s*var\(--font-size-xs\)/.test(description) &&
+      /direction:\s*rtl/.test(description) &&
+      /text-align:\s*end/.test(description) &&
+      /text-overflow:\s*ellipsis/.test(description) &&
+      /opacity:\s*0\.4/.test(description),
+  );
+  check(
+    "the highlighted row's path reads at 0.6",
+    /opacity:\s*0\.6/.test(rule(".ws-typeahead-popup__item--selected .ws-typeahead-popup__description")),
+  );
+  const header = rule(".ws-typeahead-popup__header");
+  check(
+    "section headers are not uppercase and have no border",
+    header !== "" &&
+      !/text-transform/.test(header) &&
+      !/border/.test(header) &&
+      !/:not\(:first-child\)/.test(css),
+  );
+}
 
 if (failures.length > 0) {
   console.error(`ws-typeahead-popup: ${failures.length} failure(s)`);

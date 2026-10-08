@@ -1,8 +1,10 @@
 /* The model picker trigger (model-picker-trigger.ts imports this file;
-   esbuild bundles it into dist/app.css). The dropdown it opens is
-   styled by workshop/dropdown.css; these rules cover only the trigger.
-   Themed values come from the :root tokens in @workshop/look/tokens.css; every var()
-   includes a fallback so a deleted token degrades instead of breaking. */
+   esbuild bundles it into dist/app.css). The menu it opens is the
+   composer's shared surface (look's dropdown.css, .menu-composer); these
+   rules cover the trigger and that menu's size. The button is 20px tall
+   with a 4px radius and 6px side padding, its text 13px/18px in the
+   secondary tier, an 8% fill on hover, and a 9px chevron at 0.7 opacity.
+   Themed values come from the :root tokens in @workshop/look/tokens.css. */
 
 .ws-model-picker-trigger {
   display: inline-flex;
@@ -10,11 +12,11 @@
   gap: var(--space-1);
   block-size: var(--model-trigger-height);
   padding-block: 0;
-  padding-inline: var(--space-2);
+  padding-inline: var(--space-1-5);
   font: inherit;
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
-  color: var(--text-muted);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--cursor-text-secondary);
   background: transparent;
   border: none;
   border-radius: var(--model-trigger-radius);
@@ -25,14 +27,13 @@
 /* The open state keeps the hover wash: DropdownMenu sets aria-expanded
    on the trigger while its menu is up. */
 .ws-model-picker-trigger:hover,
-.ws-model-picker-trigger[aria-expanded="true"] {
-  background: var(--bg-hover);
-  color: var(--text);
+.ws-model-picker-trigger[aria-expanded="true"],
+.ws-model-picker-trigger:focus-visible {
+  background: var(--cursor-bg-tertiary);
 }
 
 .ws-model-picker-trigger:focus-visible {
   outline: none;
-  background: var(--cursor-bg-secondary);
 }
 
 /* Long model ids truncate instead of stretching the toolbar. */
@@ -46,4 +47,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0.7;
+}
+
+.ws-model-picker-trigger__icon svg {
+  inline-size: var(--ws-model-chevron-size);
+  block-size: var(--ws-model-chevron-size);
+}
+
+/* The menu: 230px wide and at most 320px tall. */
+.ws-model-menu {
+  inline-size: var(--ws-model-menu-width);
+  max-block-size: var(--ws-model-menu-max-height);
 }

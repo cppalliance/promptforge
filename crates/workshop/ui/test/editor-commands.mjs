@@ -604,6 +604,23 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "executing a catalog command runs through the lazy import",
     executed === true && surface.text() === "alpha\nalpha\nbeta\n",
   );
+
+  // Indent Line and Outdent Line: the keybinding-only rows that keep
+  // Ctrl+] and Ctrl+[ working in the editor beside the chat's chords.
+  const beforeIndent = surface.text();
+  await Commands.execute("editor.action.indentLines");
+  const indented = surface.text();
+  check(
+    "Indent Line indents the cursor line through the command registry",
+    indented.length > beforeIndent.length && indented.replace(/^[ \t]+/gm, "") === beforeIndent,
+  );
+  await Commands.execute("editor.action.outdentLines");
+  check("Outdent Line takes the indent back out", surface.text() === beforeIndent);
+  check(
+    "the indent rows bind Ctrl+] and Ctrl+[ while the editor's text is focused",
+    KeybindingsRegistry.lookupKeybinding("editor.action.indentLines")?.getLabel() === "Ctrl+]" &&
+      KeybindingsRegistry.lookupKeybinding("editor.action.outdentLines")?.getLabel() === "Ctrl+[",
+  );
   unregisterDock.dispose();
   panel.dispose();
 }

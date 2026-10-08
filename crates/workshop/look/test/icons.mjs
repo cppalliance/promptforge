@@ -56,6 +56,21 @@ const expected = {
   ICON_ERROR: { codicon: "error", size: 16 },
   ICON_CHECK: { codicon: "check", size: 16 },
   ICON_COPY: { codicon: "copy", size: 16 },
+  // The glyphs the composer and agent chrome draw once lucide is gone: the five
+  // mode glyphs and the mention chip's file, folder, and link family.
+  ICON_AGENT: { codicon: "agent", size: 16 },
+  ICON_CHECKLIST: { codicon: "checklist", size: 16 },
+  ICON_BUG: { codicon: "bug", size: 16 },
+  ICON_LAYERS: { codicon: "layers", size: 16 },
+  ICON_ASK: { codicon: "ask", size: 16 },
+  ICON_FILE: { codicon: "file", size: 16 },
+  ICON_FILE_CODE: { codicon: "file-code", size: 16 },
+  ICON_FILE_MEDIA: { codicon: "file-media", size: 16 },
+  ICON_FILE_TEXT: { codicon: "file-text", size: 16 },
+  ICON_FOLDER: { codicon: "folder", size: 16 },
+  ICON_GLOBE: { codicon: "globe", size: 16 },
+  ICON_LINK: { codicon: "link", size: 16 },
+  ICON_SYMBOL_KEYWORD: { codicon: "symbol-keyword", size: 16 },
 };
 
 check(
@@ -63,8 +78,8 @@ check(
   Object.keys(icons).sort().join(",") === Object.keys(expected).sort().join(","),
 );
 check(
-  "the set covers the fifteen codicons the specifications use",
-  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 15,
+  "every export is a different codicon, twenty-eight in all",
+  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 28,
 );
 
 // The codicon package root, found through its package.json.

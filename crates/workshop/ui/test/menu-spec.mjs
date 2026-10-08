@@ -387,6 +387,8 @@ const SPEC = {
     ["workbench.action.closeUnmodifiedEditors", "1_close", "stub", "Close Saved"],
     ["workbench.action.closeAllEditors", "1_close", "stub", "Close All"],
     ["workbench.action.reopenWithEditor", "1_open", "stub", "Reopen Editor With..."],
+    // The chat tab's own row: the tab menu opens with the clicked tab's type as activeEditor.
+    ["workbench.action.chat.rename", "2_chat", "wired", "Rename Chat"],
     ["workbench.action.keepEditor", "3_preview", "stub", "Keep Open"],
     ["workbench.action.pinEditor", "3_preview", "stub", "Pin"],
     ["workbench.action.moveEditorToNewWindow", "7_new_window", "stub", "Move into New Window"],
@@ -427,8 +429,13 @@ for (const rows of Object.values(SPEC)) {
 
 // Wired rows that deliberately omit f1: menu-only commands. New Run
 // Window is one menu row by design (no palette row, no keybinding), and
-// Close Others is a tab-menu row acting on the clicked tab's group.
-const WIRED_WITHOUT_F1 = new Set(["workbench.action.newRunWindow", "workbench.action.closeOtherEditors"]);
+// Close Others is a tab-menu row acting on the clicked tab's group, and Rename Chat
+// one acting on the clicked chat tab.
+const WIRED_WITHOUT_F1 = new Set([
+  "workbench.action.newRunWindow",
+  "workbench.action.closeOtherEditors",
+  "workbench.action.chat.rename",
+]);
 
 for (const id of wiredIds) {
   if (WIRED_WITHOUT_F1.has(id)) {

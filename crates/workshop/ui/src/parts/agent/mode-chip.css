@@ -1,36 +1,27 @@
 /* The mode selector chip trigger (mode-chip.ts imports this file;
-   esbuild bundles it into dist/app.css). The dropdown it opens is
-   styled by workshop/dropdown.css; these rules cover only the trigger.
-   Themed values come from the :root tokens in @workshop/look/tokens.css. */
+   esbuild bundles it into dist/app.css). The menu it opens is the
+   composer's shared surface (look's dropdown.css, .menu-composer); these
+   rules cover the trigger and that menu's width. The chip is 20px tall with
+   padding 2px 4px 2px 8px, a 16px icon at 0.5 opacity, the label at 0.8, and
+   a 14px chevron at 0.5. Plan, Ask, Debug, and Multitask tint it: a 24% fill
+   under text of the same color. Themed values come from the :root tokens in
+   @workshop/look/tokens.css. */
 
 .ws-mode-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1-5);
-  block-size: var(--height-sm);
-  padding-block: 0;
-  padding-inline: var(--space-2);
+  gap: var(--ws-size-2);
+  block-size: var(--height-xs);
+  padding: var(--ws-size-2) var(--space-1) var(--ws-size-2) var(--space-2);
   font: inherit;
   font-size: var(--font-size-sm);
   line-height: var(--line-height-sm);
   color: var(--cursor-text-primary);
-  background: var(--cursor-bg-secondary);
+  background: transparent;
   border: none;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  opacity: 0.8;
   white-space: nowrap;
-}
-
-/* The open state keeps the hover wash: DropdownMenu sets aria-expanded
-   on the trigger while its menu is up. */
-.ws-mode-chip:hover,
-.ws-mode-chip[aria-expanded="true"] {
-  opacity: 1;
-}
-
-.ws-mode-chip:focus-visible {
-  outline: none;
 }
 
 .ws-mode-chip__icon,
@@ -38,4 +29,64 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0.5;
+}
+
+.ws-mode-chip__icon svg {
+  inline-size: var(--ws-size-16);
+  block-size: var(--ws-size-16);
+}
+
+.ws-mode-chip__chevron svg {
+  inline-size: var(--ws-size-14);
+  block-size: var(--ws-size-14);
+}
+
+.ws-mode-chip__label {
+  opacity: 0.8;
+}
+
+/* Hover and the open menu wash the plain chip; DropdownMenu sets
+   aria-expanded on the trigger while its menu is up. */
+.ws-mode-chip:hover,
+.ws-mode-chip[aria-expanded="true"] {
+  background: var(--cursor-bg-tertiary);
+}
+
+.ws-mode-chip:focus-visible {
+  outline: none;
+  background: var(--cursor-bg-tertiary);
+}
+
+/* The mode tints: a 24% fill and text of the same color. */
+.ws-mode-chip[data-mode="plan"] {
+  color: var(--cursor-yellow);
+  background: color-mix(in srgb, var(--cursor-yellow) 24%, transparent);
+}
+
+.ws-mode-chip[data-mode="ask"] {
+  color: var(--cursor-green);
+  background: color-mix(in srgb, var(--cursor-green) 24%, transparent);
+}
+
+.ws-mode-chip[data-mode="debug"] {
+  color: var(--cursor-red);
+  background: color-mix(in srgb, var(--cursor-red) 24%, transparent);
+}
+
+.ws-mode-chip[data-mode="multitask"] {
+  color: var(--cursor-multitask);
+  background: color-mix(in srgb, var(--cursor-multitask) 24%, transparent);
+}
+
+/* Below 300px of composer the label gives way to the icon and chevron. */
+@container ws-composer (width < 300px) {
+  .ws-mode-chip__label {
+    display: none;
+  }
+}
+
+/* The menu: at least 170px wide. */
+.ws-mode-menu {
+  min-inline-size: var(--ws-mode-menu-min-width);
 }

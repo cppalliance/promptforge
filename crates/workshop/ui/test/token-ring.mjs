@@ -1,11 +1,14 @@
-// The token ring (src/parts/chrome/token-ring.ts) in jsdom: an SVG gauge with a
-// track circle and a progress circle whose stroke-dashoffset encodes
-// the context-usage percentage. The default provider stub returns 0%
-// (an empty ring); an injected provider or setPercentage drives
-// non-zero values, clamped to 0-100. Runs under the shared leak check:
-// a TokenRing left undisposed fails.
+// The token ring (src/parts/chrome/token-ring.ts) in jsdom: a 15px SVG gauge
+// (stroke 2, radius 5.5, round line caps) with a track circle and a progress
+// circle whose stroke-dashoffset encodes the context-usage percentage. The
+// default provider stub reports no usage data (null), which hides the ring
+// and drops its value; an injected provider or setPercentage drives the
+// percentages, clamped to 0-100, and null hides the ring again. The
+// stylesheet's side of the contract - the 15px size in a 20px box, the 8%
+// track, hiding below 260px of composer - is read from the source text.
+// Runs under the shared leak check: a TokenRing left undisposed fails.
 // Run: node test/token-ring.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,8 +50,8 @@ const bundlePath = path.join(os.tmpdir(), "promptforge-token-ring-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { TokenRing, lifecycle } = await import(pathToFileURL(bundlePath).href);
 
-// The geometry the component fixes: 16px viewBox, stroke width 2.
-const RADIUS = 7;
+// The geometry the component fixes: a 15-unit viewBox, radius 5.5, stroke width 2.
+const RADIUS = 5.5;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 const failures = [];
@@ -76,8 +79,8 @@ await assertNoLeaks(lifecycle, async () => {
         ring.element.getAttribute("class") === "ws-token-ring",
     );
     check(
-      "the svg uses the 16px viewBox",
-      ring.element.getAttribute("viewBox") === "0 0 16 16",
+      "the svg uses the 15px viewBox",
+      ring.element.getAttribute("viewBox") === "0 0 15 15",
     );
     const [background, progress] = circles(ring);
     check(
@@ -86,19 +89,20 @@ await assertNoLeaks(lifecycle, async () => {
         progress?.getAttribute("class") === "ws-token-ring-progress",
     );
     check(
-      "both circles share the center, radius, and stroke width",
+      "both circles share the center, radius 5.5, and stroke width 2",
       circles(ring).every(
         (circle) =>
-          circle.getAttribute("cx") === "8" &&
-          circle.getAttribute("cy") === "8" &&
+          circle.getAttribute("cx") === "7.5" &&
+          circle.getAttribute("cy") === "7.5" &&
           circle.getAttribute("r") === String(RADIUS) &&
           circle.getAttribute("stroke-width") === "2",
       ),
     );
     check(
-      "only the progress circle gets the dash wiring",
+      "only the progress circle gets the dash wiring and round caps",
       background?.getAttribute("stroke-dasharray") === null &&
-        closeTo(Number(progress?.getAttribute("stroke-dasharray")), CIRCUMFERENCE),
+        closeTo(Number(progress?.getAttribute("stroke-dasharray")), CIRCUMFERENCE) &&
+        progress?.getAttribute("stroke-linecap") === "round",
     );
     ring.dispose();
     ring.element.remove();
@@ -118,33 +122,41 @@ await assertNoLeaks(lifecycle, async () => {
     ring.dispose();
   }
 
-  // --- The stub ------------------------------------------------------------------
+  // --- The stub: no usage data hides the ring ---------------------------------------
 
   {
     const ring = new TokenRing();
-    check("the default provider reads as 0%", ring.percentage === 0);
+    check("the default provider reports no usage data", ring.percentage === null);
     check(
-      "the stub percentage shows an empty ring",
-      closeTo(
-        Number(
-          ring.element
-            .querySelector(".ws-token-ring-progress")
-            ?.getAttribute("stroke-dashoffset"),
-        ),
-        CIRCUMFERENCE,
-      ) && ring.element.getAttribute("aria-valuenow") === "0",
+      "with no usage data the ring is hidden and reports no value",
+      ring.element.hasAttribute("hidden") && !ring.element.hasAttribute("aria-valuenow"),
+    );
+    ring.setPercentage(40);
+    check(
+      "usage data shows the ring and its value",
+      !ring.element.hasAttribute("hidden") &&
+        ring.element.getAttribute("aria-valuenow") === "40",
+    );
+    ring.setPercentage(null);
+    check(
+      "null hides the ring again",
+      ring.percentage === null &&
+        ring.element.hasAttribute("hidden") &&
+        !ring.element.hasAttribute("aria-valuenow"),
     );
     ring.dispose();
   }
 
-  // --- Non-zero percentages --------------------------------------------------------
+  // --- Percentages ----------------------------------------------------------------------
 
   {
     const ring = new TokenRing(() => 25);
     const progress = ring.element.querySelector(".ws-token-ring-progress");
     check(
-      "an injected provider sets the initial percentage",
-      ring.percentage === 25 && ring.element.getAttribute("aria-valuenow") === "25",
+      "an injected provider sets the initial percentage and shows the ring",
+      ring.percentage === 25 &&
+        ring.element.getAttribute("aria-valuenow") === "25" &&
+        !ring.element.hasAttribute("hidden"),
     );
     check(
       "25% fills a quarter of the circumference",
@@ -189,8 +201,34 @@ await assertNoLeaks(lifecycle, async () => {
         nanRing.element.getAttribute("aria-valuenow") === "0",
     );
     nanRing.dispose();
+
+    const nullRing = new TokenRing(() => null);
+    check("a null provider value is no data", nullRing.percentage === null && nullRing.element.hasAttribute("hidden"));
+    nullRing.dispose();
   }
 });
+
+// --- The stylesheet --------------------------------------------------------------------
+
+{
+  const css = (await readFile(path.join(testDir, "..", "src", "parts", "chrome", "token-ring.css"), "utf8")).replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const lookTokens = await readFile(
+    path.join(testDir, "..", "..", "look", "tokens.css"),
+    "utf8",
+  );
+  check("the ring is 15px", /--token-ring-size:\s*15px/.test(lookTokens) && /inline-size:\s*var\(--token-ring-size\)/.test(css));
+  check("the ring's track is the 8% stroke", /--token-ring-track:\s*var\(--cursor-stroke-tertiary\)/.test(lookTokens));
+  check("the ring sits in a 20px box: the 2.5px margin around the 15px gauge", /margin:\s*var\(--ws-token-ring-margin\)/.test(css));
+  check("the progress arc has round line caps", /stroke-linecap:\s*round/.test(css));
+  check("a ring with no data stays hidden", /\.ws-token-ring\[hidden\]\s*\{\s*display:\s*none/.test(css));
+  check(
+    "the ring hides below 260px of composer",
+    /@container ws-composer \(width < 260px\)\s*\{\s*\.ws-token-ring\s*\{\s*display:\s*none/.test(css),
+  );
+}
 
 if (failures.length > 0) {
   console.error(`ws-token-ring: ${failures.length} failure(s)`);

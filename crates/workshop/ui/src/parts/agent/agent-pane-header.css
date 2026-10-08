@@ -1,0 +1,45 @@
+/* The chat pane's header buttons (agent-pane-header.ts imports this file).
+   Dockview puts one header actions element in every group; only the right
+   zone's groups show it (data-ws-zone, stamped by zones.ts). The buttons are
+   24px with a 6px radius and 2px between them; their icons read #F0F0F084
+   and a hover washes #5A5D5E50. Themed values come from the :root tokens in
+   @workshop/look/tokens.css. */
+
+.ws-pane-header {
+  display: none;
+  align-items: center;
+  gap: var(--ws-size-2);
+  padding-inline: var(--space-1);
+}
+
+[data-ws-zone="right"] .ws-pane-header {
+  display: flex;
+}
+
+.ws-pane-header__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--height-sm);
+  block-size: var(--height-sm);
+  padding: 0;
+  color: var(--cursor-icon-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.ws-pane-header__button svg {
+  inline-size: var(--ws-size-16);
+  block-size: var(--ws-size-16);
+}
+
+.ws-pane-header__button:hover {
+  background: var(--cursor-toolbar-hover);
+}
+
+.ws-pane-header__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}

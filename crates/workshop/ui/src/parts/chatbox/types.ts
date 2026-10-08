@@ -2,7 +2,8 @@
 // gives out (events), and exposes (the handle), plus the chip model and
 // the persisted draft shape. Everything the owning part and the component
 // share is declared here and nowhere else. `chatbox/` imports only
-// `@workshop/platform/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two outside types
+// `@workshop/platform/lifecycle`, `@workshop/look/icons`, the shared menu surface
+// `@workshop/look/dropdown.css`, and `@tiptap/*`; the two outside types
 // this file mirrors - the text-control adapter and dictation's input
 // target - are declared structurally so neither side imports the other.
 
@@ -62,6 +63,9 @@ export interface SerializedDraft {
   readonly attachments: ChipRef[];
 }
 
+/** The agent modes the action button's fill follows. */
+export type ChatBoxMode = "agent" | "plan" | "ask" | "debug" | "multitask";
+
 /**
  * The error popup docked on the card's top edge: a warning glyph, a title
  * over a message, and an optional Try again. The owning part decides what
@@ -88,14 +92,21 @@ export interface ChatBoxProps {
   /** Whether the operator can type; default true. */
   readonly editable?: boolean;
   /**
-   * The send button's state; default "send". `send`: enabled.
-   * `send-blocked`: aria-disabled but still clickable and still emits
-   * `send`, so the owning part can name the blocker. `idle`: disabled.
-   * `stop`: reserved.
+   * What the round action button does once the box holds text; default
+   * "send". `send`: enabled. `send-blocked`: aria-disabled but still
+   * clickable and still emits `send`, so the owning part can name the
+   * blocker. `idle`: disabled. `stop`: the agent is generating - the button
+   * becomes Stop and emits `stop`, and the placeholder reads "Add a
+   * follow-up". With an empty box and no `stop`, the same button is the mic.
    */
   readonly action?: "send" | "send-blocked" | "stop" | "idle";
-  /** The mic button's state; default "idle". */
+  /**
+   * The mic's state, shown on the action button while the box is empty (or
+   * recording); default "idle".
+   */
   readonly mic?: "idle" | "recording" | "blocked";
+  /** The agent mode that picks the action button's fill; default "agent". */
+  readonly mode?: ChatBoxMode;
   // construction-only
   /**
    * The layout variant, rendered as `data-variant` on the root; default
@@ -113,8 +124,8 @@ export interface ChatBoxProps {
   readonly content?: string;
   /**
    * A toolbar element the owning part supplies, placed after the editor;
-   * the box appends its mic and send buttons to its end. Absent, the
-   * buttons go directly on the bar.
+   * the box appends its round action button to its end. Absent, the
+   * button goes directly on the bar.
    */
   readonly controls?: HTMLElement;
   /** The `@` provider; default: the built-in three-item stub. */
@@ -201,4 +212,4 @@ export interface ChatBoxHandle {
 }
 
 /** The dynamic subset: the only props `update()` accepts. */
-export type ChatBoxDynamicProps = Pick<ChatBoxProps, "editable" | "action" | "mic" | "error">;
+export type ChatBoxDynamicProps = Pick<ChatBoxProps, "editable" | "action" | "mic" | "mode" | "error">;

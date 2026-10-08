@@ -44,7 +44,13 @@
 
 import "./zones.css";
 
-import type { Direction, DockviewApi, IDockviewGroupPanel, IDockviewPanel } from "dockview";
+import type {
+  Direction,
+  DockviewApi,
+  DockviewGroupPanel,
+  IDockviewGroupPanel,
+  IDockviewPanel,
+} from "dockview";
 
 import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
@@ -64,7 +70,28 @@ export { ZONE_NAMES } from "@workshop/platform/panel-registry";
 export type { PanelParams, PanelType, ZoneName } from "@workshop/platform/panel-registry";
 export type { ZoneState } from "../../services/zone-state-service";
 
+/** The right zone's floor: the chat pane never narrows below this. */
+export const RIGHT_ZONE_MIN_WIDTH = 300;
+
+/** The widest the right zone prefers to open at, before the quarter-of-the-window rule. */
+const RIGHT_ZONE_PREFERRED_MAX_WIDTH = 400;
+
+/**
+ * The right zone's preferred width in a dock `totalWidth` wide:
+ * `min(400px, W/4)`, never under the zone's 300px floor.
+ */
+export function rightZonePreferredWidth(totalWidth: number): number {
+  return Math.max(
+    RIGHT_ZONE_MIN_WIDTH,
+    Math.min(RIGHT_ZONE_PREFERRED_MAX_WIDTH, Math.round(totalWidth / 4)),
+  );
+}
+
 let dock: DockviewApi | null = null;
+
+// The right-zone groups whose width floor is already applied, so the
+// constraint is set once per group and not on every layout change.
+const constrainedGroups = new WeakSet<IDockviewGroupPanel>();
 
 /** The shared zone state: the group map and the placement overrides. */
 function zoneState(): ZoneStateService {
@@ -107,6 +134,89 @@ export function withZoneRestore<T>(run: () => T): T {
   }
 }
 
+/**
+ * Marks every live zone group with its zone name (`data-ws-zone` on the
+ * group's element), so the stylesheets can skin one zone's groups - the
+ * right zone's header and chat tabs - without knowing group ids. Runs
+ * after every change that creates, rebuilds, or restores a group, and
+ * with each layout change as the net under them. The right zone's groups
+ * also get their width floor here, once each.
+ */
+function stampZones(): void {
+  if (dock === null) {
+    return;
+  }
+  for (const zone of ZONE_NAMES) {
+    const group = liveGroup(zone);
+    if (group === undefined) {
+      continue;
+    }
+    // The interface hides the element the group class carries; a dock
+    // double without one has nothing to stamp.
+    const element: HTMLElement | undefined = (group as DockviewGroupPanel).element;
+    if (element !== undefined && element.dataset["wsZone"] !== zone) {
+      element.dataset["wsZone"] = zone;
+    }
+    // The floor goes on once the dock is laid out wide enough to hold the
+    // right zone beside something else; an unsized dock (Dockview's 100px
+    // default) still has placeholder widths, and a floor set then would
+    // overwrite the proportions a restore is about to apply.
+    if (
+      zone === "right" &&
+      dock.width >= RIGHT_ZONE_MIN_WIDTH * 2 &&
+      !constrainedGroups.has(group)
+    ) {
+      constrainedGroups.add(group);
+      applyRightFloor(group);
+    }
+  }
+}
+
+/**
+ * A right group created beside others opens at the chat pane's preferred
+ * width, `min(400px, W/4)` and never under 300px. Only a laid-out dock is
+ * sized: an unsized one (Dockview's 100px default) has nothing to prefer.
+ */
+function sizeNewRightGroup(group: IDockviewGroupPanel): void {
+  const width: unknown = dock?.width;
+  if (typeof width !== "number" || width < RIGHT_ZONE_MIN_WIDTH * 2) {
+    return;
+  }
+  group.api?.setSize?.({ width: rightZonePreferredWidth(width) });
+}
+
+/**
+ * Sets the right zone's width floor. Dockview redistributes the dock's
+ * widths when a constraint changes, even when nothing violates it, so a
+ * group already at or over the floor has every zone's width put back
+ * afterwards; one under the floor is lifted to it and the others give way.
+ */
+function applyRightFloor(group: IDockviewGroupPanel): void {
+  if (group.api?.setConstraints === undefined) {
+    return;
+  }
+  const widths: { readonly group: IDockviewGroupPanel; readonly width: number; readonly height: number }[] = [];
+  for (const zone of ZONE_NAMES) {
+    const live = liveGroup(zone);
+    if (live !== undefined) {
+      widths.push({ group: live, width: live.api.width, height: live.api.height });
+    }
+  }
+  group.api.setConstraints({ minimumWidth: RIGHT_ZONE_MIN_WIDTH });
+  if (group.api.width < RIGHT_ZONE_MIN_WIDTH && group.api.width !== 0) {
+    return;
+  }
+  const wasWide = widths.find((entry) => entry.group === group)?.width ?? 0;
+  if (wasWide < RIGHT_ZONE_MIN_WIDTH) {
+    return;
+  }
+  for (const entry of widths) {
+    if (entry.group.api.width !== entry.width) {
+      entry.group.api.setSize({ width: entry.width, height: entry.height });
+    }
+  }
+}
+
 /** Records every zone group's current dimensions. */
 function recordZoneSizes(): void {
   if (dock === null) {
@@ -137,9 +247,12 @@ function rebuildZone(zone: ZoneName): void {
   }
   const group = dock.addGroup(position);
   zoneState().setGroup(zone, group.id);
+  stampZones();
   const size = zoneSizes.get(zone);
   if (size !== undefined) {
     group.api.setSize(size);
+  } else if (zone === "right") {
+    sizeNewRightGroup(group);
   }
   for (const other of ZONE_NAMES) {
     if (other === zone) {
@@ -221,7 +334,12 @@ export function initZones(dockview: DockviewApi): IDisposable {
   // The size memory refreshes on every layout change, so a rebuild
   // restores the dimensions the zone last had, not the ones it booted
   // with.
-  store.add(dockview.onDidLayoutChange(() => recordZoneSizes()));
+  store.add(
+    dockview.onDidLayoutChange(() => {
+      stampZones();
+      recordZoneSizes();
+    }),
+  );
   // The rebuild boundary: snapshot which zones are live when a top-level
   // mutation opens, and once it has settled rebuild every zone that lost
   // its group in it. A zone that was not live before is never created
@@ -288,8 +406,9 @@ function liveGroup(zone: ZoneName): IDockviewGroupPanel | undefined {
 /**
  * Hides or shows a zone's live group and answers the new visibility.
  * Hiding goes through the group's own setVisible, so its panels and
- * their live connections survive; nothing is removed. Answers undefined
- * when the zone has no live group, leaving
+ * their live connections survive; nothing is removed. The flip itself is
+ * setZoneVisibility's, so the right zone's auxiliaryBarVisible key follows
+ * here too. Answers undefined when the zone has no live group, leaving
  * the caller to open the zone's anchor panel instead.
  */
 export function toggleZoneVisibility(zone: ZoneName): boolean | undefined {
@@ -298,7 +417,7 @@ export function toggleZoneVisibility(zone: ZoneName): boolean | undefined {
     return undefined;
   }
   const visible = !group.api.isVisible;
-  group.api.setVisible(visible);
+  setZoneVisibility(zone, visible);
   return visible;
 }
 
@@ -369,6 +488,8 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
   const id = panelIdFor(type, params);
   const existing = dock.getPanel(id);
   if (existing) {
+    // Activating an open panel leaves its zone as it is: the boot re-opens
+    // every anchor, and a pane hidden last session must stay hidden.
     existing.api.setActive();
     return existing;
   }
@@ -383,7 +504,47 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
     position: group ? { referenceGroup: group.id } : rebuildPosition(zone),
   });
   state.setGroup(zone, panel.group.id);
+  stampZones();
+  if (group === undefined && zone === "right") {
+    sizeNewRightGroup(panel.group);
+  }
+  revealGroupOf(panel);
   return panel;
+}
+
+/** A newly opened panel shows its zone: a hidden group (the toggled-off chat pane) comes back. */
+function revealGroupOf(panel: IDockviewPanel): void {
+  // Only a group that says it is hidden is revealed; a dock double that
+  // reports nothing is left alone.
+  if (panel.group?.api?.isVisible !== false) {
+    return;
+  }
+  const zone = zoneState().zoneForGroupId(panel.group.id);
+  if (zone !== undefined) {
+    setZoneVisibility(zone, true);
+  }
+}
+
+/** The zone's live group, or undefined once it has closed away. */
+export function groupOfZone(zone: ZoneName): IDockviewGroupPanel | undefined {
+  return liveGroup(zone);
+}
+
+/**
+ * Shows or hides a zone's live group and answers whether it was found.
+ * The right zone's outcome also lands in the auxiliaryBarVisible key, the
+ * one the Secondary Side Bar toggle and its menu row read.
+ */
+export function setZoneVisibility(zone: ZoneName, visible: boolean): boolean {
+  const group = liveGroup(zone);
+  if (group === undefined) {
+    return false;
+  }
+  group.api.setVisible(visible);
+  if (zone === "right") {
+    getService(CONTEXT_KEY_SERVICE).createKey("auxiliaryBarVisible", true).set(visible);
+  }
+  return true;
 }
 
 /** Snapshots the zone map and placement overrides for layout persistence. */
@@ -399,6 +560,7 @@ export function serializeZoneState(): ZoneState {
  */
 export function restoreZoneState(zones: unknown, overrides: unknown): void {
   zoneState().restore(zones, overrides);
+  stampZones();
 }
 
 /** Clears all zone state; the default-layout fallback starts from blank. */

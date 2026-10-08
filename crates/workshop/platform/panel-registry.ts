@@ -56,6 +56,12 @@ export interface PanelTypeEntry {
   /** False when the tab strip must not close the panel. Defaults to true. */
   readonly closable?: boolean;
   /**
+   * True when the operator may rename the panel's tab: a double-click opens
+   * an inline editor and the tab menu offers Rename. The name lasts for the
+   * session only; the panel's own title is untouched. Defaults to false.
+   */
+  readonly renamable?: boolean;
+  /**
    * The panel id for one open. Without it, a string `instance` param keys
    * the id as `type:instance`, and otherwise the kind is a singleton.
    * An id must start with `type:` or equal `type`, so the type is

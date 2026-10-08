@@ -1,15 +1,16 @@
-// The model picker trigger: a pill-shaped toolbar button showing the
-// selected model's id. Clicking opens a DropdownMenu of the ModelService
-// catalog; picking one sends the select command through the service. The
-// label never updates optimistically - the server owns the selection, so
-// the trigger re-renders only when the service's change events fire. The
-// catalog subscription earns its keep through the tooltip: the current
-// model's description, resolved from the latest catalog (the title-bar
-// Model menu's convention).
+// The model picker trigger: a toolbar button showing the selected
+// model's id, with a 9px chevron. Clicking it (or Ctrl+/, through open)
+// opens a DropdownMenu of the ModelService catalog on the composer's menu
+// surface - check-only selection, 230px wide, at most 320px tall - and
+// picking one sends the select command through the service. The label
+// never updates optimistically - the server owns the selection, so the
+// trigger re-renders only when the service's selection changes. The label
+// shows the selected id alone, so a catalog change leaves it as it is; the
+// menu reads the catalog each time it opens.
 
 import "./model-picker-trigger.css";
 
-import { ChevronDown, createElement } from "lucide";
+import { ICON_CHEVRON_DOWN } from "@workshop/look/icons";
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import type { ModelService } from "../../services/model-service";
 import { DropdownMenu } from "@workshop/look/dropdown";
@@ -19,7 +20,10 @@ import type { DropdownItem } from "@workshop/look/dropdown";
 const NO_SELECTION_LABEL = "Select model";
 
 /** The single menu row shown when the catalog is empty. */
-const EMPTY_CATALOG_LABEL = "No models available";
+const EMPTY_CATALOG_LABEL = "No models found";
+
+/** The trigger's tooltip. */
+const TRIGGER_TITLE = "Switch Model (Ctrl+/)";
 
 /**
  * The trigger button plus its dropdown. Disposable: dispose() closes an
@@ -40,6 +44,7 @@ export class ModelPickerTrigger extends Disposable {
     this.element = document.createElement("button");
     this.element.type = "button";
     this.element.className = "ws-model-picker-trigger";
+    this.element.title = TRIGGER_TITLE;
 
     this.labelSlot = document.createElement("span");
     this.labelSlot.className = "ws-model-picker-trigger__label";
@@ -47,8 +52,8 @@ export class ModelPickerTrigger extends Disposable {
     const iconSlot = document.createElement("span");
     iconSlot.className = "ws-model-picker-trigger__icon";
     iconSlot.setAttribute("aria-hidden", "true");
-    // The chevron is this module's own static markup, never input.
-    iconSlot.innerHTML = createElement(ChevronDown, { width: 12, height: 12 }).outerHTML;
+    // The chevron is a static string from @workshop/look, never input.
+    iconSlot.innerHTML = ICON_CHEVRON_DOWN;
 
     this.element.append(this.labelSlot, iconSlot);
 
@@ -61,21 +66,33 @@ export class ModelPickerTrigger extends Disposable {
     );
 
     this._register(this.modelService.onDidChangeCurrent(() => this.renderCurrent()));
-    this._register(this.modelService.onDidChangeModels(() => this.renderCurrent()));
 
     this.renderCurrent();
   }
 
+  /** Opens the model menu (Ctrl+/); a menu already open stays open. */
+  open(): void {
+    if (!this.dropdown.isOpen) {
+      this.showMenu();
+    }
+  }
+
   private showMenu(): void {
     const models = this.modelService.models;
+    const current = this.modelService.current;
     const items: DropdownItem[] =
       models.length === 0
         ? [{ label: EMPTY_CATALOG_LABEL, onClick: () => {} }]
         : models.map((model) => ({
             label: model.id,
+            selected: model.id === current,
             onClick: () => this.select(model.id),
           }));
-    this.dropdown.show(this.element, items);
+    this.dropdown.show(this.element, items, undefined, {
+      skin: "composer",
+      className: "ws-model-menu",
+      placement: "above",
+    });
   }
 
   private select(id: string): void {
@@ -88,14 +105,5 @@ export class ModelPickerTrigger extends Disposable {
   private renderCurrent(): void {
     const current = this.modelService.current;
     this.labelSlot.textContent = current === "" ? NO_SELECTION_LABEL : current;
-    const description =
-      current === ""
-        ? undefined
-        : this.modelService.models.find((model) => model.id === current)?.description;
-    if (description === undefined) {
-      this.element.removeAttribute("title");
-    } else {
-      this.element.title = description;
-    }
   }
 }

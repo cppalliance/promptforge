@@ -131,9 +131,10 @@ const stubRows = [
   { id: "editor.action.revealDeclaration", title: "Go to Declaration", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 3 },
   { id: "editor.action.goToTypeDefinition", title: "Go to Type Definition", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 4 },
   { id: "editor.action.goToImplementation", title: "Go to Implementations", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 5, keybinding: "ctrlcmd+f12" },
-  { id: "workbench.action.addSymbolToCurrentChat", title: "Add Symbol to Current Chat", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 6, keybinding: "ctrlcmd+l" },
+  // The Add Symbol rows carry no chord: Ctrl+L and Ctrl+Shift+L are the chat pane's Open Chat and New Chat.
+  { id: "workbench.action.addSymbolToCurrentChat", title: "Add Symbol to Current Chat", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 6 },
   { id: "editor.action.goToReferences", title: "Go to References", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 7, keybinding: "shift+f12" },
-  { id: "workbench.action.addSymbolToNewChat", title: "Add Symbol to New Chat", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 8, keybinding: "ctrlcmd+shift+l" },
+  { id: "workbench.action.addSymbolToNewChat", title: "Add Symbol to New Chat", menu: MenuId.MenubarGoMenu, group: "4_symbol_nav", order: 8 },
   { id: "workbench.action.editor.nextChange", title: "Next Change", menu: MenuId.MenubarGoMenu, group: "7_change_nav", order: 1, keybinding: "alt+f3" },
   { id: "workbench.action.editor.previousChange", title: "Previous Change", menu: MenuId.MenubarGoMenu, group: "7_change_nav", order: 2, keybinding: "shift+alt+f3" },
   // Go > Switch Editor (Next/Previous Editor are wired by the editor contribution)

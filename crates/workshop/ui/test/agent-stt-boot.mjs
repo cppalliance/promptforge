@@ -108,7 +108,7 @@ const scenarios = {
 
       // The session view (and its mic) shows once a session is acknowledged.
       emitAgent({ type: "agent_session", session: "s1", agent: "chat" });
-      const mic = document.querySelector("#dock .ws-agent-session__mic");
+      const mic = document.querySelector("#dock .ws-agent-session__action");
       const input = document.querySelector("#dock .ws-prompt-input__editor");
       if (!mic || !input) {
         failures.push("the agent session mounted no mic beside its input");
@@ -185,16 +185,16 @@ const scenarios = {
       // Closing the Agent tab from its tab chip disposes the panel, the view,
       // and the stt handle: a click on the detached mic starts nothing.
       const agentTab = [...document.querySelectorAll("#dock .dv-default-tab")].find(
-        (tab) => tab.querySelector(".dv-default-tab-content")?.textContent === "Agent Session",
+        (tab) => tab.querySelector(".dv-default-tab-content")?.textContent === "New Agent",
       );
       const closeAction = agentTab?.querySelector(".dv-default-tab-action");
       if (!closeAction) {
-        failures.push("no closable tab action found for the Agent Session tab");
+        failures.push("no closable tab action found for the New Agent tab");
         return;
       }
       closeAction.click();
       if (!(await poll(sleep, () => !document.contains(mic)))) {
-        failures.push("closing the Agent Session tab did not unmount its input form");
+        failures.push("closing the New Agent tab did not unmount its input form");
         return;
       }
       if (await startTake(ctx, mic)) {
@@ -227,7 +227,7 @@ const scenarios = {
           failures.push("the recording LED must start dark");
         }
         emitAgent({ type: "agent_session", session: "s1", agent: "chat" });
-        const mic = document.querySelector("#dock .ws-agent-session__mic");
+        const mic = document.querySelector("#dock .ws-agent-session__action");
         if (!mic) {
           failures.push("the restored agent session mounted no mic");
           return;
@@ -263,7 +263,7 @@ const scenarios = {
         return;
       }
       emitAgent({ type: "agent_session", session: "s2", agent: "chat" });
-      const mic = [...document.querySelectorAll("#dock .ws-agent-session__mic")].find(
+      const mic = [...document.querySelectorAll("#dock .ws-agent-session__action")].find(
         (candidate) => !agentPanel.contains(candidate),
       );
       if (!mic) {
@@ -290,7 +290,7 @@ const scenarios = {
       const first = dock.getPanel("agent");
 
       emitAgent({ type: "agent_session", session: "s1", agent: "chat" });
-      const firstMic = agentPanel.querySelector(".ws-agent-session__mic");
+      const firstMic = agentPanel.querySelector(".ws-agent-session__action");
       if (!firstMic) {
         failures.push("the boot agent session mounted no mic");
         return;
@@ -336,7 +336,7 @@ const scenarios = {
 
       emitAgent({ type: "agent_session", session: "s2", agent: "chat" });
       second.api.setActive();
-      const secondMic = [...document.querySelectorAll("#dock .ws-agent-session__mic")].find(
+      const secondMic = [...document.querySelectorAll("#dock .ws-agent-session__action")].find(
         (candidate) => !agentPanel.contains(candidate),
       );
       if (!secondMic) {

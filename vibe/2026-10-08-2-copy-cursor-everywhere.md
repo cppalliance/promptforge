@@ -1077,7 +1077,7 @@ Rules for every step:
 
 <step-4>
 
-### Step 4: Copy Cursor's composer and agent pane chrome
+### Step 4: Copy Cursor's composer and agent pane chrome [completed]
 
 - Component: Agent pane
 - Placement: fourth, for the reasons in the component list.

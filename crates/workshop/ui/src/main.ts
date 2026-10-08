@@ -51,6 +51,7 @@ import { persistZoom, restoreZoom } from "./parts/chrome/zoom";
 import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./parts/layout/panel-types";
+import { createAgentPaneHeader } from "./parts/agent/agent-pane-header";
 import { bindActiveEditorKey, initZones, openInZone } from "./parts/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
@@ -256,7 +257,9 @@ registerService(LAYOUT_POLICY, () => ({
     const tree = openInZone("tree", {});
     openInZone("agent", {});
     // A lone group always fills the dock, so the tree takes its width only
-    // once the agent's group shares the row.
+    // once the agent's group shares the row. (The chat pane's own preference,
+    // min(400px, W/4) and never under 300px, applies when its group is
+    // created beside others; here the tree's 280px leaves it the rest.)
     tree.group.api.setSize({ width: 280 });
   },
 }));
@@ -274,6 +277,9 @@ const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  // The right zone's New Agent, More Actions, and Close buttons; the
+  // stylesheet shows them for that zone's groups only.
+  createRightHeaderActionComponent: createAgentPaneHeader,
   defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,

@@ -1,19 +1,29 @@
 /* ChatBox (src/parts/chatbox/chat-box.ts): the bar, the framed rich-text
-   prompt box, and the box's mic and send buttons. The bar is the card;
+   prompt box, and the box's one round action button. The bar is the card;
    the frame sits in it; the inner ProseMirror contenteditable takes the
-   type and the JS-driven height, clamped between the min/max tokens. */
+   type and the JS-driven height, clamped between the min/max tokens. The
+   card copies Cursor's older input box: a 12px radius, 8/10/6 padding, and
+   the fill of the input color at 90%. */
 
 .ws-agent-session__bar {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-1-5);
+  /* 9px between the editor and the toolbar row under it. */
+  gap: var(--ws-composer-toolbar-gap);
   padding: var(--space-2) var(--space-2-5) var(--space-1-5);
   background: var(--prompt-input-bg);
   border: var(--ws-border-width) solid var(--prompt-input-border);
   border-radius: var(--agent-card-radius);
+  /* Border and shadow ease over 100ms. */
+  transition:
+    border-color var(--duration-fast) ease-in-out,
+    box-shadow var(--duration-fast) ease-in-out;
   /* The error popup docks on the card's top edge, outside its box. */
   position: relative;
+  /* The toolbar's breakpoints (mode label, context ring) follow the
+     card's own width, not the viewport's. */
+  container: ws-composer / inline-size;
 }
 
 .ws-agent-session__bar:focus-within {
@@ -99,9 +109,10 @@
   max-block-size: var(--prompt-input-max-height);
   overflow-y: auto;
   padding: 0;
-  font-size: var(--font-size-base);
-  line-height: var(--line-height-base);
-  letter-spacing: var(--letter-spacing-base);
+  /* 14px/22px with no letter-spacing, like the transcript's own text. */
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  letter-spacing: normal;
   color: var(--text);
 }
 
@@ -138,8 +149,11 @@
   opacity: 0.5;
 }
 
-/* The send button: the accent control on the bar. */
-.ws-agent-session__send {
+/* The action button: one round control, the mic, the send arrow, or Stop
+   (data-state). The send arrow and Stop take their fill from the agent
+   mode (data-mode) and a #141414 glyph; the mic is a 66% fill under a
+   #181818 glyph. The glyph is 14px. */
+.ws-agent-session__action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -147,129 +161,131 @@
   inline-size: var(--height-xs);
   block-size: var(--height-xs);
   padding: 0;
-  color: var(--cursor-editor);
-  background: var(--cursor-icon-secondary);
+  color: var(--cursor-chrome);
+  background: var(--cursor-base);
   border: none;
   border-radius: var(--radius-full);
   cursor: pointer;
 }
 
-.ws-agent-session__send:focus-visible {
-  outline: none;
-  background: var(--cursor-icon-primary);
+.ws-agent-session__action svg {
+  inline-size: var(--ws-composer-action-glyph);
+  block-size: var(--ws-composer-action-glyph);
 }
 
-.ws-agent-session__send:disabled {
-  background: var(--border-subtle);
-  color: var(--text-tertiary);
+.ws-agent-session__action:focus-visible {
+  outline: none;
+  opacity: 0.85;
+}
+
+/* The mic. */
+.ws-agent-session__action[data-state="mic"] {
+  color: var(--cursor-editor);
+  background: var(--cursor-icon-secondary);
+}
+
+/* The mode fills, for the send arrow and Stop. Agent is the base above. */
+.ws-agent-session__action[data-state="send"][data-mode="plan"],
+.ws-agent-session__action[data-state="stop"][data-mode="plan"] {
+  background: var(--cursor-yellow);
+}
+
+.ws-agent-session__action[data-state="send"][data-mode="ask"],
+.ws-agent-session__action[data-state="stop"][data-mode="ask"] {
+  background: var(--cursor-green);
+}
+
+.ws-agent-session__action[data-state="send"][data-mode="debug"],
+.ws-agent-session__action[data-state="stop"][data-mode="debug"],
+.ws-agent-session__action[data-state="send"][data-mode="multitask"],
+.ws-agent-session__action[data-state="stop"][data-mode="multitask"] {
+  background: color-mix(in srgb, var(--cursor-base) 80%, transparent);
+}
+
+/* Disabled keeps the fill and drops to 30%. */
+.ws-agent-session__action:disabled {
+  opacity: 0.3;
   cursor: default;
 }
 
-/* The push-to-talk mic: an icon button the size of the send button, in
-   the raised tone so the accent stays on Send. The recording rules below
-   paint the fill over it; rule order is load-bearing - they tie the
-   hover-glow rule on specificity and must stay after it. */
-.ws-agent-session__mic {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: var(--height-base);
-  min-block-size: var(--height-base);
-  padding: 0;
-  color: var(--text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  opacity: 0.5;
-}
-
-.ws-agent-session__mic:hover {
-  opacity: 0.8;
-}
-
-.ws-agent-session__mic:focus-visible {
-  outline: none;
-  opacity: 0.8;
-}
-
-.ws-stt-mic {
-  flex: none;
-}
-
 /* Recording mic: a steady danger fill with a matching ring and bloom. The
-   ring and bloom keep recording visible without changing normal hover. */
-.ws-stt-mic--recording {
+   ring and bloom keep recording visible without changing normal hover. The
+   compound selector outranks the mic's own fill above. */
+.ws-agent-session__action.ws-stt-mic--recording {
   color: var(--on-danger);
   background: var(--danger);
   border-radius: 50%;
   box-shadow: var(--ws-stt-mic-shadow);
 }
 
-.ws-stt-mic--recording:hover:not(:disabled) {
-  color: var(--on-danger);
-  background: var(--danger);
-  border-radius: 50%;
+.ws-agent-session__action.ws-stt-mic--recording:hover:not(:disabled) {
   box-shadow: var(--ws-stt-mic-shadow-recording);
 }
 
 /* MentionChip (src/parts/chatbox/mention-chip.ts): the inline pill for an
-   @-referenced file. The label truncates against the chip's max width;
-   the remove button stays quiet until the chip is hovered or focused. */
+   @-referenced file: a 6px radius, padding 1px 4px, a 24% blue fill, and a
+   label of at most 200px. The icon and the remove button share the pill's
+   first grid cell, so the close X can take the icon's place without
+   moving anything: only while the editor holds focus and the pill is
+   hovered (or the X itself has keyboard focus). */
 .ws-mention-chip {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-1);
-  block-size: var(--height-xs);
-  max-inline-size: var(--ws-prompt-chip-max-width);
-  padding-inline: var(--space-1-5);
-  border-radius: var(--radius-sm);
+  column-gap: var(--space-1);
+  padding: var(--ws-size-1) var(--space-1);
+  border-radius: var(--radius);
   background: var(--mention-bg);
   color: var(--mention-text);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
   white-space: nowrap;
 }
 
 .ws-mention-chip__icon {
+  grid-area: 1 / 1;
   display: inline-flex;
-  flex: none;
 }
 
 .ws-mention-chip__label {
+  grid-area: 1 / 2;
   min-inline-size: 0;
+  max-inline-size: var(--ws-prompt-chip-label-max-width);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .ws-mention-chip__remove {
+  grid-area: 1 / 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: none;
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  /* Hidden and inert until revealed: the button sits over the icon, so a
+     click on the icon of a pill in an unfocused editor must not reach it. */
+  cursor: default;
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out-cubic);
+  pointer-events: none;
 }
 
-.ws-mention-chip:hover .ws-mention-chip__remove,
-.ws-mention-chip:focus-within .ws-mention-chip__remove {
+.ws-prompt-input__editor.ProseMirror-focused .ws-mention-chip:hover .ws-mention-chip__icon {
+  opacity: 0;
+}
+
+.ws-prompt-input__editor.ProseMirror-focused .ws-mention-chip:hover .ws-mention-chip__remove,
+.ws-mention-chip__remove:focus-visible {
+  cursor: pointer;
   opacity: 1;
-}
-
-.ws-mention-chip__remove:hover {
-  background: var(--bg-hover);
+  pointer-events: auto;
 }
 
 .ws-mention-chip__remove:focus-visible {
   outline: none;
   background: var(--bg-hover);
-  opacity: 1;
 }
 
 /* renderDraft (src/parts/chatbox/chat-box-view.ts): the read-only

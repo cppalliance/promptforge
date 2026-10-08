@@ -1,24 +1,20 @@
 /* TypeaheadPopup (src/parts/chatbox/typeahead-popup.ts): the floating
-   @-mention suggestion list. The ProseMirror suggestion plugin's managed
-   mount appends the popup to document.body and writes position, left, and
-   top inline from the cursor rect (Floating UI), so this file owns only
-   the surface and the list. Themed values come from the :root tokens in
-   @workshop/look/tokens.css, each with a fallback so a missing token degrades instead of
-   breaking the property. */
+   @-mention menu. It wears the composer's shared menu surface (look's
+   .menu-composer: #181818, a 15% border, a 6px radius, 2px padding, 12px
+   rows, a #F0F0F011 highlight), which the popup's classes ask for; this
+   file adds what only the @ menu has: its size, the right-aligned path
+   subtitle, and the group headers. The ProseMirror suggestion plugin's
+   managed mount appends the popup to document.body and writes position,
+   left, and top inline from the cursor rect (Floating UI), so this file
+   owns only the size and the list. */
 
 .ws-typeahead-popup {
   position: absolute; /* a pre-mount default; mount() overwrites it inline */
   z-index: 9999;
-  min-inline-size: var(--ws-typeahead-min-width);
-  max-inline-size: var(--ws-typeahead-max-width);
-  padding: var(--space-1);
-  background: var(--bg-elevated);
-  border: var(--ws-border-width) solid var(--border-subtle);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-popup);
-  font-size: var(--font-size-base);
-  line-height: var(--line-height-base);
-  letter-spacing: var(--letter-spacing-base);
+  box-sizing: border-box;
+  inline-size: var(--ws-typeahead-width);
+  max-block-size: var(--ws-typeahead-max-height);
+  letter-spacing: normal;
   color: var(--text);
 }
 
@@ -34,13 +30,6 @@
 }
 
 .ws-typeahead-popup__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-block: var(--space-1);
-  padding-inline: var(--space-2);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -48,9 +37,8 @@
 /* The chip's glyph, sized by the icon itself; kept from shrinking so a
    long label truncates instead of the icon. */
 .ws-typeahead-popup__icon {
-  display: inline-flex;
   flex: none;
-  color: var(--text-muted);
+  color: var(--cursor-text-tertiary);
 }
 
 /* Shrinkable (flex-basis auto, min-inline-size 0) so the ellipsis is
@@ -63,45 +51,47 @@
   text-overflow: ellipsis;
 }
 
-/* The row detail (for files, the parent path): dimmed, to the right of
-   the label, and the first thing to give way when space is short. The
-   larger flex-shrink takes width from the description well before the
-   label starts to truncate. */
+/* The row's path: an 11px subtitle at the row's right edge, at 0.4 opacity
+   (0.6 on the highlighted row), and the first thing to give way when space
+   is short. It truncates from the left: the span runs right to left, so the
+   ellipsis lands at its start, and the inner bdi keeps the path's own
+   left-to-right order. */
 .ws-typeahead-popup__description {
   flex: 1 8 auto;
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  direction: rtl;
+  text-align: end;
+  opacity: 0.4;
+  font-size: var(--font-size-xs);
 }
 
-/* A group boundary: not an option, not selectable, not highlighted. */
+.ws-typeahead-popup__item--selected .ws-typeahead-popup__description {
+  opacity: 0.6;
+}
+
+/* A group boundary: not an option, not selectable, not highlighted. It is
+   plain text in the tertiary tier - not uppercase, and with no rule above. */
 .ws-typeahead-popup__header {
   padding-block: var(--space-1);
-  padding-inline: var(--space-2);
-  color: var(--text-muted);
+  padding-inline: var(--space-1-5);
+  color: var(--cursor-text-tertiary);
   font-size: var(--font-size-xs);
-  text-transform: uppercase;
   user-select: none;
-}
-
-.ws-typeahead-popup__header:not(:first-child) {
-  margin-block-start: var(--space-1);
-  border-block-start: var(--ws-border-width) solid var(--border-subtle);
 }
 
 /* The source is still working: shown in place of an empty list so the
    popup does not blink shut between keystrokes. */
 .ws-typeahead-popup__loading {
   padding-block: var(--space-1);
-  padding-inline: var(--space-2);
-  color: var(--text-muted);
+  padding-inline: var(--space-1-5);
+  color: var(--cursor-text-tertiary);
   font-style: italic;
 }
 
 /* The keyboard highlight; the rows are not focusable (the editor keeps
    focus), so aria-selected on the option is the state of record. */
 .ws-typeahead-popup__item--selected {
-  background: var(--bg-card);
+  background: var(--bg-hover);
 }

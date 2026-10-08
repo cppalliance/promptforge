@@ -1,13 +1,22 @@
 /* The token ring gauge (token-ring.ts imports this file; esbuild
-   bundles it into dist/app.css). Geometry (radii, stroke width, dash
-   math) lives in the TS; these rules cover only paint and size. Themed
-   values come from the :root tokens in @workshop/look/tokens.css; every var() includes
-   a fallback so a deleted token degrades instead of breaking. */
+   bundles it into dist/app.css). Geometry (radius 5.5, stroke 2, dash
+   math) lives in the TS; these rules cover paint and size: a 15px gauge in
+   a 20px box (the 2.5px margin around it), round line caps, and an 8%
+   track. It is hidden while there is no usage data, and below 260px of
+   composer. Themed values come from the :root tokens in
+   @workshop/look/tokens.css. */
 
 .ws-token-ring {
   display: block;
+  flex: none;
   inline-size: var(--token-ring-size);
   block-size: var(--token-ring-size);
+  margin: var(--ws-token-ring-margin);
+}
+
+/* The hidden attribute does not hide an SVG element by itself. */
+.ws-token-ring[hidden] {
+  display: none;
 }
 
 .ws-token-ring-background,
@@ -21,7 +30,14 @@
 
 .ws-token-ring-progress {
   stroke: var(--token-ring-fill);
+  stroke-linecap: round;
   /* SVG arcs start at three o'clock; rotate so the fill grows from twelve. */
   transform: rotate(-90deg);
   transform-origin: center;
+}
+
+@container ws-composer (width < 260px) {
+  .ws-token-ring {
+    display: none;
+  }
 }

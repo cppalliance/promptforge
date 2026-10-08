@@ -93,6 +93,12 @@ await assertNoLeaks(lifecycle, () => {
     const menu = new AgentMenu(delegate);
     check("an empty discovery shows the empty note", emptyOf(menu).hidden === false);
     check("an empty discovery renders no buttons", buttonsOf(menu).length === 0);
+    check(
+      "the empty state has no lead text: the list opens the menu",
+      menu.element.querySelector(".ws-agent-menu__lead") === null &&
+        menu.element.firstElementChild?.classList.contains("ws-agent-menu__list") === true &&
+        !menu.element.textContent.includes("Launch an agent"),
+    );
     delegate.push(["chat", "research"]);
     check(
       "every discovered agent renders as a launch button, in order",

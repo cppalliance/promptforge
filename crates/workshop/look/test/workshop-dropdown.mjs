@@ -193,6 +193,78 @@ dropdown.show(trigger, [
   );
 }
 
+// --- The composer skin: check-only selection, descriptions, placement --------
+
+{
+  const anchored = window.document.createElement("button");
+  anchored.type = "button";
+  window.document.body.appendChild(anchored);
+  // jsdom has no layout, so the trigger's rect and the menu's measured size are stubbed.
+  anchored.getBoundingClientRect = () => ({
+    x: 40, y: 200, left: 40, right: 100, top: 200, bottom: 224, width: 60, height: 24, toJSON: () => ({}),
+  });
+  const probe = new DropdownMenu();
+  probe.show(
+    anchored,
+    [
+      { label: "Agent", description: "Plan, search, build anything", selected: true, onClick: () => undefined },
+      { label: "Plan", onClick: () => undefined },
+    ],
+    undefined,
+    { skin: "composer", className: "ws-test-menu", placement: "above", offsetX: -6 },
+  );
+  // The earlier menu from `dropdown` is still open, so the probe's is the last one.
+  const menu = [...window.document.querySelectorAll(".menu-popup")].at(-1);
+  const rows = itemsOf(menu);
+  check(
+    "the composer skin adds its classes beside the shared ones",
+    menu?.classList.contains("menu") === true &&
+      menu.classList.contains("menu-popup") &&
+      menu.classList.contains("menu-composer") &&
+      menu.classList.contains("scrollbar-menu"),
+  );
+  check("an options className lands on the menu", menu?.classList.contains("ws-test-menu") === true);
+  check(
+    "a description sits under its label in one text column",
+    rows[0]?.querySelector(".menu-item__text > .menu-item__label")?.textContent === "Agent" &&
+      rows[0]?.querySelector(".menu-item__text > .menu-item__description")?.textContent ===
+        "Plan, search, build anything",
+  );
+  check(
+    "a row without a description keeps the bare label",
+    rows[1]?.querySelector(".menu-item__text") === null &&
+      rows[1]?.querySelector(":scope > .menu-item__label")?.textContent === "Plan",
+  );
+  check(
+    "the selected row's check is a codicon, not a text glyph",
+    rows[0]?.querySelector(".menu-item__check svg") !== null &&
+      rows[0]?.querySelector(".menu-item__check")?.textContent === "",
+  );
+  check(
+    "an above placement with an offset opens at the trigger's left minus 6px",
+    menu?.style.left === "34px" && menu?.style.right === "auto",
+  );
+  check(
+    "an above placement sits over the trigger, not under it",
+    Number.parseFloat(menu?.style.top ?? "999") < 200,
+  );
+  probe.dispose();
+  anchored.remove();
+}
+
+{
+  // The plain skin is untouched: the text check, no composer classes.
+  const plain = new DropdownMenu();
+  plain.show(trigger, [{ label: "One", selected: true, onClick: () => undefined }]);
+  const last = [...window.document.querySelectorAll(".menu-popup")].at(-1);
+  check(
+    "the default skin keeps the text check and no composer class",
+    last?.classList.contains("menu-composer") === false &&
+      itemsOf(last)[0]?.querySelector(".menu-item__check")?.textContent === "✓",
+  );
+  plain.dispose();
+}
+
 // --- dispose() closes the open menu ------------------------------------------
 
 {

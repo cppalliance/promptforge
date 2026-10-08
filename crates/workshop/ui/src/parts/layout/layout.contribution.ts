@@ -54,20 +54,18 @@ addAction({
   keybinding: { keybinding: "ctrlcmd+alt+b" },
   menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 3 }],
   run: () => {
-    // A hidden group stays live, so the toggle always finds it; a zone
-    // whose group was never built opens the layout policy's right-zone
-    // anchors instead.
-    const visible = toggleZoneVisibility("right");
-    if (visible === undefined) {
-      for (const anchor of getService(LAYOUT_POLICY).anchors) {
-        if (panelTypeEntry(anchor)?.defaultZone === "right") {
-          openInZone(anchor, {});
-        }
-      }
-      setVisibilityKey("auxiliaryBarVisible", true);
+    // A hidden group stays live, so the toggle always finds it, and it
+    // writes the auxiliaryBarVisible key itself; a zone whose group was
+    // never built opens the layout policy's right-zone anchors instead.
+    if (toggleZoneVisibility("right") !== undefined) {
       return;
     }
-    setVisibilityKey("auxiliaryBarVisible", visible);
+    for (const anchor of getService(LAYOUT_POLICY).anchors) {
+      if (panelTypeEntry(anchor)?.defaultZone === "right") {
+        openInZone(anchor, {});
+      }
+    }
+    setVisibilityKey("auxiliaryBarVisible", true);
   },
 });
 

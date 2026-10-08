@@ -37,10 +37,14 @@ const bundle = await esbuild.build({
       // Close and Close Others, the tab menu's rows.
       import "./src/parts/layout/layout.contribution.ts";
       export { createDockview, themeDark } from "dockview";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { createAgentPaneHeader } from "./src/parts/agent/agent-pane-header.ts";
       export {
+        groupOfZone,
         initZones,
         openInZone,
         panelIdFor,
+        rightZonePreferredWidth,
         setZoneOverride,
         zoneOfPanel,
       } from "./src/parts/layout/zones.ts";
@@ -222,9 +226,13 @@ await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,
   themeDark,
+  Commands,
+  createAgentPaneHeader,
+  groupOfZone,
   initZones,
   openInZone,
   panelIdFor,
+  rightZonePreferredWidth,
   setZoneOverride,
   zoneOfPanel,
   createPanelComponent,
@@ -258,6 +266,7 @@ const fileCalls = () => calls.filter((url) => url.startsWith("/workspace/file"))
 const dock = createDockview(window.document.getElementById("dock"), {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  createRightHeaderActionComponent: createAgentPaneHeader,
   defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,
@@ -283,6 +292,72 @@ check(
   "reopening a singleton panel activates it instead of duplicating",
   openInZone("tree", {}) === treePanel && dock.panels.length === 2,
 );
+
+// --- Each zone's group carries its zone name ----------------------------------
+
+check(
+  "the agent's group is stamped as the right zone",
+  agentPanel.group.element.dataset.wsZone === "right",
+);
+check(
+  "the tree's group is stamped as the left zone",
+  treePanel.group.element.dataset.wsZone === "left",
+);
+
+// --- The right group's header: New Agent, More Actions, Close ----------------------
+
+const paneHeader = agentPanel.group.element.querySelector(".ws-pane-header");
+const headerButtons = [...(paneHeader?.querySelectorAll(".ws-pane-header__button") ?? [])];
+check(
+  "the right group holds the pane header with three buttons in order",
+  headerButtons.map((button) => button.getAttribute("aria-label")).join("|") ===
+    "New Agent|More Actions...|Close",
+);
+check(
+  "every header button draws a codicon",
+  headerButtons.length === 3 && headerButtons.every((button) => button.querySelector("svg") !== null),
+);
+check(
+  "the left group holds the header element too, which the stylesheet shows for the right zone only",
+  treePanel.group.element.querySelector(".ws-pane-header") !== null &&
+    treePanel.group.element.dataset.wsZone !== "right",
+);
+
+// Plus is New Chat Tab, which reuses an empty chat instead of piling up tabs.
+headerButtons[0].click();
+await flush();
+check("New Agent reuses the empty chat rather than opening another", dock.panels.length === 2);
+
+// More Actions opens the pane menu with the group's active chat as its target.
+headerButtons[1].click();
+const paneMenuLabels = () =>
+  [...window.document.querySelectorAll(".ws-window-titlebar__popover")]
+    .filter((popover) => !popover.hidden)
+    .flatMap((popover) => [...popover.querySelectorAll(".ws-window-titlebar__item-label")])
+    .map((label) => label.textContent)
+    .join("|");
+check(
+  `More Actions lists Toggle Chat Pane and the three close rows (got: ${paneMenuLabels()})`,
+  paneMenuLabels() === "Toggle Chat Pane|Close Tab|Close Other Tabs|Close All Tabs",
+);
+window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+check("an outside press closes the pane menu", paneMenuLabels() === "");
+
+// --- The right zone's sizes -------------------------------------------------------
+
+check("the right zone prefers a quarter of a 1200px dock, floored at 300px", rightZonePreferredWidth(1200) === 300);
+check("the right zone prefers a quarter of a 1400px dock, 350px", rightZonePreferredWidth(1400) === 350);
+check("the right zone caps its preference at 400px", rightZonePreferredWidth(3000) === 400);
+check("the right zone never prefers less than 300px", rightZonePreferredWidth(400) === 300);
+dock.layout(1200, 800);
+// The floor goes on with the first layout change of a laid-out dock.
+agentPanel.group.api.setSize({ width: 320 });
+await flush();
+check(
+  "once the dock is laid out the right zone's width floor is 300px",
+  agentPanel.group.minimumWidth === 300 && treePanel.group.minimumWidth !== 300,
+);
+check("the floor leaves the right zone's width where it was", agentPanel.group.api.width === 320);
 
 // --- Tabs: normal chips, and the tree's has no close button -----------------
 
@@ -314,8 +389,22 @@ const agentTabMenuLabels = [...(shownTabMenus()[0]?.querySelectorAll(".ws-window
   .join(",");
 check(
   `right-clicking an agent tab opens the registry tab menu (got: ${agentTabMenuLabels})`,
-  agentTabMenuLabels === "Close,Close Others",
+  agentTabMenuLabels === "Close,Close Others,Rename Chat",
 );
+// The menu's Rename Chat row opens the rename prompt for the clicked tab.
+const renameRow = [...(shownTabMenus()[0]?.querySelectorAll(".ws-window-titlebar__item") ?? [])].find(
+  (row) => row.querySelector(".ws-window-titlebar__item-label")?.textContent === "Rename Chat",
+);
+renameRow?.click();
+await flush();
+check(
+  "the tab menu's Rename Chat row opens the rename prompt, prefilled with the tab's name",
+  window.document.querySelector(".ws-chat-rename input")?.value === "New Agent",
+);
+[...(window.document.querySelector(".ws-chat-rename")?.querySelectorAll("button") ?? [])]
+  .find((button) => button.textContent === "Cancel")
+  ?.click();
+check("Cancel closes the prompt and renames nothing", window.document.querySelector(".ws-chat-rename") === null);
 window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
 check("an outside pointer closes the agent tab menu", shownTabMenus().length === 0);
 treeTab.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
@@ -329,7 +418,7 @@ treePanel.api.setTitle("Workshop");
 
 // --- The agent session is a singleton: reopening focuses it ----------------
 
-check("the agent tab shows the Agent Session title", agentPanel.title === "Agent Session");
+check("a new agent tab is titled New Agent", agentPanel.title === "New Agent");
 check("the agent panel keys by its type name", panelIdFor("agent", {}) === "agent");
 check(
   "reopening the agent session activates the same panel",
@@ -343,6 +432,91 @@ check(
     dock.panels.length === 3 &&
     zoneOfPanel(secondAgent) === "right",
 );
+// --- Renaming a chat tab: in place and from the tab menu ----------------------------
+
+const tabText = (panel) => panel.view.tab.element.querySelector(".dv-default-tab-content")?.textContent;
+const renameField = (panel) => panel.view.tab.element.querySelector("input.ws-tab-rename");
+const doubleClickTab = (panel) =>
+  panel.view.tab.element.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+const pressKey = (target, key) =>
+  target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
+doubleClickTab(secondAgent);
+let field = renameField(secondAgent);
+check(
+  "double-clicking a chat tab opens an inline field holding the tab's name",
+  field !== null && field.value === "New Agent",
+);
+field.value = "Docs chat";
+pressKey(field, "Enter");
+check(
+  "Enter commits the rename and the tab shows the new name",
+  tabText(secondAgent) === "Docs chat" && renameField(secondAgent) === null,
+);
+check("a rename leaves the panel's own title alone, so nothing persists", secondAgent.title === "New Agent");
+check("another chat's tab keeps its own name", tabText(agentPanel) === "New Agent");
+
+doubleClickTab(secondAgent);
+field = renameField(secondAgent);
+field.value = "Changed my mind";
+pressKey(field, "Escape");
+check("Escape cancels the rename", tabText(secondAgent) === "Docs chat" && renameField(secondAgent) === null);
+
+doubleClickTab(secondAgent);
+field = renameField(secondAgent);
+field.value = "   ";
+pressKey(field, "Enter");
+check("committing a blank name clears the rename", tabText(secondAgent) === "New Agent");
+
+doubleClickTab(secondAgent);
+field = renameField(secondAgent);
+field.value = "By blur";
+field.dispatchEvent(new window.FocusEvent("blur"));
+check("leaving the field commits the rename", tabText(secondAgent) === "By blur");
+
+doubleClickTab(treePanel);
+check(
+  "a tab whose panel type is not renamable has no rename field",
+  renameField(treePanel) === null && tabText(treePanel) === "Workshop",
+);
+
+// The tab menu's Rename Chat asks for the name in the form modal.
+await Commands.execute("workbench.action.chat.rename", { panelId: secondAgent.id });
+const renameDialog = window.document.querySelector(".ws-chat-rename");
+check(
+  "Rename Chat opens the form modal asking 'Enter new chat name'",
+  renameDialog !== null &&
+    renameDialog.textContent.includes("Enter new chat name") &&
+    renameDialog.classList.contains("modal-dialog--form"),
+);
+const renameInput = renameDialog?.querySelector("input");
+check(
+  "the field's placeholder is 'Chat name' and it starts on the current name",
+  renameInput?.placeholder === "Chat name" && renameInput?.value === "By blur",
+);
+renameInput.value = "From the menu";
+renameInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+[...renameDialog.querySelectorAll("button")].find((button) => button.textContent === "Rename").click();
+check(
+  "the dialog's Rename applies the name and closes the dialog",
+  tabText(secondAgent) === "From the menu" && window.document.querySelector(".ws-chat-rename") === null,
+);
+
+// --- A middle click closes a chat tab; the tree's tab has nothing to close ------------
+
+const thirdAgent = openInZone("agent", { instance: "third" });
+await flush();
+treePanel.view.tab.element.dispatchEvent(
+  new window.MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }),
+);
+await flush();
+check("a middle click on the non-closable tree tab closes nothing", dock.getPanel("tree") !== undefined);
+thirdAgent.view.tab.element.dispatchEvent(
+  new window.MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }),
+);
+await flush();
+check("a middle click closes a chat tab", dock.getPanel("agent:third") === undefined);
+
 dock.removePanel(secondAgent);
 await flush();
 check("closing the second agent restores the original panel count", dock.panels.length === 2);
@@ -507,6 +681,23 @@ check(
   unknown.element.textContent === "Unknown panel: nope",
 );
 check("isPanelType narrows registered names", isPanelType("editor") && !isPanelType("nope"));
+
+// --- Closing the last chat tab hides the right zone ---------------------------------
+
+check("the right zone is showing before its last chat closes", groupOfZone("right")?.api.isVisible === true);
+await Commands.execute("workbench.action.closeActiveEditor", { panelId: "agent" });
+await flush();
+check("the last chat tab is gone", dock.getPanel("agent") === undefined);
+check(
+  "closing the last chat tab hides the right zone, which stays alive and empty",
+  groupOfZone("right") !== undefined &&
+    groupOfZone("right").panels.length === 0 &&
+    groupOfZone("right").api.isVisible === false,
+);
+check(
+  "the hidden right zone shows again when a chat opens",
+  openInZone("agent", { instance: "again" }).group.api.isVisible === true,
+);
 
 if (failures.length > 0) {
   console.error(`workshop-zones: ${failures.length} failure(s)`);

@@ -22,9 +22,8 @@ import { JSDOM } from "jsdom";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
-// One jsdom for the whole test: the lucide icon module serializes SVGs
-// through the document at import time, so the globals must exist before
-// the bundle loads.
+// One jsdom for the whole test: the modules read the document at import
+// time, so the globals must exist before the bundle loads.
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
 globalThis.window = window;

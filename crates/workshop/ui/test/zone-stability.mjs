@@ -267,6 +267,12 @@ await flush();
 const mainGroup = zoneGroup(dock, "main");
 check("closing the last editor leaves the main zone with a live group", mainGroup !== undefined);
 check("the rebuilt main group holds no panels", mainGroup?.panels.length === 0);
+check(
+  "every zone group is stamped with its zone: opened, and the rebuilt main group too",
+  treePanel.group.element.dataset.wsZone === "left" &&
+    agentPanel.group.element.dataset.wsZone === "right" &&
+    mainGroup?.element.dataset.wsZone === "main",
+);
 check("the dock keeps all three zone groups", dock.groups.length === 3);
 check("the rebuilt main group takes the recorded width", mainGroup?.api.width === 600);
 check(
@@ -291,6 +297,7 @@ await flush();
 const rightRebuilt = zoneGroup(dock, "right");
 check("closing the last agent panel leaves the right zone with a live group", rightRebuilt !== undefined);
 check("the rebuilt right group holds no panels", rightRebuilt?.panels.length === 0);
+check("the rebuilt right group is stamped as the right zone", rightRebuilt?.element.dataset.wsZone === "right");
 check("the rebuilt right group takes the recorded width", rightRebuilt?.api.width === 320);
 check("the dock still has three groups after the agent close", dock.groups.length === 3);
 
@@ -366,6 +373,12 @@ const relaunchedRight = zoneGroup(dockRelaunched, "right");
 check("the relaunch restores the main zone as an empty group", relaunchedMain?.panels.length === 0);
 check("the relaunch restores the right zone as an empty group", relaunchedRight?.panels.length === 0);
 check(
+  "the relaunch stamps every restored group with its zone",
+  dockRelaunched.getPanel("tree")?.group.element.dataset.wsZone === "left" &&
+    relaunchedMain?.element.dataset.wsZone === "main" &&
+    relaunchedRight?.element.dataset.wsZone === "right",
+);
+check(
   "the relaunch restores the zones at their prior widths",
   dockRelaunched.getPanel("tree")?.group.api.width === 280 &&
     relaunchedMain?.api.width === 600 &&
@@ -411,6 +424,32 @@ await flush();
 check("an unrelated mutation leaves the never-opened main zone unmapped", zoneGroup(dockTwo, "main") === undefined);
 check("an unrelated mutation creates no group for the never-opened zone", dockTwo.groups.length === 2);
 check("the unrelated mutation keeps the right zone's group", zoneGroup(dockTwo, "right")?.panels.length === 1);
+
+// --- A right group created in a laid-out dock opens at the chat pane's preference ----
+
+{
+  const dockSized = createDock(window.document.createElement("div"));
+  initZones(dockSized);
+  resetZones();
+  dockSized.layout(1600, 800);
+  await flush();
+  openInZone("tree", {});
+  const agent = openInZone("agent", {});
+  await flush();
+  check(
+    "a right group created beside another opens at min(400px, W/4): 400px in a 1600px dock",
+    agent.group.api.width === 400,
+  );
+  agent.group.api.setSize({ width: 320 });
+  await flush();
+  check("the floor leaves a 320px chat pane where it is", agent.group.api.width === 320 && agent.group.minimumWidth === 300);
+  dockSized.removePanel(agent);
+  await flush();
+  check(
+    "the rebuilt right group returns to the width the pane last had",
+    zoneGroup(dockSized, "right")?.api.width === 320,
+  );
+}
 
 // --- No placeholder ever renders -------------------------------------------------
 

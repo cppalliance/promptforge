@@ -12,9 +12,20 @@
 
 import type { IDockviewPanel } from "dockview";
 
+import { Emitter, type Event } from "@workshop/platform/event";
 import { DOCK, panelTypeEntry, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { WorkshopPart } from "@workshop/platform/workshop-part";
+
+// The panels this module closed, announced after each one is gone, so a
+// feature can follow its own panels' closes (the agent contribution hides
+// the chat pane when its last chat tab closes) without the close path
+// naming any panel type. A close that does not go through this path - a
+// layout restore, a workspace switch - announces nothing.
+const closedEmitter = new Emitter<IDockviewPanel>();
+
+/** Fires with each panel the close path closed, after it left the dock. */
+export const onDidClosePanel: Event<IDockviewPanel> = closedEmitter.event;
 
 /**
  * The panel a close command acts on: the one a `{ panelId }` argument
@@ -79,6 +90,7 @@ export async function closeActiveEditor(arg?: unknown): Promise<boolean> {
   }
   if ((await confirmPanelClose(panel)) && isInDock(panel)) {
     panel.api.close();
+    closedEmitter.fire(panel);
     return true;
   }
   return false;
@@ -117,6 +129,7 @@ export async function closeOtherEditors(arg?: unknown): Promise<void> {
   for (const panel of batch) {
     if (isInDock(panel)) {
       panel.api.close();
+      closedEmitter.fire(panel);
     }
   }
 }

@@ -1,11 +1,19 @@
-// The chat box: a Tiptap/ProseMirror editor framed on a bar with its mic
-// and send buttons. The schema is deliberately minimal - paragraphs,
+// The chat box: a Tiptap/ProseMirror editor framed on a bar with one round
+// action button. The schema is deliberately minimal - paragraphs,
 // text, and hard breaks - so what the operator types is plain text with
 // newlines; richer nodes (mention chips) join as extensions on top of
-// this base. Enter emits `send`; an Enter that commits an IME composition
-// never does; Shift+Enter inserts a hard break. The box grows with its
+// this base. Enter emits `send`, and so does Ctrl+Enter; an Enter that
+// commits an IME composition never does, and neither does an auto-repeat
+// Enter; Shift+Enter inserts a hard break. The box grows with its
 // content: every edit re-measures scrollHeight and clamps it between the
 // skin's min/max height tokens.
+//
+// The action button is the mic while the box is empty and the agent idle,
+// the send arrow once there is text, and Stop while the agent generates
+// (`action: "stop"`); a recording mic keeps the button on the mic so a
+// second press can end the take. The agent mode picks the fill of the send
+// and stop states. While generating, the placeholder reads "Add a
+// follow-up".
 //
 // The component is isolated: props in (every one defaulted), events out
 // through one sink, an imperative handle for the owning part and for
@@ -29,7 +37,7 @@ import { Slice } from "@tiptap/pm/model";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { EditorState } from "@tiptap/pm/state";
 import { Disposable, type IDisposable, toDisposable } from "@workshop/platform/lifecycle";
-import { ICON_MIC, ICON_SEND, ICON_WARNING } from "@workshop/look/icons";
+import { ICON_MIC, ICON_SEND, ICON_STOP_CIRCLE, ICON_WARNING } from "@workshop/look/icons";
 import { renderChip } from "./chip-view";
 import {
   attrsFromChip,
@@ -52,9 +60,13 @@ import type {
 } from "./types";
 
 // The fallbacks mirror the token defaults in @workshop/look/tokens.css; they
-// apply when the skin is absent (tests) or the token is deleted.
-const DEFAULT_MIN_HEIGHT_PX = 36;
-const DEFAULT_MAX_HEIGHT_PX = 200;
+// apply when the skin is absent (tests) or the token is deleted. The editor
+// grows from one 22px line to 240px.
+const DEFAULT_MIN_HEIGHT_PX = 22;
+const DEFAULT_MAX_HEIGHT_PX = 240;
+
+/** The placeholder while the agent generates; otherwise the owning part's. */
+const FOLLOW_UP_PLACEHOLDER = "Add a follow-up";
 
 // The ProseMirror suggestion plugin waits this long after the last
 // keystroke before asking the source, and aborts the in-flight query when
@@ -124,10 +136,22 @@ type ResolvedDynamicProps = {
   -readonly [K in keyof ChatBoxDynamicProps]-?: ChatBoxDynamicProps[K];
 };
 
-/** The mic button's title per state; blocked reads as idle because the press is what names the blocker. */
-function micTitle(mic: ResolvedDynamicProps["mic"]): string {
-  return mic === "recording" ? "Stop recording" : "Push to talk";
-}
+/** What the one round button is right now. */
+type ActionState = "mic" | "send" | "stop";
+
+// The button's tooltip per state. A blocked mic reads as an idle one,
+// because the press is what names the blocker.
+const SEND_TITLE = "Send";
+const STOP_TITLE = "Stop (Ctrl+Shift+Backspace)";
+const MIC_TITLE = "Voice Input (Ctrl+Shift+Space)";
+const MIC_RECORDING_TITLE = "Stop recording";
+
+/** The glyph per state: static strings from @workshop/look, never data. */
+const ACTION_ICON: Readonly<Record<ActionState, string>> = {
+  mic: ICON_MIC,
+  send: ICON_SEND,
+  stop: ICON_STOP_CIRCLE,
+};
 
 /** The popup's title when the owning part gives none. */
 const DEFAULT_ERROR_TITLE = "Connection Error";
@@ -151,9 +175,9 @@ interface ErrorPopup {
 /**
  * The chat box: the bar (`ws-agent-session__bar`) holding the framed
  * editor, an optional controls element the owning part supplies, and
- * the box's own mic and send buttons. Disposable: dispose() destroys
+ * the box's own round action button. Disposable: dispose() destroys
  * the editor, releases the text-control registration, and takes its
- * buttons back out of the controls element it was handed.
+ * button back out of the controls element it was handed.
  *
  * The handle is a structural superset of dictation's input target:
  * dictation splices the transcript in through insertionContext and
@@ -168,8 +192,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
 
   private readonly frame: HTMLDivElement;
   private readonly strip: HTMLDivElement;
-  private readonly mic: HTMLButtonElement;
-  private readonly send: HTMLButtonElement;
+  private readonly button: HTMLButtonElement;
   private readonly editor: Editor;
   private readonly onEvent: ChatBoxEventSink;
   private readonly variant: NonNullable<ChatBoxProps["variant"]>;
@@ -189,6 +212,15 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   // wait.
   private takeReadOnly = false;
 
+  // Whether the editor holds no text and no pill: an empty box shows the
+  // mic on the action button. Kept current by every transaction once the
+  // editor is mounted.
+  private empty = true;
+  private mounted = false;
+  // The state the button currently draws, so a render swaps the glyph
+  // only when the state changes.
+  private drawnState: ActionState | null = null;
+
   constructor(props: ChatBoxProps = {}, onEvent: ChatBoxEventSink = () => {}) {
     super();
     this.onEvent = onEvent;
@@ -197,8 +229,10 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       editable: props.editable ?? true,
       action: props.action ?? "send",
       mic: props.mic ?? "idle",
+      mode: props.mode ?? "agent",
       error: props.error ?? null,
     };
+    const idlePlaceholder = props.placeholder ?? "";
     this.commandSource = props.commandSource ?? NO_COMMANDS;
     const mentionSource = props.mentionSource ?? stubMentionSource;
 
@@ -214,39 +248,29 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.strip.className = "ws-prompt-input__attachments";
     this.frame.appendChild(this.strip);
 
-    this.mic = document.createElement("button");
-    this.mic.type = "button";
-    this.mic.className = "ws-agent-session__mic ws-stt-mic";
-    this.mic.setAttribute("aria-label", "Push to talk");
-    // Static lucide strings, not data: the only markup this box writes.
-    this.mic.innerHTML = ICON_MIC;
-    this.mic.addEventListener("click", () => this.onEvent({ type: "mic-press" }));
-    this.send = document.createElement("button");
-    this.send.type = "button";
-    this.send.className = "ws-agent-session__send";
-    this.send.setAttribute("aria-label", "Send");
-    this.send.innerHTML = ICON_SEND;
-    this.send.addEventListener("click", () => this.emitAction());
+    // One round button is the mic, the send arrow, or Stop; renderAction
+    // paints whichever the state calls for.
+    this.button = document.createElement("button");
+    this.button.type = "button";
+    this.button.className = "ws-agent-session__action";
+    this.button.addEventListener("click", () => this.pressAction());
 
-    // Two bar shapes, one owner: with a controls element the buttons
-    // trail the owning part's toolbar; without one they sit on the bar. The
-    // buttons are the box's in both cases.
+    // Two bar shapes, one owner: with a controls element the button
+    // trails the owning part's toolbar; without one it sits on the bar. The
+    // button is the box's in both cases.
     if (props.controls !== undefined) {
-      props.controls.append(this.mic, this.send);
+      props.controls.append(this.button);
       this.element.append(this.frame, props.controls);
       const controls = props.controls;
       this._register(
         toDisposable(() => {
-          if (this.mic.parentElement === controls) {
-            this.mic.remove();
-          }
-          if (this.send.parentElement === controls) {
-            this.send.remove();
+          if (this.button.parentElement === controls) {
+            this.button.remove();
           }
         }),
       );
     } else {
-      this.element.append(this.frame, this.mic, this.send);
+      this.element.append(this.frame, this.button);
     }
 
     this.editor = new Editor({
@@ -278,7 +302,14 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           underline: false,
         }),
         Placeholder.configure({
-          placeholder: props.placeholder ?? "",
+          // Re-read on every state update: the follow-up text while the
+          // agent generates, the owning part's text otherwise.
+          placeholder: () => {
+            if (this.dynamic.action === "stop") {
+              return FOLLOW_UP_PLACEHOLDER;
+            }
+            return typeof idlePlaceholder === "function" ? idlePlaceholder() : idlePlaceholder;
+          },
           // The gated (non-editable) box still shows its placeholder,
           // same as a disabled textarea: the gate's "the agent is
           // working" message IS the non-editable state.
@@ -309,6 +340,9 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           role: "textbox",
           "aria-label": props.ariaLabel ?? "Message",
           "aria-multiline": "true",
+          // The prompt is not prose to be corrected or capitalized.
+          spellcheck: "false",
+          autocapitalize: "off",
         },
         handleKeyDown: (view, event) => {
           // An open typeahead owns Enter and Tab - both insert the highlighted
@@ -322,16 +356,24 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           // An Enter that commits an IME composition is not a send:
           // without the isComposing guard the box would submit
           // half-composed text. Claimed, not passed on: the keymap would
-          // otherwise split the paragraph under the composition.
-          if (event.isComposing) {
+          // otherwise split the paragraph under the composition. A held
+          // Enter is claimed the same way - only its first press sends, so
+          // a held key never sends twice or splits the paragraph.
+          if (event.isComposing || event.repeat) {
             return true;
           }
-          this.emitAction();
+          // Enter and Ctrl+Enter both send; only Shift+Enter, above, is a newline.
+          this.emitSend();
           return true;
         },
       },
       onUpdate: () => {
         this.syncHeight();
+      },
+      // Every transaction, including a whole-content replace that onUpdate
+      // skips, can empty or fill the box, which flips the button's state.
+      onTransaction: () => {
+        this.syncEmpty();
       },
     });
     // prosemirror-view drops keydown events for a non-editable editor
@@ -346,7 +388,9 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       }
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
-        this.emitAction();
+        if (!event.repeat) {
+          this.emitSend();
+        }
       }
     });
     this._register(
@@ -381,9 +425,10 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       });
       this._register(registration);
     }
+    this.mounted = true;
+    this.empty = this.getText() === "";
     this.renderEditable();
     this.renderAction();
-    this.renderMic();
     this.renderError();
     const initialMeasure = window.requestAnimationFrame(() => this.syncHeight());
     this._register(toDisposable(() => window.cancelAnimationFrame(initialMeasure)));
@@ -404,13 +449,27 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       this.dynamic.editable = props.editable;
       this.renderEditable();
     }
+    let actionChanged = false;
     if (props.action !== undefined && props.action !== this.dynamic.action) {
+      const wasStop = this.dynamic.action === "stop";
       this.dynamic.action = props.action;
-      this.renderAction();
+      actionChanged = true;
+      if (wasStop !== (props.action === "stop")) {
+        // The placeholder follows the generating state, and ProseMirror
+        // redraws it only on a state update: an empty transaction is one.
+        this.editor.view.dispatch(this.editor.state.tr);
+      }
     }
     if (props.mic !== undefined && props.mic !== this.dynamic.mic) {
       this.dynamic.mic = props.mic;
-      this.renderMic();
+      actionChanged = true;
+    }
+    if (props.mode !== undefined && props.mode !== this.dynamic.mode) {
+      this.dynamic.mode = props.mode;
+      actionChanged = true;
+    }
+    if (actionChanged) {
+      this.renderAction();
     }
     if (props.error !== undefined && !sameError(props.error, this.dynamic.error)) {
       this.dynamic.error = props.error;
@@ -419,16 +478,51 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   }
 
   /**
-   * The send button's press and the submitting Enter share this path:
-   * `idle` is silent, `stop` emits `stop`, and both send states emit
-   * `send`, `send-blocked` included, so the owning part can name the blocker.
+   * What the one round button is: the mic while the box is empty, the send
+   * arrow once it has text, Stop while the agent generates. A recording
+   * mic stays the mic whatever the box holds, so its second press can end
+   * the take.
    */
-  private emitAction(): void {
-    switch (this.dynamic.action) {
-      case "idle":
+  private actionState(): ActionState {
+    if (this.dynamic.mic === "recording") {
+      return "mic";
+    }
+    if (this.dynamic.action === "stop") {
+      return "stop";
+    }
+    return this.empty ? "mic" : "send";
+  }
+
+  /** The button's press: the mic presses, Stop stops, the send arrow sends. */
+  private pressAction(): void {
+    const state = this.actionState();
+    switch (state) {
+      case "mic":
+        this.onEvent({ type: "mic-press" });
         return;
       case "stop":
         this.onEvent({ type: "stop" });
+        return;
+      case "send":
+        this.emitSend();
+        return;
+      default: {
+        const exhaustive: never = state;
+        return exhaustive;
+      }
+    }
+  }
+
+  /**
+   * The send button's press and the submitting Enter share this path:
+   * `idle` and `stop` are silent (Stop is the button's alone), and both
+   * send states emit `send`, `send-blocked` included, so the owning part
+   * can name the blocker.
+   */
+  private emitSend(): void {
+    switch (this.dynamic.action) {
+      case "idle":
+      case "stop":
         return;
       case "send":
       case "send-blocked":
@@ -443,6 +537,18 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
         const exhaustive: never = this.dynamic.action;
         return exhaustive;
       }
+    }
+  }
+
+  /** Re-reads whether the box is empty; a change repaints the button. */
+  private syncEmpty(): void {
+    if (!this.mounted) {
+      return;
+    }
+    const empty = this.getText() === "";
+    if (empty !== this.empty) {
+      this.empty = empty;
+      this.renderAction();
     }
   }
 
@@ -469,11 +575,38 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.frame.dataset["editable"] = String(effective);
   }
 
+  /**
+   * Paints the round button for its current state. `data-state` names it
+   * (mic, send, or stop), `data-action`, `data-mic`, and `data-mode`
+   * mirror the props, and the glyph, name, and tooltip follow the state.
+   * Only the send arrow can be disabled: an idle agent with text in the
+   * box dims it, while the mic and Stop always answer a press.
+   */
   private renderAction(): void {
-    const action = this.dynamic.action;
-    this.send.dataset["action"] = action;
-    this.send.disabled = action === "idle";
-    this.send.setAttribute("aria-disabled", String(action === "send-blocked"));
+    const state = this.actionState();
+    const { action, mic, mode } = this.dynamic;
+    const recording = mic === "recording";
+    const button = this.button;
+    button.dataset["state"] = state;
+    button.dataset["action"] = action;
+    button.dataset["mic"] = mic;
+    button.dataset["mode"] = mode;
+    button.classList.toggle("ws-stt-mic--recording", recording);
+    button.disabled = state === "send" && action === "idle";
+    button.setAttribute("aria-disabled", String(state === "send" && action === "send-blocked"));
+    if (state === "mic") {
+      button.setAttribute("aria-label", "Push to talk");
+      button.setAttribute("aria-pressed", String(recording));
+      button.title = recording ? MIC_RECORDING_TITLE : MIC_TITLE;
+    } else {
+      button.removeAttribute("aria-pressed");
+      button.setAttribute("aria-label", state === "stop" ? "Stop" : "Send");
+      button.title = state === "stop" ? STOP_TITLE : SEND_TITLE;
+    }
+    if (this.drawnState !== state) {
+      this.drawnState = state;
+      button.innerHTML = ACTION_ICON[state];
+    }
   }
 
   /**
@@ -521,15 +654,6 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     retry.addEventListener("click", () => this.onEvent({ type: "retry" }));
     element.append(icon, title, message, retry);
     return { element, title, message, retry };
-  }
-
-  private renderMic(): void {
-    const mic = this.dynamic.mic;
-    const recording = mic === "recording";
-    this.mic.dataset["mic"] = mic;
-    this.mic.classList.toggle("ws-stt-mic--recording", recording);
-    this.mic.setAttribute("aria-pressed", String(recording));
-    this.mic.title = micTitle(mic);
   }
 
   /** The prompt as plain text: paragraphs and hard breaks as single newlines. */

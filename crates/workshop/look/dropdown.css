@@ -88,6 +88,71 @@
 		opacity: 1;
 	}
 
+	/* The composer menu surface (add .menu-composer beside .menu): the skin
+	   of the mode, model, and @ menus - #181818 with a #F0F0F026 border, a
+	   6px radius, and 2px of padding; rows padded 2px 6px with a 4px radius,
+	   12px text, 14px icons, and a #F0F0F011 highlight. Selection is a 10px
+	   check alone, with no selected fill. A row's description sits under
+	   its label in the quieter text tier. */
+	.menu-composer {
+		min-width: 0;
+		padding: 2px;
+		border: 1px solid var(--cursor-stroke-focused);
+		border-radius: var(--radius);
+		background: var(--cursor-editor);
+		box-shadow: var(--shadow-popup);
+		font-size: var(--font-size-sm);
+		line-height: var(--line-height-sm);
+		overflow-y: auto;
+	}
+	.menu-composer .menu-item {
+		min-height: 0;
+		padding: 2px 6px;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
+		line-height: var(--line-height-sm);
+	}
+	.menu-composer .menu-item:hover,
+	.menu-composer .menu-item:focus-visible,
+	.menu-composer .menu-item[aria-selected="true"] {
+		background: var(--bg-hover);
+	}
+	.menu-composer .menu-item--selected {
+		background: transparent;
+	}
+	.menu-composer .menu-item--selected:hover,
+	.menu-composer .menu-item--selected:focus-visible {
+		background: var(--bg-hover);
+	}
+	.menu-composer .menu-item__icon {
+		width: 14px;
+		height: 14px;
+	}
+	.menu-composer .menu-item__icon svg {
+		width: 14px;
+		height: 14px;
+	}
+	.menu-composer .menu-item__text {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+	}
+	.menu-composer .menu-item__description {
+		color: var(--cursor-text-tertiary);
+		font-size: var(--font-size-xs);
+		line-height: var(--line-height-xs);
+	}
+	.menu-composer .menu-item__check {
+		display: inline-flex;
+		flex: none;
+		color: var(--cursor-text-primary);
+	}
+	.menu-composer .menu-item__check svg {
+		width: 10px;
+		height: 10px;
+	}
+
 	/* The floating action menu: fixed against the viewport, fading in. */
 	.menu-popup {
 		position: fixed;

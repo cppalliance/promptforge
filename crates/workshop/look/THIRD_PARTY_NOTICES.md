@@ -4,7 +4,7 @@ Source in this directory that derives from another project, with the notice its 
 
 ## Codicons
 
-`icons.ts` holds the artwork of 15 icons from the Visual Studio Code codicon set - add, arrow-up, check, chevron-down, chevron-right, close, copy, ellipsis, error, info, mic, new-folder, stop-circle, trash, and warning - as inline SVG strings. Each string is the icon's `src/icons/<name>.svg` file from `@vscode/codicons` with only the `width` and `height` attributes changed. `@vscode/codicons` is a `devDependency` that only `test/icons.mjs` reads, to check every string against its source file.
+`icons.ts` holds the artwork of 28 icons from the Visual Studio Code codicon set - add, agent, arrow-up, ask, bug, check, checklist, chevron-down, chevron-right, close, copy, ellipsis, error, file, file-code, file-media, file-text, folder, globe, info, layers, link, mic, new-folder, stop-circle, symbol-keyword, trash, and warning - as inline SVG strings. Each string is the icon's `src/icons/<name>.svg` file from `@vscode/codicons` with only the `width` and `height` attributes changed. `@vscode/codicons` is a `devDependency` that only `test/icons.mjs` reads, to check every string against its source file.
 
 - Project: <https://github.com/microsoft/vscode-codicons>
 - Package: `@vscode/codicons` 0.0.46-24

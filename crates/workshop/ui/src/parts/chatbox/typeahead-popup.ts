@@ -9,14 +9,18 @@
 // resize through Floating UI's autoUpdate; the unmount it returns tears
 // all of that down.
 //
-// The rows are chips: each draws the chip's icon, its label, and its
-// `description` dimmed to the right. Items with a `group` are ordered by
-// group with a non-selectable header at each boundary; keyboard
+// The popup wears the composer's shared menu surface (look's
+// `.menu-composer`, the skin the mode and model menus use) and its rows
+// are `.menu-item` rows. The rows are chips: each draws the chip's icon,
+// its label, and its `description` as a right-aligned subtitle that
+// truncates from the left, so a long path keeps its file name. Items with
+// a `group` are ordered by group with a non-selectable header at each boundary; keyboard
 // navigation indexes the items only. The ProseMirror plugin's `loading`
 // flag renders a loading row while the source is pending. The popup
 // writes no fetch, debounce, or staleness logic of its own: the plugin
 // supplies the items, the abort, and the flag; the popup only draws.
 
+import "@workshop/look/dropdown.css";
 import "./typeahead-popup.css";
 
 import type { SuggestionKeyDownProps, SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
@@ -24,6 +28,9 @@ import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { renderChipIcon } from "./chip-view";
 import { type ChipNodeAttrs, attrsFromChip } from "./mention-chip";
 import type { ChipRef } from "./types";
+
+/** The glyph size on a row; the shared menu surface's icon size. */
+const ROW_ICON_SIZE_PX = 14;
 
 // The ProseMirror plugin hands the popup ChipRef items and takes the node's
 // attributes back through command(): the popup converts at that edge,
@@ -89,7 +96,7 @@ export class TypeaheadPopup extends Disposable {
   constructor(props: TypeaheadProps) {
     super();
     this.element = document.createElement("div");
-    this.element.className = "ws-typeahead-popup";
+    this.element.className = "menu menu-composer scrollbar-menu ws-typeahead-popup";
     this.list = document.createElement("ul");
     this.list.className = "ws-typeahead-popup__list";
     this.list.setAttribute("role", "listbox");
@@ -188,23 +195,29 @@ export class TypeaheadPopup extends Disposable {
 
   private renderItem(chip: ChipRef): HTMLLIElement {
     const option = document.createElement("li");
-    option.className = "ws-typeahead-popup__item";
+    option.className = "menu-item ws-typeahead-popup__item";
     option.setAttribute("role", "option");
     if (chip.kind !== undefined) {
       option.setAttribute("data-kind", chip.kind);
     }
     const icon = document.createElement("span");
-    icon.className = "ws-typeahead-popup__icon";
+    icon.className = "menu-item__icon ws-typeahead-popup__icon";
     icon.setAttribute("aria-hidden", "true");
-    icon.appendChild(renderChipIcon(chip));
+    icon.appendChild(renderChipIcon(chip, ROW_ICON_SIZE_PX));
     const label = document.createElement("span");
     label.className = "ws-typeahead-popup__label";
     label.textContent = chip.label;
     option.append(icon, label);
     if (chip.description !== undefined) {
+      // The subtitle truncates from the left: the span is right-to-left so
+      // the ellipsis lands at the start, and the inner bdi keeps the path's
+      // own left-to-right order.
       const description = document.createElement("span");
       description.className = "ws-typeahead-popup__description";
-      description.textContent = chip.description;
+      const text = document.createElement("bdi");
+      text.setAttribute("dir", "ltr");
+      text.textContent = chip.description;
+      description.appendChild(text);
       option.appendChild(description);
     }
     option.addEventListener("click", () => {

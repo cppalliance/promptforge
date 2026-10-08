@@ -29,6 +29,10 @@ export interface ModalField {
   /** The input's id, unique per dialog kind for the label association. */
   readonly id: string;
   readonly label: string;
+  /** Placeholder text shown while the field is empty. */
+  readonly placeholder?: string;
+  /** The field's initial text, selected on open so typing replaces it. */
+  readonly value?: string;
 }
 
 /**
@@ -176,6 +180,12 @@ export function openModal(options: ModalOptions): ModalHandle {
     input.type = "text";
     input.id = options.field.id;
     input.className = skin === undefined ? `${prefix}__input` : `${prefix}__input input`;
+    if (options.field.placeholder !== undefined) {
+      input.placeholder = options.field.placeholder;
+    }
+    if (options.field.value !== undefined) {
+      input.value = options.field.value;
+    }
     field.append(label, input);
   }
 
@@ -207,7 +217,8 @@ export function openModal(options: ModalOptions): ModalHandle {
       primaryButton = button;
     }
     if (def.requiresValue === true) {
-      button.disabled = true;
+      // Disabled until the field holds text; an initial value counts.
+      button.disabled = (options.field?.value ?? "").trim() === "";
       valueButtons.push(button);
     }
     button.addEventListener("click", () => {
@@ -289,6 +300,9 @@ export function openModal(options: ModalOptions): ModalHandle {
   const firstFocus: HTMLElement | undefined = input ?? primaryButton ?? buttons[0];
   if (firstFocus) {
     firstFocus.focus();
+  }
+  if (input && options.field?.value !== undefined) {
+    input.select();
   }
   return {
     close: dismiss,

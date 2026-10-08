@@ -1,14 +1,20 @@
 // The model picker trigger (src/parts/chrome/model-picker-trigger.ts) in jsdom: a
-// pill button showing the selected model's id. Clicking opens a
-// DropdownMenu of the ModelService catalog; picking one sends the select
-// command through the service and leaves the label for the server's
-// confirming snapshot. The trigger re-renders on the service's change
-// events; dispose() closes an open menu and unsubscribes. The service
-// under test is a real ModelService with a recording send function - its
-// constructor takes nothing else. Runs under the shared leak check: an
-// undisposed trigger or service fails.
+// button showing the selected model's id and a 9px chevron, with the tooltip
+// "Switch Model (Ctrl+/)". Clicking (or open(), which Ctrl+/ calls) opens a
+// DropdownMenu of the ModelService catalog on the composer's menu surface with
+// a check-only selection, 230px wide and at most 320px tall, reading "No models
+// found" when the catalog is empty; picking one sends the select command
+// through the service and leaves the label for the server's confirming
+// snapshot. The trigger re-renders when the service's selection changes (a
+// catalog change leaves the label alone); dispose()
+// closes an open menu and unsubscribes. The stylesheet's side - 20px tall, a
+// 4px radius, 6px side padding, 13px/18px secondary text, an 8% hover fill, the
+// chevron at 0.7 - is read from the source text. The service under test is a
+// real ModelService with a recording send function - its constructor takes
+// nothing else. Runs under the shared leak check: an undisposed trigger or
+// service fails.
 // Run: node test/model-picker-trigger.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -39,8 +45,8 @@ const bundle = await esbuild.build({
   loader: { ".css": "empty" },
 });
 
-// lucide's createElement renders the chevron against the DOM, so the
-// jsdom globals must exist before the bundle is imported.
+// The trigger reads the DOM globals when it builds, so the jsdom globals
+// must exist before the bundle is imported.
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
 });
@@ -91,9 +97,17 @@ await assertNoLeaks(lifecycle, async () => {
       trigger.element.classList.contains("ws-model-picker-trigger"),
     );
     check("no selection shows the placeholder label", labelOf(trigger) === "Select model");
-    check("no selection omits the tooltip", trigger.element.getAttribute("title") === null);
+    check(
+      "the tooltip is Switch Model (Ctrl+/) with or without a selection",
+      trigger.element.title === "Switch Model (Ctrl+/)",
+    );
+    check(
+      "the chevron is a codicon",
+      trigger.element.querySelector(".ws-model-picker-trigger__icon svg") !== null,
+    );
     service.applySelected("alpha");
     check("the trigger shows the current model id", labelOf(trigger) === "alpha");
+    check("the tooltip stays the same after a selection", trigger.element.title === "Switch Model (Ctrl+/)");
     trigger.dispose();
     service.dispose();
     trigger.element.remove();
@@ -113,6 +127,7 @@ await assertNoLeaks(lifecycle, async () => {
   {
     const service = new ModelService(() => true);
     service.setModels([{ id: "alpha", description: "the alpha model" }, { id: "beta" }]);
+    service.applySelected("beta");
     const trigger = new ModelPickerTrigger(service);
     document.body.appendChild(trigger.element);
     trigger.element.click();
@@ -121,14 +136,39 @@ await assertNoLeaks(lifecycle, async () => {
     check(
       "the dropdown lists the catalog in order",
       items.length === 2 &&
-        items[0]?.textContent === "alpha" &&
-        items[1]?.textContent === "beta",
+        items[0]?.querySelector(".menu-item__label")?.textContent === "alpha" &&
+        items[1]?.querySelector(".menu-item__label")?.textContent === "beta",
     );
     check(
       "the trigger gains the menu's aria wiring",
       trigger.element.getAttribute("aria-haspopup") === "menu" &&
         trigger.element.getAttribute("aria-expanded") === "true",
     );
+    check(
+      "the menu wears the composer surface at the model menu's size",
+      menuEl()?.classList.contains("menu-composer") === true &&
+        menuEl()?.classList.contains("ws-model-menu") === true,
+    );
+    check(
+      "the selection is a check on the current model alone",
+      items[1]?.querySelector(".menu-item__check svg") !== null &&
+        items[0]?.querySelector(".menu-item__check") === null,
+    );
+    trigger.dispose();
+    service.dispose();
+    trigger.element.remove();
+  }
+
+  {
+    // Ctrl+/ opens the same menu through open(); a second call leaves it open.
+    const service = new ModelService(() => true);
+    service.setModels([{ id: "alpha" }]);
+    const trigger = new ModelPickerTrigger(service);
+    document.body.appendChild(trigger.element);
+    trigger.open();
+    check("open() opens the model menu", menuEl() !== null);
+    trigger.open();
+    check("open() while open keeps the menu open", menuEl() !== null);
     trigger.dispose();
     service.dispose();
     trigger.element.remove();
@@ -143,7 +183,7 @@ await assertNoLeaks(lifecycle, async () => {
     const items = menuItems();
     check(
       "an empty catalog lists a single no-models row",
-      items.length === 1 && items[0]?.textContent === "No models available",
+      items.length === 1 && items[0]?.textContent === "No models found",
     );
     items[0]?.click();
     check(
@@ -190,21 +230,15 @@ await assertNoLeaks(lifecycle, async () => {
     service.applySelected("alpha");
     const trigger = new ModelPickerTrigger(service);
     document.body.appendChild(trigger.element);
-    check(
-      "the tooltip resolves the current model's description from the catalog",
-      trigger.element.title === "the alpha model",
-    );
+    check("the label follows the selection", labelOf(trigger) === "alpha");
     service.setModels([{ id: "alpha", description: "the renamed alpha" }, { id: "beta" }]);
-    check("a catalog change re-resolves the tooltip", trigger.element.title === "the renamed alpha");
+    check("a catalog change leaves the label and the fixed tooltip alone", labelOf(trigger) === "alpha" && trigger.element.title === "Switch Model (Ctrl+/)");
     service.applySelected("beta");
-    check(
-      "a selection without a description clears the tooltip",
-      trigger.element.getAttribute("title") === null,
-    );
+    check("a new selection updates the label", labelOf(trigger) === "beta");
     service.applySelected("gamma");
     check(
-      "a selection absent from the catalog shows its id with no tooltip",
-      labelOf(trigger) === "gamma" && trigger.element.getAttribute("title") === null,
+      "a selection absent from the catalog shows its id",
+      labelOf(trigger) === "gamma" && trigger.element.title === "Switch Model (Ctrl+/)",
     );
     trigger.dispose();
     service.dispose();
@@ -234,6 +268,43 @@ await assertNoLeaks(lifecycle, async () => {
     trigger.element.remove();
   }
 });
+
+// --- The stylesheet --------------------------------------------------------------------
+
+{
+  const css = (
+    await readFile(path.join(testDir, "..", "src", "parts", "chrome", "model-picker-trigger.css"), "utf8")
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const lookTokens = await readFile(path.join(testDir, "..", "..", "look", "tokens.css"), "utf8");
+  const rule = (selector) => {
+    const match = new RegExp(`${selector.replace(/[.[\]"=]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    return match === null ? "" : match[1].replace(/\s+/g, " ");
+  };
+  const trigger = rule(".ws-model-picker-trigger");
+  check("the button is 20px tall", /block-size:\s*var\(--model-trigger-height\)/.test(trigger) && /--model-trigger-height:\s*20px/.test(lookTokens));
+  check("the button has a 4px radius", /border-radius:\s*var\(--model-trigger-radius\)/.test(trigger) && /--model-trigger-radius:\s*4px/.test(lookTokens));
+  check("the button pads 6px at its sides", /padding-inline:\s*var\(--space-1-5\)/.test(trigger));
+  check(
+    "the text is 13px/18px in the secondary tier",
+    /font-size:\s*var\(--font-size-base\)/.test(trigger) &&
+      /line-height:\s*var\(--line-height-base\)/.test(trigger) &&
+      /color:\s*var\(--cursor-text-secondary\)/.test(trigger),
+  );
+  check(
+    "hover fills 8%",
+    /\.ws-model-picker-trigger:hover[^{]*\{[^}]*var\(--cursor-bg-tertiary\)/.test(css),
+  );
+  check(
+    "the chevron is 9px at 0.7 opacity",
+    /opacity:\s*0\.7/.test(rule(".ws-model-picker-trigger__icon")) &&
+      /inline-size:\s*var\(--ws-model-chevron-size\)/.test(rule(".ws-model-picker-trigger__icon svg")),
+  );
+  check(
+    "the menu is 230px wide and at most 320px tall",
+    /inline-size:\s*var\(--ws-model-menu-width\)/.test(rule(".ws-model-menu")) &&
+      /max-block-size:\s*var\(--ws-model-menu-max-height\)/.test(rule(".ws-model-menu")),
+  );
+}
 
 if (failures.length > 0) {
   console.error(`ws-model-picker-trigger: ${failures.length} failure(s)`);

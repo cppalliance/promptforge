@@ -3,7 +3,23 @@
    CSS references only its own slots and the semantic tier. */
 :root {
   /* Agent session feed */
-  --ws-agent-toolbar-gap: var(--ws-size-rem-0-55);
+  --ws-agent-toolbar-gap: var(--ws-size-4);
+
+  /* Composer controls: the mode menu is at least 170px wide; the model menu is
+     230px wide and at most 320px tall; the model button's chevron is 9px */
+  --ws-mode-menu-min-width: var(--ws-size-170);
+  --ws-model-menu-width: var(--ws-size-230);
+  --ws-model-menu-max-height: var(--ws-size-320);
+  --ws-model-chevron-size: var(--ws-size-9);
+  --ws-token-ring-margin: var(--ws-size-2-5);
+
+  /* Chat pane chrome: a 35px header row; chat tabs 60 to 120px wide, and the
+     active one can grow to 200px */
+  --ws-pane-header-height: var(--ws-size-35);
+  --ws-chat-tab-min-width: var(--ws-size-60);
+  --ws-chat-tab-max-width: var(--ws-size-120);
+  --ws-chat-tab-active-max-width: var(--ws-size-200);
+  --ws-chat-tab-padding: var(--ws-size-3) var(--ws-size-6);
 
   /* Agent transcript */
   --ws-transcript-row-inset: var(--ws-size-11);
@@ -29,11 +45,15 @@
   --ws-markdown-quote-bar-width: var(--ws-size-3);
 
   /* Prompt input */
-  --ws-prompt-chip-max-width: var(--ws-size-240);
+  --ws-prompt-chip-label-max-width: var(--ws-size-200);
 
-  /* Mention typeahead */
-  --ws-typeahead-min-width: var(--ws-size-180);
-  --ws-typeahead-max-width: var(--ws-size-320);
+  /* Composer: the toolbar sits 9px under the editor; the action glyph is 14px */
+  --ws-composer-toolbar-gap: var(--ws-size-9);
+  --ws-composer-action-glyph: var(--ws-size-14);
+
+  /* Mention typeahead: the @ menu is 240px wide and at most 280px tall */
+  --ws-typeahead-width: var(--ws-size-240);
+  --ws-typeahead-max-height: var(--ws-size-280);
 
   /* Chrome: about dialog, model picker, update view */
   --ws-about-min-width: var(--ws-size-320);

@@ -2,7 +2,10 @@
 // session, one panel - the modal design. The panel composes the wire
 // (AgentSocket), the state (AgentSessionService), and the session view.
 // Closing the panel disposes the tree and closes its socket; every new
-// panel gets a fresh socket and therefore a fresh server session.
+// panel gets a fresh socket and therefore a fresh server session. The
+// panel is also the handle the agent commands act through (agent-handle.ts):
+// focus the composer, stop the turn, open the mode and model menus, and
+// answer whether the chat is empty enough to reuse.
 
 import type { GroupPanelPartInitParameters } from "dockview";
 import { WorkshopPart } from "@workshop/platform/workshop-part";
@@ -11,6 +14,7 @@ import { AgentSocket } from "../../services/agent-socket";
 import type { ModelService } from "../../services/model-service";
 import type { SpeechCaptureService } from "../../services/speech-capture";
 import type { SttStatus } from "../../services/stt-status";
+import type { AgentPanelHandle } from "./agent-handle";
 import { AgentSessionView } from "./agent-session-view";
 
 // Where the session view's dictation reports when the panel is built without
@@ -21,8 +25,11 @@ const SILENT_STATUS: SttStatus = {
   setRecording: () => undefined,
 };
 
-export class AgentPanel extends WorkshopPart {
+export class AgentPanel extends WorkshopPart implements AgentPanelHandle {
   private instance: string | undefined;
+  private view: AgentSessionView | null = null;
+  // A focus asked for before the view exists lands as soon as it does.
+  private focusWhenBuilt = false;
 
   constructor(
     private readonly status: SttStatus = SILENT_STATUS,
@@ -48,6 +55,7 @@ export class AgentPanel extends WorkshopPart {
         title: () => this.panelApi?.title,
       }),
     );
+    this.view = view;
     parent.appendChild(view.element);
     this._register(
       service.onDidChangeAgents((agents) => {
@@ -58,5 +66,41 @@ export class AgentPanel extends WorkshopPart {
       }),
     );
     socket.connect();
+    if (this.focusWhenBuilt) {
+      this.focusWhenBuilt = false;
+      view.focusInput();
+    }
+  }
+
+  focusInput(): void {
+    if (this.view === null) {
+      this.focusWhenBuilt = true;
+      return;
+    }
+    this.view.focusInput();
+  }
+
+  hasFocus(): boolean {
+    return this.view?.hasFocus() ?? false;
+  }
+
+  isEmpty(): boolean {
+    return this.view?.isEmpty() ?? true;
+  }
+
+  cancelTurn(): boolean {
+    return this.view?.cancelTurn() ?? false;
+  }
+
+  toggleVoiceInput(): void {
+    this.view?.toggleVoiceInput();
+  }
+
+  openModeMenu(): void {
+    this.view?.openModeMenu();
+  }
+
+  openModelMenu(): void {
+    this.view?.openModelMenu();
   }
 }

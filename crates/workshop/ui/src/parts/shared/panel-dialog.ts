@@ -31,6 +31,10 @@ export interface PanelDialogField {
   /** The input's id, unique per dialog kind for the label association. */
   readonly id: string;
   readonly label: string;
+  /** Placeholder text shown while the field is empty. */
+  readonly placeholder?: string;
+  /** The field's initial text, selected on open so typing replaces it. */
+  readonly value?: string;
 }
 
 export interface PanelDialogOptions {

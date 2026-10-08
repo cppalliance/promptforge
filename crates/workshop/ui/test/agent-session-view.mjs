@@ -212,7 +212,9 @@ function setup() {
   const input = view.chatBox;
   const editorEl = view.element.querySelector(".ws-prompt-input__editor");
   const editable = () => editorEl.getAttribute("contenteditable") === "true";
-  const send = view.element.querySelector(".ws-agent-session__send");
+  // The one round action button: the mic over an empty box, the send arrow
+  // once there is text, Stop while the agent generates.
+  const send = view.element.querySelector(".ws-agent-session__action");
   // The operator's turn: the wait opens, the text goes, and the server
   // records it as a user message - which also leaves the agent generating.
   const ask = (text, token = `tok-${wire.responses.length}`) => {
@@ -1079,8 +1081,8 @@ await assertNoLeaks(lifecycle, async () => {
   {
     const { wire, input, editorEl, editable, send, dispose } = setup();
     check(
-      "the input starts disabled with no wait open",
-      !editable() && send.disabled === true,
+      "the input starts disabled with no wait open, the action idle",
+      !editable() && send.getAttribute("data-action") === "idle",
     );
     wire.fire.inputRequired("tok1");
     check(
@@ -1095,8 +1097,10 @@ await assertNoLeaks(lifecycle, async () => {
     );
     check("a successful send clears the box", input.getText() === "");
     check(
-      "the spent wait returns the input to disabled",
-      !editable() && send.disabled === true,
+      "the spent wait returns the input to disabled, and the button to Stop while the agent generates",
+      !editable() &&
+        send.getAttribute("data-action") === "stop" &&
+        send.getAttribute("data-state") === "stop",
     );
     wire.fire.inputRequired("tok2");
     send.click();
@@ -1145,10 +1149,12 @@ await assertNoLeaks(lifecycle, async () => {
     window.document.body.appendChild(view.element);
     const input = view.chatBox;
     const editorEl = view.element.querySelector(".ws-prompt-input__editor");
-    const send = view.element.querySelector(".ws-agent-session__send");
+    const send = view.element.querySelector(".ws-agent-session__action");
     check(
-      "with no wait the send action is idle whatever the model state",
-      send.getAttribute("data-action") === "idle" && send.disabled === true,
+      "with no wait the action is idle whatever the model state, and the empty box's mic stays pressable",
+      send.getAttribute("data-action") === "idle" &&
+        send.getAttribute("data-state") === "mic" &&
+        send.disabled === false,
     );
     wire.fire.inputRequired("model-gated");
     input.setText("keep this draft");
@@ -1259,17 +1265,16 @@ await assertNoLeaks(lifecycle, async () => {
         toolbar.previousElementSibling?.classList.contains("ws-prompt-input") === true,
     );
     check(
-      "the box's mic and send trail the toolbar's own controls, as before the extraction",
-      toolbar?.lastElementChild?.classList.contains("ws-agent-session__send") === true &&
-        toolbar?.lastElementChild?.previousElementSibling?.classList.contains("ws-agent-session__mic") === true &&
-        toolbar?.querySelector(".ws-token-ring") !== null &&
-        bar?.querySelector(":scope > .ws-agent-session__mic") === null,
+      "the box's one round action button trails the toolbar's own controls, after the ring",
+      toolbar?.lastElementChild?.classList.contains("ws-agent-session__action") === true &&
+        toolbar?.lastElementChild?.previousElementSibling?.classList.contains("ws-token-ring") === true &&
+        bar?.querySelector(":scope > .ws-agent-session__action") === null,
     );
     check(
-      "the toolbar composes the mode chip, the model picker, and the context ring",
+      "the toolbar composes the mode chip, the model picker, and the context ring, hidden until there is usage data",
       toolbar?.querySelector(".ws-mode-chip__label")?.textContent === "Agent" &&
         toolbar?.querySelector(".ws-model-picker-trigger__label")?.textContent === "Select model" &&
-        toolbar?.querySelector(".ws-token-ring")?.getAttribute("aria-valuenow") === "0",
+        toolbar?.querySelector(".ws-token-ring")?.hasAttribute("hidden") === true,
     );
     modelService.setModels([
       { id: "alpha", description: "first" },
@@ -1312,6 +1317,160 @@ await assertNoLeaks(lifecycle, async () => {
     service.dispose();
     modelService.dispose();
     view.element.remove();
+  }
+
+  // --- Stop: the round button cancels the running turn --------------------------------------
+
+  {
+    const { wire, service, view, send, ask, dispose } = setup();
+    wire.fire.session("s-stop");
+    check(
+      "before any turn there is nothing to stop",
+      view.cancelTurn() === false && wire.cancels === 0,
+    );
+    ask("go");
+    check(
+      "the turn the operator started leaves the button as Stop",
+      service.generating === true && send.getAttribute("data-state") === "stop" && send.disabled === false,
+    );
+    send.click();
+    check("a click on Stop cancels the turn through the wire", wire.cancels === 1);
+    check(
+      "the service settles its own view of the cancelled turn: generating is off",
+      service.generating === false && send.getAttribute("data-state") !== "stop",
+    );
+    check(
+      "with generating off and no wait the action is idle again",
+      send.getAttribute("data-action") === "idle",
+    );
+    check("a turn that is not running cannot be stopped again", view.cancelTurn() === false && wire.cancels === 1);
+    dispose();
+  }
+
+  {
+    // The agent finishing its own turn (a reply, then a new wait) takes Stop away too.
+    const { wire, service, send, ask, dispose } = setup();
+    wire.fire.session("s-done");
+    ask("go");
+    check("generating shows Stop", send.getAttribute("data-state") === "stop");
+    wire.fire.event("agent_message", "done", { reply: 0 });
+    wire.fire.inputRequired("tok-next");
+    check(
+      "the reply and the next wait end the turn: Stop gives way to the mic over the empty box",
+      service.generating === false && send.getAttribute("data-state") === "mic" && send.getAttribute("data-action") === "send",
+    );
+    dispose();
+  }
+
+  // --- The mode follows the toolbar's chip onto the action button ------------------------------
+
+  {
+    const modelService = new ModelService(() => true);
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const view = new AgentSessionView(service, silentStatus, modelService);
+    window.document.body.appendChild(view.element);
+    const button = view.element.querySelector(".ws-agent-session__action");
+    check("the action button starts in Agent mode", button.getAttribute("data-mode") === "agent");
+    view.element.querySelector(".ws-mode-chip")?.click();
+    [...document.querySelectorAll(".menu-item")]
+      .find((item) => item.querySelector(".menu-item__label")?.textContent === "Ask")
+      ?.click();
+    check("picking Ask in the chip colors the action button for Ask", button.getAttribute("data-mode") === "ask");
+    view.dispose();
+    service.dispose();
+    modelService.dispose();
+    view.element.remove();
+  }
+
+  // --- The commands' handle: focus, emptiness, menus, Shift+Tab ------------------------------
+
+  {
+    const modelService = new ModelService(() => true);
+    modelService.setModels([{ id: "alpha" }]);
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const view = new AgentSessionView(service, silentStatus, modelService);
+    window.document.body.appendChild(view.element);
+    check("a fresh view is empty: a chat to reuse", view.isEmpty() === true);
+    view.chatBox.setText("a draft");
+    check("a draft makes the chat non-empty", view.isEmpty() === false);
+    view.chatBox.clear();
+    wire.fire.session("s-handle");
+    wire.fire.event("user_message", "hello");
+    check("a turn makes the chat non-empty", view.isEmpty() === false);
+
+    check("focus starts outside the view", view.hasFocus() === false);
+    // jsdom does not focus a contenteditable, so the composer's focus request is
+    // observed on the box, and hasFocus on a control jsdom can focus.
+    let focusRequests = 0;
+    const realFocus = view.chatBox.focus.bind(view.chatBox);
+    view.chatBox.focus = () => {
+      focusRequests += 1;
+      realFocus();
+    };
+    view.focusInput();
+    check("focusInput asks the composer for focus", focusRequests === 1);
+    const probe = document.createElement("button");
+    view.element.appendChild(probe);
+    probe.focus();
+    check("hasFocus sees focus anywhere inside the view", view.hasFocus() === true);
+    probe.remove();
+    check("hasFocus is false again once focus leaves the view", view.hasFocus() === false);
+
+    // Escape is how a person dismisses an open menu; it also frees the chip's own state.
+    const dismissMenus = () =>
+      document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    view.openModeMenu();
+    check(
+      "openModeMenu opens the mode menu",
+      document.querySelector(".menu-popup.ws-mode-menu") !== null,
+    );
+    view.openModeMenu();
+    check(
+      "pressing again cycles the mode",
+      view.element.querySelector(".ws-mode-chip__label")?.textContent === "Plan",
+    );
+    dismissMenus();
+    view.openModelMenu();
+    check("openModelMenu opens the model menu", document.querySelector(".menu-popup.ws-model-menu") !== null);
+    dismissMenus();
+
+    // Shift+Tab in the composer opens the mode menu; it is not a registered
+    // chord, so the dispatcher never claims it from the other controls.
+    const editorElement = view.element.querySelector(".ws-prompt-input__editor");
+    const press = (init) => {
+      const event = new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true, ...init });
+      editorElement.dispatchEvent(event);
+      return event;
+    };
+    const plain = press({});
+    check("a plain Tab in the composer is left alone", plain.defaultPrevented === false && document.querySelector(".menu-popup") === null);
+    const shifted = press({ shiftKey: true });
+    check(
+      "Shift+Tab in the composer opens the mode menu and is consumed",
+      shifted.defaultPrevented === true && document.querySelector(".menu-popup.ws-mode-menu") !== null,
+    );
+    dismissMenus();
+    const outside = new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    view.element.querySelector(".ws-chat-error, .ws-agent-session__bar")?.dispatchEvent(outside);
+    check(
+      "Shift+Tab outside the editor (on the bar) opens nothing",
+      outside.defaultPrevented === false && document.querySelector(".menu-popup") === null,
+    );
+    view.dispose();
+    service.dispose();
+    modelService.dispose();
+    view.element.remove();
+  }
+
+  {
+    // Without a model service there is no toolbar, so the menu commands have nothing to open.
+    const { view, dispose } = setup();
+    view.openModeMenu();
+    view.openModelMenu();
+    check("a view without a toolbar opens no menu", document.querySelector(".menu-popup") === null);
+    dispose();
   }
 
   // --- A new session clears the feed -----------------------------------------------------------

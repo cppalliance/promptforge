@@ -40,6 +40,7 @@
   --cursor-magenta: #B48EAD;
   --cursor-orange: #D08770;
   --cursor-purple: #9386F2;
+  --cursor-multitask: #B180D7;
 
   /* Cursor Dark derived surfaces */
   --cursor-bg-quinary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
@@ -49,6 +50,8 @@
   --cursor-bg-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
   --cursor-bg-active: #F0F0F01E;
   --cursor-bg-focused: #F0F0F01E;
+  /* The IDE's toolbar-button hover wash (tab closers, pane header buttons) */
+  --cursor-toolbar-hover: #5A5D5E50;
   --cursor-bg-card: var(--cursor-bg-quaternary);
   --cursor-bg-elevated: #181818;
   --cursor-bg-input-surface: var(--cursor-bg-quaternary);
@@ -217,30 +220,30 @@
   --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Component tokens (consumed by the agent-window components) */
-  --mention-bg: color-mix(in srgb, #81A1C1 12%, transparent);
-  --mention-text: #81A1C1;
+  --mention-bg: color-mix(in srgb, var(--cursor-blue) 24%, transparent);
+  --mention-text: var(--cursor-blue);
   --tool-card-bg: #181818;
   --tool-card-border: var(--cursor-stroke-tertiary);
   --tool-card-header-height: 28px;
-  --prompt-input-bg: var(--cursor-bg-input-surface);
+  --prompt-input-bg: color-mix(in srgb, var(--bg-input) 90%, transparent);
   --prompt-input-border: var(--cursor-stroke-secondary);
   --prompt-input-border-focus: var(--cursor-stroke-primary);
-  --prompt-input-min-height: 18px;
-  --prompt-input-max-height: 200px;
+  --prompt-input-min-height: 22px;
+  --prompt-input-max-height: 240px;
   --prompt-input-radius: 6px;
-  --model-trigger-height: 24px;
-  --model-trigger-radius: 9999px;
-  --token-ring-track: var(--cursor-stroke-secondary);
+  --model-trigger-height: 20px;
+  --model-trigger-radius: 4px;
+  --token-ring-track: var(--cursor-stroke-tertiary);
   --token-ring-fill: var(--cursor-icon-secondary);
   --agent-max-width: 840px;
   --agent-card-radius: 12px;
   --feed-padding-inline: 12px;
   --feed-row-gap: 14px;
-  --agent-outer-padding: 12px;
+  --agent-outer-padding: 10px;
   --bubble-radius: 12px;
   --assistant-inset: 13px;
   --space-2-5: 10px;
-  --token-ring-size: 16px;
+  --token-ring-size: 15px;
 
   /* Status bar */
   --status-bar-height: 22px;

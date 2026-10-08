@@ -37,8 +37,14 @@
 // SerializedDraft with text, one inline pill, and one attachment into
 // the expected read-only DOM. Runs under the shared leak check: a
 // ChatBox that is never disposed fails.
+// The round action button: the mic over an empty box, the send arrow once
+// there is text, Stop while the agent generates (with the placeholder "Add a
+// follow-up"), the agent mode picking the send and Stop fill; a recording mic
+// stays the mic; Enter ignores auto-repeat and Ctrl+Enter sends. The
+// stylesheet's side - the card, the editor, the button's fills - is read from
+// the source text.
 // Run: node test/chat-box.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -135,13 +141,14 @@ function frameElement(input) {
   return input.element.querySelector(".ws-prompt-input");
 }
 
-function micButton(input) {
-  return input.element.querySelector(".ws-agent-session__mic");
+// The one round button: the mic while the box is empty, the send arrow once it
+// has text, Stop while the agent generates. Both names reach the same element,
+// so each test reads as the state it is exercising.
+function actionButton(input) {
+  return input.element.querySelector(".ws-agent-session__action");
 }
-
-function sendButton(input) {
-  return input.element.querySelector(".ws-agent-session__send");
-}
+const micButton = actionButton;
+const sendButton = actionButton;
 
 // The ProseMirror suggestion plugin debounces its item fetch (the
 // component configures 50 to 100 ms), so a typeahead assertion waits past
@@ -317,15 +324,15 @@ await assertNoLeaks(lifecycle, async () => {
 
   check(
     "the clamp passes heights inside the band through",
-    clampPromptInputHeight(150, 36, 200) === 150,
+    clampPromptInputHeight(150, 22, 240) === 150,
   );
   check(
     "the clamp holds heights at the max token",
-    clampPromptInputHeight(500, 36, 200) === 200,
+    clampPromptInputHeight(500, 22, 240) === 240,
   );
   check(
     "the clamp lifts heights to the min token",
-    clampPromptInputHeight(10, 36, 200) === 36,
+    clampPromptInputHeight(10, 22, 240) === 22,
   );
 
   {
@@ -345,14 +352,14 @@ await assertNoLeaks(lifecycle, async () => {
     measured = 500;
     input.syncHeight();
     check(
-      "the box height clamps at the max token",
-      editor.style.height === "200px",
+      "the box height clamps at the max token, 240px by default",
+      editor.style.height === "240px",
     );
     measured = 10;
     input.syncHeight();
     check(
-      "the box height clamps at the min token",
-      editor.style.height === "36px",
+      "the box height clamps at the min token, one 22px line by default",
+      editor.style.height === "22px",
     );
     measured = 120;
     input.clear();
@@ -771,6 +778,7 @@ await assertNoLeaks(lifecycle, async () => {
       input.props.editable === true &&
         input.props.action === "send" &&
         input.props.mic === "idle" &&
+        input.props.mode === "agent" &&
         input.props.variant === "expanded",
     );
     check(
@@ -791,25 +799,33 @@ await assertNoLeaks(lifecycle, async () => {
       editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "",
     );
     check(
-      "the send button defaults to send: enabled, not aria-disabled",
-      send !== null &&
-        send.getAttribute("data-action") === "send" &&
+      "an empty box's one round button is the mic, enabled, with its accessible name, tooltip, and icon",
+      mic !== null &&
+        mic.getAttribute("data-state") === "mic" &&
+        mic.getAttribute("data-action") === "send" &&
+        mic.getAttribute("data-mic") === "idle" &&
+        mic.getAttribute("data-mode") === "agent" &&
+        mic.type === "button" &&
+        mic.disabled === false &&
+        mic.getAttribute("aria-label") === "Push to talk" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        mic.title === "Voice Input (Ctrl+Shift+Space)" &&
+        mic.querySelector("svg") !== null,
+    );
+    check("the box has one action button and no separate mic", input.element.querySelectorAll("button").length === 1);
+    input.setText("hello");
+    check(
+      "text turns the button into the send arrow: enabled, not aria-disabled, named Send",
+      send.getAttribute("data-state") === "send" &&
         send.disabled === false &&
         send.getAttribute("aria-disabled") === "false" &&
         send.getAttribute("aria-label") === "Send" &&
+        send.title === "Send" &&
+        !send.hasAttribute("aria-pressed") &&
         send.querySelector("svg") !== null,
     );
-    check(
-      "the mic button defaults to idle with its accessible name and icon",
-      mic !== null &&
-        mic.getAttribute("data-mic") === "idle" &&
-        mic.type === "button" &&
-        mic.classList.contains("ws-stt-mic") &&
-        mic.getAttribute("aria-label") === "Push to talk" &&
-        mic.getAttribute("aria-pressed") === "false" &&
-        mic.title === "Push to talk" &&
-        mic.querySelector("svg") !== null,
-    );
+    input.clear();
+    check("emptying the box brings the mic back", send.getAttribute("data-state") === "mic");
     const strip = frame.querySelector(".ws-prompt-input__attachments");
     check(
       "an empty attachments strip sits inside the frame before the editor",
@@ -819,11 +835,8 @@ await assertNoLeaks(lifecycle, async () => {
         strip.nextElementSibling === editorElement(input),
     );
     check(
-      "without controls the mic and send sit on the bar after the frame",
-      mic.parentElement === input.element &&
-        send.parentElement === input.element &&
-        frame.nextElementSibling === mic &&
-        mic.nextElementSibling === send,
+      "without controls the action button sits on the bar after the frame",
+      mic.parentElement === input.element && frame.nextElementSibling === mic,
     );
     input.dispose();
   }
@@ -910,7 +923,101 @@ await assertNoLeaks(lifecycle, async () => {
     input.dispose();
   }
 
-  // --- The mic button renders its state and emits mic-press ---------------------
+  // --- Stop: the agent is generating --------------------------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({ placeholder: "Plan, Build" }, sink);
+    const button = actionButton(input);
+    const editor = editorElement(input);
+    check(
+      "before generating the placeholder is the owner's",
+      editor.querySelector("p")?.getAttribute("data-placeholder") === "Plan, Build",
+    );
+    input.update({ action: "stop" });
+    check(
+      "stop turns the button into Stop, even with an empty box",
+      button.getAttribute("data-state") === "stop" &&
+        button.getAttribute("data-action") === "stop" &&
+        button.disabled === false &&
+        button.getAttribute("aria-label") === "Stop" &&
+        button.title === "Stop (Ctrl+Shift+Backspace)" &&
+        !button.hasAttribute("aria-pressed") &&
+        button.querySelector("svg") !== null,
+    );
+    check(
+      "while generating the placeholder reads Add a follow-up",
+      editor.querySelector("p")?.getAttribute("data-placeholder") === "Add a follow-up",
+    );
+    button.click();
+    check(
+      "a click on Stop emits stop, not send or mic-press",
+      sink.events.length === 1 && sink.events[0].type === "stop",
+    );
+    pressEnter(editor);
+    check("Enter while generating emits nothing: Stop is the button's alone", sink.events.length === 1);
+    input.setText("typed");
+    check("text in the box does not turn Stop into send", button.getAttribute("data-state") === "stop");
+    input.clear();
+    input.update({ action: "send" });
+    check(
+      "the turn ending brings the mic back over an empty box, with the owner's placeholder",
+      button.getAttribute("data-state") === "mic" &&
+        editor.querySelector("p")?.getAttribute("data-placeholder") === "Plan, Build",
+    );
+    input.dispose();
+  }
+
+  // --- The mode picks the fill ----------------------------------------------------------
+
+  {
+    const input = new ChatBox({ mode: "plan" });
+    const button = actionButton(input);
+    check("the mode prop mirrors onto the button", button.getAttribute("data-mode") === "plan" && input.props.mode === "plan");
+    for (const mode of ["ask", "debug", "multitask", "agent"]) {
+      input.update({ mode });
+      check(`the mode ${mode} mirrors onto the button`, button.getAttribute("data-mode") === mode);
+    }
+    input.dispose();
+  }
+
+  // --- Held and Ctrl Enter ---------------------------------------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>hello</p>" }, sink);
+    const editor = editorElement(input);
+    pressEnter(editor, { repeat: true });
+    check("an auto-repeating Enter does not send", sink.sends() === 0);
+    check("an auto-repeating Enter does not split the paragraph either", input.getText() === "hello");
+    pressEnter(editor);
+    check("the first Enter of a hold sends", sink.sends() === 1);
+    pressEnter(editor, { ctrlKey: true });
+    check("Ctrl+Enter sends", sink.sends() === 2);
+    pressEnter(editor, { metaKey: true });
+    check("Cmd+Enter sends", sink.sends() === 3);
+    input.dispose();
+  }
+
+  {
+    // The non-editable path (a dictation take holds the box) follows the same rule.
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>take</p>" }, sink);
+    document.body.appendChild(input.element);
+    input.setReadOnly(true);
+    const frame = frameElement(input);
+    frame.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true }),
+    );
+    check("a held Enter over a read-only box sends nothing", sink.sends() === 0);
+    frame.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    check("the first Enter over a read-only box still sends", sink.sends() === 1);
+    input.setReadOnly(false);
+    input.dispose();
+    input.element.remove();
+  }
+
+  // --- The button's state follows the box and the mic ----------------------------------
 
   {
     const sink = recordingSink();
@@ -932,24 +1039,62 @@ await assertNoLeaks(lifecycle, async () => {
     );
     mic.click();
     check("a click while recording still emits mic-press", sink.events.length === 2);
+    // Dictated words land in the box while the take records; the button must
+    // stay the mic so a second press can end the take.
+    input.setText("dictated words");
+    check(
+      "a recording mic stays the mic whatever the box holds",
+      mic.getAttribute("data-state") === "mic" && mic.classList.contains("ws-stt-mic--recording"),
+    );
+    mic.click();
+    check("a press on a recording mic over a filled box still emits mic-press", sink.events.length === 3);
     input.update({ mic: "blocked" });
     check(
-      "blocked releases the pressed state and the recording class",
+      "blocked ends the recording look, and with text in the box the button is the send arrow",
       mic.getAttribute("data-mic") === "blocked" &&
-        mic.getAttribute("aria-pressed") === "false" &&
         !mic.classList.contains("ws-stt-mic--recording") &&
-        mic.title === "Push to talk" &&
+        mic.getAttribute("data-state") === "send" &&
+        !mic.hasAttribute("aria-pressed") &&
+        mic.disabled === false,
+    );
+    input.clear();
+    check(
+      "a blocked mic over an empty box reads as an idle one",
+      mic.getAttribute("data-state") === "mic" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        mic.title === "Voice Input (Ctrl+Shift+Space)" &&
         mic.disabled === false,
     );
     mic.click();
-    check("a click while blocked still emits mic-press so the owning part can name the blocker", sink.events.length === 3);
+    check("a click while blocked still emits mic-press so the owning part can name the blocker", sink.events.length === 4);
     input.update({ mic: "idle" });
     check(
       "idle restores the default rendering",
       mic.getAttribute("data-mic") === "idle" &&
         mic.getAttribute("aria-pressed") === "false" &&
-        mic.title === "Push to talk",
+        mic.title === "Voice Input (Ctrl+Shift+Space)",
     );
+    input.update({ action: "idle" });
+    check("an idle agent leaves the mic enabled over an empty box", mic.disabled === false && mic.getAttribute("data-state") === "mic");
+    input.setText("x");
+    check("an idle agent dims the send arrow once there is text", mic.getAttribute("data-state") === "send" && mic.disabled === true);
+    input.dispose();
+  }
+
+  // --- Typing, restoring, and clearing move the button too ---------------------------------
+
+  {
+    const input = new ChatBox();
+    const button = actionButton(input);
+    const editor = editorElement(input).editor;
+    editor.commands.insertContent("typed");
+    check("typing turns the mic into the send arrow", button.getAttribute("data-state") === "send");
+    editor.commands.clearContent();
+    check("deleting everything brings the mic back", button.getAttribute("data-state") === "mic");
+    input.insertMention({ id: "a.ts", label: "a.ts", data: null });
+    check("a lone mention pill counts as content", button.getAttribute("data-state") === "send");
+    input.restore({ v: 1, doc: { type: "doc", content: [{ type: "paragraph" }] }, attachments: [] });
+    check("restoring an empty draft brings the mic back", button.getAttribute("data-state") === "mic");
     input.dispose();
   }
 
@@ -962,23 +1107,21 @@ await assertNoLeaks(lifecycle, async () => {
     controls.appendChild(existing);
     const input = new ChatBox({ controls });
     const frame = frameElement(input);
-    const mic = micButton(input);
-    const send = sendButton(input);
+    const button = actionButton(input);
     check(
       "the controls element sits on the bar after the frame",
       controls.parentElement === input.element && frame.nextElementSibling === controls,
     );
     check(
-      "with controls the mic and send are its last two children, after the owning part's own",
-      controls.children.length === 3 &&
+      "with controls the action button is the last child, after the owning part's own",
+      controls.children.length === 2 &&
         controls.children[0] === existing &&
-        controls.children[1] === mic &&
-        controls.children[2] === send &&
-        input.element.querySelector(":scope > .ws-agent-session__mic") === null,
+        controls.children[1] === button &&
+        input.element.querySelector(":scope > .ws-agent-session__action") === null,
     );
     input.dispose();
     check(
-      "dispose removes the box's buttons from the controls element and leaves the owning part's",
+      "dispose removes the box's button from the controls element and leaves the owning part's",
       controls.children.length === 1 && controls.children[0] === existing,
     );
   }
@@ -1467,6 +1610,104 @@ await assertNoLeaks(lifecycle, async () => {
     input.dispose();
   }
 });
+
+// --- The stylesheet: the card, the editor, and the action button ---------------------------
+
+{
+  const css = (
+    await readFile(path.join(testDir, "..", "src", "parts", "chatbox", "chat-box.css"), "utf8")
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const lookTokens = await readFile(path.join(testDir, "..", "..", "look", "tokens.css"), "utf8");
+  const componentCss = await readFile(path.join(testDir, "..", "src", "tokens", "component.css"), "utf8");
+  const sessionCss = await readFile(path.join(testDir, "..", "src", "parts", "agent", "agent-session.css"), "utf8");
+  const rule = (selector) => {
+    const match = new RegExp(`${selector.replace(/[.[\]"=():>~+*]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    return match === null ? "" : match[1].replace(/\s+/g, " ");
+  };
+  const token = (name) => new RegExp(`${name}:\\s*([^;]+);`).exec(lookTokens)?.[1].trim();
+
+  const card = rule(".ws-agent-session__bar");
+  check(
+    "the card's fill is the input color at 90%, about #202020",
+    token("--prompt-input-bg") === "color-mix(in srgb, var(--bg-input) 90%, transparent)" &&
+      /background:\s*var\(--prompt-input-bg\)/.test(card),
+  );
+  check(
+    "the card keeps its 12px radius and 8/10/6 padding",
+    token("--agent-card-radius") === "12px" &&
+      /border-radius:\s*var\(--agent-card-radius\)/.test(card) &&
+      /padding:\s*var\(--space-2\) var\(--space-2-5\) var\(--space-1-5\)/.test(card) &&
+      token("--space-2") === "8px" &&
+      token("--space-2-5") === "10px" &&
+      token("--space-1-5") === "6px",
+  );
+  check(
+    "the card's border and shadow ease over 100ms",
+    /transition:\s*border-color var\(--duration-fast\) ease-in-out, box-shadow var\(--duration-fast\) ease-in-out/.test(card) &&
+      token("--duration-fast") === "100ms",
+  );
+  check(
+    "the card sits 10px from each side",
+    token("--agent-outer-padding") === "10px" && /padding-inline:\s*var\(--agent-outer-padding\)/.test(sessionCss),
+  );
+  check(
+    "the toolbar sits 9px under the editor",
+    /gap:\s*var\(--ws-composer-toolbar-gap\)/.test(card) && /--ws-composer-toolbar-gap:\s*var\(--ws-size-9\)/.test(componentCss),
+  );
+  check(
+    "the card is the composer container the toolbar's breakpoints answer to",
+    /container:\s*ws-composer \/ inline-size/.test(card),
+  );
+
+  const editor = rule(".ws-prompt-input__editor");
+  check(
+    "the editor is 14px/22px with no letter-spacing",
+    /font-size:\s*var\(--font-size-lg\)/.test(editor) &&
+      /line-height:\s*var\(--line-height-lg\)/.test(editor) &&
+      /letter-spacing:\s*normal/.test(editor) &&
+      token("--font-size-lg") === "14px" &&
+      token("--line-height-lg") === "22px",
+  );
+  check(
+    "the editor grows from 22px to 240px",
+    token("--prompt-input-min-height") === "22px" && token("--prompt-input-max-height") === "240px",
+  );
+
+  check(
+    "the action button is a round control with a #141414 glyph on the Agent fill",
+    /border-radius:\s*var\(--radius-full\)/.test(rule(".ws-agent-session__action")) &&
+      /color:\s*var\(--cursor-chrome\)/.test(rule(".ws-agent-session__action")) &&
+      /background:\s*var\(--cursor-base\)/.test(rule(".ws-agent-session__action")) &&
+      token("--cursor-chrome") === "#141414",
+  );
+  check(
+    "the mic is a 66% fill under a #181818 glyph",
+    /color:\s*var\(--cursor-editor\)/.test(rule('.ws-agent-session__action[data-state="mic"]')) &&
+      /background:\s*var\(--cursor-icon-secondary\)/.test(rule('.ws-agent-session__action[data-state="mic"]')) &&
+      /--cursor-icon-secondary:\s*color-mix\(in srgb, var\(--cursor-base\) 66%, transparent\)/.test(lookTokens),
+  );
+  check(
+    "Plan fills yellow and Ask green, for send and Stop alike",
+    /\[data-state="send"\]\[data-mode="plan"\],\s*\.ws-agent-session__action\[data-state="stop"\]\[data-mode="plan"\]\s*\{[^}]*background:\s*var\(--cursor-yellow\)/.test(css) &&
+      /\[data-state="send"\]\[data-mode="ask"\],\s*\.ws-agent-session__action\[data-state="stop"\]\[data-mode="ask"\]\s*\{[^}]*background:\s*var\(--cursor-green\)/.test(css) &&
+      token("--cursor-yellow") === "#F1B467" &&
+      token("--cursor-green") === "#3FA266",
+  );
+  check(
+    "Debug and Multitask fill the base color at 80%",
+    /\[data-mode="debug"\][^{]*\[data-mode="multitask"\][^{]*\{[^}]*color-mix\(in srgb, var\(--cursor-base\) 80%, transparent\)/.test(css),
+  );
+  check(
+    "a disabled button keeps its fill at opacity 0.3",
+    /opacity:\s*0\.3/.test(rule(".ws-agent-session__action:disabled")) &&
+      !/background/.test(rule(".ws-agent-session__action:disabled")),
+  );
+  check(
+    "the recording look survives on the one button",
+    /ws-agent-session__action\.ws-stt-mic--recording/.test(css) &&
+      !/\.ws-agent-session__(mic|send)\b/.test(css),
+  );
+}
 
 if (failures.length > 0) {
   console.error(`chat-box: ${failures.length} failure(s)`);

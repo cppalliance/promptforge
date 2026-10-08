@@ -1,12 +1,18 @@
+/* The agent toolbar (agent-toolbar.ts imports this file): a fixed 28px row
+   with 4px between its children, under the editor's 9px gap (chat-box.css).
+   The model button's trailing auto margin pushes the ring and the chat box's
+   action button, which follow it, to the trailing edge, whether or not the
+   ring is showing. */
+
 .ws-agent-toolbar {
   display: flex;
   align-items: center;
   gap: var(--ws-agent-toolbar-gap);
-  min-block-size: var(--height-base);
+  block-size: var(--height-base);
   padding: 0;
   border-block-start: none;
 }
 
-.ws-agent-toolbar > .ws-token-ring {
-  margin-inline-start: auto;
+.ws-agent-toolbar > .ws-model-picker-trigger {
+  margin-inline-end: auto;
 }

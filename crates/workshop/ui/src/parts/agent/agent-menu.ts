@@ -1,5 +1,7 @@
 // The agent menu: the list of discovered agents an operator launches a
-// session from. Renders from the delegate's agent list, re-renders on
+// session from. It has no lead text: the empty state is the launcher's list
+// alone, with nothing above the composer the session view puts at the
+// bottom. Renders from the delegate's agent list, re-renders on
 // every push (the list is a complete snapshot per connect), and disables
 // its buttons after a launch goes out - the session acknowledgment hides
 // the whole menu, and an error frame (a refused launch) re-enables it
@@ -41,10 +43,6 @@ export class AgentMenu extends Disposable {
     this.element.className = "ws-agent-menu";
     this.element.setAttribute("aria-label", "Agents");
 
-    const lead = document.createElement("p");
-    lead.className = "ws-agent-menu__lead";
-    lead.textContent = "Launch an agent to start a session.";
-
     this.list = document.createElement("ul");
     this.list.className = "ws-agent-menu__list";
 
@@ -56,7 +54,7 @@ export class AgentMenu extends Disposable {
     this.errorLine.className = "ws-agent-menu__error";
     this.errorLine.hidden = true;
 
-    this.element.append(lead, this.list, this.empty, this.errorLine);
+    this.element.append(this.list, this.empty, this.errorLine);
 
     this._register(this.delegate.onDidChangeAgents(() => this.render()));
     this._register(

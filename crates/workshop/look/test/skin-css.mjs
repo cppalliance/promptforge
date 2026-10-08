@@ -254,6 +254,45 @@ check(
     dropdown.value(".menu-item:focus-visible", "outline-offset") === "-1px",
 );
 
+// The composer menu surface: the mode, model, and @ menus.
+check("the composer menu is #181818", dropdown.value(".menu-composer", "background") === "#181818");
+check(
+  "the composer menu has a 1px border at 15% of the base text color",
+  dropdown.value(".menu-composer", "border") === "1px solid color-mix(in srgb, #F0F0F0 15%, transparent)",
+);
+check("the composer menu has a 6px radius", dropdown.value(".menu-composer", "border-radius") === "6px");
+check("the composer menu pads 2px", dropdown.value(".menu-composer", "padding") === "2px");
+check("the composer menu sets 12px text", dropdown.value(".menu-composer", "font-size") === "12px");
+check(
+  "composer rows pad 2px 6px with a 4px radius and 12px text",
+  dropdown.value(".menu-composer .menu-item", "padding") === "2px 6px" &&
+    dropdown.value(".menu-composer .menu-item", "border-radius") === "4px" &&
+    dropdown.value(".menu-composer .menu-item", "font-size") === "12px",
+);
+check(
+  "composer row icons are 14px",
+  dropdown.value(".menu-composer .menu-item__icon svg", "width") === "14px" &&
+    dropdown.value(".menu-composer .menu-item__icon svg", "height") === "14px",
+);
+check(
+  "a composer row highlights #F0F0F011",
+  dropdown.value(".menu-composer .menu-item:hover", "background") === "#F0F0F011",
+);
+check(
+  "a selected composer row has no selected fill, only the check",
+  dropdown.value(".menu-composer .menu-item--selected", "background") === "transparent",
+);
+check(
+  "the composer check is 10px",
+  dropdown.value(".menu-composer .menu-item__check svg", "width") === "10px" &&
+    dropdown.value(".menu-composer .menu-item__check svg", "height") === "10px",
+);
+check(
+  "a composer row's description reads in the tertiary tier at 11px",
+  dropdown.value(".menu-composer .menu-item__description", "font-size") === "11px" &&
+    dropdown.value(".menu-composer .menu-item__description", "color").includes("60%"),
+);
+
 // --- progress.css ------------------------------------------------------------------
 
 const progress = sheet(await read("progress.css"));

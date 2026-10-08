@@ -125,6 +125,29 @@ for (const row of editorActions) {
   });
 }
 
+// Indent and Outdent: CodeMirror's own Mod-] and Mod-[ (indentMore and
+// indentLess). They sit outside the catalog - no menu row, no palette row -
+// but they must be registry rules: the keybinding dispatcher swallows every
+// claimed chord, and the chat pane claims Ctrl+] and Ctrl+[ for its tab
+// cycle, so without these rules the editor's own indent chords would never
+// reach CodeMirror. The chat's rules need a chat as the active panel and
+// these need an editor, so the two sets never claim the same press
+// (agent.contribution.ts).
+const indentActions = [
+  { id: "editor.action.indentLines", title: "Indent Line", keybinding: "ctrlcmd+]", pick: (c) => c.indentMore },
+  { id: "editor.action.outdentLines", title: "Outdent Line", keybinding: "ctrlcmd+[", pick: (c) => c.indentLess },
+] satisfies readonly Pick<EditorActionRow, "id" | "title" | "keybinding" | "pick">[];
+
+for (const row of indentActions) {
+  addAction({
+    id: row.id,
+    title: row.title,
+    precondition: "activeEditor == 'editor'",
+    keybinding: { keybinding: row.keybinding, when: "editorTextFocus", weight: KeybindingWeight.EditorContrib },
+    run: runEditorCommand(row.pick),
+  });
+}
+
 /** One settings toggle row: the action flips a setting on the editor settings service. */
 interface EditorToggleRow {
   readonly id: string;

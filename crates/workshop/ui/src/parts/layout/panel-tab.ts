@@ -7,7 +7,13 @@
 // clicked tab and read activeEditor as its type; a `closable: false` type
 // gets neither. Delete and Backspace on the focused tab make the same
 // call, then focus the neighbouring tab once the panel closes, and do
-// nothing on a `closable: false` type.
+// nothing on a `closable: false` type. A middle click on a closable tab
+// closes it the same way.
+//
+// A `renamable` type (the chat tabs) also renames in place: a double-click
+// swaps the title for a text field that commits on Enter or blur and
+// cancels on Escape. The name is the session's own (tab-names.ts); the
+// panel's title is untouched.
 //
 // The loading shimmer: while its panel is loading, the title span shimmers
 // through @workshop/look's setShimmer, whose shared phase keeps the sweep
@@ -32,6 +38,7 @@ import { getService } from "@workshop/platform/service-registry";
 // setTabLoading.
 import { Menu, reportCommandFailure } from "../menu/menu";
 import { closeActiveEditor } from "./panel-close";
+import { onDidChangeTabName, setTabName, tabNameOf } from "./tab-names";
 
 /** Closes one panel through the layout core, so its part confirms before it goes. */
 function closePanel(panelId: string): void {
@@ -87,6 +94,9 @@ export class PanelTab extends Disposable implements ITabRenderer {
   private menu: Menu | null = null;
   private panelId: string | null = null;
   private loading = false;
+  // The panel's own title, and the open inline editor while one is up.
+  private title = "";
+  private renameInput: HTMLInputElement | null = null;
 
   constructor() {
     super();
@@ -97,7 +107,8 @@ export class PanelTab extends Disposable implements ITabRenderer {
 
   public init(parameters: TabPartInitParameters): void {
     const { api } = parameters;
-    const closable = panelTypeEntry(api.component)?.closable !== false;
+    const entry = panelTypeEntry(api.component);
+    const closable = entry?.closable !== false;
     if (parameters.tabLocation === "header") {
       this.panelId = api.id;
       tabs.set(api.id, this);
@@ -105,16 +116,40 @@ export class PanelTab extends Disposable implements ITabRenderer {
     }
     // The panel may have entered loading before the tab mounted.
     this.loading = loadingByPanel.get(api.id) ?? false;
-    this.content.textContent = parameters.title;
+    this.title = parameters.title;
+    this.renderTitle(api.id);
     this._register(
       api.onDidTitleChange((event) => {
-        this.content.textContent = event.title;
+        this.title = event.title;
+        this.renderTitle(api.id);
       }),
     );
+    if (entry?.renamable === true) {
+      this._register(
+        onDidChangeTabName((changed) => {
+          if (changed === api.id) {
+            this.renderTitle(api.id);
+          }
+        }),
+      );
+      this.element.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.beginRename(api.id);
+      });
+    }
     this.applyLoading();
     if (!closable) {
       return;
     }
+    // A middle click closes the tab, as in every tabbed editor.
+    this.element.addEventListener("auxclick", (event) => {
+      if (event.button === 1) {
+        event.preventDefault();
+        event.stopPropagation();
+        closePanel(api.id);
+      }
+    });
     const close = document.createElement("button");
     close.type = "button";
     close.className = "dv-default-tab-action";
@@ -172,6 +207,63 @@ export class PanelTab extends Disposable implements ITabRenderer {
     };
     document.addEventListener("keydown", onKeydown, true);
     this._register(toDisposable(() => document.removeEventListener("keydown", onKeydown, true)));
+  }
+
+  /** Paints the tab's text: the operator's name when it has one, else the panel's title. */
+  private renderTitle(panelId: string): void {
+    if (this.renameInput !== null) {
+      return;
+    }
+    this.content.textContent = tabNameOf(panelId) ?? this.title;
+  }
+
+  /**
+   * Swaps the title for a text field. Enter or leaving the field commits
+   * (a blank name clears the rename), Escape cancels. The field keeps its
+   * pointer, key, and drag events from Dockview, whose tab would
+   * otherwise start a drag or close the panel under the typing.
+   */
+  private beginRename(panelId: string): void {
+    if (this.renameInput !== null) {
+      return;
+    }
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "ws-tab-rename";
+    input.value = tabNameOf(panelId) ?? this.title;
+    input.setAttribute("aria-label", "Chat name");
+    input.spellcheck = false;
+    this.renameInput = input;
+    this.content.replaceChildren(input);
+    let finished = false;
+    const finish = (commit: boolean): void => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      this.renameInput = null;
+      if (commit) {
+        setTabName(panelId, input.value);
+      }
+      this.renderTitle(panelId);
+    };
+    for (const type of ["pointerdown", "mousedown", "click", "dblclick", "dragstart", "keyup"]) {
+      input.addEventListener(type, (event) => event.stopPropagation());
+    }
+    input.setAttribute("draggable", "false");
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
   }
 
   /** Toggles the shimmer on the title span. */

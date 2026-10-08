@@ -22,9 +22,8 @@ import { JSDOM } from "jsdom";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
-// The lucide icon module (pulled in by the built-in thunks' graph)
-// serializes SVGs through the document at import time, so the globals
-// must exist before the bundle loads.
+// The built-in thunks' graph reads the document at import time, so the
+// globals must exist before the bundle loads.
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
 globalThis.window = window;
@@ -139,10 +138,11 @@ check(
     panelTypeEntry("config")?.title === "Gateway Config",
 );
 check(
-  "the agent session opens in the right zone and is closable",
+  "the agent session opens in the right zone, titled New Agent, closable and renamable",
   panelTypeEntry("agent")?.defaultZone === "right" &&
-    panelTypeEntry("agent")?.title === "Agent Session" &&
-    panelTypeEntry("agent")?.closable !== false,
+    panelTypeEntry("agent")?.title === "New Agent" &&
+    panelTypeEntry("agent")?.closable !== false &&
+    panelTypeEntry("agent")?.renamable === true,
 );
 check(
   "the Run window opens in the main zone, titled after its file",
