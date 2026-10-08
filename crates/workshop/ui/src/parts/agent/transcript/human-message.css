@@ -1,0 +1,79 @@
+/* The operator's message row (human-message.ts): a bordered card of plain
+   text, clipped to three and a half lines with a fade, and sticky at the
+   top of the feed inside its turn. */
+
+.ws-human-message {
+  --ws-human-fill: color-mix(in srgb, var(--bg-input) 90%, var(--bg-raised));
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 101;
+  box-sizing: border-box;
+  min-inline-size: var(--ws-human-min-width);
+  margin-block-end: var(--space-1);
+  padding: var(--space-2) var(--space-2-5);
+  /* A solid panel color under the translucent fill, so rows scrolling
+     beneath the stuck card never show through it. */
+  background: linear-gradient(var(--ws-human-fill), var(--ws-human-fill)), var(--cursor-editor);
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-xl);
+  transition:
+    border-color var(--duration-fast),
+    background var(--duration-fast);
+}
+
+.ws-human-message:hover {
+  --ws-human-fill: var(--bg-input);
+  border-color: var(--cursor-stroke-primary);
+}
+
+/* A message taller than the feed doesn't stick. */
+.ws-human-message[data-tall="true"] {
+  position: static;
+}
+
+/* The fade under a stuck card, so the rows passing beneath it dissolve. */
+.ws-human-message::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 100%;
+  block-size: var(--ws-human-stuck-fade-height);
+  background: linear-gradient(var(--cursor-editor), transparent);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.ws-human-message[data-stuck="true"]::after {
+  opacity: 1;
+}
+
+.ws-human-message__text {
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  color: var(--cursor-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  /* The bleed gives glyphs that overhang the line box room inside the clip's mask. */
+  padding-block: var(--ws-human-bleed-top) var(--ws-human-bleed-bottom);
+  margin-block: calc(-1 * var(--ws-human-bleed-top)) calc(-1 * var(--ws-human-bleed-bottom));
+}
+
+.ws-human-message__text:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+/* Only a message that overflows reads as clickable. */
+.ws-human-message[data-overflowing="true"] .ws-human-message__text {
+  cursor: pointer;
+}
+
+.ws-human-message__text[data-clipped="true"] {
+  max-block-size: var(--ws-human-clip-height);
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to bottom,
+    var(--cursor-text-primary) calc(100% - var(--ws-human-fade-height)),
+    transparent
+  );
+}

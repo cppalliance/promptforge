@@ -24,6 +24,7 @@ import { getService, registerService } from "@workshop/platform/service-registry
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
 import { STT_STATUS, type SttStatus } from "./services/stt-status";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
+import { TOAST_STACK } from "./services/toast-service";
 import { TREE_STATE, TreeStateService } from "./services/tree-state-service";
 import { createUiStorage, UI_STORAGE } from "./services/ui-storage";
 import { UpdateService } from "./services/update-service";
@@ -132,11 +133,14 @@ registerService(
 // view (@workshop/look) and appends it as the body's full-width footer.
 const statusBar = disposables.add(new StatusBar());
 const updates = disposables.add(new UpdateService());
-// The shared toast stack shows the update notifications; the workshop
-// keeps it clear of the status bar via --toast-inset-block-end.
+// The shared toast stack shows the update notifications and the views'
+// confirmations (a copied message); it registers so those views reach it
+// without importing the app. The workshop keeps it clear of the status
+// bar via --toast-inset-block-end.
 const toasts = createToastStack();
 document.body.append(toasts.element);
 disposables.add(toDisposable(() => toasts.element.remove()));
+registerService(TOAST_STACK, () => toasts);
 disposables.add(new UpdateView(updates, toasts));
 updates.startAutoCheck();
 // The custom title bar stays hidden in a plain browser; it only appears

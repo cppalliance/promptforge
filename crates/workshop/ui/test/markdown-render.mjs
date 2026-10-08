@@ -7,9 +7,10 @@
 // are stripped by the DOMPurify pass inside renderMarkdown. highlightCode
 // is exercised directly for its plain-fallback paths. Run:
 // node test/markdown-render.mjs
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { mock } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
@@ -19,7 +20,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { renderMarkdown, highlightCode, markdownReady } from "./src/parts/agent/markdown-render.ts";
+      export { renderMarkdown, highlightCode, markdownReady, MarkdownStream, FADE_MS } from "./src/parts/agent/markdown-render.ts";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",
@@ -45,9 +46,22 @@ globalThis.document = dom.window.document;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-markdown-render-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { renderMarkdown, highlightCode, markdownReady } = await import(
+const { renderMarkdown, highlightCode, markdownReady, MarkdownStream, FADE_MS } = await import(
   pathToFileURL(bundlePath).href
 );
+
+// The clipboard the code blocks' copy buttons write to, recorded.
+const clipboard = [];
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: {
+    clipboard: {
+      writeText: async (text) => {
+        clipboard.push(text);
+      },
+    },
+  },
+});
 
 // Highlighting is the async half of the contract; everything below runs
 // after readiness, so code blocks exercise the Shiki path.
@@ -252,6 +266,168 @@ function render(text, options) {
   check(
     `a full re-parse per delta stays cheap at chat scale (30 deltas of a ${doc.length}-char buffer in ${Math.round(elapsed)}ms)`,
     elapsed < 5000,
+  );
+}
+
+// --- The streaming fade -------------------------------------------------------
+
+// A stream rendered at scripted times: the text a render adds past the
+// previous render's text fades in, word by word, and only text younger than
+// FADE_MS is wrapped, with a negative animation-delay of how far into the
+// fade it already is.
+{
+  const stream = new MarkdownStream();
+  const draw = (text, now, streaming = true) => {
+    const container = document.createElement("div");
+    container.append(stream.render(text, { streaming, now }));
+    return container.firstElementChild;
+  };
+  const fades = (root) => [...root.querySelectorAll(".ws-fade-in")];
+  const words = (root) => fades(root).map((span) => span.textContent);
+  const delays = (root) => fades(root).map((span) => Number.parseFloat(span.style.animationDelay));
+
+  check("the fade lasts 150ms", FADE_MS === 150);
+
+  let root = draw("Hello", 1000);
+  check(
+    "the first render of a stream fades all of its text in, with no delay yet",
+    words(root).join(",") === "Hello" && delays(root)[0] === 0,
+  );
+
+  root = draw("Hello world", 1050);
+  check(
+    "a delta fades its own word in; the earlier word, 50ms in, carries its fade on",
+    words(root).join(",") === "Hello,world" && delays(root)[0] === -50 && delays(root)[1] === 0,
+  );
+  check("the text itself is unchanged by the wrapping", root.querySelector("p")?.textContent === "Hello world");
+
+  root = draw("Hello world again", 1200);
+  check(
+    "text older than 150ms is no longer wrapped: only the new word fades",
+    words(root).join(",") === "again" && root.querySelector("p")?.textContent === "Hello world again",
+  );
+
+  root = draw("Hello world again", 1500);
+  check("a render with nothing new wraps nothing once the fade is over", fades(root).length === 0);
+
+  root = draw("Hello world again and more", 1600, false);
+  check(
+    "a settle that still has new text keeps fading it (a stream that streamed keeps its fade)",
+    words(root).join(",") === "and,more",
+  );
+}
+
+{
+  const stream = new MarkdownStream();
+  const container = document.createElement("div");
+  container.append(stream.render("settled history", { streaming: false, now: 5 }));
+  check(
+    "a reply that never streamed renders plain, with no fade",
+    container.querySelectorAll(".ws-fade-in").length === 0 &&
+      container.textContent === "settled history",
+  );
+}
+
+{
+  const stream = new MarkdownStream();
+  const container = document.createElement("div");
+  container.append(stream.render("intro\n\n```js\nconst a = 1;\n```\n\noutro", { streaming: true, now: 10 }));
+  const spans = [...container.querySelectorAll(".ws-fade-in")].map((span) => span.textContent);
+  check(
+    "prose fades but a code block never does",
+    spans.join(",") === "intro,outro" &&
+      container.querySelectorAll("pre .ws-fade-in").length === 0 &&
+      container.querySelector("pre")?.textContent?.includes("const a = 1;") === true,
+  );
+  check(
+    "the copy button is chrome and never fades",
+    container.querySelector(".ws-code-block__copy .ws-fade-in") === null &&
+      container.querySelector(".ws-code-block__copy")?.textContent === "Copy code",
+  );
+}
+
+{
+  const stream = new MarkdownStream();
+  const container = document.createElement("div");
+  container.append(stream.render("one **two", { streaming: true, now: 100 }));
+  container.replaceChildren(stream.render("one **two** three", { streaming: true, now: 400 }));
+  check(
+    "when earlier text changes (markup closing), the text from the change on fades again",
+    [...container.querySelectorAll(".ws-fade-in")].map((span) => span.textContent).join(",") === "two,three" &&
+      container.querySelector("strong")?.textContent === "two",
+  );
+}
+
+{
+  window.matchMedia = (query) => ({ matches: true, media: query });
+  const stream = new MarkdownStream();
+  const container = document.createElement("div");
+  container.append(stream.render("moving words", { streaming: true, now: 1 }));
+  check(
+    "under reduced motion nothing is wrapped to fade",
+    container.querySelectorAll(".ws-fade-in").length === 0 && container.textContent === "moving words",
+  );
+  delete window.matchMedia;
+}
+
+{
+  const stream = new MarkdownStream();
+  const container = document.createElement("div");
+  container.append(
+    stream.render(
+      '<script>alert(1)</script>\n\n[x](javascript:alert(1)) <img src="x" onerror="alert(1)">',
+      { streaming: true, now: 1 },
+    ),
+  );
+  check(
+    "DOMPurify still runs on a stream: no script, no javascript: href, no handler",
+    container.querySelector("script") === null &&
+      container.querySelector("a")?.getAttribute("href") === null &&
+      container.querySelector("[onerror]") === null,
+  );
+}
+
+// --- No caret -----------------------------------------------------------------
+
+{
+  const css = (await readFile(path.join(testDir, "..", "src", "parts", "agent", "markdown-render.css"), "utf8")).toLowerCase();
+  const session = (await readFile(path.join(testDir, "..", "src", "parts", "agent", "agent-session.css"), "utf8")).toLowerCase();
+  check("no stylesheet draws a streaming caret", !css.includes("caret") && !session.includes("caret"));
+  const root = render("partial text", { streaming: true });
+  check("a streaming render adds no caret element", root?.querySelector("[class*='caret']") === null);
+}
+
+// --- Copy code ---------------------------------------------------------------------
+
+{
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const root = render("```js\nconst a = 1;\n```");
+  const holder = root?.querySelector(".ws-code-block");
+  const button = holder?.querySelector(".ws-code-block__copy");
+  check(
+    "a fenced block sits in a holder with a Copy code button after its pre and no language label",
+    holder?.firstElementChild?.tagName === "PRE" &&
+      button?.textContent === "Copy code" &&
+      button?.previousElementSibling === holder.firstElementChild &&
+      holder.querySelector("[class*='lang']") === null,
+  );
+  button?.click();
+  for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+  check(
+    "clicking copies the block's code and reads Copied",
+    clipboard.at(-1)?.includes("const a = 1;") === true &&
+      button?.textContent === "Copied" &&
+      button.classList.contains("ws-code-block__copy--copied"),
+  );
+  mock.timers.tick(2000);
+  check(
+    "the button reads Copy code again after a moment",
+    button?.textContent === "Copy code" && !button.classList.contains("ws-code-block__copy--copied"),
+  );
+  mock.timers.reset();
+  check(
+    "an unknown language still gets the button",
+    render("```nope\nx\n```")?.querySelector(".ws-code-block__copy") !== null,
   );
 }
 

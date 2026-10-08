@@ -1,12 +1,17 @@
-// The agent-session view: paints the service's transcript into a feed
-// and pins the chat input to the pending input wait. The feed repaints
-// by a prefix diff over item identity - the service replaces item
-// objects when they change, so the first non-identical index marks where
-// the repaint starts, and everything before it (the settled history) is
-// never rebuilt. Every content string is untrusted model-, tool-, or
-// user-authored data: reply and reasoning markdown renders through
-// renderMarkdown, whose DOMPurify pass is the last step before the DOM;
-// user text, tool output, and errors land through textContent.
+// The agent-session view: paints the service's transcript into the feed
+// and pins the chat input to the pending input wait. The transcript is
+// built the way Cursor draws it: buildTranscript turns the service's items
+// into turns of keyed rows plus a tail status, and the TranscriptView
+// reconciles them by key, so a streaming delta updates its row in place
+// and an opened thought or group stays as the operator left it. Every
+// content string is untrusted model-, tool-, or user-authored data:
+// reply and thinking markdown renders through renderMarkdown, whose
+// DOMPurify pass is the last step before the DOM; user text, tool
+// arguments, and tool output land through textContent.
+//
+// Errors don't take rows. An error opens the composer's error popup
+// (title, message, and Try again), which re-sends the last user message
+// through the service while a wait is pinned.
 //
 // The composer is the ChatBox component, which this view embeds. It maps
 // service state to the box's props (editable follows the pinned wait,
@@ -24,11 +29,7 @@
 import "./agent-session.css";
 
 import { Disposable } from "@workshop/platform/lifecycle";
-import type {
-  AgentSessionService,
-  ToolCallItem,
-  TranscriptItem,
-} from "../../services/agent-session";
+import type { AgentSessionService } from "../../services/agent-session";
 import type { ModelService } from "../../services/model-service";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import {
@@ -36,16 +37,20 @@ import {
   type SpeechCapturePresence,
 } from "../../services/speech-capture";
 import type { SttStatus } from "../../services/stt-status";
+import { TOAST_STACK } from "../../services/toast-service";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import { AgentToolbar } from "./agent-toolbar";
-import { renderMarkdown } from "./markdown-render";
+import { buildTranscript } from "./transcript/transcript-model";
+import { TranscriptView } from "./transcript/transcript-view";
 import { ChatBox } from "../chatbox/chat-box";
-import type { ChatBoxEvent, ChatBoxProps } from "../chatbox/types";
+import type { ChatBoxError, ChatBoxEvent, ChatBoxProps } from "../chatbox/types";
 import { openInZone } from "../layout/zones";
-import { ToolCallCard } from "./tool-call-card";
 import { setupStt, type SttHandle } from "../stt/stt";
 
 const SESSION_LABEL = "Agent session";
+
+/** The toast a turn's Copy raises. */
+const COPIED_TOAST = "Message copied to clipboard";
 
 /**
  * The panel hosting a session view, as dictation's capture presence names
@@ -59,134 +64,10 @@ export interface AgentSessionHost {
   title(): string | undefined;
 }
 
-/** One painted feed row, kept for the identity diff. */
-interface RenderedRow {
-  readonly item: TranscriptItem;
-  readonly row: HTMLLIElement;
-  /**
-   * The row's tool card, when it paints one. A landing tool result
-   * appends a new item rather than replacing the call item, so the
-   * card's row survives the prefix diff and each repaint re-drives the
-   * card's running state.
-   */
-  readonly card?: ToolCallCard;
-}
-
-/** The muted origin line above a row's content. */
-function metaLine(text: string): HTMLParagraphElement {
-  const meta = document.createElement("p");
-  meta.className = "ws-agent-item__meta";
-  meta.textContent = text;
-  return meta;
-}
-
-/** The row's content paragraph, untrusted text as text. */
-function textBlock(text: string): HTMLParagraphElement {
-  const block = document.createElement("p");
-  block.className = "ws-agent-item__text";
-  block.textContent = text;
-  return block;
-}
-
-/** The ids of every tool result in the transcript, for matching calls to outcomes. */
-function toolResultIds(items: readonly TranscriptItem[]): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const item of items) {
-    if (item.kind === "tool-result" && item.toolCallId !== null && item.toolCallId !== "") {
-      ids.add(item.toolCallId);
-    }
-  }
-  return ids;
-}
-
-/**
- * True while a tool-call batch awaits its outcome: a batch runs until a
- * tool-result whose toolCallId matches one of its calls lands. Calls
- * without ids (an entry parsed with no string id, or an unparsed batch)
- * can never match, so they have nothing to await.
- */
-function isToolCallRunning(item: ToolCallItem, resultIds: ReadonlySet<string>): boolean {
-  let trackable = false;
-  for (const call of item.calls) {
-    if (call.id === "") {
-      continue;
-    }
-    if (resultIds.has(call.id)) {
-      return false;
-    }
-    trackable = true;
-  }
-  return trackable;
-}
-
-/** One rendered transcript item: its feed row plus its live tool card, when any. */
-interface PaintedItem {
-  readonly row: HTMLLIElement;
-  readonly card?: ToolCallCard;
-}
-
-/** Renders one transcript item as a feed row. */
-function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): PaintedItem {
-  const row = document.createElement("li");
-  row.className = `ws-agent-item ws-agent-item--${item.kind}`;
-  switch (item.kind) {
-    case "user": {
-      row.append(metaLine("You"), textBlock(item.text));
-      break;
-    }
-    case "reply": {
-      if (item.pending) {
-        row.classList.add("ws-agent-item--pending");
-      }
-      if (item.model !== null) {
-        row.appendChild(metaLine(item.model));
-      }
-      row.appendChild(renderMarkdown(item.text, { streaming: item.pending }));
-      break;
-    }
-    case "reasoning": {
-      if (item.pending) {
-        row.classList.add("ws-agent-item--pending");
-      }
-      const block = document.createElement("details");
-      block.className = "ws-agent-item__reasoning";
-      // Open while streaming so the thinking is watchable; the settled
-      // block collapses out of the way of the reply that follows it.
-      block.open = item.pending;
-      const summary = document.createElement("summary");
-      summary.textContent = item.model === null ? "Reasoning" : `Reasoning (${item.model})`;
-      block.append(summary, renderMarkdown(item.text, { streaming: item.pending }));
-      row.appendChild(block);
-      break;
-    }
-    case "tool-call": {
-      row.appendChild(metaLine(item.model === null ? "Tool call" : `Tool call (${item.model})`));
-      const card = new ToolCallCard(item, { running: isToolCallRunning(item, resultIds) });
-      row.appendChild(card.element);
-      return { row, card };
-    }
-    case "tool-result": {
-      row.appendChild(
-        metaLine(item.toolCallId === null ? "Tool result" : `Tool result (${item.toolCallId})`),
-      );
-      const output = document.createElement("pre");
-      output.className = "ws-agent-item__output";
-      output.textContent = item.text;
-      row.appendChild(output);
-      break;
-    }
-    case "error": {
-      const message = document.createElement("p");
-      message.className = "ws-agent-item__text";
-      const label = document.createElement("strong");
-      // A visible label, so the failure never signals by color alone.
-      label.textContent = "Error: ";
-      message.append(label, item.message);
-      row.appendChild(message);
-      break;
-    }
-  }
-  return { row };
+/** The error the popup shows: what the service folded, as the box takes it. */
+interface PopupError {
+  readonly title: string | null;
+  readonly message: string;
 }
 
 /**
@@ -196,7 +77,8 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
  * through; a view built without one mounts none. The box is editable
  * only while a wait is pinned; a configured model service marks the send
  * action blocked until its current selection is non-empty. A send
- * answers the wait through the service and clears the box on success.
+ * answers the wait through the service, clears the box on success, and
+ * pins the feed to the bottom.
  * The status sink receives dictation's local messages, selection
  * blockers, and recording LED state. While this view dictates, the
  * capture service names it by its session title and agent, and reveals
@@ -209,9 +91,11 @@ export class AgentSessionView extends Disposable {
    * selection - the DOM alone sets neither on a ProseMirror editor.
    */
   readonly chatBox: ChatBox;
-  private readonly feed: HTMLOListElement;
+  /** The transcript feed; its `element` is the scrolling region. */
+  readonly transcript: TranscriptView;
   private readonly stt: SttHandle;
-  private rendered: RenderedRow[] = [];
+  private popup: PopupError | null = null;
+  private sessionId: string | null = null;
 
   constructor(
     private readonly service: AgentSessionService,
@@ -225,12 +109,13 @@ export class AgentSessionView extends Disposable {
     this.element.className = "ws-agent-session";
     this.element.setAttribute("aria-label", SESSION_LABEL);
 
-    this.feed = document.createElement("ol");
-    this.feed.className = "ws-agent-session__feed";
-    // A live list, not role="log": the role would replace the list
-    // semantics, and the property alone announces appended rows.
-    this.feed.setAttribute("aria-live", "polite");
-    this.feed.setAttribute("aria-atomic", "false");
+    this.transcript = this._register(
+      new TranscriptView({
+        copied: () => {
+          getServiceOrNull(TOAST_STACK)?.show(COPIED_TOAST, "info");
+        },
+      }),
+    );
 
     // The box is composed from what this view resolves: the toolbar for
     // its controls slot and the text-control registrar; the box itself
@@ -253,11 +138,24 @@ export class AgentSessionView extends Disposable {
     const outer = document.createElement("div");
     outer.className = "ws-agent-session__outer";
     outer.appendChild(chatBox.element);
-    this.element.append(this.feed, outer);
+    this.element.append(this.transcript.element, outer);
 
     // Element-owned listeners die with the elements; only service
     // subscriptions need the lifecycle.
     this._register(this.service.onDidChangeTranscript(() => this.renderFeed()));
+    this._register(this.service.onDidChangeGenerating(() => this.renderFeed()));
+    this._register(this.service.onDidChangeReconnecting(() => this.renderFeed()));
+    this._register(this.service.onError(() => this.showError()));
+    this._register(
+      this.service.onDidChangeSession((frame) => {
+        // A new session replays from index zero: the old session's error
+        // does not belong to it.
+        if (this.sessionId !== frame.session) {
+          this.sessionId = frame.session;
+          this.clearError();
+        }
+      }),
+    );
     this._register(
       this.service.onDidChangePendingInput((token) => {
         if (token === null) {
@@ -317,6 +215,9 @@ export class AgentSessionView extends Disposable {
       case "mic-press":
         this.stt.press();
         return;
+      case "retry":
+        this.retry();
+        return;
       case "command":
       case "stop":
       case "cancel":
@@ -331,46 +232,23 @@ export class AgentSessionView extends Disposable {
   }
 
   /**
-   * Repaints the feed from the first index whose item is not the very
-   * object painted there: everything past it is removed and re-rendered,
-   * everything before it stands. Streaming touches only the tail, so the
-   * settled history never rebuilds (and is never re-announced).
+   * Repaints the transcript from the service: the model is rebuilt from
+   * the items and the transcript view reconciles it by key, so only the
+   * rows that changed repaint.
    */
   private renderFeed(): void {
-    const items = this.service.items;
-    let first = 0;
-    while (first < this.rendered.length && first < items.length) {
-      const painted: RenderedRow | undefined = this.rendered[first];
-      if (painted === undefined || painted.item !== items[first]) {
-        break;
-      }
-      first++;
-    }
-    for (const stale of this.rendered.splice(first)) {
-      stale.row.remove();
-    }
-    const resultIds = toolResultIds(items);
-    // A result that just landed leaves its call item's identity alone,
-    // so surviving cards are re-driven here; setRunning is a no-op on an
-    // unchanged state, so a card the operator opened is never slammed.
-    for (const painted of this.rendered) {
-      if (painted.card !== undefined && painted.item.kind === "tool-call") {
-        painted.card.setRunning(isToolCallRunning(painted.item, resultIds));
-      }
-    }
-    for (const item of items.slice(first)) {
-      const painted = renderItem(item, resultIds);
-      this.feed.appendChild(painted.row);
-      this.rendered.push({ item, row: painted.row, card: painted.card });
-    }
-    this.feed.scrollTop = this.feed.scrollHeight;
+    const generating = this.service.generating;
+    this.transcript.render(
+      buildTranscript(this.service.items, generating, this.service.reconnecting),
+      generating,
+    );
   }
 
   /**
    * Pins the box to the pending wait: editable only while one is open,
    * the send action idle without one, and blocked (still clickable, so
    * the press can say why) while a configured model service has no
-   * selection.
+   * selection. The popup's Try again follows the same wait.
    */
   private renderInputState(): void {
     const pinned = this.service.pendingInputToken !== null;
@@ -382,6 +260,72 @@ export class AgentSessionView extends Disposable {
           : "send-blocked"
         : "idle",
     });
+    this.renderError();
+  }
+
+  // --- The error popup ---------------------------------------------------------------
+
+  /** Opens the popup with the error the service just folded. */
+  private showError(): void {
+    const last = this.service.items[this.service.items.length - 1];
+    if (last?.kind !== "error") {
+      return;
+    }
+    this.popup = { title: last.title, message: last.message };
+    this.renderError();
+  }
+
+  private clearError(): void {
+    this.popup = null;
+    this.renderError();
+  }
+
+  /** The text of the last user message, or null before the operator has sent one. */
+  private lastUserText(): string | null {
+    const items = this.service.items;
+    for (let index = items.length - 1; index >= 0; index--) {
+      const item = items[index];
+      if (item?.kind === "user") {
+        return item.text;
+      }
+    }
+    return null;
+  }
+
+  /** Pushes the popup to the box: Try again is offered after a send and enabled only while a wait is pinned. */
+  private renderError(): void {
+    if (this.popup === null) {
+      this.chatBox.update({ error: null });
+      return;
+    }
+    const error: { -readonly [K in keyof ChatBoxError]: ChatBoxError[K] } = {
+      message: this.popup.message,
+    };
+    if (this.popup.title !== null) {
+      error.title = this.popup.title;
+    }
+    if (this.lastUserText() !== null) {
+      error.tryAgain = this.service.pendingInputToken !== null ? "enabled" : "disabled";
+    }
+    this.chatBox.update({ error });
+  }
+
+  /**
+   * Try again: re-sends the last user message through the service. The
+   * resend adds a second user message to the agent's history; the chat
+   * agent returns to its ask after a failed round, which is the wait this
+   * answers.
+   */
+  private retry(): void {
+    const text = this.lastUserText();
+    if (text === null || this.service.pendingInputToken === null) {
+      return;
+    }
+    this.stt.discardIfRecording();
+    if (this.service.respond(text)) {
+      this.transcript.forcePin();
+      this.clearError();
+    }
   }
 
   /**
@@ -406,6 +350,8 @@ export class AgentSessionView extends Disposable {
     this.stt.discardIfRecording();
     if (this.service.respond(text)) {
       this.chatBox.clear();
+      this.transcript.forcePin();
+      this.clearError();
     }
   }
 }

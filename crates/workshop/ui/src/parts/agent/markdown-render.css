@@ -1,13 +1,15 @@
 /* Rendered markdown (src/parts/agent/markdown-render.ts): styles the sanitized
-   marked + Shiki output inside a .ws-markdown-content root. Every value
-   comes from the skin's design tokens with a fallback, so a missing
-   token degrades to these defaults instead of breaking the property. */
+   marked + Shiki output inside a .ws-markdown-content root, on Cursor's
+   agent-panel markdown rules. Sizes come from the shared tokens and the
+   per-component slots in tokens/component.css; the em factors are scale
+   ratios of the surrounding text, not sizes. */
 
 .ws-markdown-content {
   font-size: var(--font-size-lg);
   line-height: var(--line-height-lg);
-  letter-spacing: var(--letter-spacing-base);
-  color: var(--text);
+  letter-spacing: normal;
+  font-weight: normal;
+  color: var(--cursor-text-primary);
   overflow-wrap: break-word;
 }
 
@@ -19,115 +21,221 @@
   margin-block-end: 0;
 }
 
+/* Blocks sit 16px apart. A paragraph before a list gets 8px, before a code
+   block or a table 12px, and inside a list item none. */
 .ws-markdown-content p {
-  margin-block: var(--space-2);
+  margin-block: var(--space-4);
 }
 
+.ws-markdown-content p:has(+ ul),
+.ws-markdown-content p:has(+ ol) {
+  margin-block-end: var(--space-2);
+}
+
+.ws-markdown-content p:has(+ .ws-code-block),
+.ws-markdown-content p:has(+ table) {
+  margin-block-end: var(--space-3);
+}
+
+.ws-markdown-content li p {
+  margin-block: 0;
+}
+
+.ws-markdown-content strong,
+.ws-markdown-content b {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Headings: weight 590 on a 1.42 line, 20.5px above h1 to h3 and 12px above
+   h4 to h6, 4px below; h5 and h6 read in the secondary tier. */
 .ws-markdown-content h1,
 .ws-markdown-content h2,
 .ws-markdown-content h3,
 .ws-markdown-content h4,
 .ws-markdown-content h5,
 .ws-markdown-content h6 {
-  margin-block: var(--space-3) var(--space-2);
+  margin-block: var(--space-3) var(--space-1);
   font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-lg);
+  line-height: 1.42;
+}
+
+.ws-markdown-content h1,
+.ws-markdown-content h2,
+.ws-markdown-content h3 {
+  margin-block-start: var(--ws-markdown-heading-gap-large);
 }
 
 .ws-markdown-content h1 {
-  font-size: var(--font-size-lg);
+  font-size: 1.428em;
 }
 
 .ws-markdown-content h2 {
-  font-size: var(--font-size-lg);
+  font-size: 1.318em;
 }
 
-.ws-markdown-content h3,
-.ws-markdown-content h4,
-.ws-markdown-content h5,
+.ws-markdown-content h3 {
+  font-size: 1.214em;
+}
+
+.ws-markdown-content h4 {
+  font-size: 1em;
+}
+
+.ws-markdown-content h5 {
+  font-size: 0.866em;
+  color: var(--cursor-text-secondary);
+}
+
 .ws-markdown-content h6 {
-  font-size: var(--font-size-base);
+  font-size: 0.8em;
+  color: var(--cursor-text-secondary);
 }
 
-/* Inline code; the pre rule below undoes the pill inside fenced blocks. */
+/* Inline code: 0.9em mono on an 8% fill, no border; the pre rule below
+   undoes the pill inside fenced blocks. */
 .ws-markdown-content code {
   font-family: var(--code-font);
-  font-size: var(--font-size-sm);
-  background: var(--bg-card);
-  border-radius: var(--radius-sm);
-  padding-block: var(--ws-size-1);
-  padding-inline: var(--space-1);
+  font-size: 0.9em;
+  background: var(--cursor-bg-tertiary);
+  border: none;
+  border-radius: var(--ws-markdown-inline-code-radius);
+  padding: var(--ws-markdown-inline-code-padding);
 }
 
 /* Fenced blocks, highlighted (Shiki's pre has inline colors from the
-   theme) or not (the degraded path's plain pre). */
+   theme) or not (the degraded path's plain pre), in a holder that carries
+   the hover copy button. */
+.ws-code-block {
+  position: relative;
+  margin-block: var(--space-3);
+}
+
 .ws-markdown-content pre {
-  margin-block: var(--space-2);
-  padding-block: var(--space-2);
-  padding-inline: var(--space-3);
+  margin: 0;
+  padding: var(--space-1-5) var(--space-2-5);
   background: var(--syntax-bg);
-  border: var(--ws-border-width) solid var(--border-subtle);
-  border-radius: var(--radius);
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-xl);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
   overflow-x: auto;
 }
 
 .ws-markdown-content pre code {
   background: transparent;
   border-radius: 0;
-  padding-block: 0;
-  padding-inline: 0;
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-base);
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
 }
 
+/* "Copy code" at the block's top-right, shown on hover or focus, reading
+   "Copied" in green once the copy landed. No language label. */
+.ws-code-block__copy {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+  padding: var(--ws-size-2) var(--space-1-5);
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--syntax-bg);
+  color: var(--cursor-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+
+.ws-code-block:hover .ws-code-block__copy,
+.ws-code-block__copy:focus-visible {
+  opacity: 1;
+}
+
+.ws-code-block__copy:hover {
+  color: var(--cursor-text-primary);
+}
+
+.ws-code-block__copy:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.ws-code-block__copy--copied,
+.ws-code-block__copy--copied:hover {
+  color: var(--cursor-green);
+}
+
+/* Links: the link color at weight 500, never underlined; hovering adds a
+   24% blue fill with a 4px radius. */
 .ws-markdown-content a {
-  color: var(--syntax-link);
+  color: var(--cursor-text-link);
+  font-weight: var(--font-weight-medium);
   text-decoration: none;
 }
 
 .ws-markdown-content a:hover {
-  text-decoration: underline;
+  padding: var(--ws-size-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--cursor-blue) 24%, transparent);
 }
 
 .ws-markdown-content a:focus-visible {
-  outline: none;
-  text-decoration: underline;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
 }
 
+/* Lists: 8px above and 18px below, a 2em indent, items in a flex column
+   8px apart. */
 .ws-markdown-content ul,
 .ws-markdown-content ol {
-  margin-block: var(--space-2);
-  padding-inline-start: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block: var(--space-2) var(--ws-markdown-list-gap-end);
+  padding-inline-start: 2em;
 }
 
-.ws-markdown-content li {
-  margin-block: var(--space-1);
+.ws-markdown-content li > ul,
+.ws-markdown-content li > ol {
+  margin-block: var(--space-2) 0;
 }
 
+/* A blockquote: a 3px rounded bar, 16px of left padding, secondary text. */
 .ws-markdown-content blockquote {
-  margin-block: var(--space-2);
+  margin-block: var(--space-4);
   margin-inline: 0;
-  padding-inline-start: var(--space-3);
-  border-inline-start: var(--ws-border-width-strong) solid var(--border);
-  color: var(--text-muted);
+  padding-inline-start: var(--space-4);
+  border-inline-start: var(--ws-markdown-quote-bar-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--ws-markdown-quote-bar-width);
+  color: var(--cursor-text-secondary);
 }
 
+/* A table is a 12px-radius card with 6px 10px cells. */
 .ws-markdown-content table {
-  margin-block: var(--space-2);
-  border-collapse: collapse;
+  margin-block: var(--space-4);
+  border-collapse: separate;
+  border-spacing: 0;
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
 }
 
 .ws-markdown-content th,
 .ws-markdown-content td {
-  border: var(--ws-border-width) solid var(--border-subtle);
-  padding-block: var(--space-1);
-  padding-inline: var(--space-2);
+  padding: var(--space-1-5) var(--space-2-5);
+  border-block-end: var(--ws-border-width) solid var(--cursor-stroke-tertiary);
   text-align: start;
+}
+
+.ws-markdown-content tr:last-child > td {
+  border-block-end: none;
 }
 
 .ws-markdown-content th {
   font-weight: var(--font-weight-semibold);
-  background: var(--bg-card);
+  background: var(--cursor-bg-quaternary);
 }
 
 /* height: auto keeps the =WxH attribute ratio when max-inline-size
@@ -139,6 +247,32 @@
 
 .ws-markdown-content hr {
   border: none;
-  border-block-start: var(--ws-border-width) solid var(--border);
-  margin-block: var(--space-3);
+  border-block-start: var(--ws-border-width) solid var(--cursor-stroke-tertiary);
+  margin-block: var(--space-4);
+}
+
+/* Streaming text fades in from 0 to 1 over 150ms, linear. The JS wraps
+   only text younger than that, with a negative delay so the fade carries
+   on across renders. */
+.ws-fade-in {
+  animation: ws-markdown-fade-in var(--duration-normal) linear both;
+}
+
+@keyframes ws-markdown-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-fade-in {
+    animation: none;
+  }
+
+  .ws-code-block__copy {
+    transition: none;
+  }
 }

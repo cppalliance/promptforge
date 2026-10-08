@@ -3,14 +3,30 @@
    CSS references only its own slots and the semantic tier. */
 :root {
   /* Agent session feed */
-  --ws-agent-meta-min-width: var(--ws-size-150);
-  --ws-agent-cursor-width: var(--ws-size-2);
   --ws-agent-toolbar-gap: var(--ws-size-rem-0-55);
-  --ws-feed-block-max-height: var(--ws-size-rem-12);
 
-  /* Tool call card */
-  --ws-tool-card-dot-size: var(--ws-size-8);
-  --ws-tool-card-name-min-width: var(--ws-size-16);
+  /* Agent transcript */
+  --ws-transcript-row-inset: var(--ws-size-11);
+  --ws-transcript-row-enter: var(--ws-duration-160);
+  --ws-transcript-footer-height: var(--height-base);
+  --ws-collapsible-chevron-size: var(--ws-size-12);
+  --ws-collapsible-chevron-gap: var(--ws-size-3);
+  --ws-human-min-width: var(--ws-size-150);
+  --ws-human-clip-height: var(--ws-size-77);
+  --ws-human-fade-height: var(--ws-size-41);
+  --ws-human-bleed-top: var(--ws-size-2);
+  --ws-human-bleed-bottom: var(--ws-size-8);
+  --ws-human-stuck-fade-height: var(--space-5);
+  --ws-tool-block-max-height: var(--ws-size-240);
+  --ws-web-card-width: var(--ws-size-360);
+  --ws-web-card-max-height: var(--ws-size-280);
+
+  /* Agent markdown */
+  --ws-markdown-heading-gap-large: var(--ws-size-20-5);
+  --ws-markdown-list-gap-end: var(--ws-size-18);
+  --ws-markdown-inline-code-padding: var(--ws-size-1-5) var(--ws-size-2);
+  --ws-markdown-inline-code-radius: var(--ws-size-5);
+  --ws-markdown-quote-bar-width: var(--ws-size-3);
 
   /* Prompt input */
   --ws-prompt-chip-max-width: var(--ws-size-240);

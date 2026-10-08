@@ -575,7 +575,6 @@ const keysOf = (model, turn = 0) => rowsOf(model, turn).map((row) => row.key);
     action: "Planning next moves",
     details: "",
     callName: null,
-    cancellable: true,
     inGroup: false,
   });
   check(
@@ -592,12 +591,11 @@ const keysOf = (model, turn = 0) => rowsOf(model, turn).map((row) => row.key);
   );
 
   // Reconnecting.
-  same("reconnecting shows its own status with no cancel", tailOf([user("q")], true, true), {
+  same("reconnecting shows its own status", tailOf([user("q")], true, true), {
     kind: "reconnecting",
     action: "Reconnecting...",
     details: "",
     callName: null,
-    cancellable: false,
     inGroup: false,
   });
   check("the reconnecting text uses three ASCII dots", tailOf([user("q")], true, true).action === "Reconnecting...");
@@ -615,7 +613,6 @@ const keysOf = (model, turn = 0) => rowsOf(model, turn).map((row) => row.key);
     action: "Searching web",
     details: "rust",
     callName: null,
-    cancellable: true,
     inGroup: true,
   });
   const generic1 = tailOf([user("q"), batch(generic("c1", "read", "fs/read"), search("c2")), result("c2")]);
@@ -647,7 +644,6 @@ const keysOf = (model, turn = 0) => rowsOf(model, turn).map((row) => row.key);
       action: "Thinking",
       details: "",
       callName: null,
-      cancellable: true,
       inGroup: true,
     },
   );

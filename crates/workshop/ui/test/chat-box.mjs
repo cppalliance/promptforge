@@ -1391,6 +1391,81 @@ await assertNoLeaks(lifecycle, async () => {
         empty.firstElementChild?.querySelectorAll(".ws-draft-view__paragraph").length === 0,
     );
   }
+
+  // --- The error popup -----------------------------------------------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({}, sink);
+    const popup = () => input.element.querySelector(".ws-chat-error");
+    const retry = () => popup()?.querySelector(".ws-chat-error__retry");
+    check("a box with no error has no popup", popup() === null && input.props.error === null);
+
+    input.update({ error: { message: "The socket closed." } });
+    check(
+      "an error opens the popup on the card, an alert",
+      popup() !== null && popup().parentElement === input.element && popup().getAttribute("role") === "alert",
+    );
+    check(
+      "the title defaults to Connection Error and the message sits below it",
+      popup().querySelector(".ws-chat-error__title")?.textContent === "Connection Error" &&
+        popup().querySelector(".ws-chat-error__message")?.textContent === "The socket closed.",
+    );
+    check(
+      "the popup carries the warning glyph",
+      popup().querySelector(".ws-chat-error__icon svg") !== null,
+    );
+    check("without tryAgain there is no Try again button shown", retry()?.hidden === true);
+
+    input.update({ error: { title: "Connection failed", message: "Check your network.", tryAgain: "disabled" } });
+    check(
+      "a given title replaces the default, and the popup is reused in place",
+      popup().querySelector(".ws-chat-error__title")?.textContent === "Connection failed" &&
+        input.element.querySelectorAll(".ws-chat-error").length === 1,
+    );
+    check(
+      "Try again shows disabled until the owner enables it",
+      retry()?.hidden === false && retry().disabled === true && retry().textContent === "Try again",
+    );
+    retry().click();
+    check("a disabled Try again reports nothing", sink.events.every((event) => event.type !== "retry"));
+
+    input.update({ error: { title: "Connection failed", message: "Check your network.", tryAgain: "enabled" } });
+    check("the owner enables Try again", retry().disabled === false);
+    retry().click();
+    check(
+      "pressing Try again emits retry",
+      sink.events.filter((event) => event.type === "retry").length === 1,
+    );
+    check(
+      "Try again is the secondary small button",
+      retry().classList.contains("button-secondary") && retry().classList.contains("button-sm"),
+    );
+
+    const same = popup();
+    input.update({ error: { title: "Connection failed", message: "Check your network.", tryAgain: "enabled" } });
+    check("an unchanged error touches nothing", popup() === same);
+
+    input.update({ error: { message: "<b>markup</b>" } });
+    check(
+      "the message is text, never markup",
+      popup().querySelector("b") === null &&
+        popup().querySelector(".ws-chat-error__message")?.textContent === "<b>markup</b>",
+    );
+
+    input.update({ error: null });
+    check("a null error removes the popup", popup() === null && input.props.error === null);
+    input.dispose();
+  }
+
+  {
+    const input = new ChatBox({ error: { message: "from construction" } });
+    check(
+      "an error given at construction opens the popup",
+      input.element.querySelector(".ws-chat-error__message")?.textContent === "from construction",
+    );
+    input.dispose();
+  }
 });
 
 if (failures.length > 0) {

@@ -92,8 +92,16 @@ window.matchMedia =
     removeListener() {},
     dispatchEvent: () => false,
   }));
+// The transcript's feed scroll watches its content column for growth; the
+// test keeps that observer's callback to play the browser's resize report.
+const feedGrowth = [];
 window.ResizeObserver = class {
-  observe() {}
+  constructor(callback) {
+    this.callback = callback;
+  }
+  observe(target) {
+    if (target?.classList?.contains("ws-transcript")) feedGrowth.push(this.callback);
+  }
   unobserve() {}
   disconnect() {}
 };
@@ -301,7 +309,10 @@ if (feed !== null) {
   });
   await flush();
 
-  check("the message painted a row in the feed", feed.querySelectorAll(".ws-agent-item").length === 1);
+  check("the message painted a human row in the feed", feed.querySelectorAll(".ws-human-message").length === 1);
+  check("the feed's scroll watches the transcript column", feedGrowth.length >= 1);
+  // The column grew; the pinned feed follows it to the bottom.
+  for (const callback of feedGrowth) callback([]);
   check(
     "appending a message scrolls the feed to its bottom",
     scrollTops.length > 0 && scrollTops.at(-1) === 4321,

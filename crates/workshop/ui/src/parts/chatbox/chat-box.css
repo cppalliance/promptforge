@@ -12,11 +12,63 @@
   background: var(--prompt-input-bg);
   border: var(--ws-border-width) solid var(--prompt-input-border);
   border-radius: var(--agent-card-radius);
-  overflow: hidden;
+  /* The error popup docks on the card's top edge, outside its box. */
+  position: relative;
 }
 
 .ws-agent-session__bar:focus-within {
   border-color: var(--prompt-input-border-focus);
+}
+
+/* The error popup, docked on the card's top edge: the warning glyph and
+   the title over the message, and a right-aligned Try again below. */
+.ws-chat-error {
+  position: absolute;
+  inset-inline: calc(-1 * var(--ws-border-width));
+  inset-block-end: calc(100% - var(--ws-border-width));
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: color-mix(in srgb, var(--cursor-base) 2.5%, var(--cursor-bg-elevated));
+  color: var(--cursor-text-primary);
+}
+
+.ws-chat-error__icon {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  color: var(--cursor-yellow);
+}
+
+.ws-chat-error__title {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.ws-chat-error__message {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--cursor-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ws-chat-error__retry {
+  grid-column: 2;
+  grid-row: 3;
+  justify-self: end;
+  margin-block-start: var(--space-1-5);
+}
+
+.ws-chat-error__retry[hidden] {
+  display: none;
 }
 
 /* The prompt box owns the row's remaining width. */

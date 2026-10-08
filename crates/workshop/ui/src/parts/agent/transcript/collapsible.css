@@ -1,0 +1,122 @@
+/* The transcript's shared collapsible (collapsible.ts): a header line over
+   a body that opens its height from zero. The tone variables are the
+   transcript's (transcript.css); a muted scope shifts them down a tier. */
+
+.ws-collapsible {
+  min-inline-size: 0;
+}
+
+/* The header: a flex row, 4px apart, 14px/22px at weight 400. The action
+   reads in the tertiary tier and the details in the quaternary one, in
+   tabular figures; hovering doesn't brighten either. */
+.ws-collapsible__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ws-collapsible[data-expandable="false"] > .ws-collapsible__header {
+  cursor: default;
+}
+
+.ws-collapsible__header:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.ws-collapsible__action {
+  flex: none;
+  color: var(--ws-tone-tertiary, var(--cursor-text-tertiary));
+}
+
+.ws-collapsible__details {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ws-tone-quaternary, var(--cursor-text-quaternary));
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-collapsible__details[hidden] {
+  display: none;
+}
+
+/* The trailing chevron: hidden until the header is hovered, and kept
+   visible while the body is open, where it turns down. */
+.ws-collapsible__chevron {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  inline-size: var(--ws-collapsible-chevron-size);
+  block-size: var(--ws-collapsible-chevron-size);
+  margin-inline-start: var(--ws-collapsible-chevron-gap);
+  color: var(--cursor-icon-tertiary);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-normal);
+}
+
+.ws-collapsible__chevron svg {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.ws-collapsible[data-expandable="false"] > .ws-collapsible__header > .ws-collapsible__chevron {
+  display: none;
+}
+
+.ws-collapsible__header:hover > .ws-collapsible__chevron,
+.ws-collapsible[data-open="true"] > .ws-collapsible__header > .ws-collapsible__chevron {
+  opacity: 1;
+  color: var(--cursor-icon-secondary);
+}
+
+.ws-collapsible[data-open="true"] > .ws-collapsible__header > .ws-collapsible__chevron {
+  transform: rotate(90deg);
+}
+
+/* The body: a one-row grid whose row animates between 0fr and 1fr, which
+   opens the height from zero without measuring it. Closed, it is hidden
+   from the page once the collapse has finished. */
+.ws-collapsible__clip {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--duration-normal) var(--ease-out-cubic),
+    visibility 0s linear var(--duration-normal);
+}
+
+.ws-collapsible[data-open="true"] > .ws-collapsible__clip {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows var(--duration-normal) var(--ease-out-cubic);
+}
+
+.ws-collapsible__body {
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+/* The body starts 14px below the header; the space is content, so the
+   collapsed row clips it away. */
+.ws-collapsible__body::before {
+  content: "";
+  display: block;
+  block-size: var(--feed-row-gap);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-collapsible__clip,
+  .ws-collapsible__chevron {
+    transition: none;
+  }
+}

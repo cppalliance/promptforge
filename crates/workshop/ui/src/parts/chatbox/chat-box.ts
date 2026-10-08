@@ -16,6 +16,9 @@
 // injected mentionSource (a three-item stub by default) through the
 // ProseMirror suggestion plugin, which owns the debounce, the abort, and
 // the stale-result guard; the box only forwards the plugin's signal.
+// An `error` prop opens a popup docked on the card's top edge - a warning
+// glyph, a title over a message, and an optional Try again, whose press the
+// box reports as a `retry` event for the owning part to act on.
 
 import "./chat-box.css";
 
@@ -26,7 +29,7 @@ import { Slice } from "@tiptap/pm/model";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { EditorState } from "@tiptap/pm/state";
 import { Disposable, type IDisposable, toDisposable } from "@workshop/platform/lifecycle";
-import { ICON_MIC, ICON_SEND } from "@workshop/look/icons";
+import { ICON_MIC, ICON_SEND, ICON_WARNING } from "@workshop/look/icons";
 import { renderChip } from "./chip-view";
 import {
   attrsFromChip,
@@ -39,6 +42,7 @@ import { setTentativeMark, TentativeMark } from "./tentative-mark";
 import { renderMentionTypeahead } from "./typeahead-popup";
 import type {
   ChatBoxDynamicProps,
+  ChatBoxError,
   ChatBoxEventSink,
   ChatBoxHandle,
   ChatBoxProps,
@@ -125,6 +129,25 @@ function micTitle(mic: ResolvedDynamicProps["mic"]): string {
   return mic === "recording" ? "Stop recording" : "Push to talk";
 }
 
+/** The popup's title when the owning part gives none. */
+const DEFAULT_ERROR_TITLE = "Connection Error";
+
+/** Whether two error props paint the same popup. */
+function sameError(a: ChatBoxError | null, b: ChatBoxError | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  return a.title === b.title && a.message === b.message && a.tryAgain === b.tryAgain;
+}
+
+/** The popup's parts, kept so an update touches only what changed. */
+interface ErrorPopup {
+  readonly element: HTMLDivElement;
+  readonly title: HTMLDivElement;
+  readonly message: HTMLDivElement;
+  readonly retry: HTMLButtonElement;
+}
+
 /**
  * The chat box: the bar (`ws-agent-session__bar`) holding the framed
  * editor, an optional controls element the owning part supplies, and
@@ -151,6 +174,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   private readonly onEvent: ChatBoxEventSink;
   private readonly variant: NonNullable<ChatBoxProps["variant"]>;
   private readonly dynamic: ResolvedDynamicProps;
+  private errorPopup: ErrorPopup | null = null;
   private attachments: ChipRef[] = [];
   // Held for the `/` trigger, which is not wired to a ProseMirror plugin
   // in this plan: a typed `/` stays text. The seam exists so the owning
@@ -173,6 +197,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       editable: props.editable ?? true,
       action: props.action ?? "send",
       mic: props.mic ?? "idle",
+      error: props.error ?? null,
     };
     this.commandSource = props.commandSource ?? NO_COMMANDS;
     const mentionSource = props.mentionSource ?? stubMentionSource;
@@ -359,6 +384,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.renderEditable();
     this.renderAction();
     this.renderMic();
+    this.renderError();
     const initialMeasure = window.requestAnimationFrame(() => this.syncHeight());
     this._register(toDisposable(() => window.cancelAnimationFrame(initialMeasure)));
   }
@@ -385,6 +411,10 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     if (props.mic !== undefined && props.mic !== this.dynamic.mic) {
       this.dynamic.mic = props.mic;
       this.renderMic();
+    }
+    if (props.error !== undefined && !sameError(props.error, this.dynamic.error)) {
+      this.dynamic.error = props.error;
+      this.renderError();
     }
   }
 
@@ -444,6 +474,53 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.send.dataset["action"] = action;
     this.send.disabled = action === "idle";
     this.send.setAttribute("aria-disabled", String(action === "send-blocked"));
+  }
+
+  /**
+   * Paints the error popup docked on the card's top edge: the warning
+   * glyph, the title (default "Connection Error") over the message, and,
+   * when offered, a right-aligned Try again that is disabled until the
+   * owning part enables it. The text is the owning part's and lands
+   * through textContent.
+   */
+  private renderError(): void {
+    const error = this.dynamic.error;
+    if (error === null) {
+      this.errorPopup?.element.remove();
+      this.errorPopup = null;
+      return;
+    }
+    if (this.errorPopup === null) {
+      this.errorPopup = this.buildErrorPopup();
+      this.element.prepend(this.errorPopup.element);
+    }
+    const popup = this.errorPopup;
+    popup.title.textContent = error.title ?? DEFAULT_ERROR_TITLE;
+    popup.message.textContent = error.message;
+    popup.retry.hidden = error.tryAgain === undefined;
+    popup.retry.disabled = error.tryAgain !== "enabled";
+  }
+
+  private buildErrorPopup(): ErrorPopup {
+    const element = document.createElement("div");
+    element.className = "ws-chat-error";
+    element.setAttribute("role", "alert");
+    const icon = document.createElement("span");
+    icon.className = "ws-chat-error__icon";
+    icon.setAttribute("aria-hidden", "true");
+    // A static string from @workshop/look, never data.
+    icon.innerHTML = ICON_WARNING;
+    const title = document.createElement("div");
+    title.className = "ws-chat-error__title";
+    const message = document.createElement("div");
+    message.className = "ws-chat-error__message";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "button button-secondary button-sm ws-chat-error__retry";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => this.onEvent({ type: "retry" }));
+    element.append(icon, title, message, retry);
+    return { element, title, message, retry };
   }
 
   private renderMic(): void {

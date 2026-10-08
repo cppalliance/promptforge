@@ -1,0 +1,98 @@
+/* A tool line (tool-line.ts) and its hover card (web-hover-card.ts). A
+   tool line is the shared collapsible header with the verb never
+   shrinking and the details truncating, no icons, dots, or badges. */
+
+.ws-tool-line > .ws-collapsible__header {
+  user-select: none;
+}
+
+/* The verb reads in the secondary tier and the details in the tertiary
+   one; a muted scope (a group's steps) shifts both down a tier, which
+   gives the verb 60% and the details 36%. */
+.ws-tool-line .ws-collapsible__action {
+  color: var(--ws-tone-secondary, var(--cursor-text-secondary));
+}
+
+.ws-tool-line .ws-collapsible__details {
+  color: var(--ws-tone-tertiary, var(--cursor-text-tertiary));
+}
+
+/* A generic tool's call name leads the details in the verb's color. */
+.ws-tool-line .ws-collapsible__call {
+  color: var(--ws-tone-secondary, var(--cursor-text-secondary));
+}
+
+/* The generic tool's block opens 4px under the line, not 14. */
+.ws-tool-line .ws-collapsible__body::before {
+  block-size: var(--space-1);
+}
+
+.ws-tool-block {
+  background: var(--cursor-bg-elevated);
+  border: var(--ws-border-width) solid var(--cursor-stroke-tertiary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.ws-tool-block__pre {
+  margin: 0;
+  padding: var(--space-1-5) var(--space-2-5);
+  max-block-size: var(--ws-tool-block-max-height);
+  overflow: auto;
+  font-family: var(--code-font);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--ws-tone-secondary, var(--cursor-text-secondary));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The web hover card: below the line's start edge, over the feed. */
+.ws-web-card {
+  position: fixed;
+  z-index: 9999;
+  box-sizing: border-box;
+  inline-size: var(--ws-web-card-width);
+  max-block-size: var(--ws-web-card-max-height);
+  overflow-y: auto;
+  padding: var(--space-1);
+  background: var(--cursor-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--cursor-box-shadow-base);
+  font-family: var(--font-prose);
+}
+
+.ws-web-card__entry {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.ws-web-card__entry:hover {
+  background: var(--cursor-bg-active);
+}
+
+.ws-web-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--cursor-text-primary);
+  text-decoration: none;
+}
+
+a.ws-web-card__title {
+  color: var(--cursor-text-link);
+}
+
+.ws-web-card__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+  color: var(--cursor-text-tertiary);
+}

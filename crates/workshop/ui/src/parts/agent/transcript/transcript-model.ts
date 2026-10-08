@@ -136,8 +136,6 @@ export interface TailStatus {
   readonly details: string;
   /** The call name leading `details`, for the verb's color; see `ToolLabel`. */
   readonly callName: string | null;
-  /** False while reconnecting: a cancel frame can't cross a down socket. */
-  readonly cancellable: boolean;
   /** True when the last row is a group: the tail renders inside it. */
   readonly inGroup: boolean;
 }
@@ -474,7 +472,6 @@ function makeTail(kind: TailKind, action: string, inGroup: boolean, rest: Partia
     action,
     details: "",
     callName: null,
-    cancellable: kind !== "reconnecting",
     inGroup,
     ...rest,
   };

@@ -63,6 +63,19 @@ export interface SerializedDraft {
 }
 
 /**
+ * The error popup docked on the card's top edge: a warning glyph, a title
+ * over a message, and an optional Try again. The owning part decides what
+ * Try again does; the box only reports the press.
+ */
+export interface ChatBoxError {
+  /** The popup title; default "Connection Error". */
+  readonly title?: string;
+  readonly message: string;
+  /** Offers Try again, enabled or shown disabled; absent: no button. */
+  readonly tryAgain?: "enabled" | "disabled";
+}
+
+/**
  * Construction props. Every prop is optional with a stated default, so
  * `new ChatBox()` constructs a working box. The first group is dynamic
  * and may change through `update()`; the rest is construction-only and
@@ -70,6 +83,8 @@ export interface SerializedDraft {
  */
 export interface ChatBoxProps {
   // dynamic
+  /** The error popup's content, or null for no popup; default null. */
+  readonly error?: ChatBoxError | null;
   /** Whether the operator can type; default true. */
   readonly editable?: boolean;
   /**
@@ -143,6 +158,7 @@ export type ChatBoxEvent =
   | { readonly type: "send"; readonly text: string; readonly mentions: ChipRef[]; readonly attachments: ChipRef[] }
   | { readonly type: "command"; readonly command: ChipRef; readonly args: string }
   | { readonly type: "stop" }
+  | { readonly type: "retry" }
   | { readonly type: "cancel" }
   | { readonly type: "mic-press" }
   | { readonly type: "mic-release" };
@@ -185,4 +201,4 @@ export interface ChatBoxHandle {
 }
 
 /** The dynamic subset: the only props `update()` accepts. */
-export type ChatBoxDynamicProps = Pick<ChatBoxProps, "editable" | "action" | "mic">;
+export type ChatBoxDynamicProps = Pick<ChatBoxProps, "editable" | "action" | "mic" | "error">;

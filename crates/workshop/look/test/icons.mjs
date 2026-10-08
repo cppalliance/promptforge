@@ -55,6 +55,7 @@ const expected = {
   ICON_INFO: { codicon: "info", size: 16 },
   ICON_ERROR: { codicon: "error", size: 16 },
   ICON_CHECK: { codicon: "check", size: 16 },
+  ICON_COPY: { codicon: "copy", size: 16 },
 };
 
 check(
@@ -62,8 +63,8 @@ check(
   Object.keys(icons).sort().join(",") === Object.keys(expected).sort().join(","),
 );
 check(
-  "the set covers the fourteen codicons the specifications use",
-  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 14,
+  "the set covers the fifteen codicons the specifications use",
+  new Set(Object.values(expected).map((entry) => entry.codicon)).size === 15,
 );
 
 // The codicon package root, found through its package.json.

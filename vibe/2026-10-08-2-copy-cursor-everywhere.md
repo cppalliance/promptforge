@@ -1032,7 +1032,7 @@ Rules for every step:
 
 <step-3>
 
-### Step 3: Render the agent transcript the way Cursor does
+### Step 3: Render the agent transcript the way Cursor does [completed]
 
 - Component: Agent pane
 - Placement: third. It renders Step 2's model, and it gives errors the composer popup that Step 4's card hosts.

@@ -1,0 +1,174 @@
+/* The agent transcript (transcript-view.ts): the centered feed column,
+   turn wrappers, row spacing, thought and group rows, the tail status, a
+   finished turn's footer, and the trailing spacer. The feed's own box is
+   .ws-agent-session__feed in agent-session.css. */
+
+/* The column: at most 840px wide, centered, with 16px of side padding. The
+   three tone variables are the text tiers rows read; a muted scope below
+   shifts them down. */
+.ws-transcript {
+  --ws-tone-secondary: var(--cursor-text-secondary);
+  --ws-tone-tertiary: var(--cursor-text-tertiary);
+  --ws-tone-quaternary: var(--cursor-text-quaternary);
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: var(--agent-max-width);
+  margin-inline: auto;
+  padding-inline: var(--space-4);
+  padding-block-start: var(--space-3);
+}
+
+/* Each user item starts a turn wrapper; rows sit 14px apart inside it and
+   turns 14px apart in the column. The wrapper is the sticky human
+   message's containing block. */
+.ws-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--feed-row-gap);
+  min-inline-size: 0;
+}
+
+.ws-turn + .ws-turn {
+  margin-block-start: var(--feed-row-gap);
+}
+
+/* Every row but the human message takes the 11px inline inset. */
+.ws-transcript-row:not(.ws-human-message),
+.ws-turn > .ws-tail,
+.ws-turn > .ws-turn-footer {
+  margin-inline: var(--ws-transcript-row-inset);
+}
+
+/* The spacer's height is set from JS (feed-scroll.ts). */
+.ws-transcript__spacer {
+  flex: none;
+}
+
+/* A muted scope: secondary text maps to tertiary and tertiary to
+   quaternary, and a running tool's verb shimmers from the tertiary tier. */
+.ws-muted-scope {
+  --ws-tone-secondary: var(--cursor-text-tertiary);
+  --ws-tone-tertiary: var(--cursor-text-quaternary);
+}
+
+.ws-muted-scope .ws-shimmer-text--tool {
+  --shimmer-base: color-mix(in srgb, var(--cursor-text-tertiary) 60%, transparent);
+}
+
+/* --- Rows ---------------------------------------------------------------------- */
+
+.ws-markdown-row {
+  min-inline-size: 0;
+}
+
+/* A new reply row fades in and rises 8px. */
+.ws-markdown-row--enter {
+  animation: ws-markdown-row-enter var(--ws-transcript-row-enter) var(--ease-out-cubic) both;
+}
+
+@keyframes ws-markdown-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The thinking body: the thinking markdown at half opacity, no max height. */
+.ws-thinking-body {
+  opacity: 0.5;
+}
+
+/* A group's steps sit 4px apart inside its muted scope. */
+.ws-group-row__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+/* --- Tail status --------------------------------------------------------------- */
+
+.ws-tail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  white-space: nowrap;
+}
+
+/* Inside a group the tail sits under the steps, 14px below. */
+.ws-group-row > .ws-tail {
+  margin-block-start: var(--feed-row-gap);
+}
+
+.ws-tail[hidden] {
+  display: none;
+}
+
+.ws-tail__action {
+  flex: none;
+  color: var(--ws-tone-secondary, var(--cursor-text-secondary));
+}
+
+.ws-tail__details {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ws-tone-tertiary, var(--cursor-text-tertiary));
+}
+
+.ws-tail__details[hidden] {
+  display: none;
+}
+
+.ws-tail__call {
+  color: var(--ws-tone-secondary, var(--cursor-text-secondary));
+}
+
+/* --- Turn footer --------------------------------------------------------------- */
+
+.ws-turn-footer {
+  display: flex;
+  align-items: center;
+  block-size: var(--ws-transcript-footer-height);
+}
+
+.ws-turn-footer__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--height-xs);
+  block-size: var(--height-xs);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--cursor-icon-tertiary);
+  cursor: pointer;
+}
+
+.ws-turn-footer__copy:hover {
+  background: var(--cursor-bg-tertiary);
+  color: var(--cursor-icon-secondary);
+}
+
+.ws-turn-footer__copy:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.ws-turn-footer__copy[data-copied="true"] {
+  color: var(--cursor-green);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-markdown-row--enter {
+    animation: none;
+  }
+}
