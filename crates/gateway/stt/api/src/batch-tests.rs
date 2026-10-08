@@ -4,8 +4,10 @@ use super::*;
 use crate::test_fixtures::{SCRIPTED_SILERO_MODEL, ScriptedSilero};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedDetector};
+use gateway_stt_engine::DecodeMode;
+use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedDetector, ScriptedModelFactory};
 use std::path::PathBuf;
+use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 fn wav(samples: &[i16]) -> Vec<u8> {
@@ -261,5 +263,39 @@ async fn a_request_without_a_prompt_decodes_with_the_configured_vocabulary_alone
 
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(decoder.requests()[0].guidance(), ["WG21"]);
+    state.shutdown();
+}
+
+/// A generation with both an interim and a final physical model, and the
+/// decoders that record the requests each role serves.
+fn paired_generation() -> (GenerationState, ScriptedDecoder, ScriptedDecoder) {
+    let interim = ScriptedDecoder::new();
+    let final_decoder = ScriptedDecoder::new();
+    let state = GenerationState::default();
+    let policy = EnginePolicy::new(15, 500, false).expect("the scripted policy is valid");
+    state
+        .load_scripted(
+            ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
+            policy,
+            &CancellationToken::new(),
+        )
+        .expect("the scripted runtime loads");
+    (state, interim, final_decoder)
+}
+
+#[tokio::test]
+async fn the_realtime_transcribe_model_is_accepted_and_decodes_with_the_final_pass() {
+    let (state, interim, final_decoder) = paired_generation();
+
+    let (status, json) = post_to(&state, &[("model", "realtime-transcribe")]).await;
+
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let requests = final_decoder.requests();
+    assert_eq!(requests.len(), 1, "the final worker serves the request");
+    assert_eq!(requests[0].mode(), DecodeMode::Final);
+    assert!(
+        interim.requests().is_empty(),
+        "the interim worker serves nothing"
+    );
     state.shutdown();
 }
