@@ -1238,7 +1238,7 @@ Rules for every step:
 
 <step-10>
 
-### Step 10: Move the gateway config app onto Cursor's settings look
+### Step 10: Move the gateway config app onto Cursor's settings look [completed]
 
 - Component: Gateway config app
 - Placement: last, for the reasons in the component list.

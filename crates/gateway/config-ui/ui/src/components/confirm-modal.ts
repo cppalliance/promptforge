@@ -1,7 +1,8 @@
 // Confirm dialog [Adapted: llama.cpp]: the shared focus-trapped modal
-// (shared-ui/modal) as a Cancel/confirm pair. Focus moves into the
-// dialog (landing on Cancel, the safe default), Escape and the backdrop
-// cancel, and focus returns to the opener when the dialog closes.
+// (shared-ui/modal) as a Cancel/confirm pair in Cursor's form modal skin -
+// Cancel first, the confirming action last. Focus moves into the dialog
+// (landing on Cancel, the safe default), Escape and the backdrop cancel,
+// and focus returns to the opener when the dialog closes.
 
 import { openModal } from "shared-ui/modal";
 

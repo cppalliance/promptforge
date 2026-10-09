@@ -1,8 +1,10 @@
-// The top tab bar [Adapted: Unsloth]: medallion left (standalone only),
-// the profile switcher, seven icon+label tabs whose active state is the
-// accent underline, and the right cluster holding the connection dot
+// The tab bar: a slim header strip with the medallion (standalone only),
+// the profile switcher, and the right cluster holding the connection dot
 // [Adapted: llama-swap] plus the container the Apply/Revert pair mounts
-// into when the write path lands.
+// into; and, as its own element, Cursor's settings nav - seven icon+label
+// links in three groups, set in a sticky left column that drops its labels
+// and becomes a 40px icon column in a narrow window. The caller mounts the
+// strip above the desk and the nav beside the content.
 
 import {
   Cloud,
@@ -26,14 +28,28 @@ declare const __APP_VERSION__: string | undefined;
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 /** One tab: destination view, label, lucide icon, and hash target. */
-const TABS: ReadonlyArray<readonly [view: PageId, label: string, icon: IconNode, href: string]> = [
-  ["settings", "Settings", Settings, "#/settings"],
-  ["discover", "Discover", Search, "#/discover"],
-  ["local", "Local", Cpu, "#/local"],
-  ["remote", "Remote", Globe, "#/remote"],
-  ["cloud", "Cloud", Cloud, "#/cloud"],
-  ["profiles", "Profiles", Folder, "#/profiles"],
-  ["secrets", "Secrets", Key, "#/secrets"],
+type Tab = readonly [view: PageId, label: string, icon: IconNode, href: string];
+
+/** The nav's icon size: Cursor's 12px settings-nav glyphs. */
+const ICON_SIZE = 12;
+
+/**
+ * The tabs in nav order, grouped: the gateway's own settings, then the
+ * model catalogs, then the profiles and the secrets they read. A divider
+ * sits between groups.
+ */
+const TAB_GROUPS: ReadonlyArray<readonly Tab[]> = [
+  [["settings", "Settings", Settings, "#/settings"]],
+  [
+    ["discover", "Discover", Search, "#/discover"],
+    ["local", "Local", Cpu, "#/local"],
+    ["remote", "Remote", Globe, "#/remote"],
+    ["cloud", "Cloud", Cloud, "#/cloud"],
+  ],
+  [
+    ["profiles", "Profiles", Folder, "#/profiles"],
+    ["secrets", "Secrets", Key, "#/secrets"],
+  ],
 ];
 
 /** Construction options for the tab bar. */
@@ -50,9 +66,11 @@ export interface TabBarOptions {
 
 /** The mounted tab bar and its live-update handles. */
 export interface TabBar {
-  /** The `<header class="tab-bar">` element. */
+  /** The `<header class="tab-bar">` strip: medallion, profile switcher, actions. */
   element: HTMLElement;
-  /** Moves `aria-current` (and the accent underline) to `view`. */
+  /** The `<nav class="tab-nav">` column of grouped links, mounted beside the content. */
+  nav: HTMLElement;
+  /** Moves `aria-current` (and the selected fill) to `view`. */
   setActivePage(view: PageId | null): void;
   /** Recolors the connection dot from the latest API outcome. */
   setConnected(ok: boolean): void;
@@ -79,20 +97,35 @@ export function createTabBar(options: TabBarOptions): TabBar {
 
   const nav = document.createElement("nav");
   nav.setAttribute("aria-label", "Primary");
-  nav.className = "tab-list";
+  nav.className = "tab-nav";
   const tabByPage = new Map<PageId, HTMLAnchorElement>();
-  for (const [view, label, icon, href] of TABS) {
-    const tab = document.createElement("a");
-    tab.className = "tab";
-    tab.href = href;
-    const svg = lucideElement(icon, { "aria-hidden": "true", width: 16, height: 16 });
-    const text = document.createElement("span");
-    text.textContent = label;
-    tab.append(svg, text);
-    nav.append(tab);
-    tabByPage.set(view, tab);
-  }
-  element.append(nav);
+  TAB_GROUPS.forEach((group, index) => {
+    if (index > 0) {
+      const divider = document.createElement("div");
+      divider.className = "tab-divider";
+      divider.setAttribute("role", "separator");
+      nav.append(divider);
+    }
+    for (const [view, label, icon, href] of group) {
+      const tab = document.createElement("a");
+      tab.className = "tab";
+      tab.href = href;
+      // The label is the link's name; the column hides it, so a tooltip
+      // keeps the icon-only column readable.
+      tab.title = label;
+      const svg = lucideElement(icon, {
+        "aria-hidden": "true",
+        width: ICON_SIZE,
+        height: ICON_SIZE,
+      });
+      const text = document.createElement("span");
+      text.className = "tab-label";
+      text.textContent = label;
+      tab.append(svg, text);
+      nav.append(tab);
+      tabByPage.set(view, tab);
+    }
+  });
 
   const actions = document.createElement("div");
   actions.className = "tab-actions";
@@ -114,6 +147,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
 
   return {
     element,
+    nav,
     setPendingCount(count: number): void {
       if (count <= 0) {
         pending.replaceChildren();

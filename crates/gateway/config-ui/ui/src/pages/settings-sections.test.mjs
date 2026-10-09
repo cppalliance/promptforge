@@ -661,3 +661,34 @@ test("Restore recommended models creates or resets the pinned STT pair", async (
   assert.equal(stub.state.pending.stt_model[0].sha256.length, 64);
   assert.equal(stub.state.pending.stt_model[1].role, "final");
 });
+
+test("a non-numeric entry in a numeric field raises an alert under the input and keeps the saved number", async () => {
+  const config = modelsFixture();
+  config.stt = { window_seconds: 8, interval_ms: 250, vocabulary: ["WG21"] };
+  const stub = fixtureStub({ config });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/settings/workshop");
+  await settle();
+
+  const input = root.querySelector(".field-row[data-key='window_seconds'] input");
+  changeValue(dom, input, "abc");
+  const row = root.querySelector(".field-row[data-key='window_seconds']");
+  const error = row.querySelector(".field-error");
+  assert.ok(error, "the bad entry raises a field error");
+  assert.equal(error.getAttribute("role"), "alert");
+  assert.match(error.textContent, /number/i);
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.ok(
+    input.getAttribute("aria-describedby").split(" ").includes(error.id),
+    "the input is described by the alert",
+  );
+  assert.equal(input.nextElementSibling, error, "the alert sits right under the input");
+  assert.equal(putBodies(stub, "/admin/config").length, 0, "nothing was staged");
+
+  changeValue(dom, input, "9");
+  await settle();
+  const fixed = root.querySelector(".field-row[data-key='window_seconds']");
+  assert.equal(fixed.querySelector(".field-error"), null, "a valid number clears the alert");
+  assert.equal(fixed.querySelector("input").getAttribute("aria-invalid"), null);
+  assert.equal(fixed.querySelector("input").value, "9");
+});

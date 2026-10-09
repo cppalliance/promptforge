@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { bundledDeclarations, squash } from "../css-support.mjs";
 import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../test-support.mjs";
 
 const ORPHAN = {
@@ -211,4 +212,166 @@ test("editing an STT model and applying defers the restart verdict to the gatewa
     !toasts.some((text) => /speech-to-text/.test(text)),
     "the browser raises no speech toast of its own; restart_required from the apply decides",
   );
+});
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("the search box reads Add or search model and a search with no match says No models available", async () => {
+  const { dom, root } = await open();
+  const input = root.querySelector("#models-search");
+  assert.equal(input.placeholder, "Add or search model");
+  assert.equal(root.querySelector(".model-list-empty"), null, "rows exist, so no empty note");
+
+  input.value = "no-such-model";
+  input.dispatchEvent(new dom.window.Event("input"));
+  await sleep(250);
+  const empty = root.querySelector(".model-list-empty");
+  assert.ok(empty, "an empty result renders the empty state");
+  assert.equal(empty.textContent, "No models available");
+  assert.equal(root.querySelectorAll(".model-row").length, 0);
+});
+
+/** Boots the app with a gateway whose `/admin/config` reload waits until `release()`. */
+async function openWithHeldReload() {
+  const stub = gatewayStub({ key: "k", config: modelsFixture(), orphans: [ORPHAN] });
+  const real = stub.fetchFn;
+  let hold = false;
+  let release = () => undefined;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  stub.fetchFn = async (url, init) => {
+    if (hold && String(url).endsWith("/admin/config")) {
+      await gate;
+    }
+    return real(url, init);
+  };
+  const { dom, root } = await bootApp({ key: "k", stub });
+  await settle();
+  return {
+    dom,
+    root,
+    hold: () => {
+      hold = true;
+    },
+    release,
+  };
+}
+
+test("the refresh icon spins while the catalog reloads and stops once it lands", async () => {
+  const { root, hold, release } = await openWithHeldReload();
+
+  const refresh = root.querySelector(".models-refresh");
+  assert.equal(refresh.getAttribute("aria-label"), "Refresh models");
+  assert.ok(refresh.querySelector("svg"), "the button is an icon");
+  assert.equal(refresh.classList.contains("is-loading"), false, "idle until pressed");
+
+  hold();
+  refresh.click();
+  await settle();
+  const spinning = root.querySelector(".models-refresh");
+  assert.ok(spinning.classList.contains("is-loading"), "spins while the reload is in flight");
+  assert.equal(spinning.getAttribute("aria-busy"), "true");
+
+  release();
+  await settle(20);
+  assert.equal(
+    root.querySelector(".models-refresh").classList.contains("is-loading"),
+    false,
+    "stops when the load settles",
+  );
+});
+
+test("pressing refresh from the keyboard keeps focus on the refresh button through both renders", async () => {
+  const { dom, root, hold, release } = await openWithHeldReload();
+  const doc = dom.window.document;
+
+  const refresh = root.querySelector(".models-refresh");
+  refresh.focus();
+  assert.equal(doc.activeElement, refresh, "the press starts with focus on the button");
+
+  hold();
+  refresh.click();
+  await settle();
+  const spinning = root.querySelector(".models-refresh");
+  assert.notEqual(spinning, refresh, "the toolbar was rebuilt, so the old button is gone");
+  assert.equal(doc.activeElement, spinning, "focus returns to the new button while the reload runs");
+
+  release();
+  await settle(20);
+  const settled = root.querySelector(".models-refresh");
+  assert.equal(settled.classList.contains("is-loading"), false, "the reload landed");
+  assert.equal(doc.activeElement, settled, "focus is on the final button after the load settles");
+});
+
+test("a reload does not pull focus onto refresh when the press did not leave it there", async () => {
+  const { dom, root, hold, release } = await openWithHeldReload();
+  const doc = dom.window.document;
+
+  hold();
+  root.querySelector(".models-refresh").click();
+  await settle();
+  assert.notEqual(doc.activeElement, root.querySelector(".models-refresh"), "unfocused press, no focus taken");
+
+  // Focus moves to the search box while the reload is in flight; the landing render leaves it alone.
+  const search = root.querySelector("#models-search");
+  search.focus();
+  release();
+  await settle(20);
+  assert.notEqual(
+    doc.activeElement,
+    root.querySelector(".models-refresh"),
+    "the settled reload does not steal focus",
+  );
+});
+
+test("a non-numeric entry in a model's numeric field raises an alert under the input and stages nothing", async () => {
+  const { dom, root, stub } = await open();
+  navigate(dom, "#/local/qwen-common");
+  await settle();
+
+  const row = root.querySelector(".field-row[data-key='max_output']");
+  const input = row.querySelector("input");
+  input.value = "lots";
+  input.dispatchEvent(new dom.window.Event("change"));
+
+  const error = row.querySelector(".field-error");
+  assert.ok(error, "the bad entry raises a field error");
+  assert.equal(error.getAttribute("role"), "alert");
+  assert.equal(error.textContent, "Enter a number");
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.ok(
+    input.getAttribute("aria-describedby").split(" ").includes(error.id),
+    "the input is described by the alert",
+  );
+  assert.equal(input.nextElementSibling, error, "the alert sits right under the input");
+  assert.equal(
+    stub.calls.filter((call) => call.init?.method === "PUT").length,
+    0,
+    "nothing was staged",
+  );
+
+  // A good number commits an edit, and the page re-render takes the alert with the old input.
+  const typed = root.querySelector(".field-row[data-key='max_output'] input");
+  typed.value = "512";
+  typed.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  const fixed = root.querySelector(".field-row[data-key='max_output']");
+  assert.equal(fixed.querySelector(".field-error"), null, "a valid number leaves no alert");
+  assert.equal(fixed.querySelector("input").getAttribute("aria-invalid"), null);
+  assert.equal(fixed.querySelector("input").value, "512", "the edit is kept");
+});
+
+test("model rows sit 12px apart with no hover fill, and the search box takes Cursor's padding", async () => {
+  const list = await bundledDeclarations(".model-list");
+  assert.equal(list.get("display"), "flex");
+  assert.equal(list.get("flex-direction"), "column");
+  assert.equal(list.get("gap"), "var(--space-3)", "a 12px gap");
+  const hover = await bundledDeclarations(".model-row:hover");
+  assert.equal(hover.get("background"), undefined, "no hover fill");
+  const search = await bundledDeclarations(".models-toolbar .input");
+  assert.equal(squash(search.get("padding")), "5px12px", "padding 5px 12px");
+  assert.equal(search.get("border-radius"), "var(--radius-sm)", "a 4px radius");
+  const spin = await bundledDeclarations(".models-refresh.is-loading svg");
+  assert.match(spin.get("animation") ?? "", /spin/, "the icon rotates while loading");
 });

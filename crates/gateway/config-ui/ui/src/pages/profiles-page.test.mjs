@@ -245,6 +245,30 @@ test("New Profile supports Empty and Copy without an include mode", async () => 
   );
 });
 
+test("a refused new-profile name is an alert tied to the name input", async () => {
+  const { dom, root, stub } = await openProfiles();
+  root.querySelector(".new-profile").click();
+  const dialog = dom.window.document.querySelector(".new-profile-dialog");
+  const nameInput = dialog.querySelector("#new-profile-name");
+  const error = dialog.querySelector("#new-profile-error");
+  assert.equal(error.getAttribute("role"), "alert", "the error is announced as an alert, not a polite note");
+  assert.equal(error.getAttribute("aria-live"), null, "it carries no polite live region of its own");
+  assert.ok(error.classList.contains("field-error"), "it uses the shared field-error skin");
+  assert.equal(nameInput.getAttribute("aria-describedby"), error.id);
+  assert.equal(nameInput.getAttribute("aria-invalid"), null, "the input is valid until a name is refused");
+
+  nameInput.value = "default";
+  dialog.querySelector("button[type='submit']").click();
+  await settle();
+  assert.equal(error.textContent, "Profile default already exists.");
+  assert.equal(nameInput.getAttribute("aria-invalid"), "true");
+  assert.equal(
+    stub.state.pending.profile.filter((profile) => profile.name === "default").length,
+    1,
+    "no second profile was staged",
+  );
+});
+
 test("VRAM totals follow Chosen and surface unknown contributors", async () => {
   const config = modelsFixture();
   config.dominion[0].vram_gb = 24;

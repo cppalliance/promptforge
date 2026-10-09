@@ -19,7 +19,7 @@ import {
   providersByTier,
 } from "../services/cloud-cascade";
 import type { CloudProviderOption } from "../services/cloud-cascade";
-import { mergeCloudModel } from "../services/cloud-merge";
+import { ContextRequiredError, mergeCloudModel } from "../services/cloud-merge";
 import type { ConfigStore } from "../services/config-store";
 import type {
   CloudModelEntry,
@@ -435,13 +435,39 @@ export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPag
     );
     const description = field("Description", "cloud-add-description", entry.display_name);
 
+    const body = document.createElement("div");
+    body.className = "cloud-add__body";
+
+    // One alert serves the whole dialog. A validation failure moves it under
+    // the field it blames and marks that input; a refusal from the gateway
+    // belongs to no field, so it lands at the end of the body unmarked.
     const error = document.createElement("p");
-    error.className = "cloud-add-error";
+    error.id = "cloud-add-error";
+    error.className = "field-error cloud-add-error";
     error.setAttribute("role", "alert");
     error.hidden = true;
-    const fail = (message: string): void => {
+    let blamed: HTMLInputElement | null = null;
+    const clearError = (): void => {
+      error.hidden = true;
+      blamed?.removeAttribute("aria-invalid");
+      blamed?.removeAttribute("aria-describedby");
+      blamed = null;
+    };
+    const fail = (
+      message: string,
+      culprit?: { wrap: HTMLElement; input: HTMLInputElement },
+    ): void => {
+      clearError();
       error.textContent = message;
       error.hidden = false;
+      if (culprit) {
+        culprit.wrap.append(error);
+        culprit.input.setAttribute("aria-invalid", "true");
+        culprit.input.setAttribute("aria-describedby", error.id);
+        blamed = culprit.input;
+      } else {
+        body.append(error);
+      }
     };
 
     const actions = document.createElement("div");
@@ -456,9 +482,10 @@ export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPag
     submit.className = "button button-primary cloud-add-submit";
     submit.textContent = "Add Model";
     submit.addEventListener("click", () => {
+      clearError();
       const modelName = name.input.value.trim();
       if (modelName === "") {
-        fail("Name is required");
+        fail("Name is required", name);
         return;
       }
       let contextValue: number | undefined;
@@ -466,7 +493,7 @@ export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPag
       if (raw !== "") {
         const parsed = Number(raw);
         if (!Number.isInteger(parsed) || parsed <= 0) {
-          fail("Context must be a positive integer");
+          fail("Context must be a positive integer", context);
           return;
         }
         contextValue = parsed;
@@ -484,13 +511,19 @@ export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPag
           toasts.show(`${modelName} added - Apply to activate`, "success");
           close();
         } catch (caught) {
-          fail(caught instanceof Error ? caught.message : String(caught));
+          if (caught instanceof ContextRequiredError) {
+            // The merge owns the required-context rule; the alert only picks the field.
+            fail(caught.message, context);
+          } else {
+            fail(caught instanceof Error ? caught.message : String(caught));
+          }
         }
       })();
     });
     actions.append(cancel, submit);
 
-    dialog.append(title, name.wrap, context.wrap, description.wrap, error, actions);
+    body.append(name.wrap, context.wrap, description.wrap, error);
+    dialog.append(title, body, actions);
     overlay.append(dialog);
     overlay.addEventListener("mousedown", (event) => {
       if (event.target === overlay) {

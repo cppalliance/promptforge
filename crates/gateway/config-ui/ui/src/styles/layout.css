@@ -5,8 +5,7 @@
 @layer components {
 	/* Skip link: the desk's first focusable element, parked above the
 	   viewport until keyboard focus reveals it as a pill over the tab
-	   bar. Near-black label on the accent, same 5.2:1 pair as
-	   .button-primary. */
+	   bar. Dark label on the accent, the same pair as .button-primary. */
 	.skip-link {
 		position: absolute;
 		inset-block-start: 0.5rem;
@@ -17,8 +16,8 @@
 		height: 2.25rem;
 		padding-inline: 0.875rem;
 		border-radius: 9999px;
-		background: var(--accent);
-		color: #0F0F0F;
+		background: var(--cursor-accent);
+		color: var(--cursor-text-invert);
 		font-weight: 500;
 		text-decoration: none;
 		transform: translateY(-200%);
@@ -27,49 +26,91 @@
 		transform: translateY(0);
 	}
 
-	/* Tab bar: h-10 px-4 gap-2 tabs on the secondary surface; the
-	   active tab is a 2px accent underline, never a pill. Accent text
-	   on --bg-secondary is 4.7:1. */
+	/* Tab bar: a slim header strip on the chrome surface holding the
+	   medallion, the profile switcher, and the right cluster. The nav
+	   it used to carry is its own column below. */
 	.tab-bar {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		padding-inline: 0.75rem;
+		gap: var(--space-2);
+		min-height: var(--space-10);
+		padding-inline: var(--space-3);
 		background: var(--bg-secondary);
 		border-bottom: 1px solid var(--border);
 	}
-	.tab-list {
+
+	/* The desk: the nav column and the content column, 48px apart. */
+	.desk-layout {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
+		gap: 48px;
+		padding: var(--space-4) var(--space-4) 0;
+	}
+	.desk-content {
+		flex: 1;
+		min-width: 0;
+		padding-block-end: var(--space-4);
+	}
+
+	/* Settings nav [Cursor]: a sticky column of cells, 12px text and 12px
+	   icons, a 6% fill for the hovered and the selected cell, and a hairline
+	   between groups. A narrow window keeps only the icons. */
+	.tab-nav {
+		position: sticky;
+		inset-block-start: var(--space-4);
+		flex: none;
+		width: clamp(100px, 25%, 200px);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
 	}
 	.tab {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		height: 2.5rem;
-		padding-inline: 1rem;
-		border: 0;
-		border-bottom: 2px solid transparent;
-		border-radius: 0;
-		background: none;
-		color: var(--text-secondary);
-		font-size: 0.8125rem;
-		font-weight: 500;
+		gap: var(--space-1-5);
+		padding: 4px 6px;
+		border-radius: var(--radius);
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+		font-weight: 400;
+		line-height: var(--line-height-sm);
 		text-decoration: none;
 		cursor: pointer;
 	}
-	.tab:hover {
-		color: var(--text-primary);
+	.tab svg {
+		flex: none;
 	}
-	.tab.is-active,
+	.tab:hover {
+		background: var(--cursor-bg-quaternary);
+	}
 	.tab[aria-current="page"] {
-		border-bottom-color: var(--accent);
-		color: var(--accent);
+		background: var(--cursor-bg-quaternary);
+		color: var(--cursor-text-primary);
+	}
+	.tab-divider {
+		margin-block: var(--space-1);
+		border-top: 1px solid var(--cursor-stroke-tertiary);
+	}
+	@media (max-width: 709.98px) {
+		.tab-nav {
+			width: 40px;
+		}
+		.tab {
+			justify-content: center;
+		}
+		.tab-label {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
+		}
 	}
 
-	/* View content below the tab bar. */
+	/* View content beside the nav; the layout owns the padding. */
 	.desk {
-		padding: 1rem;
+		padding: 0;
 	}
 
 	/* Master-detail split (the Unsloth hub proportions): stacked on
@@ -105,23 +146,36 @@
 		}
 	}
 
-	/* Persistent banners (pending changes, restart required). The
-	   explicit display beats the UA [hidden] rule, so the hidden state
-	   needs its own counterpart. */
+	/* Persistent banners (pending changes, restart required): 12px cards with
+	   a 12px 14px padding. The pending-changes banner is the accent at 8% with
+	   an accent border at 20%; the restart, warning, and danger callouts carry
+	   a 4px left bar. The explicit display beats the UA [hidden] rule, so the
+	   hidden state needs its own counterpart. */
 	.banner {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 0.5rem 1rem;
-		border-left: 3px solid var(--accent);
-		background: var(--bg-secondary);
-		color: var(--text-primary);
+		gap: var(--space-3);
+		padding: 12px 14px;
+		border: 1px solid var(--cursor-stroke-secondary);
+		border-radius: var(--radius-xl);
+		background: var(--cursor-bg-quaternary);
+		color: var(--cursor-text-primary);
 	}
 	.banner[hidden] {
 		display: none;
 	}
+	.desk-content > .banner,
+	.banner-stack > .banner:not([hidden]) {
+		margin-block-end: var(--space-3);
+	}
 	.banner-pending {
-		border-left-color: var(--accent);
+		border-color: color-mix(in srgb, var(--cursor-accent) 20%, transparent);
+		background: var(--cursor-accent-subtle);
+	}
+	.banner-restart,
+	.banner-warning,
+	.banner-danger {
+		border-left-width: 4px;
 	}
 	.banner-restart {
 		border-left-color: var(--warning);
@@ -133,28 +187,46 @@
 	/* Toast stack, bottom-right: shared-ui/toast.css defines the rules;
 	   the stack element comes from createToastStack. */
 
-	/* Modal scaffolding: dimmed full-screen overlay centering a card. */
+	/* Modal scaffolding: the form modal's values (shared-ui/modal.css has the
+	   same ones for the focus-trapped dialogs). A dimmed full-screen overlay
+	   centering a 320px card; the card's own padding holds the header and body,
+	   and a footer bleeds to its edges. */
 	.overlay {
 		position: fixed;
 		inset: 0;
 		z-index: 50;
 		display: grid;
 		place-items: center;
-		background: rgb(0 0 0 / 0.6);
+		background: rgba(0,0,0,.5);
 	}
 	.modal {
-		width: min(28rem, calc(100vw - 2rem));
-		padding: 1.25rem;
-		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		background: var(--bg-secondary);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+		box-sizing: border-box;
+		width: 320px;
+		max-width: calc(100vw - 2rem);
+		padding: var(--space-3) var(--space-4) 0;
+		border: 1px solid var(--cursor-stroke-secondary);
+		border-radius: var(--radius-xl);
+		background: var(--cursor-editor);
+		color: var(--cursor-text-primary);
+		animation: modal-form-open var(--duration-slower) var(--ease-out-cubic) both;
 	}
-	.modal-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		margin-block-start: 1rem;
+	.modal > h2 {
+		margin: 0 0 var(--space-2);
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-medium);
+	}
+	.modal > .field-error {
+		margin: var(--space-2) 0 var(--space-3);
+	}
+	.modal .modal-actions {
+		margin: var(--space-4) calc(-1 * var(--space-4)) 0;
+	}
+	/* The scale-in is decorative; shared-ui/modal.css drops it for
+	   `.modal-dialog` the same way. */
+	@media (prefers-reduced-motion: reduce) {
+		.modal {
+			animation: none;
+		}
 	}
 
 	/* Metric tiles (Settings > System): rounded-xl p-4 cards in a grid
@@ -175,10 +247,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.625rem;
-		padding: 1rem;
-		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		background: var(--cursor-bg-quaternary);
+		padding: var(--space-4);
+		border: 0;
+		border-radius: var(--radius-xl);
+		background: var(--cursor-bg-quinary);
 	}
 	.metric-label {
 		color: var(--text-secondary);
@@ -233,10 +305,13 @@
 		text-align: start;
 	}
 
-	/* Inline field error: the lightened danger companion passes AA on
-	   every desk surface. */
+	/* Inline field error: 12px/16px in the IDE danger red, right under the
+	   input it describes. */
 	.field-error {
-		color: var(--danger-text);
+		margin: 0;
+		color: var(--cursor-danger);
+		font-size: var(--font-size-sm);
+		line-height: var(--line-height-sm);
 	}
 
 	/* Tab bar cluster: brand medallion and the right-side actions. */
@@ -283,10 +358,10 @@
 		display: inline-flex;
 		width: 1rem;
 		margin-inline-end: 0.375rem;
-		color: var(--accent);
+		color: var(--cursor-accent);
 	}
 	.menu-item.is-pending {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 
 	/* Apply overlay activity: the one row holds the spinner and the
@@ -323,8 +398,8 @@
 	.spinner {
 		width: 14px;
 		height: 14px;
-		border: 2px solid rgb(255 255 255 / 0.15);
-		border-top-color: var(--accent);
+		border: 2px solid var(--cursor-bg-secondary);
+		border-top-color: var(--cursor-accent);
 		border-radius: 50%;
 		animation: spin 800ms linear infinite;
 	}
@@ -354,6 +429,29 @@
 	.models-toolbar .input {
 		flex: 1;
 		min-width: 10rem;
+		height: auto;
+		padding: 5px 12px;
+		border-radius: var(--radius-sm);
+	}
+	.models-refresh {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--height-sm);
+		height: var(--height-sm);
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius);
+		background: transparent;
+		color: var(--cursor-text-secondary);
+		cursor: pointer;
+	}
+	.models-refresh:hover {
+		background: var(--cursor-bg-tertiary);
+		color: var(--cursor-text-primary);
+	}
+	.models-refresh.is-loading svg {
+		animation: spin 800ms linear infinite;
 	}
 	.filter-chips {
 		display: flex;
@@ -364,11 +462,11 @@
 		cursor: pointer;
 	}
 	.filter-chip:hover {
-		background: rgb(255 255 255 / 0.1);
+		background: var(--cursor-bg-tertiary);
 	}
 	.filter-chip[aria-pressed="true"] {
-		background: var(--accent-subtle);
-		border-color: var(--accent);
+		background: var(--cursor-accent-subtle);
+		border-color: var(--cursor-accent);
 	}
 	.filter-chip:disabled {
 		opacity: 0.6;
@@ -381,6 +479,17 @@
 		padding: 0;
 		list-style: none;
 	}
+	.model-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+	.model-list-empty {
+		margin: 0;
+		padding: var(--space-5) var(--space-3);
+		color: var(--cursor-text-tertiary);
+		text-align: center;
+	}
 	.model-row {
 		display: flex;
 		align-items: center;
@@ -390,11 +499,8 @@
 		color: var(--text-primary);
 		text-decoration: none;
 	}
-	.model-row:hover {
-		background: var(--bg-tertiary);
-	}
 	.model-row[aria-current="true"] {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 	.model-name {
 		font-family: var(--font-mono);
@@ -498,7 +604,7 @@
 	}
 	.detail-title:hover,
 	.detail-title:focus-visible {
-		background: rgba(232, 232, 232, 0.05);
+		background: var(--cursor-bg-quaternary);
 	}
 	.detail-meta {
 		display: flex;
@@ -571,8 +677,6 @@
 	.section-body {
 		display: flex;
 		flex-direction: column;
-		gap: 0.875rem;
-		padding-block-start: 0.5rem;
 	}
 	.section-body[hidden] {
 		display: none;
@@ -581,25 +685,61 @@
 		margin-block: 0.25rem;
 	}
 
-	/* One registry field: label row with marks, the control, help. */
+	/* One registry field, a Cursor Settings row: the label and its help text
+	   stack on the left, the control sits on the right, and an alert for a bad
+	   entry runs under both. The row's children arrive in the order head,
+	   control, help, so the grid places them by role rather than by order. */
 	.field-row {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		column-gap: var(--space-5);
+		row-gap: var(--space-1);
+		align-items: center;
+		padding: var(--space-3);
+		border-block-end: 1px solid var(--cursor-stroke-quaternary);
+	}
+	.field-row:last-child {
+		border-block-end: 0;
+	}
+	.field-row > :not(.field-head):not(.field-help) {
+		grid-column: 2;
+		grid-row: 1 / span 2;
+		justify-self: end;
+		max-width: 100%;
+	}
+	.field-row > .field-error[role="alert"] {
+		grid-column: 1 / -1;
+		grid-row: auto;
+		justify-self: start;
+	}
+	.field-row > .input {
+		width: 20rem;
+	}
+	/* Controls that want the row's whole width (sliders, tag fields, text
+	   areas, the template picker, a secret with its reveal button) drop
+	   below the label instead. */
+	.field-row:has(> .slider-row, > .chip-input, > textarea, > .chat-template-control, > .secret-field) {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.field-row:has(> .slider-row, > .chip-input, > textarea, > .chat-template-control, > .secret-field)
+		> :not(.field-head):not(.field-help) {
+		grid-column: 1;
+		grid-row: auto;
+		justify-self: stretch;
 	}
 	.field-head {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
+		gap: var(--space-1-5);
 	}
 	.field-head label {
-		font-size: 0.8125rem;
-		font-weight: 500;
+		font-size: var(--font-size-base);
+		font-weight: 400;
 	}
 	.field-help {
 		margin: 0;
-		color: var(--text-secondary);
-		font-size: 0.75rem;
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-base);
 	}
 
 	/* Cloud tab: the cascade controls row and the catalog table. */
@@ -642,17 +782,25 @@
 		color: var(--text-secondary);
 		font-size: 0.75rem;
 	}
+	.cloud-add__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
 	.cloud-add__field {
-		margin-block-end: 0.625rem;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
 	}
 	.cloud-add__label {
 		display: grid;
-		gap: 0.25rem;
-		font-size: 0.8125rem;
+		gap: var(--space-1);
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
 	}
-	.cloud-add-error {
-		color: var(--danger, #e5484d);
-		font-size: 0.8125rem;
+	.cloud-add__label .input {
+		box-sizing: border-box;
+		width: 100%;
 	}
 	.chat-template-control,
 	.chat-template-custom {
@@ -696,7 +844,7 @@
 		width: 0.375rem;
 		height: 0.375rem;
 		border-radius: 50%;
-		background: var(--accent);
+		background: var(--cursor-accent);
 	}
 	.field-reset {
 		display: inline-flex;
@@ -712,7 +860,7 @@
 		cursor: pointer;
 	}
 	.field-reset:hover {
-		background: rgb(255 255 255 / 0.1);
+		background: var(--cursor-bg-tertiary);
 		color: var(--text-primary);
 	}
 
@@ -764,7 +912,7 @@
 		background: var(--bg-tertiary);
 	}
 	.result-row[aria-pressed="true"] {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 	.result-avatar {
 		flex-shrink: 0;
@@ -811,7 +959,7 @@
 	}
 	.verified-badge {
 		display: inline-flex;
-		color: var(--accent);
+		color: var(--cursor-accent);
 	}
 	.pill-row {
 		display: flex;
@@ -840,7 +988,7 @@
 		text-transform: uppercase;
 	}
 	.quant-table .is-recommended {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 	.quant-name {
 		display: flex;
@@ -971,20 +1119,21 @@
 	}
 	.settings-nav-link {
 		display: block;
-		padding: 0.375rem 0.75rem;
-		border-radius: 9999px;
-		color: var(--text-secondary);
-		font-size: 0.875rem;
-		font-weight: 500;
+		padding: 4px 6px;
+		border-radius: var(--radius);
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+		font-weight: 400;
+		line-height: var(--line-height-sm);
 		text-decoration: none;
 	}
 	.settings-nav-link:hover {
-		background: rgb(255 255 255 / 0.06);
-		color: var(--text-primary);
+		background: var(--cursor-bg-quaternary);
+		color: var(--cursor-text-primary);
 	}
 	.settings-nav-link[aria-current="true"] {
-		background: var(--accent-subtle);
-		color: var(--accent);
+		background: var(--cursor-bg-quaternary);
+		color: var(--cursor-text-primary);
 	}
 	.settings-panel {
 		flex: 1;
@@ -994,16 +1143,36 @@
 		gap: 1rem;
 	}
 
+	/* A settings section: its title (12px, secondary) sits above a 4% tinted
+	   12px card that has no border or padding of its own - its rows pad
+	   themselves. The wrapper stays bare. */
 	.settings-card {
-		padding: 1rem;
-		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		background: var(--bg-secondary);
+		padding: 0;
+		border: 0;
+		background: none;
 	}
 	.settings-card .section-heading {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-2);
+		margin-block-end: var(--space-1-5);
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+		font-weight: 400;
+		line-height: var(--line-height-sm);
+	}
+	.settings-card > .section-body,
+	.settings-card > .env-body {
+		padding: 0;
+		border-radius: var(--radius-xl);
+		background: var(--cursor-bg-quinary);
+		overflow: hidden;
+	}
+	.settings-card > .env-body {
+		padding: var(--space-3);
+	}
+	.settings-card > .section-body > :not(.field-row) {
+		margin: var(--space-3);
 	}
 
 	/* System live extras. */
@@ -1029,10 +1198,10 @@
 		font-weight: 600;
 	}
 	.gpu-devices {
-		padding: 1rem;
-		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		background: var(--bg-secondary);
+		padding: var(--space-4);
+		border: 0;
+		border-radius: var(--radius-xl);
+		background: var(--cursor-bg-quinary);
 	}
 	.gpu-device-row {
 		display: flex;
@@ -1069,7 +1238,7 @@
 		font-weight: 600;
 	}
 	.about-license {
-		color: var(--accent);
+		color: var(--cursor-accent);
 	}
 }
 
@@ -1115,7 +1284,7 @@
 		background: var(--bg-tertiary);
 	}
 	.profile-select[aria-pressed="true"] {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 	/* The "No profile" row is not a checklist: a static label with its
 	   own Set Active instead of a pressable row that opens an editor. */
@@ -1207,7 +1376,13 @@
 	.env-body {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--space-3);
+	}
+	.env-body .section-heading {
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+		font-weight: 400;
+		line-height: var(--line-height-sm);
 	}
 	.env-list {
 		margin: 0;
@@ -1218,14 +1393,25 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
-		padding-block: 0.375rem;
-		border-block-end: 1px solid var(--border);
+		gap: var(--space-2);
+		padding-block: var(--space-2);
+		border-block-end: 1px solid var(--cursor-stroke-quaternary);
 	}
 	.env-key {
 		min-width: 12rem;
 		font-family: var(--font-mono);
-		font-size: 0.8125rem;
+		font-size: var(--font-size-base);
+	}
+	/* The key row's label is a plain "API Key", not a variable name. */
+	.hf-row .env-key {
+		font-family: var(--font);
+	}
+	.secret-state {
+		color: var(--cursor-text-tertiary);
+		font-size: var(--font-size-sm);
+	}
+	.secret-state[hidden] {
+		display: none;
 	}
 	.env-value-wrap {
 		display: flex;
@@ -1266,7 +1452,7 @@
 	}
 
 	.review-modal {
-		max-width: 46rem;
+		width: min(46rem, calc(100vw - 2rem));
 		max-height: 80vh;
 		overflow: auto;
 	}
@@ -1297,7 +1483,7 @@
 		color: var(--text-secondary);
 	}
 	.diff-pending {
-		color: var(--accent);
+		color: var(--cursor-accent);
 	}
 
 	.profile-editor-header,
@@ -1362,7 +1548,7 @@
 		background: var(--bg-tertiary);
 	}
 	.shuttle-option[aria-selected="true"] {
-		background: var(--accent-subtle);
+		background: var(--cursor-accent-subtle);
 	}
 	.profile-kind {
 		margin-inline-start: auto;
@@ -1385,7 +1571,7 @@
 		padding: 0.75rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
-		background: rgb(255 255 255 / 0.04);
+		background: var(--cursor-bg-quinary);
 	}
 	.vram-total,
 	.vram-budget,

@@ -166,3 +166,34 @@ test("a 401 remount cycle tears down the old router and progress stream", async 
     "the first desk's progress stream was aborted on teardown",
   );
 });
+
+test("the key field reads Enter API key, announces a bad key as an alert, and has no Verify button", async () => {
+  const stub = gatewayStub({ key: "sesame" });
+  const { dom, root } = await bootApp({ stub });
+
+  const input = root.querySelector("#gateway-api-key");
+  assert.equal(input.placeholder, "Enter API key");
+  assert.equal(
+    [...root.querySelectorAll("button")].some((button) => /verify/i.test(button.textContent)),
+    false,
+    "the screen has no Verify button; Connect is the one action",
+  );
+
+  submitKey(dom, root, "wrong");
+  await settle();
+  const error = root.querySelector("#gateway-api-key-error");
+  assert.equal(error.getAttribute("role"), "alert", "the error is announced");
+  assert.ok(error.classList.contains("field-error"));
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.equal(input.getAttribute("aria-describedby"), error.id);
+});
+
+test("Escape blurs the key field", async () => {
+  const stub = gatewayStub({ key: "sesame" });
+  const { dom, root } = await bootApp({ stub });
+  const input = root.querySelector("#gateway-api-key");
+  input.focus();
+  assert.equal(dom.window.document.activeElement, input);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.notEqual(dom.window.document.activeElement, input, "Escape blurs the field");
+});

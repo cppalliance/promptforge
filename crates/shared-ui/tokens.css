@@ -13,10 +13,12 @@
    color-mix() formulas intact (never encode premultiplied RGB as
    straight-alpha hex).
 
-   The first block is the workshop's original :root sheet, copied over
-   verbatim. The "Generic aliases" block at the end maps the names the
-   gateway config UI's components consume onto the same Cursor Dark
-   values, so both UIs read one sheet.
+   The IDE values (red, blue, cyan, the accent, the sidebar, the state
+   backgrounds, the shadow inks, the control and tier tokens) are the same
+   ones @workshop/look carries: the two UIs are copies of one Cursor look,
+   and a value changed there is changed here. The "Generic aliases" block
+   at the end maps the names the gateway config UI's components consume
+   onto the same Cursor Dark values, so both UIs read one sheet.
    ========================================================================== */
 
 :root {
@@ -24,19 +26,21 @@
   --cursor-base: #F0F0F0;
   --cursor-chrome: #141414;
   --cursor-editor: #181818;
-  --cursor-sidebar: #181818;
+  --cursor-sidebar: #141414;
   --cursor-focus: #F0F0F0;
-  --cursor-accent: #599CE7;
+  /* The IDE's accent is its button background, which is also its link color. */
+  --cursor-accent: #81A1C1;
   --cursor-brand: #F54E00;
-  --cursor-blue: #7BAFE9;
-  --cursor-cyan: #81A1C1;
+  --cursor-blue: #81A1C1;
+  --cursor-cyan: #88C0D0;
   --cursor-green: #3FA266;
-  --cursor-red: #FC6B83;
+  --cursor-red: #E34671;
   --cursor-danger: #E34671;
   --cursor-yellow: #F1B467;
   --cursor-magenta: #B48EAD;
   --cursor-orange: #D08770;
   --cursor-purple: #9386F2;
+  --cursor-multitask: #B180D7;
 
   /* Cursor Dark derived surfaces */
   --cursor-bg-quinary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
@@ -44,11 +48,20 @@
   --cursor-bg-tertiary: color-mix(in srgb, var(--cursor-base) 8%, transparent);
   --cursor-bg-secondary: color-mix(in srgb, var(--cursor-base) 14%, transparent);
   --cursor-bg-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
-  --cursor-bg-active: color-mix(in srgb, var(--cursor-base) 16%, transparent);
-  --cursor-bg-focused: color-mix(in srgb, var(--cursor-base) 22%, transparent);
+  --cursor-bg-active: #F0F0F01E;
+  --cursor-bg-focused: #F0F0F01E;
   --cursor-bg-card: var(--cursor-bg-quaternary);
   --cursor-bg-elevated: #181818;
   --cursor-bg-input-surface: var(--cursor-bg-quaternary);
+  --cursor-bg-input-field: color-mix(in srgb, var(--cursor-base) 3%, transparent);
+
+  /* Cursor Dark accent (the IDE's primary button and link color) */
+  --cursor-accent-hover: color-mix(in srgb, white 10%, var(--cursor-accent));
+  --cursor-accent-subtle: color-mix(in srgb, var(--cursor-accent) 8%, transparent);
+
+  /* Cursor Dark disabled controls */
+  --cursor-control-disabled-bg: var(--cursor-bg-tertiary);
+  --cursor-control-disabled-text: var(--cursor-text-quaternary);
 
   /* Cursor Dark derived strokes */
   --cursor-stroke-quaternary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
@@ -62,6 +75,8 @@
   --cursor-text-secondary: color-mix(in srgb, var(--cursor-base) 74%, transparent);
   --cursor-text-tertiary: color-mix(in srgb, var(--cursor-base) 60%, transparent);
   --cursor-text-quaternary: color-mix(in srgb, var(--cursor-base) 36%, transparent);
+  --cursor-text-link: #81A1C1;
+  --cursor-text-invert: #181818;
 
   /* Cursor Dark derived icons */
   --cursor-icon-primary: #F0F0F0;
@@ -69,10 +84,21 @@
   --cursor-icon-tertiary: color-mix(in srgb, var(--cursor-base) 52%, transparent);
   --cursor-icon-quaternary: color-mix(in srgb, var(--cursor-base) 28%, transparent);
 
-  /* Cursor Dark shadows */
-  --cursor-shadow-primary: #00000033;
-  --cursor-shadow-secondary: #0000001F;
-  --cursor-shadow-tertiary: #0000000F;
+  /* Cursor Dark shadows: the IDE derives the secondary and tertiary inks
+     as 60% and 30% of the widget shadow, and builds its box-shadow stacks
+     from them. The stacks' 1px ring is the widget border. */
+  --cursor-shadow-primary: #00000066;
+  --cursor-shadow-secondary: color-mix(in srgb, var(--cursor-shadow-primary) 60%, transparent);
+  --cursor-shadow-tertiary: color-mix(in srgb, var(--cursor-shadow-primary) 30%, transparent);
+  --cursor-box-shadow-base:
+    0 0 0 1px var(--cursor-stroke-tertiary),
+    0 0 4px 0px var(--cursor-shadow-secondary),
+    0 8px 24px -2px var(--cursor-shadow-secondary);
+  --cursor-box-shadow-xl:
+    0 0 0 1px var(--cursor-stroke-tertiary),
+    0 0 4px 0 var(--cursor-shadow-secondary),
+    0 12px 24px 0 var(--cursor-shadow-secondary),
+    0 24px 36px 0 var(--cursor-shadow-secondary);
 
   /* VS Code theme surfaces (white-based alpha, for desk chrome) */
   --bg: #181818;
@@ -85,8 +111,9 @@
   /* Text and borders (opacity tiers over the dark surfaces) */
   --text: #F0F0F0;
   --text-muted: #F0F0F0BD;
-  --text-tertiary: #F0F0F05C;
-  --text-quaternary: #F0F0F099;
+  /* The quieter label tiers are the Cursor tiers themselves. */
+  --text-tertiary: var(--cursor-text-tertiary);
+  --text-quaternary: var(--cursor-text-quaternary);
   --input-placeholder: #F0F0F099;
   --border: #F0F0F013;
   --border-subtle: #F0F0F011;
@@ -98,16 +125,16 @@
   --danger-text: #FC6B83;
   --on-danger: #ffffff;
   --hover-glow: var(--accent, #e4b570);
-  --color-red: #FC6B83;
+  --color-red: var(--cursor-red);
   --color-green: #3FA266;
   --color-yellow: #F1B467;
-  --color-cyan: #81A1C1;
-  --color-blue: #7BAFE9;
+  --color-cyan: var(--cursor-cyan);
+  --color-blue: var(--cursor-blue);
   --color-purple: #9386F2;
 
   /* Type */
   --font-prose: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif;
-  --code-font: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --code-font: Consolas, Menlo, Monaco, "Droid Sans Mono", "Courier New", monospace;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
   --font-size-base: 13px;
@@ -151,6 +178,7 @@
   --space-xl: var(--space-4, 16px); /* 16px */
 
   /* Radius */
+  --radius-xs: 2px;
   --radius: 6px;
   --radius-sm: 4px;
   --radius-lg: 8px;
@@ -185,6 +213,7 @@
   --duration-fast: 100ms;
   --duration-normal: 150ms;
   --duration-slow: 200ms;
+  --duration-slower: 300ms;
   --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
   --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
 

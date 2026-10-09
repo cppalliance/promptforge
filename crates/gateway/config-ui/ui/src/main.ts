@@ -24,6 +24,7 @@ import { createProfileSwitcher } from "./components/profile-switcher";
 import { openReviewDiff } from "./components/review-diff";
 import { createStatusBar } from "./components/status-bar";
 import { createTabBar } from "./components/tab-bar";
+import type { TabBar } from "./components/tab-bar";
 import { createToastStack } from "shared-ui/toast";
 import { startRouter } from "./router";
 import { ConfigStore } from "./services/config-store";
@@ -396,7 +397,7 @@ function mountLiveDesk(
   if (statusBar !== null) {
     fixed.push(statusBar.element);
   }
-  const main = mountChrome(root, tabBar.element, fixed, bannerBox);
+  const main = mountChrome(root, tabBar, fixed, bannerBox);
   statusBar?.start();
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
@@ -493,18 +494,19 @@ function mountPanelPending(root: HTMLElement, win: BootWindow): () => void {
   note.className = "banner";
   note.textContent = "Workshop bridge pending: gateway data is unavailable in panel mode.";
 
-  const main = mountChrome(root, tabBar.element, [], note);
+  const main = mountChrome(root, tabBar, [], note);
   return startRouter({ win, main, onRoute: (view) => tabBar.setActivePage(view) });
 }
 
 /**
- * Mounts the shared chrome - skip link, an optional top progress
- * strip, tab bar header, an optional banner, and the `<main>` region -
- * and returns the main element.
+ * Mounts the shared chrome - skip link, the tab bar's header strip, then
+ * the desk layout: the tab bar's nav column beside a content column of
+ * the optional banner and the `<main>` region - followed by the fixed
+ * overlays, and returns the main element.
  */
 function mountChrome(
   root: HTMLElement,
-  header: HTMLElement,
+  tabBar: TabBar,
   fixed: HTMLElement[],
   banner?: HTMLElement,
 ): HTMLElement {
@@ -525,13 +527,16 @@ function mountChrome(
     main.focus();
   });
 
-  const parts: HTMLElement[] = [skip];
-  parts.push(header);
+  const content = document.createElement("div");
+  content.className = "desk-content";
   if (banner) {
-    parts.push(banner);
+    content.append(banner);
   }
-  parts.push(main, ...fixed);
-  root.replaceChildren(...parts);
+  content.append(main);
+  const layout = document.createElement("div");
+  layout.className = "desk-layout";
+  layout.append(tabBar.nav, content);
+  root.replaceChildren(skip, tabBar.element, layout, ...fixed);
   return main;
 }
 

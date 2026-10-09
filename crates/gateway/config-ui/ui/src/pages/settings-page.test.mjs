@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { bundledDeclarations, squash } from "../css-support.mjs";
 import {
   GIB,
   bootApp,
@@ -182,4 +183,78 @@ test("the About panel renders the medallion, version, and license link", async (
   const license = root.querySelector(".about-license");
   assert.equal(license.href, "https://www.boost.org/LICENSE_1_0.txt");
   assert.equal(license.rel, "noopener");
+});
+
+test("a settings section puts its title above the card and lays each row as label, control, help", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/settings/system");
+  await settle();
+
+  const card = root.querySelector(".settings-card .field-row[data-key='cache_dir']").closest(".settings-card");
+  const kids = [...card.children];
+  const heading = card.querySelector(":scope > .section-heading");
+  const body = card.querySelector(":scope > .section-body");
+  assert.ok(heading && body, "the title and the card body are siblings");
+  assert.ok(kids.indexOf(heading) < kids.indexOf(body), "the title sits above the card");
+  assert.equal(body.contains(heading), false, "the title is not inside the card");
+
+  const row = body.querySelector(".field-row[data-key='cache_dir']");
+  const order = [...row.children].map((child) =>
+    child.classList.contains("field-head")
+      ? "label"
+      : child.classList.contains("field-help")
+        ? "help"
+        : "control",
+  );
+  assert.deepEqual(order, ["label", "control", "help"], "the grid reads label, control, then help");
+});
+
+test("the card is a 4% tinted 12px block with no border or padding, and its rows are grid cells", async () => {
+  const card = await bundledDeclarations(".settings-card");
+  assert.equal(card.get("border"), "0", "no border on the wrapper");
+  assert.equal(card.get("padding"), "0", "no padding on the wrapper");
+  assert.equal(card.get("background"), "none");
+
+  const heading = await bundledDeclarations(".settings-card .section-heading");
+  assert.equal(heading.get("font-size"), "var(--font-size-sm)", "a 12px title");
+  assert.equal(heading.get("color"), "var(--cursor-text-secondary)");
+
+  const body = await bundledDeclarations(".settings-card > .section-body");
+  assert.equal(body.get("background"), "var(--cursor-bg-quinary)", "a 4% tint");
+  assert.equal(body.get("border-radius"), "var(--radius-xl)", "a 12px radius");
+  assert.equal(body.get("padding"), "0");
+
+  const row = await bundledDeclarations(".field-row");
+  assert.equal(row.get("display"), "grid");
+  const control = await bundledDeclarations(".field-row>:not(.field-head):not(.field-help)");
+  assert.equal(control.get("grid-column"), "2", "the control sits on the right");
+  const label = await bundledDeclarations(".field-head label");
+  assert.equal(label.get("font-size"), "var(--font-size-base)", "a 13px label");
+  assert.equal(label.get("font-weight"), "400");
+  const help = await bundledDeclarations(".field-help");
+  assert.equal(help.get("font-size"), "var(--font-size-base)", "13px help text");
+  assert.equal(help.get("color"), "var(--cursor-text-secondary)");
+});
+
+test("banners are 12px cards, the pending one in the accent tint, and callouts carry a 4px left bar", async () => {
+  const banner = await bundledDeclarations(".banner");
+  assert.equal(banner.get("border-radius"), "var(--radius-xl)");
+  assert.equal(squash(banner.get("padding")), "12px14px");
+  const pending = await bundledDeclarations(".banner-pending");
+  assert.equal(pending.get("background"), "var(--cursor-accent-subtle)", "accent at 8%");
+  assert.equal(
+    squash(pending.get("border-color")),
+    "color-mix(insrgb,var(--cursor-accent)20%,transparent)",
+    "accent at 20%",
+  );
+  for (const [selector, color] of [
+    [".banner-restart", "var(--warning)"],
+    [".banner-warning", "var(--warning)"],
+    [".banner-danger", "var(--danger)"],
+  ]) {
+    const callout = await bundledDeclarations(selector);
+    assert.equal(callout.get("border-left-width"), "4px", `${selector} has a 4px bar`);
+    assert.equal(callout.get("border-left-color"), color);
+  }
 });

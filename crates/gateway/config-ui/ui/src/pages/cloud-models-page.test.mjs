@@ -236,3 +236,60 @@ test("a view open while the sheet downloads re-renders in place when it lands", 
   assert.ok(root.querySelector(".cloud-table"), "the table renders once the sheet lands");
   assert.match(root.querySelector("main").textContent, /2026-09-14T13:00:00Z/, "generated_at shows");
 });
+
+test("a missing name shows an alert under the Name field and marks it invalid", async () => {
+  const { dom, root } = await openCloud({ cloudModels: cloudSheetFixture() });
+  root.querySelector(".cloud-row .cloud-add").click();
+  await settle();
+  const dialog = dom.window.document.querySelector(".cloud-add-overlay");
+  const name = dialog.querySelector(".cloud-add-name");
+  name.value = "";
+  dialog.querySelector(".cloud-add-submit").click();
+  await settle();
+
+  const error = dialog.querySelector(".cloud-add-error");
+  assert.ok(error.classList.contains("field-error"), "it uses the shared field-error skin");
+  assert.equal(error.getAttribute("role"), "alert");
+  assert.equal(error.textContent, "Name is required");
+  assert.ok(name.closest(".cloud-add__field").contains(error), "the alert sits in the Name field");
+  assert.equal(name.getAttribute("aria-invalid"), "true");
+  assert.equal(name.getAttribute("aria-describedby"), error.id);
+
+  name.value = "Claude";
+  dialog.querySelector(".cloud-add-submit").click();
+  await settle();
+  assert.equal(name.getAttribute("aria-invalid"), null, "a fixed name clears the mark");
+  assert.equal(name.getAttribute("aria-describedby"), null);
+});
+
+test("a missing required context points at the Context field, and a shadow refusal marks no field", async () => {
+  const { dom, root } = await openCloud({ cloudModels: cloudSheetFixture() });
+  chooseProvider(dom, root, "acme");
+  await settle();
+  root.querySelector(".cloud-row .cloud-add").click();
+  await settle();
+  const dialog = dom.window.document.querySelector(".cloud-add-overlay");
+  const context = dialog.querySelector(".cloud-add-context");
+  dialog.querySelector(".cloud-add-submit").click();
+  await settle();
+  const error = dialog.querySelector(".cloud-add-error");
+  assert.ok(context.closest(".cloud-add__field").contains(error), "the alert sits in the Context field");
+  assert.equal(context.getAttribute("aria-invalid"), "true");
+  assert.equal(context.getAttribute("aria-describedby"), error.id);
+  assert.match(error.textContent, /context/);
+});
+
+test("a shadow-save refusal leaves every field unmarked", async () => {
+  const { dom, root } = await openCloud({
+    cloudModels: cloudSheetFixture(),
+    onPutConfig: () =>
+      jsonResponse({ error: { message: "unknown field `typo`", code: "config_invalid" } }, 422),
+  });
+  root.querySelector(".cloud-row .cloud-add").click();
+  await settle();
+  const dialog = dom.window.document.querySelector(".cloud-add-overlay");
+  dialog.querySelector(".cloud-add-submit").click();
+  await settle();
+  assert.equal(dialog.querySelector(".cloud-add-error").getAttribute("role"), "alert");
+  assert.equal(dialog.querySelectorAll("[aria-invalid]").length, 0, "no input is blamed for a server refusal");
+});

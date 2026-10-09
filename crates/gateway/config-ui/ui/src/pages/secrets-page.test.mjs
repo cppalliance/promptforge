@@ -243,3 +243,129 @@ test("the provider dropdown appears in place when the sheet lands", async () => 
   await sleep(200);
   assert.ok(root.querySelector(".env-provider-select"), "the dropdown appears in place");
 });
+
+/** Opens Secrets and returns the Hugging Face API Key section's pieces. */
+async function openHf(env = envFixture(), wrap = () => undefined) {
+  const stub = gatewayStub({ key: "k", config: modelsFixture(), env });
+  wrap(stub);
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/secrets");
+  await settle();
+  const card = root.querySelector(".hf-card");
+  return {
+    dom,
+    root,
+    stub,
+    card,
+    input: card.querySelector("input.env-value"),
+    state: card.querySelector(".secret-state"),
+  };
+}
+
+/** Focuses the key field and types into it the way a keystroke does. */
+function typeKey(dom, input, value) {
+  input.focus();
+  input.value = value;
+  input.dispatchEvent(new dom.window.Event("input"));
+}
+
+test("the Hugging Face section is an API Key row with the Enter API key placeholder and no Verify button", async () => {
+  const { root, card, input } = await openHf();
+  assert.equal(card.querySelector("h3.section-heading").textContent, "Hugging Face API Key");
+  const label = card.querySelector(".hf-row label.env-key");
+  assert.equal(label.textContent, "API Key");
+  assert.equal(label.htmlFor, input.id, "the visible label names the key field");
+  assert.equal(input.type, "password");
+  assert.equal(input.placeholder, "Enter API key");
+  assert.equal(
+    [...root.querySelectorAll("button")].some((button) => /verify/i.test(button.textContent)),
+    false,
+    "no Verify button anywhere on the page",
+  );
+});
+
+test("Secret saved shows once a key exists and appears after the first save", async () => {
+  const withKey = await openHf();
+  assert.equal(withKey.state.textContent, "Secret saved");
+  assert.equal(withKey.state.hidden, false);
+
+  const env = envFixture();
+  delete env.boot.vars.HF_TOKEN;
+  const { dom, stub, input, state } = await openHf(env);
+  assert.equal(state.hidden, true, "no key yet, so nothing claims it is saved");
+  typeKey(dom, input, "hf-first");
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 1);
+  assert.equal(state.textContent, "Secret saved");
+  assert.equal(state.hidden, false);
+});
+
+test("the API key saves on blur only when it was edited", async () => {
+  const { dom, stub, input } = await openHf();
+  input.focus();
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 0, "a blur with no edit saves nothing");
+
+  typeKey(dom, input, "hf-edited");
+  assert.equal(stub.state.envPuts.length, 0, "typing alone does not save");
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 1, "the blur after an edit saves once");
+  assert.deepEqual(stub.state.envPuts[0], {
+    scope: "global",
+    vars: {
+      GATEWAY_KEY: "boot-master-key",
+      HF_TOKEN: "hf-edited",
+      OPENAI_KEY: "sk-fixture",
+    },
+  });
+
+  input.focus();
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 1, "the saved key is no longer an edit");
+});
+
+test("Enter and Escape blur the API key field, and the blur saves an edit", async () => {
+  const { dom, stub, input } = await openHf();
+  for (const [key, expectedPuts] of [
+    ["Enter", 1],
+    ["Escape", 2],
+  ]) {
+    typeKey(dom, input, `hf-after-${key}`);
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true }));
+    await settle();
+    assert.notEqual(dom.window.document.activeElement, input, `${key} blurs the field`);
+    assert.equal(stub.state.envPuts.length, expectedPuts, `the ${key} blur saves the edit`);
+  }
+});
+
+test("a failed key save raises an error toast and the next blur retries", async () => {
+  const env = envFixture();
+  delete env.boot.vars.HF_TOKEN;
+  let failures = 1;
+  const { dom, root, stub, input, state } = await openHf(env, (stub) => {
+    const fetchFn = stub.fetchFn;
+    stub.fetchFn = async (url, init = {}) => {
+      if (String(url).includes("/admin/env") && init.method === "PUT" && failures > 0) {
+        failures -= 1;
+        return jsonResponse({ error: { message: "disk full" } }, 500);
+      }
+      return fetchFn(url, init);
+    };
+  });
+  typeKey(dom, input, "hf-retry");
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 0, "the refused save never reached the stub's record");
+  assert.equal(state.hidden, true, "a refused save does not claim Secret saved");
+  assert.match(root.querySelector(".toast-error, .toast")?.textContent ?? "", /disk full/);
+
+  input.focus();
+  input.blur();
+  await settle();
+  assert.equal(stub.state.envPuts.length, 1, "the key is still an edit, so the next blur retries");
+  assert.equal(state.textContent, "Secret saved");
+});

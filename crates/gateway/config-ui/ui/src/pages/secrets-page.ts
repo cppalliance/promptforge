@@ -2,9 +2,11 @@
 // variables as masked password rows with
 // per-row reveal and delete, an Add Variable row, and a Save that
 // stages the section as its own `.env.next` shadow via PUT /admin/env.
-// The global section includes the dedicated HF Token card [Adapted:
-// Unsloth] with show/hide and a Test Connection probe through the
-// gateway's HF proxy. `${VAR}` cross-references [INVENTED] annotate
+// The global section includes the dedicated Hugging Face API Key card
+// [Adapted: Unsloth]: one "API Key" password row that saves on blur when
+// it was edited (Enter and Escape blur it), says "Secret saved" once a key
+// exists, and keeps a Test Connection probe through the gateway's HF proxy.
+// There is no Verify button. `${VAR}` cross-references [INVENTED] annotate
 // rows the pending config chain points at - computed server-side and
 // returned in the GET /admin/env reply, because the config views arrive
 // interpolated with secrets redacted. Values arrive in plaintext (the
@@ -73,6 +75,12 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
   /** True once the env load has completed, gating sheet-driven repaints. */
   let envLoaded = false;
   let hfStatus = "";
+  /** The HF key as last persisted (loaded or saved); empty when none. */
+  let savedHfKey = "";
+  /** True while the HF key field holds an edit that has not been saved. */
+  let hfKeyDirty = false;
+  /** The "Secret saved" note of the mounted HF card, repainted after a save. */
+  let hfSavedNote: HTMLElement | null = null;
   let main: HTMLElement | null = null;
   let loadController: AbortController | null = null;
   let probeController: AbortController | null = null;
@@ -98,11 +106,16 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
       "global",
       Object.entries(env.global?.vars ?? {}).map(([key, value]) => ({ key, value })),
     );
+    savedHfKey = hfRow()?.value ?? "";
+    hfKeyDirty = false;
     envLoaded = true;
   };
 
-  /** One masked value input with its reveal toggle. */
-  const valueField = (scope: EnvScope, row: EnvRow): HTMLElement => {
+  /**
+   * One masked value input with its reveal toggle. It carries a hidden label
+   * unless the caller supplies a visible one (ownLabel).
+   */
+  const valueField = (scope: EnvScope, row: EnvRow, ownLabel = false): HTMLElement => {
     const wrap = document.createElement("span");
     wrap.className = "env-value-wrap";
     const id = `env-${scope}-${row.key}`;
@@ -141,7 +154,7 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
       paint();
     });
     paint();
-    wrap.append(label, input, toggle);
+    wrap.append(...(ownLabel ? [] : [label]), input, toggle);
     return wrap;
   };
 
@@ -157,32 +170,93 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
     return note;
   };
 
-  /** The Hugging Face card: dedicated token field, show/hide, Test Connection. */
+  /** Repaints the HF card's "Secret saved" note from the persisted key. */
+  const paintHfSaved = (): void => {
+    if (hfSavedNote === null) {
+      return;
+    }
+    hfSavedNote.hidden = savedHfKey === "";
+    hfSavedNote.textContent = savedHfKey === "" ? "" : "Secret saved";
+  };
+
+  /**
+   * Stages the scope's working rows as its env shadow (PUT /admin/env) and
+   * refreshes the dirty report. Resolves true once the shadow is written; a
+   * refusal raises an error toast and resolves false, leaving the edit pending.
+   */
+  const persist = async (scope: EnvScope): Promise<boolean> => {
+    const payload: Record<string, string> = {};
+    for (const row of scopeRows(scope)) {
+      payload[row.key] = row.value;
+    }
+    try {
+      await api.putEnv(payload);
+    } catch (error) {
+      if (!(error instanceof UnauthorizedError)) {
+        toasts.show(error instanceof Error ? error.message : "The save failed", "error");
+      }
+      return false;
+    }
+    toasts.show("Saved to disk", "success");
+    // The env shadow raises the dirty count and the Apply button.
+    void store.load();
+    if (scope === "global") {
+      savedHfKey = hfRow()?.value ?? "";
+      hfKeyDirty = false;
+      paintHfSaved();
+    }
+    return true;
+  };
+
+  /** The Hugging Face card: dedicated API key field, show/hide, Test Connection. */
   const hfCard = (renderSection: () => void): HTMLElement => {
     const card = document.createElement("div");
     card.className = "hf-card";
     const heading = document.createElement("h3");
     heading.className = "section-heading";
-    heading.textContent = "Hugging Face";
+    heading.textContent = "Hugging Face API Key";
     const row = document.createElement("div");
     row.className = "env-row hf-row";
-    const key = document.createElement("span");
+    const key = document.createElement("label");
     key.className = "env-key";
-    key.textContent = HF_KEY;
+    key.textContent = "API Key";
     let tokenRow = hfRow();
     if (!tokenRow) {
       // A placeholder row: typing into it creates the variable on save.
       tokenRow = { key: HF_KEY, value: "" };
     }
-    const field = valueField("global", tokenRow);
-    field.querySelector("input")?.addEventListener("input", () => {
-      // The placeholder joins the working rows on first input, and the
-      // just-created variable becomes deletable without a re-render.
-      if (tokenRow && !scopeRows("global").includes(tokenRow)) {
-        scopeRows("global").unshift(tokenRow);
-      }
-      remove.disabled = false;
-    });
+    const field = valueField("global", tokenRow, true);
+    const keyInput = field.querySelector("input");
+    if (keyInput) {
+      key.htmlFor = keyInput.id;
+      keyInput.placeholder = "Enter API key";
+      keyInput.addEventListener("input", () => {
+        // The placeholder joins the working rows on first input, and the
+        // just-created variable becomes deletable without a re-render.
+        if (tokenRow && !scopeRows("global").includes(tokenRow)) {
+          scopeRows("global").unshift(tokenRow);
+        }
+        remove.disabled = false;
+        hfKeyDirty = true;
+      });
+      // Enter and Escape leave the field; leaving it saves an edit.
+      keyInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === "Escape") {
+          event.preventDefault();
+          keyInput.blur();
+        }
+      });
+      keyInput.addEventListener("blur", () => {
+        if (hfKeyDirty) {
+          void persist("global");
+        }
+      });
+    }
+    const saved = document.createElement("span");
+    saved.className = "secret-state";
+    saved.setAttribute("role", "status");
+    hfSavedNote = saved;
+    paintHfSaved();
 
     const test = document.createElement("button");
     test.type = "button";
@@ -257,7 +331,7 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
       renderSection();
     });
 
-    row.append(key, field, test, status, remove);
+    row.append(key, field, saved, test, status, remove);
     const help = document.createElement("p");
     help.className = "field-help";
     help.textContent =
@@ -423,26 +497,10 @@ export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
     save.className = "button button-primary env-save";
     save.textContent = "Save";
     save.addEventListener("click", () => {
-      const payload: Record<string, string> = {};
-      for (const row of scopeRows(scope)) {
-        payload[row.key] = row.value;
-      }
       save.disabled = true;
-      void api
-        .putEnv(payload)
-        .then(() => {
-          toasts.show("Saved to disk", "success");
-          // The env shadow raises the dirty count and the Apply button.
-          void store.load();
-        })
-        .catch((error: unknown) => {
-          if (!(error instanceof UnauthorizedError)) {
-            toasts.show(error instanceof Error ? error.message : "The save failed", "error");
-          }
-        })
-        .finally(() => {
-          save.disabled = false;
-        });
+      void persist(scope).finally(() => {
+        save.disabled = false;
+      });
     });
     actions.append(save);
     body.append(actions);

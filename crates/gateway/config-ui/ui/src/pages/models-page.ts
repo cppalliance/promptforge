@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Globe,
   Mic,
+  RefreshCw,
   RotateCcw,
   createElement as lucideElement,
 } from "lucide";
@@ -20,6 +21,7 @@ import { createChatTemplateControl } from "../components/chat-template-control";
 import { confirmDialog } from "../components/confirm-modal";
 import { createChipInput } from "../components/chip-input";
 import { createDropdownControl } from "../components/dropdown-control";
+import { setFieldError } from "../components/field-error";
 import { createSliderControl } from "../components/slider-control";
 import type { SliderControl } from "../components/slider-control";
 import { createToggleControl } from "../components/toggle-control";
@@ -86,6 +88,8 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
   let listBox: HTMLElement | null = null;
   let detailBox: HTMLElement | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while the toolbar's refresh reload is in flight; the icon spins. */
+  let refreshing = false;
 
   store.subscribe(() => {
     // Guard on this view's own root, not just `main`: `main` is shared
@@ -200,12 +204,12 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
     const searchLabel = document.createElement("label");
     searchLabel.className = "visually-hidden";
     searchLabel.htmlFor = "models-search";
-    searchLabel.textContent = "Search models";
+    searchLabel.textContent = "Add or search model";
     const searchInput = document.createElement("input");
     searchInput.type = "search";
     searchInput.id = "models-search";
     searchInput.className = "input";
-    searchInput.placeholder = "Search models";
+    searchInput.placeholder = "Add or search model";
     searchInput.value = search;
     searchInput.addEventListener("input", () => {
       if (searchTimer !== null) {
@@ -220,6 +224,15 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
       }, SEARCH_DEBOUNCE_MS);
       (searchTimer as unknown as { unref?: () => void }).unref?.();
     });
+
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = refreshing ? "models-refresh is-loading" : "models-refresh";
+    refresh.setAttribute("aria-label", "Refresh models");
+    refresh.title = "Refresh models";
+    refresh.setAttribute("aria-busy", String(refreshing).toLowerCase());
+    refresh.append(lucideElement(RefreshCw, { "aria-hidden": "true", width: 14, height: 14 }));
+    refresh.addEventListener("click", reloadCatalog);
 
     const chips = document.createElement("div");
     chips.className = "filter-chips";
@@ -281,6 +294,7 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
     toolbar.append(
       searchLabel,
       searchInput,
+      refresh,
       chips,
       sortLabel,
       sortSelect.element,
@@ -289,7 +303,42 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
     return toolbar;
   };
 
+  /**
+   * Re-reads the catalog, the pending state, and the unconfigured files.
+   * The toolbar's refresh icon spins until the load settles; a second press
+   * while one is in flight is ignored. Each render rebuilds the toolbar and
+   * destroys the focused button, so when the press left focus on it, focus
+   * goes back to the new button after each render (unless the user has
+   * moved on to another control meanwhile).
+   */
+  const reloadCatalog = (): void => {
+    if (refreshing) {
+      return;
+    }
+    const hadFocus = document.activeElement?.classList.contains("models-refresh") === true;
+    const restoreFocus = (): void => {
+      const active = document.activeElement;
+      if (hadFocus && (active === null || active === document.body)) {
+        listBox?.querySelector<HTMLElement>(".models-refresh")?.focus();
+      }
+    };
+    refreshing = true;
+    renderList();
+    restoreFocus();
+    void store.load().finally(() => {
+      refreshing = false;
+      renderList();
+      restoreFocus();
+    });
+  };
+
   const modelList = (entries: ModelEntry[]): HTMLElement => {
+    if (entries.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "page-empty model-list-empty";
+      empty.textContent = "No models available";
+      return empty;
+    }
     const list = document.createElement("ul");
     list.className = "model-list";
     for (const entry of entries) {
@@ -948,6 +997,8 @@ export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
               parsed = Math.min(def.max, parsed);
             }
             commit(entry, def.key, parsed);
+          } else {
+            setFieldError(input, "Enter a number");
           }
           return;
         }

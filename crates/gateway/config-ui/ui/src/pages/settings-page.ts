@@ -22,6 +22,7 @@ import {
 import { confirmDialog } from "../components/confirm-modal";
 import { createChipInput } from "../components/chip-input";
 import { createDropdownControl } from "../components/dropdown-control";
+import { setFieldError } from "../components/field-error";
 import { programIcon } from "../components/program-icon";
 import { createSliderControl } from "../components/slider-control";
 import { createToggleControl } from "../components/toggle-control";
@@ -750,6 +751,9 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
           const parsed = Number(text);
           if (Number.isFinite(parsed)) {
             commit(card, spec.path, parsed);
+          } else {
+            // Keep the saved number; say why the entry was not taken.
+            setFieldError(input, "Enter a number");
           }
           return;
         }

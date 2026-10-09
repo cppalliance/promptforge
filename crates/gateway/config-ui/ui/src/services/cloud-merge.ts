@@ -18,6 +18,17 @@ export interface MergeDetails {
   description?: string;
 }
 
+/**
+ * Thrown when the sheet reports no context window and the operator supplied
+ * none, so a caller can blame the Context field without re-checking the rule.
+ */
+export class ContextRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContextRequiredError";
+  }
+}
+
 /** The config's thinking mode for the sheet's capability triple. */
 function thinkingMode(thinking: CloudModelEntry["thinking"]): string {
   if (!thinking.supported) {
@@ -50,7 +61,7 @@ export function mergeCloudModel(
   }
   const context = details.context ?? entry.context_window;
   if (context === null || context === undefined) {
-    throw new Error(
+    throw new ContextRequiredError(
       `context is required: the sheet reports no context window for ${entry.id}`,
     );
   }

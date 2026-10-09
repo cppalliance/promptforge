@@ -696,7 +696,7 @@ export function createProfilesPage(deps: ProfilesPageDeps): ProfilesPage {
     const error = document.createElement("p");
     error.id = "new-profile-error";
     error.className = "field-error";
-    error.setAttribute("aria-live", "polite");
+    error.setAttribute("role", "alert");
     input.setAttribute("aria-describedby", error.id);
     let mode = "empty";
     let copyFrom = profiles[0]?.name ?? "";

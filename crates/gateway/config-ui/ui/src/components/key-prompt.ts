@@ -41,10 +41,20 @@ export function mountKeyPrompt(root: HTMLElement, deps: KeyPromptDeps): void {
   input.className = "input";
   input.autocomplete = "current-password";
   input.required = true;
+  input.placeholder = "Enter API key";
+  // Escape leaves the field, the way Cursor's settings inputs do; Enter
+  // submits the form natively.
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      input.blur();
+    }
+  });
 
   const error = document.createElement("p");
   error.className = "field-error";
   error.id = "gateway-api-key-error";
+  // An alert, so a bad key is announced the moment it shows.
+  error.setAttribute("role", "alert");
   error.hidden = true;
 
   const submit = document.createElement("button");

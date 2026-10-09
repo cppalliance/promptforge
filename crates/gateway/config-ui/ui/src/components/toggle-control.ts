@@ -1,5 +1,6 @@
-// On/off switch [Unsloth]: a <button role="switch"> styled by the
-// .switch component class; aria-checked is the state.
+// On/off switch [Unsloth]: a <button role="switch"> styled by the shared
+// .switch class (shared-ui/controls.css: Cursor's 32x20 track and 16px
+// thumb); aria-checked is the state.
 
 /** Construction options for {@link createToggleControl}. */
 export interface ToggleControlOptions {

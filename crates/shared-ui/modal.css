@@ -1,8 +1,13 @@
-/* Default skin for modal.ts's base classes, on the Cursor Dark tokens.
+/* Default skin for modal.ts's base classes, on the Cursor Dark tokens: the
+   form modal Cursor's settings pages and quick prompts open, the same
+   values @workshop/look gives its `form` skin. A 320px card with a 12px
+   radius and a 12% stroke and no shadow; a 14px title in a 12px 16px
+   header, a body padded 12px 16px 16px, and a footer padded 10px over an
+   8% top border, Cancel first and the primary action last. It opens in
+   300ms, scaling up from 0.97, over a 0.5 backdrop.
+
    Every rule sits in the components layer, so a consumer's own per-prefix
-   dialog styles (the workshop's editor dialogs are absolute-positioned
-   inside their panel) override these defaults regardless of bundle
-   order. */
+   dialog styles override these defaults regardless of bundle order. */
 
 @layer components {
 	/* Dimmed full-container overlay centering the card. The container
@@ -13,20 +18,72 @@
 		z-index: 50;
 		display: grid;
 		place-items: center;
-		background: rgb(0 0 0 / 0.6);
+		background: rgba(0,0,0,.5);
 	}
 	.modal-dialog {
-		width: min(28rem, calc(100vw - 2rem));
-		padding: 1.25rem;
-		border: 1px solid var(--border);
+		box-sizing: border-box;
+		width: 320px;
+		max-width: calc(100vw - 2rem);
+		padding: 0;
+		border: 1px solid var(--cursor-stroke-secondary);
 		border-radius: var(--radius-xl);
-		background: var(--bg-secondary);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+		background: var(--cursor-editor);
+		box-shadow: none;
+		color: var(--cursor-text-primary);
+		animation: modal-form-open var(--duration-slower) var(--ease-out-cubic) both;
+	}
+	.modal-dialog > h2 {
+		margin: 0;
+		padding: var(--space-3) var(--space-4);
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-medium);
+	}
+	.modal-dialog > p {
+		margin: 0;
+		padding: var(--space-3) var(--space-4) 0;
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-base);
+	}
+	.modal-dialog > div:not(.modal-actions) {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-3) var(--space-4) var(--space-4);
+	}
+	.modal-dialog > div:not(.modal-actions) label {
+		color: var(--cursor-text-secondary);
+		font-size: var(--font-size-sm);
+	}
+	.modal-dialog > div:not(.modal-actions) .input {
+		box-sizing: border-box;
+		width: 100%;
+	}
+	.modal-dialog > p + .modal-actions {
+		margin-block-start: var(--space-4);
 	}
 	.modal-actions {
 		display: flex;
 		justify-content: flex-end;
-		gap: 0.5rem;
-		margin-block-start: 1rem;
+		gap: var(--space-2);
+		margin: 0;
+		padding: 10px;
+		border-top: 1px solid var(--cursor-stroke-tertiary);
+	}
+
+	@keyframes modal-form-open {
+		from {
+			opacity: 0;
+			transform: scale(0.97);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.modal-dialog {
+			animation: none;
+		}
 	}
 }
