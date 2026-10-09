@@ -8,6 +8,9 @@ use super::install_messages;
 use crate::protocol::{Answer, MessageRecord, Request, ToolCallRecord, YieldParse};
 use crate::{Error, SectionVm};
 
+#[path = "messages-tests-list.rs"]
+mod list;
+
 /// A fresh default handle's access capability for a test VM.
 fn fresh_access() -> std::sync::Arc<crate::Access> {
     std::sync::Arc::new(

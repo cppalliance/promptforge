@@ -162,6 +162,7 @@ pub use dispatch::{
 pub use engine_globals::{run_store_op, store_error_message};
 pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
+pub use messages::MessageList;
 pub use models::ModelRuntime;
 pub use prelude::install_preludes;
 pub use projection::project_messages;

@@ -81,35 +81,43 @@ fn parse_messages(
     entries
         .iter()
         .enumerate()
-        .map(|(position, entry)| parse_message(position + 1, entry))
+        .map(|(position, entry)| parse_message(position + 1, entry).map_err(chat_error))
         .collect()
+}
+
+/// Validates one record in its JSON form, as a list builder adds it.
+/// `index` is the 1-based position the record takes, named in the
+/// error.
+pub(crate) fn parse_record(
+    index: usize,
+    entry: &serde_json::Value,
+) -> std::result::Result<MessageRecord, String> {
+    parse_message(index, entry)
 }
 
 /// Parses one message entry into its validated record.
 fn parse_message(
     index: usize,
     entry: &serde_json::Value,
-) -> std::result::Result<MessageRecord, FieldFailure> {
+) -> std::result::Result<MessageRecord, String> {
     let serde_json::Value::Object(entry) = entry else {
-        return Err(chat_error(format!(
-            "messages[{index}] must be a message table"
-        )));
+        return Err(format!("messages[{index}] must be a message table"));
     };
     let role = match entry.get("role") {
         Some(serde_json::Value::String(role)) => match MessageRole::parse(role) {
             Some(role) => role,
             None => {
-                return Err(chat_error(format!(
+                return Err(format!(
                     "messages[{index}] role {role:?} is unknown; known roles: {}",
                     CHAT_ROLES.join(", ")
-                )));
+                ));
             }
         },
         _ => {
-            return Err(chat_error(format!(
+            return Err(format!(
                 "messages[{index}] role must be a string, one of: {}",
                 CHAT_ROLES.join(", ")
-            )));
+            ));
         }
     };
     let content = match entry.get("content") {
@@ -118,25 +126,23 @@ fn parse_message(
             MessageContent::Parts(parse_content_parts(index, parts)?)
         }
         _ => {
-            return Err(chat_error(format!(
+            return Err(format!(
                 "messages[{index}] content must be a string or a non-empty \
                  array of content parts"
-            )));
+            ));
         }
     };
     let tool_call_id = match entry.get("tool_call_id") {
         None => None,
         Some(serde_json::Value::String(id)) => Some(id.clone()),
         Some(_) => {
-            return Err(chat_error(format!(
-                "messages[{index}] tool_call_id must be a string"
-            )));
+            return Err(format!("messages[{index}] tool_call_id must be a string"));
         }
     };
     if role == MessageRole::Tool && tool_call_id.is_none() {
-        return Err(chat_error(format!(
+        return Err(format!(
             "messages[{index}] is a tool message and must set a string tool_call_id"
-        )));
+        ));
     }
     let tool_calls = match entry.get("tool_calls") {
         None => Vec::new(),
@@ -146,9 +152,7 @@ fn parse_message(
             .map(|(position, call)| parse_tool_call_record(index, position + 1, call))
             .collect::<std::result::Result<Vec<_>, _>>()?,
         Some(_) => {
-            return Err(chat_error(format!(
-                "messages[{index}] tool_calls must be an array"
-            )));
+            return Err(format!("messages[{index}] tool_calls must be an array"));
         }
     };
     Ok(MessageRecord {
@@ -164,7 +168,7 @@ fn parse_message(
 fn parse_content_parts(
     index: usize,
     parts: &[serde_json::Value],
-) -> std::result::Result<Vec<ContentPart>, FieldFailure> {
+) -> std::result::Result<Vec<ContentPart>, String> {
     parts
         .iter()
         .enumerate()
@@ -179,12 +183,12 @@ fn parse_content_part(
     index: usize,
     part_index: usize,
     part: &serde_json::Value,
-) -> std::result::Result<ContentPart, FieldFailure> {
+) -> std::result::Result<ContentPart, String> {
     let malformed = || {
-        chat_error(format!(
+        format!(
             "messages[{index}] content part {part_index} must be a table \
              with a string type field"
-        ))
+        )
     };
     let serde_json::Value::Object(part) = part else {
         return Err(malformed());
@@ -196,10 +200,10 @@ fn parse_content_part(
     match kind {
         "text" => match part.get("text") {
             Some(serde_json::Value::String(text)) => Ok(ContentPart::Text(text.clone())),
-            _ => Err(chat_error(format!(
+            _ => Err(format!(
                 "messages[{index}] content part {part_index} is a text part \
                  and must set a string text field"
-            ))),
+            )),
         },
         "image_url" => {
             let url = part
@@ -209,17 +213,17 @@ fn parse_content_part(
                 .and_then(serde_json::Value::as_str);
             match url {
                 Some(url) => Ok(ContentPart::ImageUrl(url.to_owned())),
-                None => Err(chat_error(format!(
+                None => Err(format!(
                     "messages[{index}] content part {part_index} is an image_url \
                      part and must set an image_url table with a string url field"
-                ))),
+                )),
             }
         }
-        unknown => Err(chat_error(format!(
+        unknown => Err(format!(
             "messages[{index}] content part {part_index} has unknown type \
              {unknown:?}; known types: {}",
             CHAT_PART_TYPES.join(", ")
-        ))),
+        )),
     }
 }
 
@@ -230,35 +234,35 @@ fn parse_tool_call_record(
     index: usize,
     call_index: usize,
     call: &serde_json::Value,
-) -> std::result::Result<ToolCallRecord, FieldFailure> {
+) -> std::result::Result<ToolCallRecord, String> {
     let serde_json::Value::Object(call) = call else {
-        return Err(chat_error(format!(
+        return Err(format!(
             "messages[{index}] tool_calls[{call_index}] must be a table"
-        )));
+        ));
     };
     let id = match call.get("id") {
         Some(serde_json::Value::String(id)) => id.clone(),
         _ => {
-            return Err(chat_error(format!(
+            return Err(format!(
                 "messages[{index}] tool_calls[{call_index}] must set a string id"
-            )));
+            ));
         }
     };
     let name = match call.get("name") {
         Some(serde_json::Value::String(name)) => name.clone(),
         _ => {
-            return Err(chat_error(format!(
+            return Err(format!(
                 "messages[{index}] tool_calls[{call_index}] must set a string name"
-            )));
+            ));
         }
     };
     let arguments = match call.get("arguments") {
         None | Some(serde_json::Value::Null) => serde_json::Value::Object(serde_json::Map::new()),
         Some(arguments @ serde_json::Value::Object(_)) => arguments.clone(),
         Some(_) => {
-            return Err(chat_error(format!(
+            return Err(format!(
                 "messages[{index}] tool_calls[{call_index}] arguments must be a table"
-            )));
+            ));
         }
     };
     Ok(ToolCallRecord {
