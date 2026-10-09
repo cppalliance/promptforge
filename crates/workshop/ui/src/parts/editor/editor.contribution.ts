@@ -15,19 +15,25 @@
 // The editor's panel type registers here too: editors key by path, and
 // untitled buffers by their allocated serial, so each new buffer is its
 // own panel instead of reactivating the previous one.
+//
+// The editor's context menu is filled here as well: Cut, Copy, Paste, and
+// Command Palette..., the rows Cursor's editor shows, each a command the
+// edit and quick-input contributions already own. The panel opens it at
+// the pointer on a right-click.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingsRegistry, KeybindingWeight } from "@workshop/platform/keybinding-registry";
-import { MenuId } from "@workshop/platform/menu-registry";
+import { MenuId, Menus } from "@workshop/platform/menu-registry";
 import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { lastSegment } from "../../base/paths";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "../../services/editor-settings-service";
+import { EDITOR_CONTEXT_MENU } from "./editor-menus";
 import { createGotoLineProvider } from "./goto-line";
 
 registerPanelType({
@@ -303,6 +309,20 @@ addAction({
   run: runEditorTask((commands) => () => commands.cycleEditor(-1)),
 });
 KeybindingsRegistry.registerKeybindingRule({ id: "workbench.action.previousEditor", keybinding: "ctrlcmd+shift+tab" });
+
+// The editor's context menu rows. The commands belong to the edit and
+// quick-input contributions (their titles come from the command registry);
+// only the placement is declared here, in VS Code's group names.
+const contextMenuRows = [
+  { command: "editor.action.clipboardCutAction", group: "9_cutcopypaste", order: 1 },
+  { command: "editor.action.clipboardCopyAction", group: "9_cutcopypaste", order: 2 },
+  { command: "editor.action.clipboardPasteAction", group: "9_cutcopypaste", order: 3 },
+  { command: "workbench.action.showCommands", group: "z_commands", order: 1 },
+] as const;
+
+for (const row of contextMenuRows) {
+  Menus.appendMenuItem(EDITOR_CONTEXT_MENU, row);
+}
 
 // The ":" go-to-line provider. The factory is CodeMirror-free; only the
 // row's accept path lazy-imports the command layer.

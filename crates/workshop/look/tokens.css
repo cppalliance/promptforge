@@ -208,16 +208,85 @@
   --shadow-tertiary: var(--cursor-shadow-tertiary);
   --shadow-popup: 0 3px 8px var(--cursor-shadow-secondary), 0 2px 5px var(--cursor-shadow-secondary), 0 1px 1px var(--cursor-shadow-secondary);
 
-  /* Syntax highlighting (code blocks) */
+  /* Syntax highlighting (code blocks): the agent's markdown fills Shiki's
+     --shiki-* slots from these. The IDE reads the Cursor Dark editor theme
+     for the foreground (#F0F0F0) and the comment (#F0F0F099, italic); the
+     rest are Cursor's syntax defaults. */
   --syntax-bg: #181818;
-  --syntax-fg: #D6D6DD;
+  --syntax-fg: #F0F0F0;
   --syntax-keyword: #82D2CE;
   --syntax-string: #E394DC;
+  --syntax-string-expression: #E394DC;
   --syntax-function: #EFB080;
   --syntax-number: #EBC88C;
-  --syntax-comment: #E4E4E45E;
+  --syntax-comment: #F0F0F099;
   --syntax-constant: #F8C762;
   --syntax-link: #87C3FF;
+  --syntax-parameter: #D6D6DD;
+  --syntax-punctuation: #D6D6DD;
+
+  /* Editor (CodeMirror): Cursor Dark's editor.* theme colors over Monaco's
+     stock geometry. The surface's theme and highlight style read these. */
+  --editor-bg: #181818;
+  --editor-fg: #F0F0F0;
+  --editor-font-size: 14px;
+  --editor-line-height: 19px;
+  --editor-gutter-bg: #181818;
+  --editor-line-number: #F0F0F05C;
+  --editor-line-number-active: #F0F0F0;
+  --editor-line-number-min-width: 5ch;
+  --editor-glyph-margin: 19px;
+  --editor-fold-lane: 26px;
+  --editor-current-line: #262626;
+  --editor-selection: #40404099;
+  --editor-selection-inactive: #40404077;
+  --editor-selection-radius: 3px;
+  --editor-cursor: #F0F0F0;
+  --editor-cursor-width: 2px;
+  --editor-cursor-shift: -1px;
+  --editor-find-match: #88C0D044;
+  --editor-find-match-current: #88C0D066;
+  --editor-word-highlight: #F0F0F01E;
+  --editor-selection-highlight: #404040CC;
+  --editor-bracket-match: #F0F0F01E;
+  --editor-whitespace: #505050B3;
+  --editor-fold-chevron: #C5C5C5;
+  --editor-fold-fade: 0.5s;
+  --editor-fold-placeholder: #808080;
+  --editor-scrollbar-width: 14px;
+  --editor-scrollbar-height: 12px;
+  --editor-scrollbar-thumb: #F0F0F011;
+  --editor-scrollbar-thumb-hover: #F0F0F01E;
+  /* The floating find widget: 419px wide, 33px rows, 28px from the right */
+  --editor-widget-bg: #141414;
+  --editor-find-width: 419px;
+  --editor-find-row-height: 33px;
+  --editor-find-right: 28px;
+  --editor-find-field-height: 24px;
+  --editor-find-button-size: 22px;
+  --editor-find-count-width: 69px;
+
+  /* Editor syntax: the Cursor Dark theme's tokenColors, by lezer tag */
+  --editor-token-keyword: #82D2CE;
+  --editor-token-operator: #D6D6DD;
+  --editor-token-punctuation: #D6D6DD;
+  --editor-token-string: #E394DC;
+  --editor-token-number: #EBC88D;
+  --editor-token-constant: var(--editor-fg);
+  --editor-token-comment: #F0F0F099;
+  --editor-token-type: #EFB080;
+  --editor-token-function: #EFB080;
+  --editor-token-variable: #87C3FF;
+  --editor-token-constant-variable: #AAA0FA;
+  --editor-token-property: #AAA0FA;
+  --editor-token-attribute: #AAA0FA;
+  --editor-token-tag: #87C3FF;
+  --editor-token-tag-punctuation: #A4A4A4;
+  --editor-token-heading: #88C0D0;
+  --editor-token-link: #82D2CE;
+  --editor-token-strong: #F8C762;
+  --editor-token-emphasis: #82D2CE;
+  --editor-token-invalid: #D6D6DD;
 
   /* Motion */
   --duration-instant: 50ms;

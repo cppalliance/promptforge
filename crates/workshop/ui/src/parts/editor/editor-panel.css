@@ -1,11 +1,13 @@
 /* Styles for editor-panel.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Covers the editor surface. The panel's save, revert,
-   and overwrite prompts (shared/panel-dialog.ts) have no rules here: they
-   open the confirmation skin from @workshop/look/modal. Themed values come
-   from the :root tokens in @workshop/look/tokens.css. */
+   into dist/app.css. Covers the editor surface, its scrollbars, and the
+   floating find widget. The panel's save, revert, and overwrite prompts
+   (shared/panel-dialog.ts) have no rules here: they open the confirmation
+   skin from @workshop/look/modal. Themed values come from the :root tokens
+   in @workshop/look/tokens.css; the --editor-* block there holds Cursor's
+   editor values. */
 
 /* The editor panel: the CodeMirror surface fills the panel; the editor's
-   own theme (colors, gutters, selection, search panel) is applied from JS
+   own theme (colors, gutters, selection, highlights) is applied from JS
    in editor-surface.ts, skinned from the same :root tokens. */
 .ws-editor-panel {
   position: relative;
@@ -31,4 +33,174 @@
   color: var(--danger-text);
   background: var(--bg-raised);
   border-bottom: var(--ws-border-width) solid var(--border);
+}
+
+/* Scrollbars: 14px vertical and 12px horizontal, square, in the editor's
+   own thumb colors. */
+.ws-editor-surface .cm-scroller::-webkit-scrollbar {
+  width: var(--editor-scrollbar-width);
+  height: var(--editor-scrollbar-height);
+}
+
+.ws-editor-surface .cm-scroller::-webkit-scrollbar-track,
+.ws-editor-surface .cm-scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.ws-editor-surface .cm-scroller::-webkit-scrollbar-thumb {
+  background-color: var(--editor-scrollbar-thumb);
+  border-radius: 0;
+}
+
+.ws-editor-surface .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background-color: var(--editor-scrollbar-thumb-hover);
+}
+
+/* The find widget floats over the editor's top right (find-widget.ts). The
+   panel container takes no room and passes pointer events through to the
+   text; the widget itself is 419px wide with 33px rows, 28px from the right. */
+.ws-editor-surface .cm-panels {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: 0;
+  border: none;
+  pointer-events: none;
+}
+
+.ws-find-widget {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: var(--editor-find-right);
+  inline-size: var(--editor-find-width);
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  background: var(--editor-widget-bg);
+  color: var(--editor-fg);
+  font-family: var(--font-prose);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  box-shadow: var(--shadow-popup);
+  border-end-start-radius: var(--radius);
+  border-end-end-radius: var(--radius);
+  pointer-events: auto;
+}
+
+.ws-find-rows {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.ws-find-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  block-size: var(--editor-find-row-height);
+  padding-inline: var(--space-1);
+  box-sizing: border-box;
+}
+
+.ws-find-widget[data-replace="false"] .ws-find-row--replace {
+  display: none;
+}
+
+.ws-find-field {
+  flex: 1;
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  block-size: var(--editor-find-field-height);
+  background: var(--bg-input);
+  border: var(--ws-border-width) solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.ws-find-field:focus-within {
+  border-color: var(--cursor-stroke-primary);
+}
+
+.ws-find-input {
+  flex: 1;
+  min-inline-size: 0;
+  padding-inline: var(--space-1);
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+}
+
+.ws-find-input::placeholder {
+  color: var(--input-placeholder);
+}
+
+.ws-find-options {
+  display: flex;
+  gap: var(--ws-size-2);
+  padding-inline-end: var(--ws-size-2);
+}
+
+.ws-find-count {
+  inline-size: var(--editor-find-count-width);
+  flex: none;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ws-find-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-inline-size: var(--editor-find-button-size);
+  block-size: var(--editor-find-button-size);
+  padding-inline: var(--ws-size-2);
+  background: transparent;
+  border: var(--ws-border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.ws-find-button:hover {
+  background: var(--cursor-toolbar-hover);
+  color: var(--text);
+}
+
+.ws-find-button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.ws-find-option[aria-pressed="true"] {
+  background: var(--editor-find-match);
+  border-color: var(--cursor-cyan);
+  color: var(--text);
+}
+
+/* The replace toggle: a chevron that turns down while the replace row is shown. */
+.ws-find-toggle {
+  align-self: stretch;
+  min-inline-size: var(--space-4);
+  padding-inline: 0;
+  border-radius: 0;
+}
+
+.ws-find-toggle svg {
+  transition: transform var(--duration-fast);
+}
+
+.ws-find-widget[data-replace="true"] .ws-find-toggle svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-find-toggle svg {
+    transition: none;
+  }
 }

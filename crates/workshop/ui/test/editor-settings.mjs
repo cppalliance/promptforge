@@ -152,7 +152,8 @@ function serviceOver(initial, contextKeys = null) {
   // Defaults, toggle, the write-through, and the no-op set.
   const { service, storage } = serviceOver();
   check("wordWrap defaults off", service.settings.wordWrap === false);
-  check("renderWhitespace defaults off", service.settings.renderWhitespace === false);
+  check("renderWhitespace defaults to selection, as in Cursor", service.settings.renderWhitespace === "selection");
+  check("the exported renderWhitespace default is selection", DEFAULT_EDITOR_SETTINGS.renderWhitespace === "selection");
   check("renderControlCharacters defaults on, as in Cursor", service.settings.renderControlCharacters === true);
   check("columnSelection defaults off", service.settings.columnSelection === false);
   check("the exported defaults match", DEFAULT_EDITOR_SETTINGS.renderControlCharacters === true);
@@ -189,11 +190,46 @@ function serviceOver(initial, contextKeys = null) {
   check("an array initial value reads as the defaults", fromArray.settings.wordWrap === false);
   const { service: fromWrongTypes } = serviceOver({ wordWrap: "yes", columnSelection: 1, renderWhitespace: true });
   check(
-    "non-boolean fields drop to defaults while real booleans survive",
+    "non-boolean fields drop to defaults while real booleans survive (a legacy true reads as all)",
     fromWrongTypes.settings.wordWrap === false &&
       fromWrongTypes.settings.columnSelection === false &&
-      fromWrongTypes.settings.renderWhitespace === true,
+      fromWrongTypes.settings.renderWhitespace === "all",
   );
+  // The three render-whitespace modes, and the legacy boolean a stored
+  // value may still hold: true was "on" (all), false was "off", which now
+  // reads as the default (selection).
+  const modeOf = (stored) => serviceOver({ renderWhitespace: stored }).service.settings.renderWhitespace;
+  check("a stored none reads as none", modeOf("none") === "none");
+  check("a stored selection reads as selection", modeOf("selection") === "selection");
+  check("a stored all reads as all", modeOf("all") === "all");
+  check("a legacy stored true reads as all", modeOf(true) === "all");
+  check("a legacy stored false reads as selection", modeOf(false) === "selection");
+  check("an unknown stored string reads as the default", modeOf("sometimes") === "selection");
+  check("a stored number reads as the default", modeOf(1) === "selection");
+  check("a missing key reads as the default", serviceOver({}).service.settings.renderWhitespace === "selection");
+
+  // Choosing a mode writes the mode string, never a boolean.
+  const { service: modal, storage: modalStorage } = serviceOver();
+  modal.set("renderWhitespace", "all");
+  check(
+    "set takes a mode and writes it to the user bucket",
+    modal.settings.renderWhitespace === "all" && modalStorage.sets.at(-1)?.value.renderWhitespace === "all",
+  );
+  modal.set("renderWhitespace", "all");
+  check("set to the current mode is a no-op write", modalStorage.sets.length === 1);
+
+  // The Render Whitespace toggle flips between none and all; the default
+  // selection reads as on, so the first flip turns it off.
+  const { service: flipper } = serviceOver();
+  flipper.toggle("renderWhitespace");
+  check("toggling from the default selection goes to none", flipper.settings.renderWhitespace === "none");
+  flipper.toggle("renderWhitespace");
+  check("toggling from none goes to all", flipper.settings.renderWhitespace === "all");
+  flipper.toggle("renderWhitespace");
+  check("toggling from all goes to none", flipper.settings.renderWhitespace === "none");
+  modal.dispose();
+  flipper.dispose();
+
   service.dispose();
   reloaded.dispose();
   fromMalformed.dispose();
@@ -233,9 +269,9 @@ function serviceOver(initial, contextKeys = null) {
   const contextKeys = new ContextKeyService();
   const { service } = serviceOver({ wordWrap: true }, contextKeys);
   check(
-    "construction publishes the defaults",
+    "construction publishes the defaults - the render-whitespace key is true under the default selection mode",
     contextKeys.getValue("config.editor.renderControlCharacters") === true &&
-      contextKeys.getValue("config.editor.renderWhitespace") === false &&
+      contextKeys.getValue("config.editor.renderWhitespace") === true &&
       contextKeys.getValue("config.editor.columnSelection") === false,
   );
   check(
@@ -243,10 +279,29 @@ function serviceOver(initial, contextKeys = null) {
     contextKeys.getValue("config.editor.wordWrap") === true,
   );
   service.toggle("renderWhitespace");
-  check("a toggle sets its context key", contextKeys.getValue("config.editor.renderWhitespace") === true);
+  check(
+    "toggling Render Whitespace off clears its boolean key",
+    contextKeys.getValue("config.editor.renderWhitespace") === false,
+  );
   service.toggle("renderWhitespace");
-  check("toggling back clears the context key", contextKeys.getValue("config.editor.renderWhitespace") === false);
+  check("toggling back sets the boolean key (mode all)", contextKeys.getValue("config.editor.renderWhitespace") === true);
+  service.set("renderWhitespace", "selection");
+  check(
+    "the key stays boolean true for the selection mode",
+    contextKeys.getValue("config.editor.renderWhitespace") === true,
+  );
+  service.set("renderWhitespace", "none");
+  check("only the none mode clears the key", contextKeys.getValue("config.editor.renderWhitespace") === false);
   service.dispose();
+
+  // A persisted none publishes false over the true default.
+  const offKeys = new ContextKeyService();
+  const { service: persistedOff } = serviceOver({ renderWhitespace: "none" }, offKeys);
+  check(
+    "a persisted none publishes a false key at construction",
+    offKeys.getValue("config.editor.renderWhitespace") === false,
+  );
+  persistedOff.dispose();
 }
 
 {
@@ -271,20 +326,40 @@ function serviceOver(initial, contextKeys = null) {
   service.toggle("wordWrap");
   check("toggling wordWrap off reconfigures back", !wraps());
 
-  check(
-    "whitespace starts unhighlighted",
-    view.contentDOM.querySelector(".cm-highlightSpace") === null,
-  );
+  // Render Whitespace: the default selection mode marks whitespace inside
+  // the selection only; all marks every space and tab; none marks nothing.
+  const spaces = () => view.contentDOM.querySelectorAll(".cm-highlightSpace").length;
+  const tabs = () => view.contentDOM.querySelectorAll(".cm-highlightTab").length;
+  check("the default is the selection mode", service.settings.renderWhitespace === "selection");
+  check("selection mode marks nothing while no text is selected", spaces() === 0);
+  view.dispatch({ selection: { anchor: 0, head: 10 } });
+  check("selection mode marks the space inside a selection", spaces() === 1);
+  view.dispatch({ selection: { anchor: 0, head: 5 } });
+  check("selection mode marks nothing when the selection holds no whitespace", spaces() === 0);
+  view.dispatch({ selection: { anchor: 11, head: 21 } });
+  check("selection mode marks only the selected line's whitespace", spaces() === 1);
+  view.dispatch({ selection: { anchor: 3, head: 3 } });
+  check("selection mode clears when the selection collapses", spaces() === 0);
+
+  service.set("renderWhitespace", "all");
+  check("all marks every space in the document", spaces() === 2);
   service.toggle("renderWhitespace");
-  check(
-    "toggling renderWhitespace highlights the spaces",
-    view.contentDOM.querySelector(".cm-highlightSpace") !== null,
-  );
+  check("toggling from all removes the highlights", spaces() === 0);
+  view.dispatch({ selection: { anchor: 0, head: 21 } });
+  check("none marks nothing even inside a selection", spaces() === 0);
   service.toggle("renderWhitespace");
-  check(
-    "toggling renderWhitespace off removes the highlights",
-    view.contentDOM.querySelector(".cm-highlightSpace") === null,
-  );
+  check("toggling from none highlights every space again", spaces() === 2);
+
+  // Tabs follow the same rules as spaces.
+  surface.open({ path: "C:\\project\\tabs.txt", text: "a\tb\n" });
+  check("all marks a tab", tabs() === 1);
+  service.set("renderWhitespace", "selection");
+  view.dispatch({ selection: { anchor: 0, head: 3 } });
+  check("selection mode marks a selected tab", tabs() === 1);
+  view.dispatch({ selection: { anchor: 0, head: 1 } });
+  check("selection mode leaves an unselected tab alone", tabs() === 0);
+  surface.open({ path: "C:\\project\\c.txt", text: "alpha beta\nthird line\n" });
+  service.set("renderWhitespace", "selection");
 
   // Control characters: on by default, over a document holding one.
   surface.open({ path: "C:\\project\\c.txt", text: "a\u0001b\n" });
@@ -304,14 +379,20 @@ function serviceOver(initial, contextKeys = null) {
   );
 
   // Column selection: the mouseSelectionStyle facet answers whether a
-  // drag gesture starts a rectangular selection. Stock behavior (alt
-  // drag) must survive in the off state.
-  const plainDrag = { altKey: false, button: 0, clientX: 0, clientY: 0 };
-  const altDrag = { altKey: true, button: 0, clientX: 0, clientY: 0 };
+  // drag gesture starts a rectangular selection. Cursor's gesture is
+  // Shift+Alt+drag, because a plain Alt+click adds a cursor; the off state
+  // keeps exactly that one.
+  const plainDrag = { altKey: false, shiftKey: false, button: 0, clientX: 0, clientY: 0 };
+  const altDrag = { altKey: true, shiftKey: false, button: 0, clientX: 0, clientY: 0 };
+  const shiftAltDrag = { altKey: true, shiftKey: true, button: 0, clientX: 0, clientY: 0 };
   const styles = () => view.state.facet(EditorView.mouseSelectionStyle);
   check(
-    "stock alt-drag rectangular selection is installed",
-    styles().some((style) => style(view, altDrag) !== null),
+    "Shift+Alt+drag starts a rectangular selection",
+    styles().some((style) => style(view, shiftAltDrag) !== null),
+  );
+  check(
+    "a plain Alt+drag is not rectangular - Alt+click adds a cursor instead",
+    styles().every((style) => style(view, altDrag) === null),
   );
   check(
     "a plain drag is not rectangular by default",
@@ -324,8 +405,9 @@ function serviceOver(initial, contextKeys = null) {
   );
   service.toggle("columnSelection");
   check(
-    "toggling column selection off restores alt-drag only",
-    styles().every((style) => style(view, plainDrag) === null),
+    "toggling column selection off restores the Shift+Alt gesture only",
+    styles().every((style) => style(view, plainDrag) === null) &&
+      styles().some((style) => style(view, shiftAltDrag) !== null),
   );
 
   // A surface created after a change seeds its first state from the
@@ -396,6 +478,15 @@ function serviceOver(initial, contextKeys = null) {
 
   // Executing through the command registry flips the shared service.
   const shared = getService(EDITOR_SETTINGS_SERVICE);
+  check(
+    "the Render Whitespace row reads as checked by default: its mode is not none",
+    shared.settings.renderWhitespace === "selection",
+  );
+  await Commands.execute("editor.action.toggleRenderWhitespace");
+  check("executing the Render Whitespace row turns it off", shared.settings.renderWhitespace === "none");
+  await Commands.execute("editor.action.toggleRenderWhitespace");
+  check("executing it again turns it all the way on", shared.settings.renderWhitespace === "all");
+  shared.set("renderWhitespace", "selection");
   const before = shared.settings.wordWrap;
   const executed = await Commands.execute("editor.action.toggleWordWrap");
   check(

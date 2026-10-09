@@ -11,6 +11,33 @@
   font-weight: normal;
   color: var(--cursor-text-primary);
   overflow-wrap: break-word;
+
+  /* The slots Shiki's CSS-variables theme reads (markdown-render.ts), filled
+     from the skin's --syntax-* tokens the way Cursor fills them from its
+     --cursor-syntax-* ones: a slot with no token of its own takes the
+     token Cursor falls back to (a type or class reads as a constant, a tag
+     as a keyword, an attribute as a parameter, a property as the
+     foreground). The foreground and comment come from the Cursor Dark
+     editor theme: #F0F0F0, and #F0F0F099 in italics. */
+  --shiki-foreground: var(--syntax-fg);
+  --shiki-background: var(--syntax-bg);
+  --shiki-token-comment: var(--syntax-comment);
+  --shiki-token-string: var(--syntax-string);
+  --shiki-token-string-expression: var(--syntax-string-expression);
+  --shiki-token-constant: var(--syntax-constant);
+  --shiki-token-keyword: var(--syntax-keyword);
+  --shiki-token-variable: var(--syntax-fg);
+  --shiki-token-language-variable: var(--syntax-keyword);
+  --shiki-token-parameter: var(--syntax-parameter);
+  --shiki-token-constant-variable: var(--syntax-constant);
+  --shiki-token-property: var(--syntax-fg);
+  --shiki-token-function: var(--syntax-function);
+  --shiki-token-type: var(--syntax-constant);
+  --shiki-token-class: var(--syntax-constant);
+  --shiki-token-tag: var(--syntax-keyword);
+  --shiki-token-attribute: var(--syntax-parameter);
+  --shiki-token-punctuation: var(--syntax-punctuation);
+  --shiki-token-link: var(--syntax-link);
 }
 
 .ws-markdown-content > :first-child {

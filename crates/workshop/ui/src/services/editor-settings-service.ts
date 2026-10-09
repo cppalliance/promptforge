@@ -9,10 +9,23 @@ import type { Event } from "@workshop/platform/event";
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
-/** The four editor settings, one boolean per toggle action. */
+/**
+ * What Render Whitespace draws: nothing, the whitespace inside the
+ * selection only (Cursor's default), or every space and tab.
+ */
+export type RenderWhitespace = "none" | "selection" | "all";
+
+/** The render-whitespace modes, in menu order. */
+export const RENDER_WHITESPACE_MODES: readonly RenderWhitespace[] = ["none", "selection", "all"];
+
+/**
+ * The editor settings: three on/off toggles and the render-whitespace
+ * mode. The toggle actions flip the booleans; Render Whitespace's toggle
+ * flips between none and all.
+ */
 export interface EditorSettings {
   readonly wordWrap: boolean;
-  readonly renderWhitespace: boolean;
+  readonly renderWhitespace: RenderWhitespace;
   readonly renderControlCharacters: boolean;
   readonly columnSelection: boolean;
 }
@@ -22,11 +35,12 @@ export type EditorSettingName = keyof EditorSettings;
 
 /**
  * The stock values. Render Control Characters is on by default, as in
- * Cursor; the other three start off.
+ * Cursor; Render Whitespace defaults to the selection mode, as in
+ * Cursor; the other two start off.
  */
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   wordWrap: false,
-  renderWhitespace: false,
+  renderWhitespace: "selection",
   renderControlCharacters: true,
   columnSelection: false,
 };
@@ -39,6 +53,15 @@ export const EDITOR_SETTING_CONTEXT_KEYS: { readonly [K in EditorSettingName]: `
   columnSelection: "config.editor.columnSelection",
 };
 
+/**
+ * The boolean a setting publishes to its context key. Every key is
+ * boolean, so the Render Whitespace menu row can show a check: the mode
+ * publishes true unless it is none.
+ */
+export function contextKeyValue<K extends EditorSettingName>(name: K, value: EditorSettings[K]): boolean {
+  return name === "renderWhitespace" ? value !== "none" : value === true;
+}
+
 /** The editor-settings service consumers resolve from the registry. */
 export interface EditorSettingsService extends IDisposable {
   /** The current settings. */
@@ -46,8 +69,11 @@ export interface EditorSettingsService extends IDisposable {
   /** Fires when a setting changes; the editor surfaces hook it. */
   readonly onDidChange: Event<EditorSettings>;
   /** Writes one setting; a write of the current value is a no-op. */
-  set(name: EditorSettingName, value: boolean): void;
-  /** Flips one setting - the toggle actions' entire run body. */
+  set<K extends EditorSettingName>(name: K, value: EditorSettings[K]): void;
+  /**
+   * Flips one setting - the toggle actions' entire run body. A boolean
+   * flips; Render Whitespace flips between none and all.
+   */
   toggle(name: EditorSettingName): void;
 }
 

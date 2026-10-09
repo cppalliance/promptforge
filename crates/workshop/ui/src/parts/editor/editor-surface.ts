@@ -10,15 +10,25 @@
 // settings) sit behind Compartments on the surface; the externalUpdate
 // annotation marks server-originated reloads so listeners can tell them
 // from local typing. The base extension set is basicSetup spelled out,
-// because two of its members - highlightSpecialChars and
-// rectangularSelection - move into settings compartments, and a bundle
-// cannot be picked apart.
+// because three of its members - highlightSpecialChars,
+// rectangularSelection, and highlightWhitespace - move into settings
+// compartments, and a bundle cannot be picked apart.
+//
+// The look and the gestures copy Cursor's editor (Monaco's stock
+// defaults with the minimap off): the theme reads the --editor-* tokens
+// from @workshop/look, the highlight style reads --editor-token-*, the
+// cursor is a 2px bar blinking once a second, a plain Alt+click adds a
+// cursor and Shift+Alt+drag selects a column (no crosshair), the indent
+// unit is four spaces, the document scrolls past its last line, and the
+// find widget floats at the top right (find-widget.ts).
 
 import {
-  crosshairCursor,
+  Decoration,
+  type DecorationSet,
   drawSelection,
   dropCursor,
   EditorView,
+  gutter,
   highlightActiveLine,
   highlightActiveLineGutter,
   highlightSpecialChars,
@@ -26,22 +36,28 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  scrollPastEnd,
+  ViewPlugin,
+  type ViewUpdate,
 } from "@codemirror/view";
 import {
   Annotation,
   Compartment,
   EditorState,
   type Extension,
+  type Range,
   type Transaction,
 } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import {
   bracketMatching,
+  codeFolding,
   defaultHighlightStyle,
   foldGutter,
   foldKeymap,
   HighlightStyle,
   indentOnInput,
+  indentUnit,
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
@@ -50,6 +66,7 @@ import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/sea
 import { lintKeymap } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
 
+import { ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT } from "@workshop/look/icons";
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
@@ -58,7 +75,9 @@ import {
   EDITOR_SETTINGS_SERVICE,
   type EditorSettings,
   type EditorSettingsService,
+  type RenderWhitespace,
 } from "../../services/editor-settings-service";
+import { createFindWidget } from "./find-widget";
 
 /** A document handed to the surface: the path it came from and its text. */
 export interface EditorDocument {
@@ -112,85 +131,180 @@ export interface EditorSurface {
   dispose(): void;
 }
 
-// The dark theme skins from the same :root tokens as the rest of the UI;
-// every var() names the token's stock value as fallback.
+// The dark theme skins from the --editor-* tokens in @workshop/look/tokens.css,
+// Cursor Dark's editor values. Text is 14px on a 19px line, set on the
+// scroller so the line numbers share it. CodeMirror's own dark theme is
+// overridden where it is more specific than a short selector: the focused
+// selection needs the long .cm-selectionLayer path to win, and the bracket
+// match must show with the editor unfocused, which the built-in rule does
+// not.
 const promptforgeTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "var(--bg)",
-      color: "var(--text)",
+      backgroundColor: "var(--editor-bg)",
+      color: "var(--editor-fg)",
       height: "100%",
-      fontSize: "13px",
-    },
-    ".cm-content": {
-      fontFamily: 'var(--code-font)',
-      caretColor: "var(--text)",
-    },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--text)",
-    },
-    ".cm-gutters": {
-      backgroundColor: "var(--bg-raised)",
-      color: "var(--text-muted)",
-      border: "none",
-      borderRight: "1px solid var(--border)",
-    },
-    // Not --bg-hover: its #252525 wash drops accent-colored syntax tokens
-    // to 4.14:1, under the 4.5:1 floor. A 4% white wash over --bg keeps
-    // every syntax color at or above 4.5:1 on the active line.
-    ".cm-activeLineGutter": {
-      backgroundColor: "rgba(255, 255, 255, 0.04)",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "rgba(255, 255, 255, 0.04)",
-    },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-      backgroundColor: "var(--accent-dim)",
     },
     "&.cm-focused": {
-      outline: "1px solid var(--accent-dim)",
-      outlineOffset: "-1px",
+      outline: "none",
+    },
+    ".cm-scroller": {
+      fontFamily: "var(--code-font)",
+      fontSize: "var(--editor-font-size)",
+      lineHeight: "var(--editor-line-height)",
+    },
+    ".cm-content": {
+      caretColor: "var(--editor-cursor)",
+      padding: "0",
+    },
+    ".cm-line": {
+      padding: "0",
+    },
+    // A 2px bar, shifted 1px left so it sits between the characters.
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftWidth: "var(--editor-cursor-width)",
+      borderLeftColor: "var(--editor-cursor)",
+      marginLeft: "var(--editor-cursor-shift)",
+    },
+    // The gutter reads glyph lane, line numbers, fold lane. No right border
+    // and no tint on the active line's gutter; only its number brightens.
+    ".cm-gutters": {
+      backgroundColor: "var(--editor-gutter-bg)",
+      color: "var(--editor-line-number)",
+      border: "none",
+      borderRight: "none",
+    },
+    ".cm-glyphMargin": {
+      minWidth: "var(--editor-glyph-margin)",
+    },
+    ".cm-lineNumbers .cm-gutterElement": {
+      minWidth: "var(--editor-line-number-min-width)",
+      padding: "0",
+    },
+    ".cm-foldGutter": {
+      minWidth: "var(--editor-fold-lane)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "transparent",
+      color: "var(--editor-line-number-active)",
+    },
+    // The current line's wash gives way to a selection (the has-selection
+    // class rides on the editor through editorAttributes).
+    ".cm-activeLine": {
+      backgroundColor: "var(--editor-current-line)",
+    },
+    "&.ws-has-selection .cm-activeLine": {
+      backgroundColor: "transparent",
+    },
+    ".cm-selectionBackground": {
+      background: "var(--editor-selection-inactive)",
+      borderRadius: "var(--editor-selection-radius)",
+    },
+    "& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+      background: "var(--editor-selection-inactive)",
+      borderRadius: "var(--editor-selection-radius)",
+    },
+    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+      background: "var(--editor-selection)",
+      borderRadius: "var(--editor-selection-radius)",
     },
     ".cm-searchMatch": {
-      backgroundColor: "var(--accent-dim)",
-      outline: "1px solid var(--accent)",
+      backgroundColor: "var(--editor-find-match)",
+      outline: "none",
     },
-    ".cm-searchMatch-selected": {
-      backgroundColor: "var(--accent)",
+    ".cm-searchMatch.cm-searchMatch-selected": {
+      backgroundColor: "var(--editor-find-match-current)",
+    },
+    // The word under the cursor, and the other occurrences of a selection.
+    ".cm-selectionMatch": {
+      backgroundColor: "var(--editor-selection-highlight)",
+    },
+    ".cm-selectionMatch.cm-selectionMatch-main": {
+      backgroundColor: "var(--editor-word-highlight)",
+    },
+    ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
+      backgroundColor: "var(--editor-bracket-match)",
+      border: "var(--ws-border-width) solid transparent",
+    },
+    // Fold chevrons fade in while the pointer is over the gutter; a folded
+    // range's chevron stays. The folded range itself reads as a bare ellipsis.
+    ".cm-foldGutter .ws-fold-marker": {
+      display: "inline-flex",
+      color: "var(--editor-fold-chevron)",
+      opacity: "0",
+      transition: "opacity var(--editor-fold-fade)",
+    },
+    ".cm-gutters:hover .ws-fold-marker, .cm-foldGutter .ws-fold-marker[data-state=folded]": {
+      opacity: "1",
+    },
+    "@media (prefers-reduced-motion: reduce)": {
+      ".cm-foldGutter .ws-fold-marker": {
+        transition: "none",
+      },
+    },
+    ".cm-foldPlaceholder": {
+      backgroundColor: "transparent",
+      border: "none",
+      color: "var(--editor-fold-placeholder)",
+    },
+    ".cm-highlightSpace": {
+      backgroundImage: "radial-gradient(circle at 50% 55%, var(--editor-whitespace) 20%, transparent 5%)",
     },
     ".cm-panels": {
-      backgroundColor: "var(--bg-raised)",
-      color: "var(--text)",
-    },
-    ".cm-panels input, .cm-panels button": {
-      backgroundColor: "var(--bg)",
-      color: "var(--text)",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius)",
+      backgroundColor: "transparent",
+      color: "var(--editor-fg)",
     },
   },
   { dark: true },
 );
 
-// Syntax colors drawn from the palette: accent for keywords and headings,
-// the LED green/amber for strings and literals, muted gray for comments
-// and punctuation. Every value stays at or above 4.5:1 on --bg.
+// Syntax colors are Cursor Dark's tokenColors, by lezer tag, read from the
+// --editor-token-* values in @workshop/look/tokens.css. A tag falls back
+// to its parent's rule (controlKeyword to keyword, integer to number), so
+// each rule names the family.
 const promptforgeHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent)" },
-  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green)" },
-  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber)" },
-  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted)", fontStyle: "italic" },
-  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent)" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text)" },
-  { tag: [tags.propertyName, tags.attributeName], color: "var(--text)" },
-  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted)" },
-  { tag: tags.heading, color: "var(--accent)", fontWeight: "bold" },
-  { tag: tags.link, color: "var(--accent)", textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
+  { tag: [tags.keyword, tags.modifier], color: "var(--editor-token-keyword)" },
+  { tag: tags.operator, color: "var(--editor-token-operator)" },
+  { tag: tags.punctuation, color: "var(--editor-token-punctuation)" },
+  { tag: tags.angleBracket, color: "var(--editor-token-tag-punctuation)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--editor-token-string)" },
+  { tag: [tags.regexp, tags.escape], color: "var(--editor-token-punctuation)" },
+  { tag: tags.number, color: "var(--editor-token-number)" },
+  { tag: [tags.bool, tags.null, tags.atom, tags.self], color: "var(--editor-token-constant)" },
+  { tag: tags.comment, color: "var(--editor-token-comment)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--editor-token-type)" },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName],
+    color: "var(--editor-token-function)",
+  },
+  { tag: [tags.variableName, tags.definition(tags.variableName)], color: "var(--editor-token-variable)" },
+  { tag: tags.constant(tags.variableName), color: "var(--editor-token-constant-variable)" },
+  { tag: tags.propertyName, color: "var(--editor-token-property)" },
+  { tag: tags.attributeName, color: "var(--editor-token-attribute)" },
+  { tag: tags.tagName, color: "var(--editor-token-tag)" },
+  { tag: tags.heading, color: "var(--editor-token-heading)", fontWeight: "bold" },
+  { tag: [tags.link, tags.url], color: "var(--editor-token-link)", textDecoration: "underline" },
+  { tag: tags.emphasis, color: "var(--editor-token-emphasis)", fontStyle: "italic" },
+  { tag: tags.strong, color: "var(--editor-token-strong)", fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: tags.invalid, color: "var(--danger-text)" },
+  { tag: tags.invalid, color: "var(--editor-token-invalid)" },
 ]);
+
+// The has-selection class: on the editor while any range is non-empty, so
+// the stylesheet can hide the current-line wash under a selection.
+const hasSelectionClass = EditorView.editorAttributes.compute(
+  ["selection"],
+  (state): Record<string, string> => (state.selection.ranges.some((range) => !range.empty) ? { class: "ws-has-selection" } : {}),
+);
+
+/** A fold lane chevron: down while the range is open, right once folded. */
+function foldMarker(open: boolean): HTMLElement {
+  const marker = document.createElement("span");
+  marker.className = "ws-fold-marker";
+  marker.dataset.state = open ? "open" : "folded";
+  marker.innerHTML = open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT;
+  return marker;
+}
 
 /** The lowercase file extension of a path, or null when it has none. */
 function extensionOf(path: string): string | null {
@@ -273,9 +387,68 @@ function wordWrapExtension(on: boolean): Extension {
   return on ? EditorView.lineWrapping : [];
 }
 
-/** Render Whitespace: the cm-highlightSpace decorator when on. */
-function whitespaceExtension(on: boolean): Extension {
-  return on ? highlightWhitespace() : [];
+const tabMark = Decoration.mark({ class: "cm-highlightTab" });
+const spaceMark = Decoration.mark({ class: "cm-highlightSpace" });
+
+/** Marks the spaces and tabs inside every non-empty selection range, within the visible text. */
+function markSelectedWhitespace(view: EditorView): DecorationSet {
+  const marks: Range<Decoration>[] = [];
+  for (const range of view.state.selection.ranges) {
+    if (range.empty) {
+      continue;
+    }
+    for (const visible of view.visibleRanges) {
+      const from = Math.max(range.from, visible.from);
+      const to = Math.min(range.to, visible.to);
+      if (from >= to) {
+        continue;
+      }
+      const text = view.state.sliceDoc(from, to);
+      for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+        if (char === "\t") {
+          marks.push(tabMark.range(from + index, from + index + 1));
+        } else if (char === " ") {
+          marks.push(spaceMark.range(from + index, from + index + 1));
+        }
+      }
+    }
+  }
+  return Decoration.set(marks, true);
+}
+
+/** The selection mode's decorator: the same marks highlightWhitespace uses, scoped to the selection. */
+const selectionWhitespace = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = markSelectedWhitespace(view);
+    }
+
+    update(update: ViewUpdate): void {
+      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        this.decorations = markSelectedWhitespace(update.view);
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
+
+/**
+ * Render Whitespace: nothing for none, the cm-highlightSpace and
+ * cm-highlightTab marks inside the selection only for selection, and
+ * the stock decorator over the whole document for all.
+ */
+function whitespaceExtension(mode: RenderWhitespace): Extension {
+  switch (mode) {
+    case "none":
+      return [];
+    case "selection":
+      return selectionWhitespace;
+    case "all":
+      return highlightWhitespace();
+  }
 }
 
 /** Render Control Characters: the cm-specialChar decorator when on. */
@@ -285,11 +458,13 @@ function controlCharactersExtension(on: boolean): Extension {
 
 /**
  * Column Selection Mode: on makes every left drag rectangular; off keeps
- * basicSetup's stock alt-drag rectangular selection, so the gesture that
- * shipped with the surface survives in both states.
+ * Cursor's gesture, Shift+Alt+drag, because a plain Alt+click adds a
+ * cursor instead.
  */
 function columnSelectionExtension(on: boolean): Extension {
-  return on ? rectangularSelection({ eventFilter: () => true }) : rectangularSelection();
+  return rectangularSelection({
+    eventFilter: on ? () => true : (event) => event.altKey && event.shiftKey && event.button === 0,
+  });
 }
 
 /** The CodeMirror 6 EditorSurface. */
@@ -375,23 +550,30 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
         state: EditorState.create({
           doc: document.text,
           extensions: [
-            // basicSetup spelled out, minus highlightSpecialChars and
-            // rectangularSelection, which live in settings compartments.
+            // basicSetup spelled out, minus highlightSpecialChars,
+            // rectangularSelection, and highlightWhitespace, which live in
+            // settings compartments, and minus crosshairCursor, which Cursor
+            // does not draw. The glyph lane comes before the line numbers.
+            gutter({ class: "cm-glyphMargin" }),
             lineNumbers(),
             highlightActiveLineGutter(),
             history(),
-            foldGutter(),
-            drawSelection(),
+            codeFolding({ placeholderText: "\u22EF" }),
+            foldGutter({ markerDOM: foldMarker }),
+            drawSelection({ cursorBlinkRate: 1000 }),
             dropCursor(),
             EditorState.allowMultipleSelections.of(true),
+            // Alt+click adds a cursor.
+            EditorView.clickAddsSelectionRange.of((event) => event.altKey && !event.shiftKey),
+            indentUnit.of("    "),
+            scrollPastEnd(),
             indentOnInput(),
             syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
             bracketMatching(),
             closeBrackets(),
             autocompletion(),
-            crosshairCursor(),
             highlightActiveLine(),
-            highlightSelectionMatches(),
+            highlightSelectionMatches({ highlightWordAroundCursor: true }),
             keymap.of([
               ...closeBracketsKeymap,
               ...defaultKeymap,
@@ -401,7 +583,8 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
               ...completionKeymap,
               ...lintKeymap,
             ]),
-            search(),
+            search({ createPanel: createFindWidget }),
+            hasSelectionClass,
             promptforgeTheme,
             syntaxHighlighting(promptforgeHighlight),
             this.language.of([]),

@@ -2,8 +2,9 @@
 // HTML with three custom renderers taken from Cursor's markdown
 // pipeline (image dimension suffixes, escaped links that are not
 // draggable, inline-only paragraphs); fenced code blocks highlight
-// through a Shiki core highlighter whose theme is built from the skin's
-// --syntax-* token values; DOMPurify sanitizes the final string before it
+// through a Shiki core highlighter whose theme is Cursor's CSS-variables
+// theme (colors are var(--shiki-*) slots the stylesheet fills from the
+// skin's --syntax-* tokens); DOMPurify sanitizes the final string before it
 // touches the DOM. Sanitizing here, at the render boundary, means no
 // caller can bypass it: marked deliberately does not sanitize (it emits
 // javascript: hrefs and passes raw <script> through) and its own
@@ -48,31 +49,104 @@ import langYaml from "@shikijs/langs/yaml";
 import { copyToClipboard } from "../shared/clipboard";
 import { prefersReducedMotion } from "./transcript/motion";
 
-const THEME_NAME = "workshop-dark";
+const THEME_NAME = "css-variables";
 
-// The theme colors are the skin's --syntax-* token values (@workshop/look/tokens.css).
-// Shiki resolves token colors in JS at highlight time, where CSS custom
-// properties cannot reach, so the values are duplicated here as a static
-// theme; @workshop/look/tokens.css stays the source of truth for what they should be.
+// Cursor's CSS-variables theme, scope for scope: every color is a var()
+// reference to a --shiki-* slot, so the markup carries no hex at all and
+// the stylesheet decides the colors (markdown-render.css maps each slot to
+// the skin's --syntax-* tokens in @workshop/look/tokens.css, the way
+// Cursor's own stylesheet maps them to --cursor-syntax-*). Shiki passes the
+// var() strings through to the style attributes untouched.
 const workshopTheme: ThemeRegistration = {
   name: THEME_NAME,
   type: "dark",
-  fg: "#D6D6DD",
-  bg: "#181818",
+  fg: "var(--shiki-foreground)",
+  bg: "var(--shiki-background)",
   settings: [
-    { scope: ["keyword", "storage"], settings: { foreground: "#82D2CE" } },
-    { scope: ["string"], settings: { foreground: "#E394DC" } },
+    { scope: ["meta.embedded", "meta.template.expression"], settings: { foreground: "var(--shiki-foreground)" } },
     {
-      scope: ["entity.name.function", "support.function", "meta.function-call"],
-      settings: { foreground: "#EFB080" },
+      scope: ["comment", "punctuation.definition.comment"],
+      settings: { foreground: "var(--shiki-token-comment)", fontStyle: "italic" },
     },
-    { scope: ["constant.numeric"], settings: { foreground: "#EBC88C" } },
-    { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: "#E4E4E45E" } },
     {
-      scope: ["constant.language", "variable.other.constant", "entity.name.constant"],
-      settings: { foreground: "#F8C762" },
+      scope: ["string", "string.quoted", "string.template", "string.other.link"],
+      settings: { foreground: "var(--shiki-token-string)" },
     },
-    { scope: ["markup.underline.link", "string.other.link"], settings: { foreground: "#87C3FF" } },
+    { scope: ["string.regexp"], settings: { foreground: "var(--shiki-token-string-expression)" } },
+    { scope: ["constant.numeric"], settings: { foreground: "var(--shiki-token-constant)" } },
+    { scope: ["constant.language"], settings: { foreground: "var(--shiki-token-keyword)" } },
+    {
+      scope: ["constant.character", "constant.character.escape"],
+      settings: { foreground: "var(--shiki-token-string-expression)" },
+    },
+    { scope: ["constant.other"], settings: { foreground: "var(--shiki-token-constant)" } },
+    { scope: ["variable"], settings: { foreground: "var(--shiki-token-variable)" } },
+    { scope: ["variable.language"], settings: { foreground: "var(--shiki-token-language-variable)" } },
+    { scope: ["variable.parameter"], settings: { foreground: "var(--shiki-token-parameter)" } },
+    { scope: ["variable.other.constant"], settings: { foreground: "var(--shiki-token-constant-variable)" } },
+    {
+      scope: ["variable.other.property", "support.variable.property"],
+      settings: { foreground: "var(--shiki-token-property)" },
+    },
+    {
+      scope: [
+        "keyword",
+        "keyword.control",
+        "keyword.operator.new",
+        "keyword.operator.expression",
+        "keyword.operator.logical",
+        "keyword.operator.delete",
+        "storage",
+        "storage.type",
+        "storage.modifier",
+      ],
+      settings: { foreground: "var(--shiki-token-keyword)" },
+    },
+    { scope: ["entity.name.function", "support.function"], settings: { foreground: "var(--shiki-token-function)" } },
+    {
+      scope: ["entity.name.type", "support.type", "entity.name.type.class"],
+      settings: { foreground: "var(--shiki-token-type)" },
+    },
+    { scope: ["entity.name.class", "support.class"], settings: { foreground: "var(--shiki-token-class)" } },
+    {
+      scope: ["entity.name.tag", "support.class.component", "punctuation.definition.tag"],
+      settings: { foreground: "var(--shiki-token-tag)" },
+    },
+    { scope: ["entity.other.attribute-name"], settings: { foreground: "var(--shiki-token-attribute)" } },
+    { scope: ["entity.name.section"], settings: { foreground: "var(--shiki-token-keyword)" } },
+    {
+      scope: ["entity.name.namespace", "entity.name.module", "entity.name.scope-resolution"],
+      settings: { foreground: "var(--shiki-token-type)" },
+    },
+    { scope: ["entity.other.inherited-class"], settings: { foreground: "var(--shiki-token-class)" } },
+    {
+      scope: ["support.type.property-name", "meta.object-literal.key"],
+      settings: { foreground: "var(--shiki-token-property)" },
+    },
+    { scope: ["support.constant"], settings: { foreground: "var(--shiki-token-constant)" } },
+    { scope: ["support.variable"], settings: { foreground: "var(--shiki-token-variable)" } },
+    {
+      scope: ["punctuation", "meta.brace", "meta.delimiter", "keyword.operator", "keyword.operator.assignment"],
+      settings: { foreground: "var(--shiki-token-punctuation)" },
+    },
+    {
+      scope: [
+        "punctuation.definition.template-expression.begin",
+        "punctuation.definition.template-expression.end",
+        "punctuation.section.embedded",
+      ],
+      settings: { foreground: "var(--shiki-token-keyword)" },
+    },
+    { scope: ["markup.heading"], settings: { foreground: "var(--shiki-token-keyword)", fontStyle: "bold" } },
+    { scope: ["markup.bold"], settings: { fontStyle: "bold" } },
+    { scope: ["markup.italic"], settings: { fontStyle: "italic" } },
+    { scope: ["markup.strikethrough"], settings: { fontStyle: "strikethrough" } },
+    { scope: ["markup.inline.raw"], settings: { foreground: "var(--shiki-token-string)" } },
+    { scope: ["markup.underline.link"], settings: { foreground: "var(--shiki-token-link)" } },
+    { scope: ["markup.inserted"], settings: { foreground: "var(--shiki-token-constant)" } },
+    { scope: ["markup.deleted"], settings: { foreground: "var(--shiki-token-string)" } },
+    { scope: ["markup.changed"], settings: { foreground: "var(--shiki-token-keyword)" } },
+    { scope: ["markup.quote"], settings: { foreground: "var(--shiki-token-comment)" } },
   ],
 };
 

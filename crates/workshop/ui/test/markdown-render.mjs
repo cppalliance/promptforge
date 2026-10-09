@@ -14,6 +14,7 @@ import { mock } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { resolver, rulesOf, valueIn } from "./helpers/css-values.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -179,8 +180,8 @@ function render(text, options) {
   const pre = root?.querySelector("pre");
   check("a fenced code block renders through Shiki once ready",
     pre?.classList.contains("shiki") === true);
-  check("a keyword in the block gets the theme's keyword color",
-    pre?.innerHTML.includes("color:#82D2CE") === true);
+  check("a keyword in the block reads the theme's keyword slot",
+    pre?.innerHTML.includes("color:var(--shiki-token-keyword)") === true);
   check("the block's text content survives highlighting",
     pre?.textContent?.includes("fn main()") === true);
 }
@@ -220,6 +221,80 @@ function render(text, options) {
   const html = highlightCode("plain", "");
   check("highlightCode with no language emits a classless plain block",
     html === "<pre><code>plain</code></pre>");
+}
+
+// --- The CSS-variables theme -----------------------------------------------
+
+// Cursor colors code through a Shiki theme whose every color is a CSS
+// variable (--shiki-foreground, --shiki-token-keyword, ...) that the
+// stylesheet fills from the skin's --syntax-* tokens. The markup carries
+// only var() references; the stylesheet must declare every slot the theme
+// can emit, and each must resolve to a color.
+{
+  const SLOTS = [
+    "foreground",
+    "background",
+    "token-comment",
+    "token-string",
+    "token-string-expression",
+    "token-constant",
+    "token-keyword",
+    "token-variable",
+    "token-language-variable",
+    "token-parameter",
+    "token-constant-variable",
+    "token-property",
+    "token-function",
+    "token-type",
+    "token-class",
+    "token-tag",
+    "token-attribute",
+    "token-punctuation",
+    "token-link",
+  ];
+  const resolve = await resolver();
+  const css = await readFile(path.join(testDir, "..", "src", "parts", "agent", "markdown-render.css"), "utf8");
+  const rules = rulesOf(css);
+  const slotValue = (slot) => resolve(valueIn(rules, ".ws-markdown-content", `--shiki-${slot}`));
+
+  for (const slot of SLOTS) {
+    const value = slotValue(slot);
+    check(`--shiki-${slot} is declared and resolves to a color`, typeof value === "string" && /^#[0-9a-f]{6,8}$|^transparent$/.test(value));
+  }
+  check("the foreground is #F0F0F0", slotValue("foreground") === "#f0f0f0");
+  check("comments are #F0F0F099", slotValue("token-comment") === "#f0f0f099");
+  check("the skin's --syntax-fg is #F0F0F0", resolve("var(--syntax-fg)") === "#f0f0f0");
+  check("the skin's --syntax-comment is #F0F0F099", resolve("var(--syntax-comment)") === "#f0f0f099");
+  check("the block background is the skin's #181818", slotValue("background") === "#181818");
+
+  // The theme draws on no slot the stylesheet leaves out, across the kinds of token a block holds.
+  const samples = [
+    ["typescript", 'import { a } from "b";\n// note\nclass Foo<T> extends Bar {\n  static readonly N = 10;\n  constructor(private p: number) { super(); this.q = `x${p}`; }\n  run(arg: T): void { const re = /ab+c/g; if (this.q === "x") { console.log(arg, true, null, Foo.N); } }\n}\n'],
+    ["html", '<div class="a" id="b">text</div>\n'],
+    ["css", "a { color: red; margin: 0 }\n"],
+    ["json", '{"a": [1, true, null, "x"]}\n'],
+    ["python", "@deco\ndef f(x, *, y=1):\n    return [x for x in range(3)]  # c\n"],
+    ["markdown", "# Title\n\n[link](http://example.test) and `code` and **bold**\n\n> quoted\n"],
+    ["rust", "fn main<'a>(x: &'a str) { let y = Vec::<u8>::new(); println!(\"{x}\"); }\n"],
+  ];
+  const used = new Set();
+  for (const [lang, code] of samples) {
+    for (const match of highlightCode(code, lang).matchAll(/var\(--shiki-([a-z-]+)\)/g)) used.add(match[1]);
+  }
+  check("the samples exercise a spread of slots", used.size >= 8);
+  check(
+    `every slot the theme emits is declared (${[...used].filter((slot) => !SLOTS.includes(slot)).join(", ") || "none missing"})`,
+    [...used].every((slot) => SLOTS.includes(slot)),
+  );
+  const comment = highlightCode("// hello\nlet x = 1;", "typescript");
+  check(
+    "a comment is italic through the same slot",
+    comment.includes("color:var(--shiki-token-comment);font-style:italic"),
+  );
+  check(
+    "no color in a highlighted block is a literal hex",
+    !/(?:color|background-color):#[0-9a-fA-F]{3,8}/.test(highlightCode("fn main() { let x = 1; }", "rust")),
+  );
 }
 
 // --- Sanitization --------------------------------------------------------

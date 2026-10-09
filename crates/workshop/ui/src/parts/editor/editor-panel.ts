@@ -21,7 +21,9 @@ import { errorText } from "../../services/error-catalog";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { setTabDirty } from "../layout/panel-tab";
+import { Menu } from "../menu/menu";
 import { showPanelDialog } from "../shared/panel-dialog";
+import { EDITOR_CONTEXT_MENU } from "./editor-menus";
 import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
   fetchFile,
@@ -71,6 +73,8 @@ export const onDidInitEditorPanel = didInitEmitter.event;
 
 export class EditorPanel extends WorkshopPart {
   private readonly surface: EditorSurface;
+  /** The context menu, built on the first right-click. */
+  private menu: Menu | null = null;
   private path: string | null = null;
   private untitled = false;
   private title = "Editor";
@@ -86,6 +90,9 @@ export class EditorPanel extends WorkshopPart {
   constructor(private readonly deps: EditorPanelDeps = {}) {
     super();
     this.element.className = "ws-editor-panel";
+    this.element.addEventListener("contextmenu", (event) => {
+      this.openContextMenu(event);
+    });
     // The surface is the panel's child: dockview disposes the panel when
     // its tab closes, and the inherited dispose() releases the surface and
     // the dirty subscription with it.
@@ -146,6 +153,22 @@ export class EditorPanel extends WorkshopPart {
       }
     }
     didInitEmitter.fire(this);
+  }
+
+  /**
+   * A right-click opens the editor's context menu (Cut, Copy, Paste,
+   * Command Palette...) at the pointer. The rows are commands whose
+   * preconditions ask for a focused text input, which a right-click on
+   * the editor is, so the open names that context.
+   */
+  private openContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    this.menu ??= this._register(new Menu());
+    this.menu.open(EDITOR_CONTEXT_MENU, { x: event.clientX, y: event.clientY }, undefined, {
+      activeEditor: "editor",
+      editorTextFocus: true,
+      textInputFocus: true,
+    });
   }
 
   /** The panel's file path, or null for an untitled buffer. */

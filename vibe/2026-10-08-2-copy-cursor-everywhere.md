@@ -1167,7 +1167,7 @@ Rules for every step:
 
 <step-7>
 
-### Step 7: Copy Cursor's editor
+### Step 7: Copy Cursor's editor [completed]
 
 - Component: Workbench shell
 - Placement: seventh. It follows Step 6, which already moved the dirty state to the tab.

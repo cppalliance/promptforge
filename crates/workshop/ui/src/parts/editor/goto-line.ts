@@ -39,10 +39,11 @@ export function createGotoLineProvider(): QuickAccessProvider {
       if (target === null) {
         return [{ label: "Type a line number to go to", accept: () => {} }];
       }
+      // Cursor's wording: "Go to line {0}." and "Go to line {0} and character {1}."
       const label =
         target.column === undefined
-          ? `Go to line ${target.line}`
-          : `Go to line ${target.line}, character ${target.column}`;
+          ? `Go to line ${target.line}.`
+          : `Go to line ${target.line} and character ${target.column}.`;
       return [
         {
           label,

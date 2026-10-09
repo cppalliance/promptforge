@@ -34,6 +34,7 @@ import { openSearchPanel, SearchCursor, selectNextOccurrence, selectSelectionMat
 import { DOCK, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { EditorPanel } from "./editor-panel";
+import { revealReplace } from "./find-widget";
 
 // The built-in CodeMirror commands behind the catalog rows, re-exported
 // so editor.contribution.ts lazy-imports this module and nothing else.
@@ -167,11 +168,15 @@ export function goToLine(line: number, column?: number): void {
   view.focus();
 }
 
-/** Replace: opens the search panel and moves focus to the replace field. */
+/**
+ * Replace: opens the search panel, shows the find widget's replace row
+ * (a hidden field cannot take focus), and moves focus to the replace field.
+ */
 export const startFindReplace: Command = (view) => {
   if (!openSearchPanel(view)) {
     return false;
   }
+  revealReplace(view);
   const replace = view.dom.querySelector("input[name=replace]");
   if (replace instanceof HTMLInputElement) {
     replace.focus();

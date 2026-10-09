@@ -95,7 +95,15 @@ const USER_DOC = {
   recent_files: ["C:\\seed\\a.md", "C:\\seed\\b.md"],
   commands_history: ["workbench.action.zoomIn", "workbench.action.files.save"],
 };
-const DEFAULT_EDITOR_SETTINGS = { wordWrap: false, renderWhitespace: false, renderControlCharacters: true, columnSelection: false };
+const DEFAULT_EDITOR_SETTINGS = {
+  wordWrap: false,
+  renderWhitespace: "selection",
+  renderControlCharacters: true,
+  columnSelection: false,
+};
+// The seeded document keeps the legacy boolean form of Render Whitespace
+// (true was "on"); the service reads it as the all mode.
+const SEEDED_EDITOR_SETTINGS = { ...USER_DOC.editor_settings, renderWhitespace: "all" };
 
 // The workspace bucket (.pfwork kv rows): a v5 layout envelope as
 // buildLayoutEnvelope writes it (tree left, agent right) whose group ids
@@ -142,7 +150,7 @@ function checkUserStores({ resolveService, document }, doc, failures) {
       failures.push(`${what}: expected ${JSON.stringify(expected)}, saw ${JSON.stringify(actual)}`);
     }
   };
-  expect("editor settings", resolveService("workshop.editorSettings").settings, doc?.editor_settings ?? DEFAULT_EDITOR_SETTINGS);
+  expect("editor settings", resolveService("workshop.editorSettings").settings, doc === null ? DEFAULT_EDITOR_SETTINGS : SEEDED_EDITOR_SETTINGS);
   expect("recent files", [...resolveService("workshop.recentFiles").list], doc?.recent_files ?? []);
   expect("commands history", [...resolveService("workshop.commandsHistory").list], doc?.commands_history ?? []);
   const zoomApplied = document.body.style.position === "relative";

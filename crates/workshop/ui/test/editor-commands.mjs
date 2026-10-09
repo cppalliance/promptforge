@@ -35,6 +35,8 @@ const bundle = await esbuild.build({
       export { parseLineColumn, createGotoLineProvider } from "./src/parts/editor/goto-line.ts";
       export { EditorState, EditorSelection } from "@codemirror/state";
       export { EditorView } from "@codemirror/view";
+      export { search } from "@codemirror/search";
+      export { createFindWidget } from "./src/parts/editor/find-widget.ts";
       export { javascript } from "@codemirror/lang-javascript";
       export { ensureSyntaxTree } from "@codemirror/language";
       export { setDiagnostics } from "@codemirror/lint";
@@ -136,6 +138,8 @@ const {
   EditorState,
   EditorSelection,
   EditorView,
+  search,
+  createFindWidget,
   javascript,
   ensureSyntaxTree,
   setDiagnostics,
@@ -331,6 +335,26 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     replaceInput !== null && window.document.activeElement === replaceInput,
   );
   replaceView.destroy();
+
+  // With Cursor's find widget, the replace row is hidden until revealed, so
+  // Replace must show it before it can focus the field.
+  const widgetView = makeView("alpha\nbeta\n", EditorSelection.cursor(0), [search({ createPanel: createFindWidget })]);
+  check(
+    "Find opens the widget with the replace row hidden",
+    editorCommands.openSearchPanel(widgetView) === true &&
+      widgetView.dom.querySelector(".ws-find-widget")?.dataset.replace === "false",
+  );
+  const widgetReplaceView = makeView("alpha\nbeta\n", EditorSelection.cursor(0), [search({ createPanel: createFindWidget })]);
+  check("startFindReplace opens the find widget", editorCommands.startFindReplace(widgetReplaceView) === true);
+  const widget = widgetReplaceView.dom.querySelector(".ws-find-widget");
+  check("startFindReplace shows the widget's replace row", widget?.dataset.replace === "true");
+  const widgetReplaceInput = widgetReplaceView.dom.querySelector("input[name=replace]");
+  check(
+    "startFindReplace focuses the widget's replace field",
+    widgetReplaceInput !== null && window.document.activeElement === widgetReplaceInput,
+  );
+  widgetView.destroy();
+  widgetReplaceView.destroy();
 }
 
 {
@@ -949,6 +973,12 @@ initZones(dock);
   check("an empty filter shows a guidance row", guidance.length === 1 && guidance[0].label.length > 0);
   const rows = provider.getItems("12");
   check("a line filter offers a go-to row", rows.length === 1 && rows[0].label.includes("12"));
+  // Cursor's wording: "Go to line {0}." and, with a column, "Go to line {0} and character {1}."
+  check("the go-to row reads `Go to line 12.`", rows[0].label === "Go to line 12.");
+  check(
+    "a line and column read `Go to line 12 and character 5.`",
+    provider.getItems("12:5")[0].label === "Go to line 12 and character 5.",
+  );
 
   const gotoSurface = new CodeMirrorSurface();
   window.document.body.appendChild(gotoSurface.element);
@@ -976,6 +1006,52 @@ initZones(dock);
     gotoView.state.selection.main.head === gotoView.state.doc.line(20).from,
   );
   gotoPanel.dispose();
+}
+
+{
+  // The editor's context menu: Cut, Copy, Paste, then Command Palette...,
+  // registered on the editor/context menu and opened at the pointer by a
+  // right-click on the editor panel.
+  const EDITOR_CONTEXT = "editor/context";
+  const expected = [
+    ["editor.action.clipboardCutAction", "Cut", "9_cutcopypaste", 1],
+    ["editor.action.clipboardCopyAction", "Copy", "9_cutcopypaste", 2],
+    ["editor.action.clipboardPasteAction", "Paste", "9_cutcopypaste", 3],
+    ["workbench.action.showCommands", "Command Palette...", "z_commands", 1],
+  ];
+  const registered = Menus.getMenuItems(EDITOR_CONTEXT);
+  check(
+    "the editor context menu holds exactly Cut, Copy, Paste, and Command Palette",
+    registered.length === expected.length &&
+      expected.every(([id, , group, order]) =>
+        registered.some((row) => row.command === id && row.group === group && row.order === order),
+      ),
+  );
+
+  // The commands the rows name come from the edit and quick-input
+  // contributions in the app; stand-ins carry the titles here.
+  for (const [id, title] of expected) {
+    if (Commands.lookup(id) === undefined) {
+      Commands.register(id, { title, run() {} });
+    }
+  }
+  const menuPanel = new EditorPanel({ createSurface: () => createStubSurface() });
+  window.document.body.appendChild(menuPanel.element);
+  const rightClick = new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 24, clientY: 16 });
+  menuPanel.element.dispatchEvent(rightClick);
+  check("a right-click on the editor is claimed, so no native menu opens", rightClick.defaultPrevented);
+  const popover = [...window.document.querySelectorAll(".ws-window-titlebar__popover")].find((p) => !p.hidden);
+  const labels = [...(popover?.querySelectorAll(".ws-window-titlebar__item-label") ?? [])].map((n) => n.textContent);
+  check(
+    "the menu reads Cut, Copy, Paste, Command Palette... in that order",
+    labels.join("|") === "Cut|Copy|Paste|Command Palette...",
+  );
+  window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+  check(
+    "a click outside dismisses the menu",
+    [...window.document.querySelectorAll(".ws-window-titlebar__popover")].every((p) => p.hidden),
+  );
+  menuPanel.dispose();
 }
 
 if (failures.length > 0) {
