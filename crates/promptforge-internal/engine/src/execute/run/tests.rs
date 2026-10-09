@@ -60,6 +60,8 @@ fn a_chat_effect_records_its_round_alias_messages_tools_and_invocation() {
         options: binding.completion_options(),
         binding,
         messages: vec![Message::user("ask")],
+        after: None,
+        keep: 0,
         tools: vec![
             tool_schema_new("grab", "Grab a value", json!({ "type": "object" }))
                 .expect("a valid schema"),
@@ -75,6 +77,8 @@ fn a_chat_effect_records_its_round_alias_messages_tools_and_invocation() {
         EffectRecord::Chat {
             round: RoundId::new(3),
             alias: "writer".to_owned(),
+            after: None,
+            keep: 0,
             messages: vec![json!({ "role": "user", "content": "ask" })],
             tools: vec!["grab".to_owned()],
             temperature: Some(0.2),
@@ -90,6 +94,8 @@ fn a_chat_record_serializes_its_round_and_its_alias_and_no_model() {
     let record = EffectRecord::Chat {
         round: RoundId::new(3),
         alias: "writer".to_owned(),
+        after: None,
+        keep: 0,
         messages: Vec::new(),
         tools: Vec::new(),
         temperature: None,
@@ -103,6 +109,12 @@ fn a_chat_record_serializes_its_round_and_its_alias_and_no_model() {
         "the round is a bare number"
     );
     assert_eq!(wire["Chat"]["alias"], json!("writer"));
+    assert_eq!(
+        wire["Chat"].get("after"),
+        Some(&json!(null)),
+        "no earlier round is written as null, not skipped: {wire}"
+    );
+    assert_eq!(wire["Chat"]["keep"], json!(0));
     assert!(
         wire["Chat"].get("model").is_none(),
         "the record names its slot by alias, not by a model: {wire}"

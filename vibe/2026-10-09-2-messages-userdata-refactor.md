@@ -746,7 +746,7 @@ The conversation list moves into the Engine, which records each round's request 
 
 <step-5>
 
-### Step 5: Record after and keep on Chat effects
+### Step 5: Record after and keep on Chat effects [completed]
 
 - Component: Chat record
 

@@ -78,6 +78,8 @@ async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
         vec![EffectRecord::Chat {
             round: RoundId::new(0),
             alias: "writer".to_owned(),
+            after: None,
+            keep: 0,
             messages: vec![json!({ "role": "user", "content": "ask" })],
             tools: Vec::new(),
             temperature: None,
@@ -110,9 +112,9 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
     let records = records.lock().expect("the tap mutex is not poisoned");
     assert_eq!(records.len(), 3, "two rounds and one call: {records:?}");
     assert!(
-        matches!(&records[0], EffectRecord::Chat { tools, messages, .. }
+        matches!(&records[0], EffectRecord::Chat { tools, after: None, keep: 0, messages, .. }
             if tools == &["echo".to_owned()] && messages.len() == 1),
-        "the first round advertises the scope over the author's list: {:?}",
+        "the first round advertises the scope over the author's list, which starts here: {:?}",
         records[0]
     );
     assert_eq!(
@@ -125,10 +127,30 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
         },
         "the model's call is one tool_call effect naming the bound identity and the model"
     );
+    let EffectRecord::Chat {
+        after,
+        keep,
+        messages,
+        ..
+    } = &records[2]
+    else {
+        panic!("the third effect is the second round: {:?}", records[2]);
+    };
+    assert_eq!(
+        (*after, *keep),
+        (Some(RoundId::new(0)), 1),
+        "the second round extends the first, repeating its one message"
+    );
+    let roles: Vec<&Value> = messages.iter().map(|message| &message["role"]).collect();
+    assert_eq!(
+        roles,
+        [&json!("assistant"), &json!("tool")],
+        "the second round logs only the assistant tool-call record and the tool record: \
+         {messages:?}"
+    );
     assert!(
-        matches!(&records[2], EffectRecord::Chat { messages, .. } if messages.len() == 3),
-        "the second round includes the assistant and tool records: {:?}",
-        records[2]
+        messages[0]["tool_calls"].is_array() && messages[1]["tool_call_id"] == json!("call_1"),
+        "the logged pair is the call and its result: {messages:?}"
     );
     assert_round_trips(&records);
 }

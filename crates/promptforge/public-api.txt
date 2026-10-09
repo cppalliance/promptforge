@@ -771,7 +771,9 @@ pub promptforge::effect::ChatAnswerRecord::model: alloc::string::String
 pub promptforge::effect::ChatAnswerRecord::reply: core::option::Option<alloc::string::String>
 pub promptforge::effect::ChatAnswerRecord::tool_calls: alloc::vec::Vec<alloc::string::String>
 pub promptforge::effect::Effect::Chat { .. }
+pub promptforge::effect::Effect::Chat::after: core::option::Option<promptforge::ids::RoundId>
 pub promptforge::effect::Effect::Chat::binding: promptforge::model::ModelBinding
+pub promptforge::effect::Effect::Chat::keep: u64
 pub promptforge::effect::Effect::Chat::messages: alloc::vec::Vec<promptforge::model::Message>
 pub promptforge::effect::Effect::Chat::options: promptforge::model::CompletionOptions
 pub promptforge::effect::Effect::Chat::round: promptforge::effect::Round
@@ -796,7 +798,9 @@ pub promptforge::effect::EffectAnswer::ToolCall::0: core::result::Result<promptf
 pub promptforge::effect::EffectAnswer::Vfs(..)
 pub promptforge::effect::EffectAnswer::Vfs::0: core::result::Result<promptforge::vfs::VfsOutcome, promptforge::vfs::VfsError>
 pub promptforge::effect::EffectRecord::Chat { .. }
+pub promptforge::effect::EffectRecord::Chat::after: core::option::Option<promptforge::ids::RoundId>
 pub promptforge::effect::EffectRecord::Chat::alias: alloc::string::String
+pub promptforge::effect::EffectRecord::Chat::keep: u64
 pub promptforge::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
 pub promptforge::effect::EffectRecord::Chat::messages: alloc::vec::Vec<serde_json::value::Value>
 pub promptforge::effect::EffectRecord::Chat::round: promptforge::ids::RoundId

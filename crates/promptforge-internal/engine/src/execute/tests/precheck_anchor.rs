@@ -4,7 +4,8 @@
 //! after a served round, for the model that served it. Each case drives two
 //! or three rounds over one list and one 4096-token window, so the last
 //! round's count decides whether the request leaves. The chat arm's overflow flag is in `chat_arm`; the
-//! compactor that receives it in `models_loop_compactors`.
+//! compactor that receives it in `models_loop_compactors`. What a refused
+//! send leaves in the run log is in `resend`.
 
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
@@ -12,6 +13,9 @@ use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelInvocation};
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_types::metrics::{CallMetrics, Usage};
+
+#[path = "precheck_anchor-resend.rs"]
+mod resend;
 
 /// A text reply with the usage a provider would report for the round.
 fn reply_with_usage(

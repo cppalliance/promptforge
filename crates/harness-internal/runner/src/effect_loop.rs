@@ -328,6 +328,7 @@ impl Driver {
                 tools,
                 options,
                 round,
+                ..
             } => {
                 let broker = Arc::clone(&self.performers.broker);
                 let round = async move {

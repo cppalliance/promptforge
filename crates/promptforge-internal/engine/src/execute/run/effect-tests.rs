@@ -1,11 +1,16 @@
-//! The answer record: a `Chat` answer projects to the reply or the
-//! requested tool names beside the model and finish reason, never the
-//! bodies; a `ToolCall` answer projects to its text and trust; and every
-//! failure projects to its display text. Each record round-trips through
-//! serde, as a run log and a replay depend on.
+//! The `Chat` effect's record keeps `after` and `keep` and logs only the
+//! request's messages after the first `keep`, while the effect still holds
+//! the whole request. Then the answer record: a `Chat` answer projects to
+//! the reply or the requested tool names beside the model and finish
+//! reason, never the bodies; a `ToolCall` answer projects to its text and
+//! trust; and every failure projects to its display text. Each record
+//! round-trips through serde, as a run log and a replay depend on.
+
+use std::num::NonZeroU32;
 
 use promptforge_model_client::client::{RawExchange, ToolCall};
-use promptforge_model_client::model::CompletionErrorKind;
+use promptforge_model_client::model::{CompletionErrorKind, ModelInvocation};
+use promptforge_types::detail::model_id_from_validated;
 use serde_json::json;
 
 use super::*;
@@ -14,6 +19,120 @@ use super::*;
 fn round_trip(record: &AnswerRecord) -> AnswerRecord {
     let text = serde_json::to_string(record).expect("an answer record serializes");
     serde_json::from_str(&text).expect("a serialized answer record deserializes")
+}
+
+/// Round 3's effect over `messages`, extending `after` by `keep` of them.
+fn chat_effect(messages: Vec<Message>, after: Option<RoundId>, keep: u64) -> Effect {
+    let binding = ModelBinding::new(
+        "writer",
+        "A general model for tests",
+        model_id_from_validated("gateway", "test-model"),
+        ModelInvocation {
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        },
+        NonZeroU32::new(4096).expect("4096 is non-zero"),
+    );
+    Effect::Chat {
+        options: binding.completion_options(),
+        binding,
+        messages,
+        after,
+        keep,
+        tools: Vec::new(),
+        round: Round {
+            id: RoundId::new(3),
+            origin: ReplyOrigin::Chat,
+        },
+    }
+}
+
+/// The three-message request the record cases send.
+fn request() -> Vec<Message> {
+    vec![
+        Message::user("ask"),
+        Message::assistant("reply"),
+        Message::user("again"),
+    ]
+}
+
+#[test]
+fn a_chat_record_copies_after_and_keep_and_logs_only_the_messages_after_keep() {
+    let effect = chat_effect(request(), Some(RoundId::new(2)), 2);
+    let record = effect.record();
+    let EffectRecord::Chat {
+        round,
+        after,
+        keep,
+        messages,
+        ..
+    } = &record
+    else {
+        panic!("a chat effect records a chat record: {record:?}");
+    };
+    assert_eq!(*round, RoundId::new(3));
+    assert_eq!(*after, Some(RoundId::new(2)));
+    assert_eq!(*keep, 2);
+    assert_eq!(
+        *messages,
+        vec![json!({ "role": "user", "content": "again" })],
+        "the first two messages repeat round 2's request"
+    );
+    let Effect::Chat { messages, .. } = &effect else {
+        panic!("the effect is a chat round");
+    };
+    assert_eq!(
+        messages.len(),
+        3,
+        "the effect still sends the whole request"
+    );
+
+    let text = serde_json::to_string(&record).expect("a record serializes");
+    let wire: Value = serde_json::from_str(&text).expect("a record is JSON");
+    assert_eq!(
+        wire["Chat"]["after"],
+        json!(2),
+        "after is a bare round number"
+    );
+    assert_eq!(wire["Chat"]["keep"], json!(2));
+    let read: EffectRecord = serde_json::from_str(&text).expect("a record deserializes");
+    assert_eq!(read, record);
+}
+
+#[test]
+fn a_keep_equal_to_the_message_count_logs_no_messages() {
+    let record = chat_effect(request(), Some(RoundId::new(2)), 3).record();
+    let EffectRecord::Chat {
+        after,
+        keep,
+        messages,
+        ..
+    } = &record
+    else {
+        panic!("a chat effect records a chat record: {record:?}");
+    };
+    assert_eq!((*after, *keep), (Some(RoundId::new(2)), 3));
+    assert!(
+        messages.is_empty(),
+        "the request repeats round 2's whole: {messages:?}"
+    );
+}
+
+#[test]
+fn a_first_send_records_no_after_and_logs_every_message() {
+    let record = chat_effect(request(), None, 0).record();
+    let EffectRecord::Chat {
+        after,
+        keep,
+        messages,
+        ..
+    } = &record
+    else {
+        panic!("a chat effect records a chat record: {record:?}");
+    };
+    assert_eq!((*after, *keep), (None, 0));
+    assert_eq!(messages.len(), 3, "the whole request starts here");
 }
 
 /// A completion with `finish_reason` and both bodies set: what a

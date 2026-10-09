@@ -98,7 +98,9 @@ impl Scheduler {
     /// leading handle when it named one, else the section's current
     /// model), the call-time tool scope recorded on the chain as
     /// `advertised`, the per-dispatch projection, the context precheck,
-    /// and the issued effect.
+    /// and the issued effect. The send is recorded on the list only once
+    /// the precheck passes, so a refused round leaves the list's last send
+    /// in place.
     fn prepare_chat(
         &mut self,
         id: ChainIndex,
@@ -167,10 +169,13 @@ impl Scheduler {
             .anchor
             .sending(binding.id().clone(), conversation.clone());
         let round = self.number_round(ReplyOrigin::Chat);
+        let (after, keep) = list.commit(round.id, &conversation);
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
             messages: conversation,
+            after,
+            keep,
             tools: schemas,
             round,
         };
