@@ -1,7 +1,11 @@
 /* Styles for the Run window panel (run-panel.ts, run-rows.ts), which
-   imports this file; esbuild bundles it into dist/app.css. Themed
-   values come from the :root tokens in @workshop/look/tokens.css; the
-   controls (buttons, inputs) use the @workshop/look/controls.css classes. */
+   imports this file; esbuild bundles it into dist/app.css. The layout copies
+   Cursor Settings: a 35px toolbar, the contract as a 4% tinted card of
+   rows (12px radius, rows padded 12px with a 20px gap and inset dividers at
+   4%), text-line empty and error states with inline links, and a right-aligned
+   footer. Themed values come from the :root tokens in @workshop/look/tokens.css
+   and src/tokens/component.css; the controls (buttons, inputs, the switch)
+   use the @workshop/look/controls.css classes. */
 
 .ws-run-panel {
   position: relative;
@@ -14,28 +18,70 @@
   color: var(--text);
 }
 
-/* The toolbar holds the prompt field and its Browse button. */
+/* A droppable drag over the panel (a tree path or OS files) washes it with
+   the hover color. The overlay lets the drop through to the panel. */
+.ws-run-panel--drag-over::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--bg-hover);
+  pointer-events: none;
+}
+
+/* The toolbar is a 35px strip padded 8px on each side, holding the path
+   field and its Browse button. */
 .ws-run-panel__toolbar {
+  box-sizing: border-box;
   display: flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  gap: var(--space-2);
+  height: var(--ws-run-toolbar-height);
+  padding: 0 var(--space-2);
   border-bottom: var(--ws-border-width) solid var(--border);
 }
 
+/* The label names the field for screen readers; the toolbar shows the field. */
 .ws-run-panel__prompt-label {
-  flex: none;
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+  position: absolute;
+  width: var(--ws-size-1);
+  height: var(--ws-size-1);
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
+/* The path field takes the workbench field's border and radius over the
+   IDE's 4% input fill: 24px tall, 12px text. */
 .ws-run-panel__prompt-path {
   flex: 1;
   min-width: 0;
+  height: var(--height-sm);
+  border: var(--ws-workbench-input-border);
+  border-radius: var(--ws-workbench-input-radius);
+  background: var(--bg-input);
+  font-size: var(--font-size-sm);
 }
 
 .ws-run-panel__browse {
   flex: none;
+}
+
+/* The content column is the width container for the stacked rows (the
+   container query at the end of this sheet). It is not the scroller, so its
+   width is the panel's, with no scrollbar gutter taken out: a panel 500px
+   wide keeps its rows side by side. It sits inside the panel, not on it, so
+   the dialogs mounted in the panel keep their overlay over the window:
+   container-type applies layout containment, which makes the element the
+   containing block for fixed descendants. */
+.ws-run-panel__content {
+  container-type: inline-size;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .ws-run-panel__body {
@@ -43,41 +89,125 @@
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding: var(--space-md);
 }
 
-.ws-run-panel__hint {
-  margin: var(--space-md);
-  font-size: var(--font-size-sm);
+/* The empty and error states: a 22px line of text with 20px on the left. */
+.ws-run-panel__message {
+  margin: 0;
+  padding-block: var(--space-3);
+  padding-left: var(--space-5);
+  padding-inline-end: var(--space-3);
+  line-height: var(--line-height-lg);
   color: var(--text-muted);
-  text-align: center;
 }
 
+.ws-run-panel__error {
+  color: var(--danger-text);
+  white-space: pre-wrap;
+}
+
+/* An inline link: a button that reads as underlined text in the link color. */
+.ws-run-panel__link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cursor-text-link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ws-run-panel__link:hover {
+  color: var(--cursor-accent-hover);
+}
+
+.ws-run-panel__link:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+/* The contract is one card; each row is a Settings row, with an inset
+   divider above every row after the first. */
 .ws-run-panel__rows {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+  margin: var(--space-3);
+  border-radius: var(--radius-xl);
+  background: var(--cursor-bg-quinary);
 }
 
 .ws-run-panel__row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  min-height: var(--ws-control-height-compact);
+  gap: var(--space-5);
+  padding: var(--space-3);
+}
+
+.ws-run-panel__row + .ws-run-panel__row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--space-3);
+  right: var(--space-3);
+  height: var(--ws-border-width);
+  background: var(--cursor-stroke-quaternary);
+}
+
+/* The text column: the label (with the required marker) over the optional
+   description line. */
+.ws-run-panel__row-text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--ws-size-2);
+  min-width: 0;
+}
+
+.ws-run-panel__row-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ws-size-4);
+  min-width: 0;
 }
 
 .ws-run-panel__row-label {
-  flex: none;
-  width: var(--ws-run-label-width, 10rem);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  line-height: var(--line-height-base);
+  color: var(--cursor-text-primary);
+}
+
+.ws-run-panel__row-description {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--cursor-text-secondary);
+}
+
+.ws-run-panel__required {
+  flex: none;
+  color: var(--danger-text);
+}
+
+/* The controls column sits on the other side of the row. */
+.ws-run-panel__row-controls {
+  display: flex;
+  flex: 0 1 var(--ws-run-control-width);
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .ws-run-panel__value {
+  min-width: 0;
   overflow: hidden;
+  text-align: end;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -90,33 +220,39 @@
 .ws-run-panel__prose {
   flex: 1;
   min-width: 0;
-  min-height: 6rem;
+  min-height: var(--ws-run-prose-min-height);
   resize: vertical;
-}
-
-.ws-run-panel__checkbox {
-  flex: none;
-}
-
-.ws-run-panel__required {
-  flex: none;
-  color: var(--danger-text);
-}
-
-.ws-run-panel__error {
-  margin: var(--space-md);
-  font-size: var(--font-size-sm);
-  color: var(--danger-text);
-  white-space: pre-wrap;
-}
-
-.ws-run-panel__choose {
-  margin: 0 var(--space-md);
 }
 
 .ws-run-panel__footer {
   display: flex;
+  flex: none;
   justify-content: flex-end;
-  padding: var(--space-sm) var(--space-md);
-  border-top: var(--ws-border-width) solid var(--border);
+  gap: var(--space-2);
+  padding: var(--ws-run-footer-padding);
+  border-top: var(--ws-border-width) solid var(--cursor-stroke-tertiary);
+}
+
+/* Under 500px the rows stack: the text column over the controls, which take
+   the full width. The width is a literal because a custom property can't
+   stand in a container query; it is the 500px of --ws-size-500. */
+@container (width < 500px) {
+  .ws-run-panel__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .ws-run-panel__row-text {
+    flex: none;
+  }
+
+  .ws-run-panel__row-controls {
+    flex: none;
+    justify-content: flex-start;
+  }
+
+  .ws-run-panel__value {
+    text-align: start;
+  }
 }

@@ -117,6 +117,16 @@ const json = (body, status = 200) => ({
       contract.args.fields[2].type === "integer" &&
       contract.args.fields[2].default === 5,
   );
+  // The Run window shows a described arg's text as a second line under its
+  // label and draws no line for an undescribed one, so the narrowed
+  // description must survive as the string, or as null when the prompt
+  // gives none.
+  check(
+    "an arg's description narrows to its text, or null when the prompt gives none",
+    contract.args.fields[0].description === "the topic" &&
+      contract.args.fields[1].description === null &&
+      contract.args.fields[2].description === null,
+  );
   check(
     "model roles narrow",
     contract.models.length === 1 &&

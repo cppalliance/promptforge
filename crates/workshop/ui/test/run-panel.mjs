@@ -16,6 +16,14 @@
 // retired fuzzy tool shape rejected as an unexpected shape; two opens
 // yielding two windows; and a superseded load discarded by the generation
 // counter.
+// The Cursor Settings layout is covered too: an arg's description as a
+// visible second line (never a tooltip), a boolean arg as a .switch, the
+// screen-reader-only Prompt label tied to its field, Browse... and Choose
+// Prompt as inline links, the drag-over class a droppable drag sets, Choose
+// Prompt and Choose Input opening the form modal with Cancel first, and the
+// stylesheet's values (the 4% card, the 12px rows, the stacked layout under
+// 500px, the 35px toolbar, the 22px state lines, the footer), read from the
+// source because jsdom applies no layout.
 // Run: node --test test/run-panel.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -23,6 +31,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { readUi, resolver, rulesOf, valueIn } from "./helpers/css-values.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -308,6 +317,30 @@ check("the empty window shows the prompt field", !!emptyEl?.querySelector(".ws-r
 check("the empty window shows a Browse button", !!emptyEl?.querySelector(".ws-run-panel__browse"));
 check("the panel root is the file-drop target", emptyEl?.hasAttribute("data-ws-file-drop") === true);
 check("the empty window shows the empty-state hint", !!emptyEl?.querySelector(".ws-run-panel__hint"));
+const hintLink = emptyEl?.querySelector(".ws-run-panel__hint .ws-run-panel__link");
+check(
+  "the empty state offers Browse... as an inline link in the hint",
+  emptyEl?.querySelector(".ws-run-panel__hint")?.textContent === "Drop a prompt file here, or Browse..." &&
+    hintLink?.tagName === "BUTTON" &&
+    hintLink.textContent === "Browse..." &&
+    !hintLink.classList.contains("button"),
+);
+const promptLabel = emptyEl?.querySelector(".ws-run-panel__prompt-label");
+const promptPath = emptyEl?.querySelector(".ws-run-panel__prompt-path");
+check(
+  "the Prompt label is a real label tied to the path field",
+  promptLabel?.tagName === "LABEL" &&
+    promptLabel.textContent === "Prompt" &&
+    typeof promptPath?.id === "string" &&
+    promptPath.id.length > 0 &&
+    promptLabel.htmlFor === promptPath.id,
+);
+check(
+  "the toolbar lists the label, the path field, then Browse",
+  [...(emptyEl?.querySelector(".ws-run-panel__toolbar")?.children ?? [])]
+    .map((child) => child.className.split(" ").find((name) => name.startsWith("ws-run-panel__")))
+    .join(",") === "ws-run-panel__prompt-label,ws-run-panel__prompt-path,ws-run-panel__browse",
+);
 check("the Run button is disabled before ready", emptyEl?.querySelector(".ws-run-panel__run")?.disabled === true);
 check("an empty open fetches nothing", calls.filter((c) => c.url.startsWith("/workspace/file")).length === 0);
 
@@ -317,6 +350,12 @@ check(
   "a Run window opened with an empty path shows the Run tab title",
   blankRun.title === "Run" &&
     blankRun.view.tab.element.querySelector(".dv-default-tab-content")?.textContent === "Run",
+);
+check(
+  "two windows give their path fields distinct ids",
+  runElement(blankRun)?.querySelector(".ws-run-panel__prompt-path")?.id !== promptPath?.id &&
+    runElement(blankRun)?.querySelector(".ws-run-panel__prompt-label")?.htmlFor ===
+      runElement(blankRun)?.querySelector(".ws-run-panel__prompt-path")?.id,
 );
 
 // --- Pre-filled open: loading shimmers, then one row per contract item ------
@@ -373,13 +412,37 @@ check(
   topicRow?.querySelector(".ws-run-panel__required") !== null &&
     topicRow?.querySelector("input") !== null,
 );
-const deepRow = rowText("deep");
+const topicDescription = topicRow?.querySelector(".ws-run-panel__row-description");
 check(
-  "a boolean arg is a checkbox from its default",
-  deepRow?.querySelector('input[type="checkbox"]') !== null &&
-    deepRow.querySelector('input[type="checkbox"]').checked === false,
+  "an arg's description is a visible second line under its label",
+  topicDescription?.textContent === "the topic" &&
+    topicDescription.parentElement === topicRow.querySelector(".ws-run-panel__row-label")?.parentElement?.parentElement &&
+    topicRow.querySelector(".ws-run-panel__row-text") === topicDescription.parentElement,
 );
+check(
+  "an arg's description is not also a tooltip",
+  topicRow?.querySelector("input")?.getAttribute("title") === null &&
+    topicRow.getAttribute("title") === null,
+);
+const deepRow = rowText("deep");
+const deepSwitch = deepRow?.querySelector("button.switch");
+check(
+  "a boolean arg is a switch from its default, not a checkbox",
+  deepSwitch?.getAttribute("role") === "switch" &&
+    deepSwitch.getAttribute("type") === "button" &&
+    deepSwitch.getAttribute("aria-checked") === "false" &&
+    deepRow.querySelector('input[type="checkbox"]') === null,
+);
+deepSwitch?.click();
+check("clicking a switch turns it on", deepSwitch?.getAttribute("aria-checked") === "true");
+deepSwitch?.click();
+check("clicking it again turns it off", deepSwitch?.getAttribute("aria-checked") === "false");
 const limitRow = rowText("limit");
+check(
+  "an arg without a description has no second line",
+  deepRow?.querySelector(".ws-run-panel__row-description") === null &&
+    limitRow?.querySelector(".ws-run-panel__row-description") === null,
+);
 check(
   "an integer arg is a numeric control prefilled from its default",
   limitRow?.querySelector('input[type="number"]')?.value === "5" &&
@@ -440,6 +503,69 @@ check(
   "a tree drop loads the prompt to ready",
   emptyEl.querySelector(".ws-run-panel__rows") !== null &&
     emptyEl.querySelector(".ws-run-panel__run")?.disabled === false,
+);
+
+// The content column holds the toolbar, body, and footer, and the panel's
+// dialogs mount beside it, so the column's width container never contains them.
+check(
+  "the content column holds the toolbar, the body, and the footer",
+  [...(emptyEl.querySelector(".ws-run-panel__content")?.children ?? [])]
+    .map((child) => child.className)
+    .join(",") === "ws-run-panel__toolbar,ws-run-panel__body,ws-run-panel__footer",
+);
+
+// --- Drag over: a droppable drag marks the panel with the overlay class -----
+
+const OVER = "ws-run-panel--drag-over";
+const dragRun = openInZone("run", { instance: "dragover" });
+await flush();
+const dragEl = runElement(dragRun);
+const dragBody = dragEl.querySelector(".ws-run-panel__body");
+const dragHint = dragEl.querySelector(".ws-run-panel__hint");
+const TREE_DRAG = { types: ["application/x-workshop-path"], getData: () => "" };
+check("a panel at rest carries no drag-over class", !dragEl.classList.contains(OVER));
+syntheticDrag("dragenter", dragBody, TREE_DRAG);
+check("a tree drag entering marks the panel", dragEl.classList.contains(OVER));
+syntheticDrag("dragenter", dragHint, TREE_DRAG);
+syntheticDrag("dragleave", dragBody, TREE_DRAG);
+check("moving onto a child keeps the mark", dragEl.classList.contains(OVER));
+syntheticDrag("dragleave", dragHint, TREE_DRAG);
+check("leaving the panel clears the mark", !dragEl.classList.contains(OVER));
+syntheticDrag("dragenter", dragBody, { types: ["Files"] });
+check("an OS file drag entering marks the panel", dragEl.classList.contains(OVER));
+syntheticDrag("drop", dragBody, { types: ["Files"], getData: () => "" });
+check("a drop clears the mark", !dragEl.classList.contains(OVER));
+syntheticDrag("dragenter", dragBody, { types: ["text/plain"] });
+check("an unrelated drag never marks the panel", !dragEl.classList.contains(OVER));
+syntheticDrag("dragleave", dragBody, { types: ["text/plain"] });
+syntheticDrag("dragenter", dragBody, TREE_DRAG);
+syntheticDrag("drop", dragBody, { types: ["application/x-workshop-path"], getData: () => FAST });
+await flush();
+check(
+  "a tree drop clears the mark and still loads the prompt",
+  !dragEl.classList.contains(OVER) && dragEl.querySelector(".ws-run-panel__rows") !== null,
+);
+
+// A drag that ends with no drop on the panel (cancelled, or released
+// elsewhere) is the source row's dragend bubbling up to the window. It
+// clears the mark and the enter/leave depth count, so the next drag starts
+// from zero instead of needing extra leaves to clear.
+const dragEndRun = openInZone("run", { instance: "dragend" });
+await flush();
+const dragEndEl = runElement(dragEndRun);
+const dragEndBody = dragEndEl.querySelector(".ws-run-panel__body");
+const dragEndHint = dragEndEl.querySelector(".ws-run-panel__hint");
+syntheticDrag("dragenter", dragEndBody, TREE_DRAG);
+syntheticDrag("dragenter", dragEndHint, TREE_DRAG);
+check("a tree drag over a child marks the panel", dragEndEl.classList.contains(OVER));
+syntheticDrag("dragend", fileRow, TREE_DRAG);
+check("a drag that ends over the panel clears the mark", !dragEndEl.classList.contains(OVER));
+syntheticDrag("dragenter", dragEndBody, TREE_DRAG);
+check("a new drag marks the panel again after a drag ended", dragEndEl.classList.contains(OVER));
+syntheticDrag("dragleave", dragEndBody, TREE_DRAG);
+check(
+  "a drag that ended leaves no depth behind: one leave clears the next mark",
+  !dragEndEl.classList.contains(OVER),
 );
 
 // --- OS drop: grant first, then the first .md loads --------------------------
@@ -523,6 +649,22 @@ check(
 );
 check("the error row is announced as an alert", errorRow?.getAttribute("role") === "alert");
 check("the error state offers Choose Prompt", !!brokenEl?.querySelector(".ws-run-panel__choose"));
+const chooseLink = brokenEl?.querySelector(".ws-run-panel__choose");
+const errorBlock = errorRow?.closest(".ws-run-panel__message") ?? null;
+check(
+  "Choose Prompt is an inline link beside the error text, not a button",
+  chooseLink?.tagName === "BUTTON" &&
+    chooseLink.textContent === "Choose Prompt" &&
+    chooseLink.classList.contains("ws-run-panel__link") &&
+    !chooseLink.classList.contains("button") &&
+    errorBlock !== null &&
+    errorBlock === chooseLink.closest(".ws-run-panel__message"),
+);
+check(
+  "the alert carries the server's message and not the link's text",
+  errorRow?.textContent.includes("line 3: bad YAML key") === true &&
+    !errorRow.textContent.includes("Choose Prompt"),
+);
 check(
   "the shimmer clears on error",
   brokenRun.view.tab.element
@@ -577,6 +719,171 @@ check(
   "a superseded load never renders",
   genRows.some((text) => text.includes("contract for fast.md")) &&
     !genRows.some((text) => text.includes("contract for slow.md")),
+);
+
+// --- Dialogs: Choose Prompt and Choose Input open the form modal, Cancel first
+
+// A plain browser has no native picker, so Browse takes the typed-path dialog.
+delete window.__TAURI_INTERNALS__;
+
+const dialogButtons = (dialog) =>
+  [...dialog.querySelectorAll(".modal-actions button")].map((button) => button.textContent);
+
+const dialogRun = openInZone("run", { instance: "dialogs" });
+await flush();
+const dialogEl = runElement(dialogRun);
+dialogEl.querySelector(".ws-run-panel__hint .ws-run-panel__link").click();
+await flush();
+const chooseDialog = dialogEl.querySelector(".ws-run-choose");
+check("the Browse... link opens Choose Prompt", chooseDialog !== null);
+check(
+  "Choose Prompt uses the form modal skin",
+  chooseDialog?.classList.contains("modal-dialog--form") === true &&
+    dialogEl.querySelector(".ws-run-choose-overlay")?.classList.contains("modal-overlay--form") === true,
+);
+check(
+  "a dialog mounts beside the content column, outside the width container",
+  dialogEl.querySelector(".ws-run-choose-overlay")?.parentElement === dialogEl &&
+    dialogEl.querySelector(".ws-run-panel__content .ws-run-choose-overlay") === null,
+);
+check(
+  "Choose Prompt puts Cancel first and the primary Choose last",
+  dialogButtons(chooseDialog).join(",") === "Cancel,Choose" &&
+    chooseDialog.querySelector(".modal-actions button:last-child")?.classList.contains("button-primary") === true,
+);
+const chooseButton = chooseDialog.querySelector(".modal-actions button:last-child");
+check("Choose waits for a path", chooseButton.disabled === true);
+const chooseField = chooseDialog.querySelector("input");
+chooseField.value = `${ROOT}\\typed.md`;
+chooseField.dispatchEvent(new window.Event("input", { bubbles: true }));
+check("Choose enables once a path is typed", chooseButton.disabled === false);
+chooseButton.click();
+await flush();
+check("Choose closes the dialog and loads the typed prompt", dialogEl.querySelector(".ws-run-choose") === null &&
+  [...dialogEl.querySelectorAll(".ws-run-panel__row")].some((row) => row.textContent.includes("typed.md")));
+
+dialogEl.querySelector(".ws-run-panel__input-browse").click();
+await flush();
+const inputDialog = dialogEl.querySelector(".ws-run-input");
+check("the input row's Browse opens Choose Input", inputDialog !== null);
+check(
+  "Choose Input uses the form modal skin with Cancel first",
+  inputDialog?.classList.contains("modal-dialog--form") === true &&
+    dialogButtons(inputDialog).join(",") === "Cancel,Choose",
+);
+const inputPath = inputDialog.querySelector("input");
+inputPath.value = `${ROOT}\\input.md`;
+inputPath.dispatchEvent(new window.Event("input", { bubbles: true }));
+inputDialog.querySelector(".modal-actions button:last-child").click();
+await flush();
+check(
+  "Choose Input fills the input row's field",
+  dialogEl.querySelector(".ws-run-input") === null &&
+    [...dialogEl.querySelectorAll(".ws-run-panel__row")]
+      .find((row) => row.querySelector(".ws-run-panel__row-label")?.textContent === "input")
+      ?.querySelector("input")?.value === `${ROOT}\\input.md`,
+);
+
+brokenEl.querySelector(".ws-run-panel__choose").click();
+await flush();
+const errorChoose = brokenEl.querySelector(".ws-run-choose");
+check("the error state's Choose Prompt link opens the same dialog", errorChoose !== null);
+errorChoose.querySelector(".modal-actions button:first-child").click();
+await flush();
+check("Cancel dismisses Choose Prompt", brokenEl.querySelector(".ws-run-choose") === null);
+
+// --- The stylesheet: Cursor Settings rows, states, toolbar, and footer ------
+
+const resolve = await resolver();
+const runCss = await readUi("src/parts/run/run-panel.css");
+const runRules = rulesOf(runCss);
+const css = (selector, property, at = null) => resolve(valueIn(runRules, selector, property, at));
+const px = (selector, property) => css(selector, property);
+const MUTED = "color-mix(in srgb, #f0f0f0 4%, transparent)";
+
+check("the rows form a 4% tinted card", css(".ws-run-panel__rows", "background") === MUTED);
+check("the card has a 12px radius", css(".ws-run-panel__rows", "border-radius") === "12px");
+check("a row pads 12px", px(".ws-run-panel__row", "padding") === "12px");
+check("a row's gap is 20px", px(".ws-run-panel__row", "gap") === "20px");
+check(
+  "an inset divider at 4% sits above every row after the first",
+  css(".ws-run-panel__row + .ws-run-panel__row::before", "background") === MUTED &&
+    css(".ws-run-panel__row + .ws-run-panel__row::before", "left") === "12px" &&
+    css(".ws-run-panel__row + .ws-run-panel__row::before", "right") === "12px" &&
+    css(".ws-run-panel__row + .ws-run-panel__row::before", "height") === "1px",
+);
+check("a row's label is 13px", px(".ws-run-panel__row-label", "font-size") === "13px");
+check("a row's label is the primary text", css(".ws-run-panel__row-label", "color") === "#f0f0f0");
+check("a description is 13px", px(".ws-run-panel__row-description", "font-size") === "13px");
+check(
+  "a description is the secondary text",
+  css(".ws-run-panel__row-description", "color") === "color-mix(in srgb, #f0f0f0 74%, transparent)",
+);
+// The container is the content column, which is never the scroller, so its
+// width excludes no scrollbar gutter: a panel 500 to 509px wide stays side by
+// side. It is not the panel element, whose containment would make it the
+// containing block for the dialogs' fixed overlay.
+check(
+  "the content column is the width container for the stacked layout",
+  css(".ws-run-panel__content", "container-type") === "inline-size",
+);
+check(
+  "the scrolling body is not the width container",
+  css(".ws-run-panel__body", "container-type") === undefined &&
+    css(".ws-run-panel__body", "overflow") === "auto",
+);
+check(
+  "the panel element is not a container, so its dialogs' fixed overlay still covers the window",
+  css(".ws-run-panel", "container-type") === undefined,
+);
+check(
+  "rows stack under 500px: the row turns into a column",
+  css(".ws-run-panel__row", "flex-direction", "width < 500px") === "column" &&
+    css(".ws-run-panel__row-controls", "flex", "width < 500px") === "none",
+);
+check(
+  "rows stay side by side at 500px and wider",
+  css(".ws-run-panel__row", "flex-direction") === undefined,
+);
+check("the toolbar is a 35px strip", css(".ws-run-panel__toolbar", "height") === "35px");
+check("the toolbar pads 8px", css(".ws-run-panel__toolbar", "padding") === "0 8px");
+check("the path field is 24px tall", css(".ws-run-panel__prompt-path", "height") === "24px");
+check("the path field text is 12px", css(".ws-run-panel__prompt-path", "font-size") === "12px");
+check("the path field has a 2px radius", css(".ws-run-panel__prompt-path", "border-radius") === "2px");
+check("the path field fill is #F0F0F00A", css(".ws-run-panel__prompt-path", "background") === "#f0f0f00a");
+check(
+  "the path field border is 1px #F0F0F013",
+  css(".ws-run-panel__prompt-path", "border") === "1px solid #f0f0f013",
+);
+check(
+  "the Prompt label is for screen readers only",
+  css(".ws-run-panel__prompt-label", "position") === "absolute" &&
+    css(".ws-run-panel__prompt-label", "clip-path") === "inset(50%)" &&
+    css(".ws-run-panel__prompt-label", "width") === "1px",
+);
+check("a state line is 22px tall", css(".ws-run-panel__message", "line-height") === "22px");
+check("a state line pads 20px on the left", css(".ws-run-panel__message", "padding-left") === "20px");
+check(
+  "an inline link is underlined, in the link color",
+  css(".ws-run-panel__link", "text-decoration") === "underline" &&
+    css(".ws-run-panel__link", "color") === "#81a1c1" &&
+    css(".ws-run-panel__link", "display") === "inline",
+);
+check(
+  "the drag-over overlay is #F0F0F011 and lets the drop through",
+  css(".ws-run-panel--drag-over::after", "background") === "#f0f0f011" &&
+    css(".ws-run-panel--drag-over::after", "pointer-events") === "none",
+);
+check("the footer pads 10px", css(".ws-run-panel__footer", "padding") === "10px");
+check("the footer's gap is 8px", css(".ws-run-panel__footer", "gap") === "8px");
+check("the footer is right-aligned", css(".ws-run-panel__footer", "justify-content") === "flex-end");
+check(
+  "the footer's top border is 8%",
+  css(".ws-run-panel__footer", "border-top") === "1px solid color-mix(in srgb, #f0f0f0 8%, transparent)",
+);
+check(
+  "the stylesheet declares no raw color or length",
+  runRules.every((rule) => !/#[0-9a-f]{3,8}\b|\b\d*\.?\d+(px|rem|em)\b/i.test(rule.body)),
 );
 
 // --- Reduced motion: the shimmer degrades to a static muted title ------------

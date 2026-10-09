@@ -94,6 +94,13 @@
   --ws-workbench-select-caret-size: var(--ws-size-16);
   --ws-workbench-select-caret-inset: var(--ws-size-6);
 
+  /* Run panel: a 35px toolbar, a footer padded 10px, and controls 240px wide
+     in a Settings row; the prose box is at least 100px tall */
+  --ws-run-toolbar-height: var(--ws-size-35);
+  --ws-run-footer-padding: var(--ws-size-10);
+  --ws-run-control-width: var(--ws-size-240);
+  --ws-run-prose-min-height: var(--ws-size-100);
+
   /* Layout: workshop tree */
   --ws-tree-indent: var(--ws-size-8);
 

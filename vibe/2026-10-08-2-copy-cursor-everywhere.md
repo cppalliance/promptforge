@@ -1222,7 +1222,7 @@ Rules for every step:
 
 <step-9>
 
-### Step 9: Lay out the run panel as Cursor Settings rows
+### Step 9: Lay out the run panel as Cursor Settings rows [completed]
 
 - Component: Workbench shell
 - Placement: ninth, last in the shell, because its selects use Step 8's workbench input values.

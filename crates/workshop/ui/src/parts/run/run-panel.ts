@@ -7,6 +7,13 @@
 // with Choose Prompt). A generation counter discards a superseded load,
 // so a fast Choose-Prompt-then-drop sequence never renders stale rows.
 //
+// The layout copies Cursor Settings: the toolbar is a 35px strip whose
+// "Prompt" label is for screen readers only, the empty and error states
+// are text lines with Browse... and Choose Prompt as inline links, a
+// droppable drag marks the panel with a drag-over overlay class, and the
+// typed-path dialogs (Choose Prompt, Choose Input) are Cursor's form
+// modal, Cancel first.
+//
 // The panel never reads disk: prompt text arrives through the confined
 // GET /workspace/file and is posted to POST /prompts/contract. Prompts
 // arrive three ways: Browse (the native picker filtered to .md in the
@@ -35,6 +42,32 @@ import "./run-panel.css";
 /** The dataTransfer type the workspace tree's drag-out sets. */
 const WORKSHOP_PATH_MIME = "application/x-workshop-path";
 
+/** The class a droppable drag puts on the panel while it hovers; the overlay is its ::after. */
+const DRAG_OVER_CLASS = "ws-run-panel--drag-over";
+
+/** The path field's id counter: each window's label needs an id of its own. */
+let promptFieldCount = 0;
+
+/** True when the drag holds a workspace-tree path or OS files, the two things the panel accepts. */
+function isDroppableDrag(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (types === undefined) {
+    return false;
+  }
+  const held = Array.from(types);
+  return held.includes(WORKSHOP_PATH_MIME) || held.includes("Files");
+}
+
+/** An inline text-link button: the Cursor-style link that sits in a line of text. */
+function linkButton(text: string, extraClass: string, onClick: () => void): HTMLButtonElement {
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = `ws-run-panel__link ${extraClass}`;
+  link.textContent = text;
+  link.addEventListener("click", onClick);
+  return link;
+}
+
 /** The panel's states. */
 type RunState = "empty" | "loading" | "ready" | "error";
 
@@ -53,6 +86,11 @@ export class RunPanel extends WorkshopPart {
   // The open Choose Prompt / input Browse dialog, dismissed with the panel.
   private dialog: { dispose(): void } | null = null;
 
+  // Holds the toolbar, body, and footer. It is the width container the rows
+  // stack against, so its width is the panel's. The panel's dialogs mount in
+  // the panel element beside it, outside the container, which would
+  // otherwise be the containing block for their fixed overlay.
+  private readonly content = document.createElement("div");
   private readonly toolbar = document.createElement("div");
   private readonly promptField = document.createElement("input");
   private readonly body = document.createElement("div");
@@ -78,9 +116,13 @@ export class RunPanel extends WorkshopPart {
 
   protected create(parent: HTMLElement): void {
     this.toolbar.className = "ws-run-panel__toolbar";
+    // The label is read by screen readers only; the toolbar shows the field.
     const promptLabel = document.createElement("label");
     promptLabel.className = "ws-run-panel__prompt-label";
     promptLabel.textContent = "Prompt";
+    promptFieldCount += 1;
+    this.promptField.id = `ws-run-prompt-path-${promptFieldCount}`;
+    promptLabel.htmlFor = this.promptField.id;
     this.promptField.type = "text";
     this.promptField.className = "input ws-run-panel__prompt-path";
     this.promptField.placeholder = "No prompt chosen";
@@ -108,7 +150,9 @@ export class RunPanel extends WorkshopPart {
     this.runButton.addEventListener("click", () => undefined);
     this.footer.appendChild(this.runButton);
 
-    parent.append(this.toolbar, this.body, this.footer);
+    this.content.className = "ws-run-panel__content";
+    this.content.append(this.toolbar, this.body, this.footer);
+    parent.appendChild(this.content);
 
     // Tree drags: accept the workshop-path payload anywhere on the panel.
     const onDragOver = (event: DragEvent): void => {
@@ -117,7 +161,33 @@ export class RunPanel extends WorkshopPart {
       }
     };
     this.element.addEventListener("dragover", onDragOver);
+    // The drag-over mark: dragenter and dragleave fire for every child the
+    // pointer crosses, so a depth count keeps the class up until the drag
+    // has left the panel. A drop, or a drag that ends anywhere, resets it.
+    let dragDepth = 0;
+    const clearDragOver = (): void => {
+      dragDepth = 0;
+      this.element.classList.remove(DRAG_OVER_CLASS);
+    };
+    const onDragEnter = (event: DragEvent): void => {
+      if (isDroppableDrag(event)) {
+        dragDepth += 1;
+        this.element.classList.add(DRAG_OVER_CLASS);
+      }
+    };
+    const onDragLeave = (event: DragEvent): void => {
+      if (isDroppableDrag(event)) {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+          this.element.classList.remove(DRAG_OVER_CLASS);
+        }
+      }
+    };
+    this.element.addEventListener("dragenter", onDragEnter);
+    this.element.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("dragend", clearDragOver);
     const onDrop = (event: DragEvent): void => {
+      clearDragOver();
       if (event.dataTransfer?.types.includes(WORKSHOP_PATH_MIME) !== true) {
         return;
       }
@@ -149,6 +219,9 @@ export class RunPanel extends WorkshopPart {
     this._register(
       toDisposable(() => {
         this.element.removeEventListener("dragover", onDragOver);
+        this.element.removeEventListener("dragenter", onDragEnter);
+        this.element.removeEventListener("dragleave", onDragLeave);
+        window.removeEventListener("dragend", clearDragOver);
         this.element.removeEventListener("drop", onDrop);
         this.element.removeEventListener(WORKSPACE_FILE_DROP_EVENT, onFileDrop);
       }),
@@ -226,16 +299,18 @@ export class RunPanel extends WorkshopPart {
       titleId: "run-choose-title",
       title: "Choose Prompt",
       message: "Enter the full path of a prompt file.",
+      skin: "form",
       field: { id: "run-choose-path", label: "Prompt path" },
       buttons: [
+        { label: "Cancel", run: () => undefined },
         {
           label: "Choose",
+          primary: true,
           requiresValue: true,
           run: (value) => {
             void this.grantAndLoad(value);
           },
         },
-        { label: "Cancel", run: () => undefined },
       ],
     });
   }
@@ -270,16 +345,18 @@ export class RunPanel extends WorkshopPart {
       titleId: "run-input-title",
       title: "Choose Input",
       message: "Enter the full path of the input file.",
+      skin: "form",
       field: { id: "run-input-path", label: "Input path" },
       buttons: [
+        { label: "Cancel", run: () => undefined },
         {
           label: "Choose",
+          primary: true,
           requiresValue: true,
           run: (value) => {
             field.value = value;
           },
         },
-        { label: "Cancel", run: () => undefined },
       ],
     });
   }
@@ -290,9 +367,13 @@ export class RunPanel extends WorkshopPart {
     this.runButton.disabled = this.state !== "ready";
     this.body.textContent = "";
     if (this.state === "empty") {
+      // One line of text that ends in the Browse... link.
       const hint = document.createElement("p");
-      hint.className = "ws-run-panel__hint";
-      hint.textContent = "Drop a prompt file here, or Browse to choose one.";
+      hint.className = "ws-run-panel__message ws-run-panel__hint";
+      hint.append(
+        "Drop a prompt file here, or ",
+        linkButton("Browse...", "ws-run-panel__browse-link", () => this.browsePrompt()),
+      );
       this.body.appendChild(hint);
       return;
     }
@@ -301,16 +382,19 @@ export class RunPanel extends WorkshopPart {
       return;
     }
     if (this.state === "error") {
-      const error = document.createElement("div");
+      // The alert holds only the message; Choose Prompt follows it inline.
+      const message = document.createElement("div");
+      message.className = "ws-run-panel__message";
+      const error = document.createElement("span");
       error.className = "ws-run-panel__error";
       error.setAttribute("role", "alert");
       error.textContent = this.failure ?? "The prompt could not be parsed.";
-      const choose = document.createElement("button");
-      choose.type = "button";
-      choose.className = "button button-outline button-sm ws-run-panel__choose";
-      choose.textContent = "Choose Prompt";
-      choose.addEventListener("click", () => this.browsePrompt());
-      this.body.append(error, choose);
+      message.append(
+        error,
+        " ",
+        linkButton("Choose Prompt", "ws-run-panel__choose", () => this.browsePrompt()),
+      );
+      this.body.appendChild(message);
       return;
     }
     if (this.contract !== null) {
