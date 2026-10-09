@@ -678,6 +678,70 @@ check("the unloadable-layout fallback mounts the default layout", dock5.panels.l
     dockBad.panels.length === 2 && dockBad.groups.length === 2 && !!dockBad.getPanel("tree"));
 }
 
+// --- The policy's empty zones: the editor group exists from the first paint ---------
+
+{
+  const seedPolicy = {
+    anchors: ["tree", "agent"],
+    seed: () => {
+      openInZone("tree", {});
+      openInZone("agent", {});
+    },
+  };
+  registerService(LAYOUT_POLICY, () => ({ ...seedPolicy, emptyZones: ["main"] }));
+  const emptyGroupsOf = (target) => target.groups.filter((group) => group.panels.length === 0);
+
+  // No stored layout: the seed plus one empty main group between the sides.
+  const freshElement = window.document.createElement("div");
+  const dockFresh = createDock(freshElement);
+  initZones(dockFresh);
+  resetZones();
+  applyLayoutOrDefault(dockFresh, null);
+  await flush();
+  check("a default layout with an empty main zone builds three groups", dockFresh.groups.length === 3);
+  check(
+    "the empty group is the main zone's",
+    emptyGroupsOf(dockFresh).length === 1 && emptyGroupsOf(dockFresh)[0].element.dataset.wsZone === "main",
+  );
+  check(
+    "the empty main group sits between the left and right zones, left to right in the page",
+    [...freshElement.querySelectorAll("[data-ws-zone]")].map((element) => element.dataset.wsZone).join(",") ===
+      "left,main,right",
+  );
+
+  // A stored layout saved before the main group existed gets one on restore.
+  const dockOld = createDock(window.document.createElement("div"));
+  initZones(dockOld);
+  resetZones();
+  openInZone("tree", {});
+  openInZone("agent", {});
+  await flush();
+  const oldEnvelope = JSON.parse(JSON.stringify(buildLayoutEnvelope(dockOld)));
+  check("the old layout had no main group", oldEnvelope.zones.main === undefined && dockOld.groups.length === 2);
+  const dockRestored = createDock(window.document.createElement("div"));
+  initZones(dockRestored);
+  resetZones();
+  applyLayoutOrDefault(dockRestored, oldEnvelope);
+  await flush();
+  check(
+    "restoring a layout with no main group adds the empty one",
+    dockRestored.groups.length === 3 && emptyGroupsOf(dockRestored).length === 1,
+  );
+
+  // A stored layout that has its main group keeps the three groups it has.
+  const dockWithMain = createDock(window.document.createElement("div"));
+  initZones(dockWithMain);
+  resetZones();
+  applyLayoutOrDefault(dockWithMain, envelope);
+  await flush();
+  check(
+    "restoring a layout that has a main group adds no second one",
+    dockWithMain.groups.length === 3 && !!dockWithMain.getPanel(editorAId),
+  );
+
+  registerService(LAYOUT_POLICY, () => seedPolicy);
+}
+
 // --- EditorPanel.confirmClose: the dirty close prompt ---------------------
 
 function createStubSurface() {

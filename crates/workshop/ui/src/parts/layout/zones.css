@@ -1,9 +1,19 @@
 /* Styles for zones.ts, which imports this file; esbuild bundles it into
    dist/app.css. Covers the dock scaffolding the zones place panels into,
-   plus the shared panel plumbing rules (.ws-panel-lazy, .ws-panel-error,
-   .ws-panel-unknown from panel-types.ts). The tree's Add Folder dialog
-   has no rules here: it opens the form modal from @workshop/look/modal.
-   Themed values come from the :root tokens in @workshop/look/tokens.css. */
+   Cursor's dockview palette, the editor tabs of the main zone's groups,
+   the left zone's pill header, the right zone's chat tabs, plus the shared
+   panel plumbing rules (.ws-panel-lazy, .ws-panel-error, .ws-panel-unknown
+   from panel-types.ts). The tree's Add Folder dialog has no rules here: it
+   opens the form modal from @workshop/look/modal.
+   Themed values come from the :root tokens in @workshop/look/tokens.css.
+
+   Every group carries the marks zones.ts stamps: data-ws-zone (left, right,
+   or main - a split the user dragged out is main too), data-ws-empty on a
+   group with no panel, and data-ws-active-group on the Workshop's active
+   editor group. Dockview's own active-group class follows focus into the tree
+   and the agent; the Workshop's mark does not, so an editor's tabs stay lit
+   while the tree or the chat has focus. The rules below key on the marks,
+   and each zone's rules stay inside its own data-ws-zone. */
 
 .ws-desk {
   display: flex;
@@ -41,13 +51,217 @@
   min-height: 0;
 }
 
+/* The dockview palette, Cursor Dark: groups #181818 and the tab strip #141414;
+   the active tab #181818 and an inactive one #141414, in every group state
+   (the Workshop's own mark below decides focus, not Dockview's); tab text
+   #F0F0F0BD in a group that is not the active one, #F0F0F05C for an inactive
+   tab; separators #F0F0F013; the drop overlay #F0F0F011 and the tab-drop line
+   #F0F0F0 (the theme draws it 1px); a hovered sash lights #F0F0F026 after
+   300ms, fading in over 100ms; icon hovers #5A5D5E50. An editor tab in a
+   group that is not the active one washes #2A2A2AB3 on hover. */
+.ws-dock .dockview-theme-dark {
+  --dv-group-view-background-color: var(--cursor-editor);
+  --dv-tabs-and-actions-container-background-color: var(--cursor-chrome);
+  --dv-tabs-and-actions-container-height: var(--ws-size-35);
+  --dv-tabs-and-actions-container-font-size: var(--font-size-base);
+  --dv-tab-font-size: var(--font-size-base);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--cursor-editor);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--cursor-chrome);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--cursor-editor);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--cursor-chrome);
+  --dv-activegroup-visiblepanel-tab-color: var(--text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-muted);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-faint);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-faint);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--cursor-stroke-focused);
+  --dv-active-sash-transition-delay: var(--duration-slower);
+  --dv-active-sash-transition-duration: var(--duration-fast);
+  --dv-drag-over-background-color: var(--bg-hover);
+  --dv-drag-over-border-color: var(--cursor-base);
+  --dv-icon-hover-background-color: var(--cursor-toolbar-hover);
+  --ws-tab-hover-wash: var(--tab-unfocused-hover);
+}
+
+/* The Workshop's active editor group reads #F0F0F0 whatever Dockview thinks is
+   active; it and the side zones take no hover wash. */
+.ws-dock [data-ws-active-group] {
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text);
+}
+
+.ws-dock [data-ws-active-group],
+.ws-dock [data-ws-zone="left"],
+.ws-dock [data-ws-zone="right"] {
+  --ws-tab-hover-wash: transparent;
+}
+
+/* An empty editor group is #141414 with no tab strip: its watermark is all it
+   shows. */
+[data-ws-zone="main"][data-ws-empty] {
+  --dv-group-view-background-color: var(--cursor-chrome);
+}
+
+[data-ws-zone="main"][data-ws-empty] .dv-tabs-and-actions-container {
+  display: none;
+}
+
+/* The editor tabs (the main zone's groups). The strip is 35px with a 1px
+   #F0F0F013 underline; a tab is at least 120px wide with a 1px #F0F0F013
+   right border and a 10px left padding, and the active tab's own #181818
+   underline covers the strip's, so it merges into the editor. Dockview's
+   dividers before each tab are dropped for the border. A tab with no close
+   button takes the 10px on its right. An editor tab in a group that is not
+   the Workshop's active one washes on hover. */
+[data-ws-zone="main"] .dv-tabs-and-actions-container {
+  box-shadow: inset 0 calc(-1 * var(--ws-border-width)) 0 var(--border);
+}
+
+.ws-dock [data-ws-zone="main"] .dv-tabs-container .dv-tab:not(:first-child)::before {
+  display: none;
+}
+
+[data-ws-zone="main"] .dv-tab {
+  padding: 0;
+  min-inline-size: var(--ws-size-120);
+  border-inline-end: var(--ws-border-width) solid var(--border);
+}
+
+[data-ws-zone="main"] .dv-tab.dv-active-tab {
+  box-shadow: inset 0 calc(-1 * var(--ws-border-width)) 0 var(--cursor-editor);
+}
+
+[data-ws-zone="main"] .dv-tab:hover {
+  background-image: linear-gradient(var(--ws-tab-hover-wash), var(--ws-tab-hover-wash));
+}
+
+[data-ws-zone="main"] .dv-tab .dv-default-tab {
+  padding-inline-start: var(--ws-size-10);
+}
+
+[data-ws-zone="main"] .dv-tab .dv-default-tab.ws-tab--no-close {
+  padding-inline-end: var(--ws-size-10);
+}
+
+[data-ws-zone="main"] .dv-tab .dv-default-tab-content {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The close button: 20x20 with a 5px radius in a 28px slot, #5A5D5E50 on hover.
+   It is out of sight until its tab is hovered or active; then it is fully
+   visible in the Workshop's active group and half visible in any other. */
+[data-ws-zone="main"] .dv-tab .dv-default-tab .dv-default-tab-action,
+[data-ws-zone="main"] .dv-tab.dv-inactive-tab .dv-default-tab .dv-default-tab-action,
+[data-ws-zone="main"] .dv-tab.dv-active-tab .dv-default-tab .dv-default-tab-action {
+  box-sizing: border-box;
+  inline-size: var(--ws-size-20);
+  block-size: var(--ws-size-20);
+  margin-inline: var(--ws-size-4);
+  padding: 0;
+  border-radius: var(--ws-size-5);
+  visibility: visible;
+  opacity: 0;
+}
+
+[data-ws-zone="main"] .dv-tab .dv-default-tab .dv-default-tab-action:hover {
+  background-color: var(--cursor-toolbar-hover);
+  border-radius: var(--ws-size-5);
+}
+
+[data-ws-active-group] .dv-tab.dv-active-tab .dv-default-tab .dv-default-tab-action,
+[data-ws-active-group] .dv-tab:hover .dv-default-tab .dv-default-tab-action {
+  opacity: 1;
+}
+
+[data-ws-zone="main"]:not([data-ws-active-group]) .dv-tab.dv-active-tab .dv-default-tab .dv-default-tab-action,
+[data-ws-zone="main"]:not([data-ws-active-group]) .dv-tab:hover .dv-default-tab .dv-default-tab-action {
+  opacity: 0.5;
+}
+
+/* A dirty tab (ws-tab--dirty, from setTabDirty) shows an 8px dot where the
+   close button's centre is - 10px from the tab's edge - and keeps the button
+   out of sight until the tab is hovered; hovering swaps the dot for the X. */
+[data-ws-zone="main"] .dv-default-tab.ws-tab--dirty::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: var(--ws-size-10);
+  inset-block-start: 50%;
+  inline-size: var(--ws-size-8);
+  block-size: var(--ws-size-8);
+  margin-block-start: calc(var(--ws-size-8) / -2);
+  border-radius: var(--radius-full);
+  background: currentcolor;
+  pointer-events: none;
+}
+
+[data-ws-zone="main"] .dv-default-tab.ws-tab--dirty:hover::after {
+  display: none;
+}
+
+[data-ws-zone="main"] .dv-tab .dv-default-tab.ws-tab--dirty:not(:hover) .dv-default-tab-action {
+  visibility: hidden;
+}
+
+/* The left zone's header: its tabs are centered pills 2px apart - 22px tall
+   with a 4px radius, 12px at weight 500 in #F0F0F0BD, #F0F0F011 on hover - on
+   the strip's #141414. */
+[data-ws-zone="left"] {
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+}
+
+[data-ws-zone="left"] .dv-tabs-and-actions-container {
+  justify-content: center;
+}
+
+[data-ws-zone="left"] .dv-void-container {
+  flex-grow: 0;
+}
+
+[data-ws-zone="left"] .dv-tabs-container {
+  justify-content: center;
+  align-items: center;
+  gap: var(--ws-size-2);
+}
+
+[data-ws-zone="left"] .dv-tab {
+  padding: 0;
+  min-inline-size: 0;
+}
+
+[data-ws-zone="left"] .dv-tab .dv-default-tab {
+  block-size: var(--ws-size-22);
+  padding: 0 var(--ws-size-6);
+  border-radius: var(--ws-size-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+}
+
+[data-ws-zone="left"] .dv-tab .dv-default-tab:hover {
+  background-color: var(--bg-hover);
+}
+
 /* The right zone's group (data-ws-zone="right", stamped by zones.ts): the
    chat pane. Its header is a 35px row on #181818 holding the chat tabs and
    the header buttons (agent-pane-header.css). A chat tab is padded 3px 6px
    with a 6px radius and 13px/18px weight-400 text; tabs run 60 to 120px wide
    and the active one can grow to 200px, on about #252525 (a 6% wash on the
    #181818 header); inactive labels read #F0F0F0BD. The close X shows on hover
-   only. */
+   only. Its tab wrappers show the header, not the editor palette. */
+[data-ws-zone="right"] {
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+}
+
 [data-ws-zone="right"] .dv-tabs-and-actions-container {
   block-size: var(--ws-pane-header-height);
   background: var(--cursor-editor);

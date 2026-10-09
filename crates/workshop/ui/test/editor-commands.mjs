@@ -771,7 +771,7 @@ initZones(dock);
   });
   check("a reopened untitled buffer keeps its text", restoredStub.text() === "draft");
   check("a reopened untitled buffer with content is dirty", restoredPanel.isDirty());
-  check("a dirty untitled title shows the dot", restoredTitles.at(-1) === "● Untitled-8");
+  check("a dirty untitled title is the bare name; the dot is the tab's", restoredTitles.at(-1) === "Untitled-8");
   restoredPanel.dispose();
 }
 

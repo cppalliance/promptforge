@@ -7,7 +7,7 @@ import "@workshop/look/sizes.css";
 import "@workshop/look/semantic.css";
 import "./tokens/component.css";
 
-import { createDockview, themeDark } from "dockview";
+import { createDockview } from "dockview";
 import { createToastStack } from "@workshop/look/toast";
 
 import { DisposableStore, toDisposable } from "@workshop/platform/lifecycle";
@@ -52,7 +52,17 @@ import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./parts/layout/panel-types";
 import { createAgentPaneHeader } from "./parts/agent/agent-pane-header";
-import { bindActiveEditorKey, initZones, openInZone } from "./parts/layout/zones";
+import { dockTheme } from "./parts/layout/dock-theme";
+import { dropPositionResolver } from "./parts/layout/drop-position";
+import { createWatermark } from "./parts/layout/watermark";
+import {
+  bindActiveEditorKey,
+  ensureZoneGroup,
+  initZones,
+  leftZonePreferredWidth,
+  openInZone,
+  rightZonePreferredWidth,
+} from "./parts/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
@@ -115,6 +125,13 @@ registerService(
       storage.set("workspace", "tree", value),
     ),
 );
+// The roots listing the tree, the window title, and the editor watermark
+// share is dropped on every workspace change, by the service itself rather
+// than by whichever panel is open: with Explorer closed (the state the empty
+// editor's watermark shows in) no tree panel is alive to do it. Followed
+// here, ahead of the first reader, so every reader on the same event reads
+// the fresh listing.
+disposables.add(getService(TREE_STATE).followWorkspaceChanges(window));
 // The closed-editor stack belongs to the workspace too: it seeds from the
 // file's "closed_editors" value and writes back on every close and
 // reopen. Bound here, ahead of the dock, so the editor chunk's tracking
@@ -247,20 +264,24 @@ disposables.add(
 workshopSocket.connect();
 
 // The default layout is product policy, not layout mechanics: the tree
-// opens left and the agent session right, main stays empty until a
-// document opens, and both anchors come back whenever a restored layout
-// lost one. Registered before the dock boots, because the boot's layout
-// apply resolves it.
+// opens left and the agent session right, an empty editor group sits
+// between them from the first paint (its watermark is the empty window's
+// face), and both anchors and the editor group come back whenever a
+// restored layout lost one. Registered before the dock boots, because the
+// boot's layout apply resolves it.
 registerService(LAYOUT_POLICY, () => ({
   anchors: ["tree", "agent"],
+  emptyZones: ["main"] as const,
   seed: () => {
     const tree = openInZone("tree", {});
-    openInZone("agent", {});
-    // A lone group always fills the dock, so the tree takes its width only
-    // once the agent's group shares the row. (The chat pane's own preference,
-    // min(400px, W/4) and never under 300px, applies when its group is
-    // created beside others; here the tree's 280px leaves it the rest.)
-    tree.group.api.setSize({ width: 280 });
+    const agent = openInZone("agent", {});
+    ensureZoneGroup("main");
+    // A lone group always fills the dock, so the sides take their widths only
+    // once the editor group shares the row, and the editor group keeps the
+    // rest: the tree opens at min(300px, W/4) and never under 214px, the
+    // chat pane at min(400px, W/4) and never under 300px.
+    tree.group.api.setSize({ width: leftZonePreferredWidth(dock.width) });
+    agent.group.api.setSize({ width: rightZonePreferredWidth(dock.width) });
   },
 }));
 
@@ -280,10 +301,19 @@ const dock = createDockview(dockEl, {
   // The right zone's New Agent, More Actions, and Close buttons; the
   // stylesheet shows them for that zone's groups only.
   createRightHeaderActionComponent: createAgentPaneHeader,
+  // An empty editor group shows the product mark and shortcut rows.
+  createWatermarkComponent: createWatermark,
   defaultTabComponent: PANEL_TAB,
-  theme: themeDark,
+  // The dark theme with Cursor's thin tab-drop line (zones.css holds the palette).
+  theme: dockTheme,
+  // Drops dock by thirds of the target, so a pointer within 10% of an edge
+  // docks to that edge.
+  dropPositionResolver,
+  // Cursor draws 1px borders between its parts.
+  hideBorders: false,
+  // Cursor has no overflow list: tabs scroll in their strip.
+  disableTabsOverflowList: true,
   disableFloatingGroups: true,
-  hideBorders: true,
   locked: false,
   noPanelsOverlay: "emptyGroup",
 });

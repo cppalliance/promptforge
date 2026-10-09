@@ -5,6 +5,7 @@
 // it. No default is registered, so a bundle that applies a layout without
 // binding a policy fails naming the token.
 
+import type { ZoneName } from "@workshop/platform/panel-registry";
 import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /** The product's default layout and the panels the workbench never boots without. */
@@ -15,6 +16,12 @@ export interface LayoutPolicy {
    * singleton and re-opening an open one only focuses it.
    */
   readonly anchors: readonly string[];
+  /**
+   * Zones that always have a group, even with no panel in it: after every
+   * layout apply, a zone with no live group gets an empty one. A layout
+   * saved before the zone had one gains it on restore.
+   */
+  readonly emptyZones?: readonly ZoneName[];
   /** Opens the default layout into a blank dock. */
   seed(): void;
 }

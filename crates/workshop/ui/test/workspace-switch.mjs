@@ -341,6 +341,10 @@ registerService(UI_STORAGE, () => storage);
 
 const tree = new TreeStateService(storage.get("workspace", "tree"), (value) => storage.set("workspace", "tree", value));
 registerService(TREE_STATE, () => tree);
+// The composition root has the service follow the workspace-changed event
+// before any reader exists (main.ts), so the panel and the title below read a
+// listing that is already dropped; a switch still fetches the roots once.
+const followWorkspace = tree.followWorkspaceChanges(window);
 const closed = new ClosedEditors(storage.get("workspace", "closed_editors"), (value) =>
   storage.set("workspace", "closed_editors", value),
 );
@@ -750,6 +754,7 @@ layoutSaver.dispose();
 treeRenders.disconnect();
 title.dispose();
 dock.clear();
+followWorkspace.dispose();
 tree.dispose();
 
 if (failures.length > 0) {

@@ -17,8 +17,17 @@
 // workspace-changed event that follows says so rather than dropping it.
 // The panel also manages the grants themselves: a root row's context
 // menu revokes it, and a header "+" button (or the empty-space context
-// menu) adds a folder - through the native folder picker in the desktop
-// app, through a typed-path dialog in a plain browser.
+// menu, or the empty tree's Open Folder button) adds a folder - through the
+// native folder picker in the desktop app, through a typed-path dialog in a
+// plain browser.
+//
+// The layout is Cursor's file list. A section header (a chevron, then the
+// title) collapses the rows and shows its actions - the "+" - on hover. Every
+// row is full width and carries its depth in `--ws-tree-depth`; the stylesheet
+// places the twistie box and the name from it, and draws one indent guide per
+// expanded list from the list's own `--ws-tree-depth` (its parent row's). The
+// list holding the focused row lights its guide. A file row dragged out
+// carries a small pill with its name.
 
 import type { GroupPanelPartInitParameters } from "dockview";
 
@@ -28,11 +37,10 @@ import { DOCK, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
-import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
+import { rootsCurrentIn, WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { addFolderToWorkspace } from "./add-folder";
-import { rootsCurrentIn } from "./workspace-drops";
 import { DropdownMenu } from "@workshop/look/dropdown";
-import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "@workshop/look/icons";
+import { ICON_CHEVRON_DOWN, ICON_FOLDER_PLUS, ICON_TRASH_2 } from "@workshop/look/icons";
 import { openInZone, panelIdFor } from "../layout/zones";
 import "./workshop-panel.css";
 
@@ -41,11 +49,24 @@ export interface TreeStatusSink {
   showLocal(label: string, severity: "info" | "error"): void;
 }
 
-const CHEVRON_SVG =
-  '<svg class="ws-workshop-tree__chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 1.5l3.5 3.5-3.5 3.5" /></svg>';
+/** The section header's title: the one section the tree has, every granted root. */
+const SECTION_TITLE = "Workspace";
+
+/** The empty tree's sentence, Cursor's. */
+const EMPTY_TEXT = "You have not yet added a folder to the workspace.";
+
+/** The class on the children list that holds the focused row, which lights its indent guide. */
+const FOCUSED_GUIDE_CLASS = "ws-workshop-tree__children--focused";
 
 export class WorkshopTreePanel extends WorkshopPart {
   private readonly list = document.createElement("ul");
+  // The empty tree's text and Open Folder button, while no root is granted.
+  private emptyState: HTMLElement | null = null;
+  // The section header's toggle, and whether the section's rows show.
+  private sectionToggle: HTMLButtonElement | null = null;
+  private sectionExpanded = true;
+  // The children list whose indent guide is lit for the focused row.
+  private litGuide: Element | null = null;
   // The panel's context menus, at most one open at a time.
   private readonly dropdown = this._register(new DropdownMenu());
   // The current menu's 0x0 fixed-position anchor under the cursor, so
@@ -54,16 +75,19 @@ export class WorkshopTreePanel extends WorkshopPart {
   // The open Add Folder dialog, dismissed with the panel.
   private dialog: { dispose(): void } | null = null;
   // A dropped folder grants a new root after this panel rendered; the
-  // change event refetches the roots so the drop is visible immediately.
-  // An event whose detail says the roots are already current (Open
-  // Workspace from File invalidated them before re-creating this panel,
-  // whose init started the new load; Save As kept the grants) leaves the
-  // load and the listing alone, so the switch fetches the roots once.
+  // change event re-renders the roots so the drop is visible immediately.
+  // The tree-state service has already dropped the roots listing by now:
+  // the composition root has it follow this event (followWorkspaceChanges)
+  // ahead of every reader, so the load this starts is the fresh one and
+  // joins any other reader's on the same event. An event whose detail says
+  // the roots are already current (Open Workspace from File invalidated
+  // them before re-creating this panel, whose init started the new load;
+  // Save As kept the grants) leaves the load and the listing alone, so the
+  // switch fetches the roots once.
   private readonly onWorkspaceChanged = (event: Event): void => {
     if (rootsCurrentIn(event)) {
       return;
     }
-    this.state.invalidateRoots();
     this.reload();
   };
 
@@ -97,6 +121,15 @@ export class WorkshopTreePanel extends WorkshopPart {
   protected create(parent: HTMLElement): void {
     parent.appendChild(this.buildHeader());
     parent.appendChild(this.list);
+    // The list holding the focused row lights its indent guide; focus leaving
+    // the tree puts it out. Focus moving row to row passes through both.
+    parent.addEventListener("focusin", (event) => {
+      const row = event.target instanceof Element ? event.target.closest(".ws-workshop-tree__row") : null;
+      this.lightGuide(row?.closest(".ws-workshop-tree__children") ?? null);
+    });
+    parent.addEventListener("focusout", () => {
+      this.lightGuide(null);
+    });
     // Right-clicking the panel's empty space offers Add Folder; root rows
     // stop propagation, and other rows fall through to the browser menu.
     parent.addEventListener("contextmenu", (event) => {
@@ -125,10 +158,32 @@ export class WorkshopTreePanel extends WorkshopPart {
     super.dispose();
   }
 
-  /** The panel header: an icon button that starts the Add Folder flow. */
+  /**
+   * The section header: a toggle (a chevron, then the title) that collapses
+   * the rows, and the hover actions beside it - the "+" that starts the
+   * Add Folder flow.
+   */
   private buildHeader(): HTMLElement {
     const header = document.createElement("div");
     header.className = "ws-workshop-tree__header";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "ws-workshop-tree__section";
+    toggle.setAttribute("aria-expanded", "true");
+    const chevron = document.createElement("span");
+    chevron.className = "ws-workshop-tree__section-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.innerHTML = ICON_CHEVRON_DOWN;
+    const title = document.createElement("span");
+    title.className = "ws-workshop-tree__section-title";
+    title.textContent = SECTION_TITLE;
+    toggle.append(chevron, title);
+    toggle.addEventListener("click", () => {
+      this.setSectionExpanded(!this.sectionExpanded);
+    });
+    this.sectionToggle = toggle;
+    const actions = document.createElement("div");
+    actions.className = "ws-workshop-tree__actions";
     const add = document.createElement("button");
     add.type = "button";
     add.className = "ws-workshop-tree__add";
@@ -138,8 +193,29 @@ export class WorkshopTreePanel extends WorkshopPart {
     add.addEventListener("click", () => {
       this.addFolder();
     });
-    header.appendChild(add);
+    actions.appendChild(add);
+    header.append(toggle, actions);
     return header;
+  }
+
+  /** Shows or hides the section's rows (and the empty tree's text); the header stays. */
+  private setSectionExpanded(expanded: boolean): void {
+    this.sectionExpanded = expanded;
+    this.sectionToggle?.setAttribute("aria-expanded", String(expanded));
+    this.list.hidden = !expanded;
+    if (this.emptyState !== null) {
+      this.emptyState.hidden = !expanded;
+    }
+  }
+
+  /** Lights one children list's indent guide, putting out the one lit before. */
+  private lightGuide(list: Element | null): void {
+    if (this.litGuide === list) {
+      return;
+    }
+    this.litGuide?.classList.remove(FOCUSED_GUIDE_CLASS);
+    list?.classList.add(FOCUSED_GUIDE_CLASS);
+    this.litGuide = list;
   }
 
   /** Clears the rendered roots (and the empty hint) and renders afresh. */
@@ -181,19 +257,38 @@ export class WorkshopTreePanel extends WorkshopPart {
       return;
     }
     this.clearRoots();
-    this.renderListing(this.list, listing, true);
+    this.renderListing(this.list, listing, 1);
     if (listing.entries.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "ws-workshop-tree__empty";
-      empty.textContent = "Drop a folder onto the window to browse it here.";
-      this.element.appendChild(empty);
+      this.emptyState = this.buildEmptyState();
+      this.emptyState.hidden = !this.sectionExpanded;
+      this.element.appendChild(this.emptyState);
     }
   }
 
-  /** Empties the roots list and removes the empty hint. */
+  /** The empty tree: Cursor's sentence and an Open Folder button that starts the Add Folder flow. */
+  private buildEmptyState(): HTMLElement {
+    const empty = document.createElement("div");
+    empty.className = "ws-workshop-tree__empty";
+    const text = document.createElement("p");
+    text.className = "ws-workshop-tree__empty-text";
+    text.textContent = EMPTY_TEXT;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "button button-primary ws-workshop-tree__open";
+    open.textContent = "Open Folder";
+    open.addEventListener("click", () => {
+      this.addFolder();
+    });
+    empty.append(text, open);
+    return empty;
+  }
+
+  /** Empties the roots list and removes the empty state. */
   private clearRoots(): void {
     this.list.textContent = "";
-    this.element.querySelector(".ws-workshop-tree__empty")?.remove();
+    this.litGuide = null;
+    this.emptyState?.remove();
+    this.emptyState = null;
   }
 
   /**
@@ -205,20 +300,34 @@ export class WorkshopTreePanel extends WorkshopPart {
     this.showError(this.list, error);
   }
 
-  /** Appends one row per entry; the server orders directories first. */
-  private renderListing(list: HTMLUListElement, listing: TreeListing, roots = false): void {
+  /**
+   * Appends one row per entry, `depth` levels down (the roots are depth 1);
+   * the server orders directories first.
+   */
+  private renderListing(list: HTMLUListElement, listing: TreeListing, depth: number): void {
     for (const entry of listing.entries) {
-      list.appendChild(this.renderEntry(entry, roots));
+      list.appendChild(this.renderEntry(entry, depth));
     }
   }
 
-  private renderEntry(entry: TreeEntry, isRoot = false): HTMLLIElement {
+  /**
+   * One row: the twistie box (holding the folder's chevron, empty for a
+   * file so names line up), then the name. The depth rides on the row as
+   * `--ws-tree-depth`, which the stylesheet turns into the box's width.
+   */
+  private renderEntry(entry: TreeEntry, depth: number): HTMLLIElement {
+    const isRoot = depth === 1;
     const item = document.createElement("li");
     item.className = "ws-workshop-tree__item";
     const row = document.createElement("button");
     row.type = "button";
     row.className = `ws-workshop-tree__row ws-workshop-tree__row--${entry.kind}`;
+    row.style.setProperty("--ws-tree-depth", String(depth));
     row.title = entry.path;
+    const twistie = document.createElement("span");
+    twistie.className = "ws-workshop-tree__twistie";
+    twistie.setAttribute("aria-hidden", "true");
+    row.appendChild(twistie);
     const name = document.createElement("span");
     name.className = "ws-workshop-tree__name";
     name.textContent = entry.name;
@@ -239,7 +348,7 @@ export class WorkshopTreePanel extends WorkshopPart {
       });
     }
     if (entry.kind === "directory") {
-      row.insertAdjacentHTML("afterbegin", CHEVRON_SVG);
+      twistie.innerHTML = ICON_CHEVRON_DOWN;
       row.appendChild(name);
       if (isRoot && !entry.exists) {
         // Not color alone: strikethrough (CSS), the danger color (CSS),
@@ -254,11 +363,13 @@ export class WorkshopTreePanel extends WorkshopPart {
       row.setAttribute("aria-expanded", String(expanded));
       const children = document.createElement("ul");
       children.className = "ws-workshop-tree__children";
+      // The list's own depth is its parent row's: its indent guide sits under that row's chevron.
+      children.style.setProperty("--ws-tree-depth", String(depth));
       children.hidden = !expanded;
       item.appendChild(row);
       item.appendChild(children);
       row.addEventListener("click", () => {
-        void this.toggle(entry, row, children).catch((error: unknown) => {
+        void this.toggle(entry, row, children, depth).catch((error: unknown) => {
           // The children list is hidden while collapsed; reveal it so the
           // error row is visible.
           children.hidden = false;
@@ -272,9 +383,9 @@ export class WorkshopTreePanel extends WorkshopPart {
       if (expanded) {
         const cached = this.state.listing(entry.path);
         if (cached !== undefined) {
-          this.renderListing(children, cached);
+          this.renderListing(children, cached, depth + 1);
         } else {
-          void this.fillRestored(entry, row, children).catch((error: unknown) => {
+          void this.fillRestored(entry, row, children, depth).catch((error: unknown) => {
             this.showError(children, error);
           });
         }
@@ -286,13 +397,39 @@ export class WorkshopTreePanel extends WorkshopPart {
         openInZone("editor", { path: entry.path });
       });
       // Files drag out of the tree: the Run window's drop zone accepts
-      // the workshop-path payload and loads the file as its prompt.
+      // the workshop-path payload and loads the file as its prompt. The
+      // drag carries a pill with the file's name.
       row.draggable = true;
       row.addEventListener("dragstart", (event) => {
-        event.dataTransfer?.setData("application/x-workshop-path", entry.path);
+        // A scripted event may carry no transfer at all.
+        const transfer: DataTransfer | null | undefined = event.dataTransfer;
+        if (!transfer) {
+          return;
+        }
+        transfer.setData("application/x-workshop-path", entry.path);
+        this.showDragPill(transfer, entry.name);
       });
     }
     return item;
+  }
+
+  /**
+   * Gives a drag Cursor's pill: the browser snapshots the element during
+   * dragstart, so it lives in the page only until the next task. A transfer
+   * with no drag image to set (a scripted one) keeps the browser's default.
+   */
+  private showDragPill(transfer: DataTransfer, label: string): void {
+    if (typeof transfer.setDragImage !== "function") {
+      return;
+    }
+    const pill = document.createElement("div");
+    pill.className = "ws-workshop-tree__drag-pill";
+    pill.textContent = label;
+    document.body.appendChild(pill);
+    transfer.setDragImage(pill, 0, 0);
+    window.setTimeout(() => {
+      pill.remove();
+    }, 0);
   }
 
   /** Expands a collapsed directory or collapses an expanded one. */
@@ -300,6 +437,7 @@ export class WorkshopTreePanel extends WorkshopPart {
     entry: TreeEntry,
     row: HTMLButtonElement,
     children: HTMLUListElement,
+    depth: number,
   ): Promise<void> {
     if (this.state.isExpanded(entry.path)) {
       this.state.collapse(entry.path);
@@ -324,7 +462,7 @@ export class WorkshopTreePanel extends WorkshopPart {
     // into an empty list (collapse keeps the rows, just hidden).
     if (fresh || children.childElementCount === 0) {
       children.textContent = "";
-      this.renderListing(children, listing);
+      this.renderListing(children, listing, depth + 1);
     }
     this.state.expand(entry.path);
     children.hidden = false;
@@ -341,6 +479,7 @@ export class WorkshopTreePanel extends WorkshopPart {
     entry: TreeEntry,
     row: HTMLButtonElement,
     children: HTMLUListElement,
+    depth: number,
   ): Promise<void> {
     row.disabled = true;
     let listing: TreeListing;
@@ -356,7 +495,7 @@ export class WorkshopTreePanel extends WorkshopPart {
     if (!row.isConnected || !this.state.isExpanded(entry.path) || children.childElementCount !== 0) {
       return;
     }
-    this.renderListing(children, listing);
+    this.renderListing(children, listing, depth + 1);
   }
 
   /** Paints a load failure as a row in the affected list. */

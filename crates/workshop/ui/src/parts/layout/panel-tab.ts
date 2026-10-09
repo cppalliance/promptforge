@@ -25,6 +25,14 @@
 // overflow list inits a second renderer per overflowed panel under the
 // same id and never disposes it, so only the "header" renderer holds the
 // panel's slot.
+//
+// The dirty dot: a panel with unsaved work calls setTabDirty, which marks the
+// tab (`ws-tab--dirty`) so the stylesheet draws a dot in the close button's
+// place until the tab is hovered. The mark lives on the tab, not in its
+// title, so renaming or restyling the title never has to know about it. A
+// tab that mounts after its panel went dirty picks the mark up at init. A tab
+// with no close button is marked too (`ws-tab--no-close`), which is what gives
+// it the right padding the missing button would have filled.
 
 import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
@@ -77,6 +85,9 @@ const tabs = new Map<string, PanelTab>();
 // its panel started loading still picks the shimmer up; entries die
 // with their tab.
 const loadingByPanel = new Map<string, boolean>();
+// The panels with unsaved work, by id, for the same reason: a tab that
+// mounts later reads it at init. Only dirty panels are held.
+const dirtyPanels = new Set<string>();
 
 /**
  * Drives one tab's shimmer. A panel calls this on every state
@@ -86,6 +97,21 @@ const loadingByPanel = new Map<string, boolean>();
 export function setTabLoading(panelId: string, loading: boolean): void {
   loadingByPanel.set(panelId, loading);
   tabs.get(panelId)?.setLoading(loading);
+}
+
+/**
+ * Marks one tab dirty or clean: a dot in place of its close button until
+ * the tab is hovered. A panel calls this whenever its unsaved state
+ * changes; a tab that has not mounted yet picks the state up at init, and
+ * one already gone is a no-op.
+ */
+export function setTabDirty(panelId: string, dirty: boolean): void {
+  if (dirty) {
+    dirtyPanels.add(panelId);
+  } else {
+    dirtyPanels.delete(panelId);
+  }
+  tabs.get(panelId)?.setDirty(dirty);
 }
 
 export class PanelTab extends Disposable implements ITabRenderer {
@@ -114,8 +140,10 @@ export class PanelTab extends Disposable implements ITabRenderer {
       tabs.set(api.id, this);
       this.interceptCloseKeys(api.id, closable);
     }
-    // The panel may have entered loading before the tab mounted.
+    // The panel may have entered loading, or gone dirty, before the tab mounted.
     this.loading = loadingByPanel.get(api.id) ?? false;
+    this.setDirty(dirtyPanels.has(api.id));
+    this.element.classList.toggle("ws-tab--no-close", !closable);
     this.title = parameters.title;
     this.renderTitle(api.id);
     this._register(
@@ -270,6 +298,11 @@ export class PanelTab extends Disposable implements ITabRenderer {
   public setLoading(loading: boolean): void {
     this.loading = loading;
     this.applyLoading();
+  }
+
+  /** Marks the tab dirty or clean; the stylesheet draws the dot. */
+  public setDirty(dirty: boolean): void {
+    this.element.classList.toggle("ws-tab--dirty", dirty);
   }
 
   private applyLoading(): void {

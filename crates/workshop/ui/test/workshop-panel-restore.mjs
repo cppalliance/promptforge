@@ -158,6 +158,9 @@ const state = new TreeStateService(storage.get("workspace", "tree"), (value) =>
   storage.set("workspace", "tree", value),
 );
 registerService(TREE_STATE, () => state);
+// The composition root has the service follow the workspace-changed event
+// (main.ts), so the panel does not drop the roots itself; follow it here too.
+const follower = state.followWorkspaceChanges(window);
 
 let panel = new WorkshopTreePanel(null);
 panel.init({ params: {}, api: {} });
@@ -333,6 +336,7 @@ function cachedRootPaths(state) {
 }
 
 panel.dispose();
+follower.dispose();
 state.dispose();
 
 if (failures.length > 0) {

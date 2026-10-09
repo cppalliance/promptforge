@@ -25,6 +25,7 @@ const bundle = await esbuild.build({
     contents: `
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { CodeMirrorSurface } from "./src/parts/editor/editor-surface.ts";
+      export { PanelTab } from "./src/parts/layout/panel-tab.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -91,7 +92,7 @@ globalThis.document = window.document;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-editor-panel-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { EditorPanel, CodeMirrorSurface } = await import(pathToFileURL(bundlePath).href);
+const { EditorPanel, CodeMirrorSurface, PanelTab } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -200,22 +201,39 @@ function createStubSurface() {
   };
 }
 
-function fakeParameters(path) {
+function fakeParameters(path, id = `editor:${path}`) {
   const titles = [];
   return {
     params: { path },
-    api: { setTitle: (title) => titles.push(title) },
+    api: { id, setTitle: (title) => titles.push(title) },
     titles,
   };
+}
+
+/** The header tab Dockview would mount for a panel id, wired the way the dock wires it. */
+function mountTab(id, title) {
+  const tab = new PanelTab();
+  tab.init({
+    api: { id, component: "editor", onDidTitleChange: () => ({ dispose() {} }) },
+    title,
+    tabLocation: "header",
+    params: {},
+    containerApi: {},
+    group: {},
+  });
+  return tab;
 }
 
 // --- Panel logic: open, dirty title, save, conflict dialog -----------------
 
 const stub = createStubSurface();
-const params = fakeParameters(FILE_PATH);
+const params = fakeParameters(FILE_PATH, "editor-a");
+// The tab mounts before the panel, as Dockview mounts a panel's tab with it.
+const panelTab = mountTab("editor-a", "a.txt");
 const panel = new EditorPanel({ createSurface: () => stub });
 panel.init(params);
 await flush();
+const dotted = () => panelTab.element.classList.contains("ws-tab--dirty");
 
 check(
   "opening a file loads its text into the surface",
@@ -223,16 +241,31 @@ check(
 );
 check("the tab title is the file's base name", params.titles.at(-1) === "a.txt");
 check("a freshly opened document is not dirty", !panel.isDirty());
+check("a clean document's tab shows no dirty dot", !dotted());
 
 stub.type("hello world\n");
 check("typing sets the dirty state", panel.isDirty());
-check("dirty state shows in the panel title", params.titles.at(-1) === "● a.txt");
+check("dirty state shows as the tab's dot", dotted());
+check("the dirty title carries no bullet prefix", params.titles.every((title) => !title.includes("●")));
+check("the dirty title is still the file's base name", params.titles.at(-1) === "a.txt");
 
 await panel.save();
 check("save writes with the read token", puts.length === 1 && puts[0].expected_token === "t100");
 check("save sends the editor text", puts[0].text === "hello world\n");
 check("save clears the dirty state", !panel.isDirty());
-check("save restores the clean title", params.titles.at(-1) === "a.txt");
+check("save clears the tab's dirty dot", !dotted());
+check("save leaves the clean title", params.titles.at(-1) === "a.txt");
+
+// A tab that mounts after the panel went dirty still shows the dot.
+stub.type("typed before the tab mounted\n");
+panelTab.dispose();
+const lateTab = mountTab("editor-a", "a.txt");
+check("a tab mounted while the panel is dirty shows the dot at once", lateTab.element.classList.contains("ws-tab--dirty"));
+stub.markSaved(stub.text());
+check("a clean panel's dot goes out", !lateTab.element.classList.contains("ws-tab--dirty"));
+lateTab.dispose();
+// Back to the saved text, so the conflict cases below start from the disk's content.
+stub.currentText = "hello world\n";
 
 // Stale token: the next PUT conflicts, surfacing the dialog.
 stub.type("local edits\n");

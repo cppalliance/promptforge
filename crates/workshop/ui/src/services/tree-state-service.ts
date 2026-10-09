@@ -18,16 +18,21 @@
 // The service self-registers with a default factory (nothing expanded,
 // no-op writer), so any bundle that touches it gets a working singleton;
 // the composition root re-registers it bound to the live adapter before
-// the first consumer resolves it.
+// the first consumer resolves it. The composition root also has the
+// service follow the workspace-changed event (followWorkspaceChanges),
+// so the roots listing is dropped on every grant change whether or not
+// the tree panel is open: the window title and the editor watermark read
+// the same listing and have no panel to do it for them.
 //
-// Generic and DOM-free: the initial value and the writer are injected,
-// and nothing here may import from the app layers.
+// Generic and DOM-free: the initial value, the writer, and the event
+// target are injected, and nothing here may import from the app layers.
 
 import { Emitter } from "@workshop/platform/event";
 import type { Event } from "@workshop/platform/event";
-import type { IDisposable } from "@workshop/platform/lifecycle";
+import { toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { createServiceToken, registerService } from "@workshop/platform/service-registry";
 import { fetchTree, type TreeListing } from "./workspace-api";
+import { rootsCurrentIn, WORKSPACE_CHANGED_EVENT } from "./workspace-events";
 
 /** Cache key for the synthetic granted-roots listing, which has no path. */
 export const ROOTS_KEY = "";
@@ -207,6 +212,27 @@ export class TreeStateService implements IDisposable {
   invalidateRoots(): void {
     this.listingCache.delete(ROOTS_KEY);
     this.rootsInFlight = null;
+  }
+
+  /**
+   * Drops the roots listing on every workspace-changed event `target`
+   * receives, so the next reader (the tree panel, the window title, the
+   * editor watermark) fetches the new grants. An event whose detail says
+   * the roots are already current (`rootsCurrent`: Open Workspace from
+   * File invalidated them itself and a load is under way, Save As kept
+   * the grants) is left alone, so a switch still fetches once. The
+   * composition root installs this once, ahead of every reader, so it
+   * needs no panel to be alive and a reader running on the same event
+   * reads the fresh listing. The returned handle stops following.
+   */
+  followWorkspaceChanges(target: EventTarget): IDisposable {
+    const onChanged: EventListener = (event) => {
+      if (!rootsCurrentIn(event)) {
+        this.invalidateRoots();
+      }
+    };
+    target.addEventListener(WORKSPACE_CHANGED_EVENT, onChanged);
+    return toDisposable(() => target.removeEventListener(WORKSPACE_CHANGED_EVENT, onChanged));
   }
 
   private scheduleWrite(): void {

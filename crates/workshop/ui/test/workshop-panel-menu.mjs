@@ -38,7 +38,11 @@ globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
   stdin: {
-    contents: `export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";`,
+    contents: `
+      export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
+      export { TREE_STATE } from "./src/services/tree-state-service.ts";
+      export { getService } from "@workshop/platform/service-registry";
+    `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
   },
@@ -55,9 +59,12 @@ const bundle = await esbuild.build({
     "@tauri-apps/plugin-dialog": path.join(uiDir, "helpers", "tauri-dialog-stub.mjs"),
   },
 });
-const { WorkshopTreePanel } = await import(
+const { WorkshopTreePanel, TREE_STATE, getService } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
+// The composition root has the tree-state service follow the workspace-changed
+// event (main.ts), so a panel does not drop the roots listing itself.
+const follower = getService(TREE_STATE).followWorkspaceChanges(window);
 
 const failures = [];
 function check(name, condition) {
@@ -361,6 +368,94 @@ panelA.dispose();
   grantResponse = (path) => ({ ok: true, status: 200, json: async () => ({ granted: path }) });
   panelD.dispose();
 }
+
+// --- The section header: a chevron, the title, hover actions, a collapsing body ------------
+
+{
+  const panelE = new WorkshopTreePanel(statusBar);
+  panelE.init({ params: {}, api: {} });
+  window.document.body.appendChild(panelE.element);
+  await flush();
+
+  const header = panelE.element.querySelector(".ws-workshop-tree__header");
+  const toggle = header?.querySelector(".ws-workshop-tree__section");
+  check("the section header toggles from a button", toggle instanceof window.HTMLButtonElement);
+  check(
+    "the section header reads a chevron, then the title",
+    toggle?.firstElementChild?.querySelector("svg") !== null &&
+      toggle?.querySelector(".ws-workshop-tree__section-title")?.textContent === "Workspace",
+  );
+  check("the section starts expanded", toggle?.getAttribute("aria-expanded") === "true");
+  check(
+    "the Add Folder button is one of the header's hover actions",
+    header?.querySelector(".ws-workshop-tree__actions > .ws-workshop-tree__add") instanceof window.HTMLButtonElement,
+  );
+  const list = panelE.element.querySelector(".ws-workshop-tree__list");
+  toggle?.click();
+  check(
+    "collapsing the section hides its rows",
+    toggle?.getAttribute("aria-expanded") === "false" && list?.hidden === true,
+  );
+  toggle?.click();
+  check(
+    "expanding the section shows its rows again",
+    toggle?.getAttribute("aria-expanded") === "true" && list?.hidden === false,
+  );
+
+  // A row's geometry is driven by its depth; a root sits at depth 1 and carries a twistie box.
+  const root = rowByName(panelE, "project");
+  check("a root row is at depth 1", root?.style.getPropertyValue("--ws-tree-depth") === "1");
+  const twistie = root?.querySelector(".ws-workshop-tree__twistie");
+  check("a folder row opens with its twistie box", twistie !== null && root?.firstElementChild === twistie);
+  check(
+    "the twistie box holds a 16px chevron",
+    twistie?.querySelector("svg")?.getAttribute("width") === "16" &&
+      twistie?.querySelector("svg")?.getAttribute("height") === "16",
+  );
+  panelE.dispose();
+}
+
+// --- An empty tree says so and offers Open Folder ------------------------------------------------
+
+{
+  const panelF = new WorkshopTreePanel(statusBar);
+  panelF.init({ params: {}, api: {} });
+  window.document.body.appendChild(panelF.element);
+  await flush();
+  check("a tree with roots shows no empty state", panelF.element.querySelector(".ws-workshop-tree__empty") === null);
+
+  const savedEntries = rootsListing.entries;
+  rootsListing.entries = [];
+  window.dispatchEvent(new window.CustomEvent("promptforge:workspace-changed"));
+  await flush();
+  const empty = panelF.element.querySelector(".ws-workshop-tree__empty");
+  check(
+    "the empty tree reads Cursor's sentence",
+    empty?.querySelector(".ws-workshop-tree__empty-text")?.textContent ===
+      "You have not yet added a folder to the workspace.",
+  );
+  const openFolder = empty?.querySelector("button");
+  check(
+    "the empty tree offers a primary Open Folder button",
+    openFolder?.textContent === "Open Folder" && openFolder.classList.contains("button-primary"),
+  );
+  openFolder?.click();
+  await flush();
+  check(
+    "Open Folder starts the Add Folder flow",
+    panelF.element.querySelector(".ws-workspace-add-overlay") !== null,
+  );
+  panelF.element.querySelector(".ws-workspace-add-overlay")?.querySelector("button")?.click();
+  await flush();
+
+  rootsListing.entries = savedEntries;
+  window.dispatchEvent(new window.CustomEvent("promptforge:workspace-changed"));
+  await flush();
+  check("granting a root clears the empty state", panelF.element.querySelector(".ws-workshop-tree__empty") === null);
+  panelF.dispose();
+}
+
+follower.dispose();
 
 if (failures.length > 0) {
   console.error(`workshop-panel-menu: ${failures.length} failure(s)`);

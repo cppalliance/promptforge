@@ -10,7 +10,7 @@ import type { DockviewApi } from "dockview";
 import { getService } from "@workshop/platform/service-registry";
 import { LAYOUT_POLICY } from "../../services/layout-policy";
 import { restoreLayout } from "./layout-persistence";
-import { openInZone, resetZones } from "./zones";
+import { ensureZoneGroup, openInZone, resetZones } from "./zones";
 
 /**
  * Applies `envelope` to the dock, falling back to the registered policy's
@@ -26,7 +26,10 @@ import { openInZone, resetZones } from "./zones";
  * The workbench never boots without the policy's anchors: a restored
  * layout that lost one (a stale snapshot, or an anchor closed away before
  * the save) gets it back. Anchors are singletons, so re-opening an
- * existing one only focuses it.
+ * existing one only focuses it. The policy's empty zones get the same
+ * guarantee: a zone with no live group gets an empty one, so the editor
+ * area exists whether the layout was seeded, restored whole, or saved
+ * before the area did.
  */
 export function applyLayoutOrDefault(dock: DockviewApi, envelope: unknown): void {
   const policy = getService(LAYOUT_POLICY);
@@ -37,5 +40,8 @@ export function applyLayoutOrDefault(dock: DockviewApi, envelope: unknown): void
   }
   for (const anchor of policy.anchors) {
     openInZone(anchor, {});
+  }
+  for (const zone of policy.emptyZones ?? []) {
+    ensureZoneGroup(zone);
   }
 }

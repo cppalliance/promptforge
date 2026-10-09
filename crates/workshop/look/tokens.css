@@ -113,11 +113,20 @@
   /* Text and borders (opacity tiers over the dark surfaces) */
   --text: #F0F0F0;
   --text-muted: #F0F0F0BD;
+  /* The quietest label: an inactive editor tab, the tree's section title */
+  --text-faint: #F0F0F05C;
   --text-tertiary: var(--cursor-text-tertiary);
   --text-quaternary: var(--cursor-text-quaternary);
   --input-placeholder: #F0F0F099;
   --border: #F0F0F013;
   --border-subtle: #F0F0F011;
+
+  /* Dock and tree: an editor tab in a group that is not the active one washes
+     on hover; the tree's indent guides are dim while it is hovered and lit
+     for the list holding the focused row */
+  --tab-unfocused-hover: #2A2A2AB3;
+  --tree-indent-guide: var(--border);
+  --tree-indent-guide-active: #F0F0F030;
 
   /* Accent and semantics */
   --accent: #e4b570;

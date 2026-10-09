@@ -44,6 +44,7 @@ const bundle = await esbuild.build({
         initZones,
         openInZone,
         panelIdFor,
+        leftZonePreferredWidth,
         rightZonePreferredWidth,
         setZoneOverride,
         zoneOfPanel,
@@ -232,6 +233,7 @@ const {
   initZones,
   openInZone,
   panelIdFor,
+  leftZonePreferredWidth,
   rightZonePreferredWidth,
   setZoneOverride,
   zoneOfPanel,
@@ -349,6 +351,9 @@ check("the right zone prefers a quarter of a 1200px dock, floored at 300px", rig
 check("the right zone prefers a quarter of a 1400px dock, 350px", rightZonePreferredWidth(1400) === 350);
 check("the right zone caps its preference at 400px", rightZonePreferredWidth(3000) === 400);
 check("the right zone never prefers less than 300px", rightZonePreferredWidth(400) === 300);
+check("the left zone prefers a quarter of a 1000px dock, 250px", leftZonePreferredWidth(1000) === 250);
+check("the left zone caps its preference at 300px", leftZonePreferredWidth(1200) === 300 && leftZonePreferredWidth(3000) === 300);
+check("the left zone never prefers less than 214px", leftZonePreferredWidth(600) === 214 && leftZonePreferredWidth(0) === 214);
 dock.layout(1200, 800);
 // The floor goes on with the first layout change of a laid-out dock.
 agentPanel.group.api.setSize({ width: 320 });
@@ -544,6 +549,102 @@ check(
 );
 check("still no file contents requested after expansion", fileCalls().length === 0);
 
+// --- Tree geometry: every row carries its depth, folders and files share one twistie box -------
+
+{
+  const depthOf = (row) => row?.style.getPropertyValue("--ws-tree-depth");
+  check("the root row is at depth 1", depthOf(rowByText("project")) === "1");
+  check("a child folder is at depth 2", depthOf(rowByText("src")) === "2");
+  check("a child file is at depth 2", depthOf(rowByText("a.txt")) === "2");
+  const fileRow = rowByText("a.txt");
+  const folderRow = rowByText("src");
+  check(
+    "a file row opens with an empty twistie box, so its name lines up with a sibling folder's",
+    fileRow?.firstElementChild?.classList.contains("ws-workshop-tree__twistie") === true &&
+      fileRow.firstElementChild.querySelector("svg") === null &&
+      folderRow?.firstElementChild?.classList.contains("ws-workshop-tree__twistie") === true &&
+      folderRow.firstElementChild.querySelector("svg") !== null,
+  );
+  const children = projectRow.closest("li").querySelector(".ws-workshop-tree__children");
+  check("a children list records its parent row's depth, which places its indent guide", depthOf(children) === "1");
+  check("no indent guide is lit before a row holds focus", children.classList.contains("ws-workshop-tree__children--focused") === false);
+  fileRow.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  check(
+    "a focused row lights the guide of the list holding it",
+    children.classList.contains("ws-workshop-tree__children--focused"),
+  );
+  folderRow.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  check(
+    "focus moving within the list keeps its guide lit",
+    children.classList.contains("ws-workshop-tree__children--focused"),
+  );
+  rowByText("project").dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  check(
+    "focus on a root row lights no child guide",
+    !children.classList.contains("ws-workshop-tree__children--focused"),
+  );
+  fileRow.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  fileRow.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }));
+  check(
+    "leaving the tree puts the guide out",
+    !children.classList.contains("ws-workshop-tree__children--focused"),
+  );
+
+  // A folder holding an expanded subfolder: only the list that holds the focused
+  // row is lit, never the subfolder's own list. The stylesheet carries the lit
+  // color on the focused list's own guide rather than on an inherited custom
+  // property, so the class is the whole of what lights a guide (dock-css.mjs).
+  const lit = (list) => list.classList.contains("ws-workshop-tree__children--focused");
+  folderRow.click();
+  await flush();
+  const nested = folderRow.closest("li").querySelector(".ws-workshop-tree__children");
+  check(
+    "an expanded subfolder has a children list of its own, at its parent row's depth",
+    nested !== null && nested !== children && depthOf(nested) === "2",
+  );
+  fileRow.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  check(
+    "focus on a file lights its own list and not the expanded subfolder's list",
+    lit(children) && !lit(nested),
+  );
+  rowByText("broken").dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+  check(
+    "focus on a row inside the subfolder lights the subfolder's list and not its parent's",
+    lit(nested) && !lit(children),
+  );
+  rowByText("broken").dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }));
+  folderRow.click();
+  await flush();
+  check("collapsing the subfolder again leaves it collapsed", folderRow.getAttribute("aria-expanded") === "false");
+
+  // A file dragged out of the tree carries a pill with its name, which leaves the page once the drag starts.
+  const sets = [];
+  let image = null;
+  const dragEvent = new window.Event("dragstart", { bubbles: true, cancelable: true });
+  Object.defineProperty(dragEvent, "dataTransfer", {
+    value: {
+      setData: (type, value) => sets.push([type, value]),
+      setDragImage: (element) => {
+        image = { className: element.className, text: element.textContent, attached: element.isConnected };
+      },
+    },
+  });
+  fileRow.dispatchEvent(dragEvent);
+  check(
+    "a dragged file sets the workshop path payload",
+    sets.length === 1 && sets[0][0] === "application/x-workshop-path" && sets[0][1] === `${ROOT}\\a.txt`,
+  );
+  check(
+    "a dragged file carries a pill with its name, attached while the browser snapshots it",
+    image?.className === "ws-workshop-tree__drag-pill" && image.text === "a.txt" && image.attached === true,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  check(
+    "the pill leaves the page after the drag starts",
+    window.document.querySelector(".ws-workshop-tree__drag-pill") === null,
+  );
+}
+
 // --- File activation opens an editor in the main zone -----------------------
 
 rowByText("a.txt").click();
@@ -592,6 +693,71 @@ check(
   zoneOfPanel(editorB3) === "main" && editorB3.group.id === editorA.group.id,
 );
 
+// --- The Workshop's active group: focusing a side zone never dims the editor tabs --------
+
+{
+  const mainGroup = editorA.group;
+  const stamp = (group) => group.element.dataset.wsActiveGroup;
+  check(
+    "the main group is the Workshop's active group while the editors have focus",
+    stamp(mainGroup) === "true" && stamp(treePanel.group) === undefined && stamp(agentPanel.group) === undefined,
+  );
+  treePanel.api.setActive();
+  await flush();
+  check("focusing the tree makes the tree's group Dockview's active group", dock.activeGroup?.id === treePanel.group.id);
+  check(
+    "focusing the tree leaves the main group as the Workshop's active group",
+    stamp(mainGroup) === "true" && stamp(treePanel.group) === undefined,
+  );
+  agentPanel.api.setActive();
+  await flush();
+  check("focusing the agent makes the agent's group Dockview's active group", dock.activeGroup?.id === agentPanel.group.id);
+  check(
+    "focusing the agent leaves the main group as the Workshop's active group",
+    stamp(mainGroup) === "true" && stamp(agentPanel.group) === undefined,
+  );
+
+  // A second editor group (a split) takes the stamp once it is activated, and gives it back.
+  const split = dock.addPanel({
+    id: "editor:split-probe",
+    component: "editor",
+    title: "split.txt",
+    params: { path: `${ROOT}\\a.txt` },
+    position: { referenceGroup: mainGroup.id, direction: "right" },
+  });
+  await flush();
+  check("a split editor group is an editor group, stamped as the main zone", split.group.element.dataset.wsZone === "main");
+  check("a split group is a different group from the first", split.group.id !== mainGroup.id);
+  check(
+    "activating the split takes the active-group stamp from the first group",
+    stamp(split.group) === "true" && stamp(mainGroup) === undefined,
+  );
+  editorA.api.setActive();
+  await flush();
+  check(
+    "activating the first group gives it back the stamp",
+    stamp(mainGroup) === "true" && stamp(split.group) === undefined,
+  );
+  treePanel.api.setActive();
+  await flush();
+  check(
+    "focusing the tree with two editor groups keeps the stamp on the last active editor group",
+    stamp(mainGroup) === "true" && stamp(split.group) === undefined && stamp(treePanel.group) === undefined,
+  );
+  dock.removePanel(split);
+  await flush();
+  check(
+    "closing the split leaves one stamped editor group",
+    dock.groups.length === 3 && stamp(mainGroup) === "true",
+  );
+  editorA.api.setActive();
+  await flush();
+}
+
+// --- An empty editor group is marked, so the stylesheet can hide its tab strip ----------
+
+check("a group holding editors is not marked empty", editorA.group.element.dataset.wsEmpty === undefined);
+
 // --- A zone group is rebuilt empty after its last panel closes ---------------
 
 /** The dock's groups holding no panel. */
@@ -611,8 +777,11 @@ check(
   "the empty group is neither the agent nor the tree group",
   !!emptyMain && emptyMain.id !== agentPanel.group.id && emptyMain.id !== treePanel.group.id,
 );
+check("the rebuilt empty main group is marked empty", emptyMain?.element.dataset.wsEmpty === "true");
 const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
 check("the next main-zone open keeps the group count", dock.groups.length === 3);
+await flush();
+check("filling the empty main group clears its empty mark", editorC.group.element.dataset.wsEmpty === undefined);
 check(
   "the reopened editor fills the empty main group",
   editorC.group.id === emptyMain?.id && zoneOfPanel(editorC) === "main" && emptyGroups().length === 0,
@@ -628,6 +797,7 @@ check(
   dock.groups.length === 3 && emptyGroups().length === 1,
 );
 const emptyLeft = emptyGroups()[0];
+check("the rebuilt empty left group is marked empty too", emptyLeft?.element.dataset.wsEmpty === "true");
 const treePanel2 = openInZone("tree", {});
 await flush();
 check("the tree reopens in the left zone", zoneOfPanel(treePanel2) === "left");

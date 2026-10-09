@@ -384,6 +384,13 @@ check(
     relaunchedMain?.api.width === 600 &&
     relaunchedRight?.api.width === 320,
 );
+check(
+  "the relaunch marks the restored empty main group empty, and as the Workshop's active group",
+  relaunchedMain?.element.dataset.wsEmpty === "true" &&
+    relaunchedMain?.element.dataset.wsActiveGroup === "true" &&
+    relaunchedRight?.element.dataset.wsActiveGroup === undefined &&
+    dockRelaunched.getPanel("tree")?.group.element.dataset.wsActiveGroup === undefined,
+);
 const relaunchedEditor = openInZone("editor", { path: FILE_A });
 check("an editor opened after relaunch fills the restored empty main group", relaunchedEditor.group.id === relaunchedMain?.id);
 check("filling the restored main group adds no group", dockRelaunched.groups.length === 3);

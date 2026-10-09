@@ -1,0 +1,90 @@
+/* Styles for watermark.ts, which imports this file; esbuild bundles it into
+   dist/app.css. The empty editor group's watermark, as in Cursor: centered,
+   at most 500px wide, at half opacity in #F0F0F099, a 100px product mark over
+   shortcut rows. A row is padded 4px 4px 4px 8px with a 4px radius and ends in
+   key caps. The rows drop out of a group narrower than 478px; the watermark
+   measures its own width (an inline-size container) so the cutoff follows the
+   group, not the window. An emptied side zone shows no watermark. Themed
+   values come from the :root tokens in @workshop/look/tokens.css. */
+
+.ws-watermark {
+  container-type: inline-size;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  inline-size: 100%;
+  block-size: 100%;
+  max-inline-size: var(--ws-size-500);
+  margin-inline: auto;
+  color: var(--input-placeholder);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  opacity: 0.5;
+  user-select: none;
+}
+
+.ws-watermark__mark {
+  flex: none;
+  inline-size: var(--ws-size-100);
+  block-size: var(--ws-size-100);
+  object-fit: contain;
+}
+
+.ws-watermark__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-size-2);
+  inline-size: 100%;
+}
+
+.ws-watermark__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--ws-size-4) var(--ws-size-4) var(--ws-size-4) var(--ws-size-8);
+  border-radius: var(--ws-size-4);
+}
+
+.ws-watermark__keys,
+.ws-watermark__chord {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ws-watermark__keys {
+  gap: var(--ws-size-8);
+}
+
+.ws-watermark__chord {
+  gap: var(--ws-size-2);
+}
+
+.ws-watermark__key {
+  display: inline-block;
+  min-inline-size: var(--ws-size-18);
+  padding: 0 var(--ws-size-4);
+  border: var(--ws-border-width) solid var(--border);
+  border-radius: var(--ws-size-4);
+  background: var(--cursor-bg-quinary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  text-align: center;
+}
+
+/* Below 478px the rows would crowd the mark: only the mark stays. */
+@container (width < 478px) {
+  .ws-watermark__rows {
+    display: none;
+  }
+}
+
+/* Only the editor area carries a watermark; an emptied side zone stays blank. */
+[data-ws-zone="left"] .ws-watermark,
+[data-ws-zone="right"] .ws-watermark {
+  display: none;
+}

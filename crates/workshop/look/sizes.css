@@ -13,11 +13,13 @@
   --ws-size-6: 6px;
   --ws-size-8: 8px;
   --ws-size-9: 9px;
+  --ws-size-10: 10px;
   --ws-size-11: 11px;
   --ws-size-12: 12px;
   --ws-size-14: 14px;
   --ws-size-16: 16px;
   --ws-size-18: 18px;
+  --ws-size-20: 20px;
   --ws-size-20-5: 20.5px;
   --ws-size-22: 22px;
   --ws-size-24: 24px;
@@ -27,6 +29,7 @@
   --ws-size-48: 48px;
   --ws-size-60: 60px;
   --ws-size-77: 77px;
+  --ws-size-100: 100px;
   --ws-size-120: 120px;
   --ws-size-150: 150px;
   --ws-size-170: 170px;
@@ -39,6 +42,7 @@
   --ws-size-320: 320px;
   --ws-size-360: 360px;
   --ws-size-380: 380px;
+  --ws-size-500: 500px;
   --ws-size-560: 560px;
   --ws-size-600: 600px;
 

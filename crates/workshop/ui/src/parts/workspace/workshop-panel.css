@@ -1,54 +1,122 @@
 /* Styles for workshop-panel.ts, which imports this file; esbuild bundles
-   it into dist/app.css. Covers the Workshop tree panel. Themed values
-   come from the :root tokens in @workshop/look/tokens.css. */
+   it into dist/app.css. Covers the Workshop tree panel, as Cursor's file
+   list draws it. Themed values come from the :root tokens in
+   @workshop/look/tokens.css.
+
+   Rows are full-width buttons in text #F0F0F0BD: #F0F0F011 on hover, #F0F0F01E
+   with a 1px #F0F0F026 outline inside the row when focused. Each carries its
+   depth in --ws-tree-depth (the roots are 1). A row opens with its twistie
+   box, 8px per depth plus 16px plus 6px wide, which holds a folder's 16px
+   chevron (turned -90deg while the folder is collapsed) and sits empty on a
+   file, so every name starts at 34 + 8 x (depth - 1) px. An expanded list
+   draws one 1px indent guide at 20 + 8 x (k - 1) px, k being the depth of its
+   parent row: #F0F0F013 while the tree is hovered, #F0F0F030 for the list
+   holding the focused row. */
 
 /* The Workshop file tree panel: one directory per level, folders before
-   files, disclosure chevrons on directories. Rows are real buttons.
-   Positioned so the Add Folder dialog overlay can cover the panel. */
+   files. Rows are real buttons. Positioned so the Add Folder dialog overlay
+   can cover the panel. No padding and no reserved scrollbar gutter. */
 .ws-workshop-tree {
   position: relative;
   height: 100%;
   overflow: auto;
-  scrollbar-gutter: stable;
-  padding: var(--space-xs) 0;
+  padding: 0;
   font-family: var(--font-prose);
   font-size: var(--font-size-base);
-  color: var(--text);
+  color: var(--text-muted);
 }
 
-/* The panel header holds the Add Folder icon button. */
+.ws-workshop-tree:hover {
+  --ws-tree-guide: var(--tree-indent-guide);
+}
+
+/* The section header, on #141414 with no bottom border: a 16px chevron, then
+   the title in #F0F0F05C. Its actions show while the header is hovered or has
+   focus inside; each is a 20px button with a 5px radius. */
 .ws-workshop-tree__header {
   display: flex;
-  justify-content: flex-end;
-  height: var(--ws-control-height-compact);
-  line-height: var(--ws-control-height-compact);
-  padding: 0 var(--space-xs) var(--space-xs);
-  border-bottom: var(--ws-border-width) solid var(--border);
-  text-transform: uppercase;
-  font-size: var(--ws-label-font-size);
-  font-weight: 700;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  block-size: var(--ws-control-height-compact);
+  padding-inline: var(--ws-size-4);
+  background-color: var(--cursor-chrome);
+}
+
+.ws-workshop-tree__section {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-inline-size: 0;
+  block-size: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.ws-workshop-tree__section:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.ws-workshop-tree__section-chevron {
+  display: inline-flex;
+  flex: none;
+  inline-size: var(--ws-size-16);
+  block-size: var(--ws-size-16);
+  color: var(--text-faint);
+}
+
+.ws-workshop-tree__section[aria-expanded="false"] .ws-workshop-tree__section-chevron {
+  transform: rotate(-90deg);
+}
+
+.ws-workshop-tree__section-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-faint);
+}
+
+.ws-workshop-tree__actions {
+  display: flex;
+  flex: none;
+  opacity: 0;
+}
+
+.ws-workshop-tree__header:hover .ws-workshop-tree__actions,
+.ws-workshop-tree__header:focus-within .ws-workshop-tree__actions {
+  opacity: 1;
 }
 
 .ws-workshop-tree__add {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-xs);
+  padding: 0;
+  inline-size: var(--ws-size-20);
+  block-size: var(--ws-size-20);
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--ws-size-5);
   background: none;
   color: var(--text-muted);
   cursor: pointer;
 }
 
 .ws-workshop-tree__add:hover {
-  background: var(--bg-hover);
+  background-color: var(--cursor-toolbar-hover);
   color: var(--text);
 }
 
 .ws-workshop-tree__add:focus-visible {
-  outline: none;
-  background: var(--bg-hover);
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+  background-color: var(--cursor-toolbar-hover);
   color: var(--text);
 }
 
@@ -59,33 +127,55 @@
   padding: 0;
 }
 
+/* One indent guide per expanded list, under its parent row's chevron. */
 .ws-workshop-tree__children {
-  padding-inline-start: var(--ws-tree-indent);
+  position: relative;
+}
+
+.ws-workshop-tree__children::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--ws-size-20) + (var(--ws-tree-depth) - 1) * var(--ws-tree-indent));
+  inline-size: var(--ws-size-1);
+  background-color: var(--ws-tree-guide, transparent);
+  pointer-events: none;
+}
+
+/* The lit color goes on the focused list's own guide, not on a custom
+   property: a custom property inherits, so every expanded list nested inside
+   the focused one would draw it too, and only the list holding the focused
+   row is lit. */
+.ws-workshop-tree__children--focused::before {
+  background-color: var(--tree-indent-guide-active);
 }
 
 .ws-workshop-tree__row {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  width: 100%;
-  height: var(--ws-control-height-compact);
+  box-sizing: border-box;
+  inline-size: 100%;
+  block-size: var(--ws-control-height-compact);
   line-height: var(--ws-control-height-compact);
-  padding: 0 var(--space-md) 0 var(--ws-size-4);
+  padding-block: 0;
+  padding-inline-start: var(--ws-size-4);
+  padding-inline-end: var(--space-md);
   border: none;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
 .ws-workshop-tree__row:hover {
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
 }
 
 .ws-workshop-tree__row:focus-visible {
-  outline: none;
-  background: var(--bg-hover);
+  background-color: var(--cursor-bg-focused);
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
 }
 
 .ws-workshop-tree__row:disabled {
@@ -93,17 +183,21 @@
   cursor: default;
 }
 
-.ws-workshop-tree__chevron {
+.ws-workshop-tree__twistie {
+  display: inline-flex;
+  align-items: center;
   flex: none;
-  color: var(--text-muted);
+  box-sizing: border-box;
+  inline-size: calc(var(--ws-tree-depth) * var(--ws-tree-indent) + var(--ws-size-16) + var(--ws-size-6));
+  padding-inline-start: calc(var(--ws-tree-depth) * var(--ws-tree-indent));
 }
 
-.ws-workshop-tree__row[aria-expanded="true"] .ws-workshop-tree__chevron {
-  transform: rotate(90deg);
+.ws-workshop-tree__twistie svg {
+  flex: none;
 }
 
-.ws-workshop-tree__row--file {
-  padding-left: calc(var(--space-md) + var(--space-lg));
+.ws-workshop-tree__row[aria-expanded="false"] .ws-workshop-tree__twistie svg {
+  transform: rotate(-90deg);
 }
 
 .ws-workshop-tree__name {
@@ -122,18 +216,50 @@
 
 .ws-workshop-tree__missing {
   flex: none;
+  margin-inline-start: var(--space-sm);
   font-size: var(--font-size-xs);
   color: var(--danger-text);
 }
 
-.ws-workshop-tree__empty,
-.ws-workshop-tree__error {
-  margin: var(--space-md);
-  font-size: var(--font-size-sm);
+/* The empty tree: Cursor's sentence over an Open Folder button. */
+.ws-workshop-tree__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl);
+  font-size: var(--font-size-base);
   color: var(--text-muted);
 }
 
+.ws-workshop-tree__empty[hidden] {
+  display: none;
+}
+
+.ws-workshop-tree__empty-text {
+  margin: 0;
+  line-height: var(--line-height-base);
+}
+
 .ws-workshop-tree__error {
-  color: var(--danger-text);
+  margin: var(--space-md);
   list-style: none;
+  font-size: var(--font-size-sm);
+  color: var(--danger-text);
+}
+
+/* The pill a dragged file carries: #F0F0F01E, a 10px radius, 12px text. The
+   browser snapshots it during dragstart, so it waits out of sight. */
+.ws-workshop-tree__drag-pill {
+  position: fixed;
+  inset-block-start: calc(-1 * var(--ws-size-100));
+  inset-inline-start: 0;
+  padding: var(--ws-size-2) var(--ws-size-8);
+  border-radius: var(--ws-size-10);
+  background-color: var(--cursor-bg-active);
+  color: var(--text);
+  font-family: var(--font-prose);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  pointer-events: none;
 }

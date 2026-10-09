@@ -16,7 +16,12 @@
 // and roots(): concurrent callers share one fetch, a cached listing
 // answers without one, an invalidation during an in-flight load makes
 // the next call fetch again and keeps the stale result out of the cache,
-// and a rejected fetch clears the slot so the next call retries.
+// and a rejected fetch clears the slot so the next call retries; and
+// followWorkspaceChanges, the owner of the roots invalidation (no panel
+// has to be alive): a workspace-changed event on its target drops the
+// roots listing and any load in flight but keeps the directory listings,
+// an event saying the roots are current leaves both alone, an unrelated
+// event does nothing, and a disposed follower stops.
 // Run: node test/tree-state-service.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +35,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { TreeStateService, TREE_STATE } from "./src/services/tree-state-service.ts";
+      export { WORKSPACE_CHANGED_EVENT } from "./src/services/workspace-events.ts";
       export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(uiDir, ".."),
@@ -42,7 +48,7 @@ const bundle = await esbuild.build({
   target: "es2022",
   logLevel: "silent",
 });
-const { TreeStateService, TREE_STATE, getService } = await import(
+const { TreeStateService, TREE_STATE, WORKSPACE_CHANGED_EVENT, getService } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -321,6 +327,55 @@ function gatedFetch(listings) {
   release();
   await load;
   check("a load settling after dispose caches nothing", service.listing("") === undefined);
+}
+
+// --- followWorkspaceChanges: the service drops the roots with no panel alive -----
+
+{
+  const { service } = bound();
+  const target = new EventTarget();
+  const stale = { path: null, entries: [] };
+  const follower = service.followWorkspaceChanges(target);
+
+  service.cacheListing("", stale);
+  service.cacheListing(SRC, { path: SRC, entries: [] });
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  check("a workspace change drops the roots listing", service.listing("") === undefined);
+  check("a workspace change keeps the directory listings", service.listing(SRC) !== undefined);
+
+  service.cacheListing("", stale);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { rootsCurrent: true } }));
+  check("an event saying the roots are current leaves the roots listing", service.listing("") === stale);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { rootsCurrent: false } }));
+  check("an event saying the roots are not current drops the roots listing", service.listing("") === undefined);
+
+  service.cacheListing("", stale);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: "rootsCurrent" }));
+  check("an event with a detail that is not a record drops the roots listing", service.listing("") === undefined);
+
+  service.cacheListing("", stale);
+  target.dispatchEvent(new CustomEvent("promptforge:something-else"));
+  check("an unrelated event leaves the roots listing", service.listing("") === stale);
+
+  // A load in flight started against the old grants: a plain change drops it, a current one keeps it.
+  service.invalidateRoots();
+  const old = gatedFetch([{ path: null, entries: [] }]);
+  const keptLoad = service.roots(old.fetch);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { rootsCurrent: true } }));
+  check("a current event keeps the load in flight", service.roots(old.fetch) === keptLoad && old.calls.length === 1);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  const fresh = gatedFetch([{ path: null, entries: [] }]);
+  const freshLoad = service.roots(fresh.fetch);
+  check("a plain event drops the load in flight, so the next reader fetches again", freshLoad !== keptLoad && fresh.calls.length === 1);
+  old.release();
+  fresh.release();
+  await Promise.all([keptLoad, freshLoad]);
+
+  follower.dispose();
+  service.cacheListing("", stale);
+  target.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  check("a disposed follower stops dropping the roots listing", service.listing("") === stale);
+  service.dispose();
 }
 
 if (failures.length > 0) {

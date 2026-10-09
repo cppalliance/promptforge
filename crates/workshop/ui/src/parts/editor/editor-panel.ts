@@ -1,6 +1,7 @@
 // The editor panel: one open document per Dockview panel, written against
 // the EditorSurface contract. The panel owns the document lifecycle -
-// loading through the workspace API, dirty state in the tab title, and
+// loading through the workspace API, dirty state on the tab (a dot in
+// place of its close button, through setTabDirty), and
 // saving with the server's opaque conflict token - and never
 // touches the concrete editor. A save that loses the token race opens a
 // themed conflict dialog (reload the on-disk text, or overwrite it)
@@ -19,6 +20,7 @@ import { Commands } from "@workshop/platform/command-registry";
 import { errorText } from "../../services/error-catalog";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
+import { setTabDirty } from "../layout/panel-tab";
 import { showPanelDialog } from "../shared/panel-dialog";
 import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
@@ -91,9 +93,18 @@ export class EditorPanel extends WorkshopPart {
     this._register(
       toDisposable(
         this.surface.onDirtyChange(() => {
-          this.updateTitle();
+          this.syncDirty();
         }),
       ),
+    );
+    // The tab's dot belongs to the panel: closing the panel clears it, so a
+    // panel reopened under the same id starts clean.
+    this._register(
+      toDisposable(() => {
+        if (this.panelApi !== null) {
+          setTabDirty(this.panelApi.id, false);
+        }
+      }),
     );
   }
 
@@ -391,8 +402,14 @@ export class EditorPanel extends WorkshopPart {
   }
 
   private updateTitle(): void {
-    const dirty = this.surface.isDirty();
-    this.panelApi?.setTitle(dirty ? `● ${this.title}` : this.title);
+    this.panelApi?.setTitle(this.title);
+  }
+
+  /** Tells the panel's tab whether the document holds unsaved changes. */
+  private syncDirty(): void {
+    if (this.panelApi !== null) {
+      setTabDirty(this.panelApi.id, this.surface.isDirty());
+    }
   }
 
   /** Paints a failure as a bar above the editor; the next error replaces it. */

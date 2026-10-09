@@ -70,6 +70,24 @@ export { ZONE_NAMES } from "@workshop/platform/panel-registry";
 export type { PanelParams, PanelType, ZoneName } from "@workshop/platform/panel-registry";
 export type { ZoneState } from "../../services/zone-state-service";
 
+/** The left zone's preference floor: the tree opens at least this wide. */
+const LEFT_ZONE_MIN_WIDTH = 214;
+
+/** The widest the left zone prefers to open at, before the quarter-of-the-window rule. */
+const LEFT_ZONE_PREFERRED_MAX_WIDTH = 300;
+
+/**
+ * The left zone's preferred width in a dock `totalWidth` wide:
+ * `min(300px, W/4)`, never under 214px. It is where the tree opens, not a
+ * floor the sash is held to.
+ */
+export function leftZonePreferredWidth(totalWidth: number): number {
+  return Math.max(
+    LEFT_ZONE_MIN_WIDTH,
+    Math.min(LEFT_ZONE_PREFERRED_MAX_WIDTH, Math.round(totalWidth / 4)),
+  );
+}
+
 /** The right zone's floor: the chat pane never narrows below this. */
 export const RIGHT_ZONE_MIN_WIDTH = 300;
 
@@ -134,10 +152,85 @@ export function withZoneRestore<T>(run: () => T): T {
   }
 }
 
+// The id of the editor group the Workshop last saw active, which stays the
+// Workshop's active group while the tree or the agent holds Dockview's focus.
+let activeEditorGroupId: string | null = null;
+
+/**
+ * Sets or clears one `data-ws-*` mark on a group's element, writing only
+ * when the value changes so the stamping pass costs the DOM nothing at rest.
+ */
+function mark(element: HTMLElement, key: string, value: string | undefined): void {
+  if (value === undefined) {
+    if (element.dataset[key] !== undefined) {
+      delete element.dataset[key];
+    }
+  } else if (element.dataset[key] !== value) {
+    element.dataset[key] = value;
+  }
+}
+
+/** Whether a group is the left or right zone's: those are not editor groups. */
+function isSideGroup(group: IDockviewGroupPanel): boolean {
+  const zone = zoneState().zoneForGroupId(group.id);
+  return zone === "left" || zone === "right";
+}
+
+/**
+ * Marks every group in the dock, so the stylesheets can skin one kind of
+ * group without knowing group ids:
+ * - `data-ws-zone` names the group's zone. The main zone is the document
+ *   area, so every group that is not the left or right zone's - a split
+ *   the user dragged out - reads as main too.
+ * - `data-ws-empty` marks a group holding no panel, whose tab strip the
+ *   editor area hides.
+ * - `data-ws-active-group` marks the Workshop's active editor group. Dockview
+ *   moves its own active group to the tree or the agent when either takes
+ *   focus, which would dim the editor tabs; the Workshop's notion keeps the
+ *   last active editor group lit through that, and only another editor
+ *   group taking focus moves it.
+ * The interface hides the element a group class carries, and a dock double
+ * has no groups to walk, so each step tolerates their absence.
+ */
+function stampGroups(): void {
+  if (dock === null) {
+    return;
+  }
+  const groups: readonly IDockviewGroupPanel[] | undefined = dock.groups;
+  if (!Array.isArray(groups)) {
+    return;
+  }
+  const active: IDockviewGroupPanel | undefined = dock.activeGroup;
+  if (active !== undefined && !isSideGroup(active)) {
+    activeEditorGroupId = active.id;
+  }
+  // The remembered group may have closed, or turned out to be a side zone's
+  // (a group is stamped before the zone map learns it); fall back to the main
+  // zone's group, else any editor group.
+  let activeEditor: IDockviewGroupPanel | undefined =
+    activeEditorGroupId === null ? undefined : groups.find((group) => group.id === activeEditorGroupId);
+  if (activeEditor === undefined || isSideGroup(activeEditor)) {
+    activeEditor = liveGroup("main") ?? groups.find((group) => !isSideGroup(group));
+    activeEditorGroupId = activeEditor?.id ?? null;
+  }
+  for (const group of groups) {
+    const element: HTMLElement | undefined = (group as DockviewGroupPanel).element;
+    if (element === undefined) {
+      continue;
+    }
+    const side = isSideGroup(group);
+    mark(element, "wsZone", zoneState().zoneForGroupId(group.id) ?? "main");
+    const panels: readonly unknown[] | undefined = group.panels;
+    mark(element, "wsEmpty", panels !== undefined && panels.length === 0 ? "true" : undefined);
+    mark(element, "wsActiveGroup", !side && group === activeEditor ? "true" : undefined);
+  }
+}
+
 /**
  * Marks every live zone group with its zone name (`data-ws-zone` on the
  * group's element), so the stylesheets can skin one zone's groups - the
- * right zone's header and chat tabs - without knowing group ids. Runs
+ * right zone's header and chat tabs - without knowing group ids, and the
+ * rest of the dock's groups with the main zone's marks (stampGroups). Runs
  * after every change that creates, rebuilds, or restores a group, and
  * with each layout change as the net under them. The right zone's groups
  * also get their width floor here, once each.
@@ -150,12 +243,6 @@ function stampZones(): void {
     const group = liveGroup(zone);
     if (group === undefined) {
       continue;
-    }
-    // The interface hides the element the group class carries; a dock
-    // double without one has nothing to stamp.
-    const element: HTMLElement | undefined = (group as DockviewGroupPanel).element;
-    if (element !== undefined && element.dataset["wsZone"] !== zone) {
-      element.dataset["wsZone"] = zone;
     }
     // The floor goes on once the dock is laid out wide enough to hold the
     // right zone beside something else; an unsized dock (Dockview's 100px
@@ -170,6 +257,7 @@ function stampZones(): void {
       applyRightFloor(group);
     }
   }
+  stampGroups();
 }
 
 /**
@@ -321,6 +409,7 @@ export function setZoneOverride(panelId: string, zone: ZoneName): void {
  */
 export function initZones(dockview: DockviewApi): IDisposable {
   dock = dockview;
+  activeEditorGroupId = null;
   registerService(DOCK, () => dockview);
   const store = new DisposableStore();
   store.add(
@@ -340,6 +429,12 @@ export function initZones(dockview: DockviewApi): IDisposable {
       recordZoneSizes();
     }),
   );
+  // Focus moving between groups changes no layout, so the Workshop's active
+  // editor group is re-stamped on its own event. A dock double has no focus
+  // to follow and no such event.
+  if (typeof dockview.onDidActiveGroupChange === "function") {
+    store.add(dockview.onDidActiveGroupChange(() => stampGroups()));
+  }
   // The rebuild boundary: snapshot which zones are live when a top-level
   // mutation opens, and once it has settled rebuild every zone that lost
   // its group in it. A zone that was not live before is never created
@@ -528,6 +623,32 @@ function revealGroupOf(panel: IDockviewPanel): void {
 /** The zone's live group, or undefined once it has closed away. */
 export function groupOfZone(zone: ZoneName): IDockviewGroupPanel | undefined {
   return liveGroup(zone);
+}
+
+/**
+ * Makes sure a zone has a live group, creating an empty one at the zone's
+ * place in the dock when it has none. The default layout opens the main
+ * zone this way, so the editor area - and the watermark an empty one shows -
+ * exists before any document does. The group is recorded as the zone's, so
+ * the first panel opened into the zone fills it rather than building
+ * another. In a dock with no group at all there is nothing to place one
+ * beside, so nothing is created; the first panel opened makes the first
+ * group and becomes the zone by itself.
+ */
+export function ensureZoneGroup(zone: ZoneName): void {
+  if (dock === null) {
+    throw new Error("ensureZoneGroup called before initZones.");
+  }
+  if (liveGroup(zone) !== undefined) {
+    return;
+  }
+  const position = rebuildPosition(zone);
+  if (position === undefined) {
+    return;
+  }
+  const group = dock.addGroup(position);
+  zoneState().setGroup(zone, group.id);
+  stampZones();
 }
 
 /**

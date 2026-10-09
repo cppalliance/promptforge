@@ -478,6 +478,25 @@ cancel?.click();
 await flush();
 check("Cancel keeps the unsaved editor's tab", isOpen(unsaved) && partOf(unsaved).isDirty() === true);
 
+// --- The dirty dot and the close slot (setTabDirty, src/parts/layout/panel-tab.ts) ------
+
+check("an unsaved editor's tab carries the dirty mark", tabOf(unsaved).classList.contains("ws-tab--dirty"));
+check(
+  "the dirty tab keeps its close button, which the stylesheet swaps for the dot until the tab is hovered",
+  closeButton(unsaved) !== null,
+);
+check("a clean closable tab has no dirty mark", !tabOf(probeB).classList.contains("ws-tab--dirty"));
+check("a closable tab is not marked as having no close", !tabOf(probeB).classList.contains("ws-tab--no-close"));
+check(
+  "a tab with no close button is marked, which gives it 10px of right padding",
+  tabOf(pinned).classList.contains("ws-tab--no-close"),
+);
+check("no tab titles carry a bullet", [...window.document.querySelectorAll(".dv-default-tab-content")].every((content) => !content.textContent.includes("●")));
+surfaces.get("unsaved.txt").markSaved("draft\n");
+check("saving clears the tab's dirty mark", !tabOf(unsaved).classList.contains("ws-tab--dirty"));
+surfaces.get("unsaved.txt").type("draft\n");
+check("typing again marks the tab dirty again", tabOf(unsaved).classList.contains("ws-tab--dirty"));
+
 closeButton(probeB)?.click();
 await flush();
 check("the X closes a clean panel", !isOpen(probeB));

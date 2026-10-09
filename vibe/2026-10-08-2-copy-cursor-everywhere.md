@@ -1144,7 +1144,7 @@ Rules for every step:
 
 <step-6>
 
-### Step 6: Copy Cursor's dock layout, tabs, and file tree
+### Step 6: Copy Cursor's dock layout, tabs, and file tree [completed]
 
 - Component: Workbench shell
 - Placement: sixth. It follows Step 5 in the shell's order, and it precedes Step 7 because it replaces the editor's dirty-title prefix with the tab dot.

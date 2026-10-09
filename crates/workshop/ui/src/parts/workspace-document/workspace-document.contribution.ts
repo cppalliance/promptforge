@@ -58,8 +58,7 @@ import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { applyLayoutOrDefault } from "../layout/layout-boot";
 import { buildLayoutEnvelope } from "../layout/layout-persistence";
 import { STATUS_BAR } from "@workshop/platform/status-bar";
-import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
-import type { WorkspaceChangedDetail } from "../workspace/workspace-drops";
+import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../../services/workspace-events";
 
 /** The Tauri event the desktop app listens for to re-apply window geometry. */
 export const WORKSPACE_OPENED_EVENT = "promptforge:workspace-opened";

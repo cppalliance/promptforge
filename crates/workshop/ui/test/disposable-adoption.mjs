@@ -188,11 +188,29 @@ const panel = root.add(
     },
   }),
 );
-panel.init({ params: { path: "C:\\ws\\a.txt" }, api: { setTitle: (title) => titles.push(title) } });
+// The dirty state reaches the panel's tab, not its title: mount the tab the
+// dock would, under the panel's id.
+const mountEditorTab = () => {
+  const editorTab = createPanelTabComponent({ name: PANEL_TAB });
+  editorTab.init({
+    title: "a.txt",
+    api: { id: "adoption-a", component: "editor", onDidTitleChange: new Emitter().event },
+    tabLocation: "header",
+  });
+  return editorTab;
+};
+const dirtyTab = root.add(mountEditorTab());
+panel.init({
+  params: { path: "C:\\ws\\a.txt" },
+  api: { id: "adoption-a", setTitle: (title) => titles.push(title) },
+});
 await flush();
 check("the panel loads its document before disposal", stub.currentText === "hello\n");
 stub.setDirty(true);
-check("the dirty subscription delivers before disposal", titles.at(-1) === "● a.txt");
+check(
+  "the dirty subscription delivers before disposal",
+  dirtyTab.element.classList.contains("ws-tab--dirty") && titles.at(-1) === "a.txt",
+);
 stub.setDirty(false);
 
 // --- ActivityIndicator: the LED decay timer ---------------------------------
@@ -262,9 +280,11 @@ check(
 
 // EditorPanel: the surface child disposed once, the dirty subscription severed.
 check("disposal reaches the panel's surface child exactly once", stub.disposeCount === 1);
-const titlesBefore = titles.length;
 stub.setDirty(true);
-check("the dirty subscription is severed after disposal", titles.length === titlesBefore);
+// A tab mounted after disposal would show the dot if the subscription still reached setTabDirty.
+const lateTab = mountEditorTab();
+check("the dirty subscription is severed after disposal", !lateTab.element.classList.contains("ws-tab--dirty"));
+lateTab.dispose();
 
 // ActivityIndicator: the armed decay timer was cancelled, so the pulse never decays.
 await sleep(400);
