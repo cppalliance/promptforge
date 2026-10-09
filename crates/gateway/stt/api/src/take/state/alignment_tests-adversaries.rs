@@ -153,6 +153,64 @@ fn a_sparse_successor_keeps_every_predecessor_word() {
 }
 
 #[test]
+fn a_sparse_successor_is_cut_at_the_projected_token_and_never_snaps_to_a_comma() {
+    // The same geometry as the test above: 128_000 of the 203_200 samples in
+    // the successor's decode range lie before the overlap end, which rounds
+    // 5 tokens to token 3, "epsilon". The comma on token 4 sits in the band
+    // after it, but a snap there drops "zeta", a word only the successor's
+    // new audio carries.
+    let predecessor = numbered_words(36);
+    let state = TakeState::default();
+    state.record_final_outcome(
+        FinalRangeOutcome::forced(ForcedBoundary::first(0..160_000), predecessor.clone()),
+        &[],
+        &ShownHypotheses::default(),
+    );
+    state.record_final_outcome(
+        FinalRangeOutcome::forced(
+            ForcedBoundary::overlapping(32_000..160_000, 160_000..235_200),
+            "gamma delta epsilon zeta, eta".to_owned(),
+        ),
+        &[],
+        &ShownHypotheses::default(),
+    );
+
+    let live = state.live_prefix_snapshot();
+    assert_eq!(live.finalized(), predecessor);
+    assert_eq!(
+        live.pending_forced(),
+        Some(("zeta, eta", 160_000..235_200)),
+        "the kept tail starts at the projected token, comma included"
+    );
+    assert_eq!(
+        state
+            .completion(&[], 235_200)
+            .expect("the sparse settlement completes"),
+        format!("{predecessor} zeta, eta"),
+    );
+}
+
+#[test]
+fn a_sparse_successor_with_two_punctuated_tokens_in_the_band_keeps_the_projected_cut() {
+    // Tokens 4 and 5 both end in punctuation, so no single boundary wins and
+    // the cut stays at the projected token 3. This guards only the
+    // two-candidate fallback; the no-snap behavior is pinned by the comma test
+    // above.
+    let predecessor = numbered_words(36);
+
+    assert_estimated(
+        completion(
+            0..160_000,
+            32_000..160_000,
+            160_000..235_200,
+            &predecessor,
+            "gamma delta epsilon zeta, eta,",
+        ),
+        &format!("{predecessor} zeta, eta,"),
+    );
+}
+
+#[test]
 fn a_one_word_successor_keeps_every_predecessor_word() {
     let predecessor = numbered_words(36);
 

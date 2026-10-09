@@ -28,10 +28,35 @@ pub(in crate::take) struct ProjectedPrefix {
     pub(in crate::take) metrics: ProjectionMetrics,
 }
 
+/// The prefix of `previous` that lies before `overlap_start`, cut after the
+/// projected token or the one punctuated token within the band after it.
 pub(in crate::take) fn projected_prefix_end(
     previous: &str,
     previous_range: Range<u64>,
     overlap_start: u64,
+) -> Option<ProjectedPrefix> {
+    project(previous, previous_range, overlap_start, true)
+}
+
+/// The prefix of `text` that lies before `overlap_end`, cut exactly after the
+/// projected token with no punctuation search. A sparse successor's words
+/// after the cut are the only record of audio the predecessor never covered,
+/// so a forward snap to a clause boundary would drop them. Ties round toward
+/// the earlier token, so the error is a repeated word at the seam, not a lost
+/// one.
+pub(in crate::take) fn projected_token_end(
+    text: &str,
+    range: Range<u64>,
+    overlap_end: u64,
+) -> Option<ProjectedPrefix> {
+    project(text, range, overlap_end, false)
+}
+
+fn project(
+    previous: &str,
+    previous_range: Range<u64>,
+    overlap_start: u64,
+    snap_to_punctuation: bool,
 ) -> Option<ProjectedPrefix> {
     if previous.len() > MAX_FINAL_TRANSCRIPT_BYTES {
         return None;
@@ -43,7 +68,7 @@ pub(in crate::take) fn projected_prefix_end(
     }
     let tokens = count_tokens(previous)?;
     let rounded_tokens = project_tokens(audio_before_overlap, audio_total, tokens)?.min(tokens);
-    let cut = locate_cut(previous, tokens, rounded_tokens);
+    let cut = locate_cut(previous, tokens, rounded_tokens, snap_to_punctuation);
     Some(ProjectedPrefix {
         byte_end: cut.byte_end,
         metrics: ProjectionMetrics {
@@ -100,12 +125,18 @@ struct LocatedCut {
     punctuation_candidates: usize,
 }
 
-/// Cuts after the projected token, or after the one punctuated token within
-/// the band after it. Never before the projected token: the successor window
-/// starts at the overlap, so words before the projection exist only in this
-/// text, and a cut ahead of the projection drops them.
-fn locate_cut(text: &str, tokens: usize, projected: usize) -> LocatedCut {
-    let prefer_punctuation = projected > 0 && projected < tokens;
+/// Cuts after the projected token, or, when `snap_to_punctuation` is set,
+/// after the one punctuated token within the band after it. Never before the
+/// projected token: the successor window starts at the overlap, so words
+/// before the projection exist only in this text, and a cut ahead of the
+/// projection drops them.
+fn locate_cut(
+    text: &str,
+    tokens: usize,
+    projected: usize,
+    snap_to_punctuation: bool,
+) -> LocatedCut {
+    let prefer_punctuation = snap_to_punctuation && projected > 0 && projected < tokens;
     let candidate_start = projected.max(1);
     let candidate_end = projected.saturating_add(PUNCTUATION_TOKEN_BAND).min(tokens);
     let mut token_start = None;
@@ -236,6 +267,25 @@ mod tests {
         assert_eq!(at_projected.metrics.selected_tokens, 3);
         assert_eq!(at_projected.metrics.punctuation_candidates, 1);
         assert_eq!(at_projected.metrics.punctuation_examined, 4);
+    }
+
+    #[test]
+    fn projected_token_end_cuts_at_the_projected_token_without_a_punctuation_snap() {
+        let text = "one two three, four five six seven";
+        let snapped = projected_prefix_end(text, 0..70, 20).expect("bounded projection succeeds");
+        assert_eq!(snapped.metrics.selected_tokens, 3);
+
+        let exact = projected_token_end(text, 0..70, 20).expect("bounded projection succeeds");
+        assert_eq!(exact.metrics.rounded_tokens, 2);
+        assert_eq!(exact.metrics.selected_tokens, 2);
+        assert_eq!(exact.metrics.punctuation_examined, 0);
+        assert_eq!(exact.metrics.punctuation_candidates, 0);
+        assert_eq!(&text[..exact.byte_end], "one two");
+
+        let whole = projected_token_end(text, 0..70, 70).expect("bounded projection succeeds");
+        assert_eq!(&text[..whole.byte_end], text);
+        let none = projected_token_end(text, 0..70, 0).expect("bounded projection succeeds");
+        assert_eq!(none.byte_end, 0);
     }
 
     #[test]

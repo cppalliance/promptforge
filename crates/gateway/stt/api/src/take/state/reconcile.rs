@@ -6,7 +6,8 @@ use std::ops::Range;
 
 use super::FinalizedState;
 use crate::take::agreement::{
-    AlignmentFailure, anchored_final_end, normalized_token, projected_prefix_end, token_spans,
+    AlignmentFailure, anchored_final_end, normalized_token, projected_prefix_end,
+    projected_token_end, token_spans,
 };
 use crate::take::live_prefix::AnchoredSuffix;
 use crate::take::text::append_transcript;
@@ -41,7 +42,7 @@ pub(super) fn estimate(
     failure: &AlignmentFailure,
 ) -> Option<Settlement> {
     if successor_is_sparse(previous_text, previous_range, text, current_range)
-        && let Some(kept) = projected_prefix_end(text, current_range.clone(), overlap.end)
+        && let Some(kept) = projected_token_end(text, current_range.clone(), overlap.end)
     {
         tracing::warn!(
             warning_code = "forced_final_successor_sparse",
@@ -54,6 +55,7 @@ pub(super) fn estimate(
             overlap_end = overlap.end,
             prior_tokens = previous_text.split_whitespace().count(),
             current_tokens = kept.metrics.tokens,
+            cut_tokens = kept.metrics.selected_tokens,
             "sparse forced final successor, so its predecessor was kept whole"
         );
         return Some(Settlement::SparseSuccessor(kept.byte_end));

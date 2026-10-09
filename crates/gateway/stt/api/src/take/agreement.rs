@@ -8,7 +8,7 @@ mod projection;
 pub(super) use final_overlap::{
     anchored_final_end, final_transcript_within_limit, range_guided_suffix_prefix_start,
 };
-pub(super) use projection::projected_prefix_end;
+pub(super) use projection::{projected_prefix_end, projected_token_end};
 
 /// Bounded work that one range-guided alignment attempt did.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
