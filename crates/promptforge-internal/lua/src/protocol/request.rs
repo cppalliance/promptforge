@@ -388,3 +388,58 @@ pub struct MessageRecord {
     /// The call ID a tool result answers; required on `tool` records.
     pub tool_call_id: Option<String>,
 }
+
+impl MessageRecord {
+    /// The record's JSON form: `role`, `content`, and `tool_calls` and
+    /// `tool_call_id` when present, in the shapes the chat parse accepts,
+    /// so the parse turns it back into an equal record.
+    #[must_use]
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        let mut entry = serde_json::Map::new();
+        entry.insert("role".to_owned(), self.role.as_str().into());
+        entry.insert("content".to_owned(), self.content.to_json());
+        if let Some(calls) = self.tool_calls_json() {
+            entry.insert("tool_calls".to_owned(), calls);
+        }
+        if let Some(id) = &self.tool_call_id {
+            entry.insert("tool_call_id".to_owned(), id.as_str().into());
+        }
+        serde_json::Value::Object(entry)
+    }
+
+    /// The `tool_calls` field's JSON form: an array of `{id, name,
+    /// arguments}` objects, or `None` when the record holds no calls.
+    pub(crate) fn tool_calls_json(&self) -> Option<serde_json::Value> {
+        (!self.tool_calls.is_empty()).then(|| {
+            self.tool_calls
+                .iter()
+                .map(|call| {
+                    serde_json::json!({
+                        "id": call.id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    })
+                })
+                .collect()
+        })
+    }
+}
+
+impl MessageContent {
+    /// The `content` field's JSON form: the text, or an array of `text`
+    /// and `image_url` parts.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        match self {
+            MessageContent::Text(text) => text.as_str().into(),
+            MessageContent::Parts(parts) => parts
+                .iter()
+                .map(|part| match part {
+                    ContentPart::Text(text) => serde_json::json!({ "type": "text", "text": text }),
+                    ContentPart::ImageUrl(url) => {
+                        serde_json::json!({ "type": "image_url", "image_url": { "url": url } })
+                    }
+                })
+                .collect(),
+        }
+    }
+}
