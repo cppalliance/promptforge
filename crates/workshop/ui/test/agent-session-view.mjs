@@ -9,8 +9,8 @@
 // opened thought, group, or tool line stays as the operator left it. The
 // tail status names the agent's phase (Planning next moves, a running
 // tool, Reconnecting...), a finished turn's footer copies its replies and
-// raises the toast, the context menu offers Copy Message / Select All /
-// Search with Google, and an error opens the composer's popup instead of
+// raises the toast, the context menu offers Copy Message / Select All,
+// and an error opens the composer's popup instead of
 // a row. Reduced motion drops the height and fade animations. The input
 // pins to the pending wait, answers it byte-exact, and returns to
 // disabled; a view built with a ModelService mounts the toolbar (mode
@@ -770,20 +770,12 @@ await assertNoLeaks(lifecycle, async () => {
       );
     const items = () => [...document.querySelectorAll(".menu-popup .menu-item")];
     const labels = () => items().map((item) => item.querySelector(".menu-item__label")?.textContent);
-    const searches = [];
-    const onClick = (event) => {
-      if (event.target.tagName === "A") {
-        event.preventDefault();
-        searches.push(event.target.href);
-      }
-    };
-    document.addEventListener("click", onClick, true);
     window.getSelection().removeAllRanges();
 
     fire(reply.querySelector(".ws-markdown-content"));
     check(
-      "right-clicking a message offers Copy Message, Select All, and Search with Google",
-      isDeepStrictEqual(labels(), ["Copy Message", "Select All", "Search with Google"]),
+      "right-clicking a message offers Copy Message and Select All",
+      isDeepStrictEqual(labels(), ["Copy Message", "Select All"]),
     );
     items()[0]?.click();
     await settleMicrotasks();
@@ -802,16 +794,6 @@ await assertNoLeaks(lifecycle, async () => {
     await settleMicrotasks();
     check("Copy copies the selected text", clipboard.at(-1) === "answer md");
 
-    // The menu takes focus, which jsdom answers by clearing the selection.
-    window.getSelection().removeAllRanges();
-    window.getSelection().addRange(range);
-    fire(reply.querySelector(".ws-markdown-content"));
-    items()[2]?.click();
-    check(
-      "Search with Google opens a search for the selection",
-      searches.at(-1) === "https://www.google.com/search?q=answer%20md",
-    );
-
     window.getSelection().removeAllRanges();
     fire(reply.querySelector(".ws-markdown-content"));
     items()[1]?.click();
@@ -821,7 +803,6 @@ await assertNoLeaks(lifecycle, async () => {
       everything.includes("question text") && everything.includes("answer md"),
     );
     window.getSelection().removeAllRanges();
-    document.removeEventListener("click", onClick, true);
     dispose();
   }
 
@@ -842,7 +823,7 @@ await assertNoLeaks(lifecycle, async () => {
     fire(tail());
     check(
       "right-clicking the tail offers no Copy Message",
-      isDeepStrictEqual(labels(), ["Select All", "Search with Google"]),
+      isDeepStrictEqual(labels(), ["Select All"]),
     );
     items()[0]?.click();
     await settleMicrotasks();
@@ -856,7 +837,7 @@ await assertNoLeaks(lifecycle, async () => {
     fire(footer);
     check(
       "right-clicking a turn footer offers no Copy Message",
-      isDeepStrictEqual(labels(), ["Select All", "Search with Google"]),
+      isDeepStrictEqual(labels(), ["Select All"]),
     );
     items()[0]?.click();
     await settleMicrotasks();
@@ -865,7 +846,7 @@ await assertNoLeaks(lifecycle, async () => {
     fire(turns()[0]?.querySelector(".ws-markdown-content"));
     check(
       "a row in the same turn still offers Copy Message",
-      isDeepStrictEqual(labels(), ["Copy Message", "Select All", "Search with Google"]),
+      isDeepStrictEqual(labels(), ["Copy Message", "Select All"]),
     );
     items()[0]?.click();
     await settleMicrotasks();

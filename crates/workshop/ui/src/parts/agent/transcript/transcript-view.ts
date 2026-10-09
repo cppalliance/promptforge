@@ -251,39 +251,15 @@ export class TranscriptView implements IDisposable {
         },
       });
     }
-    items.push(
-      {
-        label: "Select All",
-        onClick: () => {
-          window.getSelection()?.selectAllChildren(this.column);
-        },
+    items.push({
+      label: "Select All",
+      onClick: () => {
+        window.getSelection()?.selectAllChildren(this.column);
       },
-      {
-        label: "Search with Google",
-        onClick: () => searchWithGoogle(subject),
-      },
-    );
+    });
     // Closed first so a second right-click on the feed opens a new menu
     // instead of toggling the open one shut.
     this.menu.close();
     this.menu.show(this.element, items, { x: event.clientX, y: event.clientY });
   }
-}
-
-/**
- * Opens a Google search for `text`. A plain anchor click: the desktop app
- * hands any navigation off the app's own origin to the system browser,
- * the same path a markdown link takes.
- */
-function searchWithGoogle(text: string): void {
-  const query = text.trim();
-  if (query === "") {
-    return;
-  }
-  const link = document.createElement("a");
-  link.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
 }
