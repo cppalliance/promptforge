@@ -89,6 +89,13 @@ pub enum Effect {
         binding: ModelBinding,
         /// The conversation to send, in wire order.
         messages: Vec<Message>,
+        /// The earlier round whose request this one extends: the previous
+        /// send of the same `messages.new()` list. `None` on a list's first
+        /// send and on a nested `models.infer` round.
+        after: Option<RoundId>,
+        /// How many leading messages this request shares with `after`'s
+        /// request; 0 when `after` is `None`.
+        keep: u64,
         /// The tool schemas advertised to the model for this round.
         tools: Vec<ToolSchema>,
         /// The per-request completion options, built from `binding`.
@@ -167,15 +174,20 @@ impl Effect {
             Effect::Chat {
                 binding,
                 messages,
+                after,
+                keep,
                 tools,
                 round,
                 ..
             } => {
                 let invocation = binding.invocation();
+                let kept = usize::try_from(*keep).unwrap_or(usize::MAX);
                 EffectRecord::Chat {
                     round: round.id,
                     alias: binding.alias().to_owned(),
-                    messages: messages.iter().map(wire_value).collect(),
+                    after: *after,
+                    keep: *keep,
+                    messages: messages.iter().skip(kept).map(wire_value).collect(),
                     tools: tools
                         .iter()
                         .map(|schema| tool_schema_name(schema).to_owned())
@@ -209,7 +221,8 @@ impl Effect {
 /// The `Chat` record keeps only what identifies the round: its id, the
 /// alias of the model slot it ran under, and the frozen invocation
 /// settings (temperature, generation cap, and thinking switch). It stores
-/// the messages in their wire form. It names the slot by alias, because the
+/// the request's messages in wire form after the first `keep`, which repeat
+/// round `after`'s request. It names the slot by alias, because the
 /// caller may serve the slot with a different model from the bound one.
 /// The answer's [`ChatAnswerRecord`] names the model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -221,7 +234,14 @@ pub enum EffectRecord {
         round: RoundId,
         /// The prompt-local alias of the slot the round ran under.
         alias: String,
-        /// The conversation, one wire-form message per entry.
+        /// The earlier round whose request this one extends, or `None`
+        /// when the request starts here.
+        after: Option<RoundId>,
+        /// How many leading messages of `after`'s request this request
+        /// repeats; 0 when `after` is `None`.
+        keep: u64,
+        /// The request's messages after the first `keep`, one wire-form
+        /// message per entry.
         messages: Vec<Value>,
         /// The advertised tool names, in schema order.
         tools: Vec<String>,

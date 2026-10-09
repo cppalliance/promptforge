@@ -373,6 +373,7 @@ impl RecordingCapture {
 
 mod batch_turn;
 mod chat_arm;
+mod chat_record_rebuild;
 mod chat_scope;
 mod debug_and_counts;
 mod effects;

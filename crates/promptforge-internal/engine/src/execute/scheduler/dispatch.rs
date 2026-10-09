@@ -248,6 +248,8 @@ impl Scheduler {
             options: binding.completion_options(),
             binding,
             messages: vec![Message::user(prompt)],
+            after: None,
+            keep: 0,
             tools: Vec::new(),
             round,
         };
