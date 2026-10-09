@@ -199,8 +199,8 @@ impl Scheduler {
             }
             Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),
             Request::Store { op } => self.dispatch_vfs(id, op),
-            Request::Chat { messages, binding } => {
-                self.dispatch_chat(id, &messages, binding);
+            Request::Chat { list, binding } => {
+                self.dispatch_chat(id, &list, binding);
                 Ok(())
             }
         }

@@ -707,7 +707,7 @@ The conversation list moves into the Engine, which records each round's request 
 
 <step-4>
 
-### Step 4: Cut messages.new() over to the Rust list
+### Step 4: Cut messages.new() over to the Rust list [completed]
 
 - Component: Message list
 

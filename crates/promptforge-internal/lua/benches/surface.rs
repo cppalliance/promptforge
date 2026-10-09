@@ -59,8 +59,8 @@ fn builder_vm() -> SectionVm {
     vm
 }
 
-/// Builds one message list through the pure-Lua `messages.new()` builders:
-/// the chainable method calls over a plain numeric table.
+/// Builds one message list through the Rust-backed `messages.new()` list:
+/// the chainable builder calls, each validating the record it adds.
 fn message_building(c: &mut Criterion) {
     let vm = builder_vm();
     let program = LuaProgram::compile(

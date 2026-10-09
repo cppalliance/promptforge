@@ -51,8 +51,9 @@
 //! - Engine globals are namespace functions over plain values (`models.*`,
 //!   `tools.*`, `store.*`). Handles are frozen, inspectable, and
 //!   methodless, and an optional leading handle argument selects an
-//!   explicit binding. The chainable `messages.new()` builders are the one
-//!   deliberate exception.
+//!   explicit binding. The one deliberate exception is the Rust-backed
+//!   `messages.new()` list, whose chainable builders and `replace` are
+//!   colon methods; a record view read from it has metamethods only.
 
 // The shared surface that child modules pull with a single `use super::*;`.
 use std::collections::BTreeMap;

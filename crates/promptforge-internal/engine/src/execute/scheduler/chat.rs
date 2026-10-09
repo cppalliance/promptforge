@@ -30,8 +30,8 @@ use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
 use crate::lua::{
-    MessageRecord, OverflowReason, current_tool_bindings, output_reserve, precheck,
-    project_messages, resolve_model_binding,
+    MessageList, OverflowReason, current_tool_bindings, output_reserve, precheck, project_messages,
+    resolve_model_binding,
 };
 use crate::model::ModelBinding;
 use crate::model::{Completion, CompletionErrorKind, CompletionResult, ToolCall};
@@ -80,10 +80,10 @@ impl Scheduler {
     pub(super) fn dispatch_chat(
         &mut self,
         id: ChainIndex,
-        messages: &[MessageRecord],
+        list: &MessageList,
         binding: Option<ModelBinding>,
     ) {
-        match self.prepare_chat(id, messages, binding) {
+        match self.prepare_chat(id, list, binding) {
             Ok(ChatDispatch::Issued) => {}
             Ok(ChatDispatch::Answered(answer)) => {
                 self.answer_inline(id, answer);
@@ -102,9 +102,10 @@ impl Scheduler {
     fn prepare_chat(
         &mut self,
         id: ChainIndex,
-        messages: &[MessageRecord],
+        list: &MessageList,
         binding: Option<ModelBinding>,
     ) -> Result<ChatDispatch> {
+        let messages = list.records();
         let chain = &self.chains[id.index()];
         let section = chain.section_name().to_owned();
         let frame = chain
@@ -138,7 +139,7 @@ impl Scheduler {
         }
         // The projection failure reports a failed turn before its call-site
         // error resumes into Lua, the loop's precedent.
-        let conversation = match project_messages(messages) {
+        let conversation = match project_messages(&messages) {
             Ok(conversation) => conversation,
             Err(error) => {
                 emitter.report(&section, lifecycle::MODEL_TURN_FAILED);

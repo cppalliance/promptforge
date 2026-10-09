@@ -70,22 +70,21 @@ fn projection_error(records: &[MessageRecord]) -> String {
     }
 }
 
-/// Parses a Lua-authored message list through the chat protocol boundary,
-/// as a `models.loop` round's yield would, so the projection sees the same
-/// records dispatch sees.
+/// Builds a `messages.new()` list from a Lua-authored record array and
+/// parses it through the chat protocol boundary, as a `models.loop`
+/// round's yield would, so the projection sees the same records dispatch
+/// sees.
 fn lua_parse(lua: &Lua, messages: &str) -> Vec<MessageRecord> {
+    let list = lua.create_userdata(crate::MessageList::default());
+    let list = list.expect("userdata creation cannot fail");
+    let source = format!("local l = ...\nfor _, r in ipairs({messages}) do l:append(r) end");
+    let appended: mlua::Result<()> = lua.load(source).call(list.clone());
+    appended.expect("the test records build a list");
     let request = lua.create_table().expect("table creation cannot fail");
     request.raw_set("op", "chat").expect("raw_set");
-    request
-        .raw_set(
-            "messages",
-            lua.load(messages)
-                .eval::<Value>()
-                .expect("test table source evaluates"),
-        )
-        .expect("raw_set");
+    request.raw_set("messages", list).expect("raw_set");
     match Request::from_yield(lua, &Value::Table(request)) {
-        YieldParse::Request(Request::Chat { messages, .. }) => messages,
+        YieldParse::Request(Request::Chat { list, .. }) => list.records(),
         other => panic!("expected a chat request, got {other:?}"),
     }
 }

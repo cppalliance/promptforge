@@ -100,13 +100,15 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.
+    // A userdata followed by a non-function reads as a leading handle and
+    // its list, so the cases name the handle explicitly.
     let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
          local out = {}\n\
          for _, bad in ipairs({ 42, 4.5, 'summarize', {} }) do\n\
-           local ok, err = pcall(models.loop, msgs, bad)\n\
+           local ok, err = pcall(models.loop, models.get('writer'), msgs, bad)\n\
            assert(not ok, 'a non-function compactor raises')\n\
            assert(err.kind == 'lua', 'the argument error is the lua kind')\n\
            out[#out + 1] = tostring(err)\n\

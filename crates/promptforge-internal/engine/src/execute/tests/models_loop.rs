@@ -17,6 +17,12 @@ use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 use promptforge_types::detail::model_id_from_validated;
 
+#[path = "models_loop-arguments.rs"]
+mod arguments;
+
+#[path = "models_loop-author-shapes.rs"]
+mod author_shapes;
+
 /// The model set a loop test's run uses: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
@@ -128,7 +134,7 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
          assert(#msgs == 2, 'the loop appended exactly the terminal record')\n\
          assert(msgs[2].role == 'assistant', 'the terminal record is an assistant message')\n\
          assert(msgs[2].content == 'final answer', 'the terminal record holds the reply text')\n\
-         msgs[#msgs] = nil\n\
+         msgs:replace(#msgs, #msgs)\n\
          assert(#msgs == 1, 'explicit terminal removal shrinks the list')\n\
          return 'ok'",
     );
