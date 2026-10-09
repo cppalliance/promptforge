@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
+use crate::config_shadow::PendingEnv;
 use crate::error::{GatewayError, WireJson, blocking, config_write_error};
 use crate::registry::RouteInfo;
 
@@ -82,11 +83,16 @@ async fn admin_put_config(
     // save validated whole - saves serialize with apply, revert, and each
     // other.
     let _guard = state.apply.lock().await;
-    let config = crate::admin::config_path(&state)?.to_path_buf();
+    let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let document = toml_document(body)?;
-    let shadows = blocking(move || save_config_shadow(&config, document))
-        .await?
-        .map_err(config_write_error)?;
+    let shadows = blocking(move || {
+        let pending_env = PendingEnv::new(&config_path)?;
+        save_config_shadow(&config_path, document, &|name: &str| {
+            pending_env.resolve_var(name)
+        })
+        .map_err(config_write_error)
+    })
+    .await??;
     Ok(Json(ShadowReply::staged(&shadows.config)))
 }
 

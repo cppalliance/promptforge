@@ -11,7 +11,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::{Config, RawConfig, RawSttPipelineConfig, Secret, WebSearchConfig, interpolate_value};
+use super::{
+    Config, RawConfig, RawSttPipelineConfig, Secret, VarLookupFn, WebSearchConfig,
+    interpolate_value,
+};
 use crate::error::ConfigError;
 use crate::profile::{ProfileName, ProfileSelection, SelectionSource, resolve_selection};
 
@@ -175,6 +178,16 @@ impl Config {
     }
 
     pub(crate) fn parse_toml_at(raw: &str, path: Option<&Path>) -> Result<Config, ConfigError> {
+        let lookup = |name: &str| std::env::var(name);
+        Self::parse_toml_with_lookup(raw, path, &lookup)
+    }
+
+    /// [`Config::parse_toml_at`] with `${VAR}` resolved through a custom `lookup` function
+    pub(crate) fn parse_toml_with_lookup(
+        raw: &str,
+        path: Option<&Path>,
+        lookup: VarLookupFn,
+    ) -> Result<Config, ConfigError> {
         // Parse first, then interpolate only string *values*. Interpolating the
         // raw text would expand `${VAR}` inside comments and keys, and an
         // interpolated value containing a quote, backslash, or newline would
@@ -184,13 +197,13 @@ impl Config {
             source: Box::new(source),
         })?;
         reject_removed_layout(raw, path)?;
-        Self::from_value(document)
+        Self::from_value(document, lookup)
     }
 
     /// Interpolates string leaves, deserializes, and validates an already
     /// parsed TOML document.
-    fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
-        interpolate_value(&mut document)?;
+    fn from_value(mut document: toml::Value, lookup: VarLookupFn) -> Result<Config, ConfigError> {
+        interpolate_value(&mut document, lookup)?;
         let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
             path: None,
             source: Box::new(source),

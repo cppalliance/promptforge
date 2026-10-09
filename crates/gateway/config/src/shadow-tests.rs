@@ -42,6 +42,10 @@ fn state_shadow(path: &Path) -> PathBuf {
     shadow_path(&crate::profile_state_path(path))
 }
 
+fn process_env_lookup(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(name)
+}
+
 #[test]
 fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     let (_temp, path) = write_config();
@@ -95,7 +99,8 @@ fn active_profile_in_the_pending_document_is_refused_and_writes_no_shadow() {
         Value::String("work".to_owned()),
     );
 
-    let error = save_config_shadow(&path, document).expect_err("active_profile is refused");
+    let error = save_config_shadow(&path, document, &process_env_lookup)
+        .expect_err("active_profile is refused");
 
     assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
     assert!(
@@ -110,7 +115,8 @@ fn active_profile_in_the_pending_document_is_refused_and_writes_no_shadow() {
 fn pending_save_writes_only_the_config_shadow() {
     let (_temp, path) = write_config();
 
-    let shadows = save_config_shadow(&path, document(CONFIG)).expect("pending save");
+    let shadows =
+        save_config_shadow(&path, document(CONFIG), &process_env_lookup).expect("pending save");
 
     assert_eq!(
         shadows,
@@ -128,7 +134,7 @@ fn pending_save_restores_redacted_secrets() {
     let mut document = document(CONFIG);
     document["server"]["api_key"] = Value::String("***".to_owned());
 
-    let shadows = save_config_shadow(&path, document).expect("pending save");
+    let shadows = save_config_shadow(&path, document, &process_env_lookup).expect("pending save");
 
     assert!(
         fs::read_to_string(shadows.config)
@@ -144,7 +150,8 @@ fn pending_save_rejects_invalid_profiles() {
     let mut document = document(CONFIG);
     document["profile"][1]["models"] = Value::Array(vec![Value::String("ghost".to_owned())]);
 
-    let error = save_config_shadow(&path, document).expect_err("unknown member fails");
+    let error =
+        save_config_shadow(&path, document, &process_env_lookup).expect_err("unknown member fails");
 
     assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
     assert!(!shadow_path(&path).exists());
@@ -160,7 +167,8 @@ fn pending_save_accepts_a_document_that_drops_the_persisted_profile() {
     .expect("write state");
     let candidate = CONFIG.replace("[[profile]]\nname = \"work\"\nmodels = [\"local\"]\n\n", "");
 
-    let shadows = save_config_shadow(&path, document(&candidate)).expect("stale state degrades");
+    let shadows = save_config_shadow(&path, document(&candidate), &process_env_lookup)
+        .expect("stale state degrades");
 
     assert!(shadows.config.is_file());
 }
@@ -169,8 +177,12 @@ fn pending_save_accepts_a_document_that_drops_the_persisted_profile() {
 fn pending_loader_honors_a_supplied_selection() {
     let (_temp, path) = write_config();
 
-    let config = load_pending_config(&path, &ProfileSelection::new(Some("travel"), None))
-        .expect("pending loads");
+    let config = load_pending_config(
+        &path,
+        &ProfileSelection::new(Some("travel"), None),
+        &process_env_lookup,
+    )
+    .expect("pending loads");
 
     assert_eq!(config.active_profile().expect("selected").name(), "travel");
     assert!(config.local_models().is_empty());
@@ -180,7 +192,8 @@ fn pending_loader_honors_a_supplied_selection() {
 fn pending_loader_accepts_no_selection() {
     let (_temp, path) = write_config();
 
-    let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
+    let config = load_pending_config(&path, &ProfileSelection::default(), &process_env_lookup)
+        .expect("pending loads");
 
     assert!(config.active_profile().is_none());
     assert!(config.local_models().is_empty());
@@ -201,7 +214,8 @@ fn pending_loader_reads_the_state_file_and_ignores_a_state_shadow() {
     )
     .expect("write leftover state shadow");
 
-    let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
+    let config = load_pending_config(&path, &ProfileSelection::default(), &process_env_lookup)
+        .expect("pending loads");
 
     assert_eq!(config.active_profile().expect("selected").name(), "work");
     assert_eq!(config.local_models().len(), 1);
@@ -216,7 +230,8 @@ fn pending_loader_degrades_a_stale_state_file_like_load() {
     )
     .expect("write state");
 
-    let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
+    let config = load_pending_config(&path, &ProfileSelection::default(), &process_env_lookup)
+        .expect("pending loads");
 
     assert!(config.active_profile().is_none());
     assert_eq!(config.stale_state_selection(), Some("missing"));
@@ -226,8 +241,12 @@ fn pending_loader_degrades_a_stale_state_file_like_load() {
 fn pending_loader_rejects_an_undefined_ephemeral_selection() {
     let (_temp, path) = write_config();
 
-    let error = load_pending_config(&path, &ProfileSelection::new(Some("missing"), None))
-        .expect_err("a typed override must name a defined profile");
+    let error = load_pending_config(
+        &path,
+        &ProfileSelection::new(Some("missing"), None),
+        &process_env_lookup,
+    )
+    .expect_err("a typed override must name a defined profile");
 
     assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
     assert!(error.to_string().contains("missing"));

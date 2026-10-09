@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use toml::Value;
 
 use self::content::restore_secrets;
+use crate::VarLookupFn;
 use crate::config::Config;
 use crate::error::ConfigError as Repr;
 use crate::profile::{ProfileName, ProfileSelection, ProfileState};
@@ -211,6 +212,9 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 /// document: a state file naming a profile the document drops degrades to
 /// "no profile" at the next load, the same way [`Config::load`] treats it.
 ///
+/// The `lookup` argument provides a function to resolve `${VAR}`s against the
+/// pending environment.
+///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when the document is malformed
 /// or contains `active_profile`, a secret cannot be restored, the config is
@@ -218,6 +222,7 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 pub fn save_config_shadow(
     config_path: &Path,
     mut document: Value,
+    lookup: VarLookupFn,
 ) -> Result<PendingShadows, crate::ConfigError> {
     crate::config::reject_profiles_directory(config_path).map_err(crate::ConfigError::from)?;
     let table = document.as_table().ok_or_else(|| {
@@ -237,7 +242,8 @@ pub fn save_config_shadow(
     let rendered = toml::to_string_pretty(&document).map_err(|error| {
         crate::ConfigError::validation(format!("pending config does not render as TOML: {error}"))
     })?;
-    Config::parse_toml_at(&rendered, Some(config_path)).map_err(crate::ConfigError::from)?;
+    Config::parse_toml_with_lookup(&rendered, Some(config_path), lookup)
+        .map_err(crate::ConfigError::from)?;
     let config = write_shadow(config_path, &rendered)?;
     Ok(PendingShadows { config })
 }
@@ -250,12 +256,16 @@ pub fn save_config_shadow(
 /// drops degrades to no profile, reported through
 /// [`Config::stale_state_selection`].
 ///
+/// The `lookup` argument provides a function to resolve `${VAR}`s against the
+/// pending environment.
+///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) under the same conditions as
 /// [`Config::load`], or when a pending shadow cannot be read.
 pub fn load_pending_config(
     config_path: &Path,
     inputs: &ProfileSelection,
+    lookup: VarLookupFn,
 ) -> Result<Config, crate::ConfigError> {
     crate::config::reject_profiles_directory(config_path).map_err(crate::ConfigError::from)?;
     let (source_path, raw) = read_pending_or_real(config_path)
@@ -266,11 +276,12 @@ pub fn load_pending_config(
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "config not found"),
             })
         })?;
-    let config = Config::parse_toml_at(
+    let config = Config::parse_toml_with_lookup(
         &toml::to_string(&raw).map_err(|error| {
             crate::ConfigError::validation(format!("pending config does not render: {error}"))
         })?,
         Some(&source_path),
+        lookup,
     )
     .map_err(crate::ConfigError::from)?;
     // The state file sits beside the real config, not the shadow.

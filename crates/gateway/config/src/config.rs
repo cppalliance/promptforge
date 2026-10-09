@@ -20,6 +20,7 @@ pub use companion::{
     SpeculativeConfig,
 };
 pub(crate) use imp::reject_profiles_directory;
+pub use interpolate::VarLookupFn;
 use interpolate::interpolate_value;
 // The canonical home of the model-metadata types is `gateway-api-types`.
 pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};

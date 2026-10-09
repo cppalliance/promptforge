@@ -7,12 +7,17 @@
 
 use crate::error::ConfigError;
 
-/// Expands `${VAR}` from the environment; `$$` is a literal `$`.
+/// Looks up a concrete value for a `${VAR}`
+///
+/// Uses `std::env::var` semantics, so an unknown var returns `VarError::NotPresent`.
+pub type VarLookupFn<'a> = &'a dyn Fn(&str) -> Result<String, std::env::VarError>;
+
+/// Expands `${VAR}` from lookup; `$$` is a literal `$`.
 ///
 /// # Errors
 /// Returns [`ConfigError::Interpolation`] on an unclosed `${...}` and
 /// [`ConfigError::UnresolvedVar`] when a referenced variable is unset.
-pub(super) fn interpolate(input: &str) -> Result<String, ConfigError> {
+pub(super) fn interpolate(input: &str, lookup: VarLookupFn) -> Result<String, ConfigError> {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -41,7 +46,7 @@ pub(super) fn interpolate(input: &str) -> Result<String, ConfigError> {
                         "unclosed ${...} interpolation".to_string(),
                     ));
                 }
-                let value = std::env::var(&name)
+                let value = lookup(&name)
                     .map_err(|source| ConfigError::UnresolvedVar(name.clone(), source))?;
                 out.push_str(&value);
             }
@@ -54,19 +59,22 @@ pub(super) fn interpolate(input: &str) -> Result<String, ConfigError> {
 /// Recursively interpolates `${VAR}` in every string leaf of a TOML value,
 /// leaving keys, comments (already stripped by the parser), and non-string
 /// scalars untouched. (CFG-007)
-pub(super) fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+pub(super) fn interpolate_value(
+    value: &mut toml::Value,
+    lookup: VarLookupFn<'_>,
+) -> Result<(), ConfigError> {
     match value {
         toml::Value::String(text) => {
-            *text = interpolate(text)?;
+            *text = interpolate(text, lookup)?;
         }
         toml::Value::Array(items) => {
             for item in items {
-                interpolate_value(item)?;
+                interpolate_value(item, lookup)?;
             }
         }
         toml::Value::Table(table) => {
             for (_, entry) in table.iter_mut() {
-                interpolate_value(entry)?;
+                interpolate_value(entry, lookup)?;
             }
         }
         _ => {}
@@ -76,20 +84,27 @@ pub(super) fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigErr
 
 #[cfg(test)]
 mod tests {
-    use super::interpolate;
+    use super::*;
+
+    fn config_lookup(name: &str) -> Result<String, std::env::VarError> {
+        std::env::var(name)
+    }
 
     #[test]
     fn double_dollar_is_literal() {
-        assert_eq!(interpolate("cost is $$5").unwrap(), "cost is $5");
+        assert_eq!(
+            interpolate("cost is $$5", &config_lookup).unwrap(),
+            "cost is $5"
+        );
     }
 
     #[test]
     fn unset_variable_is_an_error() {
-        assert!(interpolate("${PFG_DEFINITELY_UNSET_VAR_XYZ}").is_err());
+        assert!(interpolate("${PFG_DEFINITELY_UNSET_VAR_XYZ}", &config_lookup).is_err());
     }
 
     #[test]
     fn unclosed_interpolation_is_an_error() {
-        assert!(interpolate("${UNCLOSED").is_err());
+        assert!(interpolate("${UNCLOSED", &config_lookup).is_err());
     }
 }

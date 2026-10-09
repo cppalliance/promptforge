@@ -22,6 +22,7 @@ use serde::Serialize;
 use super::config::ShadowReply;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
+use crate::config_shadow::read_env_file;
 use crate::error::{GatewayError, WireJson, WireQuery, blocking, config_write_error};
 use crate::registry::RouteInfo;
 
@@ -42,7 +43,7 @@ struct EnvReply {
 #[derive(Debug, Serialize)]
 struct EnvSection {
     path: String,
-    vars: serde_json::Map<String, serde_json::Value>,
+    vars: BTreeMap<String, String>,
 }
 
 const ENV: RouteInfo = RouteInfo::walled("/admin/env", &[Method::GET, Method::PUT]);
@@ -130,24 +131,8 @@ async fn admin_put_env(
 fn env_section(path: &Path) -> Result<EnvSection, GatewayError> {
     Ok(EnvSection {
         path: path.display().to_string(),
-        vars: parse_env(path)?,
+        vars: read_env_file(path)?,
     })
-}
-
-/// Parses one `.env` file into a map, without touching the process
-/// environment. A missing file is an empty map.
-fn parse_env(path: &Path) -> Result<serde_json::Map<String, serde_json::Value>, GatewayError> {
-    let mut vars = serde_json::Map::new();
-    if !path.is_file() {
-        return Ok(vars);
-    }
-    let entries =
-        dotenvy::from_path_iter(path).map_err(|error| GatewayError::EnvFile(Box::new(error)))?;
-    for entry in entries {
-        let (key, value) = entry.map_err(|error| GatewayError::EnvFile(Box::new(error)))?;
-        vars.insert(key, serde_json::Value::from(value));
-    }
-    Ok(vars)
 }
 
 /// Renders the variables as dotenv lines, refusing names and values the
