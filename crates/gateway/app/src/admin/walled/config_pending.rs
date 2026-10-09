@@ -24,7 +24,7 @@ use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::config_shadow::{config_root, relative_name, shadow_census};
+use crate::config_shadow::{PendingEnv, config_root, relative_name, shadow_census};
 use crate::error::{GatewayError, blocking, pending_read_error};
 use crate::registry::RouteInfo;
 
@@ -107,8 +107,13 @@ pub(super) fn load_pending_for_running(
     config_path: &Path,
     running_profile: Option<&str>,
 ) -> Result<Config, GatewayError> {
-    load_pending_config(config_path, &ProfileSelection::new(running_profile, None))
-        .map_err(|error| pending_read_error(&error))
+    let pending_env = PendingEnv::new(config_path)?;
+    load_pending_config(
+        config_path,
+        &ProfileSelection::new(running_profile, None),
+        &|name: &str| pending_env.resolve_var(name),
+    )
+    .map_err(|error| pending_read_error(&error))
 }
 
 /// The profile name the real state file persists, `None` when the file is

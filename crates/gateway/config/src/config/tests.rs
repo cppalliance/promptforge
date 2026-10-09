@@ -23,6 +23,10 @@ upstream = "u1"
 endpoints = ["anthropic"]
 "#;
 
+fn config_lookup(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(name)
+}
+
 #[test]
 fn parses_a_valid_config() {
     let config = Config::from_toml_str(SAMPLE).unwrap();
@@ -276,8 +280,11 @@ mystery = true
 #[test]
 fn interpolates_and_escapes() {
     // SAFETY-free: reading is fine; this test sets no env vars.
-    assert_eq!(interpolate("a$$b").unwrap(), "a$b");
-    assert_eq!(interpolate("no vars here").unwrap(), "no vars here");
+    assert_eq!(interpolate("a$$b", &config_lookup).unwrap(), "a$b");
+    assert_eq!(
+        interpolate("no vars here", &config_lookup).unwrap(),
+        "no vars here"
+    );
 }
 
 #[test]
@@ -314,7 +321,7 @@ endpoints = ["e"]
 fn unresolved_variable_is_an_error() {
     let missing = "${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}";
     assert!(matches!(
-        interpolate(missing),
+        interpolate(missing, &config_lookup),
         Err(ConfigError::UnresolvedVar(..))
     ));
 }
@@ -322,7 +329,7 @@ fn unresolved_variable_is_an_error() {
 #[test]
 fn unclosed_interpolation_is_an_error() {
     assert!(matches!(
-        interpolate("${OPEN"),
+        interpolate("${OPEN", &config_lookup),
         Err(ConfigError::Interpolation(_))
     ));
 }

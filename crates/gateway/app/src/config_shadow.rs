@@ -1,5 +1,6 @@
 //! Shadow-file bookkeeping: which real config files have a pending
 //! `.next` shadow, and how those paths are rendered for the wire.
+//! Provides a struct for reading the pending environment from the shadow files.
 //!
 //! Three readers share this. `GET /admin/config-dirty` reports the census
 //! as pending state, `POST /admin/config-apply` takes it under the apply
@@ -8,6 +9,8 @@
 //! `gateway-config`; this module only assembles the census and puts its
 //! paths in comparable and displayable form.
 
+use std::collections::BTreeMap;
+use std::env::VarError;
 use std::path::{Path, PathBuf};
 
 use gateway_config::{pending_report, shadow_path};
@@ -85,3 +88,68 @@ pub(crate) fn relative_name(file: &Path, root: Option<&Path>) -> String {
         .collect();
     parts.join("/")
 }
+
+/// Struct for accessing the environment variables the next boot will run with.
+pub(crate) struct PendingEnv {
+    data: BTreeMap<String, String>,
+}
+
+impl PendingEnv {
+    /// Constructs `Self` from env files.
+    /// If a shadow env file is staged, it reads that, otherwise the real file.
+    pub(crate) fn new(config_path: &Path) -> Result<Self, GatewayError> {
+        let path = {
+            let env_path = config_path.with_extension("env");
+            let shadow_path = shadow_path(&env_path);
+
+            if shadow_path.is_file() {
+                shadow_path
+            } else {
+                env_path
+            }
+        };
+
+        Ok(Self {
+            data: read_env_file(&path)?,
+        })
+    }
+
+    /// Resolves a `${VAR}` from the pending environment.
+    /// If a value is not present in the pending environment, it checks the current
+    /// running environment.
+    ///
+    /// TODO: This function is not able to distinguish between variables set in an
+    /// env file and overrides set in the shell. If the pending environment defines a
+    /// variable `VAR=abc` but the shell environment overrides it with `VAR=def`,
+    /// this will return `abc` but when the gateway restarts the value will be `def`
+    pub(crate) fn resolve_var(&self, name: &str) -> Result<String, VarError> {
+        match self.data.get(name) {
+            Some(value) => Ok(value.clone()),
+            None => std::env::var(name),
+        }
+    }
+}
+
+/// Parses a dotenv file and returns a map without changing the process environment; a
+/// missing file is an empty map.
+pub(crate) fn read_env_file(path: &Path) -> Result<BTreeMap<String, String>, GatewayError> {
+    let mut vars = BTreeMap::new();
+
+    if !path.is_file() {
+        return Ok(vars);
+    }
+
+    let entries =
+        dotenvy::from_path_iter(path).map_err(|error| GatewayError::EnvFile(Box::new(error)))?;
+
+    for entry in entries {
+        let (key, value) = entry.map_err(|error| GatewayError::EnvFile(Box::new(error)))?;
+        vars.insert(key, value);
+    }
+
+    Ok(vars)
+}
+
+#[cfg(test)]
+#[path = "config_shadow-tests.rs"]
+mod tests;
