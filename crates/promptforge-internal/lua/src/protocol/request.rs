@@ -13,6 +13,7 @@ use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::Error;
+use crate::messages::MessageList;
 
 /// A validated suspending Engine call, parsed from the yielded table.
 ///
@@ -170,18 +171,14 @@ pub enum Request {
         /// How the handler ended.
         outcome: LocalToolOutcome,
     },
-    /// One stateless tool-capable model round over an author-built message
+    /// One stateless tool-capable model round over a `messages.new()`
     /// list, yielded by the `models.loop` shim once per round. The round
     /// advertises the section's current tool scope, local Lua tools
     /// included, resolved in the dispatch arm where the tool scope sits.
     Chat {
-        /// The validated message records. Each holds a known role
-        /// ([`MessageRole`]), visible text or a non-empty content-parts
-        /// array ([`MessageContent`]), the normalized tool calls an
-        /// assistant record requested, and the call ID a tool result
-        /// answers. Validation happens here, in the protocol parse, once -
-        /// the driver converts without re-checking.
-        messages: Vec<MessageRecord>,
+        /// The list the round sends. Its records were validated as the
+        /// list added them.
+        list: MessageList,
         /// The loop shim's leading handle, as its frozen binding cloned
         /// out of the userdata while the VM handle is live; `None` when
         /// the round names no handle, and the driver resolves the

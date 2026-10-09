@@ -148,10 +148,12 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// two captures, `enter_local_handler` and `leave_local_handler`, count up
 /// and down on `local_handler_depth`, the counter the VM's `jump` reads, so
 /// `jump` refuses while a local tool's handler runs, whatever reference
-/// the handler calls it through. The last, `cancel_requested`, reads the
+/// the handler calls it through. Then `cancel_requested` reads the
 /// cancel flag of `instruction_budget`, so the chunk's protected calls
 /// raise a failure caught under cancellation again instead of returning
-/// it, and the hook's abort always reaches the block guard.
+/// it, and the hook's abort always reaches the block guard. The last,
+/// `is_message_list`, reports whether a value is a `messages.new()` list,
+/// so the loop shim drains task notices only into a list.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -181,6 +183,9 @@ pub(crate) fn install_shim_prelude(
     let cancel_requested = lua
         .create_function(move |_, ()| Ok(budget.is_cancelled()))
         .map_err(Error::lua)?;
+    let is_message_list = lua
+        .create_function(|_, value: Value| Ok(crate::messages::is_list(&value)))
+        .map_err(Error::lua)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -197,6 +202,7 @@ pub(crate) fn install_shim_prelude(
             enter_local_handler,
             leave_local_handler,
             cancel_requested,
+            is_message_list,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;

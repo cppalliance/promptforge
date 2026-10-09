@@ -1,15 +1,18 @@
-//! Tests for the `messages.new()` builders and their parse through the protocol.
+//! Tests for the `messages.new()` list and its parse through the protocol.
 
-use mlua::{Lua, LuaSerdeExt, Value};
+use mlua::{AnyUserData, Lua, LuaSerdeExt, Value};
 use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
-use super::install_messages;
-use crate::protocol::{Answer, MessageRecord, Request, ToolCallRecord, YieldParse};
+use super::{MessageList, install_messages};
+use crate::protocol::{Answer, MessageContent, MessageRecord, MessageRole, Request, YieldParse};
 use crate::{Error, SectionVm};
 
 #[path = "messages-tests-list.rs"]
 mod list;
+
+#[path = "messages-tests-records.rs"]
+mod records;
 
 #[path = "messages-tests-view.rs"]
 mod view;
@@ -34,205 +37,183 @@ fn eval(lua: &Lua, source: &str) -> Value {
     lua.load(source).eval().expect("test source evaluates")
 }
 
-/// Converts builder output through the same serde boundary the chat
-/// protocol's `messages` conversion uses.
-fn eval_json(lua: &Lua, source: &str) -> serde_json::Value {
-    lua.from_value(eval(lua, source))
-        .expect("builder output must convert to JSON")
-}
-
-/// Parses a message list through the chat protocol boundary, as a
-/// `models.loop` round's yield would.
-fn chat_parse(lua: &Lua, messages: Value) -> Vec<MessageRecord> {
-    let request = lua.create_table().expect("table creation cannot fail");
-    request.raw_set("op", "chat").expect("raw_set");
-    request.raw_set("messages", messages).expect("raw_set");
-    match Request::from_yield(lua, &Value::Table(request)) {
-        YieldParse::Request(Request::Chat { messages, .. }) => messages,
-        other => panic!("expected a chat request, got {other:?}"),
-    }
-}
-
-#[test]
-fn new_returns_an_empty_numerically_indexed_list() {
-    let lua = lua_with_messages();
-    let (len, first_nil): (i64, bool) = lua
-        .load("local l = messages.new(); return #l, l[1] == nil")
-        .eval()
-        .expect("test source evaluates");
-    assert_eq!(len, 0);
-    assert!(first_nil);
-}
-
-#[test]
-fn builders_chain_into_plain_records_in_order() {
-    let lua = lua_with_messages();
-    let json = eval_json(
-        &lua,
-        "messages.new():system('be terse'):user('hi'):assistant('hello')",
-    );
-    // The serde conversion succeeding at all proves the chainable methods
-    // live behind the metatable: as direct fields the functions would make
-    // the list JSON-unrepresentable.
-    assert_eq!(
-        json,
-        json!([
-            { "role": "system", "content": "be terse" },
-            { "role": "user", "content": "hi" },
-            { "role": "assistant", "content": "hello" },
-        ])
-    );
-}
-
-#[test]
-fn chaining_returns_the_same_list_table() {
-    let lua = lua_with_messages();
-    let same: bool = lua
-        .load(
-            "local l = messages.new(); \
-             return l:user('x') == l and l:append({ role = 'user', content = 'y' }) == l",
-        )
-        .eval()
-        .expect("test source evaluates");
-    assert!(
-        same,
-        "every builder method must return the list for chaining"
-    );
-}
-
-#[test]
-fn assistant_sets_tool_calls_only_when_given() {
-    let lua = lua_with_messages();
-    let without = eval_json(&lua, "messages.new():assistant('working on it')");
-    assert_eq!(
-        without,
-        json!([{ "role": "assistant", "content": "working on it" }]),
-        "an absent tool_calls argument must leave the field unset"
-    );
-    let with = eval_json(
-        &lua,
-        "messages.new():assistant('working', \
-         { { id = 'call_1', name = 'echo', arguments = { value = 'hi' } } })",
-    );
-    assert_eq!(
-        with,
-        json!([{
-            "role": "assistant",
-            "content": "working",
-            "tool_calls": [{ "id": "call_1", "name": "echo", "arguments": { "value": "hi" } }],
-        }])
-    );
-}
-
-#[test]
-fn tool_records_set_the_call_id() {
-    let lua = lua_with_messages();
-    let json = eval_json(&lua, "messages.new():tool('echoed: hi', 'call_1')");
-    assert_eq!(
-        json,
-        json!([{ "role": "tool", "content": "echoed: hi", "tool_call_id": "call_1" }])
-    );
-}
-
-#[test]
-fn append_adds_a_raw_record_unchanged() {
-    let lua = lua_with_messages();
-    let json = eval_json(
-        &lua,
-        "messages.new():append({ role = 'user', content = 'raw', extra = 1 })",
-    );
-    assert_eq!(
-        json,
-        json!([{ "role": "user", "content": "raw", "extra": 1 }]),
-        "append must not reshape the record; the protocol parse drops extra fields"
-    );
-}
-
-#[test]
-fn builder_output_parses_through_the_protocol_like_a_raw_array() {
-    let lua = lua_with_messages();
-    let built = eval(
-        &lua,
-        "messages.new()\
-         :system('be terse')\
-         :user('hi')\
-         :assistant('working', { { id = 'call_1', name = 'echo' } })\
-         :tool('echoed', 'call_1')",
-    );
-    let raw = eval(
-        &lua,
-        "{ { role = 'system', content = 'be terse' },\
-           { role = 'user', content = 'hi' },\
-           { role = 'assistant', content = 'working',\
-             tool_calls = { { id = 'call_1', name = 'echo' } } },\
-           { role = 'tool', content = 'echoed', tool_call_id = 'call_1' } }",
-    );
-    let built_records = chat_parse(&lua, built);
-    assert_eq!(
-        built_records,
-        chat_parse(&lua, raw),
-        "builder output and a hand-written array must validate to the same records"
-    );
-    assert_eq!(built_records.len(), 4);
-    assert_eq!(
-        built_records[2].tool_calls,
-        vec![ToolCallRecord {
-            id: "call_1".to_owned(),
-            name: "echo".to_owned(),
-            arguments: json!({}),
-        }],
-        "an absent arguments normalizes to the empty object"
-    );
-    assert_eq!(built_records[3].tool_call_id.as_deref(), Some("call_1"));
-}
-
-#[test]
-fn engine_validation_still_rejects_a_bad_builder_record() {
-    // The builders validate nothing: a record missing its content fails in
-    // the protocol parse, exactly as the same hand-written array does.
-    let lua = lua_with_messages();
-    let built = eval(&lua, "messages.new():user()");
-    let request = lua.create_table().expect("table creation cannot fail");
-    request.raw_set("op", "chat").expect("raw_set");
-    request.raw_set("messages", built).expect("raw_set");
-    match Request::from_yield(&lua, &Value::Table(request)) {
-        YieldParse::Call(Answer::Chat(Err(Error::Lua(message)))) => {
-            assert_eq!(
-                message,
-                "messages[1] content must be a string or a non-empty \
-                 array of content parts"
-            );
-        }
-        other => panic!("expected the chat call error, got {other:?}"),
-    }
-}
-
-#[test]
-fn the_builders_run_under_the_hardened_section_sandbox() {
+/// A section VM with its Engine values injected, `messages` included.
+fn section_vm() -> SectionVm {
     let nonce = GuardNonce::from_seed(1);
     let observer = crate::tests::recording::null_emitter();
     let mut vm =
         SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("value injection cannot fail");
-    let json: serde_json::Value = vm
-        .lua()
-        .load("return messages.new():system('s'):user('u')")
-        .eval::<Value>()
-        .and_then(|value| vm.lua().from_value(value))
-        .expect("builder output converts under the hardened sandbox");
-    assert_eq!(
-        json,
-        json!([{ "role": "system", "content": "s" }, { "role": "user", "content": "u" }])
-    );
-    vm.teardown(&observer, "Test");
+    vm
+}
+
+/// Parses `messages` through the chat protocol boundary, as a
+/// `models.loop` round's yield would.
+fn chat_parse(lua: &Lua, messages: Value) -> YieldParse {
+    let request = lua.create_table().expect("table creation cannot fail");
+    request.raw_set("op", "chat").expect("raw_set");
+    request.raw_set("messages", messages).expect("raw_set");
+    Request::from_yield(lua, &Value::Table(request))
+}
+
+/// The call error a chat parse answered with.
+fn chat_error(parse: YieldParse) -> String {
+    match parse {
+        YieldParse::Call(Answer::Chat(Err(Error::Lua(message)))) => message,
+        other => panic!("expected the chat call error, got {other:?}"),
+    }
+}
+
+fn text(role: MessageRole, content: &str) -> MessageRecord {
+    MessageRecord {
+        role,
+        content: MessageContent::Text(content.to_owned()),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
 #[test]
-fn the_messages_chunk_name_resolves_to_the_builders_file() {
-    crate::tests::assert_chunk_name_resolves(
-        "MESSAGES_CHUNK_NAME",
-        super::MESSAGES_CHUNK_NAME,
-        super::MESSAGES_SOURCE,
+fn new_returns_an_empty_list() {
+    let lua = lua_with_messages();
+    let (kind, len, first_nil): (String, i64, bool) = lua
+        .load("local l = messages.new(); return type(l), #l, l[1] == nil")
+        .eval()
+        .expect("test source evaluates");
+    assert_eq!(kind, "userdata");
+    assert_eq!(len, 0);
+    assert!(first_nil);
+}
+
+#[test]
+fn each_new_call_returns_a_separate_list() {
+    let lua = lua_with_messages();
+    let (first, second): (usize, usize) = lua
+        .load("local a, b = messages.new(), messages.new(); a:user('x'); return #a, #b")
+        .eval()
+        .expect("test source evaluates");
+    assert_eq!((first, second), (1, 0));
+}
+
+#[test]
+fn the_chat_parse_refuses_a_plain_table_with_the_list_error() {
+    let lua = lua_with_messages();
+    let refusal = "models.loop needs a messages.new() list; build one with \
+                   messages.new() and :user, :append, or :replace";
+    for source in [
+        "{ { role = 'system', content = 'be terse' }, { role = 'user', content = 'hi' } }",
+        "{}",
+    ] {
+        assert_eq!(
+            chat_error(chat_parse(&lua, eval(&lua, source))),
+            refusal,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn the_chat_parse_refuses_an_empty_list() {
+    let lua = lua_with_messages();
+    assert_eq!(
+        chat_error(chat_parse(&lua, eval(&lua, "messages.new()"))),
+        "messages must not be empty"
+    );
+}
+
+#[test]
+fn a_non_empty_list_parses_to_a_chat_request_holding_that_list() {
+    let lua = lua_with_messages();
+    let built = eval(
+        &lua,
+        "msgs = messages.new():system('be terse'):user('hi') return msgs",
+    );
+    let list = match chat_parse(&lua, built) {
+        YieldParse::Request(Request::Chat { list, binding }) => {
+            assert!(binding.is_none(), "a round without a handle has no binding");
+            list
+        }
+        other => panic!("expected a chat request, got {other:?}"),
+    };
+    let held = lua
+        .globals()
+        .get::<AnyUserData>("msgs")
+        .expect("msgs is the list userdata")
+        .borrow::<MessageList>()
+        .expect("msgs is a MessageList")
+        .records();
+    assert_eq!(list.records(), held);
+    assert_eq!(
+        list.records(),
+        vec![
+            text(MessageRole::System, "be terse"),
+            text(MessageRole::User, "hi")
+        ]
+    );
+    lua.load("msgs:user('more')")
+        .exec()
+        .expect("test source runs");
+    assert_eq!(
+        list.records().len(),
+        3,
+        "the request holds the author's list, not a copy"
+    );
+}
+
+#[test]
+fn a_list_or_a_record_view_is_refused_by_the_var_and_prose_guards() {
+    let vm = section_vm();
+    vm.install_lazy_prose(|state| {
+        let refusals = ["msgs", "record"].map(|name| match (state.globals)(name) {
+            Err(Error::Lua(message)) => message,
+            other => format!("{name} was not refused: {other:?}"),
+        });
+        Ok(refusals.join("|"))
+    })
+    .expect("the prose guard installs");
+    let (writes, prose): (String, String) = vm
+        .lua()
+        .load(
+            "msgs = messages.new():user('u')\n\
+             record = msgs[1]\n\
+             local out = {}\n\
+             for _, write in ipairs({\n\
+               function() var.list = msgs end,\n\
+               function() var.record = record end,\n\
+             }) do\n\
+               local ok, err = pcall(write)\n\
+               out[#out + 1] = ok and 'stored' or tostring(err):match('var%.%a+ must be JSON data, got %a+')\n\
+             end\n\
+             return table.concat(out, '|'), prose",
+        )
+        .eval()
+        .expect("test source evaluates");
+    assert_eq!(
+        writes,
+        "var.list must be JSON data, got userdata|var.record must be JSON data, got userdata"
+    );
+    assert_eq!(
+        prose,
+        "global `msgs` is a userdata; bare globals in prose must be JSON data|\
+         global `record` is a userdata; bare globals in prose must be JSON data"
+    );
+}
+
+#[test]
+fn the_list_runs_under_the_hardened_section_sandbox() {
+    let vm = section_vm();
+    let json: serde_json::Value = vm
+        .lua()
+        .load(
+            "local msgs = messages.new():system('s'):user('u')\n\
+             return { msgs[1], msgs[2] }",
+        )
+        .eval::<Value>()
+        .and_then(|value| vm.lua().from_value(value))
+        .expect("record views convert under the hardened sandbox");
+    assert_eq!(
+        json,
+        json!([{ "role": "system", "content": "s" }, { "role": "user", "content": "u" }])
     );
 }

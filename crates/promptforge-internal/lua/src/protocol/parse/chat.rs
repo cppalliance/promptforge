@@ -1,15 +1,20 @@
 //! The chat request parser: the loop shim's optional leading handle and
-//! the author-supplied `messages` list, validated once into message
-//! records.
+//! the author's `messages.new()` list, plus the per-record validation the
+//! list's builders run as they add a record.
 
-use mlua::{Lua, LuaSerdeExt, Value};
+use mlua::Value;
 
 use crate::Error;
+use crate::messages::MessageList;
 
 use super::super::request::{
     ContentPart, MessageContent, MessageRecord, MessageRole, Request, ToolCallRecord,
 };
 use super::{FieldFailure, call_handle};
+
+/// The refusal for a `messages` value that is not a `messages.new()` list.
+const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
+                          messages.new() and :user, :append, or :replace";
 
 /// The message roles the chat protocol accepts.
 const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
@@ -23,71 +28,45 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
     FieldFailure::Call(Error::Lua(message.into()))
 }
 
-/// Parses a `chat` request: the loop shim's optional leading `handle` and
-/// the author-supplied `messages` list.
+/// Parses a `chat` request: the loop shim's optional leading `handle`
+/// and the `messages` list, which must be a non-empty `messages.new()`
+/// list.
 ///
-/// The whole messages validation happens here, once - the driver converts
-/// the validated records without re-checking. Every author-argument
+/// The list validated each record as it added it, so the parse checks
+/// only that `messages` is such a list and clones its handle; the driver
+/// projects the records without re-checking them. Every author-argument
 /// failure is the call's error, raised at the `models.loop` call site so a
 /// program `pcall` catches it. The handle is checked first, as the loop's
 /// leading argument.
-pub(super) fn parse_chat(
-    lua: &Lua,
-    table: &mlua::Table,
-) -> std::result::Result<Request, FieldFailure> {
+pub(super) fn parse_chat(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let binding = call_handle(table, "models.loop")?;
-    let messages = match table.raw_get::<Value>("messages") {
-        Ok(value @ Value::Table(_)) => lua
-            .from_value::<serde_json::Value>(value)
-            .map_err(|_| chat_error("messages must be a JSON-representable table"))?,
-        Ok(other) => {
-            return Err(chat_error(format!(
-                "messages must be a table of message tables, got {}",
-                other.type_name()
-            )));
-        }
+    let list = match table.raw_get::<Value>("messages") {
+        Ok(Value::UserData(userdata)) => userdata
+            .borrow::<MessageList>()
+            .map(|list| MessageList::clone(&list))
+            .ok(),
+        Ok(_) => None,
         Err(_) => return Err(FieldFailure::Malformed),
     };
-    let messages = parse_messages(&messages)?;
-    Ok(Request::Chat { messages, binding })
-}
-
-/// Parses the converted message array into validated records, once, at the
-/// protocol boundary: known roles; `content` a string or a non-empty
-/// content-parts array with known part types and payloads; a present
-/// `tool_call_id` is a string, required on tool entries; a present
-/// `tool_calls` is an array of normalized `{id, name, arguments}` records.
-/// The empty list is rejected, and every error names the offending 1-based
-/// index (the list is Lua-authored). Entry fields beyond the four a record
-/// holds (`role`, `content`, `tool_call_id`, `tool_calls`) are accepted
-/// and dropped. Cross-record checks - unique call IDs, complete
-/// call-result pairing, provider-required alternation - belong to the
-/// per-dispatch projection ([`crate::projection`]), not this parse.
-fn parse_messages(
-    messages: &serde_json::Value,
-) -> std::result::Result<Vec<MessageRecord>, FieldFailure> {
-    let entries = match messages {
-        serde_json::Value::Array(entries) => entries,
-        // An empty Lua table converts ambiguously (array or object); both
-        // empty shapes are the same authoring error, named the same way.
-        serde_json::Value::Object(map) if map.is_empty() => {
-            return Err(chat_error("messages must not be empty"));
-        }
-        _ => return Err(chat_error("messages must be an array of message tables")),
-    };
-    if entries.is_empty() {
+    let list = list.ok_or_else(|| chat_error(NOT_A_LIST))?;
+    if list.is_empty() {
         return Err(chat_error("messages must not be empty"));
     }
-    entries
-        .iter()
-        .enumerate()
-        .map(|(position, entry)| parse_message(position + 1, entry).map_err(chat_error))
-        .collect()
+    Ok(Request::Chat { list, binding })
 }
 
 /// Validates one record in its JSON form, as a list builder adds it.
 /// `index` is the 1-based position the record takes, named in the
 /// error.
+///
+/// The rules: a known role; `content` a string or a non-empty
+/// content-parts array with known part types and payloads; a present
+/// `tool_call_id` a string, required on tool records; a present
+/// `tool_calls` an array of normalized `{id, name, arguments}` records.
+/// Fields beyond the four a record holds (`role`, `content`,
+/// `tool_call_id`, `tool_calls`) are dropped. Cross-record checks - unique
+/// call IDs, complete call-result pairing, provider-required alternation -
+/// belong to the per-dispatch projection ([`crate::projection`]).
 pub(crate) fn parse_record(
     index: usize,
     entry: &serde_json::Value,

@@ -1,14 +1,28 @@
 //! Yield parsing for the `chat` request the `models.loop` shim yields: the
-//! leading handle and message-list validation, with every author-argument
-//! failure as the call's own answer.
+//! leading handle and the `messages.new()` list, with every author-argument
+//! failure as the call's own answer. The per-record rules run as the list
+//! adds a record, so their tests sit with the list.
 
 use super::*;
+use crate::MessageList;
 
-fn chat_request(lua: &Lua, messages: &str) -> mlua::Table {
+/// The refusal for a `messages` value that is not a `messages.new()` list.
+const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
+                          messages.new() and :user, :append, or :replace";
+
+/// A `chat` request over a `messages.new()` list holding the records of
+/// the Lua array `records`, as the loop shim yields it.
+fn chat_request(lua: &Lua, records: &str) -> mlua::Table {
+    let list = lua
+        .create_userdata(MessageList::default())
+        .expect("userdata creation cannot fail");
+    lua.load(format!(
+        "local list = ...\nfor _, record in ipairs({records}) do list:append(record) end"
+    ))
+    .call::<()>(list.clone())
+    .expect("the test records build a list");
     let table = request_table(lua, "chat");
-    table
-        .raw_set("messages", lua_table(lua, messages))
-        .expect("raw_set");
+    table.raw_set("messages", list).expect("raw_set");
     table
 }
 
@@ -40,8 +54,9 @@ fn chat_parses_every_message_shape() {
     );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
-        Request::Chat { messages, binding } => {
+        Request::Chat { list, binding } => {
             assert!(binding.is_none(), "a round without a handle has no binding");
+            let messages = list.records();
             assert_eq!(messages.len(), 4);
             assert_eq!(messages[0].role, MessageRole::System);
             assert_eq!(
@@ -86,7 +101,8 @@ fn an_assistant_message_holds_visible_text_plus_multiple_normalized_tool_calls()
     );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
-        Request::Chat { messages, .. } => {
+        Request::Chat { list, .. } => {
+            let messages = list.records();
             assert_eq!(
                 messages[0].content,
                 MessageContent::Text("working on it".to_owned()),
@@ -129,7 +145,8 @@ fn correlated_tool_results_hold_the_matching_call_ids() {
     );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
-        Request::Chat { messages, .. } => {
+        Request::Chat { list, .. } => {
+            let messages = list.records();
             assert_eq!(messages[1].role, MessageRole::Tool);
             assert_eq!(messages[1].tool_call_id.as_deref(), Some("call_1"));
             assert_eq!(messages[2].role, MessageRole::Tool);
@@ -140,129 +157,42 @@ fn correlated_tool_results_hold_the_matching_call_ids() {
 }
 
 #[test]
-fn malformed_tool_calls_are_typed_call_errors_naming_the_index() {
+fn messages_that_are_not_a_list_are_the_calls_error() {
     let lua = Lua::new();
-    let cases: [(&str, &str); 4] = [
-        (
-            r#"{ { role = "assistant", content = "", tool_calls = { "raw" } } }"#,
-            "messages[1] tool_calls[1] must be a table",
-        ),
-        (
-            r#"{ { role = "assistant", content = "", tool_calls = { { name = "echo" } } } }"#,
-            "messages[1] tool_calls[1] must set a string id",
-        ),
-        (
-            r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1" } } } }"#,
-            "messages[1] tool_calls[1] must set a string name",
-        ),
-        (
-            r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1", name = "echo", arguments = "raw" } } } }"#,
-            "messages[1] tool_calls[1] arguments must be a table",
-        ),
-    ];
-    for (messages, expected) in cases {
-        let table = chat_request(&lua, messages);
-        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
-    }
-}
-
-#[test]
-fn content_parts_validate_each_variants_payload() {
-    let lua = Lua::new();
-    let cases: [(&str, &str); 3] = [
-        (
-            r#"{ { role = "user", content = { { type = "text" } } } }"#,
-            "messages[1] content part 1 is a text part and must set a string \
-             text field",
-        ),
-        (
-            r#"{ { role = "user", content = { { type = "image_url" } } } }"#,
-            "messages[1] content part 1 is an image_url part and must set an \
-             image_url table with a string url field",
-        ),
-        (
-            r#"{ { role = "user", content = { { type = "image_url", image_url = { detail = "high" } } } } }"#,
-            "messages[1] content part 1 is an image_url part and must set an \
-             image_url table with a string url field",
-        ),
-    ];
-    for (messages, expected) in cases {
-        let table = chat_request(&lua, messages);
-        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
-    }
-}
-
-#[test]
-fn a_non_string_tool_call_id_is_a_typed_call_error() {
-    let lua = Lua::new();
-    let table = chat_request(
-        &lua,
-        r#"{ { role = "user", content = "ok", tool_call_id = 7 } }"#,
-    );
-    expect_chat_call_error(
-        Request::from_yield(&lua, &Value::Table(table)),
-        "messages[1] tool_call_id must be a string",
-    );
-}
-
-#[test]
-fn chat_message_validation_names_the_offending_index() {
-    let lua = Lua::new();
-    let cases: [(&str, &str); 8] = [
-        ("{}", "messages must not be empty"),
-        (
-            r#"{ "not a table" }"#,
-            "messages[1] must be a message table",
-        ),
-        (
-            r#"{ { role = "user", content = "ok" }, { role = "wizard", content = "x" } }"#,
-            "messages[2] role \"wizard\" is unknown; known roles: system, user, assistant, tool",
-        ),
-        (
-            r#"{ { content = "no role" } }"#,
-            "messages[1] role must be a string, one of: system, user, assistant, tool",
-        ),
-        (
-            r#"{ { role = "user" } }"#,
-            "messages[1] content must be a string or a non-empty array of content parts",
-        ),
-        (
-            r#"{ { role = "user", content = { "bare string part" } } }"#,
-            "messages[1] content part 1 must be a table with a string type field",
-        ),
-        (
-            r#"{ { role = "user", content = { { type = "text", text = "ok" }, { type = "video" } } } }"#,
-            "messages[1] content part 2 has unknown type \"video\"; known types: text, image_url",
-        ),
-        (
-            r#"{ { role = "user", content = "ok" }, { role = "tool", content = "r" } }"#,
-            "messages[2] is a tool message and must set a string tool_call_id",
-        ),
-    ];
-    for (messages, expected) in cases {
-        let table = chat_request(&lua, messages);
-        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
-    }
-    // A non-table messages argument, absent included, is the call's error.
+    // Absent, a non-table, a hand-written array, an empty table, and a
+    // userdata of another type are all refused with the list error.
     let missing = request_table(&lua, "chat");
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(missing)),
-        "messages must be a table of message tables, got nil",
+        NOT_A_LIST,
     );
     let numeric = request_table(&lua, "chat");
     numeric.raw_set("messages", 42).expect("raw_set");
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(numeric)),
-        "messages must be a table of message tables, got integer",
+        NOT_A_LIST,
     );
-    // A present tool_calls of the wrong shape is rejected in place.
-    let table = chat_request(
-        &lua,
-        r#"{ { role = "assistant", content = "", tool_calls = "raw" } }"#,
-    );
+    for source in [r#"{ { role = "user", content = "hi" } }"#, "{}"] {
+        let plain = request_table(&lua, "chat");
+        plain
+            .raw_set("messages", lua_table(&lua, source))
+            .expect("raw_set");
+        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(plain)), NOT_A_LIST);
+    }
+    let other = request_table(&lua, "chat");
+    other
+        .raw_set("messages", handle_userdata(&lua))
+        .expect("raw_set");
+    expect_chat_call_error(Request::from_yield(&lua, &Value::Table(other)), NOT_A_LIST);
+}
+
+#[test]
+fn an_empty_list_is_the_calls_error() {
+    let lua = Lua::new();
+    let table = chat_request(&lua, "{}");
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(table)),
-        "messages[1] tool_calls must be an array",
+        "messages must not be empty",
     );
 }
 
