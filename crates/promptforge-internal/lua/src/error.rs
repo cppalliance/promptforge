@@ -21,7 +21,8 @@ type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// into a fresh [`Error`] each time. Wrapping it in a reference-counted
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
 /// cheaply per lookup instead of being flattened to a string. The
-/// compiled-program statics (the coroutine shim) are the callers, through
+/// compiled-program statics (the coroutine, tasks, and fanout shims, the
+/// globals chunk, and the store shims) are the callers, through
 /// [`crate::detail::shared_source_new`].
 #[derive(Debug, Clone)]
 pub struct SharedSource(pub(crate) std::sync::Arc<dyn std::error::Error + Send + Sync>);
