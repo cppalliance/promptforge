@@ -555,7 +555,7 @@ A shared foundation in `@workshop/look` comes first: Cursor's IDE token values, 
       - close icon on hover only; middle-click closes
     - **Rename:** double-click for an inline rename, plus a tab-menu "Rename Chat" (prompt "Enter new chat name", placeholder "Chat name"). Renames last for the session only.
     - **Turn footer:** a 28px row after each finished turn, which is every turn but the last, and the last once `generating` is off. It holds Copy, which puts the turn's reply texts (markdown source, joined by a blank line) on the clipboard. The icon swaps to a check, and the toast reads "Message copied to clipboard".
-    - **Transcript context menu:** Copy Message (or Copy when text is selected), Select All, Search with Google.
+    - **Transcript context menu:** Copy Message (or Copy when text is selected) and Select All.
     - **Empty state:** nothing above the composer, which sits at the bottom. The launcher's lead text goes.
     - **Right zone:** at least 300px wide, preferring `min(400px, W/4)`.
 
@@ -1048,7 +1048,7 @@ Rules for every step:
   - A keyed reconcile over the model's rows replaces the item-identity prefix diff. It reuses the component for a key and calls `update(row)`, creates new ones, removes ones that are gone, and places the tail last, or inside the open group that is the active tail.
   - Turn wrappers start at each user item; JS sets the trailing spacer; no "You" or model label.
   - After each finished turn (every turn but the last, and the last once `generating` is off), a 28px footer with Copy puts the turn's reply texts, as markdown source joined by a blank line, on the clipboard, swaps its icon to a check, and raises the toast "Message copied to clipboard" through `TOAST_STACK`.
-  - The transcript context menu offers Copy Message (Copy when text is selected), Select All, and Search with Google.
+  - The transcript context menu offers Copy Message (Copy when text is selected) and Select All.
   - The error case (line 178) leaves the feed, and the import of `tool-call-card` goes.
 - `crates/workshop/ui/src/parts/agent/agent-session.css`: the panel background and the feed values.
 - `crates/workshop/ui/src/parts/agent/markdown-render.ts` and `markdown-render.css`: the Markdown specification's body text, block spacing, headings, lists, inline code, code blocks with the hover copy button, links, blockquotes, tables, and `hr`; the streaming fade with no caret, wrapping only text runs younger than 150ms with a negative `animation-delay`, and skipping `pre`, `svg`, and `math`.

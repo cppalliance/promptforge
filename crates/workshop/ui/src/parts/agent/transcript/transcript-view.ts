@@ -10,8 +10,8 @@
 // The view owns the feed's chrome: the centered column, the trailing
 // spacer, the scroll behavior (feed-scroll.ts), the sticky human
 // messages, each finished turn's Copy footer, and the transcript context
-// menu (Copy Message, or Copy over a selection; Select All; Search with
-// Google). Nothing here reads the service; the owner hands in the model.
+// menu (Copy Message, or Copy over a selection; Select All). Nothing
+// here reads the service; the owner hands in the model.
 //
 // Every string painted here is untrusted data (user text, model markdown,
 // tool arguments and output) and reaches the DOM through the row
