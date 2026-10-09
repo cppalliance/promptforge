@@ -18,13 +18,15 @@
 -- local tool's handler runs, and `cancel_requested()` reports whether the
 -- run's cancel flag is set: a failure caught under cancellation is the
 -- instruction hook's abort, which must unwind to the block guard, so every
--- protected call below raises it again instead of returning it. The `tasks`
+-- protected call below raises it again instead of returning it, and
+-- `is_message_list(value)` reports whether a value is a messages.new()
+-- list. The `tasks`
 -- namespace and the `fanout` shim live in their own chunks
 -- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the Engine right
 -- after this one over the failure helpers this chunk returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure, enter_local_handler,
-  leave_local_handler, cancel_requested = ...
+  leave_local_handler, cancel_requested, is_message_list = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -191,11 +193,10 @@ local function tools_call_as_model(call_id, alias_or_tool, args, turn)
   })
 end
 
--- Appends one record to the author's list. The list is a plain array (a
--- messages.new() list keeps its builders behind __index, never as
--- fields), so the append is an ordinary sequence store.
+-- Appends one record to the author's messages.new() list, which validates
+-- it like an author's own append.
 local function append_record(messages, record)
-  messages[#messages + 1] = record
+  messages:append(record)
 end
 
 -- Drains the chain's pending model-task notices into the author's list
@@ -203,7 +204,11 @@ end
 -- since the last drain (the Engine's sentences saying how the model's
 -- tasks ended), each appended as a user record so the model reads them
 -- in its next round. A chain with no model tasks drains an empty list.
+-- A value that is not a messages.new() list drains nothing, so the
+-- round's protocol parse refuses it with the list error and the notices
+-- wait for the next round over a list.
 local function drain_task_notices(messages)
+  if not is_message_list(messages) then return end
   local ok, notices = yield({ op = "drain_task_notices" })
   if not ok then fail(notices) end
   for index = 1, #notices do
@@ -237,13 +242,13 @@ end
 -- author-owned message list, driven here over `chat` and `tool_call`
 -- yields so every network wait inside it is an ordinary suspension. The
 -- Engine installs this as models.loop. The leading handle is optional: a
--- userdata first argument selects the handle's frozen binding, anything
--- else is the messages argument (a wrong handle type is the protocol
--- parse's call error, exactly as for models.infer). The messages pass
--- through unvalidated: the protocol parse owns the whole message
--- contract, so every argument error surfaces at this call site
--- (pcall-able) with no second validator anywhere. The compactor defaults
--- to compactors.fail.
+-- userdata first argument followed by anything but nil or a function
+-- selects the handle's frozen binding, and otherwise the first argument
+-- is the list (a wrong handle type is the protocol parse's call error,
+-- exactly as for models.infer). The messages pass through unchecked: the
+-- protocol parse refuses anything but a non-empty messages.new() list,
+-- so every argument error surfaces at this call site (pcall-able). The
+-- compactor defaults to compactors.fail.
 --
 -- Per round: drain pending task notices, yield one `chat` over the list;
 -- on an overflow round invoke the compactor; on tool calls yield one
@@ -258,7 +263,8 @@ end
 -- the scheduler reports each round as it applies the round's answer.
 local function models_loop(...)
   local handle, messages, compactor
-  if type((...)) == 'userdata' then
+  local second = select(2, ...)
+  if type((...)) == 'userdata' and second ~= nil and type(second) ~= 'function' then
     if select('#', ...) > 3 then
       raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end

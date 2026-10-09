@@ -213,7 +213,7 @@ impl Request {
                 Some(request) => YieldParse::Request(request),
                 None => YieldParse::Malformed(direct_yield_error()),
             },
-            "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
+            "chat" => classify(parse_chat(table), |error| Answer::Chat(Err(error))),
             // No author arguments exist to fail validation: a well-formed
             // `drain_task_notices` yield is always the unit request.
             "drain_task_notices" => YieldParse::Request(Request::DrainTaskNotices),

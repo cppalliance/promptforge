@@ -170,7 +170,7 @@ async fn a_merged_history_falls_back_to_the_estimate() {
     let section = "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 11000))\n\
          models.loop(msgs)\n\
-         msgs[#msgs] = nil\n\
+         msgs:replace(#msgs, #msgs)\n\
          msgs:user(string.rep('y', 4000))\n\
          local ok, err = pcall(models.loop, msgs)\n\
          if ok then return 'sent' end\n\

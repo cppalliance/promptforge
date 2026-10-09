@@ -1,22 +1,19 @@
-//! The `messages` namespace: optional pure-Lua message-list builders.
+//! The `messages` namespace: the Rust-backed message list.
 //!
-//! `messages.new()` returns a normal numerically indexed table whose
-//! chainable `system`/`user`/`assistant`/`tool`/`append` methods live behind
-//! its metatable, so the list itself stays a plain array of message records:
-//! serde conversion, prose substitution, and the chat protocol's validation
-//! consume the records as if the author had written the array by
-//! hand. The protocol parse owns the whole message contract. The chainable
-//! builders are the one deliberate exception to the methodless-handle rule.
+//! `messages.new()` returns a [`MessageList`] userdata. Its chainable
+//! `system`/`user`/`assistant`/`tool`/`append` builders and `replace` are
+//! colon methods, the one deliberate exception to the methodless-handle
+//! rule. Each edit validates its records as it adds them, keeps the system
+//! records leading the list, and drops fields a record does not hold, so a
+//! refused edit raises at the author's call and leaves the list unchanged.
+//! `#list` counts the records, `list[i]`, `pairs`, and `ipairs` read them
+//! as read-only views with metamethods only, and assignment is refused.
 //!
-//! The shim is pure Lua with no privileged captures (it never yields), so it
-//! installs with the Engine globals during Engine injection, ahead of the shared
-//! replay. The source is pulled in with `include_str!` so chunk line 1 is
-//! file line 1, compiled once through the usual [`LuaProgram`] machinery,
-//! and loaded per VM; the `@`-prefixed chunk name renders shim frames as
-//! verbatim `file:line:` references, like the coroutine shim chunks.
+//! A model round's request holds a clone of the same list, so the round
+//! reads the records the author built with no second validation.
 
 use std::fmt::Display;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mlua::{
     AnyUserData, Function, LuaSerdeExt, MetaMethod, Table, UserData, UserDataMethods, Value,
@@ -26,40 +23,29 @@ use promptforge_model_client::client::Message;
 use promptforge_types::ids::RoundId;
 use serde_json::{Map, Value as Json};
 
-use super::{Error, Lua, LuaProgram, Result, SharedSource};
+use super::{Error, Lua, Result};
 use crate::protocol::{MessageRecord, MessageRole, parse_record};
 
 #[path = "messages-view.rs"]
 mod view;
 
-/// The builders chunk's name: `@`-prefixed so PUC renders it verbatim as a
-/// file path, making unexpected shim errors clickable `file:line:`
-/// references with no `[string "..."]` wrapper.
-const MESSAGES_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_messages.lua";
-
-/// The builders source, embedded verbatim so chunk line 1 is file line 1.
-const MESSAGES_SOURCE: &str = include_str!("__impl_messages.lua");
-
-/// The builders program, compiled once and loaded per VM. Compilation of the
-/// bundled source fails only on a crate bug, so the payload is a shareable
-/// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
-/// a typed error at each install.
-static MESSAGES_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
-    LazyLock::new(|| {
-        LuaProgram::compile_internal(MESSAGES_SOURCE, MESSAGES_CHUNK_NAME)
-            .map_err(crate::detail::shared_source_new)
-    });
-
-/// Installs the `messages` global holding the pure-Lua `new` builder.
+/// Installs the `messages` global holding `new`, which returns a new
+/// empty [`MessageList`].
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the builders chunk or the global install fails.
+/// Returns [`Error::Lua`] if the global install fails.
 pub(crate) fn install_messages(lua: &Lua, globals: &Table) -> Result<()> {
-    let program = MESSAGES_PROGRAM.as_ref().map_err(Error::shared)?;
-    let new: Function = program.load(lua)?.call(()).map_err(Error::lua)?;
+    let new = lua
+        .create_function(|lua, ()| lua.create_userdata(MessageList::default()))
+        .map_err(Error::lua)?;
     let messages = lua.create_table().map_err(Error::lua)?;
     messages.raw_set("new", new).map_err(Error::lua)?;
     globals.raw_set("messages", messages).map_err(Error::lua)
+}
+
+/// Whether `value` is a `messages.new()` list.
+pub(crate) fn is_list(value: &Value) -> bool {
+    matches!(value, Value::UserData(userdata) if userdata.is::<MessageList>())
 }
 
 /// A `messages.new()` list. The same value is the Lua userdata and the
@@ -96,6 +82,12 @@ impl MessageList {
     /// How many records the list holds.
     fn len(&self) -> usize {
         self.state().records.len()
+    }
+
+    /// Whether the list holds no records.
+    #[must_use]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.state().records.is_empty()
     }
 
     /// The record at the 1-based `index`, if the list holds one there.
