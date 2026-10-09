@@ -197,6 +197,14 @@ export class AgentSessionService extends Disposable {
    * ever supersede.
    */
   private settled = -1;
+  /**
+   * True from a sent cancel until the turn's work restarts (an answer, an
+   * input request, or a session acknowledgment). A reasoning chunk that
+   * arrives in that window is a late straggler from the cancel grace
+   * period; it opens already ended, so the thought never reads as
+   * streaming under an idle composer.
+   */
+  private stopped = false;
   private pinnedToken: string | null = null;
   private working = false;
   private dropped = false;
@@ -252,6 +260,8 @@ export class AgentSessionService extends Disposable {
         // The agent is waiting on the operator: no thinking is still
         // running, and nothing is generating until the answer lands.
         const closed = this.closeThinking(null);
+        // The relaunched agent is waiting: the cancel grace window is over.
+        this.stopped = false;
         this.setGenerating(false);
         this.setPinnedToken(token);
         if (closed) {
@@ -336,6 +346,8 @@ export class AgentSessionService extends Disposable {
       this.foldError(CONNECTION_FAILED_MESSAGE, CONNECTION_FAILED_TITLE);
       return false;
     }
+    // The answer restarts the turn's work, so a stop no longer applies.
+    this.stopped = false;
     // The token is single-use; the response just spent it.
     this.setPinnedToken(null);
     this.setGenerating(true);
@@ -353,6 +365,7 @@ export class AgentSessionService extends Disposable {
     if (!this.wire.cancelTurn()) {
       return false;
     }
+    this.stopped = true;
     const closed = this.closeThinking(null);
     this.setGenerating(false);
     if (closed) {
@@ -374,6 +387,7 @@ export class AgentSessionService extends Disposable {
     const changedSession =
       this.acknowledged === null || this.acknowledged.session !== frame.session;
     this.acknowledged = frame;
+    this.stopped = false;
     if (changedSession) {
       this.transcript = [];
       this.settled = -1;
@@ -490,8 +504,10 @@ export class AgentSessionService extends Disposable {
               model: null,
               pending: true,
               reply: frame.reply,
-              startedAt: this.now(),
-              endedAt: null,
+              // After Stop the chunk is a late straggler: it opens ended,
+              // with no start, so it reads as a finished thought.
+              startedAt: this.stopped ? null : this.now(),
+              endedAt: this.stopped ? this.now() : null,
             }
           : { kind: "reply", text: frame.content, model: null, pending: true, reply: frame.reply },
       );

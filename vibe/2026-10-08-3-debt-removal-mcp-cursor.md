@@ -182,7 +182,7 @@ Every step ends with its own test, typecheck, format, and lint gates, so each co
 </step-1>
 <step-2>
 
-### Step 2: Open a late reasoning chunk after Stop as an ended thought
+### Step 2: Open a late reasoning chunk after Stop as an ended thought [completed]
 
 - Component: Stopped-turn reasoning
 - Debt: D1-9. A first reasoning chunk that arrives after Stop opens a pending thought with no end, so `thoughtStep` reports `streaming: true` under an idle composer. `cancelTurn` ends only already-open thinking, and `foldDelta` has no post-cancel guard.

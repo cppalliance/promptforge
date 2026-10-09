@@ -611,6 +611,86 @@ await assertNoLeaks(lifecycle, () => {
     service.dispose();
   }
 
+  // --- A reasoning chunk after Stop opens as an ended thought ------------------
+
+  {
+    const wire = makeWire();
+    const clock = { now: 10 };
+    const service = new AgentSessionService(wire, () => clock.now);
+    const last = () => service.items[service.items.length - 1];
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    wire.respondResult = true;
+    wire.cancelResult = true;
+    service.respond("go");
+    service.cancelTurn();
+    clock.now = 40;
+    wire.fire.delta("reasoning", "late", 0);
+    check(
+      "a first reasoning chunk after Stop opens an ended thought with no start",
+      last().kind === "reasoning" &&
+        last().pending === true &&
+        last().startedAt === null &&
+        last().endedAt === 40,
+    );
+
+    // The relaunched agent waiting on the operator ends the grace window.
+    clock.now = 50;
+    wire.fire.inputRequired("tok2");
+    wire.fire.delta("reasoning", "after the wait", 1);
+    check(
+      "an input request after Stop makes the next first chunk stream",
+      last().startedAt === 50 && last().endedAt === null,
+    );
+
+    // The operator answering restarts the turn's work.
+    service.cancelTurn();
+    service.respond("again");
+    clock.now = 60;
+    wire.fire.delta("reasoning", "fresh", 2);
+    check(
+      "an answer after Stop makes the next first chunk stream",
+      last().startedAt === 60 && last().endedAt === null,
+    );
+
+    // A same-session reattach acknowledgment ends the grace window too.
+    service.cancelTurn();
+    wire.fire.session("s1");
+    clock.now = 70;
+    wire.fire.delta("reasoning", "reattached", 3);
+    check(
+      "a reattach acknowledgment after Stop makes the next first chunk stream",
+      last().startedAt === 70 && last().endedAt === null,
+    );
+
+    // Deltas that append to an existing item never restamp it.
+    clock.now = 80;
+    wire.fire.delta("reasoning", " more", 3);
+    check(
+      "a later chunk appends without moving the clock stamps",
+      last().text === "reattached more" && last().startedAt === 70 && last().endedAt === null,
+    );
+    service.dispose();
+  }
+
+  {
+    const wire = makeWire();
+    const clock = { now: 10 };
+    const service = new AgentSessionService(wire, () => clock.now);
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    service.respond("go");
+    wire.cancelResult = false;
+    check("a cancel that fails to send reports false", service.cancelTurn() === false);
+    clock.now = 20;
+    wire.fire.delta("reasoning", "still thinking", 0);
+    check(
+      "a failed cancel does not end a new thought: the turn is not stopped",
+      service.items[0].startedAt === 20 && service.items[0].endedAt === null,
+    );
+    service.dispose();
+  }
+
   // --- Error titles: server errors have none; a downed socket is titled -------
 
   {
