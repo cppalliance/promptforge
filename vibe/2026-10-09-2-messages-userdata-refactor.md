@@ -649,7 +649,7 @@ The conversation list moves into the Engine, which records each round's request 
 
 <step-2>
 
-### Step 2: Build the MessageList core
+### Step 2: Build the MessageList core [completed]
 
 - Component: Message list
 

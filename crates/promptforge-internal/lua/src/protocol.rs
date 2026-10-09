@@ -26,6 +26,7 @@ mod tests;
 
 pub use answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
 pub use parse::YieldParse;
+pub(crate) use parse::parse_record;
 pub use request::{
     ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request,
     ToolCallRecord, VfsOp,

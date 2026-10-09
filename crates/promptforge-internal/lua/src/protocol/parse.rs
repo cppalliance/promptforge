@@ -13,6 +13,7 @@ use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::TaskOrigin;
 
 use chat::parse_chat;
+pub(crate) use chat::parse_record;
 use store::parse_store;
 use tasks::{
     parse_cancel, parse_concurrency, parse_join_any, parse_note, parse_pending, parse_ready,
