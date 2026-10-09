@@ -678,7 +678,7 @@ The conversation list moves into the Engine, which records each round's request 
 
 <step-3>
 
-### Step 3: Add read-only record views and list iteration
+### Step 3: Add read-only record views and list iteration [completed]
 
 - Component: Message list
 
