@@ -146,7 +146,7 @@ Plan shape: Bounded path, 2 steps, 2 commits, no components. The steps share no 
 </step-1>
 <step-2>
 
-### Step 2: Suppress the native context menu in the Gateway config panel
+### Step 2: Suppress the native context menu in the Gateway config panel [completed]
 
 - Component: none
 - Follow-up: F2. The Workshop embeds the config SPA in an iframe, and the Workshop page's own `contextmenu` suppression (`crates/workshop/ui/src/main.ts`, a capture listener on its `document`) does not reach inside the frame.

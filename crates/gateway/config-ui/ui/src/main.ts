@@ -88,6 +88,9 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   const params = new URLSearchParams(win.location.search);
 
   if (params.get("mode") === "panel") {
+    // The panel is an iframe in the Workshop, so the Workshop page's own
+    // `contextmenu` suppression does not reach inside the frame.
+    root.ownerDocument.addEventListener("contextmenu", (event) => event.preventDefault(), true);
     mountPanelMode(root, win, params.get("bridge"), options);
     return;
   }

@@ -54,6 +54,30 @@ test("standalone mode shows the medallion and a working skip link", async () => 
   assert.equal(dom.window.location.hash, "#/local", "the skip jump never rewrites the route");
 });
 
+test("panel mode suppresses the native context menu inside the frame", async () => {
+  const { dom, root } = await bootApp({
+    url: "http://127.0.0.1:8081/config/?mode=panel",
+    stub: gatewayStub(),
+  });
+
+  const target = root.querySelector("main") ?? root;
+  const event = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, true, "the panel frame hides the native context menu");
+});
+
+test("standalone mode keeps the browser's native context menu", async () => {
+  const stub = gatewayStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  const target = root.querySelector("main") ?? root;
+  const event = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, false, "standalone leaves the context menu to the browser");
+});
+
 test("the connection dot goes green after a successful API call", async () => {
   const stub = gatewayStub();
   const { root } = await bootApp({ key: "k", stub });
