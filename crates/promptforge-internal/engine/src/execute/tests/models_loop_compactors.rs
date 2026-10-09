@@ -100,18 +100,22 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.
-    // A userdata followed by a non-function reads as a leading handle and
-    // its list, so the cases name the handle explicitly.
+    // Each value is passed after the list alone and after a leading
+    // handle and the list; both forms reach the compactor check.
     let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
-         local out = {}\n\
-         for _, bad in ipairs({ 42, 4.5, 'summarize', {} }) do\n\
-           local ok, err = pcall(models.loop, models.get('writer'), msgs, bad)\n\
+         local function refusal(...)\n\
+           local ok, err = pcall(models.loop, ...)\n\
            assert(not ok, 'a non-function compactor raises')\n\
            assert(err.kind == 'lua', 'the argument error is the lua kind')\n\
-           out[#out + 1] = tostring(err)\n\
+           return tostring(err)\n\
+         end\n\
+         local out = {}\n\
+         for _, bad in ipairs({ 42, 4.5, 'summarize', {} }) do\n\
+           out[#out + 1] = refusal(msgs, bad)\n\
+           out[#out + 1] = refusal(models.get('writer'), msgs, bad)\n\
          end\n\
          assert(#msgs == 1, 'a refused call appends nothing')\n\
          return table.concat(out, '|')",
@@ -125,8 +129,12 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     assert_eq!(
         out,
         "compactor must be a function, got integer\
+         |compactor must be a function, got integer\
+         |compactor must be a function, got number\
          |compactor must be a function, got number\
          |compactor must be a function, got string\
+         |compactor must be a function, got string\
+         |compactor must be a function, got table\
          |compactor must be a function, got table"
     );
     assert_eq!(

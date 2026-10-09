@@ -274,7 +274,44 @@ fn pairs_ipairs_and_a_counted_loop_visit_every_record_in_order_as_views() {
 }
 
 #[test]
-fn pairs_and_ipairs_visit_the_live_list_when_the_loop_edits_it() {
+fn a_pairs_loop_that_appends_ends_after_the_records_it_started_with() {
+    let (lua, _list) = sandboxed();
+    run(&lua, "msgs:user('u1'):assistant('a1'):user('u2')");
+    let ended: (i64, i64) = lua
+        .load(
+            "local n = 0 \
+             for _ in pairs(msgs) do \
+               n = n + 1 \
+               if n > 10 then error('runaway pairs') end \
+               msgs:user('x') \
+             end \
+             return n, #msgs",
+        )
+        .eval()
+        .expect("the loop ends after the starting records");
+    assert_eq!(ended, (3, 6));
+}
+
+#[test]
+fn a_pairs_loop_stops_early_when_the_list_shrinks_below_its_next_index() {
+    let (lua, _list) = sandboxed();
+    run(&lua, "msgs:user('u1'):assistant('a1'):user('u2')");
+    let seen: String = lua
+        .load(
+            "local seen = {} \
+             for i, view in pairs(msgs) do \
+               if i == 1 then msgs:replace(2, 3) end \
+               seen[#seen + 1] = i .. ':' .. view.content \
+             end \
+             return table.concat(seen, ' ')",
+        )
+        .eval()
+        .expect("test source evaluates");
+    assert_eq!(seen, "1:u1");
+}
+
+#[test]
+fn pairs_keeps_its_starting_length_while_ipairs_reads_the_live_list() {
     let walk = |iterate: &str| -> String {
         let (lua, _list) = sandboxed();
         run(&lua, "msgs:user('u1'):assistant('a1'):user('u2')");
@@ -290,7 +327,6 @@ fn pairs_and_ipairs_visit_the_live_list_when_the_loop_edits_it() {
         .eval()
         .expect("test source evaluates")
     };
-    let live = "1:u1 2:a1 3:u2b 4:u3";
-    assert_eq!(walk("pairs"), live, "pairs");
-    assert_eq!(walk("ipairs"), live, "ipairs");
+    assert_eq!(walk("pairs"), "1:u1 2:a1 3:u2b", "pairs");
+    assert_eq!(walk("ipairs"), "1:u1 2:a1 3:u2b 4:u3", "ipairs");
 }

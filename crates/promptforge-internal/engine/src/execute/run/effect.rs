@@ -222,7 +222,9 @@ impl Effect {
 /// alias of the model slot it ran under, and the frozen invocation
 /// settings (temperature, generation cap, and thinking switch). It stores
 /// the request's messages in wire form after the first `keep`, which repeat
-/// round `after`'s request. It names the slot by alias, because the
+/// round `after`'s request. So a caller that logs records must record every
+/// Chat effect a step returns, including ones it drops, for each `after` to
+/// name a recorded round. It names the slot by alias, because the
 /// caller may serve the slot with a different model from the bound one.
 /// The answer's [`ChatAnswerRecord`] names the model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

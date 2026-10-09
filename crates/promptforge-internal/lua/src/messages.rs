@@ -8,6 +8,8 @@
 //! refused edit raises at the author's call and leaves the list unchanged.
 //! `#list` counts the records, `list[i]`, `pairs`, and `ipairs` read them
 //! as read-only views with metamethods only, and assignment is refused.
+//! `pairs` stops at the record count it started with, as the sandbox
+//! `pairs` does for a table, while `ipairs` reads the live list.
 //!
 //! A model round's request holds a clone of the same list, so the round
 //! reads the records the author built with no second validation.
@@ -290,18 +292,25 @@ fn bound(name: &str, value: &Value) -> mlua::Result<i64> {
     })
 }
 
-/// The index after `previous` in a list walk, and a new view of the
-/// record there, or nils past the end.
+/// The index after `previous` in a `pairs` walk, and a new view of the
+/// live record there, or nils past `extent` or past the live list's end.
+/// `extent` is the record count when the walk began, so a loop that
+/// appends still ends, as the sandbox `pairs` fixes a table's keys at its
+/// start.
 fn next_record(
     lua: &Lua,
     list: &MessageList,
     previous: &Value,
+    extent: usize,
 ) -> mlua::Result<(Option<usize>, Value)> {
     let index = match previous {
         Value::Nil => Some(1),
         key => key_index(key).and_then(|index| index.checked_add(1)),
     };
-    match index.and_then(|index| Some((index, list.record(index)?))) {
+    match index
+        .filter(|index| *index <= extent)
+        .and_then(|index| Some((index, list.record(index)?)))
+    {
         Some((index, record)) => Ok((Some(index), view::create(lua, record)?)),
         None => Ok((None, Value::Nil)),
     }
@@ -379,8 +388,9 @@ impl UserData for MessageList {
             MetaMethod::Pairs,
             |lua, this: AnyUserData| -> mlua::Result<(Function, AnyUserData, Value)> {
                 let list = handle(&this)?;
+                let extent = list.len();
                 let next = lua.create_function(move |lua, (_, previous): (Value, Value)| {
-                    next_record(lua, &list, &previous)
+                    next_record(lua, &list, &previous, extent)
                 })?;
                 Ok((next, this, Value::Nil))
             },

@@ -17,8 +17,8 @@ use crate::client::{Completion, CompletionResult, Message, ToolCall, ToolSchema,
 /// `content` is the raw wire content value - a string for a plain message
 /// or an `OpenAI` content-parts array for a multimodal one - and serializes
 /// into the request verbatim. For each chat round the Engine sends, its Lua
-/// protocol layer validates the author-built message tables once and hands
-/// the validated parts here.
+/// layer has already validated each author-built record once, as the
+/// message list added it, and hands the validated parts here.
 #[must_use]
 pub fn message_from_validated_parts(
     role: impl Into<String>,
