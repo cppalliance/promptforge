@@ -242,11 +242,12 @@ end
 -- author-owned message list, driven here over `chat` and `tool_call`
 -- yields so every network wait inside it is an ordinary suspension. The
 -- Engine installs this as models.loop. The leading handle is optional: a
--- userdata first argument followed by anything but nil or a function
--- selects the handle's frozen binding, and otherwise the first argument
--- is the list (a wrong handle type is the protocol parse's call error,
--- exactly as for models.infer). The messages pass through unchecked: the
--- protocol parse refuses anything but a non-empty messages.new() list,
+-- userdata first argument that is not a messages.new() list, followed by
+-- anything but nil or a function, selects the handle's frozen binding, and
+-- otherwise the first argument is the list (a wrong handle type is the
+-- protocol parse's call error, exactly as for models.infer). The messages
+-- pass through unchecked: the protocol parse refuses anything but a
+-- non-empty messages.new() list,
 -- so every argument error surfaces at this call site (pcall-able). The
 -- compactor defaults to compactors.fail.
 --
@@ -264,7 +265,8 @@ end
 local function models_loop(...)
   local handle, messages, compactor
   local second = select(2, ...)
-  if type((...)) == 'userdata' and second ~= nil and type(second) ~= 'function' then
+  if type((...)) == 'userdata' and not is_message_list((...))
+      and second ~= nil and type(second) ~= 'function' then
     if select('#', ...) > 3 then
       raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end
