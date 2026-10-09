@@ -211,7 +211,7 @@ Every step ends with its own test, typecheck, format, and lint gates, so each co
 </step-2>
 <step-3>
 
-### Step 3: Guard the runtime service key with a server test
+### Step 3: Guard the runtime service key with a server test [completed]
 
 - Component: Runtime key guard
 - Debt: D1-1, option A. The contract owns only the bare string `TOKIO_RUNTIME`, and three production crates (`plugin-web`, `plugin-mcp`, `workshop-server`) each build their own `ServiceKey<Handle>` from it. No test bound the server's key to the one `plugin-mcp` reads. Add that guard and leave the public contract alone.

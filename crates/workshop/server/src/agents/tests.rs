@@ -320,3 +320,40 @@ async fn the_host_context_installs_the_servers_of_the_named_file() {
     let (host, _ask) = host_context(&Registry::new(), Some(Path::new(&path)));
     assert!(installed_as_a_refused_local_server(&Arc::new(host), "github").await);
 }
+
+/// A loopback URL nothing listens on: the port is bound to learn it, then
+/// freed, so a connection to it is refused at once.
+fn closed_loopback_url() -> String {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
+    let port = listener.local_addr().expect("the bound address").port();
+    drop(listener);
+    format!("http://127.0.0.1:{port}/mcp")
+}
+
+#[tokio::test]
+async fn a_remote_mcp_entry_reads_the_runtime_the_server_provides() {
+    // The server's own `services` provides the runtime, and `plugin-mcp`
+    // reads it through a key of its own, so only a run over both shows the
+    // two keys name the same service.
+    let (host, _ask) = with_plugins(
+        services(&Registry::new()),
+        vec![(
+            "docs".to_owned(),
+            serde_json::json!({ "url": closed_loopback_url() }),
+        )],
+    );
+
+    let outcome = run_prompt(&Arc::new(host), requiring("docs")).await;
+    let Some(RunOutcome::Failed { kind, message }) = outcome else {
+        panic!("the run is refused as the closed port fails the handshake: {outcome:?}");
+    };
+    assert_eq!(kind, "RequirementsUnmet");
+    assert!(
+        message.contains("- docs is unavailable: the MCP handshake failed"),
+        "the server got past the runtime read and failed at the connection: {message}"
+    );
+    assert!(
+        !message.contains(TOKIO_RUNTIME),
+        "the server's runtime reaches plugin-mcp's key: {message}"
+    );
+}
