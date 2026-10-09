@@ -14,14 +14,15 @@
 // five-second timer; the next press either completes the chord (the
 // command runs), mismatches (the not-a-command status shows for three
 // seconds), or never comes (the timer or a window blur abandons the
-// chord). A rejected command is caught and reported to the status bar,
-// never thrown out of the listener.
+// chord). A rejected command is caught and never thrown out of the
+// listener: the registry has already reported it (the toast's source), so
+// the dispatcher only logs the error object.
 //
 // The composition root constructs one dispatcher at boot; tests inject
 // their own registries and a recording status sink.
 
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
-import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { Commands, logCommandFailure, type CommandRegistry } from "@workshop/platform/command-registry";
 import { CONTEXT_KEY_SERVICE, type ContextKey, type ContextKeyService } from "@workshop/platform/context-key-service";
 import { chordFromKeyboardEvent, formatChord, formatKeybinding, type Chord } from "@workshop/platform/keybinding-parser";
 import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
@@ -41,9 +42,7 @@ const TRANSIENT_STATUS_MS = 3000;
 export interface KeybindingStatusSink {
   /** Shows an informational message (the chord prompts). */
   show(message: string): void;
-  /** Shows an error message (a command's rejection). */
-  showError(message: string): void;
-  /** Clears a message whose lifetime ended. */
+  /** Clears a message whose lifetime ended, back to the empty idle text. */
   clear(): void;
 }
 
@@ -57,9 +56,9 @@ export interface KeybindingDispatcherDependencies {
 
 /**
  * The status-bar-backed sink. Local messages go through showLocal, which the
- * next observer frame overwrites; clear restores the idle text. With no
- * composition root (a widget test) the messages go to the console so a
- * swallowed failure stays loud.
+ * next observer frame overwrites; clear sets the bar's idle text, which is
+ * empty - Cursor's status bar shows nothing when idle. With no composition
+ * root (a widget test) the prompts go to the console.
  */
 function createStatusBarSink(): KeybindingStatusSink {
   return {
@@ -71,16 +70,8 @@ function createStatusBarSink(): KeybindingStatusSink {
       }
       statusBar.showLocal(message, "info");
     },
-    showError(message: string): void {
-      const statusBar = getServiceOrNull(STATUS_BAR);
-      if (statusBar === null) {
-        console.error(message);
-        return;
-      }
-      statusBar.showLocal(message, "error");
-    },
     clear(): void {
-      getServiceOrNull(STATUS_BAR)?.showLocal("Ready", "info");
+      getServiceOrNull(STATUS_BAR)?.showLocal("", "info");
     },
   };
 }
@@ -144,8 +135,8 @@ export class KeybindingDispatcher extends Disposable {
       this.clearPending();
       const commandId = result.commandId;
       void this.commands.execute(commandId).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.status.showError(`Could not run '${commandId}': ${message}`);
+        // The registry has already reported the failure; keep the detail.
+        logCommandFailure(commandId, error);
       });
       return;
     }

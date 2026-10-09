@@ -319,7 +319,7 @@ function openPreferences() {
 // --- Zoom chords through the keybinding dispatcher -----------------------------
 
 const dispatcher = new KeybindingDispatcher({
-  status: { show() {}, showError() {}, clear() {} },
+  status: { show() {}, clear() {} },
 });
 function press(key, init = {}) {
   const event = new window.KeyboardEvent("keydown", {

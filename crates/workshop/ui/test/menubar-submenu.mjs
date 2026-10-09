@@ -468,29 +468,38 @@ menu.open("menubar/file", anchor);
   window.HTMLElement.prototype.getBoundingClientRect = originalRect;
 }
 
-// --- A failed command reports to the status bar --------------------------------
+// --- A failed command: the registry reports it, the menu keeps the detail -------
 
 const statusMessages = [];
 const statusRegistration = registerService(STATUS_BAR, () => ({
   showLocal: (label, severity) => statusMessages.push([label, severity]),
 }));
-commands.register("file.boom", { title: "Boom", run: () => Promise.reject(new Error("kaboom")) });
+commands.register("file.boom", { title: "Boom", category: "File", run: () => Promise.reject(new Error("kaboom")) });
 menus.appendMenuItem("menubar/file", { command: "file.boom", group: "9_z" });
+const reported = [];
+const failureWatch = commands.onDidFailCommand((failure) => reported.push(failure));
+const logged = [];
+const realConsoleError = console.error;
+console.error = (...args) => logged.push(args);
 
 menu.open("menubar/file", anchor);
 {
   const popover = popovers()[0];
   rowByLabel(popover, "Boom").dispatchEvent(new window.Event("click", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
+  console.error = realConsoleError;
   check("activating a failing row closes the menu", popovers().length === 0);
   check(
-    "a failed command posts an error to the status bar",
-    statusMessages.length === 1 &&
-      statusMessages[0][1] === "error" &&
-      statusMessages[0][0].includes("file.boom") &&
-      statusMessages[0][0].includes("kaboom"),
+    "the registry reports the failed row's command with its palette label",
+    reported.length === 1 && reported[0].id === "file.boom" && reported[0].label === "File: Boom",
   );
+  check(
+    "the menu logs the failure's detail on the console",
+    logged.length === 1 && String(logged[0][0]).includes("file.boom") && logged[0][1]?.message === "kaboom",
+  );
+  check("the menu posts nothing to the status bar for a failure", statusMessages.length === 0);
 }
+failureWatch.dispose();
 statusRegistration.dispose();
 
 // --- Dismissal: Escape, outside pointer, window blur ----------------------------

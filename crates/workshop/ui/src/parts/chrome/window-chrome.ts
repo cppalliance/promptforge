@@ -17,13 +17,12 @@ import "./window-chrome.css";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 
 import { ICON_GEAR, ICON_LAYOUT_SIDEBAR_LEFT, ICON_LAYOUT_SIDEBAR_RIGHT } from "@workshop/look/icons";
-import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { Commands, logCommandFailure, type CommandRegistry } from "@workshop/platform/command-registry";
 import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import { detectPlatform } from "@workshop/platform/keybinding-parser";
 import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
-import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
-import { STATUS_BAR } from "@workshop/platform/status-bar";
+import { getService } from "@workshop/platform/service-registry";
 
 declare global {
   interface Window {
@@ -131,15 +130,9 @@ function buildToolbar(
     button.addEventListener("pointerenter", refreshTooltip);
     button.addEventListener("focus", refreshTooltip);
     button.addEventListener("click", () => {
+      // The registry reports a failure (the toast); keep the detail.
       void commands.execute(tool.commandId).catch((error: unknown) => {
-        const statusBar = getServiceOrNull(STATUS_BAR);
-        if (statusBar === null) {
-          // No composition root (a widget test): keep the failure loud.
-          console.error(`title bar command '${tool.commandId}' failed`, error);
-          return;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        statusBar.showLocal(`Could not run '${tool.commandId}': ${message}`, "error");
+        logCommandFailure(tool.commandId, error);
       });
     });
     toolbar.appendChild(button);

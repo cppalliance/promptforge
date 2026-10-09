@@ -20,12 +20,21 @@
 
 import { toDisposable, type IDisposable } from "./lifecycle";
 
-/** One row in the ? help list. */
+/** One row in the ? help list, and optionally one in the command center's modes list. */
 export interface QuickAccessHelpEntry {
   /** What the mode does, e.g. "Show and Run Commands". */
   readonly description: string;
-  /** The prefix that enters the mode. */
-  readonly prefix: string;
+  /** The prefix that enters the mode; the provider's own prefix when absent. */
+  readonly prefix?: string;
+  /** The command that opens the mode; both lists show that command's keybinding. */
+  readonly commandId?: string;
+  /**
+   * Where the entry sits in the command center's modes list, ascending. An
+   * entry without an order stays out of that list and shows only under ?.
+   */
+  readonly commandCenterOrder?: number;
+  /** The modes list's label when it should differ from `description`. */
+  readonly commandCenterLabel?: string;
 }
 
 /** A quick-access provider registration, keyed by its prefix. */

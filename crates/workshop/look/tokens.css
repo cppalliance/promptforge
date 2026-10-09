@@ -323,6 +323,20 @@
   --space-2-5: 10px;
   --token-ring-size: 15px;
 
+  /* Toasts: Cursor's notification toast. The stack sits 25px from the bottom
+     (the 22px status bar plus the IDE's 3px) and 3px from the left; a card is
+     340px wide with a 6px margin and blurs what is behind it by 40px. The
+     severity glyphs use the IDE's own info blue, which is not the accent. */
+  --toast-width: 340px;
+  --toast-margin: 6px;
+  --toast-blur: 40px;
+  --toast-inset-block-end: 25px;
+  --toast-inset-inline-start: 3px;
+  --toast-icon-info: #3794FF;
+  --toast-icon-success: var(--cursor-green);
+  --toast-icon-warning: var(--cursor-yellow);
+  --toast-icon-error: var(--cursor-red);
+
   /* Status bar */
   --status-bar-height: 22px;
   --status-bar-bg: #141414;
@@ -330,6 +344,7 @@
   --status-bar-text-error: #FC6B83;
   --status-bar-padding-inline: 7px;
   --status-bar-gap: 3px;
+  --status-bar-item-padding-inline: 5px;
 
   /* Status bar barberpole (the fill and track also color the block
      progress bar in progress.css) */
@@ -393,6 +408,16 @@
   --scrollbar-width-menu: 7px;
   --scrollbar-thumb: #F0F0F011;
   --scrollbar-thumb-hover: #F0F0F01E;
+
+  /* Keybinding chips (the IDE's keybindingLabel colors) and the quick input's
+     group-label line and filter-match color (pickerGroup.border and
+     list.highlightForeground) */
+  --keybinding-label-bg: #8080802B;
+  --keybinding-label-text: #CCCCCC;
+  --keybinding-label-border: #33333399;
+  --keybinding-label-border-bottom: #44444499;
+  --quick-input-separator: #F0F0F01C;
+  --list-highlight: var(--cursor-cyan);
 
   /* Focus: Cursor draws a 1px outline inside list rows, tree rows, menu
      rows, and inputs (controls.css and dropdown.css apply it) */

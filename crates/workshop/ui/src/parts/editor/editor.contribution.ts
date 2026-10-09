@@ -324,11 +324,13 @@ for (const row of contextMenuRows) {
   Menus.appendMenuItem(EDITOR_CONTEXT_MENU, row);
 }
 
-// The ":" go-to-line provider. The factory is CodeMirror-free; only the
-// row's accept path lazy-imports the command layer.
+// The ":" go-to-line provider, in Cursor's own text. The factory is
+// CodeMirror-free; only the row's accept path lazy-imports the command
+// layer. The entry has no command-center order, as Cursor's has none, so it
+// shows under ? but not in the modes list.
 QuickAccessRegistry.registerQuickAccessProvider({
   prefix: ":",
-  placeholder: "Go to line",
-  helpEntries: [{ description: "Go to Line/Column in Editor", prefix: ":" }],
+  placeholder: "Type the line number and optional column to go to (e.g. 42:5 for line 42 and column 5).",
+  helpEntries: [{ description: "Go to Line/Column", commandId: "workbench.action.gotoLine" }],
   factory: () => createGotoLineProvider(),
 });

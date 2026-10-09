@@ -44,14 +44,19 @@ import { getService } from "@workshop/platform/service-registry";
 // The widget module, never the parts/menu barrel: the barrel imports the
 // contribution surface, and lazy panels import this module for
 // setTabLoading.
-import { Menu, reportCommandFailure } from "../menu/menu";
+import { Menu } from "../menu/menu";
+import { toastCommandFailure } from "../../services/command-failure-toasts";
 import { closeActiveEditor } from "./panel-close";
 import { onDidChangeTabName, setTabName, tabNameOf } from "./tab-names";
 
-/** Closes one panel through the layout core, so its part confirms before it goes. */
+/**
+ * Closes one panel through the layout core, so its part confirms before it
+ * goes. The call bypasses the command registry, so a failure raises the
+ * command-failure toast by hand.
+ */
 function closePanel(panelId: string): void {
   void closeActiveEditor({ panelId }).catch((error: unknown) => {
-    reportCommandFailure("workbench.action.closeActiveEditor", error);
+    toastCommandFailure("workbench.action.closeActiveEditor", error);
   });
 }
 
@@ -75,7 +80,7 @@ function closeAndRefocus(panelId: string): void {
       }
     })
     .catch((error: unknown) => {
-      reportCommandFailure("workbench.action.closeActiveEditor", error);
+      toastCommandFailure("workbench.action.closeActiveEditor", error);
     });
 }
 

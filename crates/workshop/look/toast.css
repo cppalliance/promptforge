@@ -1,38 +1,123 @@
-/* The toast stack, bottom-right, on the Cursor Dark tokens. A consumer
-   whose chrome occupies the viewport bottom (the workshop's status bar)
-   retunes the offset through --toast-inset-block-end. Rules live in the
+/* The toast stack, bottom-left, in Cursor's notification-toast style on the
+   Cursor Dark tokens: a #181818 card with the IDE's base shadow and no
+   border, a 12px codicon for the severity, and a close X that shows while
+   the toast is hovered or holds focus. The stack sits 25px from the bottom,
+   which clears the 22px status bar by the IDE's 3px; a consumer whose chrome
+   differs retunes that through --toast-inset-block-end. Rules live in the
    components layer so consumer overrides win. */
 
 @layer components {
 	.toast-stack {
 		position: fixed;
-		inset-block-end: var(--toast-inset-block-end, 1rem);
-		inset-inline-end: 1rem;
+		inset-block-end: var(--toast-inset-block-end);
+		inset-inline-start: var(--toast-inset-inline-start);
 		z-index: 60;
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
 	}
+
+	/* The newest toast is first in the stack, so it sits on top. */
 	.toast {
 		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		min-width: 240px;
-		max-width: 360px;
-		padding: 0.625rem 0.875rem;
-		border: 1px solid var(--border);
-		border-left-width: 3px;
+		align-items: flex-start;
+		gap: var(--space-1-5);
+		box-sizing: border-box;
+		width: var(--toast-width);
+		margin: var(--toast-margin);
+		padding: var(--space-2);
+		border: none;
 		border-radius: var(--radius);
-		background: var(--cursor-chrome);
-		box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+		background: var(--cursor-bg-elevated);
+		box-shadow: var(--cursor-box-shadow-base);
+		backdrop-filter: blur(var(--toast-blur));
+		font-size: var(--font-size-sm);
+		line-height: var(--line-height-sm);
+		color: var(--text);
+		animation: toast-slide-up var(--duration-slower) ease-out;
 	}
-	.toast-success {
-		border-left-color: var(--cursor-green);
+
+	@keyframes toast-slide-up {
+		from {
+			opacity: 0;
+			transform: translateY(100%);
+		}
+		to {
+			opacity: 1;
+			transform: none;
+		}
 	}
-	.toast-error {
-		border-left-color: var(--danger);
+
+	.toast__icon {
+		display: flex;
+		flex: 0 0 14px;
+		align-items: center;
+		justify-content: center;
+		height: 16px;
+		margin-inline-start: 2px;
 	}
-	.toast-info {
-		border-left-color: var(--accent);
+
+	.toast__icon svg {
+		width: 12px;
+		height: 12px;
+	}
+
+	.toast-info .toast__icon {
+		color: var(--toast-icon-info);
+	}
+	.toast-success .toast__icon {
+		color: var(--toast-icon-success);
+	}
+	.toast-warning .toast__icon {
+		color: var(--toast-icon-warning);
+	}
+	.toast-error .toast__icon {
+		color: var(--toast-icon-error);
+	}
+
+	.toast__message {
+		flex: 1;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	/* The close X: invisible until the toast is hovered or holds focus, as
+	   the IDE's toolbar container is. It hides by opacity rather than
+	   display, so the keyboard can still tab to it, and tabbing to it shows
+	   it. */
+	.toast__close {
+		display: flex;
+		flex: none;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		padding: 0;
+		border: none;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: inherit;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.toast:hover .toast__close,
+	.toast:focus-within .toast__close {
+		opacity: 0.5;
+	}
+
+	.toast__close:hover {
+		opacity: 1;
+		background: var(--cursor-toolbar-hover);
+	}
+
+	.toast__close svg {
+		width: 12px;
+		height: 12px;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.toast {
+			animation: none;
+		}
 	}
 }

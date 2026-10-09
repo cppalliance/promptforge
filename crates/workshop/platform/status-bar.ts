@@ -8,7 +8,11 @@ import { createServiceToken, type ServiceToken } from "./service-registry";
 
 /** The status-bar surface consumers resolve from the registry. */
 export interface StatusBar {
-  /** Shows a locally-originated message; the next observer frame overwrites it. */
+  /**
+   * Shows a locally-originated message. An info message paints the bar's
+   * text, and the next observer frame overwrites it. An error is raised as a
+   * toast instead, so it stays readable after the next frame lands.
+   */
   showLocal(label: string, severity: "info" | "error"): void;
   /** Whether the bar is currently shown. */
   readonly isVisible: boolean;

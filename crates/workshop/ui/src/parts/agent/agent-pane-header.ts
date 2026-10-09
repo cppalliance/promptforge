@@ -20,8 +20,8 @@ import "./agent-pane-header.css";
 import type { DockviewGroupPanel, IGroupHeaderProps, IHeaderActionsRenderer } from "dockview";
 
 import { ICON_ADD, ICON_CLOSE, ICON_ELLIPSIS } from "@workshop/look/icons";
-import { Commands } from "@workshop/platform/command-registry";
-import { Menu, reportCommandFailure } from "../menu/menu";
+import { Commands, logCommandFailure } from "@workshop/platform/command-registry";
+import { Menu } from "../menu/menu";
 import { AGENT_PANE_MENU } from "./agent-commands";
 
 /** One header button: a codicon on a 24px square, named for assistive tech and the tooltip. */
@@ -40,10 +40,10 @@ function headerButton(label: string, icon: string, onPress: (button: HTMLButtonE
   return button;
 }
 
-/** Runs a command from a header button, reporting a rejection on the status bar. */
+/** Runs a command from a header button; the registry reports a rejection (the toast), so only the detail is logged. */
 function run(commandId: string): void {
   void Commands.execute(commandId).catch((error: unknown) => {
-    reportCommandFailure(commandId, error);
+    logCommandFailure(commandId, error);
   });
 }
 

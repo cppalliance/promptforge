@@ -27,6 +27,8 @@ const bundle = await esbuild.build({
     contents: `
       export { StatusBar } from "./src/parts/status/status-bar.ts";
       export { STATUS_INDICATORS } from "@workshop/platform/status-indicators";
+      export { registerService } from "@workshop/platform/service-registry";
+      export { TOAST_STACK } from "./src/services/toast-service.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -51,7 +53,7 @@ globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-status-indicators-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { StatusBar, STATUS_INDICATORS } = await import(pathToFileURL(bundlePath).href);
+const { StatusBar, STATUS_INDICATORS, registerService, TOAST_STACK } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -71,6 +73,42 @@ check("the platform exports the STATUS_INDICATORS token", typeof STATUS_INDICATO
 const bar = new StatusBar();
 check(`the status bar registers no indicator of its own (got ${ids().join(",")})`, ids().length === 0);
 check("the status bar exposes no recording port", !("setRecording" in bar));
+
+// The idle bar reads empty: Cursor's status bar has no "Ready" placeholder.
+const barText = window.document.querySelector(".status-bar__text");
+check(`an idle bar reads empty (got "${barText.textContent}")`, barText.textContent === "");
+
+// Local messages. Info paints the bar. An error is a toast when a stack is
+// registered, and falls back to red bar text when none is, so a failure is
+// never silent in a bare bar.
+bar.showLocal("Added /x to the Workshop", "info");
+check("an info message paints the bar text", barText.textContent === "Added /x to the Workshop");
+check("an info message is not styled as an error", !barText.classList.contains("status-bar__text--error"));
+bar.showLocal("Could not open /y", "error");
+check(
+  "without a toast stack an error paints the bar red",
+  barText.textContent === "Could not open /y" && barText.classList.contains("status-bar__text--error"),
+);
+bar.showLocal("", "info");
+check("an empty local message clears the bar to idle", barText.textContent === "");
+check("an empty local message clears the error styling", !barText.classList.contains("status-bar__text--error"));
+
+const toasts = [];
+registerService(TOAST_STACK, () => ({
+  element: window.document.createElement("div"),
+  show: (message, kind) => toasts.push([message, kind]),
+}));
+bar.showLocal("Status line", "info");
+bar.showLocal("Could not add /z: denied", "error");
+check(
+  "an error raises one error toast with the caller's text",
+  toasts.length === 1 && toasts[0][0] === "Could not add /z: denied" && toasts[0][1] === "error",
+);
+check("an error toast leaves the bar text alone", barText.textContent === "Status line");
+check("an error toast does not paint the bar red", !barText.classList.contains("status-bar__text--error"));
+bar.showLocal("Still fine", "info");
+check("an info message raises no toast", toasts.length === 1 && barText.textContent === "Still fine");
+bar.showLocal("", "info");
 
 // Ordering: registration order differs from `order`; the DOM follows `order`.
 const late = bar.register({ id: "late", name: "Late indicator", order: 5 });

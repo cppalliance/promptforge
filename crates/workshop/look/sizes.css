@@ -11,6 +11,7 @@
   --ws-size-4: 4px;
   --ws-size-5: 5px;
   --ws-size-6: 6px;
+  --ws-size-7: 7px;
   --ws-size-8: 8px;
   --ws-size-9: 9px;
   --ws-size-10: 10px;
@@ -22,6 +23,7 @@
   --ws-size-20: 20px;
   --ws-size-20-5: 20.5px;
   --ws-size-22: 22px;
+  --ws-size-23: 23px;
   --ws-size-24: 24px;
   --ws-size-26: 26px;
   --ws-size-35: 35px;
@@ -42,9 +44,19 @@
   --ws-size-320: 320px;
   --ws-size-360: 360px;
   --ws-size-380: 380px;
+  --ws-size-440: 440px;
   --ws-size-500: 500px;
   --ws-size-560: 560px;
   --ws-size-600: 600px;
+  --ws-size-820: 820px;
+
+  /* Viewport-relative sizes (named by value) */
+  --ws-size-vw-62: 62vw;
+  --ws-size-vw-80: 80vw;
+  --ws-size-vh-40: 40vh;
+
+  /* Relative type sizes (named by value) */
+  --ws-size-em-0-9: 0.9em;
 
   /* Time primitives (named by value, in milliseconds) */
   --ws-duration-160: 160ms;

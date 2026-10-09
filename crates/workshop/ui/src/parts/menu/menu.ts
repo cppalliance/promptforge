@@ -40,13 +40,12 @@ import "./window-menu.css";
 import { ICON_CHECK, ICON_CHEVRON_RIGHT } from "@workshop/look/icons";
 import { Emitter } from "@workshop/platform/event";
 import { Disposable, DisposableStore, toDisposable } from "@workshop/platform/lifecycle";
-import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { Commands, logCommandFailure, type CommandRegistry } from "@workshop/platform/command-registry";
 import { CONTEXT_KEY_SERVICE, type ContextKeyService } from "@workshop/platform/context-key-service";
 import { ContextKeyExpr } from "@workshop/platform/context-key-expr";
 import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
 import { Menus, type MenuId, type MenuItem, type MenuRegistry, type MenuRow, type SubmenuItem } from "@workshop/platform/menu-registry";
-import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
-import { STATUS_BAR } from "@workshop/platform/status-bar";
+import { getService } from "@workshop/platform/service-registry";
 
 /** Where the popover opens: below an element, or at a pointer position. */
 export type MenuAnchor = HTMLElement | { readonly x: number; readonly y: number };
@@ -76,18 +75,6 @@ interface RowHandle {
   readonly key: string;
   readonly element: HTMLButtonElement;
   readonly row: MenuRow;
-}
-
-/** Reports a failed menu row or tab command on the status bar. */
-export function reportCommandFailure(commandId: string, error: unknown): void {
-  const statusBar = getServiceOrNull(STATUS_BAR);
-  if (statusBar === null) {
-    // No composition root (a widget test): keep the failure loud.
-    console.error(`command '${commandId}' failed`, error);
-    return;
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  statusBar.showLocal(`Could not run '${commandId}': ${message}`, "error");
 }
 
 /**
@@ -520,8 +507,9 @@ export class Menu extends Disposable {
     // Close the whole chain first, so a command that opens a surface
     // never stacks it under a stale popover.
     this.closeRoot();
+    // The registry reports the failure (the toast); keep the detail.
     void this.commands.execute(row.command, ...args).catch((error: unknown) => {
-      reportCommandFailure(row.command, error);
+      logCommandFailure(row.command, error);
     });
   }
 

@@ -22,13 +22,12 @@
 // shared singletons, resolved at call time; tests inject their own.
 
 import { baseName } from "../../base/paths";
-import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { Commands, logCommandFailure, type CommandRegistry } from "@workshop/platform/command-registry";
 import type { MenuItem, MenuItemsProvider } from "@workshop/platform/menu-registry";
 import { RECENT_FILES_STORE, type RecentFilesStore } from "../../services/recent-files-store";
-import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
-import { STATUS_BAR } from "@workshop/platform/status-bar";
-import type { QuickAccessProvider, QuickInputItem } from "../../services/quick-input-service";
+import { substringHighlights, type QuickAccessProvider, type QuickInputItem } from "../../services/quick-input-service";
 
 /** The stores the providers read; tests inject their own. */
 export interface RecentProviderDeps {
@@ -51,18 +50,6 @@ export function isWorkspaceFilePath(path: string): boolean {
 /** The command a recent path dispatches: the workspace open for a .pfwork, the editor otherwise. */
 function openCommandFor(path: string): string {
   return isWorkspaceFilePath(path) ? OPEN_WORKSPACE_COMMAND : "vscode.open";
-}
-
-/** Reports a rejected command run to the status bar, as the menu does. */
-function reportCommandFailure(commandId: string, error: unknown): void {
-  const statusBar = getServiceOrNull(STATUS_BAR);
-  if (statusBar === null) {
-    // No composition root (a widget test): keep the failure loud.
-    console.error(`command '${commandId}' failed`, error);
-    return;
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  statusBar.showLocal(`Could not run '${commandId}': ${message}`, "error");
 }
 
 /**
@@ -135,11 +122,13 @@ export function createFileQuickAccessProvider(deps: RecentProviderDeps = {}): Qu
         seen.add(path);
         rows.push({
           label: name,
+          labelHighlights: substringHighlights(name, needle),
           description: path,
           accept: () => {
             const command = openCommandFor(path);
+            // The registry reports a failure (the toast); keep the detail.
             void commands.execute(command, path).catch((error: unknown) => {
-              reportCommandFailure(command, error);
+              logCommandFailure(command, error);
             });
           },
         });

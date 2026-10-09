@@ -12,7 +12,8 @@
    controls; the right group holds the barberpole and then the slot with
    the consumer's LED indicators group. The barberpole hides while idle
    (the hidden attribute); the indicators never hide. min-height rather
-   than height so a descender never clips against a fixed box. */
+   than height so a descender never clips against a fixed box. The top
+   line is an inset shadow, as Cursor draws it, so it takes no height. */
 @layer components {
 	.status-bar {
 		flex: none;
@@ -20,7 +21,7 @@
 		display: flex;
 		align-items: center;
 		background: var(--status-bar-bg);
-		border-top: 1px solid var(--border);
+		box-shadow: inset 0 1px 0 0 var(--border);
 		font-size: 12px;
 		line-height: 22px;
 		font-variant-numeric: tabular-nums;
@@ -187,15 +188,16 @@
 	}
 
 	/* A non-LED item standing among the LEDs: a bare button the owner
-	   draws into. Hover takes the hover background; focus follows the
-	   consuming UI's convention. */
+	   draws into. It fills the bar's full height with square corners, as
+	   Cursor's status bar items do. Hover takes the hover background and a
+	   press the active one; focus follows the consuming UI's convention. */
 	.status-bar__item {
 		display: inline-flex;
 		align-items: center;
-		height: var(--height-xs);
-		padding: 0 var(--space-1);
+		height: var(--status-bar-height);
+		padding: 0 var(--status-bar-item-padding-inline);
 		border: none;
-		border-radius: var(--radius-sm);
+		border-radius: 0;
 		background: transparent;
 		color: inherit;
 		font: inherit;
@@ -204,6 +206,10 @@
 
 	.status-bar__item:hover {
 		background: var(--bg-hover);
+	}
+
+	.status-bar__item:active {
+		background: var(--cursor-bg-active);
 	}
 
 	/* The level meter: a row of rounded bars centered on one line. Each

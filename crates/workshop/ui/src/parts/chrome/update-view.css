@@ -59,11 +59,6 @@
   margin: var(--space-md) 0;
 }
 
-/* The shared toast stack clears the status bar at the viewport bottom. */
-.toast-stack {
-  --toast-inset-block-end: calc(var(--status-bar-height) + var(--space-2));
-}
-
 .ws-update-screen__panel details {
   margin: var(--space-md) 0;
   color: var(--text-muted);

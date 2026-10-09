@@ -4,7 +4,8 @@
 // are internal instrumentation that must not touch either. Busy: a busy
 // frame shows the barberpole beside the recording+activity LED indicators
 // group, which stays visible; a non-busy frame hides the barberpole; debug
-// frames never disturb it.
+// frames never disturb it. Local: a status-bar error raises an error toast
+// and leaves the bar's text alone.
 // Run: node test/status-frames.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
@@ -70,5 +71,22 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
   if (!barberpoleEl.hidden) failures.push("a non-busy frame did not hide the barberpole");
   if (indicatorsEl.hidden) {
     failures.push("the recording and activity LED group hid when busy cleared");
+  }
+
+  // A local error is a toast on the shared stack, not red bar text: the
+  // bar keeps the last frame's text, and the toast outlives the next frame.
+  const { document, resolveService } = ctx;
+  const before = statusText.textContent;
+  resolveService("workshop.statusBar").showLocal("Could not open C:\\work\\notes.md: denied", "error");
+  const toast = document.querySelector(".toast-stack .toast-error .toast__message");
+  if (toast?.textContent !== "Could not open C:\\work\\notes.md: denied") {
+    failures.push(`a local error did not raise an error toast (got ${toast?.textContent})`);
+  }
+  if (statusText.textContent !== before || statusText.classList.contains("status-bar__text--error")) {
+    failures.push("a local error changed the bar text instead of raising a toast");
+  }
+  emitStatus({ label: "Ready", description: "idle" });
+  if (document.querySelector(".toast-stack .toast-error") === null) {
+    failures.push("the next status frame cleared the error toast");
   }
 });

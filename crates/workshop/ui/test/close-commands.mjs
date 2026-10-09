@@ -517,10 +517,11 @@ check("Close settles when its prompting editor leaves the dock", departedClose.s
 
 // --- Ctrl+F4 through the keybinding dispatcher ---------------------------------
 
-const statusErrors = [];
-const dispatcher = new KeybindingDispatcher({
-  status: { show() {}, showError: (message) => statusErrors.push(message), clear() {} },
-});
+// The shared registry reports a rejected command; the dispatcher dispatches
+// through it, so watching the report is watching for a rejection.
+const failedCommands = [];
+const failureWatch = Commands.onDidFailCommand((failure) => failedCommands.push(failure.id));
+const dispatcher = new KeybindingDispatcher({ status: { show() {}, clear() {} } });
 const contextKeys = getService(CONTEXT_KEY_SERVICE);
 const activeEditorKey = contextKeys.createKey("activeEditor", undefined);
 const textFocusKey = contextKeys.createKey("editorTextFocus", false);
@@ -542,7 +543,8 @@ textFocusKey.set(true);
 pressCloseChord();
 await flush();
 check("Ctrl+F4 closes the active editor while it has text focus", !isOpen(focused));
-check("no close command rejected through the dispatcher", statusErrors.length === 0);
+check("no close command rejected through the dispatcher", failedCommands.length === 0);
+failureWatch.dispose();
 dispatcher.dispose();
 activeEditorKey.reset();
 textFocusKey.reset();

@@ -350,6 +350,41 @@ function stripCommentsIncludes(css, needle) {
   return stripComments(css).includes(needle);
 }
 
+// --- Toasts (toast.css) --------------------------------------------------------------
+
+const toast = sheet(await read("toast.css"));
+check("the stack sits 25px from the bottom", toast.value(".toast-stack", "inset-block-end") === "25px");
+check("the stack sits 3px from the left", toast.value(".toast-stack", "inset-inline-start") === "3px");
+check("the stack is a fixed column", toast.value(".toast-stack", "position") === "fixed" && toast.value(".toast-stack", "flex-direction") === "column");
+check("the toast card is 340px wide", toast.value(".toast", "width") === "340px");
+check("the toast card keeps a 6px margin", toast.value(".toast", "margin") === "6px");
+check("the toast card is #181818", toast.value(".toast", "background").toLowerCase() === "#181818");
+check("the toast card has no border", toast.value(".toast", "border") === "none");
+check("the toast card has the IDE's base shadow", toast.value(".toast", "box-shadow") === resolve(tokens["--cursor-box-shadow-base"]));
+check("the toast card blurs what is behind it by 40px", toast.value(".toast", "backdrop-filter") === "blur(40px)");
+check("the toast text is 12px over 16px", toast.value(".toast", "font-size") === "12px" && toast.value(".toast", "line-height") === "16px");
+check("the toast slides up over 0.3s", toast.value(".toast", "animation").includes("300ms") && toast.has("from") && toast.has("to"));
+check("no kind paints a colored edge", !toast.has(".toast-error") && !toast.has(".toast-info") && !toast.has(".toast-success"));
+check("the toast glyph is 12px", toast.value(".toast__icon svg", "width") === "12px" && toast.value(".toast__icon svg", "height") === "12px");
+check("an info glyph is #3794FF", toast.value(".toast-info .toast__icon", "color").toLowerCase() === "#3794ff");
+check("a warning glyph is #F1B467", toast.value(".toast-warning .toast__icon", "color").toLowerCase() === "#f1b467");
+check("an error glyph is #E34671", toast.value(".toast-error .toast__icon", "color").toLowerCase() === "#e34671");
+check("a success glyph is green", toast.value(".toast-success .toast__icon", "color").toLowerCase() === "#3fa266");
+check("the close X is invisible until the toast is hovered", toast.value(".toast__close", "opacity") === "0" && toast.value(".toast:hover .toast__close", "opacity") === "0.5");
+check("the close X stays in the layout, so the keyboard can reach it", toast.value(".toast__close", "display") === "flex");
+check("the close X also shows while the toast holds focus", toast.value(".toast:focus-within .toast__close", "opacity") === "0.5");
+
+// --- The status bar (status-bar.css) --------------------------------------------------
+
+const statusBar = sheet(await read("status-bar.css"));
+check("the bar's top line is an inset shadow", /^inset 0 1px 0 0 /.test(statusBar.value(".status-bar", "box-shadow")));
+check("the bar has no top border", !("border-top" in statusBar.of(".status-bar")));
+check("an item fills the 22px bar", statusBar.value(".status-bar__item", "height") === "22px");
+check("an item pads 0 5px", statusBar.value(".status-bar__item", "padding") === "0 5px");
+check("an item has square corners", statusBar.value(".status-bar__item", "border-radius") === "0");
+check("a pressed item is #F0F0F01E", statusBar.value(".status-bar__item:active", "background").toLowerCase() === "#f0f0f01e");
+check("a hovered item keeps the hover wash", statusBar.value(".status-bar__item:hover", "background") === resolve(tokens["--bg-hover"]));
+
 // --- Reduced motion ------------------------------------------------------------------
 
 /** The text of the sheet's `@media (prefers-reduced-motion: reduce)` blocks, or "". */
@@ -363,10 +398,12 @@ const reduced = {
   controls: reducedMotionBlocks(await read("controls.css")),
   progress: reducedMotionBlocks(await read("progress.css")),
   modal: reducedMotionBlocks(await read("modal.css")),
+  toast: reducedMotionBlocks(await read("toast.css")),
 };
 check("the controls drop their transitions under reduced motion", /\.switch::after[\s\S]*transition:\s*none/.test(reduced.controls));
 check("the progress bars drop their transitions and the slide under reduced motion", /transition:\s*none/.test(reduced.progress) && /animation:\s*none/.test(reduced.progress));
 check("the form modal drops its open animation under reduced motion", /animation:\s*none/.test(reduced.modal));
+check("a toast drops its slide-up under reduced motion", /\.toast\s*\{[^}]*animation:\s*none/.test(reduced.toast));
 
 if (failures.length > 0) {
   console.error(`skin-css: ${failures.length} failure(s)`);

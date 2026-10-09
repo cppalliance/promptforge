@@ -26,11 +26,10 @@
 import "./command-center.css";
 
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
-import { CommandRegistry, Commands } from "@workshop/platform/command-registry";
+import { CommandRegistry, Commands, logCommandFailure } from "@workshop/platform/command-registry";
 import { MenuId, Menus, type MenuItem, type MenuRegistry } from "@workshop/platform/menu-registry";
-import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
-import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The title shown when no workspace folder is granted. */
@@ -175,17 +174,10 @@ export class CommandCenter extends Disposable {
     return item;
   }
 
-  /** Dispatches a command; a failure posts to the status bar. */
+  /** Dispatches a command; the registry reports a failure (the toast), so only the detail is logged. */
   private run(id: string, ...args: readonly unknown[]): void {
     void this.commands.execute(id, ...args).catch((error: unknown) => {
-      const statusBar = getServiceOrNull(STATUS_BAR);
-      if (statusBar === null) {
-        // No composition root (a widget test): keep the failure loud.
-        console.error(`command center command '${id}' failed`, error);
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      statusBar.showLocal(`Could not run '${id}': ${message}`, "error");
+      logCommandFailure(id, error);
     });
   }
 }

@@ -65,6 +65,35 @@
   --ws-update-screen-width: var(--ws-size-560);
   --ws-update-log-max-height: var(--ws-size-180);
 
+  /* Quick input: a frame min(62vw, 820px) wide and at most 80vw, 35px under
+     the top; 22px rows padded 0 7px with a 0 5px margin; the box 26px tall
+     inside a 4px 6px header; the list at most min(440px, 40vh) tall */
+  --ws-quick-input-width: min(var(--ws-size-vw-62), var(--ws-size-820));
+  --ws-quick-input-max-width: var(--ws-size-vw-80);
+  --ws-quick-input-top: var(--ws-size-35);
+  --ws-quick-input-header-padding: var(--ws-size-4) var(--ws-size-6);
+  --ws-quick-input-box-height: var(--ws-size-26);
+  --ws-quick-input-box-padding: 0 var(--ws-size-7);
+  --ws-quick-input-list-max-height: min(var(--ws-size-440), var(--ws-size-vh-40));
+  --ws-quick-input-row-height: var(--ws-size-22);
+  --ws-quick-input-row-padding: 0 var(--ws-size-7);
+  --ws-quick-input-row-margin: 0 var(--ws-size-5);
+  --ws-quick-input-description-size: var(--ws-size-em-0-9);
+  --ws-quick-input-key-padding: var(--ws-size-3);
+  --ws-quick-input-key-radius: var(--ws-size-3);
+  --ws-quick-input-chord-gap: var(--ws-size-6);
+
+  /* Workbench inputs and selects: the IDE's own fields, which the run
+     panel's toolbar and arguments take. 26px tall, a 2px radius, a 1px
+     border; a select pads 2px 23px 2px 8px and draws a 16px caret 6px from
+     the right */
+  --ws-workbench-input-height: var(--ws-size-26);
+  --ws-workbench-input-radius: var(--ws-size-2);
+  --ws-workbench-input-border: var(--ws-border-width) solid var(--border);
+  --ws-workbench-select-padding: var(--ws-size-2) var(--ws-size-23) var(--ws-size-2) var(--ws-size-8);
+  --ws-workbench-select-caret-size: var(--ws-size-16);
+  --ws-workbench-select-caret-inset: var(--ws-size-6);
+
   /* Layout: workshop tree */
   --ws-tree-indent: var(--ws-size-8);
 

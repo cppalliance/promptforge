@@ -7,15 +7,22 @@
 // value minus the prefix), ArrowUp/ArrowDown moving the active option,
 // Enter accepting the active row and closing, Escape closing with focus
 // restored, a factory whose product is not a provider rendering an empty
-// list, and includeHelp rendering every provider's help entries above
-// the active provider's rows with a help row re-routing to its prefix.
+// list, and includeHelp rendering the help entries that carry a
+// commandCenterOrder above the active provider's rows (sorted by it,
+// relabelled by commandCenterLabel, with the prefix as the description and
+// the command's keybinding as chips) with a row re-routing to its provider's
+// prefix. Rows draw key chips (one per key, "+" between, a gap between
+// chords), match highlights, group labels above the row they open, and an
+// empty message for a provider that has one.
 // The provider half covers the command palette provider (Category: Title
-// labels, keybinding labels, precondition filtering, substring filter,
-// CommandsHistory recency over the fake UI-state adapter, the
-// COMMANDS_HISTORY registry token the provider resolves when no history
-// is injected), the ? help provider, the not-available placeholder
-// providers, and the real provider descriptors' modes list rendering
-// before the recent files.
+// labels, keybinding labels, precondition filtering, substring filter and
+// its highlights, the "recently used" and "other commands" group labels,
+// "No matching commands", CommandsHistory recency over the fake UI-state
+// adapter, the COMMANDS_HISTORY registry token the provider resolves when
+// no history is injected), the ? help provider (prefix labels, help-text
+// descriptions, sorted by prefix, ? itself left out, the ?> jump), the
+// not-available placeholder providers, and the real provider descriptors'
+// Cursor wording and modes list rendering before the recent files.
 // Bundles the module with esbuild and drives it against jsdom.
 // Run: node --test test/quick-input.mjs
 import path from "node:path";
@@ -114,17 +121,30 @@ function stubProvider(prefix, placeholder, helpEntries, labels) {
   return filters;
 }
 
-const fileFilters = stubProvider("", "Search files by name", [{ description: "Go to File", prefix: "" }], [
-  "a.ts",
-  "b.ts",
-]);
-const commandFilters = stubProvider(">", "Type a command", [{ description: "Show and Run Commands", prefix: ">" }], [
-  "Save",
-  "Save All",
-]);
-const debugFilters = stubProvider("debug ", "Debug configurations", [{ description: "Start Debugging", prefix: "debug " }], [
-  "Launch",
-]);
+// Only entries with a commandCenterOrder reach the modes list, sorted by it:
+// the file entry first, then the debug entry (relabelled), then commands. The
+// entry without an order never shows there.
+const fileFilters = stubProvider(
+  "",
+  "Search files by name",
+  [{ description: "Go to File", commandId: "test.quickOpen", commandCenterOrder: 10 }],
+  ["a.ts", "b.ts"],
+);
+const commandFilters = stubProvider(
+  ">",
+  "Type a command",
+  [{ description: "Show and Run Commands", prefix: ">", commandCenterOrder: 60 }],
+  ["Save", "Save All"],
+);
+const debugFilters = stubProvider(
+  "debug ",
+  "Debug configurations",
+  [
+    { description: "Start Debugging", prefix: "debug ", commandCenterOrder: 20, commandCenterLabel: "Debug" },
+    { description: "Never in the modes list", prefix: "debug " },
+  ],
+  ["Launch"],
+);
 registry.registerQuickAccessProvider({
   prefix: "%",
   placeholder: "Not a provider",
@@ -132,7 +152,9 @@ registry.registerQuickAccessProvider({
   factory: () => ({}),
 });
 
-const quickInput = new QuickInputService({ registry });
+const quickKeybindings = createKeybindingsRegistry("linux");
+quickKeybindings.registerKeybindingRule({ id: "test.quickOpen", keybinding: "ctrl+p" });
+const quickInput = new QuickInputService({ registry, keybindings: quickKeybindings });
 
 function panel() {
   return window.document.querySelector(".ws-quick-input");
@@ -246,19 +268,183 @@ key("Escape");
 quickInput.quickAccess.show("", { includeHelp: true });
 {
   check(
-    "help entries render above the provider's rows",
-    optionLabels().join(",") === "Go to File,Show and Run Commands,Start Debugging,a.ts,b.ts",
+    "ordered help entries render above the provider's rows, relabelled and sorted",
+    optionLabels().join(",") === "Go to File,Debug,Show and Run Commands,a.ts,b.ts",
   );
+  const descriptions = options().map((row) => row.querySelector(".ws-quick-input__option-description")?.textContent);
+  check(
+    "a mode row shows its prefix as the description, and the default mode shows none",
+    descriptions[0] === undefined && descriptions[1] === "debug " && descriptions[2] === ">",
+  );
+  const chips = [...options()[0].querySelectorAll(".ws-quick-input__key")].map((chip) => chip.textContent);
+  check("a mode row shows its command's keybinding as chips", chips.join(",") === "Ctrl,P");
   key("ArrowDown");
   key("Enter");
-  check("accepting a help row re-routes to its prefix", input().value === ">");
-  check("a help row keeps the panel open", panel().hidden === false);
-  check("the re-routed provider's rows render", optionLabels().join(",") === "Save,Save All");
+  check("accepting a mode row re-routes to its provider's prefix", input().value === "debug ");
+  check("a mode row keeps the panel open", panel().hidden === false);
+  check("the re-routed provider's rows render", optionLabels().join(",") === "Launch");
   key("Escape");
 }
 
+// The panels below find theirs by class, so the shared one goes first.
 quickInput.dispose();
 check("dispose removes the panel", window.document.querySelector(".ws-quick-input") === null);
+
+// --- Rows: key chips, match highlights, group labels, the empty message -----------
+
+{
+  const rowsRegistry = createQuickAccessRegistry();
+  let rowItems = [];
+  rowsRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "rows",
+    helpEntries: [],
+    factory: () => ({ getItems: () => rowItems, noResultsMessage: "No matching commands" }),
+  });
+  const rowsInput = new QuickInputService({ registry: rowsRegistry });
+  const accept = () => {};
+  rowItems = [
+    {
+      label: "File: Save",
+      labelHighlights: [{ start: 6, end: 10 }],
+      keybinding: "Ctrl+Shift+P",
+      separator: "recently used",
+      accept,
+    },
+    { label: "File: Save All", description: "every file", keybinding: "Ctrl+K Ctrl+S", separator: "other commands", accept },
+    { label: "Plain", accept },
+  ];
+  rowsInput.quickAccess.show("");
+  const first = options()[0];
+  const second = options()[1];
+  check(
+    "a match highlight wraps only the matched text",
+    [...first.querySelectorAll(".ws-quick-input__highlight")].map((mark) => mark.textContent).join("|") === "Save",
+  );
+  check(
+    "a highlighted label still reads as one label",
+    first.querySelector(".ws-quick-input__option-label")?.textContent === "File: Save",
+  );
+  check(
+    "a plain row has no highlight",
+    options()[2].querySelector(".ws-quick-input__highlight") === null,
+  );
+  check(
+    "a keybinding renders one chip per key",
+    [...first.querySelectorAll(".ws-quick-input__key")].map((chip) => chip.textContent).join(",") === "Ctrl,Shift,P",
+  );
+  check(
+    "a plus sits between the keys of a chord",
+    [...first.querySelectorAll(".ws-quick-input__key-separator")].map((plus) => plus.textContent).join("") === "++",
+  );
+  check(
+    "a two-chord keybinding renders four chips and a chord separator",
+    [...second.querySelectorAll(".ws-quick-input__key")].map((chip) => chip.textContent).join(",") === "Ctrl,K,Ctrl,S" &&
+      second.querySelectorAll(".ws-quick-input__chord-separator").length === 1,
+  );
+  check("a row without a keybinding has no chips", options()[2].querySelector(".ws-quick-input__key") === null);
+  const separators = [...panel().querySelectorAll(".ws-quick-input__separator")];
+  check(
+    "each group label sits above its row",
+    separators.map((label) => label.textContent).join(",") === "recently used,other commands" &&
+      separators[0].nextElementSibling === first &&
+      separators[1].nextElementSibling === second,
+  );
+  check("a group label is not an option", options().length === 3 && separators.every((label) => label.getAttribute("role") === "presentation"));
+  key("ArrowDown");
+  check(
+    "arrow keys step over a group label to the next row",
+    input().getAttribute("aria-activedescendant") === second.id,
+  );
+  check("no empty message while rows exist", panel().querySelector(".ws-quick-input__empty") === null);
+
+  rowItems = [];
+  type("zzz");
+  const empty = panel().querySelector(".ws-quick-input__empty");
+  check("a provider with no rows shows its empty message", empty?.textContent === "No matching commands");
+  check("the empty message is not an option", options().length === 0 && empty?.getAttribute("role") === "presentation");
+  key("Enter");
+  check("Enter on the empty message does nothing", panel().hidden === false);
+  key("Escape");
+  rowsInput.dispose();
+}
+
+{
+  // A provider may answer several spans, in any order, and a bad one never
+  // breaks the label: the spans draw in label order, a span that overlaps
+  // the one before it, runs off the label, or is empty is skipped, and the
+  // label's text always reads whole.
+  const label = "File: Save All";
+  const spanRegistry = createQuickAccessRegistry();
+  let spans = [];
+  spanRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "spans",
+    helpEntries: [],
+    factory: () => ({ getItems: () => [{ label, labelHighlights: spans, accept() {} }] }),
+  });
+  const spanInput = new QuickInputService({ registry: spanRegistry });
+  const marks = () =>
+    [...options()[0].querySelectorAll(".ws-quick-input__highlight")].map((mark) => mark.textContent).join("|");
+  const reads = () => options()[0].querySelector(".ws-quick-input__option-label")?.textContent === label;
+  const render = (next) => {
+    spans = next;
+    spanInput.quickAccess.show("");
+    return marks();
+  };
+
+  check(
+    "two spans given out of order draw in label order",
+    render([
+      { start: 11, end: 14 },
+      { start: 0, end: 4 },
+    ]) === "File|All" && reads(),
+  );
+  key("Escape");
+  check(
+    "a span that overlaps the one before it is skipped",
+    render([
+      { start: 0, end: 6 },
+      { start: 4, end: 8 },
+    ]) === "File: " && reads(),
+  );
+  key("Escape");
+  check("a span that runs off the label is skipped", render([{ start: 11, end: 99 }]) === "" && reads());
+  key("Escape");
+  check(
+    "a valid span still draws beside a skipped out-of-range one",
+    render([
+      { start: 20, end: 30 },
+      { start: 6, end: 10 },
+    ]) === "Save" && reads(),
+  );
+  key("Escape");
+  check(
+    "an empty or inverted span is skipped",
+    render([
+      { start: 3, end: 3 },
+      { start: 9, end: 5 },
+    ]) === "" && reads(),
+  );
+  key("Escape");
+  spanInput.dispose();
+}
+
+{
+  // A provider without a message shows nothing when it has no rows.
+  const plainRegistry = createQuickAccessRegistry();
+  plainRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "plain",
+    helpEntries: [],
+    factory: () => ({ getItems: () => [] }),
+  });
+  const plainInput = new QuickInputService({ registry: plainRegistry });
+  plainInput.quickAccess.show("");
+  check("a provider without a message shows no empty row", panel().querySelector(".ws-quick-input__empty") === null);
+  key("Escape");
+  plainInput.dispose();
+}
 
 // --- Provider half: the command palette provider --------------------------------
 
@@ -300,6 +486,8 @@ function paletteSetup(initialHistory) {
   check("the palette lists the palette-menu command", rows.length === 1);
   check("the palette label is Category: Title", rows[0]?.label === "File: Save");
   check("the palette row shows the keybinding label", rows[0]?.keybinding === "Ctrl+S");
+  check("with no history the palette shows no group label", rows[0]?.separator === undefined);
+  check("the palette's empty result reads 'No matching commands'", provider.noResultsMessage === "No matching commands");
   rows[0]?.accept();
   await Promise.resolve();
   check("accept runs the command through the registry", ran === 1);
@@ -332,6 +520,17 @@ function paletteSetup(initialHistory) {
   check("a category-less label is the bare title", provider.getItems("").map((row) => row.label).join(",") === "File: Save,Reload Window");
   check("the filter narrows case-insensitively", provider.getItems("reload").map((row) => row.label).join(",") === "Reload Window");
   check("a filter matching nothing renders no rows", provider.getItems("zzz").length === 0);
+  const reload = provider.getItems("rEl")[0];
+  check(
+    "the matched text of the label is highlighted",
+    reload?.labelHighlights?.length === 1 && reload.labelHighlights[0].start === 0 && reload.labelHighlights[0].end === 3,
+  );
+  const save = provider.getItems("sav")[0];
+  check(
+    "a match inside the title is highlighted past its category",
+    save?.labelHighlights?.[0]?.start === 6 && save.labelHighlights[0].end === 9,
+  );
+  check("an empty filter highlights nothing", provider.getItems("").every((row) => row.labelHighlights === undefined));
 }
 
 {
@@ -342,8 +541,13 @@ function paletteSetup(initialHistory) {
   menus.appendMenuItem(MenuId.CommandPalette, { command: "a.one" });
   menus.appendMenuItem(MenuId.CommandPalette, { command: "b.two" });
   check("without history the rows keep menu order", provider.getItems("").map((row) => row.label).join(",") === "One,Two");
+  check("without history no row carries a group label", provider.getItems("").every((row) => row.separator === undefined));
   history.add("b.two");
   check("a used command sorts first", provider.getItems("").map((row) => row.label).join(",") === "Two,One");
+  check(
+    "the used commands open under 'recently used' and the rest under 'other commands'",
+    provider.getItems("")[0]?.separator === "recently used" && provider.getItems("")[1]?.separator === "other commands",
+  );
   provider.getItems("")[1]?.accept();
   await Promise.resolve();
   check("accept records the command in the history", history.list[0] === "a.one");
@@ -374,6 +578,18 @@ function paletteSetup(initialHistory) {
   menus.appendMenuItem(MenuId.CommandPalette, { command: "b.two" });
   check("the initial history list sorts its command first", provider.getItems("").map((row) => row.label).join(",") === "Two,One");
   check("construction writes nothing", storage.sets.length === 0);
+}
+
+{
+  // Only recent commands: one 'recently used' label and no 'other commands'.
+  const { commands, menus, provider } = paletteSetup(["a.one"]);
+  commands.register("a.one", { title: "One", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "a.one" });
+  const rows = provider.getItems("");
+  check(
+    "a palette of only recent commands has the one label",
+    rows.length === 1 && rows[0].separator === "recently used",
+  );
 }
 
 {
@@ -426,28 +642,77 @@ function paletteSetup(initialHistory) {
 
 // --- Provider half: the help provider --------------------------------------------
 
-{
+/**
+ * A registry shaped like Cursor's: the default provider, a symbol provider
+ * with two entries, the commands provider, and the ? provider itself. Each
+ * stub provider answers one row named after its prefix.
+ */
+function helpFixture() {
   const helpRegistry = createQuickAccessRegistry();
-  helpRegistry.registerQuickAccessProvider({
-    prefix: "",
-    placeholder: "files",
-    helpEntries: [{ description: "Go to File", prefix: "" }],
-    factory: () => ({ getItems: () => [] }),
-  });
-  helpRegistry.registerQuickAccessProvider({
-    prefix: ">",
-    placeholder: "commands",
-    helpEntries: [{ description: "Show and Run Commands", prefix: ">" }],
-    factory: () => ({ getItems: () => [] }),
-  });
+  const stub = (prefix, helpEntries) =>
+    helpRegistry.registerQuickAccessProvider({
+      prefix,
+      placeholder: `placeholder for "${prefix}"`,
+      helpEntries,
+      factory: () => ({ getItems: () => [{ label: `row of "${prefix}"`, accept: () => {} }] }),
+    });
+  stub(">", [{ description: "Show and Run Commands", commandId: "test.showCommands" }]);
+  stub("@", [
+    { description: "Go to Symbol in Editor", prefix: "@" },
+    { description: "Go to Symbol in Editor by Category", prefix: "@:" },
+  ]);
+  stub("", [{ description: "Go to File", commandId: "test.quickOpen" }]);
   const shown = [];
-  const help = createHelpProvider({ registry: helpRegistry, show: (value) => shown.push(value) });
+  const keybindings = createKeybindingsRegistry("linux");
+  keybindings.registerKeybindingRule({ id: "test.quickOpen", keybinding: "ctrl+p" });
+  const help = createHelpProvider({ registry: helpRegistry, keybindings, show: (value) => shown.push(value) });
+  helpRegistry.registerQuickAccessProvider({
+    prefix: "?",
+    placeholder: "Type '?' to get help",
+    helpEntries: [{ description: "Show all Quick Access Providers", commandCenterOrder: 70, commandCenterLabel: "More" }],
+    factory: () => help,
+  });
+  return { helpRegistry, help, shown, keybindings };
+}
+
+{
+  const { help, shown } = helpFixture();
   const rows = help.getItems("");
-  check("the help provider lists one row per help entry", rows.map((row) => row.label).join(",") === "Go to File,Show and Run Commands");
-  check("the default mode's row omits the prefix description", rows[0]?.description === undefined);
-  check("a prefixed mode's row shows its prefix", rows[1]?.description === ">");
-  rows[1]?.accept();
-  check("accepting a help row enters its mode", shown.join(",") === ">");
+  check(
+    "a help row's label is its prefix, or an ellipsis for the default mode",
+    rows.map((row) => row.label).join(",") === "\u2026,@,@:,>",
+  );
+  check(
+    "a help row's description is the help text",
+    rows.map((row) => row.description).join("|") ===
+      "Go to File|Go to Symbol in Editor|Go to Symbol in Editor by Category|Show and Run Commands",
+  );
+  check("the ? provider's own entry is left out", !rows.some((row) => row.label === "?"));
+  check("a help row shows its command's keybinding", rows[0]?.keybinding === "Ctrl+P" && rows[3]?.keybinding === undefined);
+  rows[3]?.accept();
+  rows[2]?.accept();
+  check("accepting a help row enters its mode", shown.join(",") === ">,@:");
+}
+
+{
+  // ?> jumps into the > mode: the help provider redirects the typed value.
+  const { help, helpRegistry } = helpFixture();
+  check("typing a prefix after ? redirects to that mode", help.redirect?.(">") === ">");
+  check("a longer prefix after ? redirects to its provider's prefix", help.redirect?.("@:x") === "@");
+  check("a bare ? stays in help", help.redirect?.("") === undefined);
+  check("text that routes to the default mode stays in help", help.redirect?.("save") === undefined);
+  check("a second ? stays in help", help.redirect?.("?") === undefined);
+
+  const jumpInput = new QuickInputService({ registry: helpRegistry });
+  jumpInput.quickAccess.show("?");
+  check("the ? list renders in the widget", optionLabels().join(",") === "\u2026,@,@:,>");
+  check("the ? list's placeholder is the ? provider's", input().placeholder === "Type '?' to get help");
+  type("?>");
+  check("typing ?> enters the > mode", input().value === ">" && input().placeholder === `placeholder for ">"`);
+  check("the > mode's rows replace the help list", optionLabels().join(",") === `row of ">"`);
+  check("the jump never closed the panel", panel().hidden === false);
+  key("Escape");
+  jumpInput.dispose();
 }
 
 // --- Provider half: the placeholder provider --------------------------------------
@@ -481,7 +746,7 @@ function paletteSetup(initialHistory) {
   modesRegistry.registerQuickAccessProvider({
     prefix: "",
     placeholder: "Search files by name",
-    helpEntries: [{ description: "Go to File", prefix: "" }],
+    helpEntries: [{ description: "Go to File", commandId: "test.quickOpen", commandCenterOrder: 10 }],
     factory: () => ({
       getItems: () => [
         { label: "alpha.md", accept: () => {} },
@@ -492,7 +757,7 @@ function paletteSetup(initialHistory) {
   const { commands, menus, keybindings, context, history } = paletteSetup();
   commands.register("file.save", { title: "Save", category: "File", run: () => {} });
   menus.appendMenuItem(MenuId.CommandPalette, { command: "file.save" });
-  for (const descriptor of createQuickAccessProviderDescriptors({
+  const descriptors = createQuickAccessProviderDescriptors({
     commands,
     menus,
     keybindings,
@@ -500,15 +765,64 @@ function paletteSetup(initialHistory) {
     history,
     quickAccess: modesRegistry,
     show: () => {},
-  })) {
+  });
+  for (const descriptor of descriptors) {
     modesRegistry.registerQuickAccessProvider(descriptor);
   }
-  const modesInput = new QuickInputService({ registry: modesRegistry });
+
+  // Cursor's own words for every placeholder and help row of the providers this file owns.
+  const wording = Object.fromEntries(
+    descriptors.map((descriptor) => [
+      descriptor.prefix,
+      [descriptor.placeholder, ...descriptor.helpEntries.map((entry) => entry.description)],
+    ]),
+  );
+  const expectedWording = {
+    ">": ["Type the name of a command to run.", "Show and Run Commands"],
+    "%": ["Search for text in your workspace files.", "Search for Text"],
+    "@": [
+      "Type the name of a symbol to go to.",
+      "Go to Symbol in Editor",
+      "Go to Symbol in Editor by Category",
+    ],
+    "debug ": ["Type the name of a launch configuration to run.", "Start Debugging"],
+    "task ": ["Type the name of a task to run.", "Run Task"],
+    "?": ["Type '?' to get help on the actions you can take from here.", "Show all Quick Access Providers"],
+  };
+  check(
+    "every descriptor this file owns uses Cursor's placeholder and help text",
+    JSON.stringify(wording) === JSON.stringify(expectedWording),
+  );
+  const orders = Object.fromEntries(
+    descriptors.flatMap((descriptor) =>
+      descriptor.helpEntries
+        .filter((entry) => entry.commandCenterOrder !== undefined)
+        .map((entry) => [descriptor.prefix, [entry.commandCenterOrder, entry.commandCenterLabel ?? null, entry.commandId ?? null]]),
+    ),
+  );
+  check(
+    "the modes list's order, label, and command ids match Cursor's",
+    JSON.stringify(orders) ===
+      JSON.stringify({
+        ">": [20, null, "workbench.action.showCommands"],
+        "%": [25, null, "workbench.action.quickTextSearch"],
+        "@": [40, null, "workbench.action.gotoSymbol"],
+        "debug ": [50, null, "workbench.action.debug.selectandstart"],
+        "task ": [60, null, null],
+        "?": [70, "More", null],
+      }),
+  );
+
+  const modesInput = new QuickInputService({ registry: modesRegistry, keybindings });
   modesInput.quickAccess.show("", { includeHelp: true });
   check(
     "includeHelp renders the modes list before the recent files",
     optionLabels().join(",") ===
       "Go to File,Show and Run Commands,Search for Text,Go to Symbol in Editor,Start Debugging,Run Task,More,alpha.md,beta.md",
+  );
+  check(
+    "the unordered help entries stay out of the modes list",
+    !optionLabels().includes("Go to Symbol in Editor by Category") && !optionLabels().includes("Show all Quick Access Providers"),
   );
   key("Escape");
   modesInput.quickAccess.show(">");

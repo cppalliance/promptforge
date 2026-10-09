@@ -13,7 +13,8 @@ import { createStatusBarView, type StatusBarView } from "@workshop/look/status-b
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { CONTEXT_KEY_SERVICE, type ContextKey } from "@workshop/platform/context-key-service";
 import type { StatusFrame } from "../../services/protocol";
-import { getService } from "@workshop/platform/service-registry";
+import { TOAST_STACK } from "../../services/toast-service";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import type { StatusBar as StatusBarContract } from "@workshop/platform/status-bar";
 import type {
   IndicatorState,
@@ -42,8 +43,9 @@ export class StatusBar extends Disposable implements StatusBarContract, StatusIn
   constructor() {
     super();
     this.visibleKey = getService(CONTEXT_KEY_SERVICE).createKey("statusBarVisible", true);
+    // The view starts with empty text: the bar has no idle placeholder, as
+    // Cursor's has none.
     this.view = createStatusBarView();
-    this.view.setText("Ready");
     // The bar is the body's full-width footer, below the desk.
     document.body.append(this.view.element);
     this._register(toDisposable(() => this.view.element.remove()));
@@ -142,8 +144,22 @@ export class StatusBar extends Disposable implements StatusBarContract, StatusIn
     };
   }
 
-  /** Shows a locally-originated message (e.g. dictation errors). The next observer frame overwrites it. */
+  /**
+   * Shows a locally-originated message. An info message paints the bar's
+   * text, and the next observer frame overwrites it. An error raises an
+   * error toast on the shared stack instead of painting the bar red, so its
+   * callers do not change and the message outlives the next frame. With no
+   * stack registered (a bare bar in a widget test) the error paints the
+   * bar's text in the error color, so a failure is never silent.
+   */
   showLocal(label: string, severity: "info" | "error"): void {
+    if (severity === "error") {
+      const toasts = getServiceOrNull(TOAST_STACK);
+      if (toasts !== null) {
+        toasts.show(label, "error");
+        return;
+      }
+    }
     this.view.setText(label, { error: severity === "error" });
   }
 

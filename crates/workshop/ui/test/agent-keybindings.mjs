@@ -201,7 +201,7 @@ const dispatcher = new KeybindingDispatcher({
       return Promise.resolve();
     },
   },
-  status: { show() {}, showError() {}, clear() {} },
+  status: { show() {}, clear() {} },
 });
 
 const CODES = {

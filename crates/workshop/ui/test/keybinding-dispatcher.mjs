@@ -8,7 +8,9 @@
 // chordPending context key, the five-second timeout and window-blur
 // exits, the three-second not-a-command status for an unrecognized
 // second key, a context-gated chord swallowed without running, a
-// rejected command reported to the status sink, and the zoom chords
+// rejected command reported by the registry (the toast's source) and
+// logged rather than posted to the sink, the default status-bar sink's
+// chord prompts and its empty idle text, and the zoom chords
 // moved here from test/zoom.mjs (Ctrl+= / Ctrl+Shift+= / Ctrl+- /
 // Ctrl+0 through event.code, Alt chords unbound, dispose uninstalling
 // the listener). Bundles the module with esbuild and drives it against
@@ -37,6 +39,8 @@ const bundle = await esbuild.build({
       export { CommandRegistry } from "@workshop/platform/command-registry";
       export { ContextKeyService } from "@workshop/platform/context-key-service";
       export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { registerService } from "@workshop/platform/service-registry";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -49,7 +53,14 @@ const bundle = await esbuild.build({
   logLevel: "silent",
   loader: { ".css": "empty" },
 });
-const { KeybindingDispatcher, CommandRegistry, ContextKeyService, createKeybindingsRegistry } = await import(
+const {
+  KeybindingDispatcher,
+  CommandRegistry,
+  ContextKeyService,
+  createKeybindingsRegistry,
+  registerService,
+  STATUS_BAR,
+} = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -68,7 +79,6 @@ function scenario() {
   const statusLog = [];
   const status = {
     show: (message) => statusLog.push(["show", message]),
-    showError: (message) => statusLog.push(["error", message]),
     clear: () => statusLog.push(["clear"]),
   };
   const runs = [];
@@ -215,22 +225,71 @@ function scenario() {
   s.dispose();
 }
 
-// --- Failure: a rejected command reports to the status sink ------------------
+// --- Failure: the registry reports a rejected command, the sink stays quiet ----
 
 {
   const s = scenario();
-  s.commands.register("test.boom", { run: () => Promise.reject(new Error("boom")) });
+  const failed = [];
+  s.commands.onDidFailCommand((failure) => failed.push(failure));
+  s.commands.register("test.boom", { title: "Boom", category: "Test", run: () => Promise.reject(new Error("boom")) });
   s.keybindings.registerKeybindingRule({ id: "test.boom", keybinding: "ctrl+e" });
+  // The dispatcher logs the detail the toast leaves out; capture it.
+  const logged = [];
+  const realConsoleError = console.error;
+  console.error = (...args) => logged.push(args);
   const event = s.press("e", { code: "KeyE", ctrlKey: true });
   check("a failing command's chord is still consumed", event.defaultPrevented === true);
   for (let i = 0; i < 5; i += 1) {
     await Promise.resolve();
   }
+  console.error = realConsoleError;
   check(
-    "a failing command posts an error status",
-    s.statusLog.some(([kind, message]) => kind === "error" && message === "Could not run 'test.boom': boom"),
+    "the registry reports the failed chord once, labelled Test: Boom",
+    failed.length === 1 && failed[0].label === "Test: Boom" && failed[0].error.message === "boom",
+  );
+  check("the dispatcher posts no status message of its own for a failure", s.statusLog.length === 0);
+  check(
+    "the dispatcher keeps the failure's detail on the console",
+    logged.length === 1 && String(logged[0][0]).includes("test.boom") && logged[0][1]?.message === "boom",
   );
   s.dispose();
+}
+
+// --- The default sink: chord prompts on the bar, the idle text empty ----------
+
+{
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const barLog = [];
+  registerService(STATUS_BAR, () => ({
+    showLocal: (label, severity) => barLog.push([label, severity]),
+    isVisible: true,
+    setVisible() {},
+  }));
+  const commands = new CommandRegistry();
+  const contextKeys = new ContextKeyService();
+  const keybindings = createKeybindingsRegistry("linux");
+  const dispatcher = new KeybindingDispatcher({ commands, contextKeys, keybindings });
+  commands.register("test.chord", { run: () => {} });
+  keybindings.registerKeybindingRule({ id: "test.chord", keybinding: "ctrl+m ctrl+o" });
+  const press = (key, init) =>
+    window.document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
+    );
+  press("m", { code: "KeyM", ctrlKey: true });
+  check(
+    "the chord prompt goes to the bar as an info message",
+    barLog.length === 1 && barLog[0][1] === "info" && barLog[0][0].startsWith("(Ctrl+M) was pressed."),
+  );
+  press("x", { code: "KeyX" });
+  mock.timers.tick(3000);
+  check(
+    "the bar returns to an empty idle text, not 'Ready'",
+    barLog.at(-1)?.[0] === "" && barLog.at(-1)?.[1] === "info",
+  );
+  check("nothing posted the old idle text", !barLog.some(([label]) => label === "Ready"));
+  dispatcher.dispose();
+  contextKeys.dispose();
+  mock.timers.reset();
 }
 
 // --- Zoom chords (moved from test/zoom.mjs): Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0

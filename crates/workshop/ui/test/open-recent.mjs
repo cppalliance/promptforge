@@ -7,9 +7,10 @@
 // workbench.action.openWorkspace with the path argument, any case of the
 // extension; a text entry still renders vscode.open in 3_files; the
 // quick-access provider's accept dispatches the workspace command for a
-// .pfwork hit and vscode.open for a text hit, and a rejected run is
-// reported naming the command that ran. Bundles the module with esbuild
-// and drives it DOM-free.
+// .pfwork hit and vscode.open for a text hit, a filter's match in the file
+// name is highlighted, and a rejected run is logged naming the command that
+// ran (the registry reports it as the toast, so no status message posts).
+// Bundles the module with esbuild and drives it DOM-free.
 // Run: node --test test/open-recent.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,7 +127,23 @@ check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.p
   check("each accept runs exactly one command", executed.length === 2);
 }
 
-// --- A rejected run is reported naming the command that ran -----------------------------
+// --- The matched text of a file name is highlighted --------------------------------------
+
+{
+  const treeState = { listing: () => undefined, cachedListings: () => [] };
+  const recentFiles = { list: [WORKSPACE, NOTE] };
+  const provider = createFileQuickAccessProvider({ treeState, recentFiles, commands: { execute: () => Promise.resolve(true) } });
+  const named = provider.getItems("NOTE").find((item) => item.description === NOTE);
+  check(
+    "a filter that matches the file name highlights the match",
+    named?.labelHighlights?.length === 1 && named.labelHighlights[0].start === 0 && named.labelHighlights[0].end === 4,
+  );
+  const byPath = provider.getItems("c:\\work\\n").find((item) => item.description === NOTE);
+  check("a filter that matches only the path highlights nothing in the name", byPath !== undefined && byPath.labelHighlights === undefined);
+  check("an empty filter highlights nothing", provider.getItems("").every((item) => item.labelHighlights === undefined));
+}
+
+// --- A rejected run: the registry reports it, the provider keeps the detail --------------
 
 {
   const commands = {
@@ -136,20 +153,20 @@ check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.p
   const recentFiles = { list: [WORKSPACE, NOTE] };
   const items = createFileQuickAccessProvider({ treeState, recentFiles, commands }).getItems("");
 
+  const logged = [];
+  const realConsoleError = console.error;
+  console.error = (...args) => logged.push(args);
   items.find((item) => item.description === WORKSPACE)?.accept();
   await flush();
   check(
-    "a rejected workspace open is reported naming workbench.action.openWorkspace",
-    statusMessages.at(-1)?.severity === "error" &&
-      statusMessages.at(-1)?.label.includes("workbench.action.openWorkspace") &&
-      statusMessages.at(-1)?.label.includes("refused"),
+    "a rejected workspace open is logged naming workbench.action.openWorkspace with its error",
+    String(logged.at(-1)?.[0]).includes("workbench.action.openWorkspace") && logged.at(-1)?.[1]?.message === "refused",
   );
   items.find((item) => item.description === NOTE)?.accept();
   await flush();
-  check(
-    "a rejected text open is reported naming vscode.open",
-    statusMessages.at(-1)?.label.includes("'vscode.open'"),
-  );
+  console.error = realConsoleError;
+  check("a rejected text open is logged naming vscode.open", String(logged.at(-1)?.[0]).includes("'vscode.open'"));
+  check("the provider posts no status message of its own for a failure", statusMessages.length === 0);
 }
 
 if (failures.length > 0) {

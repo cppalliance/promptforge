@@ -199,9 +199,11 @@ addAction({
 // The dynamic halves: Open Recent's root and recent-file rows, re-read
 // at every open, and the "" quick-access provider over the same stores.
 Menus.setProvider(MenuId.MenubarRecentMenu, createRecentMenuProvider());
+// Cursor's own text for the default mode, which opens first in the command
+// center's modes list and names the Go to File command for its keybinding.
 QuickAccessRegistry.registerQuickAccessProvider({
   prefix: "",
-  placeholder: "Search files by name",
-  helpEntries: [{ description: "Go to File", prefix: "" }],
+  placeholder: "Search files, content, and symbols (append : to go to line or @ to go to symbol)",
+  helpEntries: [{ description: "Go to File", commandId: "workbench.action.quickOpen", commandCenterOrder: 10 }],
   factory: () => createFileQuickAccessProvider(),
 });

@@ -12,8 +12,14 @@
 // widget, the keybinding dispatcher, and quick input read it. Tests
 // construct their own instances for isolation.
 //
+// A command that throws or rejects is reported through onDidFailCommand
+// and still rejects its execute, so a caller that awaits the run keeps its
+// own handling. The report is how the app raises Cursor's "Command '{0}'
+// resulted in an error" toast without this package knowing about toasts.
+//
 // Generic and DOM-free: imports only this package's own files.
 
+import { Emitter, type Event } from "./event";
 import { toDisposable, type IDisposable } from "./lifecycle";
 
 /** One invocable action. */
@@ -33,8 +39,42 @@ export interface CommandAction {
   readonly toggled?: string;
 }
 
+/** One failed command run, as onDidFailCommand reports it. */
+export interface CommandFailure {
+  /** The id the failed command was registered under. */
+  readonly id: string;
+  /**
+   * The command's palette label: "Category: Title", the bare title when it
+   * has no category, or the id when it has no title.
+   */
+  readonly label: string;
+  /** What the command threw or rejected with. */
+  readonly error: unknown;
+}
+
+/** The label the command palette shows for `action`, falling back to its id. */
+function commandLabel(id: string, action: CommandAction): string {
+  if (action.title === undefined) {
+    return id;
+  }
+  return action.category === undefined ? action.title : `${action.category}: ${action.title}`;
+}
+
+/**
+ * Logs a command failure's detail on the console. The registry has already
+ * reported the failure, so a fire-and-forget caller needs no more than this
+ * to keep the error object where a developer can read it.
+ */
+export function logCommandFailure(commandId: string, error: unknown): void {
+  console.error(`command '${commandId}' failed`, error);
+}
+
 export class CommandRegistry {
   private readonly commands = new Map<string, CommandAction>();
+  private readonly failures = new Emitter<CommandFailure>();
+
+  /** Fires when a command run throws or rejects, before execute rejects. */
+  readonly onDidFailCommand: Event<CommandFailure> = this.failures.event;
 
   /**
    * Registers `action` under `id`. Re-registering an id upserts: the
@@ -58,16 +98,32 @@ export class CommandRegistry {
   }
 
   /**
+   * The palette label of the command under `id` (see CommandFailure.label),
+   * or `id` itself when nothing is registered there.
+   */
+  labelOf(id: string): string {
+    const action = this.commands.get(id);
+    return action === undefined ? id : commandLabel(id, action);
+  }
+
+  /**
    * Runs the command registered under `id`, awaiting an async run.
    * Answers false when no command is registered - a shortcut whose
    * owning feature has not activated yet is a no-op, never a crash.
+   * A run that throws or rejects fires onDidFailCommand, then rejects
+   * with the same error.
    */
   async execute(id: string, ...args: readonly unknown[]): Promise<boolean> {
     const action = this.commands.get(id);
     if (action === undefined) {
       return false;
     }
-    await action.run(...args);
+    try {
+      await action.run(...args);
+    } catch (error) {
+      this.failures.fire({ id, label: commandLabel(id, action), error });
+      throw error;
+    }
     return true;
   }
 }

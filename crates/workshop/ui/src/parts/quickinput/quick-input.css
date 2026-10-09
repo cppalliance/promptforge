@@ -1,26 +1,32 @@
 /* Styles for quick-input.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Themed values come from the :root tokens in @workshop/look/tokens.css. */
+   into dist/app.css. Themed values come from the :root tokens in
+   @workshop/look/tokens.css and the quick-input slots in
+   src/tokens/component.css. The values are Cursor's own: a frame
+   min(62vw, 820px) wide with an 8px radius, the xl shadow, and no border;
+   22px rows; a 26px box in a 4px 6px header with no divider; filter matches
+   in #88C0D0 at weight 700; key chips; and group labels with a #F0F0F01C top
+   line. */
 
-/* The panel floats under the title bar, horizontally centered, above
-   every other surface. Its width ceiling is the command center pill's
-   600px clamp (the panel anchors to the pill), with the 90vw guard
-   kept for narrow viewports. */
+/* The panel floats under the title bar, horizontally centered, above every
+   other surface. It clips its rounded corners, so a row's selection never
+   squares them off. */
 .ws-quick-input {
   position: fixed;
-  top: var(--titlebar-height);
+  top: var(--ws-quick-input-top);
   left: 50%;
   transform: translateX(-50%);
   z-index: 200;
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
-  width: var(--ws-size-560);
-  max-width: min(90vw, var(--ws-size-600));
-  padding: var(--space-xs);
+  gap: 0;
+  width: var(--ws-quick-input-width);
+  max-width: var(--ws-quick-input-max-width);
+  padding: 0;
+  overflow: hidden;
   background: var(--bg-raised);
-  border: var(--ws-border-width) solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--titlebar-popover-shadow);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--cursor-box-shadow-xl);
 }
 
 .ws-quick-input[hidden] {
@@ -38,19 +44,27 @@
   white-space: nowrap;
 }
 
+/* The box sits in a header of its own, with no divider under it. */
+.ws-quick-input__header {
+  padding: var(--ws-quick-input-header-padding);
+}
+
 .ws-quick-input__input {
-  height: var(--ws-control-height);
-  padding: 0 var(--space-md);
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--ws-quick-input-box-height);
+  padding: var(--ws-quick-input-box-padding);
   background: none;
   border: none;
-  border-bottom: var(--ws-border-width) solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius);
   color: var(--text);
   font: inherit;
+  outline: none;
 }
 
 .ws-quick-input__input::placeholder {
-  color: var(--text-muted);
+  color: var(--input-placeholder);
+  opacity: 0.5;
 }
 
 .ws-quick-input__list {
@@ -59,44 +73,125 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--ws-size-1);
-  max-height: var(--ws-size-320);
+  gap: 0;
+  max-height: var(--ws-quick-input-list-max-height);
   overflow-y: auto;
 }
 
-/* Rows: label left, muted description filling the middle, keybinding
-   hint pinned to the right edge. */
+/* Rows: label left, muted description filling the middle, key chips pinned
+   to the right edge. */
 .ws-quick-input__option {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-xs) var(--space-md);
-  border-radius: var(--ws-menu-item-radius);
+  gap: 0;
+  box-sizing: border-box;
+  flex: none;
+  height: var(--ws-quick-input-row-height);
+  padding: var(--ws-quick-input-row-padding);
+  margin: var(--ws-quick-input-row-margin);
+  border-radius: var(--radius);
   color: var(--text);
   cursor: pointer;
   user-select: none;
 }
 
-.ws-quick-input__option[aria-selected="true"] {
+.ws-quick-input__option:hover {
   background: var(--bg-hover);
+}
+
+.ws-quick-input__option[aria-selected="true"] {
+  background: var(--cursor-bg-active);
 }
 
 .ws-quick-input__option-label {
   flex: none;
+  white-space: pre;
+}
+
+/* The filter's match inside a label. */
+.ws-quick-input__highlight {
+  color: var(--list-highlight);
+  font-weight: 700;
 }
 
 .ws-quick-input__option-description {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  margin-left: var(--ws-size-6);
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--ws-quick-input-description-size);
+  opacity: 0.6;
 }
 
+/* Key chips: one box per key, a plus between the keys of a chord, a gap
+   between chords. The selected row shows them plain. */
 .ws-quick-input__option-keybinding {
+  display: flex;
   flex: none;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  align-items: center;
+  margin-left: var(--ws-size-6);
+  line-height: var(--ws-size-10);
+}
+
+.ws-quick-input__key {
+  display: inline-block;
+  padding: var(--ws-quick-input-key-padding);
+  background: var(--keybinding-label-bg);
+  border: var(--ws-border-width) solid var(--keybinding-label-border);
+  border-bottom-color: var(--keybinding-label-border-bottom);
+  border-radius: var(--ws-quick-input-key-radius);
+  box-shadow: inset 0 calc(-1 * var(--ws-border-width)) 0 var(--cursor-shadow-primary);
+  color: var(--keybinding-label-text);
+  font-size: var(--font-size-xs);
+  vertical-align: middle;
+}
+
+.ws-quick-input__key-separator {
+  display: inline-block;
+  margin: 0 var(--ws-size-2);
+  font-size: var(--font-size-xs);
+}
+
+.ws-quick-input__chord-separator {
+  width: var(--ws-quick-input-chord-gap);
+}
+
+.ws-quick-input__option[aria-selected="true"] .ws-quick-input__key {
+  background: none;
+  color: inherit;
+}
+
+/* A group label: a line above the row it opens, its text at the right with
+   a top line - except the first, which has nothing above it to divide from. */
+.ws-quick-input__separator {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--ws-quick-input-row-height);
+  padding: var(--ws-quick-input-row-padding);
+  margin: var(--ws-quick-input-row-margin);
+  border-top: var(--ws-border-width) solid var(--quick-input-separator);
+  font-size: var(--ws-quick-input-description-size);
+  opacity: 0.6;
+  user-select: none;
+}
+
+.ws-quick-input__separator:first-child {
+  border-top: none;
+}
+
+/* The line a provider with no rows says, dimmed like the IDE's message. */
+.ws-quick-input__empty {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--ws-quick-input-row-height);
+  padding: var(--ws-quick-input-row-padding);
+  margin: var(--ws-quick-input-row-margin);
+  opacity: 0.6;
+  user-select: none;
 }

@@ -1199,7 +1199,7 @@ Rules for every step:
 
 <step-8>
 
-### Step 8: Copy Cursor's quick input, toasts, and status bar
+### Step 8: Copy Cursor's quick input, toasts, and status bar [completed]
 
 - Component: Workbench shell
 - Placement: eighth. It precedes Step 9 because the run panel's selects take the workbench input values set here.

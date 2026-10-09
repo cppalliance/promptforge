@@ -23,7 +23,10 @@
 // it or its group, and every X is out of the tab order;
 // Delete and Backspace on a focused tab leave a non-closable tab open,
 // prompt on an unsaved editor (Cancel keeps it), and close a clean tab,
-// moving focus to the tab now at its index so a second Delete closes that.
+// moving focus to the tab now at its index so a second Delete closes that;
+// and a close the layout core rejects (a part whose confirmClose throws)
+// raises the "Command 'Close Editor' resulted in an error" toast from the X
+// and from Delete, leaving the tab open.
 // Run: node --test test/tab-menu.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -48,7 +51,9 @@ const bundle = await esbuild.build({
       export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
       export { detectPlatform, formatKeybinding, parseKeybinding } from "@workshop/platform/keybinding-parser";
-      export { getService } from "@workshop/platform/service-registry";
+      export { getService, registerService } from "@workshop/platform/service-registry";
+      export { createToastStack } from "@workshop/look/toast";
+      export { TOAST_STACK } from "./src/services/toast-service.ts";
       export { initZones, openInZone, resetZones } from "./src/parts/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
@@ -142,6 +147,9 @@ const {
   formatKeybinding,
   parseKeybinding,
   getService,
+  registerService,
+  createToastStack,
+  TOAST_STACK,
   initZones,
   openInZone,
   resetZones,
@@ -215,6 +223,15 @@ class ProbePart extends WorkshopPart {
   create() {}
 }
 
+// A part whose close confirmation throws, so the layout core's close
+// rejects for its tab.
+class FaultyPart extends WorkshopPart {
+  create() {}
+  confirmClose() {
+    return Promise.reject(new Error("confirm exploded"));
+  }
+}
+
 // One lazy "feature directory" serving every synthetic type. Everything
 // but "side" shares the main zone's group.
 const feature = {
@@ -226,6 +243,7 @@ const feature = {
     for (const type of ["agent", "probe", "side", "pinned"]) {
       registerPanelFactory(type, () => new ProbePart());
     }
+    registerPanelFactory("faulty", () => new FaultyPart());
   },
 };
 const load = () => Promise.resolve(feature);
@@ -240,6 +258,7 @@ registerPanelType({ type: "agent", title: "Agent", defaultZone: "main", load });
 registerPanelType({ type: "probe", title: "Probe", defaultZone: "main", load });
 registerPanelType({ type: "side", title: "Side", defaultZone: "right", load });
 registerPanelType({ type: "pinned", title: "Pinned", defaultZone: "main", closable: false, load });
+registerPanelType({ type: "faulty", title: "Faulty", defaultZone: "main", load });
 
 // Test-only rows in the tab menu's own group, sorted after every shipped
 // row: one gated on the clicked type, one checked by it, one labelled by
@@ -583,6 +602,50 @@ check("a second Delete closes the tab focus moved to", !isOpen(right) && isOpen(
 check(
   "Delete on the last tab moves focus to the wrapper of the tab before it",
   window.document.activeElement === tabOf(left).parentElement,
+);
+
+// --- A close the layout core rejects raises the command-failure toast ------------
+
+const toastStack = createToastStack();
+window.document.body.append(toastStack.element);
+registerService(TOAST_STACK, () => toastStack);
+const toastTexts = () =>
+  [...toastStack.element.querySelectorAll(".toast")].map((toast) => ({
+    text: toast.querySelector(".toast__message")?.textContent,
+    error: toast.classList.contains("toast-error"),
+  }));
+const failedClose = `Command '${Commands.labelOf(CLOSE)}' resulted in an error`;
+check(`the close command's label is its Close Editor title (got: ${Commands.labelOf(CLOSE)})`, Commands.labelOf(CLOSE) === "Close Editor");
+
+const faulty = await open("faulty");
+const loggedFailures = [];
+const realConsoleError = console.error;
+console.error = (...args) => loggedFailures.push(args);
+closeButton(faulty)?.click();
+await flush();
+check("a rejected close from the X raises one error toast", toastTexts().length === 1 && toastTexts()[0].error === true);
+check(
+  `the toast names the close command, as Cursor words it (got: ${toastTexts()[0]?.text})`,
+  toastTexts()[0]?.text === failedClose,
+);
+check("a rejected close from the X leaves the tab open", isOpen(faulty));
+
+pressOnTab(faulty, "Delete");
+await flush();
+check(
+  "a rejected close from Delete raises a second error toast with the same text",
+  toastTexts().length === 2 && toastTexts().every((toast) => toast.error && toast.text === failedClose),
+);
+check("a rejected close from Delete leaves the tab open", isOpen(faulty));
+
+tabOf(faulty).dispatchEvent(new window.MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+await flush();
+check("a rejected close from a middle click raises a third error toast", toastTexts().length === 3);
+console.error = realConsoleError;
+check(
+  "each failed close keeps its detail on the console",
+  loggedFailures.length === 3 &&
+    loggedFailures.every((args) => String(args[0]).includes(CLOSE) && args[1]?.message === "confirm exploded"),
 );
 
 if (failures.length > 0) {
