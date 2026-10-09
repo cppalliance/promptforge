@@ -29,6 +29,9 @@ use serde_json::{Map, Value as Json};
 use super::{Error, Lua, LuaProgram, Result, SharedSource};
 use crate::protocol::{MessageRecord, MessageRole, parse_record};
 
+#[path = "messages-view.rs"]
+mod view;
+
 /// The builders chunk's name: `@`-prefixed so PUC renders it verbatim as a
 /// file path, making unexpected shim errors clickable `file:line:`
 /// references with no `[string "..."]` wrapper.
@@ -93,6 +96,12 @@ impl MessageList {
     /// How many records the list holds.
     fn len(&self) -> usize {
         self.state().records.len()
+    }
+
+    /// The record at the 1-based `index`, if the list holds one there.
+    fn record(&self, index: usize) -> Option<Arc<MessageRecord>> {
+        let position = index.checked_sub(1)?;
+        self.state().records.get(position).cloned()
     }
 
     /// Appends `record`. A system record after any non-system record is
@@ -255,27 +264,54 @@ fn build<const N: usize>(
     Ok(this)
 }
 
-/// One `replace` bound under the integer rule: an integer, or a float
-/// with an integral value.
-fn bound(name: &str, value: &Value) -> mlua::Result<i64> {
+/// A Lua number under the integer rule: an integer, or a float with an
+/// integral value.
+fn integral(value: &Value) -> Option<i64> {
     match value {
-        Value::Integer(bound) => Ok(*bound),
-        Value::Number(bound) if bound.fract() == 0.0 =>
+        Value::Integer(integer) => Some(*integer),
+        Value::Number(number) if number.fract() == 0.0 =>
         {
             #[expect(
                 clippy::cast_possible_truncation,
-                reason = "the value is integral, and a magnitude past i64 saturates to a bound \
+                reason = "the value is integral, and a magnitude past i64 saturates to a value \
                           that is out of range either way"
             )]
-            Ok(*bound as i64)
+            Some(*number as i64)
         }
-        Value::Number(bound) => Err(refusal(format!(
-            "replace {name} must be an integer, got {bound}"
-        ))),
-        other => Err(refusal(format!(
+        _ => None,
+    }
+}
+
+/// The 1-based list index a Lua key names under the integer rule.
+fn key_index(key: &Value) -> Option<usize> {
+    integral(key).and_then(|index| usize::try_from(index).ok())
+}
+
+/// One `replace` bound under the integer rule.
+fn bound(name: &str, value: &Value) -> mlua::Result<i64> {
+    integral(value).ok_or_else(|| match value {
+        Value::Number(bound) => refusal(format!("replace {name} must be an integer, got {bound}")),
+        other => refusal(format!(
             "replace {name} must be an integer, got {}",
             other.type_name()
-        ))),
+        )),
+    })
+}
+
+/// The index after `previous` in a list walk, and a new view of the
+/// record there, or nils past the end.
+fn next_record(
+    lua: &Lua,
+    list: &MessageList,
+    previous: &Value,
+) -> mlua::Result<(Option<usize>, Value)> {
+    let index = match previous {
+        Value::Nil => Some(1),
+        key => key_index(key).and_then(|index| index.checked_add(1)),
+    };
+    match index.and_then(|index| Some((index, list.record(index)?))) {
+        Some((index, record)) => Ok((Some(index), view::create(lua, record)?)),
+        None => Ok((None, Value::Nil)),
     }
 }
 
@@ -340,6 +376,23 @@ impl UserData for MessageList {
             },
         );
         methods.add_meta_method(MetaMethod::Len, |_, this, ()| Ok(this.len()));
+        methods.add_meta_method(
+            MetaMethod::Index,
+            |lua, this, key: Value| match key_index(&key).and_then(|index| this.record(index)) {
+                Some(record) => view::create(lua, record),
+                None => Ok(Value::Nil),
+            },
+        );
+        methods.add_meta_function(
+            MetaMethod::Pairs,
+            |lua, this: AnyUserData| -> mlua::Result<(Function, AnyUserData, Value)> {
+                let list = handle(&this)?;
+                let next = lua.create_function(move |lua, (_, previous): (Value, Value)| {
+                    next_record(lua, &list, &previous)
+                })?;
+                Ok((next, this, Value::Nil))
+            },
+        );
         methods.add_meta_method(
             MetaMethod::NewIndex,
             |_, _, _: (Value, Value)| -> mlua::Result<()> {

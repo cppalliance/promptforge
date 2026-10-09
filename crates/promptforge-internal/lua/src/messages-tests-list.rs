@@ -14,7 +14,7 @@ mod commit;
 
 /// A VM holding a fresh list as the global `msgs`, and the Rust handle
 /// that shares it.
-fn vm() -> (Lua, MessageList) {
+pub(super) fn vm() -> (Lua, MessageList) {
     let lua = Lua::new();
     let list = MessageList::default();
     let userdata = lua
@@ -26,13 +26,13 @@ fn vm() -> (Lua, MessageList) {
     (lua, list)
 }
 
-fn run(lua: &Lua, source: &str) {
+pub(super) fn run(lua: &Lua, source: &str) {
     lua.load(source).exec().expect("test source runs");
 }
 
 /// The message of the crate error a list method raised, not its
 /// flattened traceback.
-fn refusal(lua: &Lua, source: &str) -> String {
+pub(super) fn refusal(lua: &Lua, source: &str) -> String {
     let error = lua
         .load(source)
         .exec()

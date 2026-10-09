@@ -11,6 +11,9 @@ use crate::{Error, SectionVm};
 #[path = "messages-tests-list.rs"]
 mod list;
 
+#[path = "messages-tests-view.rs"]
+mod view;
+
 /// A fresh default handle's access capability for a test VM.
 fn fresh_access() -> std::sync::Arc<crate::Access> {
     std::sync::Arc::new(
