@@ -5,7 +5,8 @@
 //! out, and the ask id names the ask tool under the name user-input was
 //! installed as. The `mcp.json` reader returns the servers sorted by
 //! name, and the install loop adds each under its lowercased name, skipping
-//! a name that does not parse or is taken.
+//! a name that does not parse or is taken. A remote `mcp.json` entry reads
+//! the runtime the server provides, so it fails only on its connection.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -319,4 +320,35 @@ async fn the_host_context_installs_the_servers_of_the_named_file() {
     let (_dir, path) = mcp_file(r#"{ "mcpServers": { "GitHub": { "command": "x" } } }"#);
     let (host, _ask) = host_context(&Registry::new(), Some(Path::new(&path)));
     assert!(installed_as_a_refused_local_server(&Arc::new(host), "github").await);
+}
+
+#[tokio::test]
+async fn a_remote_server_installs_on_the_runtime_the_server_provides_and_fails_only_on_its_connection()
+ {
+    // Bind and drop a listener to get a loopback port nothing listens on.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind a loopback port")
+        .local_addr()
+        .expect("the bound address")
+        .port();
+    let (host, _ask) = with_plugins(
+        services(&Registry::new()),
+        vec![(
+            "docs".to_owned(),
+            serde_json::json!({ "url": format!("http://127.0.0.1:{port}/mcp") }),
+        )],
+    );
+
+    let outcome = run_prompt(&Arc::new(host), requiring("docs")).await;
+    let Some(RunOutcome::Failed { message, .. }) = outcome else {
+        panic!("the run is refused as the connection fails: {outcome:?}");
+    };
+    assert!(
+        message.contains("- docs is unavailable: the MCP handshake failed"),
+        "the install reached the connection task on the provided runtime: {message}"
+    );
+    assert!(
+        !message.contains("promptforge/tokio-runtime"),
+        "the failure is the connection, not the missing runtime service: {message}"
+    );
 }
