@@ -5,7 +5,9 @@
 //! replaces the `pairs` and `next` globals with one deterministic walk: the
 //! array part (`1..=#t`) first in index order, then the hash part by the shared
 //! [`SortKey`](crate::collection::SortKey) order (booleans, then numbers, then
-//! strings). A `__pairs` metamethod still wins, exactly as in stock Lua.
+//! strings). A `__pairs` metamethod on a table's or a userdata's metatable
+//! still wins, as in stock Lua; any other non-table value, a userdata without
+//! `__pairs` included, is refused.
 //!
 //! `pairs` captures that order once and advances it by position, so a key
 //! whose value becomes `nil` mid-traversal is skipped rather than visited with
@@ -112,11 +114,37 @@ fn deterministic_next(
     Ok((key, value))
 }
 
-/// The `pairs(table)` replacement: a `__pairs` metamethod's results when one
-/// is present, otherwise a stateful iterator over the table's walk order.
+/// The `pairs(value)` replacement: a `__pairs` metamethod's results when the
+/// table's or userdata's metatable holds one, otherwise a stateful iterator
+/// over the table's walk order. A userdata without `__pairs` is refused like
+/// any other non-table value.
 fn pairs(lua: &Lua, value: Value) -> mlua::Result<MultiValue> {
-    let table = match &value {
-        Value::Table(table) => table.clone(),
+    let metamethod = match &value {
+        Value::Table(table) => match table.metatable() {
+            Some(metatable) => metatable.raw_get::<Value>("__pairs")?,
+            None => Value::Nil,
+        },
+        // mlua exposes no metatable for a userdata it did not create or one
+        // already destructed, so such a value is refused like any userdata
+        // without `__pairs`.
+        Value::UserData(userdata) => match userdata.metatable() {
+            Ok(metatable) => metatable.get::<Value>("__pairs")?,
+            Err(_) => Value::Nil,
+        },
+        _ => Value::Nil,
+    };
+    match metamethod {
+        Value::Nil => {}
+        Value::Function(callable) => return callable.call::<MultiValue>(value),
+        other => {
+            return Err(mlua::Error::runtime(format!(
+                "attempt to call a {} value (metamethod '__pairs')",
+                other.type_name()
+            )));
+        }
+    }
+    let table = match value {
+        Value::Table(table) => table,
         other => {
             return Err(mlua::Error::runtime(format!(
                 "bad argument #1 to 'pairs' (table expected, got {})",
@@ -124,18 +152,6 @@ fn pairs(lua: &Lua, value: Value) -> mlua::Result<MultiValue> {
             )));
         }
     };
-    if let Some(metatable) = table.metatable() {
-        match metatable.raw_get::<Value>("__pairs")? {
-            Value::Nil => {}
-            Value::Function(callable) => return callable.call::<MultiValue>(value),
-            other => {
-                return Err(mlua::Error::runtime(format!(
-                    "attempt to call a {} value (metamethod '__pairs')",
-                    other.type_name()
-                )));
-            }
-        }
-    }
     // Capture the walk order once, then advance it by position. Advancing a
     // snapshot rather than re-deriving order from the live table makes the
     // walk independent of a key's sortability: a key cleared mid-loop reads as

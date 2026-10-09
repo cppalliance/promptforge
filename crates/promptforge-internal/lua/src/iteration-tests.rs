@@ -1,6 +1,6 @@
 //! Tests for the deterministic `pairs`/`next` installer.
 
-use mlua::{Lua, LuaSerdeExt, Value};
+use mlua::{Lua, LuaSerdeExt, MetaMethod, UserData, UserDataMethods, Value};
 use serde_json::json;
 
 use super::install_deterministic_iteration;
@@ -11,6 +11,33 @@ fn vm() -> Lua {
     install_deterministic_iteration(&lua).expect("the installer runs");
     lua
 }
+
+/// A userdata whose `__pairs` yields `(i, i * 10)` for `i` in `1..=count`.
+struct Counted {
+    count: i64,
+}
+
+impl UserData for Counted {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::Pairs, |lua, this, ()| {
+            let count = this.count;
+            let mut index = 0;
+            lua.create_function_mut(move |_, ()| {
+                index += 1;
+                Ok(if index <= count {
+                    (Value::Integer(index), Value::Integer(index * 10))
+                } else {
+                    (Value::Nil, Value::Nil)
+                })
+            })
+        });
+    }
+}
+
+/// A userdata with no metamethods.
+struct Opaque;
+
+impl UserData for Opaque {}
 
 /// Evaluates a chunk that returns a sequence table and reads it back as JSON.
 fn sequence(lua: &Lua, source: &str) -> Vec<serde_json::Value> {
@@ -86,6 +113,41 @@ fn pairs_honors_a_pairs_metamethod() {
                   for k, v in pairs(t) do out[#out+1] = k .. ':' .. v end \
                   return out";
     assert_eq!(sequence(&lua, source), vec![json!("1:10"), json!("2:20")]);
+}
+
+#[test]
+fn pairs_honors_a_userdata_pairs_metamethod() {
+    let lua = vm();
+    let counted = lua
+        .create_userdata(Counted { count: 2 })
+        .expect("the userdata is created");
+    lua.globals()
+        .set("counted", counted)
+        .expect("the global is set");
+    let source = "local out = {} \
+                  for k, v in pairs(counted) do out[#out+1] = k .. ':' .. v end \
+                  return out";
+    assert_eq!(sequence(&lua, source), vec![json!("1:10"), json!("2:20")]);
+}
+
+#[test]
+fn pairs_refuses_a_userdata_without_a_pairs_metamethod() {
+    let lua = vm();
+    let opaque = lua
+        .create_userdata(Opaque)
+        .expect("the userdata is created");
+    lua.globals()
+        .set("opaque", opaque)
+        .expect("the global is set");
+    let error = lua
+        .load("return pairs(opaque)")
+        .exec()
+        .expect_err("a userdata without __pairs is refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("bad argument #1 to 'pairs' (table expected, got userdata)"),
+        "the refusal must name the expected and actual types: {message}"
+    );
 }
 
 #[test]
