@@ -200,7 +200,7 @@ Work in the `c:\Users\Vinnie\cursor\promptforge2` worktree on branch `vibe2`. Cr
 
 <step-2>
 
-### Step 2: Correct the README claims
+### Step 2: Correct the README claims [completed]
 
 - Component: none
 - Work item: D1-2. Make the README state what CI runs and what a final decode is conditioned on, as the code at `14324ac77` does.
