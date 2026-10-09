@@ -213,7 +213,7 @@ Run the steps in order. The two steps touch different files, but Step 2 closes t
 
 <step-2>
 
-### Step 2: Add the remote-server runtime test, prove it can fail, and run the exit checks
+### Step 2: Add the remote-server runtime test, prove it can fail, and run the exit checks [completed]
 
 - Component: none
 - Covers: D1-3 option A and the exit checks (work items W3 and Exit).

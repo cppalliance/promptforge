@@ -5,7 +5,8 @@
 //! out, and the ask id names the ask tool under the name user-input was
 //! installed as. The `mcp.json` reader returns the servers sorted by
 //! name, and the install loop adds each under its lowercased name, skipping
-//! a name that does not parse or is taken.
+//! a name that does not parse or is taken. A remote `mcp.json` entry reads
+//! the runtime the server provides, so it fails only on its connection.
 
 use std::path::Path;
 use std::sync::Arc;
