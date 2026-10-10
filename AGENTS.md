@@ -56,6 +56,7 @@ Four words have exactly one meaning each, everywhere in this repository: code co
 - Facade docs: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`, without `--all-features`, so the facade's docs build with default features.
 - Facade surface: `cargo +<pinned nightly> xtask api --check`, where the pinned nightly is the one named in `crates/build-xtask/src/api/toolchain.rs`; on any other toolchain it fails at once, naming the nightly it needs. It checks that every path a surface item's signature, fields, bounds, impls, or doc links name is a facade re-export (or std, core, alloc, or an allowlisted crate), that no surface doc text names an internal crate, and that the surface listing matches the committed `crates/promptforge/public-api.txt`.
 - Boundary and structural checks: `cargo test -p build-xtask`. It enforces the product and container boundaries, the Workshop tier graph, the `## Invariants` marker, and lint inheritance.
+- Wording and rulebook scan: `node --test crates/workshop/ui/test/docs-claims.mjs`. It enforces the Engine wording rule, the rulebook Definitions, and the Plugin lifecycle wording (installed, snapshotted, or declared). It needs no `npm ci` and runs from any directory, because the file resolves the repository root from its own path.
 
 ## Structural Rules
 
