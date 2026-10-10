@@ -9,7 +9,7 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use promptforge_types::emitter::Emitter;
 
-use super::fence::{RawBlock, lua_block_location, split_section_blocks};
+use super::fence::{RawBlock, lua_block_location, split_section_blocks, trim_leading_blank_lines};
 use super::list::{is_all_list_markers, parse_bullet_items};
 use super::{Block, LuaProgram, ParseErrorKind, Section};
 use crate::{Error, Result};
@@ -290,6 +290,7 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
+            markdown: trim_leading_blank_lines(&h.content).trim_end().to_owned(),
         });
     }
     Ok(result)
