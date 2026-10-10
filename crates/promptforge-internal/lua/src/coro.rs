@@ -68,9 +68,8 @@ const HANDLE_METHODS_REGISTRY: &str = "promptforge.impl_coro.handle_methods";
 /// The registry key for the shim's model-issued `tool_call` form, stashed
 /// by the prelude install so a test driver can install it as
 /// `tools.call_as_model` and drive the driver's `call_id` path from a
-/// fixture section. The registry is Rust-side only: in production the
-/// loop shim reaches the function directly inside the prelude chunk, and
-/// no VM ever installs it as a global.
+/// fixture section. The registry is Rust-side only, and no VM ever
+/// installs it as a global.
 const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
 
 /// The registry key for the shim's store function table, stashed by the
@@ -127,9 +126,9 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// `yield` capture (a VM without the shims keeps exactly
 /// `STRING | TABLE | MATH`); the `coroutine` global is stripped again
 /// before returning, so author code cannot yield directly and a hand-rolled
-/// yield fails the driver's strict validation. The `models`, `tools`, and
-/// `compactors` tables are passed to the shim chunk as arguments, so the
-/// chunk never reads a global; the chunk shims `models.infer` and installs
+/// yield fails the driver's strict validation. The `models` and `tools`
+/// tables are passed to the shim chunk as arguments, so the chunk never
+/// reads a global; the chunk shims `models.infer` and installs
 /// `tools.call`, and the `call` shim comes back for the Engine to install as
 /// a global. The `tasks` namespace is a second chunk, run over the same
 /// `yield` and `var_snapshot` captures plus the prelude's returned failure
@@ -138,9 +137,10 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// renderer, and installed as the `fanout` global. The `models.loop` shim
 /// is stashed in the registry for [`install_section_loop_shim`], and the
 /// chunk's `handle_methods` table, a model handle's `infer` and `loop`, for
-/// [`handle_method`]. `max_tool_iterations` is the loop's round cap, the
-/// run's resolved value, captured by the chunk so the shim reads it
-/// without an Engine call.
+/// [`handle_method`]. `max_tool_iterations`, the run's resolved round cap,
+/// and the `compactors` table go to
+/// [`loop_begin`](crate::models_loop::loop_begin), which runs the loop's
+/// rules behind the shim's trampoline.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -157,10 +157,10 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// the handler calls it through. Then `cancel_requested` reads the
 /// cancel flag of `instruction_budget`, so the chunk's protected calls
 /// raise a failure caught under cancellation again instead of returning
-/// it, and the hook's abort always reaches the block guard. The last two,
-/// `is_message_list` and `is_model_handle`, report whether a value is a
-/// `messages.new()` list or a model handle, so the shim's entries check
-/// their list and receiver arguments before any yield.
+/// it, and the hook's abort always reaches the block guard. Next,
+/// `is_model_handle` reports whether a value is a model handle, so the
+/// `infer` entries check their receiver before any yield, and the last,
+/// `loop_begin`, starts each loop call for the trampoline.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -190,12 +190,11 @@ pub(crate) fn install_shim_prelude(
     let cancel_requested = lua
         .create_function(move |_, ()| Ok(budget.is_cancelled()))
         .map_err(Error::lua)?;
-    let is_message_list = lua
-        .create_function(|_, value: Value| Ok(crate::messages::is_list(&value)))
-        .map_err(Error::lua)?;
     let is_model_handle = lua
         .create_function(|_, value: Value| Ok(crate::models::is_handle(&value)))
         .map_err(Error::lua)?;
+    let loop_begin =
+        crate::models_loop::loop_begin(lua, max_tool_iterations, compactors, instruction_budget)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -204,16 +203,14 @@ pub(crate) fn install_shim_prelude(
             var_snapshot.clone(),
             models,
             tools,
-            compactors,
-            max_tool_iterations,
             error_value,
             stash_failure,
             normalize_failure,
             enter_local_handler,
             leave_local_handler,
             cancel_requested,
-            is_message_list,
             is_model_handle,
+            loop_begin,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
@@ -437,9 +434,8 @@ pub(crate) fn handle_method(lua: &Lua, name: &str) -> mlua::Result<Value> {
 /// `tool_call` with a `call_id` straight at the driver's dispatch arm.
 ///
 /// A test driver is the only caller, so the install exists only under the
-/// `test-support` feature: in production the loop shim reaches the
-/// function directly inside the prelude chunk, and `tools.call_as_model`
-/// never exists in any VM - not stubbed, simply absent.
+/// `test-support` feature: in production `tools.call_as_model` never
+/// exists in any VM - not stubbed, simply absent.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the shim prelude was never installed on this
