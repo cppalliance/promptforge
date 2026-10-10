@@ -14,10 +14,8 @@
 //! machine's typed input, steps the machine, and turns its next step into
 //! that action.
 
-use mlua::{Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
-use promptforge_types::metrics::ToolCallEvent;
+use mlua::{AnyUserData, Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
 
-use crate::compactors::OverflowReason;
 use crate::error::{Error, Result};
 use crate::error_value::{ErrorKind, error_table, normalized};
 use crate::hardening::InstructionBudget;
@@ -153,11 +151,9 @@ fn refuse(lua: &Lua, message: &str) -> mlua::Result<MultiValue> {
 
 /// Reads the values the trampoline passed as the input `phase` awaits.
 /// A failed envelope's value goes through [`envelope_failure`]. A `chat`
-/// answer is read back into a [`ChatResult`] from the table
-/// `chat_result_table` renders: each call's arguments through
-/// `from_value`, the overflow tag through `OverflowReason::from_tag`, and
-/// `model` and `metrics`, which the loop never reads, left empty. A raw
-/// `pcall`'s outcome is read beside the run's cancel flag.
+/// answer's [`ChatResult`] is taken out of the userdata it resumed as, so
+/// the machine gets the scheduler's own value. A raw `pcall`'s outcome is
+/// read beside the run's cancel flag.
 fn read_input(
     lua: &Lua,
     phase: &Phase<Value>,
@@ -174,7 +170,9 @@ fn read_input(
             cancelled: budget.is_cancelled(),
         }),
         Phase::Chatting => Ok(Input::Answered(answer(lua, ok, value, |round| {
-            chat_result(lua, round).map(Box::new)
+            lua.unpack::<AnyUserData>(round)?
+                .take::<ChatResult>()
+                .map(Box::new)
         })?)),
         Phase::Calling => {
             let handler = next();
@@ -279,69 +277,11 @@ fn envelope_failure(lua: &Lua, value: Value) -> mlua::Result<Value> {
     Ok(Value::Table(table))
 }
 
-/// Reads a `chat` answer's result table, as `chat_result_table` renders
-/// it, back into the [`ChatResult`] the machine judges.
-fn chat_result(lua: &Lua, round: Value) -> mlua::Result<ChatResult> {
-    let Value::Table(round) = round else {
-        return Err(malformed("a chat answer's result is not a table"));
-    };
-    let overflow_reason = match optional_text(round.raw_get("overflow_reason")?)? {
-        Some(tag) => Some(
-            OverflowReason::from_tag(&tag)
-                .ok_or_else(|| malformed("a chat answer's overflow reason is unknown"))?,
-        ),
-        None => None,
-    };
-    let tool_calls = match round.raw_get::<Value>("tool_calls")? {
-        Value::Nil => None,
-        Value::Table(calls) => Some(
-            calls
-                .sequence_values::<Table>()
-                .map(|call| tool_call(lua, &call?))
-                .collect::<mlua::Result<Vec<_>>>()?,
-        ),
-        _ => return Err(malformed("a chat answer's tool calls are not a table")),
-    };
-    let turn = match round.raw_get::<Value>("turn")? {
-        Value::Integer(turn) => u32::try_from(turn).ok(),
-        _ => None,
-    };
-    Ok(ChatResult {
-        overflow: truthy(&round.raw_get("overflow")?),
-        overflow_reason,
-        reply: optional_text(round.raw_get("reply")?)?,
-        empty_detail: optional_text(round.raw_get("empty_detail")?)?,
-        tool_calls,
-        finish_reason: optional_text(round.raw_get("finish_reason")?)?,
-        model: String::new(),
-        metrics: None,
-        turn: turn.ok_or_else(|| malformed("a chat answer's turn is not a u32 integer"))?,
-    })
-}
-
-/// One requested call of a `chat` answer's `tool_calls` sequence.
-fn tool_call(lua: &Lua, call: &Table) -> mlua::Result<ToolCallEvent> {
-    Ok(ToolCallEvent {
-        id: text(call.raw_get("id")?)?,
-        name: text(call.raw_get("name")?)?,
-        arguments: lua.from_value(call.raw_get("arguments")?)?,
-        tool: None,
-    })
-}
-
 /// A Lua string's text; any other value is a malformed answer.
 fn text(value: Value) -> mlua::Result<String> {
     match value {
         Value::String(text) => Ok(text.to_str()?.to_owned()),
         _ => Err(malformed("a loop answer's text is not a string")),
-    }
-}
-
-/// An optional Lua string's text: nil is `None`.
-fn optional_text(value: Value) -> mlua::Result<Option<String>> {
-    match value {
-        Value::Nil => Ok(None),
-        value => text(value).map(Some),
     }
 }
 

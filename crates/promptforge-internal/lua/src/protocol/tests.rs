@@ -4,7 +4,7 @@
 //! yield-to-request validation, `parse_chat` the message-list request,
 //! `parse_tasks` the task-operation requests, `answer` the
 //! answer-to-envelope round trips, and `answer_chat` the `chat` answer's
-//! shapes. The helpers below are shared.
+//! typed error. The helpers below are shared.
 
 use std::num::NonZeroU32;
 
@@ -14,7 +14,6 @@ use serde_json::json;
 use promptforge_model_client::model::{ModelBinding, ModelInvocation};
 use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::ids::{TaskId, TaskOrigin};
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use crate::{Error, LuaModelHandle};
 
