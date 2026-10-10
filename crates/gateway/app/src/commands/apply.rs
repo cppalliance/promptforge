@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{APPLY_CONFIG_LABEL, Outcome};
 use crate::AppState;
-use crate::config_shadow::{canonical_form, config_root, relative_name, shadow_census};
+use crate::config_shadow::{PendingEnv, canonical_form, config_root, relative_name, shadow_census};
 use crate::error::{GatewayError, blocking, config_write_error};
 use crate::routing::Routing;
 
@@ -132,9 +132,12 @@ pub(crate) fn capture_apply(config_path: &Path) -> Result<ApplyPlan, GatewayErro
     // persisted name can differ from the running profile (a switch that
     // persisted a new name and is waiting on a restart) and must not be
     // published as the live document's selection.
-    let config = load_pending_config(config_path, &ProfileSelection::default())
-        .and_then(|config| config.select_profile(None))
-        .map_err(config_write_error)?;
+    let pending_env = PendingEnv::new(config_path)?;
+    let config = load_pending_config(config_path, &ProfileSelection::default(), &|name: &str| {
+        pending_env.resolve_var(name)
+    })
+    .and_then(|config| config.select_profile(None))
+    .map_err(config_write_error)?;
     Ok(ApplyPlan::Reload(ApplySnapshot {
         config: Box::new(config),
         files,

@@ -85,6 +85,19 @@ async fn put_config(addr: std::net::SocketAddr, body: &serde_json::Value) -> req
         .expect("put sends")
 }
 
+/// Add a call to the Add Model endpoint to a request body
+fn push_cloud_endpoint(body: &mut serde_json::Value, var: &str) {
+    body["endpoint"]
+        .as_array_mut()
+        .expect("endpoints are an array")
+        .push(serde_json::json!({
+            "id": "staged",
+            "protocol": "openai",
+            "base_url": "http://127.0.0.1:9",
+            "api_key": format!("${{{var}}}"),
+        }));
+}
+
 #[tokio::test]
 async fn a_save_setting_active_profile_is_rejected_and_stages_nothing() {
     let (_temp, config, paths) = fixture();
@@ -128,4 +141,66 @@ async fn a_save_replies_with_the_config_shadow_alone() {
     );
     assert!(shadow_path(&config_path).is_file());
     assert!(!shadow_path(&profile_state_path(&config_path)).exists());
+}
+
+#[tokio::test]
+async fn adding_a_cloud_provider_validates_against_a_key_staged_only_in_the_env_shadow() {
+    // After a 'Save' operation in the UI the saved key is stored in the shadow
+    // env file and is not yet available in the process's environment.
+    //
+    // When a Cloud Model is added the handler should validate against the running
+    // environment and  pending keys in the shadow env.
+
+    let (_temp, config, paths) = fixture();
+    let config_path = paths.config_path.clone();
+
+    std::fs::write(
+        shadow_path(&config_path.with_extension("env")),
+        "PF_TEST_STAGED_KEY=sk-staged\n",
+    )
+    .expect("write env shadow");
+
+    let addr = serve_with_paths(config, paths).await;
+
+    let mut body = save_body(addr).await;
+    push_cloud_endpoint(&mut body, "PF_TEST_STAGED_KEY");
+
+    let response = put_config(addr, &body).await;
+
+    let expected = reqwest::StatusCode::OK;
+    let actual = response.status();
+    assert_eq!(
+        actual,
+        expected,
+        "Got `{actual}`, expected `{expected}`. Response: {}",
+        response.text().await.unwrap_or_default()
+    );
+    assert!(shadow_path(&config_path).is_file());
+}
+
+#[tokio::test]
+async fn adding_a_cloud_provider_without_its_key_is_rejected_and_stages_nothing() {
+    let (_temp, config, paths) = fixture();
+    let config_path = paths.config_path.clone();
+    let addr = serve_with_paths(config, paths).await;
+
+    let mut body = save_body(addr).await;
+    push_cloud_endpoint(&mut body, "PF_TEST_MISSING_KEY");
+
+    let response = put_config(addr, &body).await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+
+    let error: serde_json::Value = response.json().await.expect("error envelope");
+
+    assert_eq!(error["error"]["code"], "config_write_rejected");
+
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("PF_TEST_MISSING_KEY")),
+        "the error message does not name the missing variable: {error}"
+    );
+
+    assert!(!shadow_path(&config_path).exists());
 }

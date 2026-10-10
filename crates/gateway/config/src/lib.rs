@@ -45,7 +45,7 @@ pub use crate::config::{
     MultimodalProjectorConfig, ProfileConfig, Protocol, QueuePolicy, RECOMMENDED_STT_MODELS,
     RecommendedSttModel, SILERO_VAD_MODEL, SearchProvider, Secret, ServerConfig, SpeculationType,
     SpeculativeConfig, SpeechArtifactPin, SttModelConfig, SttPipelineConfig, SttRole, ThinkingMode,
-    ToolDialect, ToolsConfig, WebSearchConfig, WhisperBackend, WorkshopConfig,
+    ToolDialect, ToolsConfig, VarLookupFn, WebSearchConfig, WhisperBackend, WorkshopConfig,
 };
 pub use crate::profile::{
     ProfileName, ProfileNameError, ProfileSelection, ProfileState, profile_state_path,
