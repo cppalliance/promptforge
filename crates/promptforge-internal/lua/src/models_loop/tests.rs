@@ -5,7 +5,7 @@
 use mlua::{Function, Lua, MultiValue, Value};
 use promptforge_model_client::model::{ModelBinding, ModelInvocation};
 use promptforge_types::detail::model_id_from_validated;
-use promptforge_types::metrics::{CallMetrics, ClientTiming, ToolCallEvent};
+use promptforge_types::metrics::ToolCallEvent;
 use promptforge_types::tools::ToolId;
 use serde_json::json;
 
@@ -20,7 +20,7 @@ use crate::models::LuaModelHandle;
 use crate::protocol::{Answer, ChatResult, LocalToolOutcome, Request, YieldParse};
 
 /// A requested call named `echo`, its arguments naming its id.
-fn call(id: &str) -> ToolCallEvent {
+pub(super) fn call(id: &str) -> ToolCallEvent {
     ToolCallEvent {
         id: id.to_owned(),
         name: "echo".to_owned(),
@@ -30,7 +30,7 @@ fn call(id: &str) -> ToolCallEvent {
 }
 
 /// A served round with no product, under turn 7.
-fn round() -> ChatResult {
+pub(super) fn round() -> ChatResult {
     ChatResult {
         overflow: false,
         overflow_reason: None,
@@ -38,8 +38,6 @@ fn round() -> ChatResult {
         empty_detail: None,
         tool_calls: None,
         finish_reason: None,
-        model: String::new(),
-        metrics: None,
         turn: 7,
     }
 }
@@ -161,17 +159,6 @@ fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
             ..call("c1")
         }]),
         finish_reason: Some("tool_calls".to_owned()),
-        model: "served-model".to_owned(),
-        metrics: Some(CallMetrics {
-            usage: None,
-            llama: None,
-            vllm: None,
-            client: Some(ClientTiming {
-                ttft_ms: None,
-                mean_itl_ms: None,
-                e2e_ms: 41.5,
-            }),
-        }),
         ..round()
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(served.clone())))
