@@ -1,6 +1,6 @@
 //! Answer-to-envelope rendering: every [`Answer`] variant round-trips through
 //! Lua as the `(ok, result)` envelope and retains its typed error. The
-//! `chat` answer's shapes are in `answer_chat`.
+//! `chat` answer's error is in `answer_chat`.
 
 use super::*;
 

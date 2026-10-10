@@ -1,15 +1,16 @@
 //! Tests for the `models.loop` adapter over a fresh VM: Lua's type names,
 //! both entries' argument checks, the envelope failure, the chat answer's
-//! reader, and each step's action.
+//! userdata, and each step's action.
 
-use mlua::{Function, Lua, Value};
+use mlua::{Function, Lua, MultiValue, Value};
 use promptforge_model_client::model::{ModelBinding, ModelInvocation};
 use promptforge_types::detail::model_id_from_validated;
-use promptforge_types::metrics::ToolCallEvent;
+use promptforge_types::metrics::{CallMetrics, ClientTiming, ToolCallEvent};
+use promptforge_types::tools::ToolId;
 use serde_json::json;
 
-use super::machine::Then;
-use super::{act, chat_result, envelope_failure, loop_begin, lua_type_name};
+use super::machine::{Input, Phase, Then};
+use super::{act, envelope_failure, loop_begin, lua_type_name, read_input};
 use crate::compactors::OverflowReason;
 use crate::error::Error;
 use crate::error_value::{ErrorField, ErrorKind, Raised, error_table, raised_from};
@@ -152,41 +153,47 @@ fn envelope_failure_keeps_an_error_table_and_wraps_anything_else() {
 }
 
 #[test]
-fn the_chat_reader_reads_back_every_field_the_loop_reads_from_the_rendered_table() {
+fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
     let lua = Lua::new();
-    let cases = [
-        ChatResult {
-            overflow: true,
-            overflow_reason: Some(OverflowReason::Provider),
-            ..round()
-        },
-        ChatResult {
-            reply: Some("done".to_owned()),
-            finish_reason: Some("stop".to_owned()),
-            ..round()
-        },
-        ChatResult {
-            empty_detail: Some("the reply was empty".to_owned()),
-            finish_reason: Some("length".to_owned()),
-            ..round()
-        },
-        ChatResult {
-            tool_calls: Some(vec![call("c1"), call("c2")]),
-            finish_reason: Some("tool_calls".to_owned()),
-            ..round()
-        },
-    ];
-    for expected in cases {
-        let served = ChatResult {
-            model: "served-model".to_owned(),
-            ..expected.clone()
-        };
-        let (envelope, _) = Answer::<Error>::Chat(Ok(Box::new(served)))
-            .into_envelope(&lua)
-            .unwrap();
-        let table = envelope.into_iter().nth(1).expect("the result table");
-        assert_eq!(chat_result(&lua, table).unwrap(), expected);
-    }
+    let served = ChatResult {
+        tool_calls: Some(vec![ToolCallEvent {
+            tool: Some(ToolId::parse("web/fetch").unwrap()),
+            ..call("c1")
+        }]),
+        finish_reason: Some("tool_calls".to_owned()),
+        model: "served-model".to_owned(),
+        metrics: Some(CallMetrics {
+            usage: None,
+            llama: None,
+            vllm: None,
+            client: Some(ClientTiming {
+                ttft_ms: None,
+                mean_itl_ms: None,
+                e2e_ms: 41.5,
+            }),
+        }),
+        ..round()
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(served.clone())))
+        .into_envelope(&lua)
+        .unwrap();
+    assert!(retained.is_none());
+    let values = envelope.into_vec();
+    let Some(Value::UserData(resumed)) = values.get(1).cloned() else {
+        panic!("the chat answer resumes as a userdata, got {values:?}");
+    };
+    assert!(resumed.is::<ChatResult>());
+    let budget = InstructionBudget::default();
+    let values = MultiValue::from_vec(values);
+    let input = read_input(&lua, &Phase::Chatting, values, &budget).unwrap();
+    let Input::Answered(Ok(taken)) = input else {
+        panic!("the step reads the chat answer, got {input:?}");
+    };
+    assert_eq!(*taken, served);
+    assert!(
+        resumed.borrow::<ChatResult>().is_err(),
+        "the step takes the result out of the userdata"
+    );
 }
 
 /// `act`'s tag and values for `then`.
