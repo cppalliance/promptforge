@@ -28,7 +28,6 @@ fn sibling(name: &str, level: u8) -> Section {
         name,
         level,
         vec![promptforge_parser::test_support::prose_block(String::new())],
-        Vec::new(),
     )
 }
 
