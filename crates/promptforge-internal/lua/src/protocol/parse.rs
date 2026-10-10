@@ -237,24 +237,23 @@ fn classify(
 }
 
 /// Parses an `infer` request: the author-supplied `prompt`, and the
-/// optional leading handle's userdata whose frozen [`ModelBinding`] is
-/// cloned out of its borrow while the VM handle is live.
+/// optional handle's userdata whose frozen [`ModelBinding`] is cloned out
+/// of its borrow while the VM handle is live.
 ///
-/// The handle is author-supplied under namespace-only invocation
-/// (`models.infer(handle?, prompt)`), so a wrong shape is the call's error,
-/// not a malformed yield.
+/// The handle is the receiver of `h:infer(prompt)`, so a wrong shape is
+/// the call's error, not a malformed yield.
 fn parse_infer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let prompt = call_string(table, "prompt")?;
     let binding = call_handle(table, "models.infer")?;
     Ok(Request::Infer { prompt, binding })
 }
 
-/// Reads the optional leading model handle of `call` (`models.infer` or
-/// `models.loop`) off the request's `handle` field: absent or nil is
-/// `None`, a model handle's userdata is its frozen [`ModelBinding`] cloned
-/// out of its borrow while the VM handle is live, and any other value is
-/// the call's error naming the call, since the handle is author-supplied
-/// under namespace-only invocation.
+/// Reads the optional model handle of `call` (`models.infer` or
+/// `models.loop`) off the request's `handle` field, which a handle's
+/// `infer` or `loop` sets from its receiver: absent or nil is `None`, a
+/// model handle's userdata is its frozen [`ModelBinding`] cloned out of
+/// its borrow while the VM handle is live, and any other value is the
+/// call's error naming the call, since the receiver is author-supplied.
 fn call_handle(
     table: &mlua::Table,
     call: &str,

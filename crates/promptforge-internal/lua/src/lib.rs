@@ -48,12 +48,6 @@
 //! - Scheduler state changes only through a typed `Request` yielded by the
 //!   installed shim; a direct or malformed yield fails the block without
 //!   changing scheduler state.
-//! - Engine globals are namespace functions over plain values (`models.*`,
-//!   `tools.*`, `store.*`). Handles are frozen, inspectable, and
-//!   methodless, and an optional leading handle argument selects an
-//!   explicit binding. The one deliberate exception is the Rust-backed
-//!   `messages.new()` list, whose chainable builders and `replace` are
-//!   colon methods; a record view read from it has metamethods only.
 
 // The shared surface that child modules pull with a single `use super::*;`.
 use std::collections::BTreeMap;

@@ -391,9 +391,9 @@ fn an_infer_with_a_missing_or_non_string_prompt_is_the_calls_error() {
 
 #[test]
 fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
-    // The handle is author-supplied under namespace-only invocation, so
-    // a wrong shape is the call's error (pcall-able at the call site),
-    // not a malformed-yield block failure.
+    // The handle is the author-supplied receiver of `h:infer`, so a
+    // wrong shape is the call's error (pcall-able at the call site), not
+    // a malformed-yield block failure.
     let lua = Lua::new();
     let as_string = request_table(&lua, "infer");
     as_string.raw_set("prompt", "hi").expect("raw_set");

@@ -5,8 +5,9 @@
 //! `.name`, `.description`, `.parameters`, `.wire_name`, and `.untrusted`.
 //! The object is frozen and methodless: model-facing description
 //! overrides are positional arguments to `tools.always` / `tools.add`,
-//! never assignments on this handle, and invocation is namespace-only
-//! through `tools.call(alias_or_tool, arguments)`. Existing
+//! never assignments on this handle, and unlike a model handle, which
+//! carries `infer` and `loop`, it is invoked only through
+//! `tools.call(alias_or_tool, arguments)`. Existing
 //! callers that ignore the return value keep working.
 
 use mlua::{LuaSerdeExt, MetaMethod, UserData, UserDataFields, UserDataMethods, Value};

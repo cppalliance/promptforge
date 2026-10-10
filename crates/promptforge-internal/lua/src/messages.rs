@@ -2,14 +2,14 @@
 //!
 //! `messages.new()` returns a [`MessageList`] userdata. Its chainable
 //! `system`/`user`/`assistant`/`tool`/`append` builders and `replace` are
-//! colon methods, the one deliberate exception to the methodless-handle
-//! rule. Each edit validates its records as it adds them, keeps the system
-//! records leading the list, and drops fields a record does not hold, so a
-//! refused edit raises at the author's call and leaves the list unchanged.
-//! `#list` counts the records, `list[i]`, `pairs`, and `ipairs` read them
-//! as read-only views with metamethods only, and assignment is refused.
-//! `pairs` stops at the record count it started with, as the sandbox
-//! `pairs` does for a table, while `ipairs` reads the live list.
+//! colon methods. Each edit validates its records as it adds them, keeps
+//! the system records leading the list, and drops fields a record does
+//! not hold, so a refused edit raises at the author's call and leaves the
+//! list unchanged. `#list` counts the records, `list[i]`, `pairs`, and
+//! `ipairs` read them as read-only views with metamethods only, and
+//! assignment is refused. `pairs` stops at the record count it started
+//! with, as the sandbox `pairs` does for a table, while `ipairs` reads the
+//! live list.
 //!
 //! A model round's request holds a clone of the same list, so the round
 //! reads the records the author built with no second validation.

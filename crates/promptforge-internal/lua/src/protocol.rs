@@ -1,7 +1,7 @@
 //! The coroutine protocol: validated request and answer types for the
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
-//! A suspending Engine call (`models.infer(handle?, prompt)`, `call`,
+//! A suspending Engine call (`models.infer(prompt)`, `h:infer(prompt)`, `call`,
 //! `tasks.spawn`, `fanout`, `tools.call`, `store.*`, and
 //! the `chat` and `tool_call` rounds the `models.loop` shim yields on the
 //! author's behalf) is a Lua-side shim that yields a request table; the driver validates the

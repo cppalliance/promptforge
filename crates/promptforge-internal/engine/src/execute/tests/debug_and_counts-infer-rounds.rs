@@ -90,7 +90,7 @@ async fn run_infer_round(reply: ScriptedReply) -> (String, Vec<String>) {
         writer = models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        return models.infer(writer, 'say hello')\n\
+        return writer:infer('say hello')\n\
         ```\n";
     let prompt = bound_with_tools(md);
     let out = run(

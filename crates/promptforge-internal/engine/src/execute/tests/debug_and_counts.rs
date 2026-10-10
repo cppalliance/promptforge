@@ -62,7 +62,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         writer = models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = models.infer(writer, 'say hello')\n\
+        local text = writer:infer('say hello')\n\
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md);
@@ -296,7 +296,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handle_infer_returns_text_without_touching_reply_or_sys() {
-    // The one infer shape: `models.infer(handle, ...)` returns the round's text and never
+    // The one infer shape: `handle:infer(...)` returns the round's text and never
     // sets `reply` or `sys.reply_finish_reason`.
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
@@ -304,7 +304,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         writer = models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = models.infer(writer, 'say hello')\n\
+        local text = writer:infer('say hello')\n\
         assert(type(text) == 'string', 'infer must return text')\n\
         assert(text == 'pong')\n\
         assert(reply == nil, 'infer must not set reply')\n\

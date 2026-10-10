@@ -1,5 +1,5 @@
-//! The chat request parser: the loop shim's optional leading handle and
-//! the author's `messages.new()` list, plus the per-record validation the
+//! The chat request parser: the handle a handle's `loop` names and the
+//! author's `messages.new()` list, plus the per-record validation the
 //! list's builders run as they add a record.
 
 use mlua::Value;
@@ -28,16 +28,15 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
     FieldFailure::Call(Error::Lua(message.into()))
 }
 
-/// Parses a `chat` request: the loop shim's optional leading `handle`
-/// and the `messages` list, which must be a non-empty `messages.new()`
-/// list.
+/// Parses a `chat` request: the optional `handle`, which a handle's
+/// `loop` sets from its receiver, and the `messages` list, which must be a
+/// non-empty `messages.new()` list.
 ///
 /// The list validated each record as it added it, so the parse checks
 /// only that `messages` is such a list and clones its handle; the driver
 /// projects the records without re-checking them. Every author-argument
 /// failure is the call's error, raised at the `models.loop` call site so a
-/// program `pcall` catches it. The handle is checked first, as the loop's
-/// leading argument.
+/// program `pcall` catches it. The handle is checked first.
 pub(super) fn parse_chat(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let binding = call_handle(table, "models.loop")?;
     let list = match table.raw_get::<Value>("messages") {

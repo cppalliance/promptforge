@@ -1,12 +1,13 @@
 //! Inspectable Lua userdata returned by `models.use` / `models.default` /
 //! `models.get`.
 //!
-//! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
-//! to Lua. Invocation is namespace-only, so
-//! `models.infer(handle?, prompt)` takes the handle as an optional leading
-//! argument.
+//! The userdata exposes a frozen [`ModelBinding`]'s fields to Lua, and it
+//! carries `infer` and `loop`, run as `h:infer(prompt)` and
+//! `h:loop(messages, compactor?)` on the handle's binding. Those two are
+//! the shim's Lua functions, read through field getters, because each may
+//! suspend and a Rust method cannot.
 
-use mlua::{UserData, UserDataFields};
+use mlua::{UserData, UserDataFields, Value};
 
 use promptforge_model_client::model::ModelBinding;
 
@@ -117,5 +118,12 @@ impl UserData for LuaModelHandle {
         fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
         fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
         fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
+        fields.add_field_function_get("infer", |lua, _| crate::coro::handle_method(lua, "infer"));
+        fields.add_field_function_get("loop", |lua, _| crate::coro::handle_method(lua, "loop"));
     }
+}
+
+/// Whether `value` is a model handle.
+pub(crate) fn is_handle(value: &Value) -> bool {
+    matches!(value, Value::UserData(userdata) if userdata.is::<LuaModelHandle>())
 }

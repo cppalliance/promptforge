@@ -166,7 +166,7 @@ return r[1].text\n\
 ```\n\n"
 );
 
-/// `models.infer(handle, ...)` works inside an arm, so a worker's Lua can call the model
+/// `handle:infer(...)` works inside an arm, so a worker's Lua can call the model
 /// directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_works_inside_an_arm() {
@@ -175,7 +175,7 @@ async fn fanout_arm_model_infer_works_inside_an_arm() {
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.infer(models.get('writer'), 'ping about ' .. item)\n\
+return models.get('writer'):infer('ping about ' .. item)\n\
 ```\n",
     ]
     .concat();
@@ -208,7 +208,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     );
 }
 
-/// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
+/// `handle:infer(...)` inside an arm handed no client surfaces the lazy-creation
 /// error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
@@ -219,7 +219,7 @@ async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway()
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.infer(models.get('writer'), 'ping about ' .. item)\n\
+return models.get('writer'):infer('ping about ' .. item)\n\
 ```\n",
     ]
     .concat();
@@ -240,7 +240,7 @@ async fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.infer(models.get('ghost'), 'ping')\n\
+return models.get('ghost'):infer('ping')\n\
 ```\n",
     ]
     .concat();

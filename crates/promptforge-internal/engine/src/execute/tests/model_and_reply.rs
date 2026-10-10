@@ -1,6 +1,6 @@
 //! Tests for section model selection and the prologue and epilog phases.
 //! The `sys.model`, `item`, and `reply` reads sit in `globals`, and the
-//! leading-handle `models.get` and `models.infer` cases in `handles`.
+//! `models.get` and handle `infer` cases in `handles`.
 
 use super::run;
 use super::*;

@@ -1,8 +1,8 @@
-//! `models.get` and `models.infer` with a leading handle: a handle
-//! leaves the section model alone, `models.infer` without one uses the
-//! section model and never binds `reply`, `models.use` re-selection
-//! steers the next round, and a section with no current model fails
-//! `models.infer` but still infers through a handle.
+//! `models.get` and a handle's `infer`: a handle leaves the section
+//! model alone, `models.infer` uses the section model and never binds
+//! `reply`, `models.use` re-selection steers the next round, and a
+//! section with no current model fails `models.infer` but still infers
+//! through a handle.
 
 use super::*;
 
@@ -124,7 +124,7 @@ async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
 models.default('writer')\n\
 ```\n\n\
 ## Only\n\n\
-```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
+```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
     let out = run_with_bindings(
         md,
         &[("writer", "writer-model"), ("analyst", "analyst-model")],
@@ -140,7 +140,7 @@ models.default('writer')\n\
     assert_eq!(
         body.options.model(),
         "analyst-model",
-        "a leading handle must use the handle's model, not the section default"
+        "a handle's infer must use the handle's model, not the section default"
     );
 }
 
@@ -221,7 +221,7 @@ async fn models_get_infer_works_without_any_section_model() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
 # T\n\n\
 ## Only\n\n\
-```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
+```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
     let out = run_with_bindings(
         md,
         &[("analyst", "analyst-model")],
