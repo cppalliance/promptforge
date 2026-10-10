@@ -237,8 +237,7 @@ pub(crate) enum Error {
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,
-        /// Whether the name is the wire name or id of a tool the run
-        /// offers.
+        /// Whether the name is the wire name of a tool the run offers.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,

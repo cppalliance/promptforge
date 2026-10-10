@@ -178,9 +178,7 @@ impl Scheduler {
         // names a catalog tool by its canonical id, and only a script falls
         // back to a catalog tool the run could not offer.
         let binding = if call_id.is_some() {
-            tool_set
-                .offered_binding(alias)
-                .filter(|binding| binding.alias() == alias)
+            tool_set.wire_binding(alias)
         } else if ToolId::parse(alias).is_ok() {
             tool_set
                 .offered_binding(alias)
