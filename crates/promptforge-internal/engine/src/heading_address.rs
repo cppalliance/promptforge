@@ -12,7 +12,7 @@
 //! ordered after a sibling - and waits on the live set while the scheduler's
 //! admission limit bounds how many arms run at once. This module defines
 //! [`find_visible`], the one heading lookup those surfaces share, and
-//! [`resolve_sibling`], its adapter for surfaces where a miss is an error;
+//! [`resolve_visible`], its adapter for surfaces where a miss is an error;
 //! the collection enumeration sits in the `promptforge-lua` crate, beside the
 //! VM and the coroutine protocol that consume it.
 
@@ -97,7 +97,7 @@ pub(crate) fn find_visible<'a>(
 /// visible section matches the exact address. The not-found message lists the
 /// visible sections and nothing else, so the error channel cannot leak the
 /// rest of the document's structure.
-pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
+pub(crate) fn resolve_visible<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
     find_visible(heading, visible)?.ok_or_else(|| {
         let available: Vec<String> = visible
             .iter()

@@ -14,7 +14,9 @@ use std::sync::Arc;
 use promptforge_types::ids::ChainId;
 
 use crate::execute::section_context::SectionContext;
-use crate::execute::walk_target::{JumpTarget, resolve_jump_target, section_position};
+use crate::execute::walk_target::{
+    JumpTarget, h1_visible_sections, resolve_jump_target, section_position,
+};
 use crate::heading_address;
 use crate::parser::Block;
 use crate::{Error, Result};
@@ -275,7 +277,7 @@ impl Scheduler {
     /// # Errors
     /// Returns [`Error::Lua`] when the heading is malformed, matches no
     /// visible section, or matches more than one (see
-    /// [`heading_address::resolve_sibling`]).
+    /// [`heading_address::resolve_visible`]).
     pub(super) fn resolve_chain_target(
         &self,
         id: ChainIndex,
@@ -284,11 +286,8 @@ impl Scheduler {
         let prompt = self.ctx.prompt();
         let chain = &self.chains[id.index()];
         if chain.h1 {
-            // H1 is section 0: its visible set is the whole top-level
-            // slice - it excludes nothing and has no children, so every
-            // target is a flat index into that slice.
-            let sections = promptforge_parser::detail::sections(prompt);
-            let target = heading_address::resolve_sibling(heading, sections)?;
+            let sections = h1_visible_sections(prompt);
+            let target = heading_address::resolve_visible(heading, sections)?;
             let index = section_position(sections, target).ok_or(Error::internal(
                 "a resolved H1 target is absent from the top-level slice",
             ))?;

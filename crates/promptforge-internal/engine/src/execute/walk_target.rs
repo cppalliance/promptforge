@@ -12,7 +12,7 @@
 
 use crate::heading_address;
 use crate::lua::SectionText;
-use crate::parser::Section;
+use crate::parser::{Prompt, Section};
 use crate::{Error, Result};
 
 /// The index of `target` in `slice`, matched on the parser-unique
@@ -41,6 +41,12 @@ pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Sectio
         .into_iter()
         .chain(caller.children().iter().cloned())
         .collect()
+}
+
+/// The H1 pass's visible set: the whole top-level slice. H1 is
+/// section 0, so it excludes nothing and has no children.
+pub(super) fn h1_visible_sections(prompt: &Prompt) -> &[Section] {
+    promptforge_parser::detail::sections(prompt)
 }
 
 /// What a prompt read sees of the section `heading` names in a caller's
@@ -74,7 +80,7 @@ pub(super) enum JumpTarget {
 /// sibling within the jumper's own slice.
 ///
 /// Resolution is an exact `(level, name)` match (see
-/// [`heading_address::resolve_sibling`]): two visible sections sharing an
+/// [`heading_address::resolve_visible`]): two visible sections sharing an
 /// address error loudly as ambiguous instead of silently resolving to the
 /// first.
 ///
@@ -87,7 +93,7 @@ pub(super) fn resolve_jump_target(
     jumper: &Section,
 ) -> Result<JumpTarget> {
     let visible = visible_sections(siblings, jumper);
-    let target = heading_address::resolve_sibling(heading, &visible)?;
+    let target = heading_address::resolve_visible(heading, &visible)?;
     if let Some(index) = section_position(jumper.children(), target) {
         return Ok(JumpTarget::Child(index));
     }

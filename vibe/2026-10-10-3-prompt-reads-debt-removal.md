@@ -202,7 +202,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Give H1's visible set one helper and rename resolve_sibling to resolve_visible
+### Step 2: Give H1's visible set one helper and rename resolve_sibling to resolve_visible [completed]
 
 - Component: Engine scope module
 - Placement: second, after Parser cleanup, because both edit `engine/src/heading_address-tests.rs` (the `sibling` helper there, then the renamed tests), so they run in sequence in one checkout.

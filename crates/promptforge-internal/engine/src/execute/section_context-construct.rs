@@ -15,7 +15,7 @@ use promptforge_types::ids::{ChainId, TaskId};
 use crate::Result;
 use crate::execute::context::RunState;
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::walk_target::{read_visible, visible_sections};
+use crate::execute::walk_target::{h1_visible_sections, read_visible, visible_sections};
 use crate::lua::SectionVm;
 use crate::parser::Section;
 use promptforge_types::event::lifecycle;
@@ -134,9 +134,8 @@ impl SectionContext {
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed
-    /// (it runs first and is never re-entered), and a visible set behind
-    /// the `prompt` reads spanning the whole top-level slice - section 0
-    /// excludes nothing and has no children.
+    /// (it runs first and is never re-entered), and [`h1_visible_sections`]
+    /// as the visible set behind the `prompt` reads.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
@@ -166,9 +165,7 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        // H1's visible set is the whole top-level slice: section 0
-        // excludes nothing and has no children.
-        let visible = promptforge_parser::detail::sections(ctx.prompt()).to_vec();
+        let visible = h1_visible_sections(ctx.prompt()).to_vec();
         let read = move |heading: String| read_visible(&heading, &visible);
         // H1's one privilege: `argv` installs writable, so the repair
         // pattern can assign it; the executor reads the value back at the
