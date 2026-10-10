@@ -274,8 +274,6 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
         empty_detail: None,
         tool_calls: Some(vec![call("c1"), call("c2")]),
         finish_reason: Some("tool_calls".to_owned()),
-        model: "test-model".to_owned(),
-        metrics: None,
         turn: 7,
     };
     let mut yielded = resume_with(&vm, &thread, Answer::Chat(Ok(Box::new(round))));

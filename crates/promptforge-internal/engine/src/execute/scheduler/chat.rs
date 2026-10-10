@@ -58,8 +58,6 @@ fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
         empty_detail: None,
         tool_calls: None,
         finish_reason: None,
-        model: String::new(),
-        metrics: None,
         turn,
     }
 }
@@ -302,10 +300,10 @@ impl ArrivedRound {
     /// failure is the overflow answer under a failed turn. An `EmptyReply`
     /// is a completed round with the reply absent - the turn advances and
     /// completes - because whether it is the model's clean exit or a
-    /// failure depends on the rounds before it, which only the shim knows;
-    /// no debug capture fires because the failed completion has no
-    /// request/response bodies to record. Every other failure is a failed
-    /// turn and the call's error.
+    /// failure depends on the rounds before it, which only the loop's state
+    /// machine (`models_loop`) knows; no debug capture fires because the
+    /// failed completion has no request/response bodies to record. Every
+    /// other failure is a failed turn and the call's error.
     fn failed(&self, error: Error) -> std::result::Result<Box<ChatResult>, Error> {
         match error {
             Error::Completion(error) if error.kind() == CompletionErrorKind::ContextOverflow => {
@@ -327,8 +325,6 @@ impl ArrivedRound {
                     empty_detail: Some(error.message().to_owned()),
                     tool_calls: None,
                     finish_reason: error.finish_reason().map(str::to_owned),
-                    model: String::new(),
-                    metrics: None,
                     turn,
                 }))
             }
@@ -367,8 +363,6 @@ impl ArrivedRound {
             empty_detail: None,
             tool_calls: None,
             finish_reason: served.finish_reason.clone(),
-            model: served.model.clone(),
-            metrics: served.metrics.clone(),
             turn,
         }
     }
@@ -423,8 +417,6 @@ impl ArrivedRound {
             empty_detail: None,
             tool_calls: Some(events),
             finish_reason: served.finish_reason.clone(),
-            model: served.model.clone(),
-            metrics: served.metrics.clone(),
             turn,
         }))
     }

@@ -20,8 +20,6 @@ fn empty_round(finish_reason: Option<&str>) -> Answer<Error> {
         empty_detail: None,
         tool_calls: None,
         finish_reason: finish_reason.map(str::to_owned),
-        model: "test-model".to_owned(),
-        metrics: None,
         turn: 1,
     })))
 }

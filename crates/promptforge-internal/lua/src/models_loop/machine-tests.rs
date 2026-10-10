@@ -2,9 +2,7 @@
 //! place of the Lua values it passes along, and a plain list read back
 //! through `records()`.
 
-use promptforge_types::metrics::ToolCallEvent;
-use serde_json::json;
-
+use super::super::tests::{call, round};
 use super::{Input, Machine, Phase, Then};
 use crate::compactors::OverflowReason;
 use crate::messages::MessageList;
@@ -55,31 +53,6 @@ fn records(list: &MessageList) -> Vec<String> {
         format!("{} {text}|{}|{id}", record.role.as_str(), calls.join(","))
     };
     list.records().iter().map(line).collect()
-}
-
-/// A requested call named `echo`, its arguments naming its id.
-fn call(id: &str) -> ToolCallEvent {
-    ToolCallEvent {
-        id: id.to_owned(),
-        name: "echo".to_owned(),
-        arguments: json!({ "id": id }),
-        tool: None,
-    }
-}
-
-/// A served round with no product, under turn 7.
-fn round() -> ChatResult {
-    ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: None,
-        empty_detail: None,
-        tool_calls: None,
-        finish_reason: None,
-        model: String::new(),
-        metrics: None,
-        turn: 7,
-    }
 }
 
 /// The `chat` answer `round`.
