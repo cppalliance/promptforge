@@ -29,8 +29,8 @@ impl Prompt {
     /// kind is:
     ///
     /// - `Frontmatter` when the `---` delimiters are missing, the frontmatter
-    ///   fails to decode, a tool alias is a reserved name, a Plugin entry is
-    ///   not a plain name, or a Plugin is declared twice.
+    ///   fails to decode, a Plugin entry is not a plain name, or a Plugin is
+    ///   declared twice.
     /// - `Structure` when the H1 is missing, there is more than one H1, the H1
     ///   title is empty, a section heading skips a level (such as an H4
     ///   directly under an H2), a section heading is empty, or two sibling

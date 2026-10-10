@@ -247,7 +247,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Correct the fanout-arm test name, the reserved-alias docs, and the spec status lines, then run the exit gate
+### Step 4: Correct the fanout-arm test name, the reserved-alias docs, and the spec status lines, then run the exit gate [completed]
 
 - Component: Names and docs
 - Placement: last. It depends on no other component, and the exit gate attached to it runs once after every work item lands, so any gate fix goes into a commit that is not yet finalized.
