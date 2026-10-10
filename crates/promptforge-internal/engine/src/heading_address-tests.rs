@@ -66,3 +66,15 @@ fn resolve_sibling_rejects_more_than_one_match() {
         .expect_err("two identical siblings must be rejected as ambiguous");
     assert!(err.to_string().contains("ambiguous"), "error was: {err}");
 }
+
+#[test]
+fn find_visible_returns_none_for_an_address_not_in_the_set() {
+    let sections = vec![sibling("Worker", 3)];
+    let missing = find_visible("### Missing", &sections).expect("a missing name is not an error");
+    assert!(missing.is_none(), "a missing name must be None");
+    let wrong_level =
+        find_visible("## Worker", &sections).expect("a level mismatch is not an error");
+    assert!(wrong_level.is_none(), "a level mismatch must be None");
+    let found = find_visible("### Worker", &sections).expect("exact address resolves");
+    assert_eq!(found.map(Section::name), Some("Worker"));
+}
