@@ -28,9 +28,8 @@
 //!
 //! [`RESERVED_NAMES`] is the other half of `_G`'s contract: every name the
 //! globals table holds once section setup ends, before any Plugin
-//! prelude installs, plus the Lua keywords. A frontmatter tool alias
-//! installs as a global of its own name, so the parser refuses one that is
-//! reserved, and a prelude global may not take one either.
+//! prelude installs, plus the Lua keywords. A Plugin prelude global may not
+//! take one.
 
 use std::fmt;
 use std::sync::LazyLock;

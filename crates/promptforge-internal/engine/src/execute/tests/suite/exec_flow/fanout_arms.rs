@@ -255,7 +255,7 @@ jump('## Parent')\n\
 /// worker's visible set both reject it: `call` errors not-found, which the
 /// arm catches with `pcall` and asserts on, and `prompt.list` reads `nil`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_and_list_inside_a_fanout_arm_reject_non_visible_sections() {
+async fn call_raises_and_list_reads_nil_for_non_visible_sections_in_a_fanout_arm() {
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
