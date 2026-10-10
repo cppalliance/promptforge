@@ -14,7 +14,7 @@ use std::sync::Arc;
 use promptforge_types::ids::ChainId;
 
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::execute::walk_target::section_position;
+use crate::execute::walk_target::{h1_visible_sections, section_position};
 use crate::heading_address;
 use crate::{Error, Result};
 
@@ -129,9 +129,8 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Ends the H1 pass on a jump out: the heading resolves against the
-    /// top-level sections (H1's visible set - section 0 excludes nothing
-    /// and has no children), then the pass ends and the root walk starts
+    /// Ends the H1 pass on a jump out: the heading resolves against
+    /// [`h1_visible_sections`], then the pass ends and the root walk starts
     /// at the target.
     ///
     /// # Errors
@@ -145,8 +144,8 @@ impl Scheduler {
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         let prompt = self.prompt();
-        let sections = promptforge_parser::detail::sections(&prompt);
-        let target = heading_address::resolve_sibling(heading, sections)?;
+        let sections = h1_visible_sections(&prompt);
+        let target = heading_address::resolve_visible(heading, sections)?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",
         ))?;
