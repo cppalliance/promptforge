@@ -180,7 +180,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Resolve model-supplied tool names by wire name only
+### Step 2: Resolve model-supplied tool names by wire name only [completed]
 
 - Component: Model-facing tool lookup (D1-1)
 - Component placement: second. It is the one debt the reshape introduced and the only behavior change in the plan. Step 3 also edits `promptforge-lua`; landing this fix first keeps it a self-contained, bisectable commit and leaves the renames as a mechanical follow-on.

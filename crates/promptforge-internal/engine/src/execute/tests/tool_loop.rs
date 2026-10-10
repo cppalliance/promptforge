@@ -3,8 +3,9 @@
 //! observation reporting, and its cancellation: every test drives a
 //! section calling `models.loop` through the scheduler against the mock
 //! gateway, so the shim's `chat` and `tool_call` rounds are exercised end
-//! to end. The loop's exit rules sit in `exit_rules`; its append shapes,
-//! compactor paths, and handle calls in `models_loop`.
+//! to end. The scope gate's tests sit in the `scope_gate` child. The
+//! loop's exit rules sit in `exit_rules`; its append shapes, compactor
+//! paths, and handle calls in `models_loop`.
 
 use super::models_loop::{
     always_tool, echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
@@ -295,89 +296,6 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
-    // The loop's scope gate: a model call naming a tool the run offers but
-    // the section never offered fails with OutOfScopeToolCall holding the
-    // offered-but-unscoped hint.
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
-        "call_1",
-        "global_tool",
-        "{\"value\":\"x\"}",
-    )]);
-    let tools = FixtureTools::new(
-        vec![
-            fixture_binding(
-                "scoped",
-                "A scoped tool.",
-                Arc::new(ScopedFixtureTool::new("scoped", "A scoped tool.")),
-            ),
-            fixture_binding(
-                "global_tool",
-                "A global tool.",
-                Arc::new(ScopedFixtureTool::new("global_tool", "A global tool.")),
-            ),
-        ],
-        vec!["scoped".to_owned()],
-    );
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, tools);
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("model calling a global-but-unscoped tool must fail");
-    match &error {
-        Error::OutOfScopeToolCall {
-            name,
-            global_exists,
-            in_scope,
-        } => {
-            assert_eq!(name, "global_tool");
-            assert!(*global_exists, "the name is an offered tool's wire name");
-            assert_eq!(in_scope, &["scoped".to_owned()]);
-        }
-        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
-    }
-    assert!(
-        error
-            .to_string()
-            .ends_with("[\"scoped\"] (a catalog tool that was not offered in this section)"),
-        "error message must hint offered-but-unscoped: {error}"
-    );
-    assert_eq!(gateway.call_count(), 1, "the rejected round is the last");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn model_calling_pure_unknown_tool_is_a_hard_error() {
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
-        "call_1",
-        "nonexistent",
-        "{\"value\":\"x\"}",
-    )]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("model calling a pure unknown tool must fail");
-    match &error {
-        Error::OutOfScopeToolCall {
-            name,
-            global_exists,
-            in_scope,
-        } => {
-            assert_eq!(name, "nonexistent");
-            assert!(!*global_exists, "the name is no offered tool");
-            assert_eq!(in_scope, &["echo".to_owned()]);
-        }
-        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
-    }
-    assert!(
-        !error.to_string().contains("not offered in this section"),
-        "pure unknown must not hint offered-but-unscoped: {error}"
-    );
-}
-
 // --- Guard-wrapping of tool results in the loop ---
 
 #[tokio::test(flavor = "current_thread")]
@@ -485,3 +403,6 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
         "expected Interrupted, got {result:?}"
     );
 }
+
+#[path = "tool_loop-scope-gate.rs"]
+mod scope_gate;
