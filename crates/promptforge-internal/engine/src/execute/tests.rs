@@ -394,6 +394,7 @@ mod model_task_trust;
 mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
+mod models_loop_contract;
 mod observations;
 mod offering;
 mod precheck_anchor;
