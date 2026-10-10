@@ -86,11 +86,9 @@ impl ModelRole {
 /// A label is a name local to the prompt. It follows the same grammar as
 /// a tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
-/// Each label becomes a global variable of the same name in the Lua VM
-/// that runs a prompt section. The parser therefore rejects a label that
-/// names a global the Engine installs, a Lua standard-library global the
-/// sandbox keeps, or a Lua keyword. It also rejects a label that is also
-/// a tool alias.
+/// A script reaches a role's model handle with `models.get(label)`. A label
+/// is never a Lua global, so it may be a reserved name or equal a tool
+/// alias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelRoles {
@@ -135,7 +133,7 @@ impl<'de> Deserialize<'de> for ModelRoles {
                 map: "models",
                 what: "model role label",
                 deferred: None,
-                installs_global: true,
+                installs_global: false,
             },
         )?;
         Ok(ModelRoles { roles })

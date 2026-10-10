@@ -17,7 +17,7 @@ impl SectionVm {
     /// The replay runs through the normal chunk path with every Engine
     /// global already installed: `args`, `sys`, `var`, `log`,
     /// `store`, the `tools`/`models` tables, and the control globals are all
-    /// visible to shared top-level code. Only the captured tool/model alias
+    /// visible to shared top-level code. Only the captured tool alias
     /// globals are absent; they install afterward via
     /// [`install_captured_bindings`](Self::install_captured_bindings) so a
     /// declared alias wins over a same-named shared global. A scalar
