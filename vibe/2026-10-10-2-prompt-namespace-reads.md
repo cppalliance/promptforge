@@ -414,7 +414,7 @@ The test suite gets smaller. One parser test pins the span, one unit test pins t
 
 <step-2>
 
-### Step 2: Split find_visible out of resolve_sibling
+### Step 2: Split find_visible out of resolve_sibling [completed]
 
 - Component: heading-lookup
 - Component placement: second. It is logically independent of Step 1, but each gate builds the whole workspace, so in one checkout they run in sequence; running it beside Step 1 needs a separate worktree. Step 3's `read_visible` sits on `find_visible`.

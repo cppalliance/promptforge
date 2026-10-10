@@ -11,10 +11,10 @@
 //! per member - every arm up front, before any join, so no arm is ordered
 //! after a sibling - and waits on the live set while the scheduler's
 //! admission limit bounds how many arms run at once. This module defines
-//! [`resolve_sibling`], the one
-//! heading resolution those surfaces share; the collection enumeration sits
-//! in the `promptforge-lua` crate, beside the VM and the coroutine protocol
-//! that consume it.
+//! [`find_visible`], the one heading lookup those surfaces share, and
+//! [`resolve_sibling`], its adapter for surfaces where a miss is an error;
+//! the collection enumeration sits in the `promptforge-lua` crate, beside the
+//! VM and the coroutine protocol that consume it.
 
 use crate::parser::Section;
 use crate::{Error, Result};
@@ -56,38 +56,30 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
     Ok((level, name.to_owned()))
 }
 
-/// Resolves a heading string like `"### Name"` against a caller's visible
-/// sections, returning the single matching section.
+/// Looks up a heading string like `"### Name"` in a caller's visible
+/// sections, returning the single matching section or `None`.
 ///
 /// The heading is parsed into an exact `(level, name)` address; a section
-/// matches only when BOTH its level and name are equal. Zero matches and more
-/// than one match are both rejected, so an ambiguous or level-mismatched
-/// heading never resolves to an arbitrary first hit.
+/// matches only when BOTH its level and name are equal. A heading outside the
+/// visible set and a heading that names no section anywhere are the same
+/// `None`, because only the visible set is ever searched. More than one match
+/// is rejected, so an ambiguous heading never resolves to an arbitrary first
+/// hit.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed (see
-/// [`parse_heading_address`]), when no visible section matches the exact
-/// address, or when more than one matches. The error message lists the
-/// visible sections and nothing else, so the error channel cannot leak the
-/// rest of the document's structure.
-pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
+/// [`parse_heading_address`]) or when more than one visible section matches
+/// the exact address.
+pub(crate) fn find_visible<'a>(
+    heading: &str,
+    visible: &'a [Section],
+) -> Result<Option<&'a Section>> {
     let (level, name) = parse_heading_address(heading)?;
-
     let mut matches = visible
         .iter()
         .filter(|section| usize::from(section.level()) == level && section.name() == name);
-    let Some(found) = matches.next() else {
-        let available: Vec<String> = visible
-            .iter()
-            .map(|s| format!("{} {}", "#".repeat(s.level().into()), s.name()))
-            .collect();
-        return Err(Error::Lua(format!(
-            "section heading `{}` not found; available sections: {}",
-            heading.trim(),
-            available.join(", ")
-        )));
-    };
-    if matches.next().is_some() {
+    let found = matches.next();
+    if found.is_some() && matches.next().is_some() {
         return Err(Error::Lua(format!(
             "section heading `{}` is ambiguous; more than one visible section matches {} {name}",
             heading.trim(),
@@ -95,6 +87,28 @@ pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Resu
         )));
     }
     Ok(found)
+}
+
+/// [`find_visible`] where a heading with no visible match is an error, for
+/// the surfaces that must reach a section, such as `call` and `jump`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] for every [`find_visible`] error, and when no
+/// visible section matches the exact address. The not-found message lists the
+/// visible sections and nothing else, so the error channel cannot leak the
+/// rest of the document's structure.
+pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
+    find_visible(heading, visible)?.ok_or_else(|| {
+        let available: Vec<String> = visible
+            .iter()
+            .map(|s| format!("{} {}", "#".repeat(s.level().into()), s.name()))
+            .collect();
+        Error::Lua(format!(
+            "section heading `{}` not found; available sections: {}",
+            heading.trim(),
+            available.join(", ")
+        ))
+    })
 }
 
 #[cfg(test)]
