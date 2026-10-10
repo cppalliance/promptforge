@@ -130,9 +130,9 @@ Args: {{ args }}\n\n\
 #[test]
 fn duplicate_top_level_section_names_error_loudly() {
     let sections = vec![
-        synthetic_section("Main", 2, Vec::new(), Vec::new()),
-        synthetic_section("Dup", 2, Vec::new(), Vec::new()),
-        synthetic_section("Dup", 2, Vec::new(), Vec::new()),
+        synthetic_section("Main", 2, Vec::new()),
+        synthetic_section("Dup", 2, Vec::new()),
+        synthetic_section("Dup", 2, Vec::new()),
     ];
     let error = super::super::walk_target::resolve_jump_target("## Dup", &sections, &sections[0])
         .expect_err("two visible sections with one name must be ambiguous");

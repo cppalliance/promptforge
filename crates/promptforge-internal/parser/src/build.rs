@@ -189,6 +189,85 @@ fn build_heading_blocks(
     Ok(blocks)
 }
 
+/// Rejects an orphan deep heading: one that skips a level (e.g. an H4 under an
+/// H2 with no intervening H3, or an H3/H4 top-level section with no parent H2).
+/// Such a heading has no well-defined parent, so reject it rather than
+/// silently reparenting it to a shallower ancestor.
+fn check_child_level(heading: &Heading, parent_level: u8) -> Result<()> {
+    let level = heading.level;
+    if level > parent_level + 1 {
+        return Err(Error::parse_at(
+            ParseErrorKind::Structure,
+            heading.span.clone(),
+            format!(
+                "section `{}` is an orphan H{level} heading with no parent H{}",
+                heading.title.trim(),
+                parent_level + 1
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Returns the heading's section name. A section's name is its runtime address
+/// (jumps, lookups, fanout), so an empty/whitespace heading is unaddressable
+/// and must be rejected at parse.
+fn section_name(heading: &Heading, level: u8) -> Result<String> {
+    let name = heading.title.clone();
+    if name.trim().is_empty() {
+        return Err(Error::parse_at(
+            ParseErrorKind::Structure,
+            heading.span.clone(),
+            format!("an H{level} section heading must not be empty"),
+        ));
+    }
+    Ok(name)
+}
+
+/// Returns the section's list items, or none when it is not a list. A section
+/// is a list only when it has no Lua and every nonblank prose line is a list
+/// marker; one incidental bullet in mixed prose leaves a non-marker line, so
+/// the section stays prose.
+fn list_items(blocks: &[Block], name: &str) -> Result<Vec<String>> {
+    let has_no_lua = blocks
+        .iter()
+        .all(|block| matches!(block, Block::Prose { .. }));
+    let prose_for_items = blocks.iter().find_map(|block| match block {
+        Block::Prose { text, .. } => Some(text.as_str()),
+        Block::Lua(_) => None,
+    });
+    if has_no_lua
+        && let Some(prose) = prose_for_items
+        && is_all_list_markers(prose)
+    {
+        parse_bullet_items(prose, name)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Rejects a section whose name an earlier sibling already took. Sections are
+/// addressed by name (jumps, lookups), so two siblings sharing a name would
+/// make the target ambiguous. The error names BOTH heading locations so the
+/// author can find each one.
+fn check_unique_sibling(
+    siblings: &[(String, u32)],
+    name: &str,
+    heading: &Heading,
+    heading_abs_line: u32,
+) -> Result<()> {
+    if let Some((_, first_line)) = siblings.iter().find(|(n, _)| n == name) {
+        return Err(Error::parse_at(
+            ParseErrorKind::Structure,
+            heading.span.clone(),
+            format!(
+                "duplicate sibling section name `{name}`: first declared at line {first_line}, again at line {heading_abs_line}; sibling section names must be unique"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Builds a section tree from a flat, document-ordered list of headings.
 ///
 /// Recursion consumes headings whose level is deeper than `parent_level`; a
@@ -214,74 +293,19 @@ pub(crate) fn build_sections(
     // a duplicate can name both the first and the offending location.
     let mut sibling_lines: Vec<(String, u32)> = Vec::new();
     while *pos < headings.len() {
-        let level = headings[*pos].level;
+        let h = &headings[*pos];
+        let level = h.level;
         if level <= parent_level {
             break;
         }
-        // An orphan deep heading skips a level (e.g. an H4 under an H2 with no
-        // intervening H3, or an H3/H4 top-level section with no parent H2). Such
-        // a heading has no well-defined parent, so reject it rather than
-        // silently reparenting it to a shallower ancestor.
-        if level > parent_level + 1 {
-            return Err(Error::parse_at(
-                ParseErrorKind::Structure,
-                headings[*pos].span.clone(),
-                format!(
-                    "section `{}` is an orphan H{level} heading with no parent H{}",
-                    headings[*pos].title.trim(),
-                    parent_level + 1
-                ),
-            ));
-        }
-        let h = &headings[*pos];
-        let name = h.title.clone();
-        // A section's name is its runtime address (jumps, lookups, fanout), so an
-        // empty/whitespace heading is unaddressable and must be rejected at parse.
-        if name.trim().is_empty() {
-            return Err(Error::parse_at(
-                ParseErrorKind::Structure,
-                h.span.clone(),
-                format!("an H{level} section heading must not be empty"),
-            ));
-        }
+        check_child_level(h, parent_level)?;
+        let name = section_name(h, level)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
-        let heading_span = h.span.clone();
         let blocks = build_heading_blocks(h, &name, frontmatter_lines, emitter)?;
         *pos += 1;
         let children = build_sections(headings, pos, level, frontmatter_lines, emitter)?;
-
-        let has_no_lua = blocks
-            .iter()
-            .all(|block| matches!(block, Block::Prose { .. }));
-        let prose_for_items = blocks.iter().find_map(|block| match block {
-            Block::Prose { text, .. } => Some(text.as_str()),
-            Block::Lua(_) => None,
-        });
-        // A section is a list only when it has no Lua and every nonblank prose
-        // line is a list marker; one incidental bullet in mixed prose leaves a
-        // non-marker line, so the section stays prose.
-        let items = if has_no_lua
-            && let Some(prose) = prose_for_items
-            && is_all_list_markers(prose)
-        {
-            parse_bullet_items(prose, &name)?
-        } else {
-            Vec::new()
-        };
-
-        // Sibling sections must have unique names: sections are addressed by
-        // name (jumps, lookups), so two siblings sharing a name would make the
-        // target ambiguous. Reject the duplicate at parse, naming BOTH heading
-        // locations so the author can find each one.
-        if let Some((_, first_line)) = sibling_lines.iter().find(|(n, _)| *n == name) {
-            return Err(Error::parse_at(
-                ParseErrorKind::Structure,
-                heading_span,
-                format!(
-                    "duplicate sibling section name `{name}`: first declared at line {first_line}, again at line {heading_abs_line}; sibling section names must be unique"
-                ),
-            ));
-        }
+        let items = list_items(&blocks, &name)?;
+        check_unique_sibling(&sibling_lines, &name, h, heading_abs_line)?;
         sibling_lines.push((name.clone(), heading_abs_line));
 
         result.push(Section {
