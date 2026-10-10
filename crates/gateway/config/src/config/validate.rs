@@ -207,8 +207,8 @@ impl Config {
 ///
 /// `default_effort` requires a non-empty `effort_levels` and must name a
 /// listed level; the effort knobs are meaningless on a model that never
-/// thinks; `max_output` must fit the context window; and `voices` entries
-/// must be non-empty and unique.
+/// thinks; `max_output` must fit the context window; `voices` entries
+/// must be non-empty and unique; and `provider` must match `[a-z0-9._-]+`.
 fn validate_capabilities(
     label: &str,
     name: &str,
@@ -255,7 +255,23 @@ fn validate_capabilities(
             )));
         }
     }
+    if let Some(provider) = &capabilities.provider
+        && !is_valid_provider(provider)
+    {
+        return Err(ConfigError::Validation(format!(
+            "{label} {name} provider must use lowercase letters, digits, '.', '_', or '-'"
+        )));
+    }
     Ok(())
+}
+
+/// Whether `value` is a non-empty run of lowercase ASCII letters, digits,
+/// `.`, `_`, and `-`.
+fn is_valid_provider(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
 }
 
 /// Rejects chat-only fields on a non-chat model kind and the speech-only

@@ -218,6 +218,62 @@ async fn models_catalog_omits_unset_optional_capabilities() {
 }
 
 #[tokio::test]
+async fn models_catalog_reports_a_provider_only_when_configured() {
+    let backend = fake_backend().await;
+    let toml = format!(
+        r#"
+config-version = 0
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "grok"
+description = "a model with a provider"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+provider = "xai"
+
+[[model]]
+name = "plain"
+description = "a model without a provider"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    let gateway = TestServer::start(gateway).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/models", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = json_within(response).await;
+    let data = body.get("data").and_then(Value::as_array).unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0].get("id").and_then(Value::as_str), Some("grok"));
+    assert_eq!(data[0].get("provider").and_then(Value::as_str), Some("xai"));
+    assert_eq!(data[1].get("id").and_then(Value::as_str), Some("plain"));
+    // An unset provider is omitted, never serialized as null.
+    assert!(!data[1].as_object().unwrap().contains_key("provider"));
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
 async fn models_catalog_wrong_token_is_401() {
     let backend = fake_backend().await;
     let gateway = gateway_for(backend).await;
