@@ -260,11 +260,6 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
         &vm,
         "local msgs = messages.new()\nmsgs:user('hi')\nmodels.loop(msgs)\nreturn #msgs",
     );
-    assert!(matches!(
-        parse_request(&vm, yielded),
-        Request::DrainTaskNotices
-    ));
-    let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
     assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
     let call = |id: &str| ToolCallEvent {
         id: id.to_owned(),
@@ -302,10 +297,7 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
         );
     }
-    assert!(matches!(
-        parse_request(&vm, yielded),
-        Request::DrainTaskNotices
-    ));
+    assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
 }
 
 #[test]

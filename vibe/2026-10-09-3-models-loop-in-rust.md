@@ -1053,7 +1053,7 @@ Phase 0 migrates every handle-first call and adds tests for the new forms and th
 
 <step-5>
 
-### Step 5: Fold the task-notice drain into the chat dispatch
+### Step 5: Fold the task-notice drain into the chat dispatch [completed]
 
 - Component: Drain fold
 

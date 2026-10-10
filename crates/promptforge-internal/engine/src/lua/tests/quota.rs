@@ -20,18 +20,18 @@ use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, te
 
 /// The most Lua instructions one model-tool round may spend in the loop
 /// shim's trampoline: from one `chat` yield to the next, through the
-/// `tool_call` yield, the drain yield, and the step call after each
-/// answer. The trampoline measured 30 per round when the ceiling was set,
-/// so a change that triples its cost, such as a loop rule moving back
-/// into Lua, trips this while ordinary edits do not.
-const ROUND_INSTRUCTION_CEILING: u64 = 90;
+/// `tool_call` yield and the step call after each answer. The trampoline
+/// measured 20 per round when the ceiling was set, so a change that
+/// triples its cost, such as a loop rule moving back into Lua, trips this
+/// while ordinary edits do not.
+const ROUND_INSTRUCTION_CEILING: u64 = 60;
 
 /// The fewest Lua instructions a round can spend in the trampoline: one
-/// per yield in the measured span (the `tool_call`, the drain, and the
-/// next `chat`). A round under this floor means the hook is not firing on
-/// the loop thread, and the test would otherwise pass while showing
-/// nothing about the quota.
-const ROUND_INSTRUCTION_FLOOR: u64 = 3;
+/// per yield in the measured span (the `tool_call` and the next `chat`).
+/// A round under this floor means the hook is not firing on the loop
+/// thread, and the test would otherwise pass while showing nothing about
+/// the quota.
+const ROUND_INSTRUCTION_FLOOR: u64 = 2;
 
 /// Rounds measured after the first, so the assertion reads steady-state
 /// cost rather than the one-time argument decode.
@@ -101,19 +101,12 @@ fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
         })
         .expect("the counting hook installs on the loop thread");
 
-    // Every round opens with the notice drain, answered empty here, then
-    // the chat.
     let yielded = thread
         .resume::<MultiValue>(())
-        .expect("the block yields its first drain");
-    assert!(
-        matches!(parse_request(&vm, yielded), Request::DrainTaskNotices),
-        "the loop's first yield drains the task notices"
-    );
-    let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
+        .expect("the block yields its first chat");
     assert!(
         matches!(parse_request(&vm, yielded), Request::Chat { .. }),
-        "after the drain the loop yields its first chat"
+        "the loop's first yield is its first chat"
     );
 
     // One mark per chat yield: the difference between consecutive marks
@@ -134,13 +127,8 @@ fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
         );
         assert!(
-            matches!(parse_request(&vm, yielded), Request::DrainTaskNotices),
-            "after the tool result the loop drains notices ahead of the next chat"
-        );
-        let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
-        assert!(
             matches!(parse_request(&vm, yielded), Request::Chat { .. }),
-            "after the drain the loop yields the next chat"
+            "after the tool result the loop yields the next chat"
         );
         marks.push(executed.load(Ordering::Relaxed));
     }

@@ -1,8 +1,7 @@
 //! The task-operation request parsers: `spawn`'s target, seeds, var
 //! snapshot, origin, and fanout mark; the `timer` leaf request's
-//! author-supplied `seconds` and its domain checks; the loop shim's
-//! `drain_task_notices` unit request; and `concurrency`'s optional
-//! shim-validated limit.
+//! author-supplied `seconds` and its domain checks; and `concurrency`'s
+//! optional shim-validated limit.
 
 use super::*;
 
@@ -151,17 +150,6 @@ fn a_spawn_with_a_non_string_target_keeps_the_resolve_error() {
         }
         other => panic!("expected the resolve_section_target call error, got {other:?}"),
     }
-}
-
-#[test]
-fn a_drain_task_notices_yield_parses_to_the_request() {
-    let lua = Lua::new();
-    let table = request_table(&lua, "drain_task_notices");
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
-    assert!(
-        matches!(request, Request::DrainTaskNotices),
-        "a drain_task_notices yield is the unit request, got {request:?}"
-    );
 }
 
 #[test]
