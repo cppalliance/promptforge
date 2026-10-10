@@ -255,6 +255,116 @@ async fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offe
     );
 }
 
+/// The tool names each chat round advertised, and the tool calls issued,
+/// in record order.
+fn rounds_and_calls(records: &[EffectRecord]) -> (Vec<Vec<String>>, Vec<EffectRecord>) {
+    let advertised = records
+        .iter()
+        .filter_map(|record| match record {
+            EffectRecord::Chat { tools, .. } => Some(tools.clone()),
+            _ => None,
+        })
+        .collect();
+    let calls = records
+        .iter()
+        .filter(|record| matches!(record, EffectRecord::ToolCall { .. }))
+        .cloned()
+        .collect();
+    (advertised, calls)
+}
+
+/// A model call of `id` under `alias` with `value`, from the one section.
+fn model_call(id: &str, alias: &str, value: &str) -> EffectRecord {
+    EffectRecord::ToolCall {
+        tool: ToolId::parse(id).expect("valid id"),
+        alias: alias.to_owned(),
+        args: json!({ "value": value }),
+        origin: ToolCallOrigin {
+            execution: EXECUTION.to_owned(),
+            section: "Only".to_owned(),
+            caller: ToolCaller::Model,
+        },
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its_wire_name() {
+    let gateway = ScriptedChat::new(vec![
+        resp_tool_call("call_1", "tools_echo", r#"{"value":"hi"}"#),
+        resp_text("done"),
+    ]);
+    let prompt = offering_prompt(
+        "plugins:\n  - tools\n",
+        "tools.offer(plugins.get('tools').tools)\n\
+         local history = messages.new()\n\
+         history:user('go')\n\
+         models.loop(history)\n\
+         return 'ok'",
+    );
+    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
+    let records = scheduler.record_effects_for_test();
+    let out = scheduler.drive().await.expect("the loop completes");
+    assert_eq!(out, "ok");
+    let (advertised, calls) =
+        rounds_and_calls(&records.lock().expect("the tap mutex is not poisoned"));
+    assert_eq!(
+        advertised,
+        vec![vec!["tools_echo".to_owned()]; 2],
+        "only the declared Plugin's tools are offered"
+    );
+    assert_eq!(calls, vec![model_call("tools/echo", "tools_echo", "hi")]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
+    let gateway = ScriptedChat::new(vec![
+        resp_tool_call("call_1", "gh_search", r#"{"value":"q"}"#),
+        resp_text("done"),
+    ]);
+    let prompt = offering_prompt(
+        "",
+        "assert(plugins.get('missing') == nil, 'an unknown Plugin reads nil')\n\
+         local gh = plugins.get('gh')\n\
+         if gh then tools.offer(gh.tools) end\n\
+         local history = messages.new()\n\
+         history:user('go')\n\
+         models.loop(history)\n\
+         return 'ok'",
+    );
+    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
+    let records = scheduler.record_effects_for_test();
+    let out = scheduler.drive().await.expect("the loop completes");
+    assert_eq!(out, "ok");
+    let (advertised, calls) =
+        rounds_and_calls(&records.lock().expect("the tap mutex is not poisoned"));
+    assert_eq!(
+        advertised,
+        vec![vec!["gh_search".to_owned()]; 2],
+        "the extra Plugin's tools are offered and nothing else"
+    );
+    assert_eq!(calls, vec![model_call("gh/search", "gh_search", "q")]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_plugins_table_is_installed_in_the_h1_vm() {
+    let prompt = parse(
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n\
+         # Offering\n\n\
+         ```lua\n\
+         return plugins.required()[1].name .. '|' .. plugins.extras()[1].name .. '|' .. \
+           tostring(tools.get('gh/search').plugin == plugins.get('gh'))\n\
+         ```\n",
+    );
+    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let out = TokioDriver::new(&ctx, fixture, None)
+        .drive()
+        .await
+        .expect("the H1 pass reads the plugins table");
+    assert_eq!(out, "tools|gh|true");
+}
+
 #[test]
 fn a_round_leaves_out_an_offered_binding_a_local_tool_shares_a_name_with() {
     let offered = crate::lua::ToolBinding::from_descriptor("tools_echo", &EchoTool.descriptor());

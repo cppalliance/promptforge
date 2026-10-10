@@ -153,7 +153,7 @@ impl fmt::Display for Reserved {
 /// A global section setup installs must be listed here: the Engine's
 /// section setup tests compare this list against a set-up VM's globals in
 /// both directions.
-pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
+pub const RESERVED_NAMES: [(&str, Reserved); 61] = [
     ("args", Reserved::EngineGlobal),
     ("argv", Reserved::EngineGlobal),
     ("call", Reserved::EngineGlobal),
@@ -165,6 +165,7 @@ pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
     ("log", Reserved::EngineGlobal),
     ("messages", Reserved::EngineGlobal),
     ("models", Reserved::EngineGlobal),
+    ("plugins", Reserved::EngineGlobal),
     ("prose", Reserved::EngineGlobal),
     ("store", Reserved::EngineGlobal),
     ("sys", Reserved::EngineGlobal),

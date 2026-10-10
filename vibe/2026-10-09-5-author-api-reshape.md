@@ -631,7 +631,7 @@ The owner set the direction for each surface in conversation, and the implementa
 
 <step-4>
 
-### Step 4: Add the plugins table
+### Step 4: Add the plugins table [completed]
 
 - Component: Plugins table
 - Component placement: third, after Tools by id, because its plugin objects list that component's tool objects and split plugins by `ToolSet.declared`.

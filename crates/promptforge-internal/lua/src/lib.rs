@@ -35,7 +35,9 @@
 //! The `tools` table names every catalog tool the run can offer by its
 //! canonical id: `tools.required()` and `tools.extras()` list the tool
 //! objects of the declared Plugins and of every other Plugin, and
-//! `tools.offer` scopes a tool into a section by id or tool object.
+//! `tools.offer` scopes a tool into a section by id or tool object. The
+//! `plugins` table holds one object per Plugin the run knows, whose
+//! `tools` lists that Plugin's tool objects.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
@@ -133,6 +135,8 @@ mod tools;
 #[cfg(test)]
 use tools::LuaToolHandle;
 use tools::{install_tool_call_counts, install_tools};
+mod plugins;
+use plugins::install_plugins;
 mod handles;
 mod messages;
 mod prelude;

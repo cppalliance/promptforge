@@ -39,6 +39,7 @@ pub(crate) use decode::tool_alias;
 pub(crate) use userdata::LuaToolHandle;
 
 use decode::{ToolsAddEntry, add_local_params_schema, collect_tools_add_entries};
+pub(crate) use objects::tool_object;
 use objects::{install_tool_lists, install_tool_objects};
 
 /// The registry key of the VM's local-tool handler table:

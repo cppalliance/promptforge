@@ -7,7 +7,8 @@ use crate::var_to_json;
 use crate::{
     Access, Arc, Argv, Emitter, Error, Json, Mutex, Ordering, ProseState, Result, Value,
     guarded_var, install_compactors, install_log, install_messages, install_models,
-    install_shim_prelude, install_store_table, install_tools, resolve_section_target, seal_sys,
+    install_plugins, install_shim_prelude, install_store_table, install_tools,
+    resolve_section_target, seal_sys,
 };
 
 impl SectionVm {
@@ -86,6 +87,7 @@ impl SectionVm {
             &self.tool_runtime,
             &self.local_tools,
         )?;
+        install_plugins(&self.lua, &globals, &self.bound_tools)?;
         install_models(
             &self.lua,
             &globals,
