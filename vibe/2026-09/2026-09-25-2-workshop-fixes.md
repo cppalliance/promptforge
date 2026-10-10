@@ -4,49 +4,49 @@ overview: Fix the user-facing bugs, the Windows CI gap, and the weakened tests i
 todos:
   - id: baseline
     content: Record the baseline of every exit command before any change
-    status: pending
+    status: completed
   - id: save-as
     content: Fix Save As onto an existing file and its timeout, and the reconcile-mismatch dialog wording, with UI tests (Overwrite timeout already fixed in 49d97995)
-    status: pending
+    status: completed
   - id: decode
     content: Remove the second percent-decode on workspace GET paths; %41 round-trip test; traversal still refused
-    status: pending
+    status: completed
   - id: windows-ci
     content: Run workshop-workspace tests with --all-features in the Windows check-workshop CI job
-    status: pending
+    status: completed
   - id: binary
     content: Delete the workshop-server binary, workbench.toml fallback, open dependency; drop the open_browser field (old configs still load); fix guide sentence
-    status: pending
+    status: completed
   - id: quit
     content: Stop the gateway supervisor before posting /shutdown on quit, with ordering and no-relaunch tests
-    status: pending
+    status: completed
   - id: menu-memory
     content: Make menu memory writes latest-wins with a sequence number
-    status: pending
+    status: completed
   - id: roots-signal
     content: Add a grant-set change signal to WorkspaceRoots so revokes reach running agent sessions
-    status: pending
+    status: completed
   - id: boot-order
     content: Validate loopback before composing state and bind before reopening the last workspace
-    status: pending
+    status: completed
   - id: workspace-fixes
     content: List linked folders as directories; reproduce and fix the grant-during-open race; fix the UNC test helper
-    status: pending
+    status: completed
   - id: switch-resync
     content: Resync the UI from GET /workspace/file/current after a workspace-switch 408
-    status: pending
+    status: completed
   - id: timing-tests
     content: Repair the chat quiet test; replace remaining real-clock windows (heartbeat convergence already repaired in 63ddccb5)
-    status: pending
+    status: completed
   - id: doc-sweep
     content: Rewrite the two .cursor/rules files and sweep every listed stale doc claim across crates, UI, and repo root
-    status: pending
+    status: completed
   - id: crate-map
     content: Add crates/workshop/AGENTS.md crate map and the new Vocabulary entries
-    status: pending
+    status: completed
   - id: exit
     content: Run the exit commands and retired-string checks; record results
-    status: pending
+    status: completed
 isProject: false
 ---
 

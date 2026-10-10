@@ -4,25 +4,25 @@ overview: "Fix the promptforge gateway STT defects that the talktron evaluation 
 todos:
   - id: s6-silent-exits
     content: "S6: skip budget-starved captions; route the three silent returns in realtime/route.rs through end_session (log, error event, 1011 close); tests"
-    status: pending
+    status: completed
   - id: s1-overlap-guard
     content: "S1: forward-only punctuation snap, AlignmentFailure reason + metrics logged, sparse-successor density guard with PendingForced.text_start; adversarial tests"
-    status: pending
+    status: completed
   - id: s3-pcm-errors
     content: "S3: count each append once in pcm.rs try_append; BufferTooLong carries retained_ms and requested_ms; ClientError constructors take impl Into<String>; transcription_failed includes cause; replace finalization panic with TakeFailure::FinalTailEvicted"
-    status: pending
+    status: completed
   - id: s2-biasing
     content: "S2: prompt_terms helper; realtime guidance = config vocabulary + session prompt terms; batch honors prompt; update config doc and README; tests"
-    status: pending
+    status: completed
   - id: s5-model-name
     content: "S5: ModelNames::select maps realtime-transcribe to the final model; test"
-    status: pending
+    status: completed
   - id: s4-long-speech-test
     content: "S4: native realtime_long_speech test (no 5-word deletion run), fixture zip + hash, stt-miri.yml download and step"
-    status: pending
+    status: completed
   - id: verify-gates
     content: Run the full workspace gates (clippy with warnings denied, fmt, rustdoc, nextest) on the final code commit
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,25 +4,25 @@ overview: Introduce the Plugin contract crate `promptforge-plugin`, a Host-built
 todos:
   - id: step-1-grammar
     content: "Step 1: one-segment PluginId and two-or-more-segment ToolId, the 53-file literal sweep, registry punctuation on one-segment names, regenerate public-api.txt, gates"
-    status: pending
+    status: completed
   - id: step-2-remove
     content: "Step 2: remove Plugin conflicts, optional Plugins, and the PluginDecl map form (ref, optional, config); Frontmatter::plugins becomes Vec<PluginId>; Workshop drops optional; regenerate public-api.txt, gates"
-    status: pending
+    status: completed
   - id: step-3-engine
     content: "Step 3: ToolCallOrigin move, survives_stop wired through the old performer and the effect loop, event tool ids, Workshop ask recognition by the event's tool, Requirements.unavailable/missing_tools, named preludes, regenerate public-api.txt, gates"
-    status: pending
+    status: completed
   - id: step-4-contract
     content: "Step 4: add promptforge-plugin, move service.rs, harness-plugins re-export bridge, structural-check updates, Cargo.lock and hakari, gates"
-    status: pending
+    status: completed
   - id: step-5-host
     content: "Step 5: HostContext and HostRunContext, plugin-web and plugin-user-input, Workshop install wiring, delete harness-plugins and performers-tools.rs, fixture Plugins in Harness tests, Family::Plugin rules, Cargo.lock and hakari, gates"
-    status: pending
+    status: completed
   - id: step-6-offering
     content: "Step 6: the offering: ToolSet.offered, tools.offered(), tools.add and tools.call taking records, chat.md opts in, regenerate public-api.txt, gates"
-    status: pending
+    status: completed
   - id: step-7-docs
     content: "Step 7: rewrite the root AGENTS.md Plugin definition and the crate docs and Invariants that still describe activation, two-segment ids, or a declared-only catalog, gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 

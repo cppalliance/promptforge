@@ -4,34 +4,34 @@ overview: Sweep the repo clean (stale files, tape remnants, publishing metadata)
 todos:
   - id: step-00
     content: "Repo cleanup (3 commits): stale file deletion + link repair; tape-remnant excision (gateway-config, config UI, examples); publishing-metadata strip (publish=false, docs.rs, semver-checks)"
-    status: pending
+    status: completed
   - id: step-01
     content: Edit design/what-promptforge-is.md down to general terms (product-level roles, no crate names or knobs - drift-proof), STE register for the edits
-    status: pending
+    status: completed
   - id: step-02
     content: Delete the old guide system (per-crate guides, topic pages); mdbook skeleton with four parts; build-user-guide gutted to a compiling skeleton
-    status: pending
+    status: completed
   - id: step-03
     content: "The generator tool: guided dokuman as an agent tool file (lens blocks, recon, manifest contract, per-file extract, tier, verify, evidence packet, single writer with checkpoints, per-chapter thoroughness gate, audit); proven on the language set"
-    status: pending
+    status: completed
   - id: step-04
     content: Agent-programs documentation set
-    status: pending
+    status: completed
   - id: step-05
     content: Gateway documentation set (configuration and operation lens)
-    status: pending
+    status: completed
   - id: step-06
     content: Workshop documentation set (UI operation lens, incl. the TypeScript UI source)
-    status: pending
+    status: completed
   - id: step-07
     content: "The assembler: build-user-guide becomes the book assembler (SUMMARY.md TOC, per-set exports, link check); the intro lens run generates the introduction"
-    status: pending
+    status: completed
   - id: step-08
     content: "README storefront: prominent evergreen per-platform download links (Windows/macOS/Linux), existing images preserved in place, remove crates.io/install/MCP"
-    status: pending
+    status: completed
   - id: step-09
     content: "Final verification: mdbook build, Pages deploy, links, workspace green"
-    status: pending
+    status: completed
 isProject: false
 ---
 

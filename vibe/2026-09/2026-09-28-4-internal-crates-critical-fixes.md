@@ -4,34 +4,34 @@ overview: "Fix the three critical defects found in the promptforge-internal revi
 todos:
   - id: lua-cancel
     content: "Lua cancellation: cancel_requested capture; re-raise in pcall, xpcall, local handler call, compactor call; tests"
-    status: pending
+    status: completed
   - id: chain-section-label
     content: "Engine: record entered section name on Chain; section_name reads it; walk-end and between-sections notice tests"
-    status: pending
+    status: completed
   - id: host-symlinks
     content: "VFS real-filesystem backend: no-follow resolution for remove, exists, stat, mkdir, rename; Windows directory links; symlink tests"
-    status: pending
+    status: completed
   - id: scheduler-cleanup
     content: "Engine: delete dead call stack; saturating slot release; const nz_*; concurrent-call test"
-    status: pending
+    status: completed
   - id: lua-guard-lock
     content: "Lua: __metatable on _G guard metatables in argv.rs and prose.rs; guard test (resolved by a separate change, not a step of this plan; see the Decision Record)"
     status: completed
   - id: dead-items
     content: Remove NormalizedTurn non_exhaustive, unused StreamDelta and metrics re-exports; rename promptforge-api- temp prefixes
-    status: pending
+    status: completed
   - id: docs-sweep
     content: Engine AGENTS/README/lib.md/Cargo description; types, lua, model-client, container README; new vfs README; root AGENTS.md line 55
-    status: pending
+    status: completed
   - id: comments-sweep
     content: Fix stale comments and remove history/audit-tag comments across engine, vfs, model-client, types, parser
-    status: pending
+    status: completed
   - id: dir-folds
     content: Fold engine run-* into execute/run/ and recording-* into test_support/recording/
-    status: pending
+    status: completed
   - id: verify
     content: AGENTS.md gates, cargo deny, xtask api --check unchanged, facade docs build
-    status: pending
+    status: completed
 isProject: false
 ---
 

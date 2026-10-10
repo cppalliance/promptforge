@@ -4,31 +4,31 @@ overview: "Expand shared-cloud-providers from the ten Prime providers to the ful
 todos:
   - id: descriptor-keyless
     content: "Descriptor extension: Provider.key_env to Option, fetch_models takes Option<&str>, adapt ten Prime files, keyless fetch path"
-    status: pending
+    status: completed
   - id: concurrent-fanout
     content: build_sheet_with fetches providers concurrently via FuturesUnordered; BTreeMap keeps output deterministic; in-flight-counter test proves overlap
-    status: pending
+    status: completed
   - id: secrets-loader
     content: cloud-provider-secrets.env loading (profile-dir path, override semantics) in the binary + .gitignore guard + subprocess test
-    status: pending
+    status: completed
   - id: subprime-openai-dialect
     content: "OpenAI-dialect Subprime files: minimax, stepfun, groq (STT kind) on openai_shape"
-    status: pending
+    status: completed
   - id: subprime-rich
     content: "Rich Subprime files: mistral, cohere (token pagination), baidu (CNY pricing), soniox, leonardo"
-    status: pending
+    status: completed
   - id: keyless-files
     content: "Keyless files: nvidia (no released_at from placeholder) and openrouter (pricing, modalities, deprecation)"
-    status: pending
+    status: completed
   - id: subprime-heavy
     content: "Heavy files: bedrock (SigV4 + region), foundry (endpoint env), azure_speech (region env)"
-    status: pending
+    status: completed
   - id: registry-completeness
     content: Registry completeness test extended to all 23 providers with tiers
-    status: pending
+    status: completed
   - id: local-run
     content: Run the binary locally against the real cloud-provider-secrets.env and verify the emitted cloud-provider-models.json parses as a valid Sheet
-    status: pending
+    status: completed
 isProject: false
 ---
 

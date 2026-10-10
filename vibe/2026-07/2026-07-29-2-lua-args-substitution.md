@@ -4,7 +4,7 @@ overview: "Add {{ }} substitution over args, var, and sys, plus the writable var
 todos:
   - id: subst-sys-var
     content: "subst.rs: resolve {{ args }}, {{ var.x }}, {{ sys.x }} in prose (scalar->string, table->JSON, missing->error, single pass). var writable table. sys namespace (when/now/id) populated by the runtime. Wire: run Lua (sets var) -> substitute -> model turn. prompts/greet.md demo + unit tests + e2e. Commit."
-    status: pending
+    status: completed
 isProject: false
 ---
 

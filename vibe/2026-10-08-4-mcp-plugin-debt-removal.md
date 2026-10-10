@@ -4,19 +4,19 @@ overview: "Removal plan from the Debt Collector run on promptforge2 commits 20aa
 todos:
   - id: w1-invariants-list
     content: "D1-1: edit the Tier bullet in crates/workshop/server/src/lib.rs to name plugin-mcp and promptforge-plugin; run docs-claims (npm test in crates/workshop/ui) and cargo test -p build-xtask"
-    status: pending
+    status: completed
   - id: w2-serde-verify
     content: "D1-2: verify serde is absent from plugin-mcp's Cargo.toml and Cargo.lock entry (already removed on HEAD by a1201da73); change nothing if so"
-    status: pending
+    status: completed
   - id: w3-runtime-leg-test
     content: "D1-3 option A: add the remote-entry behavior test and header clause in crates/workshop/server/src/agents/tests.rs"
-    status: pending
+    status: completed
   - id: w3-fault-injection
     content: "D1-3: inject the wrong reader literal in plugin-mcp lib.rs line 91, confirm the new test and plugin-mcp's integration tests fail, then restore the file and confirm git diff is clean of it"
-    status: pending
+    status: completed
   - id: exit-gates
     content: "Run exit checks from AGENTS.md Verification: formatter, Workshop clippy with warnings denied, Workshop nextest trio, cargo test -p build-xtask"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -222,7 +222,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Mark closed plans' todos completed, going forward and across vibe/ history
+### Step 3: Mark closed plans' todos completed, going forward and across vibe/ history [completed]
 
 - Component: Plan history
 - Placement: third. It depends on no other component. It follows the code components so the 133-file data edit stays out of the `[WIP] Plan:` seed commit that Step 1 amends, and it precedes the last step so that step's exit gate runs once after every work item lands.

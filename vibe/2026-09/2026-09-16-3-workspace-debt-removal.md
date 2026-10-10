@@ -4,22 +4,22 @@ overview: "Remove the six accepted debts introduced by the 30 commits on top of 
 todos:
   - id: item-a-wal-safety
     content: "Item A: same-path guard in Workspace::open_file, production close_backing(), shutdown BackgroundTaskAdapter registration, TWF-001 unit tests, TWF-002 integration test"
-    status: pending
+    status: completed
   - id: item-b-grant-order
     content: "Item B: per-grant position and added_at kept in memory; replace_all preserves, grant assigns, grant_rows orders by position; TWF-004 tests"
-    status: pending
+    status: completed
   - id: item-c-open-recent
     content: "Item C: workbench.action.openWorkspace optional path arg; .pfwork entries in open-recent.ts and quick access route to it in a 1_workspaces group; TWF-003 tests"
-    status: pending
+    status: completed
   - id: item-d-roots-load
     content: "Item D: TreeStateService.roots() memoized load shared by tree panel and WindowTitle; remove rootsGeneration; invalidateRoots first in applyOpenedWorkspaceState; retarget restore test; boot single-fetch and switch no-stale-render assertions"
-    status: pending
+    status: completed
   - id: item-e-docs
     content: "Item E: AGENTS.md two homes; 02-workbench.md zoom sentence; sidecar-while-open note and Open Recent wording in workspace-files.md and workshop-workspace README; grep assertions; mdbook build"
-    status: pending
+    status: completed
   - id: exit-gates
     content: "Exit: full gate list plus the five manual reproductions"
-    status: pending
+    status: completed
 isProject: false
 ---
 

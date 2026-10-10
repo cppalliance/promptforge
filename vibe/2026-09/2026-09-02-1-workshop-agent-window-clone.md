@@ -4,58 +4,58 @@ overview: "Replace the workshop's plain-text agent session UI with a Cursor-styl
 todos:
   - id: tokens
     content: "Design token overhaul: sync style.css with Cursor's palette, spacing, typography, radius, shadows"
-    status: pending
+    status: completed
   - id: markdown-render
     content: Build markdown renderer (marked + shiki custom theme, full re-parse streaming, DOMPurify)
-    status: pending
+    status: completed
   - id: tool-cards
     content: Build collapsible ToolCallCard (details/summary, auto-expand, syntax-highlighted body)
-    status: pending
+    status: completed
   - id: feed-restyle
     content: Restyle message feed (single-column, streaming cursor, left accent on user messages)
-    status: pending
+    status: completed
   - id: feed-integrate
     content: Wire markdown renderer and ToolCallCard into AgentSessionView renderItem()
-    status: pending
+    status: completed
   - id: tiptap-base
     content: Build PromptInput (Tiptap Editor, StarterKit, Placeholder, submit/IME/auto-resize)
-    status: pending
+    status: completed
   - id: mention-chip
     content: Build MentionChip NodeView + mention extension registration
-    status: pending
+    status: completed
   - id: typeahead
     content: Build TypeaheadPopup (positioned, keyboard-navigable, suggestion lifecycle)
-    status: pending
+    status: completed
   - id: stt-rename
     content: Rename voice to stt across UI and wire routes (/voice -> /stt, incl. promptforge-stt crate)
-    status: pending
+    status: completed
   - id: tiptap-integrate
     content: Replace textarea in AgentSessionView with PromptInput, wire stt adapter
-    status: pending
+    status: completed
   - id: mode-chip
     content: Build ModeChip dropdown (UI-only, as const union, agent-mode-changed event)
-    status: pending
+    status: completed
   - id: model-picker
     content: Build ModelPickerTrigger dropdown (wired to ModelService)
-    status: pending
+    status: completed
   - id: token-ring
     content: Build TokenRing SVG (stroke-dasharray, stub percentage)
-    status: pending
+    status: completed
   - id: toolbar
     content: Build AgentToolbar composing ModeChip + ModelPickerTrigger + TokenRing
-    status: pending
+    status: completed
   - id: toolbar-integrate
     content: Mount toolbar above PromptInput in AgentSessionView, thread ModelService
-    status: pending
+    status: completed
   - id: zoom
     content: Add global Ctrl+/Ctrl-/Ctrl+0 zoom (shortcuts.ts + window-menu.ts, localStorage)
-    status: pending
+    status: completed
   - id: rec-led
     content: Replace REC text badge with a second status LED (red when recording, left of activity LED)
-    status: pending
+    status: completed
   - id: css-sweep
     content: Sweep all component CSS to use new design tokens, remove hardcoded values
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,16 +4,16 @@ overview: Remove the three debts the Profiles-gate-local plan (c17173ce..73b17e6
 todos:
   - id: pgl-001-orphans-status
     content: "PGL-001: admin_orphans diffs against catalog_local_models/catalog_stt_models; admin_status configured closure reads catalog_local_models; fix orphans.rs docs and guide 11 line 35; add post-apply orphan and configured tests"
-    status: pending
+    status: completed
   - id: pgl-002-config-roundtrip
     content: "PGL-002: remove active_profile insertion from admin_config; drop boot_speech_tests strip; add GET-then-PUT round-trip test and config-store empty-diff UI test"
-    status: pending
+    status: completed
   - id: pgl-003-switch-in-flight
     content: "PGL-003: add switch_in_flight to WorkbenchSnapshot and snapshot(); thread through protocol.ts, workbench-service.ts, window-menu.ts; remove Known gap notes; update frames.rs, workbench-frames.mjs, and window-menu.mjs tests"
-    status: pending
+    status: completed
   - id: gate
     content: Run full regression list, regenerate guide exports with build-user-guide, confirm exit rg checks are empty
-    status: pending
+    status: completed
 isProject: false
 ---
 

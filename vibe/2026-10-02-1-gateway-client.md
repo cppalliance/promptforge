@@ -4,22 +4,22 @@ overview: "Create a root crate, harness-gateway-client, parallel to harness, hol
 todos:
   - id: neutral-api
     content: Add public read accessors on ToolSchema and CompletionOptions, and Completion builders for reasoning and metadata diagnostics, in model-client; bless public-api.txt
-    status: pending
+    status: completed
   - id: engine-suites
     content: Replace the engine's axum ScriptedGateway and MockGatewayClient with an in-process ScriptedChat performer and neutral ScriptedReply, keeping delta behavior; convert suites, bench, and drivers; drop axum/reqwest/bytes dev-deps
-    status: pending
+    status: completed
   - id: create-crate
     content: Create crates/harness-gateway-client, move the wire code (request, read, stream, classify, OpenAI body and metadata parsing) out of model-client, and repoint harness-internal/models to it; then remove promptforge::transport from the facade
-    status: pending
+    status: completed
   - id: move-client
     content: "Move GatewayClient, catalog, config, and failure from harness-internal/models into the new crate, rewriting harness_models:: doc examples; move the performer adapter, its delta tests, and end_to_end into harness-sessions; delete harness-internal/models"
-    status: pending
+    status: completed
   - id: rules-workspace
     content: Widen the harness facade allow-list in build-xtask product rules, update fixtures and the AGENTS.md rule line, remove models from root Cargo.toml members and swap its workspace dependency, and run hakari
-    status: pending
+    status: completed
   - id: docs-records
     content: Document the new public items in rustdoc; fix stale doc references (facade model.md and event.md, model-client docs); add the crates/README.md entry; no cicerone runs
-    status: pending
+    status: completed
 isProject: false
 ---
 

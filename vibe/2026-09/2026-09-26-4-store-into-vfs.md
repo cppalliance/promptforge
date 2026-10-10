@@ -4,46 +4,46 @@ overview: Fold the Store facade into the VFS with the smallest public API that k
 todos:
   - id: empty-anchor
     content: Step 1 - Refuse empty anchors in Access::str_replace and the default VfsAccess::str_replace, with tests; both str_replace doc comments say so
-    status: pending
+    status: completed
   - id: vfs-semantics
     content: Step 2 - Every Access has a root and paths without a leading slash join onto it; Access::remove returns Result<bool>; Access::glob returns files, or directories for a trailing slash, and validates the raw pattern; update the path, remove and glob doc comments and the vfs.md path rules and Access entries; regenerate public-api.txt
-    status: pending
+    status: completed
   - id: vfs-error
     content: Step 3 - Restructure VfsError into 13 struct variants (Backend carries a message; derives unchanged), move PathReason into the VFS with Wildcard and IntoDescendant and give every VFS InvalidPath site a reason, migrate all construction sites; rewrite the VfsError doc comments, the vfs.md VfsError section and every example that matches a tuple variant; point the facade's PathReason re-export at the VFS
-    status: pending
+    status: completed
   - id: engine-joins
     content: Steps 4 and 5 - Rename when_any/when_all to join_any/join everywhere, Harness tests included (Step 4); the root chain keeps one identity through H1 and the walk, record each task's ExecId, join on every delivery (join_any, join, model task notices) and at chain end, and simplify the AppendGate tests (Step 5)
-    status: pending
+    status: completed
   - id: hb-claims
     content: Step 5 - Replace liveness claims with happens-before (FastTrack epochs per region) - scopes, vector clocks, region claims, fork at spawn instead of retire, detail::access_join, identity refcount, scope lookup for mounted handles; rewrite the claims doc comments and the vfs.md "Identities and claims" section; drop the drop-before-answer wording from effect.md, run-effect.rs and the Harness performers; one commit with the joins
-    status: pending
+    status: completed
   - id: scheduler-limit
     content: Step 6 - RunLimits::max_concurrency replaces max_fanout_concurrency; hierarchical per-chain limits; slot released while parked on a join; resumptions before fresh starts; blocked 'queued'; task_started at admission; tasks.concurrency(n?); fanout spawns every arm up front; update the RunLimits, fanout and shim doc comments, lib.md and event.md
-    status: pending
+    status: completed
   - id: store-root
     content: Step 7 - VfsRefBuilder::store(root, backend), Default for VfsRef, overlay inheritance, and the internal store view (rooted, strict, confined to its mount, relative error paths, same identity), with the store tests ported to the VFS; STORE_MOUNT, empty() and the /_promptforge wording go in Step 10
-    status: pending
+    status: completed
   - id: engine-store
     content: Step 8 - perform_store_op over the store view returning VfsError; Conflict ends the run, shared library load included; other failures raise Lua error kind store with the rendered message; a re-raised store error keeps Store; Run::new requires a declared store; RunContext::new uses VfsRef::default(); delete Environment::base_vfs, run_vfs and vfs_explicit; drop the store crate from the engine and StoreError and StoreErrorKind from the facade; migrate the tests; update the Engine, vfs.md, effect.md and lib.md docs
-    status: pending
+    status: completed
   - id: lua-binding
     content: Step 8 - The Lua store table calls Access through the store view (no Store::new); store_error_message writes model-quality text with recovery hints; ErrorKind::Store and an integer error field for err.count; record shared library load conflicts; depend on promptforge-vfs directly; the StoreOutcome derives land in Step 9
-    status: pending
+    status: completed
   - id: harness
     content: Step 8 - StorePerformer returns VfsError; Services::vfs is the run's complete filesystem passed straight to the context's VFS; sessions and web pass VfsRef::default(); plugins tests stop naming the store path; prepare and RunServices docs describe the complete filesystem (the wait renames are in Step 4 and the drop-rule docs in Step 5)
-    status: pending
+    status: completed
   - id: records-events
     content: Step 9 - StoreOutcome derives Clone, Eq, Serialize, Deserialize; drop StoreAnswerRecord (AnswerRecord::Store holds StoreOutcome); add StoreExistsSucceeded/StoreExistsFailed from both dispatch and the direct closure; document them in the event doc comments, event.md and effect.md
-    status: pending
+    status: completed
   - id: retire-store
     content: Step 10 - Move crates/promptforge-internal/store (with its README and AGENTS.md) to cabinet/_trash, remove it from the workspace, delete STORE_MOUNT and empty(), and remove the /_promptforge wording and the store crate from the VFS docs, the internal README and root AGENTS.md
-    status: pending
+    status: completed
   - id: guide-docs
     content: Step 11 - Revise guide chapters 01, 05, 09, 14, 15, 16, 17 and 18 per Step 11's inventory, with chapter 09's rewritten sections and chapter 15's new material written through the doc pass, then regenerate guide/promptforge-language-guide.md with build-user-guide
-    status: pending
+    status: completed
   - id: living-docs
     content: Step 12 - Update vibe/archdoc.md and vibe/papergate-harness-migration.md through the doc pass, give vfs.md, effect.md, event.md and lib.md a fresh audit each, and run the facade API check and the stale-term sweep
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,34 +4,34 @@ overview: Introduce RunContext (starting with Arc<Prompt> plus a per-run GuardNo
 todos:
   - id: context-module
     content: "Create execute/context.rs with RunContext { prompt: Arc<Prompt> } (prompt ONLY - nonce lands in phase 2 with its readers), constructor, accessors, unit tests"
-    status: pending
+    status: completed
   - id: wire-module
     content: Register mod context in execute.rs and re-export RunContext; update module-layout doc comment
-    status: pending
+    status: completed
   - id: thread-run
     content: "Construct RunContext in run (pass &ctx into run_body - prompt.title used after); replace prompt: &Prompt with ctx in execute_live_h1 and run_sections; rename RunFrame ctx bindings to frame in engine.rs"
-    status: pending
+    status: completed
   - id: nonce-signature
     content: "untrusted.rs: GuardNonce pub(crate) + Clone, fresh() pub(crate) (mlua capture needs owned clone); change wrap to wrap(&GuardNonce, &str); update module docs. NOTE: atomic with the two threading todos - the wrap signature change breaks both callers at once"
-    status: pending
+    status: completed
   - id: nonce-thread-tool-loop
     content: "Thread the nonce RunContext -> RunFrame -> from_run_fields (covers from_walk AND from_fanout) -> ControlContext -> walk_context + FanoutContext -> SectionProgress -> tool_loop wrap site; fix 6 test constructors of SectionProgress"
-    status: pending
+    status: completed
   - id: nonce-thread-lua
     content: "Pass &GuardNonce into SectionVm::new (new_for_section delegates) so install_untrusted captures an owned clone; fix all construction sites: h1.rs:55, engine.rs:345, arm.rs:214, vm.rs:1037 test helper, execute/tests 897/969, model/tests:98, 25 lua/tests.rs sites via a new test helper"
-    status: pending
+    status: completed
   - id: nonce-tests
     content: "Invert the three freshness tests to stability tests; add cross-run distinctness test"
-    status: pending
+    status: completed
   - id: h1-stubs
     content: "Install clear-error stubs for execute/jump/fanout/list_from_section in the H1 VM setup (one commit with h1-stub-tests; independent of phases 1-2 but shares h1.rs/vm.rs - land after them to avoid churn)"
-    status: pending
+    status: completed
   - id: h1-stub-tests
     content: "Tests: each control global called from H1 fails with the clear message"
-    status: pending
+    status: completed
   - id: verify
     content: "cargo build / test / clippy green after EACH commit (vibe-rulebook: scheduled verify gates the next step); full suite at the end"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -9,7 +9,7 @@ overview: >-
 todos:
   - id: export-vibe-plan
     content: Run /export-vibe-plan before any other step
-    status: pending
+    status: completed
 isProject: false
 ---
 

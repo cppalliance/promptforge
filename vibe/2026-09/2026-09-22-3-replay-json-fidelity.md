@@ -4,28 +4,28 @@ overview: Make every payload the run log stores round-trip bit-for-bit (exact fl
 todos:
   - id: float-roundtrip
     content: Enable serde_json float_roundtrip on the workspace dependency; regenerate workspace-hack with cargo hakari generate; hakari verify passes
-    status: pending
+    status: completed
   - id: round-timings
     content: Round ClientTiming fields to microseconds in model-client read.rs (duration_ms + mean_itl_ms) with a bit-exact round-trip test
-    status: pending
+    status: completed
   - id: log-fidelity-test
     content: "Add harness-log tests/it/fidelity.rs covering awkward floats, key order, nested Value, real AssistantReply metrics; add the round-trip bullet to harness-log ## Invariants"
-    status: pending
+    status: completed
   - id: sort-key-extract
     content: Extract SortKey and sort_key helper from collection.rs into a shared pub(crate) module; collection_members reuses it
-    status: pending
+    status: completed
   - id: sorted-pairs
     content: Add install_deterministic_iteration replacing pairs/next with sorted iteration (honor __pairs, skip cleared keys); call after harden in SectionVm::new; tests
-    status: pending
+    status: completed
   - id: pairs-audit
     content: Audit Rust-side table.pairs() walks that produce ordered Vecs; sort or record each site
-    status: pending
+    status: completed
   - id: agents-rule
     content: Add the one-line round-trip rule to AGENTS.md Engineering; add the sorted pairs sentence to the user guide
-    status: pending
+    status: completed
   - id: verify
     content: fmt, clippy, hakari verify, build-xtask, docs, full nextest + doctests, 20x loop of the end_to_end test, mdbook build
-    status: pending
+    status: completed
 isProject: false
 ---
 

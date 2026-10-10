@@ -4,16 +4,16 @@ overview: "Remove the debt attributed to the model taxonomy and cloud models UI 
 todos:
   - id: reader-cap-version
     content: "Gateway reader: capped download in download_once, shared schema-version constant, version gate on cache and download paths, module split for the ceiling; cap and version tests (DEBT-MTCU-3, DEBT-MTCU-4)"
-    status: pending
+    status: completed
   - id: refresh-delivery
     content: "Refresh delivery per the operator's choice (A: POST awaits and answers with the sheet or error; UI drops post-refresh poll); route and store tests (DEBT-MTCU-1)"
-    status: pending
+    status: completed
   - id: e2e-align
     content: "Align the e2e test to the UI merge: drop the profile push and the fixture profile; rerun (DEBT-MTCU-2 test half)"
-    status: pending
+    status: completed
   - id: schema-policy
     content: Document the additive-field serde(default) policy in shared-gateway-api; schema_version stays 1, no bump (DEBT-MTCU-4 discipline)
-    status: pending
+    status: completed
 isProject: false
 ---
 

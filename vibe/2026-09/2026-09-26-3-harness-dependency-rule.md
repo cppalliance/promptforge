@@ -4,10 +4,10 @@ overview: "Close the one debt item the Harness facade refactor (0f43e1b3..3e2a95
 todos:
   - id: hf1-rule
     content: "DEBT-HF-1: add WORKSPACE_HACK constant and (Harness, Build) / (Harness, Unaffiliated except workspace-hack) arms in crates/build-xtask/src/product.rs; rewrite the Harness module-doc bullet"
-    status: pending
+    status: completed
   - id: hf1-tests
     content: "DEBT-HF-1: add build-ui build-dependency and unaffiliated-crate fixtures to product-harness-tests.rs; run cargo test -p build-xtask, clippy, fmt"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -46,37 +46,37 @@ todos:
     status: completed
   - id: step-13-model-kinds
     content: "E1: ModelKind (chat/embedding/classifier) on config + kind-scoped validation; ModelInfo carries kind"
-    status: pending
+    status: completed
   - id: step-14-embeddings-route
     content: "E2a: POST /v1/embeddings wire types + route + remote passthrough through dominion queues"
-    status: pending
+    status: completed
   - id: step-15-local-embeddings
     content: "E2b: local kind=embedding launches llama-server --embeddings"
-    status: pending
+    status: completed
   - id: step-16-rerank
     content: "E3: POST /v1/rerank route + local --reranking launch + remote passthrough of the rerank shape"
-    status: pending
+    status: completed
   - id: n1-catalog-enrichment
     content: "Zed-derived catalog fields: max_output, default_temperature, images, parallel_tool_calls, effort_levels/default_effort, adaptive_thinking; validation"
-    status: pending
+    status: completed
   - id: n2-dialect-config
     content: "Move tool_dialect/tools_mode to gateway-internal per-model translation config; drop from catalog response"
-    status: pending
+    status: completed
   - id: n3-request-normalization
     content: "Outbound translation: effort mapping, emulated tool-schema injection, param filtering; Anthropic upstream step series"
-    status: pending
+    status: completed
   - id: n4-response-normalization
     content: "Inbound translation: emulated tool-call parsing, thinking normalization, finish reasons, Anthropic responses"
-    status: pending
+    status: completed
   - id: n5-core-dialect-removal
     content: "Delete promptforge-core client-side dialect machinery; integration suite proves zero-dialects"
-    status: pending
+    status: completed
   - id: step-17-streaming-relay
     content: "S1a: stream:true SSE relay - ChatChunk wire types, Upstream::stream, permit held for stream lifetime"
-    status: pending
+    status: completed
   - id: step-18-streaming-lifecycle
     content: "S1b: client-disconnect cancels upstream stream; per-chunk minimal shape validation"
-    status: pending
+    status: completed
 isProject: false
 ---
 

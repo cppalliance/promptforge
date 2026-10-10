@@ -4,10 +4,10 @@ overview: "Rename the Engine's Store effect vocabulary to Vfs forms, then have t
 todos:
   - id: step-1-rename-store-to-vfs
     content: "Step 1: rename the Store effect vocabulary to Vfs across the Engine, Lua types, facade, Harness, tests and docs; bless public-api.txt; commit 1 (pure rename)"
-    status: pending
+    status: completed
   - id: step-2-answer-vfs-inline
     content: "Step 2: answer Effect::Vfs inline in the Harness effect loop; delete StorePerformer, VfsStore and Performers.store; fix tests and docs, including the vibe/archdoc.md performer sentence; commit 2"
-    status: pending
+    status: completed
 isProject: false
 ---
 

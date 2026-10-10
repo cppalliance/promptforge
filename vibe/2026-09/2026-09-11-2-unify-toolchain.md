@@ -4,22 +4,22 @@ overview: Remove the MSRV/local-vs-CI toolchain split so local builds and CI use
 todos:
   - id: fix-ci-failures
     content: Fix audio.rs:317 parens, bridge.rs expect lints, decode.rs flaky test
-    status: pending
+    status: completed
   - id: unify-toolchain-files
     content: rust-toolchain.toml to stable, remove rust-version from workspace and all 34 crates
-    status: pending
+    status: completed
   - id: simplify-ci-yml
     content: Remove RUSTUP_TOOLCHAIN overrides and msrv job from ci.yml
-    status: pending
+    status: completed
   - id: simplify-other-workflows
     content: Remove MSRV env and validation step from stt-miri.yml, remove from release-workshop.yml
-    status: pending
+    status: completed
   - id: docs-and-cleanup
     content: Remove skew bullet from AGENTS.md, MSRV section from README.md, delete validation script and its test
-    status: pending
+    status: completed
   - id: verify
     content: Run full gate locally on stable, push, confirm CI green
-    status: pending
+    status: completed
 isProject: false
 ---
 

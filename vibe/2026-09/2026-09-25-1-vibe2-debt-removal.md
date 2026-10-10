@@ -4,19 +4,19 @@ overview: "Remove the four debts that the 39 vibe2 commits since upstream/master
 todos:
   - id: debt-04-linux-clippy
     content: "DEBT-04: gate use super::*; in workspace/tests/jail.rs to Windows; verify workshop-workspace clippy and jail tests"
-    status: pending
+    status: completed
   - id: debt-01-heartbeat
     content: "DEBT-01: restore real-time quiet window in startup_convergence.rs; prove with 5 runs and heartbeat mutation"
-    status: pending
+    status: completed
   - id: debt-02-overwrite
     content: "DEBT-02: add writeCurrent helper in editor-panel.ts for save() and overwrite(); add cases (a) and (b) to editor-save-timeout.mjs; mutation proof"
-    status: pending
+    status: completed
   - id: debt-03-docs
     content: "DEBT-03: intra-doc-link module inventories in workshop-server agents.rs and lib.rs; add private-items rustdoc step to check-workshop in ci.yml; link mutation proof"
-    status: pending
+    status: completed
   - id: exit-checks
     content: Run workshop clippy, nextest, UI npm test, and the new docs step
-    status: pending
+    status: completed
 isProject: false
 ---
 

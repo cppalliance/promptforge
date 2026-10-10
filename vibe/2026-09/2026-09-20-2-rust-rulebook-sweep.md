@@ -4,43 +4,43 @@ overview: Apply the Rust rulebook across the promptforge workspace on master, on
 todos:
   - id: step-1
     content: "Step 1 (ci-baseline): gate the child's store write in cancel_ends_a_parked_task_idempotently; 20 consecutive passes"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2 (async-fs): spawn_blocking for workshop-workspace fs work and harness-sessions Runtime::launch; move UI_STATE_VALUE_CAP re-export"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3 (emitter-flags): DebugMode and OutputTrust replace Emitter bool params"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4 (error-model): strip {source} from 15 Display sites and rewire renderers; newtype 5 leaked foreign error types with manual From; 13 message fixes"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5 (error-model): #[non_exhaustive] on 10 error enums, ~17 wire enums, events! macro, response/event structs"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6 (error-model): attach causes at ~62 non-lua .map_err(|_|) sites; report sites left"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7 (layout-lint-hygiene): retire 11 mod.rs files by pure moves, form per three-file rule"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8 (layout-lint-hygiene): allow->expect with reason, 3 test-only re-exports, 2 doc unwraps, vm.rs fences, get_all rename, must_use, doubled cfg"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9 (layout-lint-hygiene): hollow parser lib.rs into modules; shared-loopback if over 500; rename types.rs and wire/shared.rs"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10 (paused-time): 5 sentinels to pending(), start_paused on ~14 in-process tests, Workspace clock injection for wait_past"
-    status: pending
+    status: completed
   - id: step-11
     content: "Step 11 (docs-prose): gateway family summaries to third person and //! lines"
-    status: pending
+    status: completed
   - id: step-12
     content: "Step 12 (docs-prose): promptforge and Harness families summaries and //! lines"
-    status: pending
+    status: completed
   - id: step-13
     content: "Step 13 (docs-prose): workshop, shared, build summaries and //! lines; FULL verification block"
-    status: pending
+    status: completed
 isProject: false
 ---
 

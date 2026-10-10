@@ -4,37 +4,37 @@ overview: Move the PromptForge workspace from reqwest 0.12 (ring) to reqwest 0.1
 todos:
   - id: manifest
     content: Change root Cargo.toml reqwest pin to 0.13 with json, query, rustls, stream and the invariant comment
-    status: pending
+    status: completed
   - id: compile
     content: cargo check --workspace --all-features and fix any reqwest 0.13 API fallout
-    status: pending
+    status: completed
   - id: comments
     content: Update stale 0.12 / rustls-tls / webpki-roots comments in gateway-local, workshop shell manifest, deny.toml
-    status: pending
+    status: completed
   - id: hakari
     content: cargo hakari generate, manage-deps, verify; confirm ring left workspace-hack
-    status: pending
+    status: completed
   - id: invariant
     content: "cargo tree checks: no ring in gateway, workshop, promptforge-api-runtime; single reqwest version"
-    status: pending
+    status: completed
   - id: ci
     content: Add the ring guard step to the supply-chain CI job, failing on cargo tree error as well as on a ring hit
-    status: pending
+    status: completed
   - id: docs
     content: "Update vibe/dependency-surface.md: resolve Finding 1, refresh measured counts and header commit"
-    status: pending
+    status: completed
   - id: gates
     content: Run clippy, headless gateway check, nextest, deny, build-xtask, fmt for the rustls slice; commit
-    status: pending
+    status: completed
   - id: toml-bump
     content: "toml slice: move the workspace toml pin from 0.8 to 1; fix any API fallout in gateway-config, gateway app, workshop-support, build-xtask"
-    status: pending
+    status: completed
   - id: toml-verify
     content: "toml slice: check shadow.rs round-trip and rendered-TOML fixtures; cargo tree confirms toml 0.8, toml_edit 0.19, winnow 0.5 are gone; hakari regenerate"
-    status: pending
+    status: completed
   - id: toml-gates
     content: "toml slice: rerun the gates, update dependency-surface.md, commit"
-    status: pending
+    status: completed
 isProject: false
 ---
 

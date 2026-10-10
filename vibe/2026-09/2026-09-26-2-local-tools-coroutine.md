@@ -4,22 +4,22 @@ overview: Run `tools.add_local` handlers inside the block coroutine by having th
 todos:
   - id: lua-storage
     content: Move handler storage into a per-VM Lua registry table; LocalTools keeps (alias, schema); delete LocalTools::call and SectionVm::call_local_tool; fix poison test
-    status: pending
+    status: completed
   - id: protocol
     content: Add ToolCallOutcome::Local (render as (true, nil, handler, args)), Request::LocalToolDone with LocalToolOutcome, and the local_tool_done parse arm applying scalar_return
-    status: pending
+    status: completed
   - id: prelude
     content: Add dispatch_tool/run_local_tool to __impl_coro.lua with swap_jump capture passed from install_shim_prelude; route tools_call and tools_call_as_model through it
-    status: pending
+    status: completed
   - id: scheduler
     content: Add frame local_calls stack; local branch pushes and answers Local; replace answer_local_tool with dispatch_local_tool_done; route in dispatch.rs with blocked None
-    status: pending
+    status: completed
   - id: tests
     content: Add Engine tests (store in handler via models.loop and tools.call, jump refused and restored, bad return, nested local, handler calling a bound tool on success and on failure inside a model-issued call), shim protocol walk test, lua parse/render tests
-    status: pending
+    status: completed
   - id: docs-verify
     content: Update module docs and 07-tools.md plus aggregate guide; run nextest, doctests, clippy, fmt, docs, site gates
-    status: pending
+    status: completed
 isProject: false
 ---
 

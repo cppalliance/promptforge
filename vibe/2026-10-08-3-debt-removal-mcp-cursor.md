@@ -4,13 +4,13 @@ overview: "Remove the debt the Debt Collector kept from promptforge's 19 target 
 todos:
   - id: d1-2-remove-search
     content: "D1-2: update agent-session-view.mjs expectations first (confirm failure), then delete the Search with Google menu item and searchWithGoogle from transcript-view.ts; grep confirms no remaining references under crates"
-    status: pending
+    status: completed
   - id: d1-9-stopped-flag
     content: "D1-9: add the failing late-reasoning-after-Stop case to agent-session-service.mjs, then add the private stopped flag (set in cancelTurn; cleared in respond, onInputRequired, acknowledge) and open the late thought already ended in foldDelta; check whether a late text delta reproduces the same stuck row"
-    status: pending
+    status: completed
   - id: d1-1-runtime-key-guard
     content: "D1-1 option A: add the server test installing a valid remote MCP entry (closed loopback URL) through host_context and asserting the refusal names the handshake failure, not promptforge/tokio-runtime; run the fault-injection check on the server's RUNTIME key and revert it"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,10 +4,10 @@ overview: "Replace the Workshop's placeholder panel with dockview's native empty
 todos:
   - id: upgrade-dockview
     content: Upgrade dockview and dockview-core to 8.3.1 in the SPA lockfile and prove the existing suite still passes
-    status: pending
+    status: completed
   - id: empty-zone-groups
     content: Rebuild zones with dock.addGroup on the mutation boundary, remove the placeholder panel type and its artifacts, bump the layout schema, rewrite the zone tests, refresh the workbench guide
-    status: pending
+    status: completed
 isProject: false
 ---
 

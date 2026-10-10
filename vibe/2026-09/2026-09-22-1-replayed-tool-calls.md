@@ -4,22 +4,22 @@ overview: Make the Engine's projection render replayed assistant tool_calls in t
 todos:
   - id: audit-consumers
     content: Audit projected-tool_calls consumers and goldens/fixtures; verify the arguments-always-object invariant at every construction path
-    status: pending
+    status: completed
   - id: fix-projection
     content: Render OpenAI wire shape in wire_message (projection.rs); update the function doc, the module doc, and the ToolCallRecord/Message docs
-    status: pending
+    status: completed
   - id: update-tests
     content: Update the two existing projection tests and add a wire-shape pin whose assertion re-decodes the arguments string
-    status: pending
+    status: completed
   - id: e2e-openai-shape
     content: Add an api-runtime end-to-end test whose ScriptedGateway validates inbound tool_calls against the OpenAI schema
-    status: pending
+    status: completed
   - id: gateway-diagnostics
     content: Log the bounded, escaped upstream error code/type in OpenAiUpstream::post (not the raw body)
-    status: pending
+    status: completed
   - id: verify
     content: Run promptforge-lua, promptforge-model-client, promptforge-api-runtime, gateway-protocol, and the gateway app suite; then the papergate or local reproduction
-    status: pending
+    status: completed
 isProject: false
 ---
 

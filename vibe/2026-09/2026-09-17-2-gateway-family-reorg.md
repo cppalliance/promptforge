@@ -4,7 +4,7 @@ overview: Apply the promptforge container shape to the gateway family: rename sh
 todos:
   - id: single-commit
     content: "One commit: structural-check updates, moves, renames, sweeps, path fixes, docs, verification"
-    status: pending
+    status: completed
 isProject: false
 ---
 

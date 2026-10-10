@@ -19,19 +19,19 @@ todos:
     status: completed
   - id: review-gateway
     content: Complete findings, API synthesis, fix-to-green, and verification for promptforge-gateway
-    status: pending
+    status: completed
   - id: review-webfetch
     content: Complete findings, API synthesis, fix-to-green, and verification for promptforge-webfetch
-    status: pending
+    status: completed
   - id: review-cli
     content: Complete findings, API synthesis, fix-to-green, and verification for promptforge-cli
-    status: pending
+    status: completed
   - id: review-dev
     content: Complete findings, API synthesis, fix-to-green, and verification for promptforge-dev
-    status: pending
+    status: completed
   - id: review-mcp-server
     content: Complete findings, API synthesis, fix-to-green, and verification for promptforge-mcp-server
-    status: pending
+    status: completed
   - id: workspace-closure
     content: Run final full-workspace gates and reconcile the completed cross-crate API
     status: completed

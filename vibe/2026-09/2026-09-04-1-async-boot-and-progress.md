@@ -7,19 +7,19 @@ todos:
     status: completed
   - id: core-restructure
     content: "Step 2 - Pieces 1-3 in one commit: Gateway::new instant assembly, command queue (FIFO, debounced, cancellable), boot LoadProfile command, serve_thread restructured"
-    status: pending
+    status: completed
   - id: drop-indicatif
     content: "Step 3 - Delete the Renderer thread and indicatif dep; command worker emits tracing log lines via LineRenderer"
-    status: pending
+    status: completed
   - id: whisper-bridge
     content: "Step 4 - WhisperLibrary::set_log_callback bridges ggml/whisper logging into tracing; whisper_cpp=warn works"
-    status: pending
+    status: completed
   - id: status-surfaces
     content: "Step 5 - Tray label reads the queue; /admin/status gains queue+endpoints; POST /admin/queue/cancel; config UI bottom status bar (LEDs <-> progress swap, cancel button)"
-    status: pending
+    status: completed
   - id: cleanup-and-browser
     content: "Step 6 - Verify hack removal against the cancellable queue; rename --open-settings to --browser everywhere"
-    status: pending
+    status: completed
   - id: shared-ui
     content: "Step 7 - Extract shared-ui (Cursor Dark tokens, modal, dropdown, toast, status bar, progress bar, button/input); gateway adopts Cursor Dark; workshop adopts shared toast"
     status: completed

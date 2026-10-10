@@ -4,43 +4,43 @@ overview: Full-stack decomposition of Workshop - server-side crate split (18.2k 
 todos:
   - id: fix-ci
     content: "Fix failing CI: scheduler determinism-violation test broken by drain commit"
-    status: pending
+    status: completed
   - id: enforcement
     content: Add xtask with tidy-style architecture tests and a new-crate generator
-    status: pending
+    status: completed
   - id: spa-directory-split
     content: "SPA: split flat workshop/ into editor/, agent/, tree/, layout/, menu/ subdirectories"
-    status: pending
+    status: completed
   - id: spa-css-colocation
     content: "SPA: colocate CSS beside TypeScript, add .ws-* prefix, extract --ws-* design tokens"
-    status: pending
+    status: completed
   - id: registry
     content: Create workshop-registry crate; migrate status bus as proof of self-registration
-    status: pending
+    status: completed
   - id: tier0
     content: Extract workshop-protocol and workshop-support (with generic retained-bus collapse)
-    status: pending
+    status: completed
   - id: services
     content: Extract workshop-gateway, workshop-status, workshop-menu
-    status: pending
+    status: completed
   - id: features
     content: Extract workshop-workspace and workshop-sessions; decompose AppState into registry handles
-    status: pending
+    status: completed
   - id: spa-lazy-panels
     content: "SPA: dynamic import registry for lazy panel loading; enable esbuild splitting"
-    status: pending
+    status: completed
   - id: spa-god-objects
     content: "SPA: break up window-menu.ts god object; add Part base class for panels; centralize zone/tree state"
-    status: pending
+    status: completed
   - id: view-decouple
     content: Decouple the SPA bundle behind a narrow asset interface; add headless test feature; content-hashed filenames
-    status: pending
+    status: completed
   - id: shell-cleanup
     content: Delete workshop shell's duplicated gateway supervisor in favor of shared-sidecar
-    status: pending
+    status: completed
   - id: rulebook
     content: Write the architecture invariants into workspace rules
-    status: pending
+    status: completed
 isProject: false
 ---
 

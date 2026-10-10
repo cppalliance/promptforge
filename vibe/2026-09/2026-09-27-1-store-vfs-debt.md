@@ -4,31 +4,31 @@ overview: "Remove the 12 debts the Debt Collector retained from the store-into-V
 todos:
   - id: scope-through-acquire
     content: "D1-10: add AcquireContext, change Vfs::acquire to take it, rewire VfsRef/Router/spawn/store_view, delete SCOPES/remember_scope/forwarded_scope, update every implementer and doc, regenerate public-api.txt; directly-wrapped VfsRef test"
-    status: pending
+    status: completed
   - id: end-run-scope
     content: "C-33: closed flag on Scope, detail::end_scope called at Done and on early drop, closed scopes refuse with PermissionDenied, drop-timing doc pass; held-access post-run read test and after-Done refusal test"
-    status: pending
+    status: completed
   - id: fix-pruning
     content: "D1-1, D1-2: ordered pruning only with one live scope, remove empty regions, reset the prune threshold from the surviving count; extend two_live_scopes_writing_one_path_conflict past 4096 claims, empty-region test"
-    status: pending
+    status: completed
   - id: claim-write-two-phase
     content: "D1-5, D1-6: claim_write checks everything before recording, adds ancestors[P].created and paths[ancestor].write checks; rename/copy combined claim; both-order sibling tests and refused-claim-records-nothing tests"
-    status: pending
+    status: completed
   - id: call-chain-admission
     content: "D1-3: a call chain parked on a join releases the nearest holding task's slots and retakes them on wake; stall guard fires when nothing queued can be admitted; call-in-arm fanout test at tasks.concurrency(1)"
-    status: pending
+    status: completed
   - id: captured-store-functions
     content: "D1-4, D1-31: store function values follow the load phase so captured locals go through Effect::Store after load; captured-local Determinism test and Effect::Store test"
-    status: pending
+    status: completed
   - id: store-probe
     content: "D1-7: the probe stats the store root through the one-mount router (NotFound on root is success); refusing-backend test expects Done with RunErrorKind::Store"
-    status: pending
+    status: completed
   - id: store-error-reporting
     content: "D1-8, D1-9: StoreScoped trims only the leading slash; vfs.md line 582 names both InvalidRange producers; /my/store path test"
-    status: pending
+    status: completed
   - id: exit-checks
     content: Full local check run (tests, clippy, fmt, rustdoc -D warnings, xtask api --check, guide build) and stale-term sweep
-    status: pending
+    status: completed
 isProject: false
 ---
 

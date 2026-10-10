@@ -4,31 +4,31 @@ overview: "Remove the five debts kept after the Debt Collector's analysis and ch
 todos:
   - id: d1-5-overload-path
     content: "D1-5 and D1-32: remove the orphaned result_queue_overload path and the whole test-only result queue"
-    status: pending
+    status: completed
   - id: remove-fallback
     content: "Remove the loudness fallback: Silero is required; provisioning or load failure leaves speech unavailable, a take that cannot open or run Silero fails with an error event; delete FallbackDetector, FallbackReport, Activity::hub, and the native fallback recorder (supersedes D1-14, D1-18, D1-29)"
-    status: pending
+    status: completed
   - id: d1-23-test-constants
     content: "D1-23: tests use SPEECH_TAIL_SAMPLES, HANGOVER_SAMPLES, and SENTENCE_END_SILENCE_SAMPLES instead of literals"
-    status: pending
+    status: completed
   - id: d1-10-overload-log
     content: "D1-10: debug log for interim ticks skipped under worker overload"
-    status: pending
+    status: completed
   - id: d1-2-released-guard
     content: "D1-2: add SPEECH_TAIL_SAMPLES <= HANGOVER_SAMPLES assertion and released-range boundary tests; clip by close kind only if the stride test fails"
-    status: pending
+    status: completed
   - id: d1-1-phrase-veto
     content: "D1-1: add Bye./you echo tests, trial-remove SILENCE_HALLUCINATIONS, verify with noise test and scored captures"
-    status: pending
+    status: completed
   - id: d1-4-ranges-request
     content: "D1-4: Workshop stops requesting and decoding the hypothesis ranges extension; update wire fixture tests"
-    status: pending
+    status: completed
   - id: d1-3-native-fixture
     content: "D1-3: re-capture jfk native replay as jfk-native-recaptured, point NATIVE_FIXTURE at it, document no hand edits"
-    status: pending
+    status: completed
   - id: exit-checks
     content: "Exit: full build, fmt, lint, docs, full suite, Miri, native noise test, and scored captures"
-    status: pending
+    status: completed
 isProject: false
 ---
 

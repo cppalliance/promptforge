@@ -4,34 +4,34 @@ overview: Replace PromptForge's loudness-based speech detection with whisper.cpp
 todos:
   - id: loudness-baseline
     content: Record the loudness baseline on dictation-01 and jfk with the gateway-level capture at the starting commit
-    status: pending
+    status: completed
   - id: abi-verify
     content: Verify b4938 VAD ABI and choose the Silero ggml model version; record exports and pin
-    status: pending
+    status: completed
   - id: ffi-bindings
     content: Bind whisper.cpp standalone VAD API with layout assertions and a safe VadContext; native jfk tests
-    status: pending
+    status: completed
   - id: cost-measure
     content: Measure per-chunk Silero CPU cost; decide inline versus session thread
-    status: pending
+    status: completed
   - id: detector-trait
     content: SpeechDetector trait, EnergyDetector, scripted detector; segmenter on 512-sample frames, behavior preserved
-    status: pending
+    status: completed
   - id: silero-artifact
     content: Pin and provision the Silero model; SileroDetector with loudness fallback and reporting
-    status: pending
+    status: completed
   - id: interim-gating
     content: Skip interim decodes without new speech; end windows at speech end plus tail; echo trim and silent spans from detector
-    status: pending
+    status: completed
   - id: tune-tail
     content: Add the short-burst close; tune speech tail, thresholds, and short-burst limit on dictation-01 and jfk via gateway-level capture; record research
-    status: pending
+    status: completed
   - id: mic-meter
     content: Status bar mic meter (scrolling loudness history, owner tooltip, click to reveal) between the barberpole and the record LED
-    status: pending
+    status: completed
   - id: full-verify
     content: Full verification and success-criteria check against the recorded loudness run
-    status: pending
+    status: completed
   - id: research-refine
     content: Fold targeted Silero, silence-detection, and hallucination research into this plan before execution
     status: completed

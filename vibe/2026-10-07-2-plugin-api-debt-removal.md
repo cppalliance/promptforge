@@ -4,16 +4,16 @@ overview: "Remove the debt the plugin-api branch (3e917d209..e7c1c7733) added, p
 todos:
   - id: package-const-ctor
     content: "D1-1: make Package #[non_exhaustive] with const fn new/prelude/needs, migrate the 20 literal sites and docs, add the package test"
-    status: pending
+    status: completed
   - id: toolview-dead-methods
     content: "D1-2 and C-1: delete ToolView::binding and ToolView::offered_binding and the two test assertions"
-    status: pending
+    status: completed
   - id: remove-wire-name
     content: "D1-22: remove ToolDescriptor::wire_name, InvalidWireName, validate_identifier, TestTool::wire_name, the host-run wire step; update all ToolDescriptor::new calls and tests; regenerate public-api.txt"
-    status: pending
+    status: completed
   - id: exit-gates
     content: Run every Exit criteria command in the Testing Plan
-    status: pending
+    status: completed
 isProject: false
 ---
 

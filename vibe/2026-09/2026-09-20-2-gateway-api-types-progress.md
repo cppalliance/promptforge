@@ -4,22 +4,22 @@ overview: Rename gateway-api to gateway-api-types; collapse progress to a busy f
 todos:
   - id: types-crate
     content: Rename gateway-api to gateway-api-types, add Progress, repoint dependents, update PUBLIC_GATEWAY, delete architecture.rs and its CI step
-    status: pending
+    status: completed
   - id: shared-ui-barberpole
     content: shared-ui status bar barberpole (144px, left of LEDs), setBusy(bool), tokens
-    status: pending
+    status: completed
   - id: gateway-progress-rewrite
     content: Rewrite shared-progress to ProgressHub::begin/Activity::set_text over watch; migrate every gateway producer; SSE, /admin/status, tray, config-ui; delete render.rs
-    status: pending
+    status: completed
   - id: workshop-busy
     content: workshop-gateway decodes Progress and pushes busy/idle; StatusBarUpdate.busy; push_busy; remove hub, renderer, ProgressMeter use; SPA setBusy
-    status: pending
+    status: completed
   - id: move-and-docs
     content: Move shared-progress to crates/gateway/progress as gateway-progress; AGENTS.md, README, Harness Invariants, crate AGENTS.md trims
-    status: pending
+    status: completed
   - id: mandatory-marker
     content: tidy.rs selects workshop-*/harness-* by name and requires the marker; mark and split Harness web crates; scope the 500-line sentence
-    status: pending
+    status: completed
 isProject: false
 ---
 

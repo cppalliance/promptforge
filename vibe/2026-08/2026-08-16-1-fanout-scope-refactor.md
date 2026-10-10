@@ -4,16 +4,16 @@ overview: "fanout() accepts a Lua array as second arg + new items() function. Sc
 todos:
   - id: fanout-array
     content: fanout() accepts Lua array as second arg, dispatch on Value type in Lua binding
-    status: pending
+    status: completed
   - id: items-fn
     content: Add items(heading) Lua function that returns a section's pre-parsed bullet items
-    status: pending
+    status: completed
   - id: fanout-tests
     content: Tests for fanout with array and items()
-    status: pending
+    status: completed
   - id: fanout-docs
     content: Update guide/src/fanout.md and design-core.md item 20 with array syntax and items() documentation
-    status: pending
+    status: completed
 isProject: false
 ---
 

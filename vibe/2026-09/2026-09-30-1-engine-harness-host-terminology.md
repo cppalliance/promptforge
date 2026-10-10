@@ -4,37 +4,37 @@ overview: "One PR in three commits. Commit 1 gives the root AGENTS.md one Defini
 todos:
   - id: preflight
     content: "Preflight: clean tree, new branch, and a trivial shell command to learn whether cargo, git and node can run on this machine"
-    status: pending
+    status: completed
   - id: c1-agents
     content: "Commit 1: write the Definitions and Using-the-terms sections into the root AGENTS.md, trim Roles, and fix lines 3, 37, 54, 56 and 79"
-    status: pending
+    status: completed
   - id: c1-rulebooks
     content: "Commit 1: apply the rulebook removals and rewordings in section 1.2, including .cursor/rules/workshop-architecture.mdc"
-    status: pending
+    status: completed
   - id: c1-sweep-code
     content: "Commit 1: run the seven code-area workers (Appendix A1 to A7) in parallel with the brief in section 1.3"
-    status: pending
+    status: completed
   - id: c1-sweep-docs
     content: "Commit 1: run the guide worker (A8) and the three vibe workers (A9 to A11) in parallel, including the rewrites in section 1.4 and the heading renames in 1.5"
-    status: pending
+    status: completed
   - id: c1-verify
     content: "Commit 1: regenerate the guide exports, run checks V1, V2, V4 and V5 until clean, then the full gate list"
-    status: pending
+    status: completed
   - id: c1-commit
     content: "Commit 1: commit with a message written per the workspace commit rule"
-    status: pending
+    status: completed
   - id: c2-caps
     content: "Commit 2: run the capitalization workers over the same eleven areas (section 2)"
-    status: pending
+    status: completed
   - id: c2-verify
     content: "Commit 2: regenerate the guide exports, run checks V1, V2, V3 and V6, then the gates, and commit"
-    status: pending
+    status: completed
   - id: c3-guard
     content: "Commit 3: extend crates/workshop/ui/test/docs-claims.mjs per section 3, add the pointer bullet to AGENTS.md, run npm test in crates/workshop, and commit"
-    status: pending
+    status: completed
   - id: followup
     content: "Write the follow-up rename plan from Appendix C as a separate plan; do not execute it in this PR"
-    status: pending
+    status: completed
 isProject: false
 ---
 

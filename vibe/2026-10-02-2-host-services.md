@@ -4,22 +4,22 @@ overview: First trim every AGENTS.md to the rules no test or check enforces, cut
 todos:
   - id: agents-trim
     content: "First: trim every AGENTS.md by the keep rule. Delete 10 crate files and cut 21 to their listed rules. Cut root to Definitions, Principles, Engineering, Verification, the flat-directory and dependency-cycle rules, and the SPA token and storage rules, removing the cicerone facade-page rule. Fix the build-xtask comments that point at removed AGENTS.md text"
-    status: pending
+    status: completed
   - id: service-ids
     content: In harness-plugins, replace the closed Service enum with const ServiceKey and ServiceId (id literal plus provider type) and HostServices; provides checks id and type, so activation treats a wrong-typed provider as missing and reports it by id; the input broker becomes the named service promptforge/input-broker
-    status: pending
+    status: completed
   - id: host-registry
     content: Harness::new takes the Host's PluginRegistry and HostServices; first_party_registry stops registering UserInput and keeps only a temporary built-in web until step 5; publish harness::plugin with its hand-written page; update every Harness::new call; Workshop registers UserInput
-    status: pending
+    status: completed
   - id: gateway-search
     content: Copy the Gateway web-search HTTP client into harness-gateway-client as GatewaySearch over GatewayEndpoint and SecretString, keeping every message, deadline, and header unchanged; the internal web-search crate stays live until step 5; GatewayEndpoint errors stop echoing the URL
-    status: pending
+    status: completed
   - id: harness-web
     content: Create root crates/harness-web merging web, webfetch, and the search tool; search calls the promptforge/search-provider service and renders typed results; fetch runs on the promptforge/tokio-runtime service with abort-on-drop; delete the three harness-internal web crates and the Harness's built-in web; in the same step update root Cargo.toml members and dependencies, run hakari, rewrite the harness inventory test, add harness-web to PUBLIC_HARNESS with fixtures, and have Workshop register Web with a Gateway-backed SearchProvider adapter and its tokio runtime handle
-    status: pending
+    status: completed
   - id: workshop-wiring
     content: Update crates/README.md, vibe/archdoc.md, guide chapters 5, 12, and 13 with the regenerated export, and the crate READMEs; run the full exit criteria
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,25 +4,25 @@ overview: Collapse the duplication between run_one_arm (fanout/arm.rs) and run_o
 todos:
   - id: step-1-vm-lifecycle
     content: "Step 1: carve the VM-lifecycle sequence out of run_one_section (behavior-identical)"
-    status: pending
+    status: completed
   - id: step-2-block-walk
     content: "Step 2: carve the block walk out of run_one_section (returns SectionFlow), Verify"
-    status: pending
+    status: completed
   - id: step-3-arm-adapter
     content: "Step 3: the arm becomes an adapter over the one engine (stubs kept), Verify"
-    status: pending
+    status: completed
   - id: step-4-arm-capabilities
     content: "Step 4: arms gain full control globals and jump (decision 3)"
-    status: pending
+    status: completed
   - id: step-5-cap-removal
     content: "Step 5: remove the fanout item cap (keep the concurrency bound)"
-    status: pending
+    status: completed
   - id: step-6-consolidation
     content: "Step 6: consolidation - delete surviving duplication, check against the delta list, Verify"
-    status: pending
+    status: completed
   - id: step-7-design-doc
     content: "Step 7: generate design-promptforge-arm-engine-collapse.md via the design-doc block, Verify"
-    status: pending
+    status: completed
 isProject: false
 ---
 

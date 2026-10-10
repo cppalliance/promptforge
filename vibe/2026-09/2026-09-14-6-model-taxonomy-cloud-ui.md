@@ -4,34 +4,34 @@ overview: Bake model taxonomy into every provider file of shared-cloud-providers
 todos:
   - id: schema-extension
     content: "Schema extension: family, variant_of, variant, languages on ModelEntry; openai_base_url and env_vars (EnvVar/EnvRole) on ProviderSlice; openai_base_url and env_vars (EnvVarSpec) on the Provider descriptor; all required, no version bump; round-trip test; missing-field fixture fails to parse"
-    status: pending
+    status: completed
   - id: taxonomy-primitives
     content: "taxonomy.rs: fixed-width snapshot-suffix strippers, vendor/ prefix splitter, :sku splitter, collapse_variants post-pass; unit tests per primitive"
-    status: pending
+    status: completed
   - id: taxonomy-providers
     content: "All 23 provider files: fixture excerpts committed from the saved 2026-09-14 sheet; family_of + snapshot patterns, openai_base_url, env_vars declared; kind inference for openai/qwen/moonshot/mistral; deepgram dedup + languages; elevenlabs/soniox/azure_speech languages; table-driven taxonomy tests; every-entry-has-a-family assertion"
-    status: pending
+    status: completed
   - id: local-verify
     content: Run the binary locally against the real secrets file; verify families, Deepgram collapsed, OpenAI kinds, openai_base_url/env_vars on every slice; crate gates green
-    status: pending
+    status: completed
   - id: republish
     content: "Stage 1 close: push the crate, dispatch the aggregation workflow (release already deleted; re-delete first if the cron republished), confirm the rebuilt asset parses in the new shape"
-    status: pending
+    status: completed
   - id: gateway-sheet-cache
     content: "Gateway: disk-cached sheet at profile dir, background download at boot when older than a week, unparseable cache treated as absent, atomic replace, GET /admin/cloud-models loopback-walled, route tests"
-    status: pending
+    status: completed
   - id: ui-view
     content: "UI view: kind radio, tier-grouped provider select (greyed when empty for kind), family select with All default, full-height table with display_name primary and id beneath when different, +N snapshots disclosures; pure cascade helper + tests; subscribable sheet store polling until the sheet lands; Cloud tab registration"
-    status: pending
+    status: completed
   - id: add-model
     content: "Add-model flow: merge helper (endpoint from the slice's openai_base_url) + unit tests, confirm-details dialog, shadow/apply submit, disabled add with reason for providers without an OpenAI-compatible API"
-    status: pending
+    status: completed
   - id: secrets-dropdown
     content: Provider accessor over the sheet (services/providers.ts, no table) + tier-grouped provider dropdown in the Secrets add-variable row; multi-variable providers add all rows; keyless and present providers greyed
-    status: pending
+    status: completed
   - id: e2e
     content: "End-to-end: gateway integration test of fetch-serve-merge-apply; manual run against the republished URL and the real UI"
-    status: pending
+    status: completed
 isProject: false
 ---
 

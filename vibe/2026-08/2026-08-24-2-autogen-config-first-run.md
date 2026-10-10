@@ -4,25 +4,25 @@ overview: Config generation, gateway cache API, status bar with observer and act
 todos:
   - id: auto-config
     content: Auto-generate ~/.promptforge/workbench.toml on first run, remove from_env path
-    status: pending
+    status: completed
   - id: gateway-cache-api
     content: "Gateway: POST/GET/DELETE /v1/cache with SSE download progress"
-    status: pending
+    status: completed
   - id: observer
     content: Observer broadcast channel in AppState, status on main WS, instrument all subsystems
-    status: pending
+    status: completed
   - id: status-bar
     content: "Status bar UI: text left, progress bar right, activity LED, custom scrollbar"
-    status: pending
+    status: completed
   - id: css-skinning
     content: Consolidate all visuals into CSS custom properties, fix scrollbar, skinnable
-    status: pending
+    status: completed
   - id: gateway-resilience
     content: Background health heartbeat, reconnect, graceful degradation
-    status: pending
+    status: completed
   - id: wb-cache-integration
     content: Workbench calls POST /v1/cache at startup for whisper models, pipes progress to status bar
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,31 +4,31 @@ overview: Markdown-driven pipeline runtime (Rust + mlua). A prompt is a function
 todos:
   - id: mark-docs-provisional
     content: Add provisional status to design document headers. This plan overrides them.
-    status: pending
+    status: completed
   - id: fix-reachability
     content: Sections can be dormant, cyclic, freely organized. Unreachable is not an error.
-    status: pending
+    status: completed
   - id: build-version-gate
     content: "Rung 1: detection function for the `promptforge:` version; run only promptforge prompts (absent = not ours, caller handles), refuse an unsupported major."
-    status: pending
+    status: completed
   - id: build-store-vfs
     content: "Rung 2: run-scoped store/VFS in core (write/append/read-numbered/str_replace/delete/glob), Lua + model equal access, capability injection (MemVfs vs RealFs). Files-first."
-    status: pending
+    status: completed
   - id: build-substitution
     content: "Rung 3: one-pass {{ }} resolver over args, sys (now/date/elapsed/id), var, reply, result (scalars stringify, tables -> JSON, nil hard error, no formulas). Parameterized single-step prompts."
-    status: pending
+    status: completed
   - id: build-control-flow
     content: "Rung 4: fall-through + goto + pass + task + reference blocks (sect.block/sect.list) + result/injection + the three budgets (nesting/step/tool). Deterministic Lua transitions; cycles legal."
-    status: pending
+    status: completed
   - id: build-fanout
     content: "Rung 5: fanout (homogeneous over a list, heterogeneous over tasks) + keyed-store reduce + structured store. Runs Diligence/Briefer."
-    status: pending
+    status: completed
   - id: build-cyclic
     content: "Rung 6: cyclic state-machine pipelines (mentograph-shaped) driven by Lua conditionals. Model-surface transfer stays deferred."
-    status: pending
+    status: completed
   - id: generate-design-doc
     content: "Final step, after all rungs: spawn one subagent to read this plan, grep <design-doc>, and write design-promptforge-orchestrator.md from the finished build; it supersedes the provisional promptforge-design docs."
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,16 +4,16 @@ overview: Prune repository policy, remove unsupported structural ratchets, prese
 todos:
   - id: remove-structural-ratchets
     content: Prune policy guidance and remove unsupported structural ratchets
-    status: pending
+    status: completed
   - id: establish-gateway-ownership
     content: Preserve logging and establish Gateway ownership
-    status: pending
+    status: completed
   - id: repair-profile-and-registry
     content: Preserve profile behavior and generation identity
-    status: pending
+    status: completed
   - id: revoke-publication-and-shutdown
     content: Revoke publication and bound supervisor shutdown
-    status: pending
+    status: completed
 isProject: false
 ---
 # Remove Unsupported Ratchets and Repair Runtime Defects

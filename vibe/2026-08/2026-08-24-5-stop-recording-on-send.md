@@ -4,7 +4,7 @@ overview: When the user sends a chat message while voice recording is active, st
 todos:
   - id: discard-on-send
     content: "Single commit: onUserSubmit hook discards active recording, suppresses late frames, closes socket without stop; typing-model splice at cursor with readOnly during takes"
-    status: pending
+    status: completed
 isProject: false
 ---
 

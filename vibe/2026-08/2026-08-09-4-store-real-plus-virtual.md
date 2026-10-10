@@ -4,10 +4,10 @@ overview: "First-class Tool/Model objects, model:infer(), alternating blocks, ex
 todos:
   - id: doc-status-orig-claim
     content: "Remove stale design-core-orig.md claim from STATUS.md (file was deleted/archived outside repo)"
-    status: pending
+    status: completed
   - id: doc-readme-or-defer
     content: "Either add first-class API summary to root README or add a note deferring to user-guide"
-    status: pending
+    status: completed
 isProject: false
 ---
 

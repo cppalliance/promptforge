@@ -4,19 +4,19 @@ overview: In the promptforge2 checkout (c:/Users/Vinnie/cursor/promptforge2, bra
 todos:
   - id: step-1
     content: "Step 1: relocate - git mv crates/workshop/server/ui to crates/workshop/ui (build_sibling, build.rs, drift test, build.mjs depth, shared-ui link + npm install, parent-walk tests, gitignore, gitattributes, workflows, workshop-spa, docs, doc comments; dist compare between moves), then git mv src/ui to src/parts (main.ts, panel-registry.ts, test stdin paths, AGENTS.md); one commit, npm test + cargo build + build-ui drift green"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: chat box foundation - git mv composer files into parts/chatbox/, types.ts, @tiptap/suggestion, mention node attrs kind/icon/preview/tone/data with renderHTML/parseHTML, chip-view.ts renderChip with data-kind, chat-box-view.ts renderDraft; gate typecheck + node --test chat-box/typeahead-popup/mention-chip"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: dictation ownership - SpeechCaptureService owner tokens/busy/owner/onOwnerChange; setupStt press/state/onState, ownership filter, blocked precedence; stt-stream two-instance test; eight-line interim view adaptation; gate typecheck + node --test speech-capture/stt-stream/agent-stt/agent-stt-boot"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: ChatBox class (defaulted props, update, controls slot, buttons, strip, data attributes, textControls) and the agent-session-view rewire in one commit; migrate chat-box, agent-session-view, agent-stt, agent-stt-boot tests; two-view data-mic test; gate typecheck + those node --test files + lazy-panel-sizing"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: seams (mentionSource/signal/debounce, commandSource, onPasteFiles, serialize/restore v1, insertMention), typeahead description/groups/loading/Tab, test/chatbox-boundary.mjs; then the deferred full verification - npm test, npm run build, cargo build, chat_gate nextest, build-ui drift, cargo fmt, clippy, clean tree; operator smoke pass reported"
-    status: pending
+    status: completed
 isProject: false
 ---
 

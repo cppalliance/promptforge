@@ -4,40 +4,40 @@ overview: Upgrade PromptForge's real-time speech-to-text so words lock on a norm
 todos:
   - id: safe-fixes
     content: "Safe fixes: stale 700 ms comment, revision bump only on emitted change, single MAX_PROMPT_TOKENS, reconnect jitter (with tests)"
-    status: pending
+    status: completed
   - id: ffi-layout
     content: Verify whisper-ffi raw.rs struct layout against whisper.h at b4938; add a layout assertion test if feasible
-    status: pending
+    status: completed
   - id: characterization
     content: Characterization tests pinning agreed shrink, exact-equality block, final overwrite, queue-full take failure, whole-range applySnapshot
-    status: pending
+    status: completed
   - id: speech-sandbox
     content: Speech-sandbox with UPWR, UPSR, partial latency, commit lag, agreed-shrink, interim decode time; record baseline
-    status: pending
+    status: completed
   - id: params-guards
     content: Per-role whisper params (fallback off, audio_ctx, max_tokens, threads) and post-decode hallucination guards
-    status: pending
+    status: completed
   - id: commit-rule
     content: Normalized evidence-based monotonic commit rule with outlier hold in agreement.rs and window.rs
-    status: pending
+    status: completed
   - id: aligned-rewrite
     content: Aligned rewrite of final text with anchored, capped fast suffix in state.rs reusing the bounded alignment
-    status: pending
+    status: completed
   - id: timestamps
     content: Interim token timestamps, window start at last agreed word, force-commit on trim, derived audio_ctx
-    status: pending
+    status: completed
   - id: wire-ui
     content: Opt-in wire fields, live plain-client deltas, UI revision guard, diff patch, tentative styling, hold-back, undo, a11y, socket-loss keep
-    status: pending
+    status: completed
   - id: endpointing
     content: Hangover, pre-roll, punctuation-aware short close, pure three-rule endpoint function
-    status: pending
+    status: completed
   - id: interim-prompt
     content: Seed interim prompt with finalized tail; keep only if speech-sandbox shows less flicker
-    status: pending
+    status: completed
   - id: degrade
     content: Keep accepted interim text on full final queue with retry; skip overloaded interim ticks
-    status: pending
+    status: completed
 isProject: false
 ---
 

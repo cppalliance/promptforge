@@ -4,28 +4,28 @@ overview: "Finish moving I/O out of the Harness in one plan: each run gets its o
 todos:
   - id: engine-rounds
     content: "Engine: RoundId and Round replace stream on Effect::Chat; round ids on thinking, reply, and tool-call events; EffectRecord::Chat gains round and drops model; Completion::with_model and CompletionOptions::with_model; StreamDelta stays until the streaming step because the runner's OnDelta uses it; the runner passes on_delta for rounds whose origin is Chat; bless public-api.txt"
-    status: pending
+    status: completed
   - id: per-run-harness
     content: "harness-runner, landed under harness-sessions: per-run Harness with control() and run(RunRequest) returning RunReport or HarnessError; RunControl stop_round (spares operator questions) and cancel; the effect loop in its final single-future form (FuturesUnordered, Abortable, catch_unwind) with spawn.rs, the answer channel, and Answering deleted; prompt as source text and prepare_run's file read gone; HostSnapshot and current_model move to the runner and OutputError lands there for RunReport; input broker via HostServices, insert_input_broker deleted; Host-supplied Timer; drive_run sink removed; InferenceBroker::chat takes Round beside a transitional Option<OnDelta> the Harness always passes as None; harness-sessions rebuilt on it and still cancels and relaunches on Stop; never-block rule in the performer trait docs; spawn Invariants rewritten; thread-parking test; checkpoint: Workshop's suite passes with only the broker signature changed"
-    status: pending
+    status: completed
   - id: workshop-agents
     content: "New tier-2 crate workshop-agents with conversations, transcript stamping reply from the event's round, input broker and waits, failure reports, recorder tee, discovery, chat.md, TokioTimer, adapted from harness-sessions; rewire workshop-server launch, socket, status, bindings, per-run broker (hands WorkshopBroker its delta sender for Chat rounds), Stop to stop_round, close to cancel; facade swaps to the per-run exports and its doc pages are rewritten; delete the workshop-architecture.mdc Tiers bullet and \"Repository policy binds plans.\" from root AGENTS.md, and update the tidy.rs FEATURES comment and workshop-server Invariants; harness-sessions stays compiling and unreferenced"
-    status: pending
+    status: completed
   - id: delete-sessions
     content: "Delete harness-sessions, its workspace member, and its session-only tests; RunMeta session_id becomes name and agent goes; the run-log session_id column becomes name and Workshop's per-run recorder writes the agent column itself"
-    status: pending
+    status: completed
   - id: broker-streaming
     content: "InferenceBroker::chat drops its transitional OnDelta, and OnDelta leaves the runner and facade; StreamDelta leaves the Engine (bless public-api.txt) for harness-gateway-client with GatewayBroker::chat_streaming and routed-model labels; Workshop per-run broker streams through it with round ids; WorkshopBroker substitutes the current pick per round and warns when the pick's context window is smaller than the launch binding's"
-    status: pending
+    status: completed
   - id: drop-tokio
     content: "Delete cancel.rs, harness::cancel and cancel.md, and the tokio and tokio-util deps of harness and every harness-internal crate; harness_bans becomes a dependency ban and the tokio clippy.toml entries go; the runner and plugins Invariants name the ban"
-    status: pending
+    status: completed
   - id: docs
     content: Update archdoc, crates/README.md, crate READMEs, cicerone harness plan, Engine doc pages, and guide chapters; regenerate guide exports (the facade pages change in the Workshop and tokio steps so their doctests pass at every commit)
-    status: pending
+    status: completed
   - id: exit-criteria
     content: Run the leftover rg searches, every exit criterion including the headless workshop-server suite, and the manual Workshop checks (stream, model swap labels, web)
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,25 +4,25 @@ overview: Land the AGENTS.md dependency-rule revisions, rename shared-protocol t
 todos:
   - id: land-rules
     content: Commit the AGENTS.md rule revisions together with the two design/ deletions
-    status: pending
+    status: completed
   - id: rename-crate
     content: Rename shared-protocol to gateway-protocol (crate, manifests, imports, AGENTS.md, lockfile)
-    status: pending
+    status: completed
   - id: extend-arch-test
     content: "Extend architecture.rs: Shared set + fifth rule, workshop prefix fix, fixture coverage"
-    status: pending
+    status: completed
   - id: fix-unix-clippy
     content: "Add #[expect(unnecessary_wraps)] to the cfg(unix) mode_of in shared-vfs host.rs"
-    status: pending
+    status: completed
   - id: fix-writerace
     content: "dispatch_store: drop the access clone before sending the answer"
-    status: pending
+    status: completed
   - id: vfs-hook
     content: "shared-vfs: op-observation sink on the handle plus mandatory acquire identity label"
-    status: pending
+    status: completed
   - id: verify
     content: "Verify: local gates plus PR #35 CI green across clippy, test, native-whisper"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,31 +4,31 @@ overview: Remove the standalone .lua agent program path and the promptforge-agen
 todos:
   - id: remove-lua-agent-path
     content: "Remove .lua agent path in workshop-sessions: discovery to .md, delete launch_lua, local run error type, audit UserInputTool, fix tests and docs"
-    status: pending
+    status: completed
   - id: delete-agent-crate
     content: Delete crates/promptforge-agent and its Cargo/facade edges
-    status: pending
+    status: completed
   - id: fix-guides
     content: Rewrite agent guides and READMEs for .md directory agents
-    status: pending
+    status: completed
   - id: rename-core-support
     content: Rename promptforge-core-support to shared-promptforge-api; sink model vocabulary and the entire tool vocabulary into it
-    status: pending
+    status: completed
   - id: rename-core-to-api
     content: Rename promptforge-core to promptforge-api, retire the promptforge facade crate, make picker optional and vfs defaulted in the run API
-    status: pending
+    status: completed
   - id: delete-integration-tests
     content: Delete crates/product-integration-tests/ and all references to it
-    status: pending
+    status: completed
   - id: migrate-consumers
     content: Migrate workshop-sessions, workshop-gateway, workshop-protocol to promptforge-api + shared-promptforge-api; reimplement gateway progress
-    status: pending
+    status: completed
   - id: enforce-boundary
     content: Add product-boundary check to xtask tidy with test wrapper
-    status: pending
+    status: completed
   - id: verify
     content: Run full verification suite and metadata sweep
-    status: pending
+    status: completed
 isProject: false
 ---
 

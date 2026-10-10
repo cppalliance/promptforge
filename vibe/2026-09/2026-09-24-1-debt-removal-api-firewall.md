@@ -4,16 +4,16 @@ overview: "Remove the four debts the promptforge API firewall commits (75245481.
 todos:
   - id: step-1
     content: "Step 1 (chunk-names): repoint TASKS/FANOUT/MESSAGES chunk names to crates/promptforge-internal/lua/src/; content-match tests in coro-tests.rs and messages-tests.rs"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2 (test-support): harness-plugins suite on a store-only Run::step/resume loop; Engine drive_tokio example on Engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3 (doctest-cycle): doctest-only facade dev-dependency exception in AGENTS.md line 35; amend the six crate statements"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4 (listing-fidelity): non_exhaustive, kind, and private-field markers in api/render.rs; pinned-nightly fixtures; re-bless public-api.txt; exit gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 

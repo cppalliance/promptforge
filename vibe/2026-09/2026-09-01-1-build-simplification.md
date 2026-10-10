@@ -4,49 +4,49 @@ overview: Move the web UI build out of git and into a shared build helper. Build
 todos:
   - id: a-ui-build-crate
     content: Create crates/ui-build helper and switch both UI crates' build.rs to it
-    status: pending
+    status: completed
   - id: a-rust-embed-outdir
     content: Point both assets.rs at the build output folder; untrack both ui/dist trees and add them to .gitignore
-    status: pending
+    status: completed
   - id: a-delete-manifest
     content: Remove the manifest files and the packaged-crate fallback from both UI crates; document Node 22 + npm ci as a build requirement
-    status: pending
+    status: completed
   - id: d-gitattributes
     content: Extend .gitattributes and renormalize in a dedicated commit
-    status: pending
+    status: completed
   - id: b1-cli
     content: Convert promptforge-gateway-build into the crates/llama-cuda-build command-line tool with --source, --arch, --out, --no-smoke; put the CUDA runtime DLLs in the output zip
-    status: pending
+    status: completed
   - id: b2-workflow
     content: Add .github/workflows/llama-cuda-blackwell.yml (hosted build, self-hosted smoke test, publish release with checksums); retire cuda.yml
-    status: pending
+    status: completed
   - id: b3-runtime-select
     content: Add cuda-blackwell and upstream cuda rows to the asset table, add GPU-based backend selection with a config override, add the config/env/cache resolution order for llama-server, remove the embedded CUDA path and the llama.cpp submodule
-    status: pending
+    status: completed
   - id: c1-cargo-dist
     content: Set up cargo-dist for the gateway, Linux only, with a Node setup step and a post-build test job
-    status: pending
+    status: completed
   - id: c2-tauri-release
     content: Add release-workshop.yml for Windows, macOS (two builds), and Linux, with a post-build test job and checksums
-    status: pending
+    status: completed
   - id: c3-ci-clean-tree
     content: Add a clean-tree check to ci.yml so a build can never dirty the repository again
-    status: pending
+    status: completed
   - id: e-default-members
     content: Set workspace default-members to the gateway so plain cargo build works on macOS and Linux
-    status: pending
+    status: completed
   - id: e-setup-docs
     content: Add per-OS setup instructions (Ubuntu packages, macOS CLT/brew, Windows) to the README and crate docs
-    status: pending
+    status: completed
   - id: e-rust-toolchain
     content: Add rust-toolchain.toml pinned to the MSRV channel
-    status: pending
+    status: completed
   - id: e-readme-align
     content: Align README and AGENTS.md on when Node is required and what plain cargo build does
-    status: pending
+    status: completed
   - id: e-linux-workshop-ci
     content: Add a Linux workshop build job to ci.yml with the Tauri system packages
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,25 +4,25 @@ overview: Remove six accepted debts added across the 30 commits in upstream/mast
 todos:
   - id: buildxtask-enumeration
     content: Unify the build-xtask crate enumeration on one recursive walk and make the marker check report unreadable or nameless manifests instead of skipping
-    status: pending
+    status: completed
   - id: error-chain-guards
     content: Add the dedup predicate and empty-text guard to both gateway error_chain renderers with a regression test each
-    status: pending
+    status: completed
   - id: event-exhaustiveness
     content: Add the every-Event-variant and every-TaskOrigin drive tests and correct the docs that assert an unconditional guarantee
-    status: pending
+    status: completed
   - id: walled-tier-inversion
     content: Split admin/walled/handoff.rs at its cfg seam, rehome the five non-route items to homes named for what they are, and repoint the import sites
-    status: pending
+    status: completed
   - id: walled-tier-ratchet
     content: Add a build-xtask rule forbidding admin::walled paths outside the tier, allowlisting the three assembly files and skipping comments
-    status: pending
+    status: completed
   - id: error-source-gateway
     content: Create the shared error-source crate with accessors and collapse the gateway family's newtypes onto it
-    status: pending
+    status: completed
   - id: error-source-harness-workshop
     content: Collapse the Harness and workshop newtypes onto the shared types, record the new component, and run the wide gates
-    status: pending
+    status: completed
 isProject: false
 ---
 

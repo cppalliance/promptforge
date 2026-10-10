@@ -4,13 +4,13 @@ overview: Add a flat-sources rule to promptforge/AGENTS.md (source subdirs need 
 todos:
   - id: create-rule
     content: Add flat-sources bullet to Structural Rules in promptforge/AGENTS.md
-    status: pending
+    status: completed
   - id: flatten-crates
     content: Flatten all 19 non-compliant crates per the audit table and mechanics spec
-    status: pending
+    status: completed
   - id: verify
     content: Run the full workspace verification gate
-    status: pending
+    status: completed
 isProject: false
 ---
 

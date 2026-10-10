@@ -4,40 +4,40 @@ overview: "Add tools.local(alias, description, params, handler) - Lua-backed too
 todos:
   - id: install-log-store
     content: Install log and store once per section via vm.install_host_apis()
-    status: pending
+    status: completed
   - id: install-control
     content: Install control globals once per section via vm.install_control_globals()
-    status: pending
+    status: completed
   - id: delete-prologue-epilog
     content: Delete prologue/epilog split, one run_loaded_with_control for every chunk
-    status: pending
+    status: completed
   - id: execute-nil-reply
     content: execute() passes nil reply to subroutines
-    status: pending
+    status: completed
   - id: models-default
     content: Rename models.only to models.default, remove models.use foreclosure
-    status: pending
+    status: completed
   - id: local-storage
     content: Add LocalTools storage to SectionVm
-    status: pending
+    status: completed
   - id: tools-local-fn
     content: Install tools.local Lua function with params table to JSON schema
-    status: pending
+    status: completed
   - id: schema-rebuild
     content: Rebuild schemas per prose block, delete ToolScope/snapshot_tool_scope
-    status: pending
+    status: completed
   - id: dispatch-local
     content: Dispatch local tools in tool loop with sentinel ToolId
-    status: pending
+    status: completed
   - id: models-get-infer
     content: Add models.get() and models.infer(), keep handle:infer()
-    status: pending
+    status: completed
   - id: tests
     content: Tests for all new behavior
-    status: pending
+    status: completed
   - id: docs
     content: Documentation for all new APIs
-    status: pending
+    status: completed
 isProject: false
 ---
 

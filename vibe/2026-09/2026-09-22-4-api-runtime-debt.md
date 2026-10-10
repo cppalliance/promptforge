@@ -4,37 +4,37 @@ overview: "Reduce technical debt in promptforge-api-runtime without changing beh
 todos:
   - id: docs
     content: "Docs accuracy: README badges/version, lib.md, stale lua/untrusted docs, execute.rs module map, test_support voice, legacy comments, crate AGENTS.md, Run step/resume contract docs"
-    status: pending
+    status: completed
   - id: facade
     content: "Root facade: make execute private, root-only re-exports, rewrite dependent imports and doctests, resolve unreachable_pub and private_intra_doc_links"
-    status: pending
+    status: completed
   - id: modelseams
     content: "Model seams: drop Applied/SseScanner/StreamAccumulator hidden re-exports (keep ToolSchemaError and the transport seams)"
-    status: pending
+    status: completed
   - id: demotions
     content: "Demotions: apply each demotion candidate that meets its condition, with the accessor it is paired with, and leave the rest public"
-    status: pending
+    status: completed
   - id: testsupport
     content: "Trim test_support pub surface to the listed names (recording keeps Observer and Observation), delete RecordingObserver, keep TokioDriver/mock/hooks cfg(test)"
-    status: pending
+    status: completed
   - id: movetests
     content: "Move args_surface, lazy_prose, offline exec_flow cases to tests/suite and declare them in tests/suite/main.rs"
-    status: pending
+    status: completed
   - id: splittests
     content: "Split tests/scheduler.rs and tests.rs along identified seams (tests/scheduler/ in standard layout; plain modules under tests/)"
-    status: pending
+    status: completed
   - id: answerinline
     content: "Hoist answer_inline into core Scheduler and replace the 16 hand-written sites across 11 modules"
-    status: pending
+    status: completed
   - id: testhost
     content: "Remove cfg(test) test_host from RunContext/RunState and the RunContext test builders; build RunHost in tests and pass it to TokioDriver"
-    status: pending
+    status: completed
   - id: substtests
     content: "Move subst.rs test block to subst-tests.rs"
-    status: pending
+    status: completed
   - id: verify
     content: "Record baseline test count with --all-features; run the crate inner loop after each work item; before finishing run clippy, nextest + doctests, cargo doc -D warnings, fmt, build-xtask and confirm the count is not lower"
-    status: pending
+    status: completed
 isProject: false
 ---
 

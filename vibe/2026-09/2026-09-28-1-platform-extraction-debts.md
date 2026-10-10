@@ -4,13 +4,13 @@ overview: "Remove the debt the platform extraction run added: move Close and Clo
 todos:
   - id: close-ownership
     content: "D1-1: move the generic close path and both close commands into parts/layout (panel-close.ts, registered from layout.contribution.ts), add WorkshopPart.isDirty, delete the editor copies, re-point tests, add the layout-only close test"
-    status: pending
+    status: completed
   - id: tab-affordances
     content: "D1-2 and D1-3: in panel-tab.ts, guard the X's pointerdown and drop it from the Tab order, and move focus to the neighbouring tab after a keyboard close"
-    status: pending
+    status: completed
   - id: activity-reset
     content: "D1-4: ActivityIndicator.reset cancels the pulse timer, clears the lit set and repaints, with a regression test in activity-led.mjs"
-    status: pending
+    status: completed
 isProject: false
 ---
 

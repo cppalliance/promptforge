@@ -4,22 +4,22 @@ overview: Replace the pure-Lua messages.new() builder with a Rust-backed list th
 todos:
   - id: step-1-sandbox-pairs
     content: "Step 1: the sandbox pairs in iteration.rs honors a userdata __pairs, with tests"
-    status: pending
+    status: completed
   - id: step-2-list-core
     content: "Step 2: MessageList core in messages.rs (builders, replace, system-first, extra fields dropped, __len, __newindex, commit) plus parse_record, with tests"
-    status: pending
+    status: completed
   - id: step-3-record-views
     content: "Step 3: read-only RecordView, MessageRecord::to_json, list __index (integral floats too) and __pairs, with tests"
-    status: pending
+    status: completed
   - id: step-4-cutover
     content: "Step 4: messages.new() returns the Rust list; shim append and handle rule; parse_chat takes the list; engine imports swap MessageRecord for MessageList; test migrations, argument and author-shape tests; full test commands"
-    status: pending
+    status: completed
   - id: step-5-chat-record
     content: "Step 5: after and keep on Effect::Chat and EffectRecord::Chat, commit after the precheck, listing re-blessed, rebuild and refused-round tests; full gates"
-    status: pending
+    status: completed
   - id: docs-follow-up
     content: "Follow-up outside the run: rewrite promptforge-docs chapters 11 and 17 and rebuild the books"
-    status: pending
+    status: completed
 isProject: false
 ---
 

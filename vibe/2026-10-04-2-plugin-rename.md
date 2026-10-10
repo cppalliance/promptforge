@@ -4,13 +4,13 @@ overview: Rename the activation unit from "capability" to Plugin, a capitalized 
 todos:
   - id: step-1
     content: "Step 1: rename the code to Plugin (crate move, name map, message texts, frontmatter key, Workshop JSON, service-id check, public-api.txt, Cargo.lock)"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: extend docs-claims.mjs, define Plugin in the root AGENTS.md, and sweep the repository's prose (rulebooks remove-first)"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: sweep the contents of every vibe/ plan and the promptforge-docs guide"
-    status: pending
+    status: completed
 isProject: false
 ---
 

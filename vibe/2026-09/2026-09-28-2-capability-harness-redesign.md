@@ -4,49 +4,49 @@ overview: Turn PromptForge Plugins into self-describing units, installable by na
 todos:
   - id: prelude
     content: Carry Plugin preludes from Contribution.prelude through Environment::preludes to section setup; install each in a restricted environment with sealed exports, checking load failures and name collisions when a section VM installs them
-    status: pending
+    status: completed
   - id: fullid
     content: Resolve a script tools.call that names the full id of a tool in the run's catalog, with no global, no scoping, and no advertising
-    status: pending
+    status: completed
   - id: origin
     content: Add ToolCallOrigin (execution, section, and caller, script or model) to Effect::ToolCall and EffectRecord::ToolCall
-    status: pending
+    status: completed
   - id: broker-needs
     content: Add InputBroker and InputError to harness-plugins and RunServices.input; make Services.input an optional broker, bridged to the old input performer until Engine removal; add Service, Plugin::needs, the activation check, Requirements.missing_services, and Activation.service_gaps
-    status: pending
+    status: completed
   - id: userinput-cap
     content: Build promptforge/user-input in harness-plugins; register it in every first-party registry; map its script-side result to user_message in Workshop; move chat.md to input.ask() and declare it required
-    status: pending
+    status: completed
   - id: park-tests
     content: Port the Engine and runner tests that use user_input() only as a parking point to fixture tools called by full id (first commit of the Engine removal change)
-    status: pending
+    status: completed
   - id: migrate-ask
     content: Move every prompt, test body, and guide chapter that uses user_input() as user input to input.ask() with a declaration, while user_input() still works through the adapter (second commit)
-    status: pending
+    status: completed
   - id: engine-removal
     content: Delete the user-input facility from the Lua, engine, types, runner, sessions, Workshop, and facade crates, with the adapter, the tests of the removed types, and the regenerated public API (third commit)
-    status: pending
+    status: completed
   - id: guard-nonce
     content: Derive the per-run guard nonce with SHA-256 instead of SplitMix64 and pin the derivation with a known-answer test
-    status: pending
+    status: completed
   - id: factories
     content: (Held until its open questions are settled) Zero-argument factories with manifest and config JSON; gateway as Host service
-    status: pending
+    status: completed
   - id: answer-records
     content: (Held until its open questions are settled) Project large tool and store answers to path, length, hash, version
-    status: pending
+    status: completed
   - id: open-slot
     content: (Held until its open questions are settled) Design and build the open slot for runtime-only tools
-    status: pending
+    status: completed
   - id: menu
     content: (Held until its open questions are settled) Workshop Plugin menu and saved agent definitions
-    status: pending
+    status: completed
   - id: dll-abi
     content: (Held until its open questions are settled) Revise the Plugin DLL plan to the one-verb manifest ABI
-    status: pending
+    status: completed
   - id: report
     content: (Held until its open questions are settled) Correct or supersede the 2026-09-19 survey report
-    status: pending
+    status: completed
 isProject: false
 ---
 

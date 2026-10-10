@@ -7,16 +7,16 @@ todos:
     status: completed
   - id: consumers
     content: Remove the picker, fuzzy slots, conflicts, the Plugin lint, and the models.bind resolver from model-client, lua, parser, runtime, and workshop-workspace
-    status: pending
+    status: completed
   - id: crate
     content: Delete the crate; prune root manifest members and the candle/tokenizers/hf-hub/safetensors/half pins; regenerate hakari; fix nextest filters; remove the CI model cache
-    status: pending
+    status: completed
   - id: ui-docs
     content: Remove fuzzy tool rendering from the Workshop SPA; update guide sources, crate READMEs, and dependency-surface.md with fresh measurements
-    status: pending
+    status: completed
   - id: verify
     content: Full gate list, cargo tree invariants, and reference sweep
-    status: pending
+    status: completed
 isProject: false
 ---
 

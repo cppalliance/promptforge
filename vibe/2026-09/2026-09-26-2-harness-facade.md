@@ -4,28 +4,28 @@ overview: Turn crates/harness/ into a pure `harness` facade shaped like crates/p
 todos:
   - id: log-wrappers
     content: "harness-log owns DatabaseSource/JsonSource; drop shared-error-source from harness-log; fix shared-error-source docs"
-    status: pending
+    status: completed
   - id: move-rename
     content: "git mv crates/harness/* to crates/harness-internal/ and crates/harness-api to crates/harness; update root Cargo.toml members/exclude/workspace deps; rename package to harness"
-    status: pending
+    status: completed
   - id: facade-rewrite
     content: "Make the facade match crates/promptforge - trimmed manifest, lib.rs of re-exports only (no Invariants block), prose into lib.md/cancel.md, delete harness.rs/session.rs/cancel.rs/README.md/clippy.toml, tests/it to tests/suite"
-    status: pending
+    status: completed
   - id: consumers
     content: "workshop-server manifest and harness_api:: to harness:: imports; internal crates' Invariants blocks"
-    status: pending
+    status: completed
   - id: xtask-names
     content: "build-xtask product.rs family/PUBLIC_HARNESS/container exception, harness_clippy_bans on the container only, facade_shape FACADE_DIRS, site.rs, fixture tests"
-    status: pending
+    status: completed
   - id: surface
     content: "Facade pub mod log re-exports; gate Harness::log behind test-support with a self dev-dependency (fallback: unit tests)"
-    status: pending
+    status: completed
   - id: guard-rules
     content: "Extend test_support_leak and doc_hidden to the Harness facade and container; in product.rs ban Harness to gateway and to shared, and generalize the facade-only rule to mirror PUBLIC_PROMPTFORGE; tests"
-    status: pending
+    status: completed
   - id: docs-gate
     content: "AGENTS.md, READMEs, archdoc, promptforge-types cancel.rs doc; full gate plus site build"
-    status: pending
+    status: completed
 isProject: false
 ---
 

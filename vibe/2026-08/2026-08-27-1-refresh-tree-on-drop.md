@@ -4,16 +4,16 @@ overview: "Fix folder drops doing nothing: the grant succeeds but the Workshop t
 todos:
   - id: grant-event
     content: Dispatch promptforge:workspace-granted from workspace-drops.ts after successful grants
-    status: pending
+    status: completed
   - id: tree-refresh
     content: "Listen in WorkshopTreePanel: invalidate roots cache, re-render, remove empty hint, dispose listener"
-    status: pending
+    status: completed
   - id: tests
     content: Cover grant event dispatch and tree refresh in UI tests
-    status: pending
+    status: completed
   - id: verify
     content: npm test + typecheck, then manual drop test in the desktop app
-    status: pending
+    status: completed
 isProject: false
 ---
 

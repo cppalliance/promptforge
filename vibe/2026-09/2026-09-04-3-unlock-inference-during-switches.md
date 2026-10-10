@@ -10,16 +10,16 @@ todos:
     status: completed
   - id: unlock-switch
     content: Step 3 - five-phase run_switch_with_config with switch held only for cut-over and commit; artifact/spawn split reusing the existing provisioner; LiveState.loading + GatewayError::ModelLoading 503 + status loading_models; downloading-models leaf and overlay stage; regression tests; scheduled Verify
-    status: in_progress
+    status: completed
   - id: bounded-waits
     content: Step 4 - timeout on worker.await in Gateway::serve (5 s, warn) with a parked-worker test; idle read timeout on artifact downloads so Cancel/Quit are honored within seconds; default tracing filter becomes info for gateway crates plus whisper_cpp=warn; log file at <state dir>/logs/gateway.log with one-run rotation, no new dep
-    status: pending
+    status: completed
   - id: overlay-download-progress
     content: Step 5 - apply overlay renders Updated frames from */download paths as a progress bar with model name and percent under the active stage; tests
-    status: pending
+    status: completed
   - id: ui-hygiene
     content: Step 6 (final) - hoist isRecord, thread error.code for all refusals, onCancel-rejection and unmounted-Settings-revert tests, mark stale async-boot plan todos; final full-suite Verify
-    status: pending
+    status: completed
 isProject: false
 ---
 

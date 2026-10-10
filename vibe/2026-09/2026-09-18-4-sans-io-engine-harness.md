@@ -4,31 +4,31 @@ overview: "Turn the PromptForge executor into a sans-IO Engine (a deterministic 
 todos:
   - id: structural-guards
     content: "Steps 1-3: Harness family row in the product matrix; Engine manifest guard, retired-symbol scan, and Harness clippy-ban check as fixture-tested functions"
-    status: pending
+    status: completed
   - id: harness-scaffolding
     content: "Steps 4-5: harness-api door with its type surface and set_gateway; skeleton crates under crates/harness with the tagged spawn wrapper"
-    status: pending
+    status: completed
   - id: harness-log
     content: "Steps 6-7: Turso run log schema, append path, and read path"
-    status: pending
+    status: completed
   - id: lua-loop
     content: "Steps 8-14: scheduler and protocol file splits; structured error values; Chat and tool_call arms; models.loop in Lua and the Rust loop deleted; Checkpoint 1"
-    status: pending
+    status: completed
   - id: tasks-fanout
     content: "Steps 15-21: hierarchical ids; task arena, spawn, chain-end rules, waits, timeouts; fanout in Lua and the join machinery deleted; Checkpoint 2"
-    status: pending
+    status: completed
   - id: model-tasks
     content: "Steps 22-24: model task origin and built-ins; notices and await_tasks; Checkpoint 2b"
-    status: pending
+    status: completed
   - id: run-api-purity
     content: "Steps 25-40: vocabulary types, sync CancelHandle, events as values, effects behind an internal table, Run::step/resume, drivers and determinism tests, RunContext inputs, bindings by id, bridge and interim driver, transport and Plugin moves, dependency-free manifests, guards live; Checkpoint 3"
-    status: pending
+    status: completed
   - id: harness-runner
     content: "Steps 41-44: performer traits and the effect loop; performers; run preparation; Checkpoint 4"
-    status: pending
+    status: completed
   - id: harness-sessions
     content: "Steps 45-51: session pieces moved; lifecycle and effective_interrupt; input registry; Session and Harness runtime; Workshop on harness-api and workshop-sessions deleted; docs and Papergate note; Checkpoint 5"
-    status: pending
+    status: completed
 isProject: false
 ---
 

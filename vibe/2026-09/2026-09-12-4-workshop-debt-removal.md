@@ -4,19 +4,19 @@ overview: "Remove the seven accepted debts the workshop decomposition (f566cc1e.
 todos:
   - id: d1-docs-link
     content: "D1 (WSD-07): qualify the Observer intra-doc link in promptforge-core input.rs; docs command green"
-    status: pending
+    status: completed
   - id: d2-facade-enforcement
     content: "D2 (WSD-04, WSD-03): handles.rs facades; workshop-server opts into tidy; split tests/it/agents.rs; rule wording matches enforcement"
-    status: pending
+    status: completed
   - id: d3-registry-collections
     content: "D3 (WSD-01, WSD-02): registry redesigned to contribution collections keyed by kind and type; single wiring path; tasks register; boot-time require"
-    status: pending
+    status: completed
   - id: d4-drift-tests
     content: "D4 (WSD-05, WSD-06): build-implementer drift test; settle the lazy-CSS premise empirically"
-    status: pending
+    status: completed
   - id: d5-records
     content: "D5 (WSD-08): dated corrections to the decomposition plan, rule files, and registry docs"
-    status: pending
+    status: completed
 isProject: false
 ---
 

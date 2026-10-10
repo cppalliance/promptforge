@@ -4,46 +4,46 @@ overview: "Replace promptforge-core's block_in_place bridge with a coroutine yie
 todos:
   - id: design-doc
     content: "Step 1: write design-ws/coroutine-executor-design.md capturing the protocol and scheduler design"
-    status: pending
+    status: completed
   - id: upgrade-mlua
     content: "Step 2: upgrade mlua 0.10 -> 0.12+ and lua54 -> lua55 as one isolated commit"
-    status: pending
+    status: completed
   - id: raii-teardown
     content: "Step 3: SectionContext RAII teardown with completed flag"
-    status: pending
+    status: completed
   - id: protocol-types
     content: "Step 4: Request/Answer enums with strict validation"
-    status: pending
+    status: completed
   - id: shim-layer
     content: "Step 5: Lua shim prelude installed per VM (infer, handle:infer, execute)"
-    status: pending
+    status: completed
   - id: coroutine-chunks
     content: "Step 6: section chunks run via Thread::resume; hook/pcall/jump spikes resolved"
-    status: pending
+    status: completed
   - id: scheduler-core
     content: "Step 7: Chain + driver loop + Infer/Execute dispatch; nested execute end-to-end on current-thread runtime (DECISION GATE)"
-    status: pending
+    status: completed
   - id: walk-core
     content: "Step 8: walk translation - fall-through, off-walk, reply/var roll-forward, id counter"
-    status: pending
+    status: completed
   - id: walk-jumps
     content: "Step 9: walk translation - jumps, return semantics, depth cap, observation boundaries"
-    status: pending
+    status: completed
   - id: h1-live
     content: "Step 10: H1 live pass on the scheduler (BlockRunMode)"
-    status: pending
+    status: completed
   - id: fanout-join
     content: "Step 11: fanout as N chains with join, concurrency window, ordered results"
-    status: pending
+    status: completed
   - id: fanout-semantics
     content: "Step 12: fanout write-race, fatal-arm abort, cancellation while suspended"
-    status: pending
+    status: completed
   - id: flip
     content: "Step 13: flip run() to the scheduler, delete the old engine (walkers, old fanout, bridge callers)"
-    status: pending
+    status: completed
   - id: cleanup
     content: "Step 14: delete bridge_blocking, fix doc example, current-thread callers, module docs"
-    status: pending
+    status: completed
 isProject: false
 ---
 

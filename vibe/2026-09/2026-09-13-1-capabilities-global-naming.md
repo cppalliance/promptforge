@@ -4,25 +4,25 @@ overview: "Plugins for PromptForge: globally named Plugins (arity encodes kind: 
 todos:
   - id: global-names
     content: steps 1-3 - GlobalName grammar, ToolId re-base + built-in id migration, picker ToolId migration
-    status: pending
+    status: completed
   - id: interface
     content: step 4 - Environment/RunContext consolidation (pure refactor, the parity gate)
-    status: pending
+    status: completed
   - id: frontmatter
     content: steps 5-6 - plugins/tools/args/models keys, structured parse error locations
-    status: pending
+    status: completed
   - id: capabilities
     content: steps 7-9 - Plugin trait + RunServices, PluginRegistry, prepare/Requirements/per-run VFS
-    status: pending
+    status: completed
   - id: binding
     content: steps 10-15 - ModelBindings + trivial fill, catalog assembly, ToolBindings + slot filling, Lua surface consolidation, args/argv, prose migration
-    status: pending
+    status: completed
   - id: first-party
     content: steps 16-17 - the promptforge/web Plugin, Workshop wiring
-    status: pending
+    status: completed
   - id: docs
     content: step 18 - guide chapters + AGENTS.md Principles rule
-    status: pending
+    status: completed
 isProject: false
 ---
 
