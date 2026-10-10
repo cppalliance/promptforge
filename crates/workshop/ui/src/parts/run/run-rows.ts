@@ -4,7 +4,7 @@
 // bind, appears as exactly one row: name, description, and promptforge
 // read-only; input a text field plus Browse; output a text field; one
 // control per arg by type with required markers and defaults (the
-// implicit declaration is the single prose box); tools and model roles
+// implicit declaration is the single prose box); model roles
 // read-only; max_tool_iterations numeric with the runtime-default
 // placeholder. No bind-time validation runs here - validation is the
 // parser's alone.
@@ -179,12 +179,6 @@ export function renderContractRows(
         row(arg.name, [argControl(arg)], { description: arg.description, required: !arg.optional }),
       );
     }
-  }
-
-  for (const tool of contract.tools) {
-    const toolRow = row(tool.alias, [readOnly(`exact: ${tool.path}`)]);
-    toolRow.classList.add("ws-run-panel__row--tool");
-    rows.appendChild(toolRow);
   }
 
   for (const model of contract.models) {

@@ -555,7 +555,7 @@ The owner set the direction for each surface in conversation, and the implementa
 
 <step-2>
 
-### Step 2: Drop tool-slot rows from the Workshop run panel
+### Step 2: Drop tool-slot rows from the Workshop run panel [completed]
 
 - Component: Tools by id
 - Component placement: second. It deletes the rest of `install_captured_bindings`, which step 1 edits, and the Plugins table component reads its `ToolSet.declared`, `ToolSet.offered`, and tool objects.
@@ -567,6 +567,7 @@ The owner set the direction for each surface in conversation, and the implementa
   - `crates/workshop/ui/src/services/run-api.ts`: delete `RunContract.tools` (line 72), the `RunContractTool` type, and its parse (near line 251).
   - `crates/workshop/ui/src/parts/run/run-rows.ts`: delete the tool rows (lines 184 to 188) and drop tools from the header comment (line 7).
   - `crates/workshop/ui/test/run-api.mjs` (lines 43, 104 to 107, 151, 184, and 204) and `crates/workshop/ui/test/run-panel.mjs` (lines 130, 198 and 199, and 451): drop the tool-slot fixtures and expectations.
+  - Prerequisite fix: the module doc of `crates/promptforge-internal/engine/src/execute/tests/models_loop-author-shapes.rs` (line 3) names the Workshop, which `crates/workshop/ui/test/docs-claims.mjs` refuses in Engine crates, so the Workshop `npm test` this step runs has failed on `master` since `2e15892a6`. Reword it to name the shipped chat agent without naming a Host application.
 - Tests:
   - The run panel renders no `ws-run-panel__row--tool` row.
   - The run API parses a contract without `tools`.
@@ -623,7 +624,7 @@ The owner set the direction for each surface in conversation, and the implementa
   - Integration: a script calls by id a catalog tool that was left out of the offering, and the call runs; both shipped prompts run end to end.
   - Migration: the roughly 27 files that embed `tools:` frontmatter and the roughly 15 that call `tools.add`; every `tools.add_local`, `tools.always`, and `tools.offered` call; every test that builds a `ToolSet` with slot bindings, which moves them into `offered` under wire names and passes `declared`; every tool alias global read, including `echo.name` in `live_infer.rs` line 160; and the tests that pin the old texts (`tools.rs` lines 103 to 108, 188, 228, and 298; `error.rs` lines 235 and 253).
   - The heaviest migrations: `crates/promptforge-internal/lua/src/tests/tool_scoping.rs`, `lua/src/tools/tests-offering.rs`, and `lua/src/tests/shared_replay.rs`; `crates/promptforge-internal/engine/src/execute/tests.rs`; the engine tests under `crates/promptforge-internal/engine/src/execute/tests/`, namely `debug_and_counts.rs`, `models_loop.rs`, `models_loop_contract-rounds.rs`, `chat_record_rebuild.rs`, `model_and_reply.rs`, `offering.rs`, `local_tools.rs`, `tool_call_arm-local-handlers.rs`, `full_id_calls.rs`, `tool_scoping.rs`, `unified_pipeline.rs`, and `suite/exec_flow/run_setup.rs`; the parser's `contract/tests*.rs`; `crates/promptforge/tests/suite/prepare.rs` (line 371); and the Harness runner tests `prepare.rs`, `prepare-ready.rs`, and `harness-stop.rs` under `crates/harness-internal/runner/tests/it/`.
-- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin -p harness -p harness-runner -p harness-gateway-client --all-features`, then the full verification commands listed in Project Survey. The facade surface check matches exactly the removals above.
+- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin -p harness -p harness-runner -p harness-gateway-client --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check matches exactly the removals above.
 - Commit: `Name tools by canonical id and remove tool slots`
 
 </step-3>
@@ -654,7 +655,7 @@ The owner set the direction for each surface in conversation, and the implementa
   - The table exists in the H1 VM.
   - The reserved-name two-way test (`crates/promptforge-internal/engine/src/lua/tests/globals.rs`, lines 86 to 118) passes with `plugins` listed.
   - Integration: a run offers a declared plugin with `tools.offer(plugins.get(name).tools)`, and the model calls one of its tools by wire name. Another run offers an extra the same way after checking `plugins.get`.
-- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin --all-features`, then the full verification commands listed in Project Survey. The facade surface check shows no diff.
+- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check shows no diff.
 - Commit: `Add the plugins table over shared plugin objects`
 
 </step-4>
@@ -696,7 +697,7 @@ The owner set the direction for each surface in conversation, and the implementa
 - Tests:
   - Client catalog decode with and without `provider`.
   - `handle.provider` is nil when the catalog names none and the provider id when it does, in a section VM.
-- Verification: `cargo nextest run --locked -p harness-gateway-client -p promptforge-types -p promptforge-model-client -p promptforge-engine -p promptforge-lua -p promptforge --all-features`, then the full verification commands listed in Project Survey. The facade surface check matches exactly the four additions above.
+- Verification: `cargo nextest run --locked -p harness-gateway-client -p promptforge-types -p promptforge-model-client -p promptforge-engine -p promptforge-lua -p promptforge --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop` and `npm test` in `crates/gateway/config-ui/ui`. The facade surface check matches exactly the four additions above.
 - Commit: `Expose the model provider on model handles`
 
 </step-6>

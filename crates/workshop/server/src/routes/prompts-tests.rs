@@ -43,8 +43,6 @@ output:
 plugins:
   - web
   - fs
-tools:
-  search: web/search
 args:
   topic:
     type: string
@@ -85,18 +83,12 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
         serde_json::json!({ "path": "out.md", "description": "the result" })
     );
     // Plugins keep declaration order; the map-backed sections are
-    // sorted by alias, name, or label.
+    // sorted by name or label.
     assert_eq!(
         json["plugins"],
         serde_json::json!([
             { "id": "web" },
             { "id": "fs" },
-        ])
-    );
-    assert_eq!(
-        json["tools"],
-        serde_json::json!([
-            { "alias": "search", "kind": "exact", "path": "web/search" },
         ])
     );
     assert_eq!(
@@ -159,16 +151,22 @@ async fn a_lua_error_answers_parse_lua() {
 }
 
 #[tokio::test]
-async fn the_dto_serializes_kind_tags_and_nulls() {
-    let text = "---\nname: tags\ndescription: kind tags\ntools:\n  exact_one: ns/pack/tool\n  other_one: ns/pack/other\n---\n\n# Tags\n\n## S\n\np\n";
-    let body = serde_json::json!({ "name": "tags", "text": text });
+async fn the_contract_has_no_tools_section() {
+    let body = serde_json::json!({ "name": "full", "text": FULL_PROMPT });
     let (status, json) = post_contract(body).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["tools"][0]["kind"], "exact");
-    assert_eq!(json["tools"][0]["path"], "ns/pack/tool");
-    assert_eq!(json["tools"][1]["kind"], "exact");
-    assert_eq!(json["tools"][1]["path"], "ns/pack/other");
-    assert!(json["tools"][1].get("want").is_none());
+    assert!(
+        json.get("tools").is_none(),
+        "the contract carries no tools key: {json}"
+    );
+}
+
+#[tokio::test]
+async fn the_dto_serializes_absent_declarations_as_nulls() {
+    let text = "---\nname: nulls\ndescription: absent keys\n---\n\n# Nulls\n\n## S\n\np\n";
+    let body = serde_json::json!({ "name": "nulls", "text": text });
+    let (status, json) = post_contract(body).await;
+    assert_eq!(status, StatusCode::OK);
     // Absent declarations serialize as explicit nulls, not missing keys.
     assert!(json["input"].is_null());
     assert!(json["output"].is_null());

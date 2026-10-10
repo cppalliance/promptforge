@@ -15,9 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use promptforge::Prompt;
 use promptforge::plugins::PluginId;
-use promptforge::prompt::{
-    ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
-};
+use promptforge::prompt::{ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole};
 
 use crate::error::AppError;
 
@@ -55,8 +53,6 @@ struct ContractResponse {
     output: Option<FileDto>,
     /// The declared Plugins, in declaration order.
     plugins: Vec<PluginDto>,
-    /// The declared tool slots, sorted by alias.
-    tools: Vec<ToolDto>,
     /// The typed args declaration.
     args: ArgsDto,
     /// The declared model roles, sorted by label.
@@ -91,33 +87,6 @@ struct PluginDto {
 impl From<&PluginId> for PluginDto {
     fn from(id: &PluginId) -> Self {
         Self { id: id.to_string() }
-    }
-}
-
-/// One tool slot, tagged by filling posture.
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-enum ToolDto {
-    /// An exact global tool path.
-    Exact {
-        /// The prompt-local alias.
-        alias: String,
-        /// The canonical `namespace/plugin/name` path.
-        path: String,
-    },
-}
-
-impl ToolDto {
-    /// Builds the DTO for the slot declared under `alias`, or `None` for
-    /// a posture with no wire form.
-    fn new(alias: &str, slot: &ToolSlot) -> Option<Self> {
-        match slot {
-            ToolSlot::Exact(id) => Some(Self::Exact {
-                alias: alias.to_owned(),
-                path: id.to_string(),
-            }),
-            _ => None,
-        }
     }
 }
 
@@ -227,11 +196,6 @@ impl From<&Frontmatter> for ContractResponse {
             input: frontmatter.input().map(FileDto::from),
             output: frontmatter.output().map(FileDto::from),
             plugins: frontmatter.plugins().iter().map(PluginDto::from).collect(),
-            tools: frontmatter
-                .tools()
-                .iter()
-                .filter_map(|(alias, slot)| ToolDto::new(alias, slot))
-                .collect(),
             args: ArgsDto::from(frontmatter.args()),
             models: frontmatter
                 .models()
