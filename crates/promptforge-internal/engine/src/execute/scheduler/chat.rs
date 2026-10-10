@@ -267,11 +267,7 @@ impl Scheduler {
                     .as_ref()
                     .ok_or(Error::internal("a parked chat round recorded its scope"))?;
                 let global_exists = |name: &str| -> Result<bool> {
-                    Ok(chain
-                        .ctx
-                        .tool_set_snapshot()?
-                        .offered_binding(name)
-                        .is_some())
+                    Ok(chain.ctx.tool_set_snapshot()?.wire_binding(name).is_some())
                 };
                 round.tool_calls(&served, turn, &calls, advertised, global_exists)?
             }

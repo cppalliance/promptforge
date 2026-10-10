@@ -212,6 +212,14 @@ impl ToolSet {
             self.offered.iter().find(|binding| binding.alias == name)
         }
     }
+
+    /// The offered binding whose wire name is `name`, never matching a
+    /// canonical id: a model reaches tools only by the wire names a round
+    /// advertised.
+    #[must_use]
+    pub fn wire_binding(&self, name: &str) -> Option<&ToolBinding> {
+        self.offered.iter().find(|binding| binding.alias == name)
+    }
 }
 
 /// The read-only view over the run's [`ToolSet`].
