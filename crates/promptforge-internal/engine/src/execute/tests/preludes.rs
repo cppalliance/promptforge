@@ -141,24 +141,22 @@ fn a_prelude_global_named_like_a_frontmatter_tool_alias_fails_the_run() {
         vec![prelude("echo", "echo = {}")],
         &[
             "Plugin `echo`: its prelude defines the global `echo`",
-            "which the prompt's frontmatter binds as a tool or model alias",
+            "which the prompt's frontmatter binds as a tool alias",
         ],
     );
 }
 
 #[test]
-fn a_prelude_global_named_like_a_frontmatter_model_alias_fails_the_run() {
-    let md = EFFECT_FIRST.replace(
-        "promptforge: 0\n",
-        "promptforge: 0\nmodels:\n  writer: {}\n",
-    );
-    assert_fails_before_any_effect(
-        &md,
-        vec![prelude("writer", "writer = 'mine'")],
-        &[
-            "Plugin `writer`: its prelude defines the global `writer`",
-            "which the prompt's frontmatter binds as a tool or model alias",
-        ],
+fn a_prelude_global_named_like_a_model_role_label_installs() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Preludes\n\n\
+        ## Only\n\n\
+        ```lua\nreturn writer .. '|' .. models.get('writer').name\n```\n";
+    let (result, _) = drive_recorded(prelude_run(md, vec![prelude("writer", "writer = 'mine'")]));
+    assert_eq!(
+        succeeded(result),
+        "mine|writer",
+        "the prelude's global and the role's handle sit side by side"
     );
 }
 

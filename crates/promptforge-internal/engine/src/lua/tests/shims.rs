@@ -372,9 +372,9 @@ fn a_handles_infer_runs_on_its_frozen_binding() {
 }
 
 #[test]
-fn captured_model_aliases_install_as_plain_handles() {
+fn a_handle_from_models_get_infers_without_a_proxy() {
     let vm = scheduler_vm(&test_models(), None);
-    match yielded_request(&vm, r#"return fast:infer("yo")"#) {
+    match yielded_request(&vm, r#"return models.get("fast"):infer("yo")"#) {
         Request::Infer {
             prompt,
             binding: Some(binding),
@@ -398,14 +398,14 @@ fn model_handles_carry_infer_and_loop_methods() {
             r#"
             local h = models.get("fast")
             local ok = pcall(function() return h.nothing end)
-            return type(h) == "userdata" and type(fast) == "userdata",
-              type(h.infer) .. "|" .. type(h.loop) .. "|" .. type(fast.loop),
+            return type(h) == "userdata",
+              type(h.infer) .. "|" .. type(h.loop),
               not ok
             "#,
         )
         .eval()
         .expect("the handle probe evaluates");
     assert!(is_userdata, "handles install as bare userdata");
-    assert_eq!(methods, "function|function|function");
+    assert_eq!(methods, "function|function");
     assert!(read_failed, "a handle has no `nothing` field to read");
 }

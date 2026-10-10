@@ -29,9 +29,8 @@ impl Prompt {
     /// kind is:
     ///
     /// - `Frontmatter` when the `---` delimiters are missing, the frontmatter
-    ///   fails to decode, a tool alias or model role label is a reserved name,
-    ///   one name is both a tool alias and a model role label, a Plugin
-    ///   entry is not a plain name, or a Plugin is declared twice.
+    ///   fails to decode, a tool alias is a reserved name, a Plugin entry is
+    ///   not a plain name, or a Plugin is declared twice.
     /// - `Structure` when the H1 is missing, there is more than one H1, the H1
     ///   title is empty, a section heading skips a level (such as an H4
     ///   directly under an H2), a section heading is empty, or two sibling
@@ -84,8 +83,7 @@ impl Prompt {
                 column,
             }
         })?;
-        crate::contract::check_distinct_aliases(frontmatter.tools(), frontmatter.models())
-            .and_then(|()| crate::contract::check_distinct_plugins(frontmatter.plugins()))
+        crate::contract::check_distinct_plugins(frontmatter.plugins())
             .map_err(|message| Error::parse(ParseErrorKind::Frontmatter, message))?;
         // Everything past the frontmatter postdates the prompt's name, so a
         // failure from here on is stamped with it (and its span's position).

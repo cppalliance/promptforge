@@ -77,7 +77,7 @@ impl Environment {
     /// A prelude fails the run as
     /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) if it fails to load,
     /// or if it defines a global that another prelude, an Engine global, a
-    /// reserved name, or a frontmatter tool or model alias already holds.
+    /// reserved name, or a frontmatter tool alias already holds.
     /// The failure happens when the first section VM is set up, before the
     /// run issues any effect.
     #[must_use]

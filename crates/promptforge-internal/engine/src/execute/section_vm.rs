@@ -87,9 +87,9 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's Plugin preludes, installed in order after the yield
     /// shims and before the shared replay.
     pub(crate) preludes: &'a [Prelude],
-    /// Every tool and model alias the prompt's frontmatter declares: the
-    /// captured bindings install these as globals after the preludes, so a
-    /// prelude global may not take one.
+    /// Every tool alias the prompt's frontmatter declares: the captured
+    /// bindings install these as globals after the preludes, so a prelude
+    /// global may not take one.
     pub(crate) frontmatter_aliases: &'a [String],
     /// Test-only: installs the raw `tools.call_as_model` shim, so a fixture
     /// section can yield one model-issued `tool_call`.

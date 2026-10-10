@@ -58,8 +58,8 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// `local plugin = ...` reads the name the Plugin was installed under.
 /// The globals it defines must not collide with a reserved name
 /// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, with
-/// `aliases` (the prompt's frontmatter tool and model aliases, which
-/// install as globals after the shared replay), or with an earlier
+/// `aliases` (the prompt's frontmatter tool aliases, which install as
+/// globals after the shared replay), or with an earlier
 /// prelude's globals. A table global installs as an empty proxy that reads
 /// the prelude's table and refuses writes; any other value installs as it
 /// is.
@@ -193,7 +193,7 @@ fn check_collision(
     let collides_with = if let Some(owner) = installed.get(name) {
         format!("which Plugin `{owner}`'s prelude already defines")
     } else if aliases.contains(&name) {
-        "which the prompt's frontmatter binds as a tool or model alias".to_owned()
+        "which the prompt's frontmatter binds as a tool alias".to_owned()
     } else if let Some(kind) = crate::reserved_name(name) {
         format!("which is reserved as {kind}")
     } else if !matches!(

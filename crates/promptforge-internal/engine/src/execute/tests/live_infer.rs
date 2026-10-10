@@ -157,7 +157,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Captured Bindings\n\n\
          ```lua shared\n\
-         function binding_names() return echo.name .. ':' .. writer.name end\n\
+         function binding_names() return echo.name .. ':' .. models.get('writer').name end\n\
          ```\n\n\
          ## Parent\n\n\
          ```lua\n\
