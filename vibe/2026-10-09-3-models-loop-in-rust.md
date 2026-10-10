@@ -888,7 +888,7 @@ Phase 0 migrates every handle-first call and adds tests for the new forms and th
 
 <step-2>
 
-### Step 2: Describe handle methods in the guide
+### Step 2: Describe handle methods in the guide [completed]
 
 - Component: Handle methods
 
