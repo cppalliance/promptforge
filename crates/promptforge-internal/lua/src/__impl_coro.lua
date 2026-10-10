@@ -5,10 +5,9 @@
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the Engine helper returning the hidden `var` data table as a plain deep
--- copy, `models`/`tools`/`compactors` are the section's namespace tables,
--- passed in so the chunk never reads a global, `max_tool_iterations` is
--- the run's resolved round cap for `models.loop`, `error_value` builds the
--- structured error table (`{ kind, message, ... }` under the Engine's shared
+-- copy, `models`/`tools` are the section's namespace tables, passed in so
+-- the chunk never reads a global, `error_value` builds the structured
+-- error table (`{ kind, message, ... }` under the Engine's shared
 -- metatable, whose `__tostring` is `message`), `stash_failure` records a
 -- block's raised value for the Engine before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
@@ -19,14 +18,16 @@
 -- run's cancel flag is set: a failure caught under cancellation is the
 -- instruction hook's abort, which must unwind to the block guard, so every
 -- protected call below raises it again instead of returning it,
--- `is_message_list(value)` reports whether a value is a messages.new()
--- list, and `is_model_handle(value)` whether it is a model handle. The
--- `tasks` namespace and the `fanout` shim live in their own chunks
--- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the Engine right
--- after this one over the failure helpers this chunk returns.
-local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
-  error_value, stash_failure, normalize_failure, enter_local_handler,
-  leave_local_handler, cancel_requested, is_message_list, is_model_handle = ...
+-- `is_model_handle(value)` reports whether a value is a model handle, and
+-- `loop_begin(entry, ...)` starts one `models.loop` call in Rust over the
+-- run's round cap and the section's `compactors` table, returning the
+-- call's step function and its first action. The `tasks` namespace and
+-- the `fanout` shim live in their own chunks (`__impl_tasks.lua`,
+-- `__impl_fanout.lua`), installed by the Engine right after this one over
+-- the failure helpers this chunk returns.
+local yield, var_snapshot, models, tools, error_value, stash_failure,
+  normalize_failure, enter_local_handler, leave_local_handler,
+  cancel_requested, is_model_handle, loop_begin = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -197,10 +198,10 @@ end
 -- requested it. The driver always resumes a bound tool with content (a
 -- tool's own failure becomes untrusted failure text) and fires ToolResult
 -- under the id and that turn, however far a local handler earlier in the
--- batch moved the counter. Shim-internal: the loop shim calls it per
--- requested tool call; authors never see it, and a hand-built yield
--- including `call_id` or `turn` is refused as a malformed request when its
--- shape is wrong.
+-- batch moved the counter. Only the test-only `tools.call_as_model` hook
+-- calls it now, since the loop builds its `tool_call` requests in Rust;
+-- authors never see it, and a hand-built yield including `call_id` or
+-- `turn` is refused as a malformed request when its shape is wrong.
 local function tools_call_as_model(call_id, alias_or_tool, args, turn)
   return dispatch_tool({
     op = "tool_call",
@@ -211,148 +212,46 @@ local function tools_call_as_model(call_id, alias_or_tool, args, turn)
   })
 end
 
--- Appends one record to the author's messages.new() list, which validates
--- it like an author's own append.
-local function append_record(messages, record)
-  messages:append(record)
-end
-
--- Drains the chain's pending model-task notices into the author's list
--- ahead of a round: one yield, answered at once with the notices queued
--- since the last drain (the Engine's sentences saying how the model's
--- tasks ended), each appended as a user record so the model reads them
--- in its next round. A chain with no model tasks drains an empty list.
-local function drain_task_notices(messages)
-  local ok, notices = yield({ op = "drain_task_notices" })
-  if not ok then fail(notices) end
-  for index = 1, #notices do
-    append_record(messages, { role = "user", content = notices[index] })
-  end
-end
-
--- The message the exit rules raise for a round that ends with neither
--- tool calls nor reply text.
-local EMPTY_MODEL_REPLY = "empty model reply"
-
--- The refusal for a list argument that is not a messages.new() list, a
--- copy of the chat parse's text (`protocol/parse/chat.rs`, NOT_A_LIST).
-local NOT_A_LIST = "models.loop needs a messages.new() list; build one with "
-  .. "messages.new() and :user, :append, or :replace"
-
--- Invokes the selected compactor on an overflow round with the reason tag.
--- The shipped policy raises typed context exhaustion from Rust; the raise
--- is normalized into the structured error table before re-raising, so the
--- kind reaches an author pcall and the Engine alike. A compactor that
--- returns instead of raising is the deferred replacement shape, which the
--- active surface refuses. A failure under cancellation is raised raw.
-local function compact(compactor, reason)
-  local ok, failure = raw_pcall(compactor, reason)
-  if ok then
-    raise("lua", {
-      message = "the selected compactor returned without raising: replacement compactors are "
-        .. "deferred; compactors.fail is the only shipped policy",
-    })
-  end
-  if cancel_requested() then error(failure, 0) end
-  error(normalize_failure(failure), 0)
-end
-
--- The model-tool loop over an author-owned message list, driven here over
--- `chat` and `tool_call` yields so every network wait inside it is an
--- ordinary suspension, on the handle's frozen binding when there is one.
--- The compactor defaults to compactors.fail, and the list must be a
--- messages.new() list; both checks run before any yield, so every
--- argument error surfaces at the call site (pcall-able).
---
--- Per round: drain pending task notices, yield one `chat` over the list;
--- on an overflow round invoke the compactor; on tool calls yield one
--- `tool_call` per call under its call id and the round's turn, buffer
--- every result, then append the assistant tool-call record and one tool
--- record per result, so the list never shows a half-answered batch; on a
--- reply append it and return nil; on an empty reply with
--- `finish_reason == "stop"` after at least one answered tool call append
--- an empty assistant record and return nil (the model's clean exit); on
--- any other empty reply raise empty_model_reply.
--- Past the round cap raise tool_loop_exhausted. The shim emits no events:
--- the scheduler reports each round as it applies the round's answer.
-local function run_loop(handle, messages, compactor)
-  if compactor == nil then
-    compactor = compactors.fail
-  elseif type(compactor) ~= "function" then
-    raise("lua", { message = "compactor must be a function, got " .. engine_type(compactor) })
-  end
-  if not is_message_list(messages) then raise("lua", { message = NOT_A_LIST }) end
-  -- Answered dispatches: any call that received a result record, a tool's
-  -- own failure included, counts toward the clean-exit rule.
-  local answered = 0
-  for _ = 1, max_tool_iterations do
-    drain_task_notices(messages)
-    local ok, round = yield({ op = "chat", messages = messages, handle = handle })
-    if not ok then fail(round) end
-    if round.overflow then
-      compact(compactor, round.overflow_reason)
-    end
-    local calls = round.tool_calls
-    if calls then
-      local results = {}
-      for index, call in ipairs(calls) do
-        results[index] = tools_call_as_model(call.id, call.name, call.arguments, round.turn)
-      end
-      local record_calls = {}
-      for index, call in ipairs(calls) do
-        record_calls[index] = { id = call.id, name = call.name, arguments = call.arguments }
-      end
-      append_record(messages, { role = "assistant", content = "", tool_calls = record_calls })
-      for index, call in ipairs(calls) do
-        append_record(messages, { role = "tool", content = results[index], tool_call_id = call.id })
-      end
-      answered = answered + #calls
-    elseif round.reply then
-      append_record(messages, { role = "assistant", content = round.reply })
-      return nil
-    elseif round.finish_reason == "stop" and answered > 0 then
-      append_record(messages, { role = "assistant", content = "" })
-      return nil
+-- The loop's rules run in Rust, behind `loop_begin` and the step function
+-- each call of it returns; this function only performs the action each
+-- step returns. A Rust function called from Lua cannot yield, and cannot
+-- call a Lua function that may yield, so the step hands back what to do
+-- next instead of doing it: yield a request and pass every resume value
+-- back; run a local tool's handler between the depth captures, or the
+-- compactor, under the raw pcall and pass `ok` and the first result back;
+-- raise a value at level 0; or return nil. The raw pcall keeps a Rust
+-- callback's failure in mlua's own form for the step to judge.
+local function drive(step, action, a, b)
+  while true do
+    if action == "yield" then
+      action, a, b = step(yield(a))
+    elseif action == "handler" then
+      enter_local_handler()
+      local ok, value = raw_pcall(a, b)
+      leave_local_handler()
+      action, a, b = step(ok, value)
+    elseif action == "compactor" then
+      local ok, failure = raw_pcall(a, b)
+      action, a, b = step(ok, failure)
+    elseif action == "raise" then
+      error(a, 0)
     else
-      raise("empty_model_reply", {
-        message = round.empty_detail or EMPTY_MODEL_REPLY,
-        finish_reason = round.finish_reason,
-      })
+      return nil
     end
   end
-  raise("tool_loop_exhausted", { message = "tool-call loop did not converge" })
 end
 
 -- models.loop(messages, compactor?) runs on the section's current model,
 -- and a model handle's `loop`, as `h:loop(messages, compactor?)`, runs
 -- every round on the handle's frozen binding. The Engine installs the
--- first as models.loop. Each entry checks its receiver and then its
--- arity, counting trailing nils, before the shared checks of `run_loop`.
+-- first as models.loop. Each entry names itself to `loop_begin`, so the
+-- argument checks know the form without inspecting the arguments.
 local function models_loop(...)
-  if is_model_handle((...)) then
-    raise("lua", {
-      message = "models.loop takes (messages, compactor?); "
-        .. "call handle:loop(messages, compactor?) to run on a model handle",
-    })
-  end
-  if select('#', ...) > 2 then
-    raise("lua", { message = "models.loop takes (messages, compactor?)" })
-  end
-  local messages, compactor = ...
-  return run_loop(nil, messages, compactor)
+  return drive(loop_begin(false, ...))
 end
 
 local function handle_loop(...)
-  if not is_model_handle((...)) then
-    raise("lua", {
-      message = "call loop on a model handle with a colon: handle:loop(messages, compactor?)",
-    })
-  end
-  if select('#', ...) > 3 then
-    raise("lua", { message = "handle:loop takes (messages, compactor?)" })
-  end
-  local handle, messages, compactor = ...
-  return run_loop(handle, messages, compactor)
+  return drive(loop_begin(true, ...))
 end
 
 -- store.*: every store operation is a leaf yield, answered by the driver

@@ -403,13 +403,20 @@ impl ErrorValue for Classified {
 /// # Errors
 /// Returns an `mlua` error if the function cannot be created.
 pub(crate) fn install_normalize_failure(lua: &Lua) -> mlua::Result<Function> {
-    lua.create_function(|lua, value: Value| match value {
+    lua.create_function(normalized)
+}
+
+/// What `normalize_failure` returns for `value`: a Rust callback's
+/// failure as the error table its classification names, anything else
+/// unchanged. The capture and the loop's compactor rule share it.
+pub(crate) fn normalized(lua: &Lua, value: Value) -> mlua::Result<Value> {
+    match value {
         Value::Error(error) => Ok(Value::Table(error_table(
             lua,
             &Classified::from_mlua(&error),
         )?)),
         other => Ok(other),
-    })
+    }
 }
 
 /// Reads a raised Lua value back as a [`Raised`] when it is an error table

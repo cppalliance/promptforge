@@ -1,9 +1,9 @@
-//! The Lua loop's instruction cost. `models.loop` runs on the author's
-//! Lua instruction budget: every instruction the shim spends per round is
-//! one the every-Nth-instruction hook counts, so a round must cost a few
-//! hundred instructions of shim bookkeeping, never thousands. That keeps
-//! the cancel poll's cadence measured in rounds and keeps the loop's own
-//! bookkeeping from taxing an author's block.
+//! The loop trampoline's instruction cost. `models.loop` runs on the
+//! author's Lua instruction budget, but its rules run in Rust behind the
+//! loop shim's trampoline, so the every-Nth-instruction hook counts only
+//! the trampoline's own instructions: a handful per yield. This bounds
+//! that cost, so the trampoline stays a dispatcher that holds no rule and
+//! the loop's bookkeeping never taxes an author's block.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,22 +18,20 @@ use crate::execute::protocol::{Answer, ChatResult, Request, ToolCallOutcome};
 
 use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, test_tools};
 
-/// The most Lua instructions one model-tool round may spend inside the
-/// loop shim: from one `chat` yield to the next, through the tool-call
-/// answer, the `tool_call` yield, the result, and both record appends.
-/// "A few hundred" is the budget; the shim measured 86 per round when the
-/// ceiling was set, so a change that triples the round overhead trips
-/// this while ordinary edits do not.
-const ROUND_INSTRUCTION_CEILING: u64 = 300;
+/// The most Lua instructions one model-tool round may spend in the loop
+/// shim's trampoline: from one `chat` yield to the next, through the
+/// `tool_call` yield, the drain yield, and the step call after each
+/// answer. The trampoline measured 30 per round when the ceiling was set,
+/// so a change that triples its cost, such as a loop rule moving back
+/// into Lua, trips this while ordinary edits do not.
+const ROUND_INSTRUCTION_CEILING: u64 = 90;
 
-/// The fewest Lua instructions a round can honestly spend in the shim:
-/// draining notices, reading the answer, yielding the tool call, and
-/// appending the assistant and tool records is a few dozen instructions
-/// at the least. A round under this floor means the counted span is not
-/// the loop's work at all (the loop runs outside the shim, or the hook is
-/// not firing on the thread), and the test would otherwise pass while
-/// showing nothing about the quota.
-const ROUND_INSTRUCTION_FLOOR: u64 = 20;
+/// The fewest Lua instructions a round can spend in the trampoline: one
+/// per yield in the measured span (the `tool_call`, the drain, and the
+/// next `chat`). A round under this floor means the hook is not firing on
+/// the loop thread, and the test would otherwise pass while showing
+/// nothing about the quota.
+const ROUND_INSTRUCTION_FLOOR: u64 = 3;
 
 /// Rounds measured after the first, so the assertion reads steady-state
 /// cost rather than the one-time argument decode.
@@ -75,13 +73,13 @@ fn reply_round(text: &str) -> Answer<Error> {
 }
 
 #[test]
-fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
+fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
     // The block is the bench prompt's shape: one user message, one loop
     // call. The coroutine runs a per-instruction counting hook in
     // place of the VM's cancel hook, so the counter reads exactly the Lua
-    // instructions the shim executes between two yields. Every round is
-    // answered with one tool call so the measured span is the full
-    // model-tool round, not the terminal exit.
+    // instructions the trampoline executes between two `chat` yields.
+    // Every round is answered with one tool call so the measured span is
+    // the full model-tool round, not the terminal exit.
     let vm = scheduler_vm_with_tools(&test_models(), &test_tools(), None);
     let function = vm
         .lua()
@@ -119,7 +117,7 @@ fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
     );
 
     // One mark per chat yield: the difference between consecutive marks
-    // is one round's shim cost.
+    // is one round's trampoline cost.
     let mut marks = vec![executed.load(Ordering::Relaxed)];
     for _ in 0..=MEASURED_ROUNDS {
         let yielded = resume_with(&vm, &thread, tool_call_round());
@@ -160,14 +158,14 @@ fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
     for (round, cost) in costs.iter().enumerate().skip(1) {
         assert!(
             *cost >= ROUND_INSTRUCTION_FLOOR,
-            "round {round} spent {cost} Lua instructions in the loop shim, under the \
-             {ROUND_INSTRUCTION_FLOOR} floor: the loop's work is not being counted; \
-             per-round costs: {costs:?}"
+            "round {round} spent {cost} Lua instructions in the loop trampoline, under \
+             the {ROUND_INSTRUCTION_FLOOR} floor: the hook is not counting the loop \
+             thread; per-round costs: {costs:?}"
         );
         assert!(
             *cost <= ROUND_INSTRUCTION_CEILING,
-            "round {round} spent {cost} Lua instructions in the loop shim, over the \
-             {ROUND_INSTRUCTION_CEILING} ceiling; per-round costs: {costs:?}"
+            "round {round} spent {cost} Lua instructions in the loop trampoline, over \
+             the {ROUND_INSTRUCTION_CEILING} ceiling; per-round costs: {costs:?}"
         );
     }
 }

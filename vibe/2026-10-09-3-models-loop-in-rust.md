@@ -978,7 +978,7 @@ Phase 0 migrates every handle-first call and adds tests for the new forms and th
 
 <step-4>
 
-### Step 4: Run the models.loop rules in a Rust state machine
+### Step 4: Run the models.loop rules in a Rust state machine [completed]
 
 - Component: Loop port
 

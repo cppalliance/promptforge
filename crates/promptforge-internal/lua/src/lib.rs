@@ -141,6 +141,7 @@ mod scope;
 mod vm;
 use handles::resolve_section_target;
 mod models;
+mod models_loop;
 mod protocol;
 
 // The executor-facing surface: every item `promptforge-engine` names crosses

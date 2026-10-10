@@ -12,9 +12,10 @@ use super::super::request::{
 };
 use super::{FieldFailure, call_handle};
 
-/// The refusal for a `messages` value that is not a `messages.new()` list.
-const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
-                          messages.new() and :user, :append, or :replace";
+/// The refusal for a `messages` value that is not a `messages.new()`
+/// list. The chat parse and the loop's argument check share it.
+pub(crate) const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
+                                     messages.new() and :user, :append, or :replace";
 
 /// The message roles the chat protocol accepts.
 const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
