@@ -1,6 +1,6 @@
 //! Regression guards for the list shapes the shipped prompts use, run
 //! against a canned model: the `prompts/research-person.md` section and
-//! the Workshop chat agent's turn loop.
+//! the shipped chat agent's turn loop.
 
 use super::*;
 

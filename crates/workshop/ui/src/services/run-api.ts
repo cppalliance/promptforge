@@ -22,13 +22,6 @@ export interface RunContractPlugin {
   readonly id: string;
 }
 
-/** One tool slot: its alias and the canonical namespace/plugin/name path. */
-export interface RunContractTool {
-  readonly kind: "exact";
-  readonly alias: string;
-  readonly path: string;
-}
-
 /** The declared arg types the wire format allows. */
 export type RunContractArgType = "string" | "boolean" | "integer" | "number";
 
@@ -69,7 +62,6 @@ export interface RunContract {
   readonly input: RunContractFile | null;
   readonly output: RunContractFile | null;
   readonly plugins: readonly RunContractPlugin[];
-  readonly tools: readonly RunContractTool[];
   readonly args: RunContractArgs;
   readonly models: readonly RunContractModel[];
 }
@@ -94,17 +86,6 @@ function parsePlugin(value: unknown): RunContractPlugin | null {
     return null;
   }
   return { id };
-}
-
-function parseTool(value: unknown): RunContractTool | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const { kind, alias, path } = value;
-  if (kind !== "exact" || typeof alias !== "string" || typeof path !== "string") {
-    return null;
-  }
-  return { kind, alias, path };
 }
 
 const ARG_TYPES: readonly string[] = ["string", "boolean", "integer", "number"];
@@ -191,7 +172,7 @@ function parseContract(body: unknown): RunContract | null {
   if (!isRecord(body)) {
     return null;
   }
-  const { name, description, promptforge, max_tool_iterations, plugins, tools, models } = body;
+  const { name, description, promptforge, max_tool_iterations, plugins, models } = body;
   if (typeof name !== "string" || typeof description !== "string") {
     return null;
   }
@@ -209,7 +190,7 @@ function parseContract(body: unknown): RunContract | null {
   if (body.output !== null && output === null) {
     return null;
   }
-  if (!Array.isArray(plugins) || !Array.isArray(tools) || !Array.isArray(models)) {
+  if (!Array.isArray(plugins) || !Array.isArray(models)) {
     return null;
   }
   const parsedPlugins: RunContractPlugin[] = [];
@@ -219,14 +200,6 @@ function parseContract(body: unknown): RunContract | null {
       return null;
     }
     parsedPlugins.push(parsed);
-  }
-  const parsedTools: RunContractTool[] = [];
-  for (const tool of tools) {
-    const parsed = parseTool(tool);
-    if (parsed === null) {
-      return null;
-    }
-    parsedTools.push(parsed);
   }
   const args = parseArgs(body.args);
   if (args === null) {
@@ -248,7 +221,6 @@ function parseContract(body: unknown): RunContract | null {
     input,
     output,
     plugins: parsedPlugins,
-    tools: parsedTools,
     args,
     models: parsedModels,
   };
