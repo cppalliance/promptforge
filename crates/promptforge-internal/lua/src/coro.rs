@@ -61,6 +61,10 @@ const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 /// the section setup can install it as `models.loop`.
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 
+/// The registry key for the shim's model-handle methods, `infer` and
+/// `loop`, stashed by the prelude install for [`handle_method`].
+const HANDLE_METHODS_REGISTRY: &str = "promptforge.impl_coro.handle_methods";
+
 /// The registry key for the shim's model-issued `tool_call` form, stashed
 /// by the prelude install so a test driver can install it as
 /// `tools.call_as_model` and drive the driver's `call_id` path from a
@@ -132,9 +136,11 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// helpers, and installed as the `tasks` global; `fanout` is a third, run
 /// over the same captures plus the collection enumerator and the item
 /// renderer, and installed as the `fanout` global. The `models.loop` shim
-/// is stashed in the registry for [`install_section_loop_shim`].
-/// `max_tool_iterations` is the loop's round cap, the run's resolved value,
-/// captured by the chunk so the shim reads it without an Engine call.
+/// is stashed in the registry for [`install_section_loop_shim`], and the
+/// chunk's `handle_methods` table, a model handle's `infer` and `loop`, for
+/// [`handle_method`]. `max_tool_iterations` is the loop's round cap, the
+/// run's resolved value, captured by the chunk so the shim reads it
+/// without an Engine call.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -151,9 +157,10 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// the handler calls it through. Then `cancel_requested` reads the
 /// cancel flag of `instruction_budget`, so the chunk's protected calls
 /// raise a failure caught under cancellation again instead of returning
-/// it, and the hook's abort always reaches the block guard. The last,
-/// `is_message_list`, reports whether a value is a `messages.new()` list,
-/// so the loop shim drains task notices only into a list.
+/// it, and the hook's abort always reaches the block guard. The last two,
+/// `is_message_list` and `is_model_handle`, report whether a value is a
+/// `messages.new()` list or a model handle, so the shim's entries check
+/// their list and receiver arguments before any yield.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -186,6 +193,9 @@ pub(crate) fn install_shim_prelude(
     let is_message_list = lua
         .create_function(|_, value: Value| Ok(crate::messages::is_list(&value)))
         .map_err(Error::lua)?;
+    let is_model_handle = lua
+        .create_function(|_, value: Value| Ok(crate::models::is_handle(&value)))
+        .map_err(Error::lua)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -203,6 +213,7 @@ pub(crate) fn install_shim_prelude(
             leave_local_handler,
             cancel_requested,
             is_message_list,
+            is_model_handle,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
@@ -254,19 +265,29 @@ pub(crate) fn install_shim_prelude(
         ))
         .map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
+    stash_shims(lua, &shims)?;
+    globals
+        .raw_set("coroutine", Value::Nil)
+        .map_err(Error::lua)?;
+    Ok(())
+}
+
+/// Stashes the shim chunk's `loop`, `handle_methods`, `model_tool_call`,
+/// and `store` under their registry keys, for the installs and the handle
+/// getters that read them after the prelude.
+fn stash_shims(lua: &Lua, shims: &Table) -> Result<()> {
     let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
     lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
+        .map_err(Error::lua)?;
+    let handle_methods: Table = shims.raw_get("handle_methods").map_err(Error::lua)?;
+    lua.set_named_registry_value(HANDLE_METHODS_REGISTRY, handle_methods)
         .map_err(Error::lua)?;
     let model_tool_call: Function = shims.raw_get("model_tool_call").map_err(Error::lua)?;
     lua.set_named_registry_value(MODEL_TOOL_CALL_REGISTRY, model_tool_call)
         .map_err(Error::lua)?;
     let store: Table = shims.raw_get("store").map_err(Error::lua)?;
     lua.set_named_registry_value(STORE_REGISTRY, store)
-        .map_err(Error::lua)?;
-    globals
-        .raw_set("coroutine", Value::Nil)
-        .map_err(Error::lua)?;
-    Ok(())
+        .map_err(Error::lua)
 }
 
 /// Builds the prelude's `stash_failure(failure)` capture: records the
@@ -399,6 +420,16 @@ pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
     models.raw_set("loop", models_loop).map_err(Error::lua)
+}
+
+/// The shim's `name` method for a model handle, `infer` or `loop`, from
+/// the table `install_shim_prelude` stashed; nil on a VM where the
+/// prelude never ran.
+pub(crate) fn handle_method(lua: &Lua, name: &str) -> mlua::Result<Value> {
+    match lua.named_registry_value::<Value>(HANDLE_METHODS_REGISTRY)? {
+        Value::Table(methods) => methods.raw_get(name),
+        _ => Ok(Value::Nil),
+    }
 }
 
 /// Installs the model-issued `tool_call` form as `tools.call_as_model` on a

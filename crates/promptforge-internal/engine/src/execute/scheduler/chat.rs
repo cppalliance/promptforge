@@ -94,8 +94,8 @@ impl Scheduler {
         }
     }
 
-    /// The fallible half of chat dispatch: the binding (the loop shim's
-    /// leading handle when it named one, else the section's current
+    /// The fallible half of chat dispatch: the binding (the handle whose
+    /// `loop` ran, when one did, else the section's current
     /// model), the call-time tool scope recorded on the chain as
     /// `advertised`, the per-dispatch projection, the context precheck,
     /// and the issued effect. The send is recorded on the list only once

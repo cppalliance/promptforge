@@ -18,15 +18,15 @@
 -- local tool's handler runs, and `cancel_requested()` reports whether the
 -- run's cancel flag is set: a failure caught under cancellation is the
 -- instruction hook's abort, which must unwind to the block guard, so every
--- protected call below raises it again instead of returning it, and
+-- protected call below raises it again instead of returning it,
 -- `is_message_list(value)` reports whether a value is a messages.new()
--- list. The `tasks`
--- namespace and the `fanout` shim live in their own chunks
+-- list, and `is_model_handle(value)` whether it is a model handle. The
+-- `tasks` namespace and the `fanout` shim live in their own chunks
 -- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the Engine right
 -- after this one over the failure helpers this chunk returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure, enter_local_handler,
-  leave_local_handler, cancel_requested, is_message_list = ...
+  leave_local_handler, cancel_requested, is_message_list, is_model_handle = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -103,22 +103,40 @@ local function protected_xcall(f, handler, ...)
   end, ...))
 end
 
--- models.infer(handle?, prompt): an optional leading model handle runs the
--- round on the handle's frozen binding; without one the driver resolves the
--- section's current model. Invocation is namespace-only: handles are
--- plain inspectable userdata with no colon methods.
-local function infer(...)
-  local handle, prompt
-  if select('#', ...) > 2 then
-    raise("lua", { message = "models.infer takes (handle?, prompt)" })
-  elseif select('#', ...) == 2 then
-    handle, prompt = ...
-  else
-    prompt = ...
-  end
+-- One infer round: on the handle's frozen binding when there is one, and
+-- otherwise on the section's current model, which the driver resolves.
+local function run_infer(handle, prompt)
   local ok, result = yield({ op = "infer", prompt = prompt, handle = handle })
   if not ok then fail(result) end
   return result
+end
+
+-- models.infer(prompt) and a model handle's `infer`, as `h:infer(prompt)`.
+-- Handles carry `infer` and `loop` as fields that read these entries, Lua
+-- functions because each may suspend and a Rust method cannot. Each entry
+-- checks its receiver and then its arity, counting trailing nils, before
+-- any yield.
+local function infer(...)
+  if is_model_handle((...)) then
+    raise("lua", {
+      message = "models.infer takes (prompt); call handle:infer(prompt) to run on a model handle",
+    })
+  end
+  if select('#', ...) > 1 then
+    raise("lua", { message = "models.infer takes (prompt)" })
+  end
+  return run_infer(nil, (...))
+end
+
+local function handle_infer(...)
+  if not is_model_handle((...)) then
+    raise("lua", { message = "call infer on a model handle with a colon: handle:infer(prompt)" })
+  end
+  if select('#', ...) > 2 then
+    raise("lua", { message = "handle:infer takes (prompt)" })
+  end
+  local handle, prompt = ...
+  return run_infer(handle, prompt)
 end
 
 local function call_section(target, input)
@@ -204,11 +222,7 @@ end
 -- since the last drain (the Engine's sentences saying how the model's
 -- tasks ended), each appended as a user record so the model reads them
 -- in its next round. A chain with no model tasks drains an empty list.
--- A value that is not a messages.new() list drains nothing, so the
--- round's protocol parse refuses it with the list error and the notices
--- wait for the next round over a list.
 local function drain_task_notices(messages)
-  if not is_message_list(messages) then return end
   local ok, notices = yield({ op = "drain_task_notices" })
   if not ok then fail(notices) end
   for index = 1, #notices do
@@ -219,6 +233,11 @@ end
 -- The message the exit rules raise for a round that ends with neither
 -- tool calls nor reply text.
 local EMPTY_MODEL_REPLY = "empty model reply"
+
+-- The refusal for a list argument that is not a messages.new() list, a
+-- copy of the chat parse's text (`protocol/parse/chat.rs`, NOT_A_LIST).
+local NOT_A_LIST = "models.loop needs a messages.new() list; build one with "
+  .. "messages.new() and :user, :append, or :replace"
 
 -- Invokes the selected compactor on an overflow round with the reason tag.
 -- The shipped policy raises typed context exhaustion from Rust; the raise
@@ -238,18 +257,12 @@ local function compact(compactor, reason)
   error(normalize_failure(failure), 0)
 end
 
--- models.loop(handle?, messages, compactor?): the model-tool loop over an
--- author-owned message list, driven here over `chat` and `tool_call`
--- yields so every network wait inside it is an ordinary suspension. The
--- Engine installs this as models.loop. The leading handle is optional: a
--- userdata first argument that is not a messages.new() list, followed by
--- anything but nil or a function, selects the handle's frozen binding, and
--- otherwise the first argument is the list (a wrong handle type is the
--- protocol parse's call error, exactly as for models.infer). The messages
--- pass through unchecked: the protocol parse refuses anything but a
--- non-empty messages.new() list,
--- so every argument error surfaces at this call site (pcall-able). The
--- compactor defaults to compactors.fail.
+-- The model-tool loop over an author-owned message list, driven here over
+-- `chat` and `tool_call` yields so every network wait inside it is an
+-- ordinary suspension, on the handle's frozen binding when there is one.
+-- The compactor defaults to compactors.fail, and the list must be a
+-- messages.new() list; both checks run before any yield, so every
+-- argument error surfaces at the call site (pcall-able).
 --
 -- Per round: drain pending task notices, yield one `chat` over the list;
 -- on an overflow round invoke the compactor; on tool calls yield one
@@ -262,26 +275,13 @@ end
 -- any other empty reply raise empty_model_reply.
 -- Past the round cap raise tool_loop_exhausted. The shim emits no events:
 -- the scheduler reports each round as it applies the round's answer.
-local function models_loop(...)
-  local handle, messages, compactor
-  local second = select(2, ...)
-  if type((...)) == 'userdata' and not is_message_list((...))
-      and second ~= nil and type(second) ~= 'function' then
-    if select('#', ...) > 3 then
-      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
-    end
-    handle, messages, compactor = ...
-  else
-    if select('#', ...) > 2 then
-      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
-    end
-    messages, compactor = ...
-  end
+local function run_loop(handle, messages, compactor)
   if compactor == nil then
     compactor = compactors.fail
   elseif type(compactor) ~= "function" then
     raise("lua", { message = "compactor must be a function, got " .. engine_type(compactor) })
   end
+  if not is_message_list(messages) then raise("lua", { message = NOT_A_LIST }) end
   -- Answered dispatches: any call that received a result record, a tool's
   -- own failure included, counts toward the clean-exit rule.
   local answered = 0
@@ -321,6 +321,38 @@ local function models_loop(...)
     end
   end
   raise("tool_loop_exhausted", { message = "tool-call loop did not converge" })
+end
+
+-- models.loop(messages, compactor?) runs on the section's current model,
+-- and a model handle's `loop`, as `h:loop(messages, compactor?)`, runs
+-- every round on the handle's frozen binding. The Engine installs the
+-- first as models.loop. Each entry checks its receiver and then its
+-- arity, counting trailing nils, before the shared checks of `run_loop`.
+local function models_loop(...)
+  if is_model_handle((...)) then
+    raise("lua", {
+      message = "models.loop takes (messages, compactor?); "
+        .. "call handle:loop(messages, compactor?) to run on a model handle",
+    })
+  end
+  if select('#', ...) > 2 then
+    raise("lua", { message = "models.loop takes (messages, compactor?)" })
+  end
+  local messages, compactor = ...
+  return run_loop(nil, messages, compactor)
+end
+
+local function handle_loop(...)
+  if not is_model_handle((...)) then
+    raise("lua", {
+      message = "call loop on a model handle with a colon: handle:loop(messages, compactor?)",
+    })
+  end
+  if select('#', ...) > 3 then
+    raise("lua", { message = "handle:loop takes (messages, compactor?)" })
+  end
+  local handle, messages, compactor = ...
+  return run_loop(handle, messages, compactor)
 end
 
 -- store.*: every store operation is a leaf yield, answered by the driver
@@ -416,6 +448,8 @@ return {
   helpers = { raise = raise, fail = fail, engine_type = engine_type },
   infer = infer,
   loop = models_loop,
+  -- The fields a model handle reads, through the registry stash.
+  handle_methods = { infer = handle_infer, loop = handle_loop },
   model_tool_call = tools_call_as_model,
   guard = guard,
   pcall = protected_call,

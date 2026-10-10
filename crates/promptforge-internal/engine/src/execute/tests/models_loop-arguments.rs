@@ -1,12 +1,50 @@
-//! Tests for how `models.loop` reads its arguments: every documented form
-//! resolves the `messages.new()` list, and a plain array in the list's
-//! place is refused with the list error before any request leaves, also
-//! while a task notice is pending, which then waits for a round over a
-//! list.
+//! Tests for how `models.loop` and a model handle's `loop` read their
+//! arguments: every documented form resolves the `messages.new()` list,
+//! each entry's argument errors are raised in order before any request
+//! leaves, and a plain array in the list's place is refused with the list
+//! error, also while a task notice is pending, which then waits for a
+//! round over a list.
 
 use super::super::model_task_notices::loop_owner;
 use super::super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
 use super::*;
+
+/// The list refusal both loop entries raise, as `kind:message`.
+const LIST_REFUSAL: &str = "lua:models.loop needs a messages.new() list; build one with \
+                            messages.new() and :user, :append, or :replace";
+
+/// Runs each call in `calls`, a Lua list of functions that each make one
+/// refused loop call, under `pcall`, and returns the section's result:
+/// every error's `kind:message`, joined by `|`, then the list's size. No
+/// gateway reply is scripted, so a call that sends a request fails the
+/// run.
+async fn refusals(calls: &str) -> String {
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let md = loop_prompt(&format!(
+        "local other = models.get('other')\n\
+         local msgs = messages.new()\n\
+         msgs:user('hello')\n\
+         local out = {{}}\n\
+         for _, call in ipairs({{ {calls} }}) do\n\
+           local ok, err = pcall(call)\n\
+           assert(not ok, 'the call is refused')\n\
+           out[#out + 1] = err.kind .. ':' .. tostring(err)\n\
+         end\n\
+         return table.concat(out, '|') .. '|' .. #msgs"
+    ));
+    let prompt = parse(&md);
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
+        .drive()
+        .await
+        .expect("every refusal is pcall-able at the call site");
+    assert_eq!(
+        gateway.call_count(),
+        0,
+        "every refusal fires before any request leaves"
+    );
+    out
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn every_argument_form_resolves_the_list() {
@@ -24,9 +62,9 @@ async fn every_argument_form_resolves_the_list() {
          msgs:user('two')\n\
          models.loop(msgs, compactors.fail)\n\
          msgs:user('three')\n\
-         models.loop(other, msgs)\n\
+         other:loop(msgs)\n\
          msgs:user('four')\n\
-         models.loop(other, msgs, compactors.fail)\n\
+         other:loop(msgs, compactors.fail)\n\
          local replies = {}\n\
          for i = 2, #msgs, 2 do replies[#replies + 1] = msgs[i].content end\n\
          return #msgs .. '|' .. table.concat(replies, ',')",
@@ -46,7 +84,7 @@ async fn every_argument_form_resolves_the_list() {
     assert_eq!(
         models,
         ["test-model", "test-model", "other-model", "other-model"],
-        "only the forms with a leading handle run on the handle's binding"
+        "only the handle's own loop runs on the handle's binding"
     );
     let sizes: Vec<usize> = gateway
         .requests()
@@ -61,13 +99,93 @@ async fn every_argument_form_resolves_the_list() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_handle_passed_to_models_loop_is_the_pointed_error() {
+    let out = refusals(
+        "function() return models.loop(other, msgs) end,\n\
+         function() return models.loop(other, msgs, compactors.fail) end,",
+    )
+    .await;
+    let pointed = "lua:models.loop takes (messages, compactor?); \
+                   call handle:loop(messages, compactor?) to run on a model handle";
+    assert_eq!(out, format!("{pointed}|{pointed}|1"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_handles_loop_called_without_its_receiver_is_the_colon_error() {
+    // A dot call passes the list where the receiver belongs, and the
+    // function taken off the handle and called bare has no receiver at all.
+    let out = refusals(
+        "function() return other.loop(msgs) end,\n\
+         function() local run = other.loop; return run(msgs, compactors.fail) end,\n\
+         function() return other.loop() end,",
+    )
+    .await;
+    let colon = "lua:call loop on a model handle with a colon: handle:loop(messages, compactor?)";
+    assert_eq!(out, format!("{colon}|{colon}|{colon}|1"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn each_loop_entry_refuses_extra_arguments_counting_trailing_nils() {
+    let out = refusals(
+        "function() return models.loop(msgs, compactors.fail, 1) end,\n\
+         function() return models.loop(msgs, nil, nil) end,\n\
+         function() return other:loop(msgs, compactors.fail, 1) end,\n\
+         function() return other:loop(msgs, nil, nil) end,",
+    )
+    .await;
+    let entry = "lua:models.loop takes (messages, compactor?)";
+    let method = "lua:handle:loop takes (messages, compactor?)";
+    assert_eq!(out, format!("{entry}|{entry}|{method}|{method}|1"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_non_list_in_either_entry_is_the_list_error() {
+    let out = refusals(
+        "function() return models.loop() end,\n\
+         function() return models.loop('hello', compactors.fail) end,\n\
+         function() return other:loop() end,\n\
+         function() return other:loop(42, compactors.fail) end,",
+    )
+    .await;
+    let refused = [LIST_REFUSAL; 4].join("|");
+    assert_eq!(out, format!("{refused}|1"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn each_entry_checks_the_handle_then_the_arity_then_the_compactor_then_the_list() {
+    // Every call fails two adjacent checks, so the earlier check names
+    // the error.
+    let out = refusals(
+        "function() return models.loop(other, msgs, 1, 2) end,\n\
+         function() return models.loop(42, 42, nil) end,\n\
+         function() return models.loop(42, 42) end,\n\
+         function() return other.loop(msgs, nil, nil, nil) end,\n\
+         function() return other:loop(42, 42, nil) end,\n\
+         function() return other:loop(42, 42) end,",
+    )
+    .await;
+    assert_eq!(
+        out,
+        "lua:models.loop takes (messages, compactor?); \
+         call handle:loop(messages, compactor?) to run on a model handle\
+         |lua:models.loop takes (messages, compactor?)\
+         |lua:compactor must be a function, got integer\
+         |lua:call loop on a model handle with a colon: handle:loop(messages, compactor?)\
+         |lua:handle:loop takes (messages, compactor?)\
+         |lua:compactor must be a function, got integer\
+         |1"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_plain_array_in_the_lists_place_is_refused_with_the_list_error() {
     let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
-        "local plain = { { role = 'user', content = 'hi' } }\n\
+        "local other = models.get('other')\n\
+         local plain = { { role = 'user', content = 'hi' } }\n\
          local out = {}\n\
          for _, call in ipairs({\n\
-           function() return models.loop(models.get('other'), plain) end,\n\
+           function() return other:loop(plain) end,\n\
            function() return models.loop(plain) end,\n\
          }) do\n\
            local ok, err = pcall(call)\n\
@@ -105,10 +223,11 @@ async fn a_non_list_is_refused_with_the_list_error_while_a_task_notice_waits_for
         "",
         &loop_owner(
             "tasks.cancel(tasks.pending({ origin = 'model' })[1])\n\
+             local other = models.get('other')\n\
              local plain = { { role = 'user', content = 'hi' } }\n\
              local out = {}\n\
              for _, call in ipairs({\n\
-               function() return models.loop(models.get('other'), plain) end,\n\
+               function() return other:loop(plain) end,\n\
                function() return models.loop(plain) end,\n\
                function() return models.loop(msgs[1]) end,\n\
              }) do\n\

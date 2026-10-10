@@ -20,15 +20,15 @@ use crate::test_support::recording::null_emitter;
 use super::{compile_block, scheduler_vm, start, test_models};
 
 #[test]
-fn models_infer_rejects_a_third_argument() {
-    // `models.infer(handle?, prompt)` is the whole signature; a third
-    // argument (per-call options, or anything else) raises at the call
-    // site rather than being silently dropped.
+fn models_infer_rejects_a_second_argument() {
+    // `models.infer(prompt)` is the whole signature; a second argument
+    // (per-call options, or anything else) raises at the call site rather
+    // than being silently dropped.
     let vm = scheduler_vm(&test_models(), None);
     let program = compile_block(
-        r#"local ok, err = pcall(models.infer, models.get("fast"), "yo", { temperature = 0 })
-           assert(not ok, "a third argument must fail")
-           assert(tostring(err) == "models.infer takes (handle?, prompt)", tostring(err))
+        r#"local ok, err = pcall(models.infer, "yo", { temperature = 0 })
+           assert(not ok, "a second argument must fail")
+           assert(tostring(err) == "models.infer takes (prompt)", tostring(err))
            return "rejected""#,
     );
     match vm.start_block_coro(&program).expect("the block runs") {
@@ -45,13 +45,62 @@ fn a_shim_argument_error_is_a_table_whose_tostring_is_the_message() {
     // is an authoring error, so its kind is `lua`.
     let vm = scheduler_vm(&test_models(), None);
     let program = compile_block(
-        r#"local ok, err = pcall(models.infer, models.get("fast"), "yo", { temperature = 0 })
-           assert(not ok, "a third argument must fail")
+        r#"local h = models.get("fast")
+           local ok, err = pcall(h.infer, h, "yo", { temperature = 0 })
+           assert(not ok, "an argument past the prompt must fail")
            return type(err) .. "|" .. tostring(err.kind) .. "|" .. err"#,
     );
     match vm.start_block_coro(&program).expect("the block runs") {
         CoroStep::Done(LuaBlockResult::Returned(Some(text))) => {
-            assert_eq!(text, "table|lua|models.infer takes (handle?, prompt)");
+            assert_eq!(text, "table|lua|handle:infer takes (prompt)");
+        }
+        other => panic!("expected the rejection return, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_handle_passed_to_models_infer_is_the_pointed_error() {
+    // The handle-first form is gone; the error names the method that
+    // replaced it, before any request leaves.
+    let vm = scheduler_vm(&test_models(), None);
+    let program = compile_block(
+        r#"local ok, err = pcall(models.infer, models.get("fast"), "yo")
+           assert(not ok, "a handle first must fail")
+           return tostring(err.kind) .. "|" .. tostring(err)"#,
+    );
+    match vm.start_block_coro(&program).expect("the block runs") {
+        CoroStep::Done(LuaBlockResult::Returned(Some(text))) => assert_eq!(
+            text,
+            "lua|models.infer takes (prompt); call handle:infer(prompt) to run on a model handle"
+        ),
+        other => panic!("expected the rejection return, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_handles_infer_called_without_its_receiver_is_the_colon_error() {
+    // A dot call passes the prompt where the receiver belongs, and the
+    // function taken off the handle and called bare has no receiver.
+    let vm = scheduler_vm(&test_models(), None);
+    let program = compile_block(
+        r#"local h = models.get("fast")
+           local run = h.infer
+           local out = {}
+           for _, call in ipairs({
+             function() return h.infer("yo") end,
+             function() return run("yo") end,
+             function() return h.infer() end,
+           }) do
+             local ok, err = pcall(call)
+             assert(not ok, "a call without the receiver must fail")
+             out[#out + 1] = tostring(err.kind) .. "|" .. tostring(err)
+           end
+           return table.concat(out, "\n")"#,
+    );
+    let colon = "lua|call infer on a model handle with a colon: handle:infer(prompt)";
+    match vm.start_block_coro(&program).expect("the block runs") {
+        CoroStep::Done(LuaBlockResult::Returned(Some(text))) => {
+            assert_eq!(text, [colon; 3].join("\n"));
         }
         other => panic!("expected the rejection return, got {other:?}"),
     }
@@ -171,7 +220,7 @@ fn an_uncaught_lua_kind_shim_raise_keeps_the_mapped_runtime_error() {
     // 40 and fails at chunk line 2, so the mapped author frame is line 41.
     let vm = scheduler_vm(&test_models(), None);
     let program = LuaProgram::compile(
-        "local h = models.get(\"fast\")\nmodels.infer(h, \"yo\", { temperature = 0 })",
+        "local h = models.get(\"fast\")\nh:infer(\"a\", \"b\")",
         "section `Test` prologue",
         NonZeroU32::new(40).expect("40 is non-zero"),
         &null_emitter(),
@@ -181,7 +230,7 @@ fn an_uncaught_lua_kind_shim_raise_keeps_the_mapped_runtime_error() {
     match vm.start_block_coro(&program) {
         Err(Error::LuaRuntime { message, .. }) => {
             assert!(
-                message.contains("models.infer takes (handle?, prompt)"),
+                message.contains("handle:infer takes (prompt)"),
                 "the mapped error keeps the shim's message: {message}"
             );
             assert!(

@@ -26,11 +26,11 @@ plugins:
 ```lua
 local history = messages.new()
 history:user('launch@' .. tostring(ui().workspace_root))
-models.loop(models.get('test-model'), history)
+models.get('test-model'):loop(history)
 while true do
     local text = input.ask()
     history:user(text .. '@' .. tostring(ui().workspace_root))
-    models.loop(models.get('test-model'), history)
+    models.get('test-model'):loop(history)
 end
 ```
 ";
