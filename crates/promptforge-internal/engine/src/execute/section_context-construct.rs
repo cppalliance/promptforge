@@ -5,8 +5,8 @@
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
 //! setup half (Engine injection, Engine globals, the control surface, the
 //! Plugin preludes, the shared replay, the store yield shims) is shared;
-//! only the seed, the `sys` extras, and the `list_from_section` visible
-//! set differ.
+//! only the seed, the `sys` extras, and the visible set behind the
+//! `prompt` reads differ.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use promptforge_types::ids::{ChainId, TaskId};
 use crate::Result;
 use crate::execute::context::RunState;
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::walk_target::{list_items_from_visible, visible_sections};
+use crate::execute::walk_target::{read_visible, visible_sections};
 use crate::lua::SectionVm;
 use crate::parser::Section;
 use promptforge_types::event::lifecycle;
@@ -26,15 +26,15 @@ use super::{SectionContext, TaskSeed};
 impl SectionContext {
     /// Constructs the frame for one walked section and runs its setup
     /// preamble: the `sys` JSON, the section-started observation, VM
-    /// construction and limits, the control surface (the `jump` and
-    /// `list_from_section` callbacks resolved over the section's visible
-    /// set, plus the coroutine yield shims for the suspending calls), and
+    /// construction and limits, the control surface (`jump`, and the
+    /// `prompt` reads resolved over the section's visible set, plus the
+    /// coroutine yield shims for the suspending calls), and
     /// the rest of the shared setup half (Engine injection, Engine globals, the
     /// Plugin preludes, the shared replay, the store yield shims).
     ///
     /// `siblings` is the caller's own walk slice, from which the section's
     /// visible set (its siblings minus itself, plus its direct children) is
-    /// built for the `list_from_section` callback. `section_id` is the
+    /// built for the `prompt` reads. `section_id` is the
     /// section's `sys.id`: the entering chain's hierarchical id extended
     /// by its local entry counter, allocated by the scheduler; `task_id`
     /// is the entering chain's `sys.taskid`. `var` is the walk's current
@@ -85,11 +85,11 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        // The `list_from_section` callback resolves over the section's
-        // visible set; the suspending calls (`call`, `fanout`,
-        // `models.infer`) are the yield shims the setup half installs.
+        // The `prompt` reads resolve over the section's visible set; the
+        // suspending calls (`call`, `fanout`, `models.infer`) are the
+        // yield shims the setup half installs.
         let visible = visible_sections(siblings, section);
-        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
+        let read = move |heading: String| read_visible(&heading, &visible);
         // The setup half of the section lifecycle - Engine injection, Engine
         // globals, the control surface, the shared replay, and the captured
         // alias bindings - is shared with the H1 pass; only the seed, the
@@ -105,7 +105,7 @@ impl SectionContext {
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, read) {
             vm.teardown(ctx.emitter(), section.name());
             return Err(error);
         }
@@ -134,9 +134,9 @@ impl SectionContext {
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed
-    /// (it runs first and is never re-entered), and a `list_from_section`
-    /// visible set spanning the whole top-level slice - section 0 excludes
-    /// nothing and has no children.
+    /// (it runs first and is never re-entered), and a visible set behind
+    /// the `prompt` reads spanning the whole top-level slice - section 0
+    /// excludes nothing and has no children.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
@@ -169,7 +169,7 @@ impl SectionContext {
         // H1's visible set is the whole top-level slice: section 0
         // excludes nothing and has no children.
         let visible = promptforge_parser::detail::sections(ctx.prompt()).to_vec();
-        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
+        let read = move |heading: String| read_visible(&heading, &visible);
         // H1's one privilege: `argv` installs writable, so the repair
         // pattern can assign it; the executor reads the value back at the
         // freeze (see the scheduler's H1-to-walk handoff).
@@ -177,7 +177,7 @@ impl SectionContext {
         setup.argv_writable = true;
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, read) {
             vm.teardown(ctx.emitter(), title);
             return Err(error);
         }

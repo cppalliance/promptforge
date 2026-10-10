@@ -11,7 +11,8 @@
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
 //! `var`; an arm
 //! adds its collection `item` to the caller's cloned `var`), and supplies
-//! the `list_from_section` callback resolved over its own visible set.
+//! the `read` callback behind the `prompt` reads, resolved over its own
+//! visible set.
 //!
 //! VM construction and the Lua limits install stay with the driver. A
 //! construction failure's handling differs (the walk propagates, the arm
@@ -26,7 +27,7 @@ use std::sync::Arc;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::plugins::Prelude;
 
-use crate::lua::{LuaProgram, SectionVm};
+use crate::lua::{LuaProgram, SectionText, SectionVm};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
@@ -97,8 +98,8 @@ pub(crate) struct SectionVmSetup<'a> {
 /// The sequence is fixed and shared: Engine injection with the driver's
 /// [`VmSeed`], [`SectionVm::install_engine_globals`], the `item` global when the
 /// seed includes one, the control surface
-/// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
-/// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
+/// ([`SectionVm::install_scheduler_control_globals`] for `jump` and the
+/// `prompt` reads, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims), the run's
 /// Plugin preludes, and [`SectionVm::replay_shared`]. The caller applies
 /// the Lua limits itself before calling, so a limits failure propagates
@@ -112,13 +113,13 @@ pub(crate) struct SectionVmSetup<'a> {
 /// global install, `item` install, control-global install, the prelude install (a
 /// prelude that fails to load, or whose global collides), the shared
 /// replay, or the store shims' install.
-pub(crate) fn setup_section_vm<L>(
+pub(crate) fn setup_section_vm<R>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
-    list_callback: L,
+    read: R,
 ) -> Result<()>
 where
-    L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+    R: Fn(String) -> std::result::Result<Option<SectionText>, Error> + Send + Sync + 'static,
 {
     // The raw-model-id fallback reads its flag during Engine injection, so
     // the snapshot's opt-in lands first.
@@ -138,7 +139,7 @@ where
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }
-    vm.install_scheduler_control_globals(list_callback)?;
+    vm.install_scheduler_control_globals(read)?;
     vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     // The preludes read `tools` and `store` from `_G` as they install, so

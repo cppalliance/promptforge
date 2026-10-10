@@ -1,4 +1,4 @@
-//! Tests for section walk control flow: `call`, `jump`, `fanout`, `list_from_section`, and `var`.
+//! Tests for section walk control flow: `call`, `jump`, `fanout`, the `prompt` reads, and `var`.
 
 use super::run;
 use super::*;
@@ -123,20 +123,6 @@ Args: {{ args }}\n\n\
         !text.contains("run-args"),
         "the run's args must not leak into the chain: {text}"
     );
-}
-
-/// Two visible sections sharing one `(level, name)` address error loudly as
-/// ambiguous rather than silently resolving to the first.
-#[test]
-fn list_from_section_ambiguous_error_is_loud() {
-    let visible = vec![
-        synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
-        synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
-    ];
-    let error = super::super::walk_target::list_items_from_visible("### Dup", &visible)
-        .expect_err("two visible sections with one address must be ambiguous");
-    let rendered = error.to_string();
-    assert!(rendered.contains("ambiguous"), "error was: {rendered}");
 }
 
 /// Two top-level sections sharing one name error loudly as ambiguous rather

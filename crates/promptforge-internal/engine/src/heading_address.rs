@@ -2,14 +2,14 @@
 //! surface resolves through.
 //!
 //! A section's Lua names other sections by heading string - `call`, `jump`,
-//! `list_from_section`, `tasks.spawn`, and `fanout(worker, collection)`
-//! (which runs the worker template once per collection member: the array
-//! part in order, then the hash part as `{ key, value }` pairs sorted by
-//! key, a list section's pre-parsed items feeding in through
-//! `list_from_section`). The `fanout` shim itself is Lua over the task
-//! protocol (`promptforge-lua`'s `__impl_fanout.lua`): it spawns one task
-//! per member - every arm up front, before any join, so no arm is ordered
-//! after a sibling - and waits on the live set while the scheduler's
+//! `prompt.section`, `prompt.list`, `tasks.spawn`, and
+//! `fanout(worker, collection)` (which runs the worker template once per
+//! collection member: the array part in order, then the hash part as
+//! `{ key, value }` pairs sorted by key, a list section's pre-parsed items
+//! feeding in through `prompt.list`). The `fanout` shim itself is Lua over
+//! the task protocol (`promptforge-lua`'s `__impl_fanout.lua`): it spawns
+//! one task per member - every arm up front, before any join, so no arm is
+//! ordered after a sibling - and waits on the live set while the scheduler's
 //! admission limit bounds how many arms run at once. This module defines
 //! [`find_visible`], the one heading lookup those surfaces share, and
 //! [`resolve_sibling`], its adapter for surfaces where a miss is an error;

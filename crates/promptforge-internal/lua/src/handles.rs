@@ -1,4 +1,4 @@
-//! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua.
+//! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua, and the section text a prompt read sees.
 
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
@@ -137,6 +137,15 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
             other.type_name()
         ))),
     }
+}
+
+/// What a prompt read sees of one visible section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionText {
+    /// The section's own raw Markdown.
+    pub markdown: String,
+    /// Its pre-parsed list items; empty for a section that isn't a list.
+    pub items: Vec<String>,
 }
 
 /// The run's tool set: the declared plugins, the prompt-wide offers, and

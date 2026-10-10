@@ -30,7 +30,7 @@ use promptforge_lua::Error;
 
 use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::tools::ToolId;
@@ -121,9 +121,8 @@ fn scheduler_vm_with_tools(
         preludes: &[],
         raw_shims: false,
     };
-    let list_callback =
-        |_: String| -> std::result::Result<Vec<String>, crate::Error> { Ok(Vec::new()) };
-    setup_section_vm(&mut vm, &setup, list_callback).expect("the setup installs");
+    let read = |_: String| -> std::result::Result<Option<SectionText>, crate::Error> { Ok(None) };
+    setup_section_vm(&mut vm, &setup, read).expect("the setup installs");
     vm
 }
 

@@ -292,7 +292,7 @@ fn shim_vm(cancel: Option<promptforge_types::cancel::CancelHandle>) -> SectionVm
     vm.install_engine_globals(&emitter, "Loop")
         .expect("Engine globals must install");
     vm.install_scheduler_control_globals(|_| {
-        Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
+        Ok::<Option<SectionText>, std::convert::Infallible>(None)
     })
     .expect("the control globals must install");
     vm.install_coro_shims(1).expect("coro shims must install");

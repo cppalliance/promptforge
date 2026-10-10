@@ -15,7 +15,7 @@ use serde_json::json;
 use super::{GLOBALS_CHUNK_NAME, GLOBALS_SOURCE, RESERVED_NAMES, Reserved, reserved_name};
 use crate::tests::recording::null_emitter;
 use crate::tests::{assert_chunk_name_resolves, refusal_line};
-use crate::{Argv, SectionVm};
+use crate::{Argv, SectionText, SectionVm};
 
 const SECTION: &str = "Globals";
 
@@ -51,7 +51,7 @@ fn section_vm(argv: Argv<'_>) -> SectionVm {
     vm.install_engine_globals(&emitter, SECTION)
         .expect("the Engine globals install");
     vm.install_scheduler_control_globals(|_| {
-        Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
+        Ok::<Option<SectionText>, std::convert::Infallible>(None)
     })
     .expect("the control globals install");
     vm.install_coro_shims(1)

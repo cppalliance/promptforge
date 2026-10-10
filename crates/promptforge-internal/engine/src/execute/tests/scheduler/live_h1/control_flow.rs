@@ -1,7 +1,6 @@
 //! Control flow out of the live H1 pass: `call` as a contained chain and
 //! the child ids it takes, `jump` to start the walk at a target, `fanout`,
-//! the decision-tool idiom, and `list_from_section`, with the
-//! unknown-section failures.
+//! and the decision-tool idiom, with the unknown-section failures.
 
 use super::*;
 
@@ -179,29 +178,4 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         2,
         "the loop runs the tool-call round and the terminal text round"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn list_from_section_works_on_the_h1() {
-    // `list_from_section` resolves over H1's visible set - the whole
-    // top-level slice.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # Test prompt\n\n\
-        ```lua\n\
-        local items = list_from_section('## Items')\n\
-        var.answer = table.concat(items, ',')\n\
-        ```\n\n\
-        ## Result\n\n\
-        ```lua\nreturn var.answer\n```\n\n\
-        ## Items\n\n\
-        - one\n\
-        - two\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("list_from_section from H1 reads the target's items");
-
-    assert_eq!(out, "one,two");
 }

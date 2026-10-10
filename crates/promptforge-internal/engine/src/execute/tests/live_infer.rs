@@ -163,7 +163,7 @@ async fn tool_objects_and_roles_reach_section_call_and_fanout_vms() {
          ```lua\n\
          local direct = binding_names()\n\
          local called = call('## Called')\n\
-         local arms = fanout('### Worker', list_from_section('### Items'))\n\
+         local arms = fanout('### Worker', prompt.list('### Items'))\n\
          return direct .. '|' .. called .. '|' .. table.concat(arms, ',')\n\
          ```\n\n\
          ### Worker\n\n\

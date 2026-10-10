@@ -9,7 +9,7 @@ promptforge: 0
 ## Research
 
 ```lua
-local replies = fanout("### Worker", list_from_section("### Topics"))
+local replies = fanout("### Worker", prompt.list("### Topics"))
 local files = store.glob("arm-*.md")
 -- The ordered merge: the join delivers arm results in collection order,
 -- never finish order, so the parent's merge is deterministic by

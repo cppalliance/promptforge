@@ -5,8 +5,8 @@ use super::{SectionVm, pack_sequence};
 #[cfg(test)]
 use crate::var_to_json;
 use crate::{
-    Access, Arc, Argv, Emitter, Error, Json, Mutex, Ordering, ProseState, Result, Value,
-    guarded_var, install_compactors, install_log, install_messages, install_models,
+    Access, Arc, Argv, Emitter, Error, Json, Mutex, Ordering, ProseState, Result, SectionText,
+    Value, guarded_var, install_compactors, install_log, install_messages, install_models,
     install_plugins, install_shim_prelude, install_store_table, install_tools,
     resolve_section_target, seal_sys,
 };
@@ -151,8 +151,9 @@ impl SectionVm {
             .and_then(|mut slot| slot.take())
     }
 
-    /// Installs `call`, `jump`, and `list_from_section` as persistent
-    /// globals for the section's whole lifecycle.
+    /// Installs `call`, `jump`, and the `prompt` reads (`prompt.section`
+    /// and `prompt.list`) as persistent globals for the section's whole
+    /// lifecycle.
     ///
     /// Called once by `promptforge-engine` after Engine injection. The
     /// callbacks own their run context, so the closures stay valid across
@@ -167,14 +168,10 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
     #[cfg(test)]
-    pub(crate) fn install_control_globals<E, L>(
-        &self,
-        call_callback: E,
-        list_callback: L,
-    ) -> Result<()>
+    pub(crate) fn install_control_globals<E, R>(&self, call_callback: E, read: R) -> Result<()>
     where
         E: Fn(Value, Option<String>, Json) -> std::result::Result<String, Error> + Send + 'static,
-        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+        R: Fn(String) -> std::result::Result<Option<SectionText>, Error> + Send + Sync + 'static,
     {
         let globals = self.lua.globals();
         let call_fn = self
@@ -186,11 +183,11 @@ impl SectionVm {
             .map_err(Error::lua)?;
         globals.raw_set("call", call_fn).map_err(Error::lua)?;
         self.install_jump_global(&globals)?;
-        self.install_list_global(&globals, list_callback)
+        self.install_prompt_table(&globals, read)
     }
 
-    /// Installs the scheduler-mode control surface: `jump` and
-    /// `list_from_section` as Rust callbacks (neither suspends).
+    /// Installs the scheduler-mode control surface: `jump` and the
+    /// `prompt` reads as Rust callbacks (none suspends).
     ///
     /// The suspending calls (`models.infer`, `call`, `fanout`,
     /// `tools.call`, `tasks.*`) are the yield shims installed by
@@ -198,14 +195,14 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
-    pub fn install_scheduler_control_globals<L, E>(&self, list_callback: L) -> Result<()>
+    pub fn install_scheduler_control_globals<R, E>(&self, read: R) -> Result<()>
     where
-        L: Fn(String) -> std::result::Result<Vec<String>, E> + Send + 'static,
+        R: Fn(String) -> std::result::Result<Option<SectionText>, E> + Send + Sync + 'static,
         E: std::error::Error + Send + Sync + 'static,
     {
         let globals = self.lua.globals();
         self.install_jump_global(&globals)?;
-        self.install_list_global(&globals, list_callback)
+        self.install_prompt_table(&globals, read)
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `call`,
@@ -248,22 +245,39 @@ impl SectionVm {
         globals.raw_set("jump", jump_fn).map_err(Error::lua)
     }
 
-    fn install_list_global<L, E>(&self, globals: &mlua::Table, list_callback: L) -> Result<()>
+    fn install_prompt_table<R, E>(&self, globals: &mlua::Table, read: R) -> Result<()>
     where
-        L: Fn(String) -> std::result::Result<Vec<String>, E> + Send + 'static,
+        R: Fn(String) -> std::result::Result<Option<SectionText>, E> + Send + Sync + 'static,
         E: std::error::Error + Send + Sync + 'static,
     {
-        let list_fn = self
+        let read = Arc::new(read);
+        let read_markdown = Arc::clone(&read);
+        let section = self
+            .lua
+            .create_function(move |_, target: Value| {
+                let text = read_markdown(resolve_section_target(target)?)
+                    .map_err(mlua::Error::external)?;
+                Ok(text.map(|text| text.markdown))
+            })
+            .map_err(Error::lua)?;
+        let list = self
             .lua
             .create_function(move |lua, target: Value| {
                 let heading = resolve_section_target(target)?;
-                let items = list_callback(heading).map_err(mlua::Error::external)?;
-                pack_sequence(lua, items)
+                match read(heading.clone()).map_err(mlua::Error::external)? {
+                    None => Ok(Value::Nil),
+                    Some(text) if text.items.is_empty() => Err(mlua::Error::external(format!(
+                        "section `{}` has no pre-parsed items",
+                        heading.trim()
+                    ))),
+                    Some(text) => pack_sequence(lua, text.items).map(Value::Table),
+                }
             })
             .map_err(Error::lua)?;
-        globals
-            .raw_set("list_from_section", list_fn)
-            .map_err(Error::lua)
+        let prompt = self.lua.create_table().map_err(Error::lua)?;
+        prompt.raw_set("section", section).map_err(Error::lua)?;
+        prompt.raw_set("list", list).map_err(Error::lua)?;
+        globals.raw_set("prompt", prompt).map_err(Error::lua)
     }
 
     /// Replaces the sealed Lua `sys` global after scope close.
