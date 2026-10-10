@@ -119,7 +119,7 @@ pub(super) fn split_h1(
 }
 
 /// Removes complete leading lines that contain only whitespace.
-fn trim_leading_blank_lines(content: &str) -> &str {
+pub(crate) fn trim_leading_blank_lines(content: &str) -> &str {
     let mut offset = 0;
     for line in content.split_inclusive('\n') {
         if line.trim().is_empty() {

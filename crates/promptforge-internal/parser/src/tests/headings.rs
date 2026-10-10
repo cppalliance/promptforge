@@ -134,6 +134,23 @@ fn duplicate_sibling_section_names_are_rejected() {
 }
 
 #[test]
+fn section_markdown_is_the_sections_own_content() {
+    let own = "  indented first line\n\n```lua\nvar.n = 1\n```\n\ntext\n\n---\n\n{{ x }}";
+    let src = prompt_src(&format!(
+        "## S\n\n\n{own}\n\n### Child\n\nchild text\n\n## Empty\n\n\n"
+    ));
+    let prompt = parse(&src).expect("prompt must parse");
+    let section = &prompt.sections[0];
+    assert_eq!(
+        section.markdown(),
+        own,
+        "a section's Markdown is its own content byte for byte, stopping at its child"
+    );
+    assert_eq!(section.children[0].markdown(), "child text");
+    assert_eq!(prompt.sections[1].markdown(), "");
+}
+
+#[test]
 fn first_h2_is_entry_regardless_of_name() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## Zebra\n\nfirst\n\n## Main\n\nsecond\n";

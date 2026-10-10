@@ -40,6 +40,8 @@ pub struct Section {
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
     /// Empty for non-list sections.
     pub(crate) items: Vec<String>,
+    /// The section's own raw Markdown, without its heading line or children.
+    pub(crate) markdown: String,
 }
 
 impl Section {
@@ -71,6 +73,13 @@ impl Section {
     #[must_use]
     pub fn items(&self) -> &[String] {
         &self.items
+    }
+
+    /// The section's own raw Markdown: from just after its heading line to the next
+    /// heading of any level, leading blank lines and trailing whitespace trimmed.
+    #[must_use]
+    pub fn markdown(&self) -> &str {
+        &self.markdown
     }
 
     /// Classic leading Lua fence when the first block is Lua.

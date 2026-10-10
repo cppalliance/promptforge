@@ -18,6 +18,7 @@ pub fn synthetic_section(name: &str, level: u8, blocks: Vec<Block>, items: Vec<S
         blocks,
         children: Vec::new(),
         items,
+        markdown: String::new(),
     }
 }
 
