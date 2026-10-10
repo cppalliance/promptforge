@@ -14,10 +14,10 @@ pub struct ToolCallCounts {
 }
 
 impl ToolCallCounts {
-    /// Creates a counts map pre-seeded with 0 for every alias.
+    /// Creates a counts map pre-seeded with 0 for every name.
     #[must_use]
-    pub fn new(aliases: impl IntoIterator<Item = String>) -> Self {
-        let map: BTreeMap<String, u64> = aliases.into_iter().map(|a| (a, 0)).collect();
+    pub fn new(names: impl IntoIterator<Item = String>) -> Self {
+        let map: BTreeMap<String, u64> = names.into_iter().map(|name| (name, 0)).collect();
         Self {
             inner: Arc::new(Mutex::new(map)),
         }
@@ -29,46 +29,46 @@ impl ToolCallCounts {
             .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))
     }
 
-    /// Ensures `alias` is present in the map, seeding it at 0 when new.
+    /// Ensures `name` is present in the map, seeding it at 0 when new.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn ensure(&self, alias: &str) -> Result<()> {
+    pub fn ensure(&self, name: &str) -> Result<()> {
         let mut map = self.lock()?;
-        map.entry(alias.to_owned()).or_insert(0);
+        map.entry(name.to_owned()).or_insert(0);
         Ok(())
     }
 
-    /// Increments the count for `alias`.
+    /// Increments the count for `name`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned or `alias` was never
+    /// Returns [`Error::Lua`] if the mutex is poisoned or `name` was never
     /// seeded.
-    pub fn increment(&self, alias: &str) -> Result<()> {
+    pub fn increment(&self, name: &str) -> Result<()> {
         let mut map = self.lock()?;
-        let count = map.get_mut(alias).ok_or_else(|| {
+        let count = map.get_mut(name).ok_or_else(|| {
             Error::Lua(format!(
-                "tool call counts: alias {alias:?} was not pre-seeded"
+                "tool call counts: name {name:?} was not pre-seeded"
             ))
         })?;
         *count += 1;
         Ok(())
     }
 
-    /// Returns the current count for `alias`, or `None` when `alias` was
+    /// Returns the current count for `name`, or `None` when `name` was
     /// never seeded.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn get(&self, alias: &str) -> Result<Option<u64>> {
-        Ok(self.lock()?.get(alias).copied())
+    pub fn get(&self, name: &str) -> Result<Option<u64>> {
+        Ok(self.lock()?.get(name).copied())
     }
 
-    /// Returns a snapshot of every seeded alias.
+    /// Returns a snapshot of every seeded name.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn aliases(&self) -> Result<Vec<String>> {
+    pub fn names(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
     }
 }

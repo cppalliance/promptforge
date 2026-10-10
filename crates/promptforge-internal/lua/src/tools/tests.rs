@@ -4,7 +4,7 @@ use mlua::{Lua, Value, Variadic};
 use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
-use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
+use super::decode::{collect_offer_entries, local_params_schema, tool_name};
 use super::userdata::LuaToolHandle;
 use super::{install_tool_call_counts, install_tools};
 use crate::handles::ToolSet;
@@ -35,30 +35,30 @@ fn echo_handle() -> LuaToolHandle {
 }
 
 #[test]
-fn tool_alias_accepts_a_bare_string() {
+fn tool_name_accepts_a_bare_string() {
     let lua = Lua::new();
     let value = lua.create_string("tools/echo").expect("string");
     assert_eq!(
-        tool_alias(&Value::String(value)).expect("a string decodes"),
+        tool_name(&Value::String(value)).expect("a string decodes"),
         "tools/echo"
     );
 }
 
 #[test]
-fn tool_alias_reads_the_id_off_a_tool_object() {
+fn tool_name_reads_the_id_off_a_tool_object() {
     let lua = Lua::new();
     let userdata = lua.create_userdata(echo_handle()).expect("userdata");
     assert_eq!(
-        tool_alias(&Value::UserData(userdata)).expect("a tool object decodes"),
+        tool_name(&Value::UserData(userdata)).expect("a tool object decodes"),
         "tools/echo",
         "a tool object stands for its canonical id, not its wire name"
     );
 }
 
 #[test]
-fn tool_alias_rejects_tables_other_types_and_other_userdata() {
+fn tool_name_rejects_tables_other_types_and_other_userdata() {
     let lua = Lua::new();
-    let number = tool_alias(&Value::Integer(42)).expect_err("a number is not a tool");
+    let number = tool_name(&Value::Integer(42)).expect_err("a number is not a tool");
     assert!(
         number
             .to_string()
@@ -69,7 +69,7 @@ fn tool_alias_rejects_tables_other_types_and_other_userdata() {
         .load("{ id = 'tools/echo', name = 'tools_echo' }")
         .eval::<mlua::Table>()
         .expect("the record evaluates");
-    let table = tool_alias(&Value::Table(record)).expect_err("a record is not a tool");
+    let table = tool_name(&Value::Table(record)).expect_err("a record is not a tool");
     assert!(
         table.to_string().contains("got table"),
         "a plain record no longer stands for a tool: {table}"
@@ -77,7 +77,7 @@ fn tool_alias_rejects_tables_other_types_and_other_userdata() {
     // A userdata that is not a tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.
     let foreign = lua.create_userdata(Foreign).expect("userdata");
-    let other = tool_alias(&Value::UserData(foreign)).expect_err("not a tool object");
+    let other = tool_name(&Value::UserData(foreign)).expect_err("not a tool object");
     assert!(
         other
             .to_string()
@@ -90,7 +90,7 @@ fn tool_alias_rejects_tables_other_types_and_other_userdata() {
 fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
     let lua = Lua::new();
     let tool = lua.create_userdata(echo_handle()).expect("userdata");
-    let entries = collect_tools_add_entries(
+    let entries = collect_offer_entries(
         "tools.offer",
         Variadic::from_iter([
             Value::String(lua.create_string("web/search").expect("string")),
@@ -99,12 +99,12 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
     )
     .expect("an id plus override decodes");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].alias, "web/search");
+    assert_eq!(entries[0].name, "web/search");
     assert_eq!(
         entries[0].description_override.as_deref(),
         Some("an override")
     );
-    let entries = collect_tools_add_entries(
+    let entries = collect_offer_entries(
         "tools.offer",
         Variadic::from_iter([
             Value::UserData(tool.clone()),
@@ -112,7 +112,7 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
         ]),
     )
     .expect("a tool object plus override decodes");
-    assert_eq!(entries[0].alias, "tools/echo");
+    assert_eq!(entries[0].name, "tools/echo");
     assert_eq!(
         entries[0].description_override.as_deref(),
         Some("an override")
@@ -126,10 +126,9 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
             lua.create_string("web/fetch").expect("string"),
         ))
         .expect("push");
-    let entries =
-        collect_tools_add_entries("tools.offer", Variadic::from_iter([Value::Table(array)]))
-            .expect("the array form decodes");
-    let names: Vec<&str> = entries.iter().map(|entry| entry.alias.as_str()).collect();
+    let entries = collect_offer_entries("tools.offer", Variadic::from_iter([Value::Table(array)]))
+        .expect("the array form decodes");
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
     assert_eq!(
         names,
         vec!["tools/echo", "web/fetch"],
@@ -138,13 +137,13 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
 }
 
 #[test]
-fn add_local_params_schema_builds_object_schema_with_required_fields() {
+fn local_params_schema_builds_object_schema_with_required_fields() {
     let lua = Lua::new();
     let params = lua
         .load("{ query = 'string', limit = { 'integer', 'maximum hits' } }")
         .eval::<mlua::Table>()
         .expect("params table evaluates");
-    let schema = add_local_params_schema(&params).expect("the schema builds");
+    let schema = local_params_schema(&params).expect("the schema builds");
     assert_eq!(
         schema["properties"],
         json!({
@@ -161,7 +160,7 @@ fn add_local_params_schema_builds_object_schema_with_required_fields() {
 }
 
 #[test]
-fn add_local_params_schema_sorts_required_so_the_schema_text_is_deterministic() {
+fn local_params_schema_sorts_required_so_the_schema_text_is_deterministic() {
     // `required` is the one Rust-side `table.pairs` walk whose output is an
     // ordered array rather than a table or map, so it must impose an order
     // itself: left as the walk produced it, two VMs emit different schema
@@ -175,7 +174,7 @@ fn add_local_params_schema_sorts_required_so_the_schema_text_is_deterministic() 
         )
         .eval::<mlua::Table>()
         .expect("params table evaluates");
-    let schema = add_local_params_schema(&params).expect("the schema builds");
+    let schema = local_params_schema(&params).expect("the schema builds");
     assert_eq!(
         schema["required"],
         json!([
@@ -186,13 +185,13 @@ fn add_local_params_schema_sorts_required_so_the_schema_text_is_deterministic() 
 }
 
 #[test]
-fn add_local_params_schema_rejects_an_unsupported_type() {
+fn local_params_schema_rejects_an_unsupported_type() {
     let lua = Lua::new();
     let params = lua
         .load("{ payload = 'table' }")
         .eval::<mlua::Table>()
         .expect("params table evaluates");
-    let error = add_local_params_schema(&params).expect_err("an unsupported type fails");
+    let error = local_params_schema(&params).expect_err("an unsupported type fails");
     assert!(
         error.to_string().contains("unsupported type \"table\""),
         "the rejection names the bad type: {error}"

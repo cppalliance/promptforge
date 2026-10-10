@@ -34,11 +34,11 @@ mod decode;
 mod objects;
 mod userdata;
 
-pub(crate) use decode::tool_alias;
+pub(crate) use decode::tool_name;
 #[cfg(test)]
 pub(crate) use userdata::LuaToolHandle;
 
-use decode::{ToolsAddEntry, add_local_params_schema, collect_tools_add_entries};
+use decode::{OfferEntry, collect_offer_entries, local_params_schema};
 pub(crate) use objects::tool_object;
 use objects::{install_tool_lists, install_tool_objects};
 
@@ -97,7 +97,7 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: &[String]
             if let Some(count) = value {
                 Ok(count)
             } else {
-                let seeded = counts_for_index.aliases().map_err(mlua::Error::external)?;
+                let seeded = counts_for_index.names().map_err(mlua::Error::external)?;
                 let offered_unseeded = offered.iter().any(|id| id == &key);
                 Err(mlua::Error::external(format!(
                     "tools.calls: {key:?} has no seeded count; \
@@ -164,18 +164,18 @@ pub(crate) fn install_tool_call_counts(
 fn resolve_entries(
     call: &str,
     set: &ToolSet,
-    entries: Vec<ToolsAddEntry>,
+    entries: Vec<OfferEntry>,
 ) -> mlua::Result<Vec<(String, Option<String>)>> {
     entries
         .into_iter()
         .map(|entry| {
-            let binding = ToolId::parse(&entry.alias)
+            let binding = ToolId::parse(&entry.name)
                 .ok()
-                .and_then(|_| set.offered_binding(&entry.alias))
+                .and_then(|_| set.offered_binding(&entry.name))
                 .ok_or_else(|| {
                     mlua::Error::external(format!(
                         "{call}: {:?} is not a catalog tool in this run",
-                        entry.alias
+                        entry.name
                     ))
                 })?;
             Ok((binding.alias().to_owned(), entry.description_override))
@@ -225,7 +225,7 @@ fn install_offer(
     let state = Arc::clone(runtime);
     let offer = lua
         .create_function(move |_, args: Variadic<Value>| {
-            let entries = collect_tools_add_entries("tools.offer", args)?;
+            let entries = collect_offer_entries("tools.offer", args)?;
             let resolved = resolve_entries("tools.offer", &*lock_tools(&frozen)?, entries)?;
             let mut state = state
                 .lock()
@@ -258,7 +258,7 @@ fn install_always_offer(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> 
     let frozen = Arc::clone(set);
     let always_offer = lua
         .create_function(move |_, args: Variadic<Value>| {
-            let entries = collect_tools_add_entries("tools.always_offer", args)?;
+            let entries = collect_offer_entries("tools.always_offer", args)?;
             let mut set = lock_tools(&frozen)?;
             let resolved = resolve_entries("tools.always_offer", &set, entries)?;
             for (name, description) in resolved {
@@ -302,7 +302,7 @@ fn install_offer_local(lua: &Lua, tools: &Table, local_tools: &LocalTools) -> Re
                         "tools.offer_local alias {alias:?} is already registered"
                     )));
                 }
-                let parameters = add_local_params_schema(&params)?;
+                let parameters = local_params_schema(&params)?;
                 let schema = tool_schema_new(alias.clone(), description, parameters)
                     .map_err(mlua::Error::external)?;
                 let handlers: Table = lua.named_registry_value(LOCAL_HANDLERS_REGISTRY)?;
