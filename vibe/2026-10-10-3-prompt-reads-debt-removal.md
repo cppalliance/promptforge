@@ -4,19 +4,19 @@ overview: Remove the one cheap fix the prompt-namespace-reads work left, adopt t
 todos:
   - id: parser-cleanup
     content: "D1-5, C-1: split build_sections into four named checks; drop synthetic_section's items parameter and update its four call sites"
-    status: pending
+    status: completed
   - id: scope-module
     content: "D1-14, D1-15: add h1_visible_sections beside visible_sections and use it at the three H1 sites; rename resolve_sibling to resolve_visible with its tests and doc links"
-    status: pending
+    status: completed
   - id: names-docs
     content: "C-2, C-3, X-1: rename the fanout-arm test, fix the reserved tool-alias docs in globals.rs and parse.rs, set the two spec status lines to Active. (promptforge-design commit)"
-    status: pending
+    status: completed
   - id: plan-history
     content: "D1-16: vibe coder close step marks todos completed (tools-public commit); flip todo statuses in every closed vibe/ plan, preserving line endings"
-    status: pending
+    status: completed
   - id: exit-gate
     content: "Full exit gate: both nextest runs, both clippy runs, fmt, docs builds, xtask api --check, build-xtask tests, docs-claims, and the rg checks"
-    status: pending
+    status: completed
 isProject: false
 ---
 
