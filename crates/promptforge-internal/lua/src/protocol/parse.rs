@@ -20,7 +20,7 @@ use tasks::{
     parse_status, parse_timer,
 };
 
-use crate::tools::tool_alias;
+use crate::tools::tool_name;
 use crate::{Error, LuaModelHandle, Result, resolve_section_target, scalar_return};
 
 use super::answer::Answer;
@@ -374,7 +374,7 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         // the other author-argument failures (`Error::Lua`, not a runtime
         // wrapper).
         Ok(value) => {
-            tool_alias(&value).map_err(|error| FieldFailure::Call(Error::Lua(error.to_string())))?
+            tool_name(&value).map_err(|error| FieldFailure::Call(Error::Lua(error.to_string())))?
         }
         Err(_) => return Err(FieldFailure::Malformed),
     };
