@@ -2,6 +2,9 @@
 # Pre-push hook: Comprehensive validation before pushing to remote.
 set -e
 
+echo "==> Running docs-claims wording scan..."
+node --test crates/workshop/ui/test/docs-claims.mjs
+
 echo "==> Checking headless gateway (AGENTS.md rule)..."
 cargo check -p gateway --no-default-features
 
