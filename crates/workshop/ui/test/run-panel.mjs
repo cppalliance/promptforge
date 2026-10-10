@@ -6,14 +6,13 @@
 // and scripts fetch for /workspace/tree, /workspace/file, /prompts/contract,
 // and /workspace/grant. Covers: the empty open, and the Run tab title for
 // an empty path; a pre-filled open reaching
-// ready with one row per contract item; the shimmer class on the tab title
+// ready with one row per contract item and no tool row; the shimmer class on the tab title
 // in loading and its absence in ready and error, including after the
 // overflow list inits a second tab for the panel; tree dragstart setting
 // application/x-workshop-path and a tree drop loading the prompt; an OS
 // drop granting then loading the first .md; a Browse pick granted then
 // loading to ready; a parse failure rendering the
-// line-numbered error row with Choose Prompt; a contract declaring the
-// retired fuzzy tool shape rejected as an unexpected shape; two opens
+// line-numbered error row with Choose Prompt; two opens
 // yielding two windows; and a superseded load discarded by the generation
 // counter.
 // The Cursor Settings layout is covered too: an arg's description as a
@@ -112,7 +111,6 @@ const BROKEN = `${ROOT}\\broken.md`;
 const SLOW = `${ROOT}\\slow.md`;
 const FAST = `${ROOT}\\fast.md`;
 const OSDROP = `${ROOT}\\osdrop.md`;
-const FUZZY = `${ROOT}\\fuzzy.md`;
 
 const calls = [];
 // Paths whose /workspace/file answer pends until releaseDeferred() runs.
@@ -127,7 +125,6 @@ function contractFor(name) {
     input: { path: "in/papers.md", description: "the papers" },
     output: { path: "out/verdicts.md", description: "the verdicts" },
     plugins: [{ id: "tools/web" }],
-    tools: [{ kind: "exact", alias: "search", path: "tools/web/search" }],
     args: {
       implicit: false,
       fields: [
@@ -187,19 +184,6 @@ globalThis.fetch = (url, init) => {
     if (name.includes("broken")) {
       return Promise.resolve(
         json({ error: { code: "parse_frontmatter", message: "line 3: bad YAML key" } }, 422),
-      );
-    }
-    if (name.includes("fuzzy")) {
-      // The retired fuzzy slot shape: the contract parser must refuse it.
-      const contract = contractFor(name);
-      return Promise.resolve(
-        json({
-          ...contract,
-          tools: [
-            ...contract.tools,
-            { kind: "fuzzy", alias: "fetch", want: "fetch a page", optional: true },
-          ],
-        }),
       );
     }
     return Promise.resolve(json(contractFor(name)));
@@ -448,12 +432,9 @@ check(
   limitRow?.querySelector('input[type="number"]')?.value === "5" &&
     limitRow.querySelector('input[type="number"]')?.step === "1",
 );
-const toolRows = rows.filter((row) => row.classList.contains("ws-run-panel__row--tool"));
 check(
-  "an exact tool renders read-only under its alias",
-  toolRows.length === 1 &&
-    toolRows[0].querySelector(".ws-run-panel__row-label")?.textContent === "search" &&
-    toolRows[0].textContent.includes("exact: tools/web/search"),
+  "the ready panel renders no tool row",
+  rows.length > 0 && filledEl.querySelector(".ws-run-panel__row--tool") === null,
 );
 const modelRow = rowText("main");
 check(
@@ -672,18 +653,6 @@ check(
     ?.classList.contains("ws-shimmer-text") === false,
 );
 check("the Run button stays disabled in error", brokenEl?.querySelector(".ws-run-panel__run")?.disabled === true);
-
-// --- A fuzzy tool entry is not a contract shape the panel accepts ------------
-
-const fuzzyRun = openInZone("run", { instance: "fuzzy", path: FUZZY });
-await flush();
-const fuzzyEl = runElement(fuzzyRun);
-const fuzzyError = fuzzyEl?.querySelector(".ws-run-panel__error");
-check(
-  "a contract declaring a fuzzy tool is rejected as an unexpected shape",
-  fuzzyError?.textContent.includes("unexpected shape") === true &&
-    fuzzyEl?.querySelector(".ws-run-panel__rows") === null,
-);
 
 // --- Two opens yield two windows ---------------------------------------------
 

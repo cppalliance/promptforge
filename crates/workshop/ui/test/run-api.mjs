@@ -1,11 +1,10 @@
 // Unit test for the Run window's contract client (src/services/run-api.ts).
 // Bundles the module with esbuild, imports it via a data URL, and drives it
 // against a scripted fetch. Covers: a full contract narrows field by field
-// (snake_case wire keys to the client's camelCase); the implicit-args shape;
-// narrowing rejects an unknown tool kind, the retired fuzzy tool kind, and
-// an unknown arg type; a 422
-// envelope surfaces the server's code and message; a non-JSON answer and a
-// transport failure throw their typed variants.
+// (snake_case wire keys to the client's camelCase) and carries no tools
+// section; the implicit-args shape; narrowing rejects an unknown arg type; a
+// 422 envelope surfaces the server's code and message; a non-JSON answer and
+// a transport failure throw their typed variants.
 // Run: node --test test/run-api.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +39,6 @@ const CONTRACT = {
   input: { path: "in/papers.md", description: "the papers" },
   output: { path: "out/verdicts.md", description: "the verdicts" },
   plugins: [{ id: "tools/web" }],
-  tools: [{ kind: "exact", alias: "search", path: "tools/web/search" }],
   args: {
     implicit: false,
     fields: [
@@ -99,13 +97,7 @@ const json = (body, status = 200) => ({
     "plugins narrow",
     contract.plugins.length === 1 && contract.plugins[0].id === "tools/web",
   );
-  check(
-    "tool slots narrow to alias and exact path",
-    contract.tools.length === 1 &&
-      contract.tools[0].kind === "exact" &&
-      contract.tools[0].alias === "search" &&
-      contract.tools[0].path === "tools/web/search",
-  );
+  check("a contract without tools narrows with no tools section", !("tools" in contract));
   check(
     "arg fields narrow with defaults and descriptions",
     contract.args.implicit === false &&
@@ -148,7 +140,6 @@ const json = (body, status = 200) => ({
       input: null,
       output: null,
       plugins: [],
-      tools: [],
       args: {
         implicit: true,
         fields: [
@@ -176,45 +167,6 @@ const json = (body, status = 200) => ({
 }
 
 // --- Narrowing rejects unknown variants -------------------------------------
-
-{
-  scriptFetch(() =>
-    json({
-      ...CONTRACT,
-      tools: [{ kind: "open", alias: "x", path: "tools/web/search" }],
-    }),
-  );
-  let caught = null;
-  try {
-    await fetchPromptContract("p.md", "text");
-  } catch (error) {
-    caught = error;
-  }
-  check(
-    "an unknown tool kind is a shape failure",
-    caught !== null && caught.code === "unexpected_shape",
-  );
-}
-
-{
-  // The retired fuzzy slot shape is no longer a variant the client narrows.
-  scriptFetch(() =>
-    json({
-      ...CONTRACT,
-      tools: [{ kind: "fuzzy", alias: "fetch", want: "fetch a page", optional: true }],
-    }),
-  );
-  let caught = null;
-  try {
-    await fetchPromptContract("p.md", "text");
-  } catch (error) {
-    caught = error;
-  }
-  check(
-    "the retired fuzzy tool kind is a shape failure",
-    caught !== null && caught.code === "unexpected_shape",
-  );
-}
 
 {
   scriptFetch(() =>
