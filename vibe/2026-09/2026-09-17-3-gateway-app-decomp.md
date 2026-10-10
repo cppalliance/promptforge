@@ -4,25 +4,25 @@ overview: "Split crates/gateway/app/src/lib.rs (4,199 lines: route table, handle
 todos:
   - id: extract-relay
     content: Extract relay.rs, speech.rs, models.rs with their test siblings from lib.rs; test siblings import shared fixtures from test_support.rs instead of copying them
-    status: pending
+    status: completed
   - id: extract-admin
     content: Create admin.rs + admin/ directory (profiles, status, progress, config, queue) with test siblings; test siblings import shared fixtures from test_support.rs
-    status: pending
+    status: completed
   - id: absorb-auth-boot-tray
     content: Move auth helpers into auth.rs, boot/tray/loopback test modules to kebab siblings; siblings import shared fixtures from test_support.rs
-    status: pending
+    status: completed
   - id: rewire-router
     content: Update build_router mounts to module paths; shrink lib.rs to docs, state, route table, tiny glue handlers; state the handler-placement rule in the crate docs
-    status: pending
+    status: completed
   - id: consolidate-fixtures
     content: Dedup the remaining fixture definitions crate-wide (shutdown.rs, handoff.rs, orphans.rs, commands.rs, config_apply.rs, boot_load-tests.rs); move auth.rs's parameterized state(trust_loopback) into test_support.rs as the configurable entry point behind a default state() wrapper
-    status: pending
+    status: completed
   - id: verify
     content: Run the verification battery; test counts before and after must match; one commit
-    status: pending
+    status: completed
   - id: function-shape-idioms
     content: Apply the six function-shape idioms from the field study (snapshot extractor, auth extractor, Json rejection, cancellation policy, error extensions, agent error fields) as a separate commit after the decomposition lands
-    status: pending
+    status: completed
 isProject: false
 ---
 

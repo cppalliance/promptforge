@@ -4,10 +4,10 @@ overview: "Remove the two debts the Debt Collector accepted from the sans-io Eng
 todos:
   - id: settle-on-run-end
     content: Settle every live task with AbandonReason::RunTerminated before the scheduler tears the run down, with one cancel-mid-task regression test
-    status: pending
+    status: completed
   - id: typed-failure-boundary
     content: Carry FailureKind plus message on the Harness error channel, match on the kind in workshop-server, re-pin the status test
-    status: pending
+    status: completed
 isProject: false
 ---
 

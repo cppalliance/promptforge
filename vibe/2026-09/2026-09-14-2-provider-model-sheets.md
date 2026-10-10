@@ -4,16 +4,16 @@ overview: "Phase 1 infrastructure for provider model sheets: two new shared crat
 todos:
   - id: settle-open-questions
     content: Settle remaining open questions (raw payload embedding, v1 scope confirmation, cadence)
-    status: pending
+    status: completed
   - id: shared-gateway-api
     content: Create shared-gateway-api with the sheet schema types (Sheet, ProviderSlice, SliceStatus, ModelEntry, Thinking, Pricing, Deprecation, Tier); hoist Capabilities, ModelInfo, ModelKind (extended with transcription/image/video), ThinkingMode from gateway-config/gateway-protocol with re-exports at the old paths
-    status: pending
+    status: completed
   - id: shared-cloud-providers
     content: Create shared-cloud-providers (lib + bin) with Provider descriptor (name, display_name, tier, key_env, base_url), provider registry, per-provider files, fetch/normalize behind an injected reqwest::Client, build_sheet/fetch_sheet
-    status: pending
+    status: completed
   - id: aggregation-workflow
     content: Build the GitHub workflow (manual + cron) that compiles the binary, runs it with secrets as env vars, and publishes models.json as a release artifact - DEFERRED 2026-09-14 to a separate aggregation repo, not this plan's scope
-    status: pending
+    status: completed
 isProject: false
 ---
 

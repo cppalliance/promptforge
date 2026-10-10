@@ -4,16 +4,16 @@ overview: "Extract the Workshop SPA's generic browser-side mechanics into a new 
 todos:
   - id: platform-move
     content: "Create crates/workshop/platform (@workshop/platform) and move the mechanics: git mv the listed modules, split Result/ok/err into result.ts, rewrite ~350 imports and 134 test paths, move the status bar contract, add platform/AGENTS.md and the approved boundary test, align docs and rules"
-    status: pending
+    status: completed
   - id: open-registry
     content: "Open the panel registry: move it to platform with string ids and entry fields, features register their own panel types, layout policy from the composition root, layout schema v5, synthetic-panel behavior test"
-    status: pending
+    status: completed
   - id: tab-menu
     content: "One generic tab with a registry-driven tab menu: MenuId.EditorTitleContext, per-tab overlay, VS Code-aligned activeEditor, confirm-then-close for the X button and the Close and Close Others commands, tab-menu stub rows"
-    status: pending
+    status: completed
   - id: status-indicators
     content: "Status bar indicator slots: platform contract, generic status bar, contributed activity and recording LEDs wired at the composition root, setRecording removed from the status bar contract, recording verified end to end"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,19 +4,19 @@ overview: Replace the Harness's own Gateway bindings with a required Host-suppli
 todos:
   - id: broker-seam
     content: "Harness: InferenceBroker and OnDelta replace ChatPerformer; runner maps stream to on_delta; Harness::new takes the broker; current_model resolves via models(); delete GatewayBinding, CatalogBinding, set_gateway, set_catalog, generations, GatewayUnusable, performer.rs; drop harness-sessions' harness-gateway-client dependency; tests and doc tours on scripted or offline brokers"
-    status: pending
+    status: completed
   - id: gateway-client
     content: "harness-gateway-client: rename GatewayClient to GatewayChat; add GatewayBroker with the moved SSE performer tests; GatewaySearch implements harness_web::SearchProvider with wire types private and Workshop's mapping tests moved in; depend on harness and harness-web"
-    status: pending
+    status: completed
   - id: workshop-broker
     content: "Workshop: gateway-following broker passed to Harness::new; search delegator without conversion; bindings.rs pushes only HostSnapshot; launch refusal with today's GatewayUnusable text; Workshop tests for Unavailable, gateway replacement, and no cancel on replacement"
-    status: pending
+    status: completed
   - id: docs-tooling
     content: RUSTDOC_SITES gains harness-gateway-client and harness-web with test; harness lib.md reference entries; archdoc, crates/README.md, crate READMEs, cicerone harness plan inventory; regenerate workspace-hack
-    status: pending
+    status: completed
   - id: exit-criteria
     content: Run the leftover rg searches and the exit criteria once at the end, plus the manual Workshop chat, web, and profile-switch checks
-    status: pending
+    status: completed
 isProject: false
 ---
 

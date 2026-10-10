@@ -4,19 +4,19 @@ overview: "Replace the single-mdBook Pages deploy with one assembled site: an HT
 todos:
   - id: stubs
     content: "Add scaffolding: guide/books/*/book.toml, guide/landing (index.html with the drafted intro and 4-row two-column product table with image slots, style.css, img/), guide/chrome (banner.html, back-link.js), guide/src/workshop/01-stub.md, harness-api lib.md stub + include_str"
-    status: pending
+    status: completed
   - id: user-guide-books
     content: "build-user-guide: SETS -> BOOKS table (sole list of books), default mode = checks + exports, new `stage <abs-out>` mode rendering per-book SUMMARY and index into staging; update tests"
-    status: pending
+    status: completed
   - id: xtask-site
     content: "build-xtask: add `site` subcommand (site.rs) - stage books, mdbook build each staged folder, isolated default-feature cargo doc for promptforge and harness-api with banner via CARGO_ENCODED_RUSTDOCFLAGS, file-targeted redirects, copy landing; absolute paths throughout; `--books-only` flag skips rustdoc"
-    status: pending
+    status: completed
   - id: workflow-housekeeping
     content: "Create site.yml (full build + deploy on push/dispatch; path-filtered PR build with --books-only, own cancel-in-progress concurrency group, not required); facade documentation= URLs; tools/document.md, CONTRIBUTING.md, crates/README.md, .gitignore edits; move guide.yml and retired guide files to cabinet/_trash"
-    status: pending
+    status: completed
   - id: verify
     content: Run tests + clippy, cargo xtask site twice, click-through over file://, confirm Harness crates.js isolation and clean git status
-    status: pending
+    status: completed
 isProject: false
 ---
 

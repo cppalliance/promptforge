@@ -4,16 +4,16 @@ overview: Remove the one debt the author API reshape introduced (a false "not of
 todos:
   - id: d1-1-wire-lookup
     content: "D1-1: add ToolSet::wire_binding, use it in model-call dispatch and the scope gate's global_exists, fix the field doc, with a failing-first canonical-id test in tool_loop.rs"
-    status: pending
+    status: completed
   - id: d1-2-local-gate
     content: "D1-2: run node --test crates/workshop/ui/test/docs-claims.mjs from the root AGENTS.md Verification list and .githooks/pre-push, proven by fault injection"
-    status: pending
+    status: completed
   - id: d1-12-renames
     content: "D1-12: rename ToolsAddEntry, collect_tools_add_entries, add_local_params_schema, tool_alias, and ToolCallCounts::aliases (with its alias parameters) to names that match the offer API"
-    status: pending
+    status: completed
   - id: d1-17-harness-doc
     content: "D1-17: correct the ToolPerformer::call doc in performers.rs so alias is the wire name, or the canonical id when the run could not offer the tool"
-    status: pending
+    status: completed
 isProject: false
 ---
 

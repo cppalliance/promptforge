@@ -4,25 +4,25 @@ overview: Make crates/workshop one npm workspace (one install, one lockfile, one
 todos:
   - id: npm-workspace
     content: "Create the crates/workshop npm workspace: root package.json with shared tooling, git mv the lockfile, widen the .gitignore node_modules line, build-ui esbuild lookup and watch changes, CI and docs"
-    status: pending
+    status: completed
   - id: copy-switch
     content: Copy shared-ui's tracked files to crates/workshop/look as @workshop/look, add .gitattributes lines, add it to the workspace, switch workshop/ui imports, update docs
-    status: pending
+    status: completed
   - id: drop-aliases
     content: Repoint look's 12 alias uses to Cursor tokens and delete the Gateway alias block from look/tokens.css
-    status: pending
+    status: completed
   - id: token-tiers
     content: Move workshop/ui/src/tokens/base.css and semantic.css into look as sizes.css and semantic.css; update main.ts import order
-    status: pending
+    status: completed
   - id: icons
     content: Move parts/shared/icons.ts into look with lucide as a look dependency; confirm one hoisted lucide copy
-    status: pending
+    status: completed
   - id: tests-guards
     content: Move the four component tests into look/test, add boundary test and workshop no-shared-ui guard; CI runs tests across the workspace
-    status: pending
+    status: completed
   - id: agents-md
     content: Rewrite look/AGENTS.md and document the workspace in crates/workshop/AGENTS.md
-    status: pending
+    status: completed
 isProject: false
 ---
 

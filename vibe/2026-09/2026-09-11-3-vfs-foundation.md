@@ -4,37 +4,37 @@ overview: "Focused foundation layer: a Vfs/VfsAccess trait pair with a claims mo
 todos:
   - id: vfs-trait
     content: "Design the Vfs/VfsAccess trait pair and VfsRef handle: sync, bytes-based, Store-derived semantics plus stat/list/grep, acquire/release on the backend trait"
-    status: pending
+    status: completed
   - id: router
     content: "Build the mount router: builder-style mount installation, longest-prefix dispatch, lazy per-mount acquire, nestable, universal path canonicalization (Windows/macOS/Linux)"
-    status: pending
+    status: completed
   - id: mem-backend
     content: Implement the in-memory Vfs backend carrying former MemStore semantics
-    status: pending
+    status: completed
   - id: hostdir-backend
     content: "IN SCOPE (without it the Vfs is useless): real-filesystem backend in shared-vfs (std::fs is std - the zero-dependency rule holds) with `HostBackend::identity()` and `HostBackend::rooted(dir)`. Stage 1 thin: direct std::fs ops, lexical+canonicalize containment, failure-atomic writes (sibling temp + rename). Stage 2 hardening toward the Bashkit RealFs oracle (resolver trio, symlink policies, Windows long paths and device names) as the threat model demands"
-    status: pending
+    status: completed
   - id: policy
     content: "Implement the Policy layer: Op and Verdict (Deny/Ask carry reason strings), per-op check in Access before the claims check, AllowAll in shared-vfs, ModePolicy (Ask/Plan/Agent) in promptforge-vfs with a UI-flippable shared mode"
-    status: pending
+    status: completed
   - id: store-rewrite
     content: Rewrite Store as a public concrete facade (no trait) over Vfs mounted at /_promptforge/store; Lua store table unchanged; WriteScope registry deleted in favor of the claims model; the Harness seeds/extracts declared input/output keys through it
-    status: pending
+    status: completed
   - id: executor-api
     content: Change executor::run() to take VfsRef instead of StoreRef; RunContext builds the Store facade internally
-    status: pending
+    status: completed
   - id: store-yield
     content: Make Lua store operations leaf yields in the coroutine protocol (new Request/Answer variants, one dispatch arm, spawn_blocking over the sync Vfs); uniform for all backends - no inline fast path
-    status: pending
+    status: completed
   - id: bashkit-adapter
     content: "SPIKE (deliverable is evidence, not integration): implement the Bashkit FsBackend adapter over VfsRef as a path dependency against the local clone at bashkit/, compile-check, and smoke-test an ls/cat/grep script against mounted backends. Toolchain already verified compatible: workspace runs stable 1.98, Bashkit's 1.95 pin applies only inside its own repo. Success proves the trait subsumes Bashkit; a mapping failure here is the spike working as intended, cheaply"
-    status: pending
+    status: completed
   - id: claims
     content: "Implement the claims model: ExecId vending, Access RAII capability (acquire/spawn/borrow/move/drop), readers/writers claims tables keyed by interned canonical paths, canonicalize (stub-to-intern acceptable in v1), fatal determinism RunErrorKind, scheduler installation of the current access per chain step"
-    status: pending
+    status: completed
   - id: tests
     content: Port the promptforge-store test suite onto the rewritten Store; add router and path-canonicalization matrices
-    status: pending
+    status: completed
 isProject: false
 ---
 

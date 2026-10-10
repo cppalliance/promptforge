@@ -4,34 +4,34 @@ overview: "Make the Workshop's workspace a document: a single Turso database fil
 todos:
   - id: boundary
     content: "Land the shell boundary first: new workshop-server-api crate with the nine-item re-export surface, retarget the shell, enforce via the build-xtask product-boundary matrix; rename shared-sidecar to shared-gateway-discovery"
-    status: pending
+    status: completed
   - id: spike
     content: "Dependency spike: add turso 0.7.2, cargo deny, Windows build (no MSRV pin anymore - stable toolchain)"
-    status: pending
+    status: completed
   - id: workspace-file
     content: "Build workspace_file module in workshop-workspace: Turso-backed open/create/save-as/duplicate of the single anchor file, schema v1, meta validation"
-    status: pending
+    status: completed
   - id: workspace-integration
     content: Persist grant/revoke to the open workspace file; bulk-replace grants on open
-    status: pending
+    status: completed
   - id: routes
     content: Add /workspace/file/* HTTP endpoints in workshop-workspace handlers, registered via the Registry
-    status: pending
+    status: completed
   - id: pointer
     content: Last-workspace pointer in state_dir; boot reopens it before serving
-    status: pending
+    status: completed
   - id: spa-actions
     content: Replace the three File-menu stubs with real SPA actions (dialogs + fetch); recents integration
-    status: pending
+    status: completed
   - id: window-state
     content: "Shell: drop tauri-plugin-window-state, restore/save geometry through the server"
-    status: pending
+    status: completed
   - id: tests-docs
     content: Tests (module, routes, UI actions) and docs (READMEs, guide, module comments)
-    status: pending
+    status: completed
   - id: verify
     content: "CI gates plus manual smoke: save, quit, relaunch, open, duplicate; inspect with tursodb"
-    status: pending
+    status: completed
 isProject: false
 ---
 

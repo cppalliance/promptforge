@@ -4,31 +4,31 @@ overview: Recover the design rationale of `promptforge-core` from the code alone
 todos:
   - id: step-1
     content: "Step 1: create the ledger with the method and the two worked example records"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: pass 1 extraction - parser.rs, lib.rs, error.rs"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: pass 1 extraction - execute.rs, execute/tests.rs, observe.rs"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: pass 1 extraction - lua.rs, subst.rs, store.rs"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: pass 1 extraction - client.rs, tools.rs, tools/web_search.rs"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6: merge, deduplicate, fill reach from call sites, rank"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7: pass 2 - propose collapses from the archive as measurement, with provenance and dates"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8: write design-core-recovered.md as a design document organized by the system, not a ledger transcript"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9: report the recovery ratio - code forced, archive could settle, still open"
-    status: pending
+    status: completed
 isProject: false
 ---
 

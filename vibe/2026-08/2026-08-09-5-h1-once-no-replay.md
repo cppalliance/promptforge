@@ -4,10 +4,10 @@ overview: "Runtime refactor shipped: bind phase eliminated, H1 runs once with li
 todos:
   - id: doc-quick-reference
     content: "Add Quick Reference rules block to the user guide (before final image)"
-    status: pending
+    status: completed
   - id: doc-status-orig-claim
     content: "Remove stale design-core-orig.md claim from STATUS.md (file was deleted)"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,43 +4,43 @@ overview: Replace promptforge-api-runtime with a pure re-export facade, package 
 todos:
   - id: step-1
     content: "Step 1: record the baseline, rename crates/promptforge/ to crates/promptforge-internal/, update build-xtask (ENGINE_CONTAINER, container exception key, family() exact match)"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: surface audit (non-test vs test-only uses), create the facade package promptforge with auto-trait tests, add TRANSITIONAL_CONTAINER_EXCEPTIONS"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: migrate every outside crate to the facade; rewrite outside tests that need unjustified items"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: move the types and runtime crates into the container, move the suite and bench to the facade, delete the transitional exception"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: drop the types-to-vfs edge, fold shared-vfs into promptforge-vfs, keep its no-dependencies guarantee"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6: facade shape check"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7: cargo xtask api (rustdoc JSON, closure, link targets, doc text, listing) with fixtures"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8: move engine-only operations into detail functions, including ToolId::from_validated"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9: clear all 78 doc(hidden), document the transport codec, gate test helpers, turn on the ban"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10: surface docs name only facade paths (intra-doc links, doc text, doc examples)"
-    status: pending
+    status: completed
   - id: step-11
     content: "Step 11: minimality pass (non-test uses only), bless public-api.txt, add the CI job"
-    status: pending
+    status: completed
   - id: step-12
     content: "Step 12: facade lib.md and topic docs, facade docs gate"
-    status: pending
+    status: completed
   - id: step-13
     content: "Step 13: update AGENTS.md, sweep old names, run the exit gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 

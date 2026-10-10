@@ -4,16 +4,16 @@ overview: "Debt collector result for the Plugin Harness redesign run (15 commits
 todos:
   - id: l1-proxy
     content: Move the three read-only proxy builders in promptforge-lua (prelude.rs, argv.rs, sys.rs) onto one crate-private builder in proxy.rs, pinning every refusal text and getmetatable label first (L-1)
-    status: pending
+    status: completed
   - id: d1-18-merge
     content: Make Requirements::merge drop missing_required entries that missing_services already names, with a failing-first runner regression test and a requirements unit test (D1-18)
-    status: pending
+    status: completed
   - id: doc-fixes
     content: Correct the sessions AGENTS.md broker sentence, the prelude environment doc, and the guide's Letting the model ask sentence, then regenerate the combined guide (D1-26, D1-27, D1-32)
-    status: pending
+    status: completed
   - id: d1-2-engine-docs-gate
     content: Add a CI step to the docs job that builds promptforge-engine's private-item docs with warnings denied (D1-2)
-    status: pending
+    status: completed
 isProject: false
 ---
 

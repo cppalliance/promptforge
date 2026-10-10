@@ -4,37 +4,37 @@ overview: Fix the remaining digest-marker defect, extract the tool, transcriptio
 todos:
   - id: commit-runtime-rule
     content: Commit the authorized root AGENTS.md runtime-compilation rule as Step 0
-    status: pending
+    status: completed
   - id: marker-write-fallback
     content: Make both digest-marker persistence paths best-effort
-    status: pending
+    status: completed
   - id: extract-tools
     content: Extract the tool contract and move web-search ownership behind it
-    status: pending
+    status: completed
   - id: extract-transcribe
     content: Extract the Whisper transcription engine into promptforge-transcribe
-    status: pending
+    status: completed
   - id: extract-desktop-shell
     content: Extract the desktop window and WebView bridge into promptforge-desktop-shell
-    status: pending
+    status: completed
   - id: cuda-build
     content: Produce an embedded machine-native CUDA llama-server bundle during Cargo build
-    status: pending
+    status: completed
   - id: cuda-stage
     content: Verify and atomically stage the embedded CUDA bundle at runtime
-    status: pending
+    status: completed
   - id: companion-config
     content: Add typed speculative and multimodal companion configuration
-    status: pending
+    status: completed
   - id: companion-runtime
     content: Provision companion artifacts and preserve their launch arguments across respawn
-    status: pending
+    status: completed
   - id: live-integration
     content: Prove and document CUDA, MTP, multimodal, and cache behavior
-    status: pending
+    status: completed
   - id: profile-migration
     content: Roll out E2B safely, then permanently remove the cached 31B model
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,16 +4,16 @@ overview: "Remove the two debts the Debt Collector kept from the models-loop-in-
 todos:
   - id: c1-capture-error
     content: "C-1 and D1-20: write the rebound-error regression test (fails as Interrupted), then capture error chunk-wide in __impl_coro.lua; delete the unread infer return key, the stale H1 comment, and the dead models and tools guards"
-    status: pending
+    status: completed
   - id: d1-1-chatresult-fields
     content: "D1-1, C-2, C-3, D1-15: remove ChatResult.model and .metrics, their four initializers in scheduler/chat.rs, and test literal lines; fix the stale loop-shim wording and the empty-reply doc line in the touched docs; keep one shared copy of the call() and round() test fixtures"
-    status: pending
+    status: completed
   - id: d1-2-messages-doc
     content: "D1-2: correct the messages.rs module doc that says the round reads only author-built records with no second validation"
-    status: pending
+    status: completed
   - id: exit-checks
     content: Run the AGENTS.md Verification list; facade surface check shows no diff
-    status: pending
+    status: completed
 isProject: false
 ---
 

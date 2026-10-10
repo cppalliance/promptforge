@@ -4,55 +4,55 @@ overview: Cleanup of crates/workshop in the promptforge repository (branch maste
 todos:
   - id: baseline
     content: "Baseline: record test results on master before any change"
-    status: pending
+    status: completed
   - id: bind
     content: "Bind: refuse non-loopback addresses in reuse_bind, with a test"
-    status: pending
+    status: completed
   - id: dead-code
     content: "Dead code: delete WorkshopObserver and StatusBus helpers, drop unused server re-exports, fix gateway description and a stale comment"
-    status: pending
+    status: completed
   - id: shell-rename
     content: "Shell rename: gateway icon copies, shell/ to desktop/, tier and constant renames, prose, UI names (desk, view, placeholder, entry bundle), vocabulary in AGENTS.md"
-    status: pending
+    status: completed
   - id: config-ui
     content: "config-ui: views/ to pages/, page identifiers, shell to desk"
-    status: pending
+    status: completed
   - id: flaky-tests
     content: "Flaky tests: symlink tests fail under CI, replace fixed sleeps"
-    status: pending
+    status: completed
   - id: save-timeout
     content: "Save timeout: reproducing test, JSON 408 body on every deadline route, unknown-token state in the editor, audit of UI error consumers"
-    status: pending
+    status: completed
   - id: security-tests
     content: "Security tests: realtime relay refusals, jail edge cases"
-    status: pending
+    status: completed
   - id: wire-fixture
     content: "Wire fixture: shared /ws frame fixture for Rust and TypeScript, SelectModelFrame"
-    status: pending
+    status: completed
   - id: registry-docs
     content: "Registry docs: keep subsystem-named traits, reword claims, record runtime links in the registry crate docs"
-    status: pending
+    status: completed
   - id: code-docs
     content: "Code-level docs: fix code-comment drift; make the AGENTS.md import pointer explicit"
-    status: pending
+    status: completed
   - id: prompts-route
     content: "Prompts route: move /prompts/contract into workshop-server, drop workspace Engine dependency"
-    status: pending
+    status: completed
   - id: helpers
     content: "Helpers: move render_message, JSON bucket validator, mock server helper, UI reconnect backoff into shared homes"
-    status: pending
+    status: completed
   - id: layout
     content: "Layout: directories for hyphenated groups of three or more, distinct ui_state names"
-    status: pending
+    status: completed
   - id: renames
     content: "Renames: remove server aliases, move /ws socket to a workshop_socket module, rename status relay and gateway SwitchOutcome to SwitchProfileBody, handles named structs, UI tokens into services"
-    status: pending
+    status: completed
   - id: split
     content: "Split: supervisor.rs, socket.rs framing, compose, heartbeat and progress run loops"
-    status: pending
+    status: completed
   - id: docs
     content: "Docs removal: delete workshop guide chapters, export, and READMEs; drop them from the guide build, doc tool, and docs-claims test"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,13 +4,13 @@ overview: "Delete the task history read completely, with no trace outside vibe/:
 todos:
   - id: step-1-task-history-code
     content: "Step 1: remove the Engine, Lua protocol and Harness runner code, tests and prose, hand-edit the facade pages, bless public-api.txt"
-    status: pending
+    status: completed
   - id: step-2-run-log-read-path
     content: "Step 2: remove the harness-log per-task read path and fix its tests"
-    status: pending
+    status: completed
   - id: step-3-guide-chapter
     content: "Step 3: delete guide chapter 16, renumber 17 and 18, fix every link and per-site sentence (including crates/harness/src/vfs.md), regenerate exports, run the residual searches"
-    status: pending
+    status: completed
 isProject: false
 ---
 

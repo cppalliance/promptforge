@@ -4,16 +4,16 @@ overview: "Remove the debt that changes 2 to 5 (upstream/master b845508c to 1f05
 todos:
   - id: failure-contract
     content: "D1-3, D1-12: catalog regression test first; Gateway text to detail in catalog.rs; align CompletionError and classify_http_failure docs with the shipped messages"
-    status: pending
+    status: completed
   - id: guide-order
     content: "D1-4: fix the search row order sentence in guide chapter 13 and regenerate the export"
-    status: pending
+    status: completed
   - id: layout-prose
     content: "D1-6: fix archdoc lines 10 and 23, replace the root AGENTS.md import pointer in the new-crate template and surviving Invariants blocks, name the platform boundary guard"
-    status: pending
+    status: completed
   - id: exit-checks
     content: Run the exit checks once after all three items
-    status: pending
+    status: completed
 isProject: false
 ---
 

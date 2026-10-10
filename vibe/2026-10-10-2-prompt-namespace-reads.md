@@ -4,19 +4,19 @@ overview: Add a `prompt` Lua namespace with `prompt.section(heading)` and `promp
 todos:
   - id: parser-markdown
     content: Add Section.markdown and its accessor; set it in build_sections from Heading.content with trim_leading_blank_lines (now pub(crate)) and trim_end; synthetic_section defaults it to empty; one parser test in tests/headings.rs (blank line above its ---)
-    status: pending
+    status: completed
   - id: scope-lookup
     content: Add find_visible in heading_address.rs as the one heading lookup (Ok(None) when the visible set has no such heading) and make resolve_sibling a thin adapter over it with unchanged messages; one unit test in heading_address-tests.rs; lands alone, after parser-markdown in the same checkout (or beside it in a separate worktree)
-    status: pending
+    status: completed
   - id: prompt-change
     content: "One atomic change in three parts. Table: SectionText, read_visible replacing list_items_from_visible (plus the stale home_without doc paragraph), install_prompt_table replacing install_list_global (Send + Sync read callback), prompt for list_from_section in RESERVED_NAMES, the read callback through setup_section_vm and both SectionContext constructors, the seven test stubs. Removal: every remaining list_from_section use (calls, test names, doc comments, the four fanout fixtures, the collection.rs error). Tests: prompt_reads.rs replacing list_from_section.rs, the two nil-rule edits, the three deletions"
-    status: pending
+    status: completed
   - id: docs
     content: "Update the language spec: index entries, the whole H1 availability sentence (call and jump work there too), the deferred markdown note, and the list_from_section API entry replaced by prompt.section and prompt.list entries with Implementation status lines"
-    status: pending
+    status: completed
   - id: verify
     content: nextest (both sets), clippy with warnings denied (both sets), fmt, docs and facade docs builds, xtask api --check, build-xtask tests, the docs-claims test, and a list_from_section search over crates/ and the spec that finds nothing
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,16 +4,16 @@ overview: "Remove the three accepted debts from the Plugins/global-naming range 
 todos:
   - id: retype-capability-accessor
     content: Re-type ToolId::plugin() to PluginId, delete the fill.rs string round-trip, migrate GlobalName-comparing consumers (PF-DEBT-01)
-    status: pending
+    status: completed
   - id: registry-twin-rejection
     content: Reject punctuation-normalized Plugin id twins at registry registration with RegistryErrorKind::NormalizationCollision (PF-DEBT-02)
-    status: pending
+    status: completed
   - id: remove-fallback-descriptor
     content: Delete the 8192 fallback descriptor; report catalog fetch failure as the chat launch error (PF-DEBT-03)
-    status: pending
+    status: completed
   - id: tool-errors-as-results
     content: Convert bound-tool dispatch failures into model-readable tool results in the model loop (PF-EXP-01)
-    status: pending
+    status: completed
 isProject: false
 ---
 

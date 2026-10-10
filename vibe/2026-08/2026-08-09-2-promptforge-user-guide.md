@@ -4,67 +4,67 @@ overview: Write a progressive tutorial for PromptForge prompt authoring, startin
 todos:
   - id: s01
     content: "Section 1: What is a prompt file (skeleton + Hello World)"
-    status: pending
+    status: completed
   - id: s02
     content: "Section 2: The model turn (prose in, text out)"
-    status: pending
+    status: completed
   - id: s03
     content: "Section 3: Your first Lua block (the prologue)"
-    status: pending
+    status: completed
   - id: s04
     content: "Section 4: The preamble (H1 shared Lua)"
-    status: pending
+    status: completed
   - id: s05
     content: "Section 5: The epilog"
-    status: pending
+    status: completed
   - id: s06
     content: "Section 6: Multiple sections"
-    status: pending
+    status: completed
   - id: s07
     content: "Section 7: The store"
-    status: pending
+    status: completed
   - id: s08
     content: "Section 8: Template substitution"
-    status: pending
+    status: completed
   - id: s09
     content: "Section 9: Tools (search and fetch)"
-    status: pending
+    status: completed
   - id: s10
     content: "Section 10: The Tool object"
-    status: pending
+    status: completed
   - id: s11
     content: "Section 11: The Model object"
-    status: pending
+    status: completed
   - id: s12
     content: "Section 12: Explicit inference with model:infer()"
-    status: pending
+    status: completed
   - id: s13
     content: "Section 13: Alternating blocks"
-    status: pending
+    status: completed
   - id: s14
     content: "Section 14: Composable tool sets"
-    status: pending
+    status: completed
   - id: s15
     content: "Section 15: Sections as subroutines: execute()"
-    status: pending
+    status: completed
   - id: s16
     content: "Section 16: Control flow: goto()"
-    status: pending
+    status: completed
   - id: s17
     content: "Section 17: Fanout (parallel execution)"
-    status: pending
+    status: completed
   - id: s18
     content: "Section 18: The sys table"
-    status: pending
+    status: completed
   - id: s19
     content: "Section 19: Error handling and validation"
-    status: pending
+    status: completed
   - id: s20
     content: "Section 20: Capstone prompt (everything together)"
-    status: pending
+    status: completed
   - id: s21
     content: "Section 21: API Reference (all objects, functions, globals)"
-    status: pending
+    status: completed
 isProject: false
 ---
 

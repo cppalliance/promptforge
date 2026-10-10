@@ -4,67 +4,67 @@ overview: Fix the cancellation, real-filesystem backend, claims-ledger, and vali
 todos:
   - id: types
     content: "Types: Cancelled deregisters on drop; fold ModelCatalog::from_validated; event test gaps"
-    status: pending
+    status: completed
   - id: model-client
     content: "Model client: validating from_result/from_parts with their Engine test and facade doctest callers; linear SSE scan; null error field; #[non_exhaustive] ClientError with wildcard arms; re-bless listing"
-    status: pending
+    status: completed
   - id: lua-cancel
     content: "Lua cancellation: skip the author xpcall handler under cancel; refuse __gc metatables and __mode on _G; tests"
-    status: pending
+    status: completed
   - id: lua-cleanup
     content: "Lua cleanup: pin var.k = nil; delete the unreachable Rust placeholder behind models.infer (models.infer itself stays); correct the run_store_op doc; crate docs"
-    status: pending
+    status: completed
   - id: vfs-host
     content: "VFS real-filesystem backend: refuse dangling symlinks in contain; README sentence; tests"
-    status: pending
+    status: completed
   - id: vfs-claims
     content: "VFS claims: close the three verified gaps (nested subtrees, subtree vs parent listing, created ancestors vs listings and globs); both-order tests"
-    status: pending
+    status: completed
   - id: dead-api
     content: Remove grep (VFS crate, facade re-exports, vfs.md, tests) and Environment::max_depth (engine, lib.md); re-bless listing
-    status: pending
+    status: completed
   - id: parser-frontmatter
     content: "Parser frontmatter: duplicate-Plugin refusal; optional-Plugin slot refusal; guide text; regenerate the combined guide; tests"
-    status: pending
+    status: completed
   - id: parser-structure
     content: "Parser structure: span doc correction; column-0 frontmatter closer; container headings; structural error locations; tests"
-    status: pending
+    status: completed
   - id: engine-surface
     content: "Engine surface: narrow the unused public surface with the bench and doctest paths; bench-only test-support docs; Requirements::notice and prelude-collision tests"
-    status: pending
+    status: completed
   - id: engine-scheduler
     content: "Engine scheduler: entered placeholder; drive.rs panic; shared Chain constructor; rename fanout.rs to heading_address.rs; tests"
-    status: pending
+    status: completed
   - id: housekeeping
     content: "Housekeeping: fold build-xtask product-* and api/listing-*; vfs manifest test catches the missing dependency table forms; audit-tag and history comment sweep"
-    status: pending
+    status: completed
   - id: split-small
     content: "Split to the ceiling and add the marker: promptforge-types, promptforge-model-client, promptforge-parser"
-    status: pending
+    status: completed
   - id: split-lua-tests
     content: "Split promptforge-lua src/tests.rs to the ceiling"
-    status: pending
+    status: completed
   - id: split-lua-rest
     content: "Split the rest of promptforge-lua to the ceiling and add the marker"
-    status: pending
+    status: completed
   - id: split-engine-source
     content: "Split the promptforge-engine source files and forward-tests.rs to the ceiling"
-    status: pending
+    status: completed
   - id: split-engine-exec-flow
     content: "Split promptforge-engine suite/exec_flow.rs to the ceiling"
-    status: pending
+    status: completed
   - id: split-engine-scheduler-tests
     content: "Split the promptforge-engine scheduler/ test files to the ceiling"
-    status: pending
+    status: completed
   - id: split-engine-other-tests
     content: "Split the remaining promptforge-engine test files to the ceiling and add the marker"
-    status: pending
+    status: completed
   - id: split-vfs-handle
     content: "Split promptforge-vfs src/handle.rs to the ceiling"
-    status: pending
+    status: completed
   - id: split-vfs-rest
     content: "Split the rest of promptforge-vfs to the ceiling, add the marker, and pass the full exit gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 

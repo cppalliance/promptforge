@@ -4,13 +4,13 @@ overview: Replace the stale hand-authored mdBook chapters with thin wrappers tha
 todos:
   - id: chapters
     content: Delete old chapter files and create thin include wrappers
-    status: pending
+    status: completed
   - id: summary
     content: Rewrite SUMMARY.md and update introduction.md
-    status: pending
+    status: completed
   - id: verify
     content: Verify mdbook build succeeds
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,52 +4,52 @@ overview: Remove the layout-shifting voice-status line, upgrade the agent window
 todos:
   - id: step-01
     content: Remove the voice-status line; route voice errors to StatusBar.showLocal
-    status: pending
+    status: completed
   - id: step-02
     content: Open chat links externally (target/rel in sanitizer, shell navigation intercept)
-    status: pending
+    status: completed
   - id: step-03
     content: Block-memoized streaming markdown with unterminated-construct repair
-    status: pending
+    status: completed
   - id: step-04
     content: Three-state thinking block (Planning next moves / Thinking, 4-line preview)
-    status: pending
+    status: completed
   - id: step-05
     content: Tool activity block (one-line autoscroll collapsed, full log expanded)
-    status: pending
+    status: completed
   - id: step-06
     content: Title-bar markup and window-chrome.ts browser-side wiring
-    status: pending
+    status: completed
   - id: step-07
     content: Accessible File, Edit, Window, Help menus
-    status: pending
+    status: completed
   - id: step-08
     content: Title-bar and menu CSS in the :root skin system
-    status: pending
+    status: completed
   - id: step-09
     content: Decorationless Windows shell with typed wry IPC commands
-    status: pending
+    status: completed
   - id: step-10
     content: Install the cold medallion as the program icon
-    status: pending
+    status: completed
   - id: step-11
     content: Confined workspace list/read/write APIs in workspace.rs
-    status: pending
+    status: completed
   - id: step-12
     content: Native Windows path drops through the shell
-    status: pending
+    status: completed
   - id: step-13
     content: Zone registry, panel-type registry, and Workshop file-tree panel
-    status: pending
+    status: completed
   - id: step-14
     content: EditorSurface interface and CodeMirror 6 editor panel
-    status: pending
+    status: completed
   - id: step-15
     content: Layout boot, lock, persistence, and keyboard shortcuts
-    status: pending
+    status: completed
   - id: verify
     content: Final full verification (build, tests, manual Windows pass)
-    status: pending
+    status: completed
 isProject: false
 ---
 

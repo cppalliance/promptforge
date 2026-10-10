@@ -4,7 +4,7 @@ overview: "Remove DEBT-PMS-1: the sheet binary treats a failed previous-sheet do
 todos:
   - id: debt-pms-1
     content: "DEBT-PMS-1: distinguish previous-sheet error kinds in fetch_sheet/previous_sheet; fatal exit on outage or corruption, tolerate unset URL and 404; unit + 3 integration tests; nextest/clippy/fmt green"
-    status: pending
+    status: completed
 isProject: false
 ---
 <product-contract>

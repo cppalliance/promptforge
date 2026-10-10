@@ -4,43 +4,43 @@ overview: Hide stale docs from the agent, one audited item at a time.
 todos:
   - id: "1"
     content: Remove all rustdoc markdown includes (promptforge, harness, engine) and archive them, plus tools/cicerone, in promptforge-design/saved-docs/
-    status: pending
+    status: completed
   - id: "2"
     content: Move or delete every remaining doctest, remove the doctest steps, and add a tidy check that rejects new doctests
-    status: pending
+    status: completed
   - id: "3"
     content: Rewrite every README.md as a broad, stale-proof statement of responsibility
-    status: pending
+    status: completed
   - id: "4"
     content: Replace the docs landing page with one table that xtask site generates
-    status: pending
+    status: completed
   - id: "5"
     content: Remove all crates.io metadata from every Cargo.toml
-    status: pending
+    status: completed
   - id: "6"
     content: Move the three guides' chapters to promptforge-docs; promptforge CI clones it and builds the whole site
-    status: pending
+    status: completed
   - id: "7"
     content: Remove stale enforcement code and config
-    status: pending
+    status: completed
   - id: "8"
     content: One strict workspace lint table; no copies
-    status: pending
+    status: completed
   - id: "9"
     content: Root clippy.toml bans on installing process-global state
-    status: pending
+    status: completed
   - id: "10"
     content: Ban serde_json preserve_order in deny.toml
-    status: pending
+    status: completed
   - id: "11"
     content: Gate settings - docs-link-free clippy, CARGO_BUILD_WARNINGS, hakari verify, git hooks on
-    status: pending
+    status: completed
   - id: "12"
     content: Shrink AGENTS.md - delete what checks now enforce, fix the wrong fact, reword CSS
-    status: pending
+    status: completed
   - id: "13"
     content: Make the 500-line limit absolute, compiler-enforced, and encapsulation-safe
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,61 +4,61 @@ overview: Correct the MCP server from a surface that competes for a model's tool
 todos:
   - id: step-1
     content: "Step 1: publish only the four built-ins; delete Expose and is_direct; rewrite descriptions and instructions in the command register"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: delete the tools/list_changed machinery - Sessions, ListChanged, published_changed"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: remove expose and default_expose from the configuration and the shipped prompts.toml"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: rename the crate, binary, library, and design document to promptforge-mcp-server"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: correct the stale doc comments in promptforge-core and promptforge-gateway"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6: write the do-more-with-less principle into AGENTS.md and design.md"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7: reconcile design.md, design-promptforge.md and notes.md with explicit invocation"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8: refactor design-cli.md in place into built and unbuilt parts"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9: transfer the built part to crates/promptforge-cli/design-cli.md"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10: finish the residue as design-cli-residue.md in the design repo"
-    status: pending
+    status: completed
   - id: step-11
     content: "Step 11: refactor design-gateway.md in place into built and unbuilt parts"
-    status: pending
+    status: completed
   - id: step-12
     content: "Step 12: transfer the built part to crates/promptforge-gateway/design-gateway.md"
-    status: pending
+    status: completed
   - id: step-13
     content: "Step 13: finish the residue as design-gateway-residue.md in the design repo"
-    status: pending
+    status: completed
   - id: step-14
     content: "Step 14: refactor design-core.md in place into built and unbuilt parts"
-    status: pending
+    status: completed
   - id: step-15
     content: "Step 15: transfer the built part to crates/promptforge-core/design-core.md"
-    status: pending
+    status: completed
   - id: step-16
     content: "Step 16: finish the residue as design-core-residue.md in the design repo"
-    status: pending
+    status: completed
   - id: step-17
     content: "Step 17: rename design-mcp.md to design-mcp-server.md and refactor it in place"
-    status: pending
+    status: completed
   - id: step-18
     content: "Step 18: merge the built part into the crate's design-mcp-server.md"
-    status: pending
+    status: completed
   - id: step-19
     content: "Step 19: rewrite the crate document from finished work; residue becomes design-mcp-server-residue.md"
-    status: pending
+    status: completed
 isProject: false
 ---
 

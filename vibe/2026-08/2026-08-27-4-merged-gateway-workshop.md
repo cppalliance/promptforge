@@ -7,37 +7,37 @@ todos:
     status: completed
   - id: harden-cross-site
     content: "Step 1: block cross-site requests - Sec-Fetch-Site filter, WS Origin allowlist, JSON content-type guard, URL-decode workspace path params"
-    status: pending
+    status: completed
   - id: harden-atomic-writes
     content: "Step 2: shared atomic-write helper for workspace.rs and menu.rs plus startup orphan sweep"
-    status: pending
+    status: completed
   - id: harden-timeouts
     content: "Step 3: TimeoutLayer tiers, explicit gateway HTTP timeout, bounded heartbeat probes"
-    status: pending
+    status: completed
   - id: harden-delta-decoder
     content: "Step 4: gateway delta-decoder conformance audit with random-split tests"
-    status: pending
+    status: completed
   - id: harden-backoff
     content: "Step 5: gateway reconnect backoff - reset on useful work, jitter, total budget"
-    status: pending
+    status: completed
   - id: harden-traversal
     content: "Step 6: verify debug asset path enforces the same traversal guarantee as the release embed path"
-    status: pending
+    status: completed
   - id: gateway-spawn
     content: "Step 7: refactor gateway run() into spawn() returning GatewayHandle with shutdown"
-    status: pending
+    status: completed
   - id: workshop-config
     content: "Step 8: add optional [workshop] section to gateway config with boot-only profile validation"
-    status: pending
+    status: completed
   - id: host-workshop
     content: "Step 9: gateway workshop feature - spawn ws-server on second loopback listener, derive client creds, shutdown order"
-    status: pending
+    status: completed
   - id: shell-boot
     content: "Step 10: desktop shell boots merged gateway; first-run generates gateway.toml + default profile"
-    status: pending
+    status: completed
   - id: docs
     content: "Step 11: update README and design log; run full verify"
-    status: pending
+    status: completed
 isProject: false
 ---
 

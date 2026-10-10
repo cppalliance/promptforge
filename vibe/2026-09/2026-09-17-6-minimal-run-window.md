@@ -4,28 +4,28 @@ overview: "A bare-minimum Run window for the Workshop SPA: a Run menu item opens
 todos:
   - id: reexports
     content: Add contract type re-exports to promptforge-api-runtime parser.rs
-    status: pending
+    status: completed
   - id: route
     content: POST /prompts/contract route + hand-written contract DTO in workshop-workspace (handlers-prompts.rs) + promptforge-api-runtime dep edge
-    status: pending
+    status: completed
   - id: route-tests
     content: "Server route tests: 200 full contract, 422 with line number, implicit prose args"
-    status: pending
+    status: completed
   - id: panel
     content: "SPA ui/run/ concern: panel, states, rows, run-api.ts, RunTab shimmer title, shared-ui shimmer.css, panel-registry/zones wiring"
-    status: pending
+    status: completed
   - id: menu
     content: workbench.action.newRunWindow menu action with active-editor pre-fill
-    status: pending
+    status: completed
   - id: dnd
     content: Tree drag-out (application/x-workshop-path) + OS drop-target hook in workspace-drops.ts
-    status: pending
+    status: completed
   - id: spa-tests
     content: "SPA tests: empty open, pre-filled open, tree drag, parse error row"
-    status: pending
+    status: completed
   - id: zones-fix
     content: "Zone stability: size memory + group resurrection with placeholder panel in zones.ts, persisted across relaunch"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -4,28 +4,28 @@ overview: "Change `Tool::call` to `call(&self, cx: ToolContext<'_>, args)`. The 
 todos:
   - id: engine-effect
     content: "Add access: Arc<Access> to Effect::ToolCall and update the effect.rs docs; fix run/tests.rs; bless public-api.txt"
-    status: pending
+    status: completed
   - id: engine-fork-join
     content: In prepare_tool_call fork the call's identity from the chain with access_spawn and keep its ExecId in ToolCallContinuation; in apply_answer join it into the chain on every ToolCall answer, including Dropped
-    status: pending
+    status: completed
   - id: harness-context
     content: "Add ToolContext<'a> (borrowed access and origin) to tool.rs, change Tool::call, rewrite the trait docs, and re-export ToolContext, ToolCallOrigin, ToolCaller, and Access from the harness facade's plugin and vfs modules"
-    status: pending
+    status: completed
   - id: harness-performer
     content: Pass the effect's access and origin through ToolPerformer, ActivatedTools (which owns them inside its future and lends them to the tool), and effect_loop perform
-    status: pending
+    status: completed
   - id: remove-services-vfs
     content: Remove the vfs field from RunServices and the vfs parameter from RunServices::new and with_host; update prepare.rs, the struct and prepare docs, the activation fixture and its two tests, and about 17 test call sites
-    status: pending
+    status: completed
   - id: mechanical
     content: Update the 7 Tool implementations, about 40 test call sites (with a small owned test fixture per crate that lends a ToolContext), and 7 test ToolPerformer implementations
-    status: pending
+    status: completed
   - id: tests
     content: "Add the four Engine tests (tool reads the chain's write, chain reads the tool's write, a task's tool call runs under the task, a Dropped call is still joined) and the end-to-end Harness test"
-    status: pending
+    status: completed
   - id: verify
     content: Run the nextest, clippy, fmt, doc, xtask api, and build-xtask gates
-    status: pending
+    status: completed
 isProject: false
 ---
 

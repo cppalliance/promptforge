@@ -4,34 +4,34 @@ overview: Make every Workshop surface that has a Cursor counterpart look and beh
 todos:
   - id: step-1
     content: "Step 1: IDE tokens, text tiers, inline codicons, shimmer, controls, progress, focus, scrollbars, and two dialog skins in look and ui"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: reasoning timing, generating and reconnecting flags, tool ids, cancel, error titles, and the pure transcript model"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: keyed transcript view, rows, markdown, feed scroll, turn footer, context menu, toast token, and the composer error popup"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: composer, menus, agent keybindings, zone attribute, pane header, chat tabs, rename, empty state, and the lucide removal from ui"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: title bar, menu skin and structure, zoom keys, About, and the Windows quit accelerator"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6: dockview palette, tabs, dirty dot, watermark, drop zones, default sizes, and the file tree"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7: editor theme, Cursor Dark highlight style, find widget, whitespace modes, and the Shiki theme"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8: quick input, toasts, status bar, command failure toasts, and workbench inputs"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9: run panel as Cursor Settings rows, with form-modal dialogs"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10: gateway config app on Cursor's settings look, then the branch-wide gate"
-    status: pending
+    status: completed
 isProject: false
 ---
 

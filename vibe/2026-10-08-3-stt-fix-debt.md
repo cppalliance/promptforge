@@ -4,13 +4,13 @@ overview: "Remove the two debts that the STT report-fix work added: the sparse-s
 todos:
   - id: d1-1-successor-cut
     content: "D1-1: cut the sparse successor at the projected token with no punctuation snap, log the cut position, add the punctuated-successor regression test (fails first)"
-    status: in_progress
+    status: completed
   - id: d1-2-readme
     content: "D1-2: fix README lines 33, 43, 58 and 80 so CI scope and forced-window history match the code"
-    status: pending
+    status: completed
   - id: exit-checks
     content: Run STT crate tests, fmt, clippy with warnings denied, and the native long-speech test if fixtures are available
-    status: pending
+    status: completed
 isProject: false
 ---
 

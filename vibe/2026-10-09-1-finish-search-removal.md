@@ -4,10 +4,10 @@ overview: "Finish what the debt-removal run missed and close out the four follow
 todos:
   - id: f1-finish-removal-text
     content: "F1: reword the split-line header comment in transcript-view.ts and edit lines 558 and 1051 of the closed plan record vibe/2026-10-08-2-copy-cursor-everywhere.md; verify with a multi-line search and the workshop UI typecheck"
-    status: pending
+    status: completed
   - id: f2-config-panel-context-menu
     content: "F2: add panel and standalone contextmenu tests to config-ui mode.test.mjs (npm run build first, panel test must fail), then install a capture-phase contextmenu preventDefault on root.ownerDocument in boot()'s panel branch in main.ts; run config-ui npm test and typecheck"
-    status: pending
+    status: completed
 isProject: false
 ---
 

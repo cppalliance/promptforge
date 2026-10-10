@@ -13,10 +13,10 @@ todos:
     status: completed
   - id: local-completions
     content: Serve local llama.cpp inference through /v1/chat/completions endpoint
-    status: pending
+    status: completed
   - id: model-download
     content: HTTP download from source URL with cache management in ~/.promptforge/models/
-    status: pending
+    status: completed
   - id: candle-gpu
     content: Extend Candle from CPU-only to CUDA/Metal for utility models (classifiers, embedders)
     status: cancelled

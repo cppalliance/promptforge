@@ -4,16 +4,16 @@ overview: Debt Collector review of the 13 promptforge commits on master over ups
 todos:
   - id: end-tool-identity
     content: "D1-2/3/4: add a VFS primitive that ends a tool call's identity (refuse, join, drop snapshot), call it from apply_answer and abort_effect, with regression tests"
-    status: pending
+    status: completed
   - id: redact-gateway-config
     content: "D1-16: hand-written redacting Debug on workshop_support::GatewayConfig plus a regression test"
-    status: pending
+    status: completed
   - id: fix-web-tests-comment
     content: "D1-13: reword crates/harness-web/src/web-tests.rs lines 29-30 to drop the VFS claim"
-    status: pending
+    status: completed
   - id: run-gates
     content: Run the full root AGENTS.md gates (nextest, clippy, fmt, docs, xtask api --check, build-xtask)
-    status: pending
+    status: completed
 isProject: false
 ---
 

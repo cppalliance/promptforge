@@ -4,25 +4,25 @@ overview: Replace Workshop-specific speech transcription with a generic OpenAI R
 todos:
   - id: characterize
     content: Pin current batch and two-model realtime behavior with deterministic and native fixtures
-    status: pending
+    status: completed
   - id: backend-boundary
     content: Split the backend-neutral engine from the safe Whisper adapter and bound model workers
-    status: pending
+    status: completed
   - id: session-lifecycle
     content: Isolate per-item finalization and implement atomic cancellation-safe generation replacement
-    status: pending
+    status: completed
   - id: realtime-contract
     content: Implement the OpenAI Realtime transcription subset and hypothesis extension
-    status: pending
+    status: completed
   - id: workshop-adapter
     content: Convert Workshop to a payload-opaque relay with local capture and status ownership
-    status: pending
+    status: completed
   - id: verify-document
     content: Enforce architecture and debt budgets, complete acceptance, and document final boundaries
-    status: pending
+    status: completed
   - id: gateway-log-bookends
     content: Mark Gateway serving-log launch and terminal outcomes without changing logging infrastructure
-    status: pending
+    status: completed
   - id: ci-architecture-toolchain
     content: Run pinned architecture tools under the repository Cargo version inside stable CI
     status: completed
@@ -49,7 +49,7 @@ todos:
     status: completed
   - id: realtime-live-hypotheses
     content: Bind precommit hypothesis item IDs to the active browser take
-    status: pending
+    status: completed
 isProject: false
 ---
 

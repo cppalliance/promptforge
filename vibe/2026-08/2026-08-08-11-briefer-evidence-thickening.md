@@ -25,10 +25,10 @@ todos:
     status: completed
   - id: source-log-late
     content: "Late try: store.append log.md Source Log; keep only if clean"
-    status: pending
+    status: completed
   - id: commit-steps
     content: Git commit each kept briefer.md quality step-up (fold later)
-    status: pending
+    status: completed
 isProject: false
 ---
 

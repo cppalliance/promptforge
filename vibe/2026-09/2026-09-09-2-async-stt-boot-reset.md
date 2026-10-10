@@ -4,19 +4,19 @@ overview: Restart the STT hot-swap removal from the clean base while preserving 
 todos:
   - id: simplify-gateway-infrastructure
     content: Rename GatewayDiscoveryFile and replace the duplicated bounded command channel with one notified pending deque
-    status: pending
+    status: completed
   - id: one-time-speech
     content: Build the minimal one-time speech load while preserving existing status and retained ownership
-    status: pending
+    status: completed
   - id: bind-first-queue
     content: Load STT once through the existing post-readiness boot profile command and remove runtime reload paths
-    status: pending
+    status: completed
   - id: ui-restart
     content: Add the browser STT change predicate and successful-Apply restart toast
-    status: pending
+    status: completed
   - id: docs-qualification
     content: Reconcile documentation and complete full automated, package, and microphone qualification
-    status: pending
+    status: completed
 isProject: false
 ---
 

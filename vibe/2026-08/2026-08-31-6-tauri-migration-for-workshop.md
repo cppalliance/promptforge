@@ -4,25 +4,25 @@ overview: "Migrate the PromptForge Workshop desktop shell from raw tao/wry to Ta
 todos:
   - id: scaffold
     content: "Scaffold Tauri in promptforge-workshop: deps, build.rs, final tauri.conf.json, capabilities, icons (desktop-shell untouched)"
-    status: pending
+    status: completed
   - id: rust-core
     content: Rewrite main.rs on Tauri Builder and port navigation.rs (app boots under Tauri; no drops/mic yet)
-    status: pending
+    status: completed
   - id: rust-bridge
     content: "Port bridge.rs: Windows COM file drops plus per-platform mic permission handlers, with tests"
-    status: pending
+    status: completed
   - id: delete-shell
     content: Delete the promptforge-desktop-shell crate and its workspace.dependencies entry
-    status: pending
+    status: completed
   - id: frontend
     content: Switch window-chrome.ts and workshop-panel.ts to Tauri APIs; update UI test mocks; repackage dist
-    status: pending
+    status: completed
   - id: field-fixes
     content: "Field-report fixes: download resume in cache.rs, truncation warning, mic UX, tilde expansion, status bar recompute"
-    status: pending
+    status: completed
   - id: verify
     content: Full test/lint suite, docs sweep, cargo tauri build, manual smoke; then fold all checkpoints into one commit
-    status: pending
+    status: completed
 isProject: false
 ---
 

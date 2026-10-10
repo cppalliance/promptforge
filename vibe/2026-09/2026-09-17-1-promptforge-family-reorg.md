@@ -4,7 +4,7 @@ overview: Rename promptforge-api to promptforge-api-runtime, rename shared-promp
 todos:
   - id: single-commit
     content: "One commit: move, rename, re-export, privacy rule, docs, verification"
-    status: pending
+    status: completed
 isProject: false
 ---
 

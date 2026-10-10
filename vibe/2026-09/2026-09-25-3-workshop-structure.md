@@ -4,67 +4,67 @@ overview: The structure plan that follows the landed workshop fixes plan, merged
 todos:
   - id: step-1
     content: "Step 1: Record the baselines (no code)"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: Reword the stale UI comments and clarify the layout rule"
-    status: pending
+    status: completed
   - id: step-3
     content: "Step 3: Enforce the desktop dependency boundary in the build check"
-    status: pending
+    status: completed
   - id: step-4
     content: "Step 4: Trim the gateway public surface and delete the cache API"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: Rename the gateway modules and share the heartbeat stop-and-rebind logic"
-    status: pending
+    status: completed
   - id: step-6
     content: "Step 6: Deduplicate the gateway binding and client, and close the gateway test gaps"
-    status: pending
+    status: completed
   - id: step-7
     content: "Step 7: Tidy the small crates: register tests, private handles, menu directory, one chat filter"
-    status: pending
+    status: completed
   - id: step-8
     content: "Step 8: Apply the layout rule to the workspace and rename the Save Workspace As route"
-    status: pending
+    status: completed
   - id: step-9
     content: "Step 9: Replace the workspace response type, trim its surface, and close its test gaps"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10: Share the envelope response and validate state buckets once"
-    status: pending
+    status: completed
   - id: step-11
     content: "Step 11: Finish the /ws split: websocket module, shared SocketState, own route and state, renames"
-    status: pending
+    status: completed
   - id: step-12
     content: "Step 12: Split the socket loops and move the /ws integration tests"
-    status: pending
+    status: completed
   - id: step-13
     content: "Step 13: Move the agent frames into the server and drop the protocol crate Engine dependency"
-    status: pending
+    status: completed
   - id: step-14
     content: "Step 14: Trim the server public surface and share its require check"
-    status: pending
+    status: completed
   - id: step-15
     content: "Step 15: Restructure the server integration tests and close the server test gaps"
-    status: pending
+    status: completed
   - id: step-16
     content: "Step 16: Tidy the desktop gateway module and its tests"
-    status: pending
+    status: completed
   - id: step-17
     content: "Step 17: Merge launch-and-wait and survive a stale discovery file"
-    status: pending
+    status: completed
   - id: step-18
     content: "Step 18: Settle the UI service tokens, barrels, backoff, and contribution name"
-    status: pending
+    status: completed
   - id: step-19
     content: "Step 19: Move the tree panel into workspace and settle the workspace folders"
-    status: pending
+    status: completed
   - id: step-20
     content: "Step 20: Guard every inbound frame in the UI"
-    status: pending
+    status: completed
   - id: step-21
     content: "Step 21: Update the docs and run the exit gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 

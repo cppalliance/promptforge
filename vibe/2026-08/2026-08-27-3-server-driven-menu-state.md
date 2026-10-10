@@ -4,67 +4,67 @@ overview: "Make the Model menu fully server-driven: the server owns profiles, ac
 todos:
   - id: led-stuck-fix
     content: Fix LED stuck amber when error frame follows expired pulse
-    status: pending
+    status: completed
   - id: statusbar-group
     content: REC and LED grouped, hidden together behind progress bar
-    status: pending
+    status: completed
   - id: ci-no-cuda
     content: check-workshop CI builds without the default cuda feature
-    status: pending
+    status: completed
   - id: editor-save-baseline
     content: Save baseline is the written text, not the post-write editor text
-    status: pending
+    status: completed
   - id: socket-reasoning-close
     content: Socket close after reasoning-only rejects instead of resolving empty
-    status: pending
+    status: completed
   - id: macos-dragdrop
     content: macOS drag-drop handler consumes only Drop, restoring HTML5 DnD
-    status: pending
+    status: completed
   - id: workspace-token-colon
     content: Full-precision write-conflict token; colon ban gated to Windows
-    status: pending
+    status: completed
   - id: reasoning-synonyms
     content: delta_fields skips empty reasoning synonyms to the next key
-    status: pending
+    status: completed
   - id: titlebar-glyphs
     content: Maximize/restore glyph toggle that actually hides SVG
-    status: pending
+    status: completed
   - id: menu-state
     content: menu.rs with workbench snapshot, bus, chat_ready, per-profile memory file
-    status: pending
+    status: completed
   - id: gateway-sse
     content: Gateway switch-profile streams stage events; client consumes them
-    status: pending
+    status: completed
   - id: populate
     content: Boot and heartbeat populate profile state and reachability
-    status: pending
+    status: completed
   - id: session-multiplex
     content: Session loop multiplexes concurrent chats by id, inbound always read
-    status: pending
+    status: completed
   - id: ws-frames
     content: Connect snapshot, workbench branch, inbound select/switch events
-    status: pending
+    status: completed
   - id: socket-ui
     content: WorkshopSocket workbench frame and event send methods
-    status: pending
+    status: completed
   - id: model-service
     content: WorkbenchService and ModelService command/state split fed by pushes
-    status: pending
+    status: completed
   - id: main-rewire
     content: main.ts drops boot fetches and local switch logic
-    status: pending
+    status: completed
   - id: menu-render
     content: Menu disables all rows while switching, rebuilds live
-    status: pending
+    status: completed
   - id: send-gating
     content: Composer send and mic recording gated on chat_ready
-    status: pending
+    status: completed
   - id: remove-http
     content: Remove HTTP /profiles routes, tests, and update module ceilings
-    status: pending
+    status: completed
   - id: verify
     content: Full test suites pass and live switch verified
-    status: pending
+    status: completed
 isProject: false
 ---
 

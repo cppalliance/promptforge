@@ -4,22 +4,22 @@ overview: Move the twelve workshop-* crates into a manifestless, fully private c
 todos:
   - id: harness
     content: build-xtask product.rs gains crates/workshop/ fully-private container rule + fixtures; sync architecture test matrix
-    status: in_progress
+    status: completed
   - id: moves
     content: git mv the twelve crates into crates/workshop/ with short dir names
-    status: pending
+    status: completed
   - id: manifests
     content: Root Cargo.toml members/exclude/workspace.dependencies
-    status: pending
+    status: completed
   - id: paths
     content: "Path literals: gitignore, package.json + lockfile, chat_gate.rs, gateway build.rs icon, sidecar tool, 6 workflow files, README, document.md"
-    status: pending
+    status: completed
   - id: docs
     content: AGENTS.md root rule + moved docs sweep
-    status: pending
+    status: completed
   - id: verify
     content: Cargo.lock regen, full verification battery, one commit
-    status: pending
+    status: completed
 isProject: false
 ---
 

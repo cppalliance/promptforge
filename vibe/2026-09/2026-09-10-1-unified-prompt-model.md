@@ -4,43 +4,43 @@ overview: "Implement a narrow `promptforge: 0` core: rename heading-based `execu
 todos:
   - id: define-unified-contracts
     content: Define only the active plain-message, message-builder, models.loop, and call-time model/tool selection contracts; retain every other contract as deferred description.
-    status: pending
+    status: completed
   - id: rename-section-call
     content: Rename heading-based `execute` to synchronous `call` as the first behavior change, preserving current execution semantics.
-    status: pending
+    status: completed
   - id: resolve-concurrency-primitive
     content: "Deferred: retain the designed `call_async`, task, `tasks.await_all`, and thin Lua fanout contracts without implementing or migrating them."
     status: deferred
   - id: replace-prose-semantics
     content: Replace positional prose inference with a pending Markdown buffer, thematic-break reset, and a read-only, lazy, memoized `prose` value for each following Lua fence.
-    status: pending
+    status: completed
   - id: add-message-list
     content: Ship optional pure-Lua `messages.new()` builders over the unchanged plain message-array contract.
-    status: pending
+    status: completed
   - id: add-context-projection
     content: Add only provider-neutral message projection and role and tool-call correlation validation required by active `models.loop`.
-    status: pending
+    status: completed
   - id: add-compactor-fail
     content: Add the minimum compactor surface `models.loop` requires (optional compactor parameter defaulting to `compactors.fail`, overflow invocation with reason, typed context exhaustion) and defer the replacement-handling framework.
-    status: pending
+    status: completed
   - id: add-models-loop
     content: Expose Rust-backed `models.loop(handle?, messages, compactor?)`, append complete assistant and tool history, return nil, and default omitted compaction policy to `compactors.fail`.
-    status: pending
+    status: completed
   - id: add-modules-execution
     content: "Deferred: retain inherited Lua, `require`, path-based `execute`, `execute_async`, `include`, `local_include`, and Markdown fragments as documented future contracts."
     status: deferred
   - id: generalize-user-input
     content: Lift blocking, fallback, and failing user input into a generic broker used by direct Lua `user_input()`, the model-visible input tool, and the Agent window.
-    status: pending
+    status: completed
   - id: restore-unified-sessions
     content: "Deferred: retain journaled operations, snapshots, incarnation-gated restore, and replay contracts."
     status: deferred
   - id: migrate-prompts-guides
     content: Migrate only prompts, fixtures, APIs, and guides directly affected by `execute` to `call`, `tool_call` to `tools.call`, `handle:infer` to `models.infer(handle, prompt)`, explicit lazy prose, `reply` removal, message builders, `models.infer`, and `models.loop`.
-    status: pending
+    status: completed
   - id: verify-complete-model
     content: Run focused parser, Lua, models.loop, projection, and migration verification for the active core only.
-    status: pending
+    status: completed
 isProject: false
 ---
 

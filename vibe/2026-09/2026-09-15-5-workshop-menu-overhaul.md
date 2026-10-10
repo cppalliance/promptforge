@@ -4,31 +4,31 @@ overview: Replace the workshop's 5-menu bar with Cursor's 8-menu bar (File, Edit
 todos:
   - id: services-registries
     content: DOM-free registries and stateful services under src/services/ (command, menu, context-key, keybinding parser/resolver/registry, action, quick-access, recent-files, text-control) with jsdom-free tests; re-export shims at the old ui/menu paths. See Technical Design.
-    status: pending
+    status: completed
   - id: menubar-widgets
     content: "ui/menu/menubar.ts + menu.ts: buttons generated from MenubarMainMenu, recursive flyouts, registry-derived shortcut labels, when/precondition/toggled rendering, title-bar left/center/right restructure. See Technical Design."
-    status: pending
+    status: completed
   - id: keybinding-dispatcher
     content: "ui/layout/keybinding-dispatcher.ts: capture-phase dispatch over the resolver, multi-stroke chords with pending status, claimed chords swallowed. See Technical Design."
-    status: pending
+    status: completed
   - id: editor-contribution
     content: "Editor: eager contribution with lazy run; all CodeMirror-backed commands from the catalog; EditorSettingsService with compartments; TextControl adapter; ':' quick-access provider; recent-files recording. See Functional Specification."
-    status: pending
+    status: completed
   - id: files-contribution
     content: "Files/workspace: openFile, openFolder, addRootFolder, saveAs, saveAll, revert; Open Recent provider rows; '' quick-access provider. See Functional Specification."
-    status: pending
+    status: completed
   - id: shell-contribution
     content: "Shell: edit commands over TextControlService; chrome, layout, status, agent, gateway contributions; menubar and stub tables; workbench.contributions.ts; remove window-menu.ts; main.ts cleanup; macOS traffic-light chrome (overlay title-bar style in the shell's macOS config, hidden custom controls and left inset in window-chrome). See Technical Design."
-    status: pending
+    status: completed
   - id: quick-input
     content: "ui/quickinput/: QuickInputService widget, '>' palette, '?' help, placeholder providers, the four quick-access actions. See Technical Design."
-    status: pending
+    status: completed
   - id: command-center
     content: "ui/chrome/command-center.ts: title-bar pill over MenuId.CommandCenter with WindowTitle. See Technical Design."
-    status: pending
+    status: completed
   - id: closing-sweep
     content: Remove shims, enable noUncheckedIndexedAccess, update ui/AGENTS.md and the panel-registry doc comment, run all gates. See Testing Plan.
-    status: pending
+    status: completed
 isProject: false
 ---
 

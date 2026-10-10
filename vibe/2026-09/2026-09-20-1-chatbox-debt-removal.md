@@ -4,10 +4,10 @@ overview: Remove the two debts the ChatBox extraction (37be5c6d..bbff0144 in pro
 todos:
   - id: step-1
     content: "Step 1 (CBX-001): renderChip removable option, strip and static renderer pass false, reserved docstrings, restored-strip assertion"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2 (CBX-002): delete 11 dead crates/workshop/*/ui/package-lock.json globs in 4 workflow files; fix test/mention-chip.mjs header"
-    status: pending
+    status: completed
 isProject: false
 ---
 

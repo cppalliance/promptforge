@@ -4,22 +4,22 @@ overview: Add a `plugin-mcp` crate that connects PromptForge to remote MCP serve
 todos:
   - id: runtime-name
     content: "Step 1: name the tokio runtime service in promptforge-plugin, make web's key private, and build Workshop's key from the name"
-    status: pending
+    status: completed
   - id: contract-ready
     content: "Step 2: add defaulted Plugin::ready and the Harness readiness wait before each run's snapshot, end a refusal whose run was cancelled as cancelled, with tests"
-    status: pending
+    status: completed
   - id: plugin-mcp-crate
     content: "Step 3: add crates/plugin-mcp on rmcp's Streamable HTTP client with PACKAGE as its only public item, refusing local entries as not supported yet, plus entry, connect, server, and result modules and fixture tests"
-    status: pending
+    status: completed
   - id: workshop-install
     content: "Step 4: add [agents] mcp to workshop.toml, read the named mcp.json, and install one MCP Plugin per server"
-    status: pending
+    status: completed
   - id: remove-reserved-mcp
     content: "Step 5: remove the reserved Lua mcp request and its parse, dispatch, and tests"
-    status: pending
+    status: completed
   - id: verify-live
     content: "After Step 5: the operator's live check: github and wg21-papers work in chat, and pinecone-search and wg21-wiki are installed as unavailable with the not-supported reason"
-    status: pending
+    status: completed
 isProject: false
 ---
 

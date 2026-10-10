@@ -4,31 +4,31 @@ overview: Fix all Tier 1 (correctness/operational) and Tier 2 (hygiene) rust-rul
 todos:
   - id: ws-b
     content: "B: CI doctest step + aggregate job + drop unused tracing-subscriber dev-dep"
-    status: pending
+    status: completed
   - id: ws-a1
     content: "A: fix blocking/fallible Drop impls (RecoveryCandidate, GatewaySupervisor, SttEngine/Transcriber)"
-    status: pending
+    status: completed
   - id: ws-a2
     content: "A: restore discarded error causes (SessionError::Inference, AudioError::InvalidBase64)"
-    status: pending
+    status: completed
   - id: ws-a3
     content: "A: bound the session_agents supervisor event channel"
-    status: pending
+    status: completed
   - id: ws-d1
     content: "D: add #[non_exhaustive] to 7 public items/variants"
-    status: pending
+    status: completed
   - id: ws-d2
     content: "D: convert 43 #[allow] sites to #[expect] with reasons"
-    status: pending
+    status: completed
   - id: ws-e
     content: "E: convert ~5 in-process async tests to paused time"
-    status: pending
+    status: completed
   - id: ws-c1
     content: "C1: FixtureError for the fixture API + typed sources in the take/finalization pipeline (~26 sites)"
-    status: pending
+    status: completed
   - id: ws-c2
     content: "C2: anyhow for test-only code and build tools + folded typed errors in remaining production (~32 sites)"
-    status: pending
+    status: completed
 isProject: false
 ---
 

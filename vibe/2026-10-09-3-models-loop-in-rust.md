@@ -4,25 +4,25 @@ overview: First replace models.loop's and models.infer's optional leading handle
 todos:
   - id: handle-methods
     content: Phase 0 - models.loop(messages, compactor?) and models.infer(prompt) run on the section's current model, and model handles gain h:loop(messages, compactor?) and h:infer(prompt), which run on the handle's model, through two field getters over one registry table; models::is_handle backs the new is_model_handle capture; the shim splits each function into an entry per form over a shared body, checks the list before the first yield, and drops the drain guard and the guessing rule; every handle-form call site, test, and Rust doc comment migrates; the methodless-handle bullet is deleted from lua/AGENTS.md and the lua crate's Invariants list; handles_reject_colon_methods is rewritten; new argument tests in models_loop-arguments.rs, shims.rs, and errors.rs
-    status: pending
+    status: completed
   - id: loop-docs
     content: Phase 0 docs - rewrite the handle-first passages of promptforge-docs chapters 05, 10, 11, and 17 for h:loop and h:infer, together with the messages refactor's open chapter 11 and 17 follow-up, and rebuild the books, as a vibe step committed in promptforge-docs
-    status: pending
+    status: completed
   - id: characterization-tests
     content: Add the gap tests from the behavior inventory to execute/tests/models_loop_contract.rs (a flat peer registered in execute/tests.rs) and engine/src/lua/tests/models_loop_contract.rs, driven through models.loop and h:loop from Lua; they pass on the Phase 0 shim before any Phase 1 code exists
-    status: pending
+    status: completed
   - id: loop-machine
     content: Phase 1 port - models_loop.rs adapter, models_loop-machine.rs typed machine (Machine, Phase, Input, Then over the existing ChatResult, ToolCallEvent, ToolCallRecord, MessageList, and Raised), models_loop-tests.rs VM-free and adapter tests; loop_begin passed as the shim chunk's last argument in place of compactors, max_tool_iterations, and is_message_list, returning a per-call step closure that owns the call's machine; one trampoline behind both loop entries replaces run_loop, append_record, drain_task_notices, EMPTY_MODEL_REPLY, NOT_A_LIST, and compact; normalized and the parse's list text shared; quota.rs rewritten; shim, coro.rs, quota.rs, and bench comments updated
-    status: pending
+    status: completed
   - id: drain-fold
     content: Phase 2, after Phase 1 - prepare_chat drains first and pushes notices onto the list before it reads the records and commits, the empty-list refusal moves from parse_chat to after that push, and Request::DrainTaskNotices and Answer::DrainTaskNotices go with their arms and tests; MessageList::push becomes pub so the Engine can call it
-    status: pending
+    status: completed
   - id: chat-handle
     content: Phase 3, after Phase 2 - the chat answer resumes as the scheduler's own ChatResult as an opaque userdata that the step takes, and chat_result_table and the adapter's table reader go with their table-shape tests
-    status: pending
+    status: completed
   - id: verify
     content: AGENTS.md verification commands after each landed change, the facade surface check with no diff, and a clean docs build
-    status: pending
+    status: completed
 isProject: false
 ---
 

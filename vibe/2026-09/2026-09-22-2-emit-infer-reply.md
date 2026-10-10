@@ -4,25 +4,25 @@ overview: Report tool-less `models.infer` turns as an `assistant_reply` carrying
 todos:
   - id: api-types-variant
     content: Add ReplyOrigin and the AssistantReply origin field, give Emitter::assistant_reply an origin parameter, and cover the round-trip in promptforge-api-types
-    status: pending
+    status: completed
   - id: hoist-metrics
     content: Hoist call_metrics to execute/support.rs as pub(crate) and re-point chat.rs
-    status: pending
+    status: completed
   - id: emit-infer-reply
     content: Capture model/metrics/thinking before the result move, then emit thinking and an infer-origin assistant_reply from accept_infer_completion; update its doc comment
-    status: pending
+    status: completed
   - id: observer-forwarding
     content: Add origin to on_assistant_reply on the test_support observer (dropping on_infer_reply) and forward it
-    status: pending
+    status: completed
   - id: session-parity
     content: "Give infer-origin replies session parity: one AssistantReply arm covers both origins in settle_current_turn and reply_stamp in session.rs"
-    status: pending
+    status: completed
   - id: tests
     content: Add api-runtime (execute/tests) and sessions (session-tests.rs + tests/it/session.rs) tests, including the reply-index sequence and a chat-origin assertion
-    status: pending
+    status: completed
   - id: verify
     content: Run crate test suites and a local tool-less infer reproduction
-    status: pending
+    status: completed
 isProject: false
 ---
 

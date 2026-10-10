@@ -4,19 +4,19 @@ overview: "Turn the placeholder models.yml in cppalliance/promptforge-cloud-prov
 todos:
   - id: make-public
     content: "Make the repository public so release assets download anonymously"
-    status: pending
+    status: completed
   - id: rewrite-workflow
     content: "Rewrite .github/workflows/models.yml: build, run, secret-scan gate, content-only change detection, conditional rolling-release publish"
-    status: pending
+    status: completed
   - id: readme
     content: "Rewrite README.md: badges, stable asset URL, what the sheet is, why PromptForge downloads it"
-    status: pending
+    status: completed
   - id: validate
     content: Validate the workflow YAML and inline scripts locally
-    status: pending
+    status: completed
   - id: verify-dispatch
     content: "Land the changes, then operator dispatches manually twice: first run publishes the initial sheet, second run skips publish; verify the asset URL downloads anonymously"
-    status: pending
+    status: completed
 isProject: false
 ---
 

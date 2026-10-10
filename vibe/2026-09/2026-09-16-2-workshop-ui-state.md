@@ -4,22 +4,22 @@ overview: "Replace the Workshop SPA's browser localStorage, which is wiped on ev
 todos:
   - id: workspace-bucket
     content: "workshop-workspace: allow-listed kv keys layout/tree/closed_editors, generic put command through the actor, ui_state read at open, GET /workspace/file/state and PUT /workspace/file/state/{key}, tests"
-    status: pending
+    status: completed
   - id: user-bucket
     content: "New workshop-user-state crate: ui-state.json behind a mutex with atomic writes and tolerant reads, GET /user/state and PUT /user/state/{key}, registration in app.rs, tests and boot test"
-    status: pending
+    status: completed
   - id: spa-adapter
     content: "SPA: ui-storage.ts adapter (get/set per bucket, boot preload with timeout and defaults, suppress-while-applying guard); main.ts preloads before building stores"
-    status: pending
+    status: completed
   - id: spa-user-stores
     content: "SPA: editor-settings-service, zoom, recent-files-store, commands-history (as registry service) read initial from the adapter and write through it; drop Storage; tests"
-    status: pending
+    status: completed
   - id: spa-workspace-stores
     content: "SPA: layout-persistence, tree-state-service, closed editors read initial from the adapter and write through it; shared applyLayoutOrDefault; workshop-panel fetches listings for restored expanded folders; Open re-applies, Save As writes; localStorage grep test"
-    status: pending
+    status: completed
   - id: docs-gates
     content: Docs (crate READMEs, guide 'What persists', AGENTS.md rule made absolute, archdoc line), full gates, manual smoke
-    status: pending
+    status: completed
 isProject: false
 ---
 

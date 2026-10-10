@@ -25,7 +25,7 @@ todos:
     status: completed
   - id: crate-dev
     content: Run Dokuman on promptforge-dev -> user-guide-promptforge-dev.md
-    status: in_progress
+    status: completed
 isProject: false
 ---
 

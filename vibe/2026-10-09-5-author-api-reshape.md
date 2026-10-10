@@ -4,19 +4,19 @@ overview: "Reshape the prompt-author API in four changes: role labels stop being
 todos:
   - id: p1-role-globals
     content: "Role-globals change: delete the model half of install_captured_bindings, stop treating model labels as globals in the parser, drop them from the prelude collision list, migrate the 2 role-global calls and 3 other bare role-label reads in 3 test files to models.get"
-    status: pending
+    status: completed
   - id: p2-tools-by-id
     content: "Tools change: delete tools: slots, slot fill, and tool alias globals; the offering holds every catalog tool and resolves ids; ToolSet swaps bindings for declared; tool objects; tools.offer, always_offer, offer_local, required, extras, get, call and calls by id; consumers including the Workshop run panel, error texts, facade listing, tests"
-    status: pending
+    status: completed
   - id: p3-model-provider
     content: "Provider change: optional provider on the gateway's Capabilities and its validation, client catalog decode, ModelDescriptor, ModelBinding, handle.provider, facade listing, tests"
-    status: pending
+    status: completed
   - id: p4-plugins-table
     content: "Plugins change: plugins global with required, extras, get over one shared read-only object per plugin; tool objects gain plugin; RESERVED_NAMES; section and H1 install; tests"
-    status: pending
+    status: completed
   - id: gates
     content: Run the repository verification commands after each change; the facade listing changes only in the tools change and the provider change
-    status: pending
+    status: completed
 isProject: false
 ---
 

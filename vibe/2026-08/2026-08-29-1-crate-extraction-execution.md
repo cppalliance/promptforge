@@ -4,31 +4,31 @@ overview: "Execute all nine crate extractions from the extraction menu in depend
 todos:
   - id: extract-protocol
     content: Extract promptforge-gateway-protocol (wire + upstream, re-type shutdown, http_util)
-    status: pending
+    status: completed
   - id: extract-client
     content: Extract promptforge-gateway-client (core client + model, picker stays in core)
-    status: pending
+    status: completed
   - id: workshop-facade
     content: Rewire workshop client as facade over shared wire crate
-    status: pending
+    status: completed
   - id: extract-store
     content: Extract promptforge-store (store.rs + store/ together)
-    status: pending
+    status: completed
   - id: extract-local
     content: Extract promptforge-gateway-local behind additive local feature
-    status: pending
+    status: completed
   - id: extract-lua
     content: Extract promptforge-lua plus core-support crate for untrusted/cancel/observe
-    status: pending
+    status: completed
   - id: extract-parser
     content: Extract promptforge-parser
-    status: pending
+    status: completed
   - id: ui-artifact
     content: Convert UI build to versioned artifact consumption
-    status: pending
+    status: completed
   - id: extract-search-service
     content: Extract gateway web-search service behind additive feature
-    status: pending
+    status: completed
 isProject: false
 ---
 

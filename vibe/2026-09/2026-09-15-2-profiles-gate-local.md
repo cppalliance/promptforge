@@ -4,46 +4,46 @@ overview: Redefine profiles so they select only local and STT models, serve ever
 todos:
   - id: config-semantics
     content: "gateway-config: validate local/STT-only members with remote-name error, never narrow models(), accept None selection; rewrite validation and schema tests"
-    status: pending
+    status: completed
   - id: boot-load
     content: "gateway: replace profile_switch.rs with boot-only boot_load.rs, drop drain/in_flight/switch mutex, LoadProfile boot-only and FIFO with ApplyConfig, runner assembles full remote routing"
-    status: pending
+    status: completed
   - id: config-version-0
     content: config-version required value and messages to 0; first-run default; every literal under crates/, guide/src, and crate READMEs
-    status: pending
+    status: completed
   - id: remove-state-shadow
     content: gateway-config shadow.rs drops the state shadow and refuses active_profile in PUT bodies; gateway config_write/config_pending/config_apply lose state-shadow paths; config-pending envelope reads the state file
-    status: pending
+    status: completed
   - id: switch-route
     content: "gateway: switch-profile persists state (or deletes it for null) and answers JSON {profile, restart_required}; delete SSE shaping; unit tests"
-    status: pending
+    status: completed
   - id: stale-state-degrade
     content: "gateway-config: resolve_selection reports its source; stale state-file name boots with no profile and stale_state_selection(); clear_profile_state; runner warning; boot.rs IT"
-    status: pending
+    status: completed
   - id: workshop-none-profile
     content: workshop-protocol switch_profile name nullable; workshop-menu begin_switch Option; workshop-gateway switch_profile Option; Model menu No profile entry; tests
-    status: pending
+    status: completed
   - id: ui-select-route
     content: config UI selects through POST /admin/switch-profile (switcher, Set Active, banner, Active/Selected pills); tests
-    status: pending
+    status: completed
   - id: proxy-rule
     content: workshop-server forward_allowed becomes /admin/* except GET /admin/progress plus GET /v1/cache and digest-checked DELETE; rewrite admitted/refused test lists
-    status: pending
+    status: completed
   - id: apply-reload
     content: "gateway: census restart_required for profile/local_model/stt_model/stt; apply reloads remote routing merged with live locals; tests"
-    status: pending
+    status: completed
   - id: gateway-it
     content: "gateway IT: rewrite profiles.rs and boot.rs; restore wait_for_catalog in cloud_models.rs"
-    status: pending
+    status: completed
   - id: workshop-restart
     content: workshop-gateway JSON switch + GatewaySnapshot is_sidecar()/request_shutdown(); workshop-sessions restart ladder, LAN notice, 90 s bound; update IT mocks
-    status: pending
+    status: completed
   - id: config-ui
     content: "config UI: Profiles Available list local/STT only, drop client STT toast diff, rename overlay stage; tests"
-    status: pending
+    status: completed
   - id: docs-archdoc
     content: Guide chapters, READMEs, archdoc A5 rewrite, regenerate guide exports with build-user-guide; no version constants change
-    status: pending
+    status: completed
 isProject: false
 ---
 

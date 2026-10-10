@@ -4,10 +4,10 @@ overview: "Remove the two debts that PR #81 (f4f92899..6a0ad504) added: build-ui
 todos:
   - id: w1-install-root
     content: "W1 (D1-1, D1-3): add install_root in crates/build-ui/src/lib.rs, bound find_esbuild and workspace_members at it, add the three failing-first tests and update the existing ones in lib-tests.rs, verify with build-ui tests and both UI cargo builds"
-    status: pending
+    status: completed
   - id: w2-look-theming
     content: "W2 (D1-2): add --accent-bright to look/tokens.css and use it in look/controls.css line 48; reword look/AGENTS.md line 7, AGENTS.md line 89, workshop-spa.mdc line 20; verify with the git grep checks, workspace npm suite, and a visual hover check"
-    status: pending
+    status: completed
 isProject: false
 ---
 

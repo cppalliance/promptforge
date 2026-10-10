@@ -4,25 +4,25 @@ overview: Fix the three CI failures from the family reorg (stale crate names in 
 todos:
   - id: ci-package-name
     content: "ci.yml: rename shared-gateway-discovery to gateway-api-discovery (both jobs), add shell: bash to both ownership-race steps"
-    status: in_progress
+    status: completed
   - id: ci-shared-vfs
     content: Remove workspace-hack from shared-vfs, exclude it in hakari.toml, verify hakari
-    status: pending
+    status: completed
   - id: ci-ui-fixtures
     content: Fix gateway-stt fixture paths in four workshop-server/ui test files
-    status: pending
+    status: completed
   - id: ci-verify
     content: Part 1 verification battery, commit CI repair
-    status: pending
+    status: completed
   - id: snapshot-core
     content: Add focused AppState accessors (routing, config, profile_name, model_allowlist, is_loading, local_children) in lib.rs
-    status: pending
+    status: completed
   - id: snapshot-sweep
     content: Convert single-field read sites to accessors; keep scoped guards for atomic multi-field reads and writers
-    status: pending
+    status: completed
   - id: snapshot-verify
     content: Part 2 verification battery, commit
-    status: pending
+    status: completed
 isProject: false
 ---
 
