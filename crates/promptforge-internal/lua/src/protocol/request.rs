@@ -24,12 +24,12 @@ use crate::messages::MessageList;
 #[derive(Debug)]
 pub enum Request {
     /// `models.infer(prompt)` (`binding: None`: resolve the section's
-    /// current model) or `models.infer(handle, prompt)` (`binding: Some`:
-    /// the handle's frozen binding).
+    /// current model) or `h:infer(prompt)` (`binding: Some`: the handle's
+    /// frozen binding).
     Infer {
         /// The author-supplied prompt text.
         prompt: String,
-        /// The leading handle's frozen binding, else `None`.
+        /// The receiver handle's frozen binding, else `None`.
         binding: Option<ModelBinding>,
     },
     /// `call(target, input?)`: run a contained chain over the target's
@@ -179,7 +179,7 @@ pub enum Request {
         /// The list the round sends. Its records were validated as the
         /// list added them.
         list: MessageList,
-        /// The loop shim's leading handle, as its frozen binding cloned
+        /// The receiver of a handle's `loop`, as its frozen binding cloned
         /// out of the userdata while the VM handle is live; `None` when
         /// the round names no handle, and the driver resolves the
         /// section's current model.

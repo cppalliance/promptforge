@@ -338,15 +338,15 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn models_loop_with_a_leading_handle_runs_on_its_frozen_binding() {
+async fn a_handles_loop_runs_on_its_frozen_binding() {
     let gateway = ScriptedChat::new(vec![resp_text("first"), resp_text("second")]);
     let md = loop_prompt(
         "local other = models.get('other')\n\
          local msgs = messages.new()\n\
          msgs:user('one')\n\
-         models.loop(other, msgs)\n\
+         other:loop(msgs)\n\
          msgs:user('two')\n\
-         models.loop(other, msgs)\n\
+         other:loop(msgs)\n\
          assert(#msgs == 4, 'each call appends its terminal record')\n\
          return msgs[2].content .. '|' .. msgs[4].content",
     );

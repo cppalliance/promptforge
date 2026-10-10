@@ -24,7 +24,7 @@ use crate::{Error, Result};
 #[path = "models-userdata.rs"]
 mod userdata;
 
-pub(crate) use userdata::LuaModelHandle;
+pub(crate) use userdata::{LuaModelHandle, is_handle};
 
 /// The context window a raw gateway-id binding records: catalog metadata
 /// the hack never sees, so a conservative default keeps the compactor

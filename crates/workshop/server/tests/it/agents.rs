@@ -51,7 +51,7 @@ while true do
         return
     end
     history:user(text)
-    models.loop(models.get('test-model'), history)
+    models.get('test-model'):loop(history)
 end
 ```
 ";

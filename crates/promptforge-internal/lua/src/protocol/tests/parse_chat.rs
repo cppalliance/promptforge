@@ -1,5 +1,5 @@
 //! Yield parsing for the `chat` request the `models.loop` shim yields: the
-//! leading handle and the `messages.new()` list, with every author-argument
+//! handle and the `messages.new()` list, with every author-argument
 //! failure as the call's own answer. The per-record rules run as the list
 //! adds a record, so their tests sit with the list.
 
@@ -197,8 +197,8 @@ fn an_empty_list_is_the_calls_error() {
 }
 
 #[test]
-fn chat_with_the_loops_leading_handle_holds_its_frozen_binding() {
-    // The loop shim yields its leading handle beside the messages; the
+fn chat_with_the_loops_handle_holds_its_frozen_binding() {
+    // A handle's `loop` yields its receiver beside the messages; the
     // binding is cloned out of the userdata at the parse, so the round runs
     // on the handle's model rather than the section default.
     let lua = Lua::new();

@@ -89,6 +89,19 @@ fn the_models_namespace_has_no_bind() {
 }
 
 #[test]
+fn a_handle_reads_nil_methods_where_the_shim_prelude_never_ran() {
+    let (lua, _, _) = models_vm();
+    let (infer_is_nil, loop_is_nil): (bool, bool) = lua
+        .load("local h = models.get('writer'); return h.infer == nil, h.loop == nil")
+        .eval()
+        .expect("the method probe evaluates");
+    assert!(
+        infer_is_nil && loop_is_nil,
+        "with no shim prelude a handle's infer and loop must read nil"
+    );
+}
+
+#[test]
 fn models_use_selects_a_bound_role_by_label() {
     let (lua, _, runtime) = models_vm();
     let handle: String = lua

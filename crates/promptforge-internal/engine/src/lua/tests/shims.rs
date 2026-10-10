@@ -1,9 +1,9 @@
 //! The yield shims installed on a scheduler-mode section VM produce
 //! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
 //! `tools.call` in their alias and handle forms, the local tool
-//! handshake, the loop's per-call requesting turn, the optional leading
-//! model handle, the captured alias globals, and the methodless handle
-//! contract.
+//! handshake, the loop's per-call requesting turn, a model handle's
+//! `infer` method, the captured alias globals, and the `infer` and `loop`
+//! methods a model handle carries.
 
 use promptforge_types::ids::TaskOrigin;
 use promptforge_types::metrics::ToolCallEvent;
@@ -356,7 +356,7 @@ fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
 }
 
 #[test]
-fn models_infer_takes_an_optional_leading_handle() {
+fn a_handles_infer_runs_on_its_frozen_binding() {
     let vm = scheduler_vm(&test_models(), None);
     let request = yielded_request(
         &vm,
@@ -365,7 +365,7 @@ fn models_infer_takes_an_optional_leading_handle() {
             local u = models.use("fast")
             assert(h.name == "fast" and h.model_id == "test-model")
             assert(u.name == "fast")
-            return models.infer(h, "yo")
+            return h:infer("yo")
             "#,
     );
     match request {
@@ -384,7 +384,7 @@ fn models_infer_takes_an_optional_leading_handle() {
 #[test]
 fn captured_model_aliases_install_as_plain_handles() {
     let vm = scheduler_vm(&test_models(), None);
-    match yielded_request(&vm, r#"return models.infer(fast, "yo")"#) {
+    match yielded_request(&vm, r#"return fast:infer("yo")"#) {
         Request::Infer {
             prompt,
             binding: Some(binding),
@@ -397,22 +397,25 @@ fn captured_model_aliases_install_as_plain_handles() {
 }
 
 #[test]
-fn handles_reject_colon_methods() {
-    // Namespace-only invocation: a handle is a frozen, inspectable value
-    // with no methods - reading `infer` off the userdata fails, and the one
-    // invocation form is the leading handle argument to `models.infer`.
+fn model_handles_carry_infer_and_loop_methods() {
+    // A model handle stays a frozen, inspectable userdata whose `infer`
+    // and `loop` fields read the shim's methods; a field the handle does
+    // not have still fails to read.
     let vm = scheduler_vm(&test_models(), None);
-    let (is_userdata, read_failed): (bool, bool) = vm
+    let (is_userdata, methods, read_failed): (bool, String, bool) = vm
         .lua()
         .load(
             r#"
             local h = models.get("fast")
-            local ok = pcall(function() return h.infer end)
-            return type(h) == "userdata" and type(fast) == "userdata", not ok
+            local ok = pcall(function() return h.nothing end)
+            return type(h) == "userdata" and type(fast) == "userdata",
+              type(h.infer) .. "|" .. type(h.loop) .. "|" .. type(fast.loop),
+              not ok
             "#,
         )
         .eval()
         .expect("the handle probe evaluates");
     assert!(is_userdata, "handles install as bare userdata");
-    assert!(read_failed, "a handle has no `infer` field to call");
+    assert_eq!(methods, "function|function|function");
+    assert!(read_failed, "a handle has no `nothing` field to read");
 }

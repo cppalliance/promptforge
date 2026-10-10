@@ -51,9 +51,9 @@ impl SectionVm {
                 .lock()
                 .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))?;
             for binding in models.bindings() {
-                // Handles are plain frozen userdata in every mode: invocation is
-                // namespace-only (`models.infer(handle, prompt)`), so no
-                // shim-wrapped proxy is needed.
+                // Handles are plain frozen userdata in every mode: `h:infer`
+                // and `h:loop` read the shim's functions through field
+                // getters, so no shim-wrapped proxy is needed.
                 let handle = LuaModelHandle::from_binding(binding);
                 let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
                 globals

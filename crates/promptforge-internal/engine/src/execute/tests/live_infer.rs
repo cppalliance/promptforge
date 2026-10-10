@@ -10,7 +10,7 @@ async fn live_h1_infer_runs_once() {
         # Live H1\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
-        var.answer = models.infer(writer, 'answer once')\n\
+        var.answer = writer:infer('answer once')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
@@ -36,7 +36,7 @@ async fn the_callers_client_serves_a_run_the_context_never_names() {
         # Caller Client\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
-        var.answer = models.infer(writer, 'answer once')\n\
+        var.answer = writer:infer('answer once')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
@@ -250,7 +250,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         # Nested Infer Observations\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
-        var.answer = models.infer(writer, 'ping')\n\
+        var.answer = writer:infer('ping')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
@@ -304,7 +304,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         # Cancelled Infer\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
-        return models.infer(writer, 'must cancel')\n\
+        return writer:infer('must cancel')\n\
         ```\n";
     let prompt = parse(source);
     let recorder = Arc::new(Recorder::default());
@@ -354,7 +354,7 @@ async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
         # Infer Tool Call\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
-        return models.infer(writer, 'answer without tools')\n\
+        return writer:infer('answer without tools')\n\
         ```\n";
     let error = super::run(
         &bound_for_model(source),
