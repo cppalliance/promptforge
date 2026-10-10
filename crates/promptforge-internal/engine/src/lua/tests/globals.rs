@@ -21,7 +21,7 @@ use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
@@ -123,9 +123,8 @@ fn fully_bound_vm(argv_writable: bool) -> SectionVm {
         preludes: &[],
         raw_shims: false,
     };
-    let list_callback =
-        |_: String| -> std::result::Result<Vec<String>, crate::Error> { Ok(Vec::new()) };
-    setup_section_vm(&mut vm, &setup, list_callback).expect("the setup installs");
+    let read = |_: String| -> std::result::Result<Option<SectionText>, crate::Error> { Ok(None) };
+    setup_section_vm(&mut vm, &setup, read).expect("the setup installs");
     vm.install_lazy_prose(|_| Ok("the block's prose".to_owned()))
         .expect("the prose guard installs");
     vm

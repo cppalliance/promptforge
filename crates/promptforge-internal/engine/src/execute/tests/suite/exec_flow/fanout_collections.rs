@@ -10,7 +10,7 @@ async fn fanout_returns_structured_results() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', list_from_section('### Items'))\n\
+local r = fanout('### Worker', prompt.list('### Items'))\n\
 assert(r[1].text == 'alpha-1')\n\
 assert(r[1].ok == true)\n\
 assert(r[1].item == 'alpha')\n\
@@ -43,7 +43,7 @@ async fn off_walk_worker_runs_as_a_fanout_arm() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', list_from_section('### Items'))\n\
+local r = fanout('### Worker', prompt.list('### Items'))\n\
 return r[1].text .. ',' .. r[2].text\n\
 ```\n\n\
 ### Worker\n\n\
@@ -259,10 +259,9 @@ fanout('### Niece', {'x'})\n\
     );
 }
 
-/// The two-string form errors at the boundary, pointing at
-/// `list_from_section`.
+/// The two-string form errors at the boundary, pointing at `prompt.list`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_string_second_parameter_errors_pointing_at_list_from_section() {
+async fn fanout_string_second_parameter_errors_pointing_at_prompt_list() {
     let md = flow_prompt!(
         "\
 ## Parent\n\n\
@@ -283,8 +282,8 @@ fanout('### Worker', '### Items')\n\
         "error was: {rendered}"
     );
     assert!(
-        rendered.contains("list_from_section"),
-        "the error must point at list_from_section: {rendered}"
+        rendered.contains("prompt.list(heading)"),
+        "the error must point at prompt.list: {rendered}"
     );
 }
 

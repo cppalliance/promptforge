@@ -1,5 +1,5 @@
 //! Section walk control flow over the offline fixtures: `call`, `jump`,
-//! `fanout`, `list_from_section`, and `var`. The cases run on the suite's
+//! `fanout`, the `prompt` reads, and `var`. The cases run on the suite's
 //! `run_fixture` runner through the thin fixture support below: the
 //! `run`/`fixture`/`TestStore`/`silent`/`run_offline` helpers. Each
 //! submodule holds one topic and reaches that support through `super`.
@@ -98,6 +98,6 @@ mod fanout_arms;
 mod fanout_collections;
 mod globals;
 mod h1_control;
-mod list_from_section;
+mod prompt_reads;
 mod run_setup;
 mod store_failures;

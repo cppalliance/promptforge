@@ -6,11 +6,12 @@
 //! nieces/nephews, and grandchildren are never in the set, so a resolution
 //! error that lists the set cannot leak the rest of the document's
 //! structure. The scheduler's chains resolve jumps, `call` targets, and
-//! fanout workers through these helpers, and the `list_from_section`
-//! callback resolves through them too, so every control surface agrees on
+//! fanout workers through these helpers, and the `prompt.section` and
+//! `prompt.list` reads resolve through them too, so every surface agrees on
 //! what a heading may name.
 
 use crate::heading_address;
+use crate::lua::SectionText;
 use crate::parser::Section;
 use crate::{Error, Result};
 
@@ -24,11 +25,6 @@ pub(super) fn section_position(slice: &[Section], target: &Section) -> Option<us
 
 /// The caller's home slice minus the caller itself, the caller found by its
 /// parser-unique `(level, name)` pair and excluded by index.
-///
-/// A caller absent from the slice leaves it whole: that is the fanout
-/// arm's case, whose home slice is the worker's resolution set with the
-/// worker already removed, so the arm's visible set comes out as exactly
-/// the home slice plus the worker's children.
 fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
     let caller_index = section_position(home, caller);
     home.iter()
@@ -47,24 +43,20 @@ pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Sectio
         .collect()
 }
 
-/// Resolves `heading` against a caller's visible set and returns the matched
-/// section's pre-parsed list items.
+/// What a prompt read sees of the section `heading` names in a caller's
+/// visible set: its own raw Markdown and its pre-parsed list items, or
+/// `None` when no visible section has that heading.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] when the heading is malformed, matches no visible
-/// section, or matches more than one (see
-/// [`heading_address::resolve_sibling`]), or when the resolved section has
-/// no pre-parsed items - the error that catches naming a prose section by
-/// mistake.
-pub(super) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
-    let section = heading_address::resolve_sibling(heading, visible)?;
-    if section.items().is_empty() {
-        return Err(Error::Lua(format!(
-            "section `{}` has no pre-parsed items",
-            section.name()
-        )));
-    }
-    Ok(section.items().to_vec())
+/// Returns [`Error::Lua`] when the heading is malformed or matches more
+/// than one visible section (see [`heading_address::find_visible`]).
+pub(super) fn read_visible(heading: &str, visible: &[Section]) -> Result<Option<SectionText>> {
+    Ok(
+        heading_address::find_visible(heading, visible)?.map(|section| SectionText {
+            markdown: section.markdown().to_owned(),
+            items: section.items().to_vec(),
+        }),
+    )
 }
 
 /// Where a jump transfers control, resolved against the jumper's visible set.

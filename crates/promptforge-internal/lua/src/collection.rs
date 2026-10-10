@@ -25,13 +25,13 @@ pub(crate) use order::{KeyError, SortKey, sort_key};
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the value is not a table (the message points
-/// at `list_from_section` for the list-section case), when a member is a
+/// at `prompt.list` for the list-section case), when a member is a
 /// function, userdata, or thread (the error names the member's index), or
 /// when a hash key is not a string, number, or boolean.
 pub(crate) fn collection_members(lua: &Lua, collection: &Value) -> Result<Table> {
     let Value::Table(table) = collection else {
         return Err(Error::Lua(
-            "fanout's second parameter is a collection; for a list section use list_from_section(heading)".to_owned(),
+            "fanout's second parameter is a collection; for a list section use prompt.list(heading), which returns nil when no visible section has that heading".to_owned(),
         ));
     };
     let members = lua.create_table().map_err(Error::lua)?;
@@ -145,8 +145,8 @@ mod tests {
             let error =
                 collection_members(&lua, &value).expect_err("a non-table is not a collection");
             assert!(
-                error.to_string().contains("list_from_section"),
-                "the error must point at list_from_section for {source}: {error}"
+                error.to_string().contains("prompt.list(heading)"),
+                "the error must point at prompt.list for {source}: {error}"
             );
         }
     }

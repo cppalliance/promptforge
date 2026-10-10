@@ -13,8 +13,8 @@ use super::install_preludes;
 use crate::tests::recording::null_emitter;
 use crate::tests::refusal_line;
 use crate::{
-    Argv, CoroStep, LuaProgram, Request, SectionVm, YieldParse, install_section_loop_shim,
-    install_ui,
+    Argv, CoroStep, LuaProgram, Request, SectionText, SectionVm, YieldParse,
+    install_section_loop_shim, install_ui,
 };
 
 #[path = "prelude-tests-environment.rs"]
@@ -50,7 +50,7 @@ fn section_vm_with_var(var: Option<&serde_json::Value>) -> SectionVm {
     vm.install_engine_globals(&emitter, SECTION)
         .expect("the Engine globals install");
     vm.install_scheduler_control_globals(|_| {
-        Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
+        Ok::<Option<SectionText>, std::convert::Infallible>(None)
     })
     .expect("the control globals install");
     vm.install_coro_shims(1)

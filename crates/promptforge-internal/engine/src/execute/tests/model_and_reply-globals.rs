@@ -83,7 +83,7 @@ async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
-## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
+## Parent\n\n```lua\nlocal r = fanout('### Worker', prompt.list('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
 ### Worker\n\n```lua\ntools.call('tools/echo', { value = item })\n```\n\n\
 ```lua\nreturn sys.model .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";

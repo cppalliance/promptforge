@@ -1,4 +1,4 @@
-//! Control flow inside a fanout arm: `list_from_section`, `call`, nested
+//! Control flow inside a fanout arm: `prompt.list`, `call`, nested
 //! `fanout`, and `jump` over the worker's visible set, the depth cap
 //! across the arm boundary, and an arm's text when it replies nothing.
 
@@ -16,16 +16,16 @@ return r[1].text\n\
 ```\n\n"
 );
 
-/// `list_from_section` inside a fanout arm reads a list section's items,
-/// resolving over the worker's visible set (the set the worker was resolved
-/// from, minus the worker, plus its children).
+/// `prompt.list` inside a fanout arm reads a list section's items: the arm
+/// resolves like any section (the worker's siblings minus the worker, plus
+/// its children).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn list_from_section_inside_a_fanout_arm_reads_items() {
+async fn prompt_list_inside_a_fanout_arm_reads_items() {
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-local items = list_from_section('### Items')\n\
+local items = prompt.list('### Items')\n\
 return item .. ':' .. table.concat(items, ',')\n\
 ```\n\n\
 ### Items\n\n\
@@ -35,7 +35,7 @@ return item .. ':' .. table.concat(items, ',')\n\
     .concat();
     let out = run_offline(&md)
         .await
-        .expect("list_from_section inside an arm must read items");
+        .expect("prompt.list inside an arm must read items");
     assert_eq!(out, "alpha:x,y");
 }
 
@@ -251,9 +251,9 @@ jump('## Parent')\n\
     );
 }
 
-/// `call` and `list_from_section` inside an arm naming a section outside
-/// the worker's visible set both error not-found; the arm catches them with
-/// `pcall` and asserts on the messages.
+/// `call` and `prompt.list` inside an arm naming a section outside the
+/// worker's visible set both reject it: `call` errors not-found, which the
+/// arm catches with `pcall` and asserts on, and `prompt.list` reads `nil`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn call_and_list_inside_a_fanout_arm_reject_non_visible_sections() {
     let md = [
@@ -263,9 +263,7 @@ async fn call_and_list_inside_a_fanout_arm_reject_non_visible_sections() {
 local ok_call, err_call = pcall(call, '## Parent')\n\
 assert(not ok_call, 'call of a non-visible section must fail')\n\
 assert(tostring(err_call):find('not found', 1, true), 'call error must be not-found: ' .. tostring(err_call))\n\
-local ok_list, err_list = pcall(list_from_section, '## Parent')\n\
-assert(not ok_list, 'list_from_section of a non-visible section must fail')\n\
-assert(tostring(err_list):find('not found', 1, true), 'list error must be not-found: ' .. tostring(err_list))\n\
+assert(prompt.list('## Parent') == nil, 'prompt.list of a non-visible section must read nil')\n\
 return item .. ':rejected'\n\
 ```\n\n\
 ### Items\n\n\
@@ -274,7 +272,7 @@ return item .. ':rejected'\n\
     .concat();
     let out = run_offline(&md)
         .await
-        .expect("non-visible call/list inside an arm must error not-found");
+        .expect("a non-visible call must error not-found and a non-visible list must read nil");
     assert_eq!(out, "alpha:rejected");
 }
 
