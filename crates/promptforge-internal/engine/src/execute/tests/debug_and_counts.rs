@@ -59,10 +59,10 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = writer:infer('say hello')\n\
+        local text = models.get('writer'):infer('say hello')\n\
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md);
@@ -301,10 +301,10 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = writer:infer('say hello')\n\
+        local text = models.get('writer'):infer('say hello')\n\
         assert(type(text) == 'string', 'infer must return text')\n\
         assert(text == 'pong')\n\
         assert(reply == nil, 'infer must not set reply')\n\

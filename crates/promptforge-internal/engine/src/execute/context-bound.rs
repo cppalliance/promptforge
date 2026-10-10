@@ -109,17 +109,15 @@ pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding
         .collect()
 }
 
-/// Every tool and model alias the prompt's frontmatter declares, filled or
-/// not: the names a Plugin prelude's globals must not take, so whether
-/// a prelude installs depends only on the frontmatter.
+/// Every tool alias the prompt's frontmatter declares, filled or not: the
+/// names a Plugin prelude's globals must not take, so whether a prelude
+/// installs depends only on the frontmatter.
 pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
-    let frontmatter = prompt.frontmatter();
-    frontmatter
+    prompt
+        .frontmatter()
         .tools()
         .iter()
-        .map(|(alias, _)| alias)
-        .chain(frontmatter.models().iter().map(|(label, _)| label))
-        .map(str::to_owned)
+        .map(|(alias, _)| alias.to_owned())
         .collect()
 }
 

@@ -288,7 +288,7 @@ async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_
     assert!(
         message.contains(
             "Plugin `user-input`: its prelude defines the global `input`, \
-             which the prompt's frontmatter binds as a tool or model alias"
+             which the prompt's frontmatter binds as a tool alias"
         ),
         "the failure names the Plugin, the global, and the alias: {message}"
     );

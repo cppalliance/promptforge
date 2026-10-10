@@ -1,4 +1,4 @@
-//! Section VM setup: the captured alias globals, the Engine values and
+//! Section VM setup: the captured tool alias globals, the Engine values and
 //! persistent Engine globals, the control globals and yield shims, and the
 //! `sys` and `prose` globals.
 
@@ -6,60 +6,37 @@ use super::{SectionVm, pack_sequence};
 #[cfg(test)]
 use crate::var_to_json;
 use crate::{
-    Access, Arc, Argv, Emitter, Error, Json, LuaModelHandle, LuaToolHandle, Mutex, Ordering,
-    ProseState, Result, Value, guarded_var, install_compactors, install_log, install_messages,
-    install_models, install_shim_prelude, install_store_table, install_tools,
-    resolve_section_target, seal_sys,
+    Access, Arc, Argv, Emitter, Error, Json, LuaToolHandle, Mutex, Ordering, ProseState, Result,
+    Value, guarded_var, install_compactors, install_log, install_messages, install_models,
+    install_shim_prelude, install_store_table, install_tools, resolve_section_target, seal_sys,
 };
 
 impl SectionVm {
-    /// Installs the captured tool and model alias globals.
+    /// Installs the captured tool alias globals.
     ///
     /// Each bound slot becomes a bare global holding its handle userdata.
     /// The Engine calls this after [`replay_shared`](Self::replay_shared), so
     /// a declared alias wins over a same-named shared global; the raw install
     /// also bypasses any metatable the shared library set on `_G`. The raw
     /// install never replaces an Engine global only because the parser refuses
-    /// an alias on [`RESERVED_NAMES`](crate::RESERVED_NAMES) and one name
-    /// under both `tools` and `models`.
+    /// an alias on [`RESERVED_NAMES`](crate::RESERVED_NAMES).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if a handle cannot be created or installed, or
-    /// a shared set's mutex is poisoned.
+    /// the tool set's mutex is poisoned.
     pub fn install_captured_bindings(&self) -> Result<()> {
         let globals = self.lua.globals();
-        {
-            let tools = self
-                .bound_tools
-                .lock()
-                .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?;
-            for binding in tools.bindings() {
-                let handle = LuaToolHandle::from_binding(
-                    binding.alias(),
-                    binding.description(),
-                    binding.id(),
-                );
-                let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
-                globals
-                    .raw_set(binding.alias(), userdata)
-                    .map_err(Error::lua)?;
-            }
-        }
-        {
-            let models = self
-                .bound_models
-                .lock()
-                .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))?;
-            for binding in models.bindings() {
-                // Handles are plain frozen userdata in every mode: `h:infer`
-                // and `h:loop` read the shim's functions through field
-                // getters, so no shim-wrapped proxy is needed.
-                let handle = LuaModelHandle::from_binding(binding);
-                let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
-                globals
-                    .raw_set(binding.alias(), userdata)
-                    .map_err(Error::lua)?;
-            }
+        let tools = self
+            .bound_tools
+            .lock()
+            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?;
+        for binding in tools.bindings() {
+            let handle =
+                LuaToolHandle::from_binding(binding.alias(), binding.description(), binding.id());
+            let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
+            globals
+                .raw_set(binding.alias(), userdata)
+                .map_err(Error::lua)?;
         }
         Ok(())
     }

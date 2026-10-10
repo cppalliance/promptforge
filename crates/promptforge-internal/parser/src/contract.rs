@@ -3,8 +3,8 @@
 //! The YAML is the whole contract: Plugins install, tools bind, models
 //! declare, args type. Parsing validates the static shape - each Plugin
 //! a one-segment plain name declared once, the alias grammar on slot keys,
-//! the reserved names no tool alias or model role label may take, the
-//! closed model-keyword vocabulary, arg name and type sanity - and exposes
+//! the reserved names no tool alias may take, the closed model-keyword
+//! vocabulary, arg name and type sanity - and exposes
 //! the FULL declaration on the parsed [`Prompt`](crate::Prompt); satisfying
 //! the declaration against the caller's environment is prepare's job,
 //! never the parser's.
@@ -127,8 +127,8 @@ where
             }
             if installs_global && let Some(kind) = promptforge_lua::reserved_name(&key) {
                 return Err(de::Error::custom(format!(
-                    "{what} `{key}` in `{map_key}` is reserved ({kind}): tool aliases and model \
-                     role labels install as section VM globals, so none may take a reserved name"
+                    "{what} `{key}` in `{map_key}` is reserved ({kind}): tool aliases install \
+                     as section VM globals, so none may take a reserved name"
                 )));
             }
             if entries.contains_key(&key) {
@@ -194,8 +194,7 @@ impl Visitor<'_> for ToolSlotVisitor {
 /// Parsing rejects the key `open`, which is reserved. Each alias is
 /// installed as a global of the same name in the section's Lua VM. For that
 /// reason, parsing also rejects an alias that names an Engine global, a Lua
-/// standard-library global the sandbox keeps, or a Lua keyword. It rejects
-/// an alias that matches a model role label for the same reason.
+/// standard-library global the sandbox keeps, or a Lua keyword.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolSlots {
@@ -245,21 +244,6 @@ impl<'de> Deserialize<'de> for ToolSlots {
             },
         )?;
         Ok(ToolSlots { slots })
-    }
-}
-
-/// Refuses a name declared both as a tool alias and as a model role label:
-/// both install as section VM globals of their own name, so the model
-/// handle would silently replace the tool handle. Returns the refusal's
-/// message, naming the first shared name in sorted order.
-pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> Result<(), String> {
-    match tools.iter().find(|(alias, _)| models.get(alias).is_some()) {
-        Some((alias, _)) => Err(format!(
-            "invalid frontmatter: `{alias}` is both a tool alias in `tools` and a model role \
-             label in `models`; each installs as a section VM global of its own name, so the \
-             two must differ"
-        )),
-        None => Ok(()),
     }
 }
 

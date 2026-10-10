@@ -312,7 +312,7 @@ impl SectionVm {
     /// The sets are the run's own handles, not snapshots: the frontmatter's
     /// filled slots back the validating `tools`/`models` tables that
     /// [`inject_values_with_var`](Self::inject_values_with_var) installs and the
-    /// bare alias globals that
+    /// bare tool alias globals that
     /// [`install_captured_bindings`](Self::install_captured_bindings)
     /// installs after the shared replay, and the prompt-wide facts a section
     /// records (`tools.always`, `models.default`) land where every later

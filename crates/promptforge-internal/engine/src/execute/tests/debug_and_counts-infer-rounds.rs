@@ -87,10 +87,10 @@ async fn run_infer_round(reply: ScriptedReply) -> (String, Vec<String>) {
     let recorder = Arc::new(InferRoundRecorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        return writer:infer('say hello')\n\
+        return models.get('writer'):infer('say hello')\n\
         ```\n";
     let prompt = bound_with_tools(md);
     let out = run(

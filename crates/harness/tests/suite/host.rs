@@ -40,6 +40,7 @@ const PATIENT: &str = concat!(
     "---\nname: patient\ndescription: Waits on the model\npromptforge: 0\n",
     "models: { writer: {} }\n",
     "---\n\n# Patient\n\n## Only\n\n```lua\n",
+    "local writer = models.get('writer')\n",
     "local ok, err = pcall(writer.infer, writer, 'Take your time.')\n",
     "return ok and 'answered' or err.kind\n",
     "```\n",
@@ -52,7 +53,7 @@ const CHATS: &str = concat!(
     "---\n\n# Chats\n\n## Only\n\n```lua\n",
     "local msgs = messages.new()\n",
     "msgs:user('Hello, desk.')\n",
-    "writer:loop(msgs)\n",
+    "models.get('writer'):loop(msgs)\n",
     "return msgs[#msgs].content\n",
     "```\n",
 );

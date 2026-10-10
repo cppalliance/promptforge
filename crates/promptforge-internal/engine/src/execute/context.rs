@@ -120,9 +120,9 @@ pub(crate) struct RunState {
     /// The run's Plugin preludes, in install order: every section VM
     /// installs each one before the shared library replays.
     preludes: Arc<[Prelude]>,
-    /// Every tool and model alias the prompt's frontmatter declares: the
-    /// names a prelude's globals must not take, because the alias globals
-    /// install after the preludes and would silently replace them.
+    /// Every tool alias the prompt's frontmatter declares: the names a
+    /// prelude's globals must not take, because the alias globals install
+    /// after the preludes and would silently replace them.
     frontmatter_aliases: Arc<[String]>,
     /// Test-only: installs the raw `tools.call_as_model` shim in every
     /// section VM, so a fixture section can yield one model-issued
