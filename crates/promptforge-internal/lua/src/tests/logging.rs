@@ -9,17 +9,9 @@ const EXECUTION: &str = "lua-test";
 #[test]
 fn logs_are_correlated_and_ordered_across_chunks() {
     let recorder = Arc::new(Recorder::default());
-    let bindings = ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "search",
-            "search the web",
-            &fixture_tool("search"),
-        )],
-        Vec::new(),
-        Vec::new(),
-    );
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Gather")
-        .expect("section VM must install captured bindings");
+        .expect("the section VM builds over the offering");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     let observer = recorder.emitter().clone();

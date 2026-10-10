@@ -205,30 +205,35 @@ fn program(source: &str) -> LuaProgram {
     .expect("test Lua must compile")
 }
 
-/// A fixture tool as data: `fixtures/tools/<name>`, advertised under its
-/// name. The VM binds descriptors and yields calls; no implementation is
-/// ever reached here.
+/// A fixture tool as data: `fixtures/<name>`. The VM binds descriptors and
+/// yields calls; no implementation is ever reached here.
 fn fixture_tool(name: &str) -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse(&format!("fixtures/tools/{name}")).expect("valid id"),
+        ToolId::parse(&format!("fixtures/{name}")).expect("valid id"),
         "fixture",
         json!({}),
     )
 }
 
-/// Builds a fixture tool set directly: each `(alias, description, fixture)`
-/// triple is a bound slot, with `always` aliases parked prompt-wide. This is
-/// the shape prepare's filled slots arrive in; no Lua runs to produce it.
-fn fixture_set(bindings: &[(&str, &str, &'static str)], always: &[&str]) -> ToolSet {
+/// Builds a fixture tool set directly: each `(name, description)` pair is
+/// the offered tool `fixtures/<name>` under its wire name
+/// `fixtures_<name>`, with the `always` wire names offered prompt-wide.
+/// This is the shape the run's offering arrives in; no Lua runs to produce
+/// it.
+fn fixture_set(tools: &[(&str, &str)], always: &[&str]) -> ToolSet {
     ToolSet::for_test(
-        bindings
+        Vec::new(),
+        always.iter().map(|name| (*name).to_owned()).collect(),
+        tools
             .iter()
-            .map(|(alias, description, fixture)| {
-                ToolBinding::for_test(alias, description, &fixture_tool(fixture))
+            .map(|(name, description)| {
+                ToolBinding::for_test(
+                    &format!("fixtures_{name}"),
+                    description,
+                    &fixture_tool(name),
+                )
             })
             .collect(),
-        always.iter().map(|alias| (*alias).to_owned()).collect(),
-        Vec::new(),
     )
 }
 
@@ -243,15 +248,13 @@ fn section_vm_with_set(
     emitter: &Emitter,
     section: &str,
 ) -> Result<SectionVm> {
-    let vm = SectionVm::new_for_section(
+    SectionVm::new_for_section(
         &test_nonce(),
         tools,
         &Arc::new(Mutex::new(ModelSet::default())),
         emitter,
         section,
-    )?;
-    vm.install_captured_bindings()?;
-    Ok(vm)
+    )
 }
 
 fn section_vm_with_bindings(
@@ -264,8 +267,7 @@ fn section_vm_with_bindings(
 
 /// Builds a section VM through the Engine's startup order for a shared
 /// library: construction, Engine injection, persistent Engine globals, then
-/// the shared replay. Tests that need control globals or captured bindings
-/// add them by hand.
+/// the shared replay. Tests that need control globals add them by hand.
 fn section_vm_with_shared(
     shared: &LuaProgram,
     args: &str,

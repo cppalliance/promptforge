@@ -2,9 +2,8 @@
 //! services under the fixture's `BROKER`: every tool call of the run is
 //! lent it, or lent none when the Host has nobody to ask; and the fixture
 //! ask Plugin's `input.ask()` reaches it, and is refused on a run without
-//! one. A frontmatter alias named `input` collides with the Plugin's
-//! prelude global and fails the run before any effect, while an alias of
-//! another name runs beside it.
+//! one. The ask tool, read by its id, runs beside the Plugin's `input`
+//! prelude global.
 
 use super::*;
 
@@ -168,29 +167,6 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
         panic!("the refusal is a requirements refusal: {error}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
-    assert!(
-        error
-            .to_string()
-            .contains("- user-input needs tests/input-broker, and the environment provides none"),
-        "the notice names the Plugin and the missing service: {error}"
-    );
-}
-
-#[tokio::test]
-async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_broker_alone() {
-    let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  ask: user-input/ask\n");
-    let error = prepare(
-        &user_input_prompt(&declaration, ASKS_ONCE),
-        "",
-        user_input_services(&recorder, None),
-    )
-    .await
-    .expect_err("a required Plugin without its service refuses the run");
-    let PrepareError::Refused { error, .. } = error else {
-        panic!("the refusal is a requirements refusal: {error}");
-    };
-    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
         notice.contains("- user-input needs tests/input-broker, and the environment provides none"),
@@ -261,62 +237,23 @@ async fn input_ask_with_an_argument_raises() {
 }
 
 #[tokio::test]
-async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_any_effect() {
+async fn the_ask_tool_read_by_id_runs_beside_the_untouched_prelude_and_engine_globals() {
     let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  input: user-input/ask\n");
-    let prepared = prepare(
-        &user_input_prompt(&declaration, ASKS_ONCE),
-        "",
-        user_input_services(&recorder, Some(Arc::new(Scripted("unused")))),
-    )
-    .await
-    .expect("the prompt parses and its requirements are met");
-    let run_id = prepared.run_id;
-    let outcome = drive_run(
-        prepared.run,
-        prepared.performers,
-        recorder.clone(),
-        run_id,
-        CancelHandle::new(),
-    )
-    .await
-    .expect("the loop reaches an outcome");
-    let RunOutcome::Failed { kind, message } = outcome else {
-        panic!("the collision fails the run: {outcome:?}");
-    };
-    assert_eq!(kind, "Lua");
-    assert!(
-        message.contains(
-            "Plugin `user-input`: its prelude defines the global `input`, \
-             which the prompt's frontmatter binds as a tool alias"
-        ),
-        "the failure names the Plugin, the global, and the alias: {message}"
-    );
-    let effects = recorder
-        .records(run_id)
-        .into_iter()
-        .filter(|record| record.kind == RecordKind::Effect)
-        .count();
-    assert_eq!(effects, 0, "the run fails before it issues any effect");
-}
-
-#[tokio::test]
-async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_engine_globals() {
-    let recorder = recorder();
-    let declaration = format!("{REQUIRED}tools:\n  ask: user-input/ask\n");
     let outcome = drive_prompt(
         &user_input_prompt(
-            &declaration,
-            "return tools.call(ask) .. '|' .. ask.name .. '|' .. type(input.ask) .. '|' \
-             .. type(store.read) .. '|' .. type(tools.call)",
+            REQUIRED,
+            "local ask = tools.get('user-input/ask')\n\
+             return tools.call(ask) .. '|' .. ask.id .. '|' .. type(input.ask) .. '|' \
+             .. type(store.read) .. '|' .. type(tools.call) .. '|' .. type(user_input_ask)",
         ),
         user_input_services(&recorder, Some(Arc::new(Scripted("hello")))),
     )
     .await;
     assert_eq!(
         completed(outcome),
-        "hello|ask|function|function|function",
-        "the alias global is the ask tool, and input, store, and tools are the Engine's"
+        "hello|user-input/ask|function|function|function|nil",
+        "the tool object is the ask tool, no tool is a global, and input, store, and \
+         tools are the Plugin's and the Engine's"
     );
 }
 

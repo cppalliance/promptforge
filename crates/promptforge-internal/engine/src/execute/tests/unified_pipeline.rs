@@ -10,11 +10,11 @@ use super::*;
 async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     let gateway = ScriptedChat::new(vec![
         resp_text("draft text"),
-        resp_tool_call("call_1", "echo", "{\"value\":\"polish\"}"),
+        resp_tool_call("call_1", "tools_echo", "{\"value\":\"polish\"}"),
         resp_text("refined text"),
     ]);
 
-    let source = "---\nname: unified\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let source = "---\nname: unified\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Unified\n\n\
         ```lua\n\
         models.default('writer')\n\
@@ -27,7 +27,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         ```\n\n\
         ## Refine\n\n\
         ```lua\n\
-        tools.add('echo')\n\
+        tools.offer('tools/echo')\n\
         local msgs = messages.new()\n\
         msgs:system('You refine drafts.')\n\
         msgs:user(var.draft)\n\
@@ -75,7 +75,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     );
     assert_eq!(
         bodies[1].tools[0].name(),
-        "echo",
+        "tools_echo",
         "the loop advertises the section's tool scope: {bodies:?}"
     );
     let tool_turn = bodies[2]

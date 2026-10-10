@@ -6,7 +6,7 @@
 //! The caller performs each effect and hands its answer to [`Run::resume`].
 //! The run ends at [`Step::Done`] with its [`RunResult`].
 //! Before the run starts, [`Environment::prepare`] binds the prompt's model
-//! roles and tool slots into the run's [`RunContext`].
+//! roles and puts the tools a run may offer into its [`RunContext`].
 //!
 //! The crate's `greeter` example is that whole loop in one program.
 
@@ -93,10 +93,9 @@ pub mod model {
 }
 
 pub mod tools {
-    //! Tool descriptions and catalogs, the tools a prompt's slots are bound
-    //! to, and the output or error that answers a tool call.
+    //! Tool descriptions and catalogs, and the output or error that answers
+    //! a tool call.
 
-    pub use promptforge_engine::ToolBindings;
     pub use promptforge_types::tools::OutputTrust;
     pub use promptforge_types::tools::ToolCatalog;
     pub use promptforge_types::tools::ToolCatalogError;
@@ -124,8 +123,8 @@ pub mod plugins {
 }
 
 pub mod prompt {
-    //! What a prompt's frontmatter declares: its files, Plugins, tool
-    //! slots, arguments, and model roles.
+    //! What a prompt's frontmatter declares: its files, Plugins,
+    //! arguments, and model roles.
 
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
@@ -135,8 +134,6 @@ pub mod prompt {
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
-    pub use promptforge_parser::ToolSlot;
-    pub use promptforge_parser::ToolSlots;
 }
 
 pub mod vfs {

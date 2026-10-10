@@ -20,11 +20,11 @@ use crate::prepare::{installing, services};
 /// What the fixture tool writes to `/from-tool.md`.
 const WRITTEN: &str = "written through the context";
 
-/// A prompt binding `record` to the fixture tool, calling it from the
-/// section's script, and returning its answer beside the file it wrote.
+/// A prompt calling the fixture tool by id from the section's script and
+/// returning its answer beside the file it wrote.
 const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - context\ntools:\n  record: context/record\n---\n\n\
-    # Title\n\n## Only\n\n```lua\nlocal caller = tools.call('record')\n\
+    plugins:\n  - context\n---\n\n\
+    # Title\n\n## Only\n\n```lua\nlocal caller = tools.call('context/record')\n\
     return caller .. '|' .. store.read('from-tool.md')\n```\n";
 
 /// The fixture Plugin `context`: one tool, `context/record`, which writes

@@ -84,11 +84,10 @@ impl ModelRole {
 /// keyed by label.
 ///
 /// A label is a name local to the prompt. It follows the same grammar as
-/// a tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
+/// a local tool alias: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
 /// A script reaches a role's model handle with `models.get(label)`. A label
-/// is never a Lua global, so it may be a reserved name or equal a tool
-/// alias.
+/// is never a Lua global, so it may be a reserved name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelRoles {
@@ -130,10 +129,7 @@ impl<'de> Deserialize<'de> for ModelRoles {
         let roles = deserialize_contract_map(
             deserializer,
             ContractKeys {
-                map: "models",
                 what: "model role label",
-                deferred: None,
-                installs_global: false,
             },
         )?;
         Ok(ModelRoles { roles })

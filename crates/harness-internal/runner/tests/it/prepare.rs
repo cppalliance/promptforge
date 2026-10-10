@@ -54,10 +54,10 @@ const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n#
 const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
-/// A prompt binding `echo` to the fixture tool and calling it once.
+/// A prompt declaring the fixture Plugin and calling its tool once by id.
 const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - tools\ntools:\n  echo: tools/echo\n---\n\n\
-    # Title\n\n## Only\n\n```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
+    plugins:\n  - tools\n---\n\n\
+    # Title\n\n## Only\n\n```lua\nreturn tools.call('tools/echo', { value = 'hi' })\n```\n";
 
 /// An empty in-memory recorder.
 fn recorder() -> Arc<MemoryRecorder> {
@@ -372,19 +372,20 @@ async fn a_script_reaches_an_undeclared_plugins_tool_by_full_id_without_its_prel
 }
 
 #[tokio::test]
-async fn the_offering_lists_an_undeclared_plugins_tool_and_a_script_calls_it_by_its_record() {
+async fn the_lists_split_the_offering_by_declared_plugin_and_a_script_calls_a_tool_object() {
     let offering = "---\nname: offering\ndescription: d\npromptforge: 0\n\
         plugins:\n  - tools\n---\n\n# Title\n\n## Only\n\n```lua\n\
-        local offered = tools.offered()\n\
-        local record = offered[1]\n\
-        return #offered .. '|' .. record.name .. '|' .. record.plugin .. '|' .. \
-          tools.call(record, { value = 'hi' })\n```\n";
+        local required, extras = tools.required(), tools.extras()\n\
+        local extra = extras[1]\n\
+        return #required .. ':' .. required[1].id .. '|' .. #extras .. ':' .. extra.id .. '|' .. \
+          tools.call(extra, { value = 'hi' })\n```\n";
     let mut host = installing(TOOLS);
     host.install(echo_package("tests/extra", None), None, Value::Null)
         .unwrap();
     assert_eq!(
         completed(drive_over(offering, host).await),
-        "1|extra_echo|extra|hi",
-        "the declared Plugin's tool stays out, and the undeclared one's record reaches its Plugin"
+        "1:tools/echo|1:extra/echo|hi",
+        "the declared Plugin's tool is required, the undeclared one's an extra, and its \
+         object reaches its Plugin"
     );
 }

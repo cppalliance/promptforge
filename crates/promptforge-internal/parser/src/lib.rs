@@ -39,9 +39,7 @@ pub mod test_support;
 pub use build::{
     FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
 };
-pub use contract::{
-    ArgDecl, ArgType, ArgsDecl, ModelKeyword, ModelRole, ModelRoles, ToolSlot, ToolSlots,
-};
+pub use contract::{ArgDecl, ArgType, ArgsDecl, ModelKeyword, ModelRole, ModelRoles};
 use error::Result;
 pub use error::{Error, ParseError, ParseErrorKind};
 pub use prompt::{Block, Prompt, Section};

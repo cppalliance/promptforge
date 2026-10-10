@@ -11,14 +11,14 @@ use promptforge_types::tools::ToolId;
 
 use promptforge_types::emitter::Emitter;
 
-/// What kind of tool stands behind one alias a round advertised.
+/// What kind of tool stands behind one name a round advertised.
 ///
 /// Produced by [`prepare_scoped_tools`] and recorded on the chain as the
 /// round's advertised scope: the `chat` arm gates the model's requested
-/// names against the map's keys and names a bound alias's tool in the
+/// names against the map's keys and names a catalog tool's id in the
 /// batch it reports, and the `tool_call` arm the loop shim then yields
-/// resolves each name itself - a bound alias against the run's tool
-/// catalog, a local alias against the section VM's handlers.
+/// resolves each name itself - a wire name against the run's offering, a
+/// local alias against the section VM's handlers.
 #[derive(Debug, Clone)]
 pub(super) enum DispatchTarget {
     /// A bound live tool, resolved against the run's tool catalog: the
@@ -63,22 +63,20 @@ pub(super) fn prepare_scoped_tools(
     let mut schemas = Vec::with_capacity(bindings.len() + local_schemas.len());
     let mut dispatch = BTreeMap::new();
     for binding in bindings {
-        // `tools.add_local` refuses a frontmatter slot's alias but not an
-        // offered name, so only an offered binding can share its name with
-        // a local tool here; the local tool wins.
+        // A local alias may equal an offered tool's wire name; the local
+        // tool wins.
         if local_schemas
             .iter()
             .any(|schema| tool_schema_name(schema) == binding.alias())
         {
             continue;
         }
-        // Model-facing description precedence: `tools.add` override >
-        // `tools.always` override > the bound tool's catalog
-        // text. The first two layers are already folded together by
-        // `binding_for_scope` (the H2 add runtime overwrites the frozen
+        // Model-facing description precedence: `tools.offer` override >
+        // `tools.always_offer` override > the tool's catalog text. The
+        // first two layers are already folded together by
+        // `binding_for_scope` (the section's override replaces the run
         // binding's `model_description`); the catalog fallback is the
-        // description the binding copied from the tool's descriptor at
-        // fill time.
+        // description the binding copied from the tool's descriptor.
         let description = binding
             .model_description()
             .unwrap_or_else(|| binding.description())
@@ -103,7 +101,7 @@ pub(super) fn prepare_scoped_tools(
     }
     // Local tools are prompt-author Lua functions with no live implementation;
     // the `tool_call` arm answers their calls on the section VM. The alias
-    // was validated at `tools.add_local` registration.
+    // was validated at `tools.offer_local` registration.
     for schema in local_schemas {
         dispatch.insert(tool_schema_name(schema).to_owned(), DispatchTarget::Local);
         schemas.push(schema.clone());

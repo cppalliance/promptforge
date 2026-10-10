@@ -37,5 +37,5 @@ pub use crate::execute::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Environment,
     MissingService, ModelBindings, RequirementCheck, Requirements, Round, Run, RunContext,
     RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step, ToolAnswerRecord,
-    ToolBindings, ToolCallOrigin, ToolCaller, UnavailablePlugin, UnmetRequirement, perform_vfs_op,
+    ToolCallOrigin, ToolCaller, UnavailablePlugin, UnmetRequirement, perform_vfs_op,
 };

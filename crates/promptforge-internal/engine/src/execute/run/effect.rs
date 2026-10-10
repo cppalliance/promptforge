@@ -106,14 +106,16 @@ pub enum Effect {
         /// the request sent to the model is the same for either origin.
         round: Round,
     },
-    /// One call to a bound tool. The caller resolves `tool`, the tool's
-    /// stable identity, to an implementation. `alias` is the prompt-local
-    /// name the call used, and `origin` says who made the call and where.
-    /// The effect's record keeps both and leaves out `access`.
+    /// One call to a catalog tool. The caller resolves `tool`, the tool's
+    /// stable identity, to an implementation. `alias` is the tool's wire
+    /// name, or its id for a script call to a tool the run could not
+    /// offer, and `origin` says who made the call and where. The effect's
+    /// record keeps both and leaves out `access`.
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
-        /// The prompt-local alias the call used.
+        /// The tool's wire name, or its id when the run could not offer
+        /// it.
         alias: String,
         /// The call's arguments.
         args: Value,
@@ -254,11 +256,12 @@ pub enum EffectRecord {
         /// The frozen thinking switch, when the bind declared one.
         thinking: Option<bool>,
     },
-    /// One bound tool call.
+    /// One catalog tool call.
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
-        /// The prompt-local alias the call used.
+        /// The tool's wire name, or its id when the run could not offer
+        /// it.
         alias: String,
         /// The call's arguments.
         args: Value,

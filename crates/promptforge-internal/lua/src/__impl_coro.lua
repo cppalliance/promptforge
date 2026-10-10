@@ -68,7 +68,7 @@ local function fail(result)
 end
 
 -- pcall and xpcall, replacing the base library's over the globals so a
--- Engine function that fails directly from Rust (`tools.add`, `models.get`,
+-- Engine function that fails directly from Rust (`tools.offer`, `models.get`,
 -- a `sys` or `var` guard) reaches author code as the same error table a
 -- shim raise does, instead of mlua's opaque userdata that `err.kind`
 -- cannot index. Only a Rust-raised failure is rewritten; a string, an
@@ -187,9 +187,9 @@ local function dispatch_tool(request)
   return result
 end
 
--- Suspending dispatch of a tool. The first argument is the prompt-local
--- alias string or a Tool object; the alias-or-Tool polymorphism decodes
--- once, in the protocol parse. The driver resumes a bound tool's result by
+-- Suspending dispatch of a tool. The first argument is a tool id, a local
+-- tool's alias, or a tool object; the polymorphism decodes once, in the
+-- protocol parse. The driver resumes a bound tool's result by
 -- the binding's declared output kind: a plain binding's text as a string,
 -- a structured binding's JSON output as a table.
 local function tools_call(alias_or_tool, args)

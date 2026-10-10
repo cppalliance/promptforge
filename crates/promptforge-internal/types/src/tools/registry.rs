@@ -6,12 +6,12 @@ use std::sync::Arc;
 use super::descriptor::ToolDescriptor;
 use super::ids::ToolId;
 
-/// A catalog of the tools a run may bind, given as tool descriptors.
+/// A catalog of the tools a run may offer, given as tool descriptors.
 ///
 /// The caller builds the catalog from every Plugin it can serve, declared
 /// by the prompt or not, and keeps the tool implementations itself. The
-/// Engine fills a prompt's tool slots from these descriptors and offers the
-/// tools of Plugins the prompt does not declare to the prompt's Lua.
+/// Engine offers every tool in it to the prompt's Lua, which names each by
+/// its [`ToolId`].
 ///
 /// Every tool in a catalog has a unique [`ToolId`]. Construction checks it,
 /// and the [`get`](Self::get) lookup relies on that check.
@@ -62,8 +62,7 @@ impl ToolCatalog {
 
     /// Returns the descriptor for `id`, if one is in the catalog.
     ///
-    /// The lookup scans the descriptors one by one. It runs only while a run
-    /// binds its tools, once per declared tool slot.
+    /// The lookup scans the descriptors one by one.
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.iter().find(|tool| tool.id == *id)

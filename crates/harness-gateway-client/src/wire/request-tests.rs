@@ -33,23 +33,24 @@ type Offered = (&'static str, &'static str, Value);
 /// Drives a facade `Run` through one tool round and returns what its second
 /// `Chat` effect sent.
 ///
-/// The section adds every tool in `offered` and runs `models.loop` over one
-/// user message. The first `Chat` effect is answered with a call to the
+/// The section offers every tool in `offered` as `example/test/<name>`, so
+/// the model sees it as `example_test_<name>`, and runs `models.loop` over
+/// one user message. The first `Chat` effect is answered with a call to the
 /// first tool, `call_1` with `{"value":"one"}`; the tool call with the
 /// trusted output `echoed: one`; and the second `Chat` effect, recorded
 /// here, with the text `done`.
 fn tool_round(offered: &[Offered]) -> Round {
-    let (mut slots, mut adds) = (String::new(), String::new());
+    let mut offers = String::new();
     for (name, _, _) in offered {
-        writeln!(slots, "  {name}: example/test/{name}").expect("a String takes every write");
-        writeln!(adds, "tools.add('{name}')").expect("a String takes every write");
+        writeln!(offers, "tools.offer('example/test/{name}')").expect("a String takes every write");
     }
     let source = format!(
         "---\nname: round\ndescription: One tool round.\npromptforge: 0\n\
-         models:\n  writer: {{}}\ntools:\n{slots}---\n\n# Round\n\n## Ask\n\n\
-         ```lua\nmodels.use('writer')\n{adds}local msgs = messages.new()\n\
+         models:\n  writer: {{}}\n---\n\n# Round\n\n## Ask\n\n\
+         ```lua\nmodels.use('writer')\n{offers}local msgs = messages.new()\n\
          msgs:user('echo once')\nmodels.loop(msgs)\nreturn msgs[#msgs].content\n```\n"
     );
+    let first_wire_name = format!("example_test_{}", offered[0].0);
     let (parsed, _parse_events) = Prompt::parse(&source, "round");
     let prompt = parsed.expect("the round prompt parses");
     let descriptors: Vec<ToolDescriptor> = offered
@@ -85,9 +86,12 @@ fn tool_round(offered: &[Offered]) -> Round {
                     ..
                 } => {
                     let reply = if rounds.is_empty() {
-                        let call =
-                            ToolCall::from_parts("call_1", offered[0].0, json!({ "value": "one" }))
-                                .expect("a whole call");
+                        let call = ToolCall::from_parts(
+                            "call_1",
+                            first_wire_name.as_str(),
+                            json!({ "value": "one" }),
+                        )
+                        .expect("a whole call");
                         CompletionResult::ToolCalls(vec![call])
                     } else {
                         CompletionResult::Text("done".to_owned())
@@ -196,7 +200,7 @@ fn a_replayed_tool_call_turn_serializes_in_the_openai_function_shape() {
     let call = &body["messages"][1]["tool_calls"][0];
     assert_eq!(call["id"], "call_1");
     assert_eq!(call["type"], "function");
-    assert_eq!(call["function"]["name"], "echo");
+    assert_eq!(call["function"]["name"], "example_test_echo");
     assert_eq!(call["function"]["arguments"], "{\"value\":\"one\"}");
     assert_eq!(body["messages"][2]["role"], "tool");
     assert_eq!(body["messages"][2]["tool_call_id"], "call_1");
@@ -288,7 +292,7 @@ fn each_tool_is_wrapped_as_a_function_with_its_schema_in_order() {
             {
                 "type": "function",
                 "function": {
-                    "name": "echo",
+                    "name": "example_test_echo",
                     "description": "Echo a value.",
                     "parameters": parameters,
                 },
@@ -296,7 +300,7 @@ fn each_tool_is_wrapped_as_a_function_with_its_schema_in_order() {
             {
                 "type": "function",
                 "function": {
-                    "name": "grab",
+                    "name": "example_test_grab",
                     "description": "Grab a value",
                     "parameters": { "type": "object" },
                 },
@@ -346,7 +350,7 @@ fn options_and_tools_reach_the_body() {
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"][0]["type"], "function");
-    assert_eq!(body["tools"][0]["function"]["name"], "echo");
+    assert_eq!(body["tools"][0]["function"]["name"], "example_test_echo");
 }
 
 #[test]

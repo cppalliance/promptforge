@@ -32,9 +32,10 @@
 //! raw-set into `_G`. The `input` table that `user-input` defines is one:
 //! `input.ask()` is an ordinary tool call to that Plugin's ask tool.
 //!
-//! The `tools` table also holds the offering: every catalog tool of a
-//! Plugin the prompt does not declare, which `tools.offered()` lists as
-//! plain records and `tools.add` scopes into a section by name or record.
+//! The `tools` table names every catalog tool the run can offer by its
+//! canonical id: `tools.required()` and `tools.extras()` list the tool
+//! objects of the declared Plugins and of every other Plugin, and
+//! `tools.offer` scopes a tool into a section by id or tool object.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
@@ -129,7 +130,9 @@ mod engine_globals;
 pub use engine_globals::install_ui;
 use engine_globals::{install_log, install_store_table, install_untrusted, route_store_to_shims};
 mod tools;
-use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
+#[cfg(test)]
+use tools::LuaToolHandle;
+use tools::{install_tool_call_counts, install_tools};
 mod handles;
 mod messages;
 mod prelude;

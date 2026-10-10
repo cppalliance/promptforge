@@ -45,14 +45,14 @@ use self::gateway::*;
 // tool-scoping and fanout-arm suites.
 
 /// The catalog text is advertised when no override exists at any layer, and a
-/// `tools.add` override reaches the advertised schema.
+/// `tools.offer` override reaches the advertised schema.
 #[test]
 fn tool_description_override_appears_in_model_schema() {
     let echo: Arc<dyn TestTool> = Arc::new(EchoTool);
-    // In production the binding's description is the descriptor's, copied
-    // at fill time; the test's slot text stands in for it here.
-    let (binding, _) = fixture_binding("echo", "echo capability for live matching", echo);
-    let bindings = crate::lua::ToolSet::for_test(vec![binding], Vec::new(), Vec::new());
+    // In production the binding's description is the descriptor's; the
+    // test's text stands in for it here.
+    let (binding, _) = fixture_binding("tools_echo", "echo capability for live matching", echo);
+    let bindings = crate::lua::ToolSet::for_test(Vec::new(), Vec::new(), vec![binding]);
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
         &Arc::new(Mutex::new(bindings)),
@@ -60,15 +60,13 @@ fn tool_description_override_appears_in_model_schema() {
         &null_emitter(),
         "Override",
     )
-    .expect("captured bindings must install");
-    vm.install_captured_bindings()
-        .expect("alias globals must install");
+    .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
 
-    // tools.add(alias) with no override keeps the bound tool's catalog text.
+    // tools.offer(tool) with no override keeps the tool's catalog text.
     let add_default = LuaProgram::compile(
-        "tools.add(echo)",
+        "tools.offer(tools.get('tools/echo'))",
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         &null_emitter(),
@@ -76,7 +74,7 @@ fn tool_description_override_appears_in_model_schema() {
     )
     .expect("prologue must compile");
     vm.run_chunk(&add_default, &null_emitter(), "Override")
-        .expect("tools.add(echo) without override must succeed");
+        .expect("tools.offer without override must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
@@ -88,9 +86,9 @@ fn tool_description_override_appears_in_model_schema() {
         "no override anywhere must advertise the bound tool's description"
     );
 
-    // tools.add(alias, override) overrides the model-facing schema.
+    // tools.offer(id, override) overrides the model-facing schema.
     let add_override = LuaProgram::compile(
-        "tools.add('echo', 'Author override for the model')",
+        "tools.offer('tools/echo', 'Author override for the model')",
         "prologue-2",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         &null_emitter(),
@@ -98,7 +96,7 @@ fn tool_description_override_appears_in_model_schema() {
     )
     .expect("second prologue must compile");
     vm.run_chunk(&add_override, &null_emitter(), "Override")
-        .expect("description override at tools.add must succeed");
+        .expect("description override at tools.offer must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
@@ -110,22 +108,22 @@ fn tool_description_override_appears_in_model_schema() {
     vm.teardown(&null_emitter(), "Override");
 }
 
-/// Precedence at the advertised schema: a `tools.add` override beats the
-/// `model_description` recorded by `tools.always`, which itself
+/// Precedence at the advertised schema: a `tools.offer` override beats the
+/// `model_description` recorded by `tools.always_offer`, which itself
 /// beats the catalog text.
 #[test]
-fn bind_override_reaches_the_schema_and_add_beats_bind() {
+fn always_offer_override_reaches_the_schema_and_offer_beats_it() {
     let bindings = crate::lua::ToolSet::for_test(
+        Vec::new(),
+        Vec::new(),
         vec![crate::lua::ToolBinding {
-            alias: "echo".to_owned(),
+            alias: "tools_echo".to_owned(),
             description: "echo capability for live matching".to_owned(),
             id: ToolId::parse("tools/echo").expect("valid id"),
-            model_description: Some("bind override".to_owned()),
+            model_description: Some("always override".to_owned()),
             schema: EchoTool.parameters_schema(),
             output_kind: ToolOutputKind::Plain,
         }],
-        Vec::new(),
-        Vec::new(),
     );
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
@@ -134,14 +132,12 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         &null_emitter(),
         "Precedence",
     )
-    .expect("captured bindings must install");
-    vm.install_captured_bindings()
-        .expect("alias globals must install");
+    .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
 
     let add_plain = LuaProgram::compile(
-        "tools.add('echo')",
+        "tools.offer('tools/echo')",
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         &null_emitter(),
@@ -149,19 +145,19 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     )
     .expect("prologue must compile");
     vm.run_chunk(&add_plain, &null_emitter(), "Precedence")
-        .expect("tools.add without override must succeed");
+        .expect("tools.offer without override must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
         tool_schema_description(&schemas[0]),
-        "bind override",
-        "the bind/always override must beat the catalog text"
+        "always override",
+        "the always_offer override must beat the catalog text"
     );
 
     let add_override = LuaProgram::compile(
-        "tools.add('echo', 'add override')",
+        "tools.offer('tools/echo', 'offer override')",
         "prologue-2",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         &null_emitter(),
@@ -169,14 +165,14 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     )
     .expect("second prologue must compile");
     vm.run_chunk(&add_override, &null_emitter(), "Precedence")
-        .expect("tools.add with override must succeed");
+        .expect("tools.offer with override must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
         tool_schema_description(&schemas[0]),
-        "add override",
-        "the add override must beat the bind/always override"
+        "offer override",
+        "the offer override must beat the always_offer override"
     );
 
     vm.teardown(&null_emitter(), "Precedence");
@@ -278,11 +274,11 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // different nonces, so an envelope's tag stays unguessable from one run
     // to the next as long as the caller draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
+        ```lua\nreturn tools.call('tools/untrusted_echo', { value = 'hi' })\n```\n";
     let test = bound_with_tools(md);
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {

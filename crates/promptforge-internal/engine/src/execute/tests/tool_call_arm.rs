@@ -150,7 +150,7 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
 #[tokio::test(flavor = "current_thread")]
 async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
     let md = arm_prompt(
-        "local ok, err = pcall(tools.call, 'fail', {})\n\
+        "local ok, err = pcall(tools.call, 'tools/failing', {})\n\
          assert(not ok, 'a script call raises the tool failure at the call site')\n\
          return err.kind .. '|' .. tostring(err)",
     );
@@ -187,16 +187,17 @@ async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_a
     // answers the effect with the error instead of a call, and a script
     // call raises it at the call site.
     let md = arm_prompt(
-        "local ok, err = pcall(tools.call, 'echo', { value = 'hi' })\n\
+        "local ok, err = pcall(tools.call, 'tools/echo', { value = 'hi' })\n\
          assert(not ok, 'an unresolvable identity raises at the call site')\n\
          return err.kind .. '|' .. tostring(err)",
     );
     let prompt = parse(&md);
-    let (binding, _unregistered) = fixture_binding("echo", "echo capability", Arc::new(EchoTool));
+    let (binding, _unregistered) =
+        fixture_binding("tools_echo", "echo capability", Arc::new(EchoTool));
     let recorder = Arc::new(ToolRecorder::default());
     let (ctx, fixture) = tool_context(
         &prompt,
-        ToolSet::for_test(vec![binding], vec!["echo".to_owned()], Vec::new()),
+        ToolSet::for_test(Vec::new(), vec!["tools_echo".to_owned()], vec![binding]),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
     let out = TokioDriver::new(&ctx, fixture, None)
@@ -232,7 +233,7 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     // `task_status` is registered as a local tool so the test proves the
     // reservation wins over a lookup that would otherwise succeed.
     let md = arm_prompt(
-        "tools.add_local('task_status', 'shadow', {}, function() return 'shadowed' end)\n\
+        "tools.offer_local('task_status', 'shadow', {}, function() return 'shadowed' end)\n\
          local kinds = {}\n\
          for _, name in ipairs({ 'task', 'task_cancel', 'task_status', 'await_tasks' }) do\n\
            local ok, err = pcall(tools.call, name, {})\n\

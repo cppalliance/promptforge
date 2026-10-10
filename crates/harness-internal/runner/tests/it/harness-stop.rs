@@ -57,8 +57,8 @@ const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\npromptforge: 
 /// a `pcall`, and ask again, with the held tool advertised to the model.
 const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
     plugins:\n  - harness\n  - user-input\n\
-    tools:\n  hold: harness/hold\nmodels:\n  writer: {}\n---\n\n\
-    # Chats\n\n```lua\nmodels.default('writer')\ntools.always('hold')\n```\n\n\
+    models:\n  writer: {}\n---\n\n\
+    # Chats\n\n```lua\nmodels.default('writer')\ntools.always_offer('harness/hold')\n```\n\n\
     ## Conversation\n\n```lua\n\
     local history = messages.new()\n\
     while true do\n\
@@ -155,14 +155,14 @@ async fn an_uncaught_stopped_round_ends_the_run_cancelled() {
 }
 
 /// The round that asks for the held tool: the model's first round calls
-/// `hold`, and every later round replies with text.
+/// its wire name `harness_hold`, and every later round replies with text.
 fn calls_hold_once() -> ScriptedBroker {
     ScriptedBroker::new(|round, _messages| {
         Box::pin(async move {
             if round.id.get() > 0 {
                 return reply("done");
             }
-            let call = ToolCall::from_parts("call-1", "hold", json!({}))?;
+            let call = ToolCall::from_parts("call-1", "harness_hold", json!({}))?;
             Completion::from_result(CompletionResult::ToolCalls(vec![call]), MODEL).map(Box::new)
         })
     })

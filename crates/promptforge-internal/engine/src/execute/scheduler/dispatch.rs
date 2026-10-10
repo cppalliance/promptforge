@@ -26,17 +26,16 @@ use promptforge_vfs::VfsError;
 
 use super::{ChainIndex, Continuation, Counters, Scheduler, VfsContinuation};
 
-/// The error for an alias that names no binding in the run's tool catalog:
-/// the name and every bound alias, so the message reads required versus
-/// actual. Shared by the script `tool_call` arm and the `chat` arm's
-/// explicit tool list.
+/// The error for a name that resolves to no tool in the run: the name and
+/// the id of every tool the run offers, so the message reads required
+/// versus actual. The `tool_call` arm's answer for an unresolved name.
 pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
     Error::UnboundToolCall {
         name: name.to_owned(),
-        bound: tool_set
-            .bindings()
+        ids: tool_set
+            .offered()
             .iter()
-            .map(|binding| binding.alias().to_owned())
+            .map(|binding| binding.id().to_string())
             .collect(),
     }
 }

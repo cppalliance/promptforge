@@ -230,33 +230,34 @@ pub(crate) enum Error {
     /// The model referenced a tool outside the section's advertised scope.
     ///
     /// This is the model tool loop's error alone: a script `tools.call`
-    /// resolves against the run's full bound catalog and fails with
+    /// resolves against the run's whole catalog and fails with
     /// [`Error::UnboundToolCall`] instead.
-    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias is a bound tool slot but was not added to this section's scope)" } else { "" })]
+    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (a catalog tool that was not offered in this section)" } else { "" })]
     #[non_exhaustive]
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,
-        /// Whether the name is one of the prompt's bound tool slots.
+        /// Whether the name is the wire name or id of a tool the run
+        /// offers.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,
     },
 
-    /// A script `tools.call` referenced an alias with no binding in the run's
-    /// tool catalog.
+    /// A `tools.call` named no local tool and no tool in the run's catalog.
     ///
-    /// Script-initiated dispatch resolves against the run's full bound set,
-    /// not the section's advertised scope - the scope shapes what the model
-    /// is offered, and the author's own code is not the model - so this
-    /// error means the alias was never bound at all.
-    #[error("tool {name:?} is not bound in this run; bound aliases: {bound:?}")]
+    /// Script-initiated dispatch resolves a canonical id against the run's
+    /// whole catalog, not the section's advertised scope - the scope shapes
+    /// what the model is offered, and the author's own code is not the
+    /// model - so this error means the name is no catalog tool's id at
+    /// all; a wire name is the model's, never a script's.
+    #[error("tool {name:?} is not a tool in this run; catalog tools: {ids:?}")]
     #[non_exhaustive]
     UnboundToolCall {
-        /// The alias the script tried to dispatch.
+        /// The name the call tried to dispatch.
         name: String,
-        /// Every bound alias in the run's tool catalog.
-        bound: Vec<String>,
+        /// The id of every tool the run offers.
+        ids: Vec<String>,
     },
 
     /// A model-facing section has non-empty prose but no `models.use` or
@@ -274,10 +275,9 @@ pub(crate) enum Error {
     UnsupportedVersion(u32),
 
     /// The environment cannot satisfy the prompt: a required Plugin is
-    /// missing, unavailable, or needs a service the run lacks, a slotted
-    /// tool is not offered by its Plugin, the filled model
-    /// fails a declared requirement (a context minimum or a hard keyword),
-    /// or an H1 block failed the prompt's hard gate.
+    /// missing, unavailable, or needs a service the run lacks, the filled
+    /// model fails a declared requirement (a context minimum or a hard
+    /// keyword), or an H1 block failed the prompt's hard gate.
     ///
     /// The notice is the whole message, written to be read by a model.
     #[error("{notice}")]

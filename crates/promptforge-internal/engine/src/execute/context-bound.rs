@@ -14,47 +14,31 @@ use crate::parser::Prompt;
 
 use super::super::config::RunContext;
 
-/// Builds the run's shared tool set from the prepared bindings: every
-/// filled slot becomes a binding with the tool's descriptor data (its
-/// schema, description, and output kind), so run-time execution never
-/// consults the catalog again and never holds an implementation. Unfilled
-/// slots produce no binding: advertising or calling the alias fails at run
-/// time, exactly as prepare's report promised. The offering is bound
-/// beside the slots.
+/// Builds the run's shared tool set: the frontmatter's declared plugins,
+/// and every catalog tool the run can offer bound with the tool's
+/// descriptor data (its schema, description, and output kind), so run-time
+/// execution never consults the catalog again and never holds an
+/// implementation.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
-    let mut set = ToolSet::default();
-    for (alias, _) in prompt.frontmatter().tools().iter() {
-        let Some(tool) = ctx.tool_bindings.resolve(alias) else {
-            continue;
-        };
-        // The exact path says nothing prose-like; the tool's own catalog
-        // text stands in as the binding's description.
-        set.bindings.push(ToolBinding::from_descriptor(alias, tool));
-    }
-    set.offered = offered_bindings(prompt, ctx);
-    set
+    ToolSet::from_parts(
+        prompt.frontmatter().plugins().to_vec(),
+        Vec::new(),
+        offered_bindings(ctx),
+    )
 }
 
-/// Binds the offering: every catalog tool whose Plugin the prompt's
-/// frontmatter doesn't declare, in tool id order, under its id with `/`
-/// and `.` replaced by `_` (`web/fetch` becomes `web_fetch`). A tool whose
-/// name can't be offered is left out with a log line.
-fn offered_bindings(prompt: &Prompt, ctx: &RunContext) -> Vec<ToolBinding> {
-    let frontmatter = prompt.frontmatter();
-    let declared = frontmatter.plugins();
-    let aliases: BTreeSet<&str> = frontmatter.tools().iter().map(|(alias, _)| alias).collect();
-    let mut tools: Vec<&ToolDescriptor> = ctx
-        .tools
-        .tools()
-        .iter()
-        .filter(|tool| !declared.contains(&tool.id.plugin()))
-        .collect();
+/// Binds the offering: every catalog tool, in tool id order, under its
+/// wire name, its id with `/` and `.` replaced by `_` (`web/fetch` becomes
+/// `web_fetch`). A tool whose name can't be offered is left out with a log
+/// line; a script still reaches it by id through the catalog bindings.
+fn offered_bindings(ctx: &RunContext) -> Vec<ToolBinding> {
+    let mut tools: Vec<&ToolDescriptor> = ctx.tools.tools().iter().collect();
     tools.sort_by(|left, right| left.id.cmp(&right.id));
     let mut taken = BTreeSet::new();
     let mut offered = Vec::new();
     for tool in tools {
         let name = tool.id.to_string().replace(['/', '.'], "_");
-        if let Some(reason) = offer_refusal(&name, tool, &aliases, &taken) {
+        if let Some(reason) = offer_refusal(&name, tool, &taken) {
             tracing::warn!(tool = %tool.id, %name, %reason, "a tool is left out of the offering");
             continue;
         }
@@ -64,18 +48,10 @@ fn offered_bindings(prompt: &Prompt, ctx: &RunContext) -> Vec<ToolBinding> {
     offered
 }
 
-/// Why `tool` can't be offered under `name`: a frontmatter tool alias or a
-/// task built-in has the name, no model round could advertise it, or an
-/// earlier offered tool has it. `None` when it can be offered.
-fn offer_refusal(
-    name: &str,
-    tool: &ToolDescriptor,
-    aliases: &BTreeSet<&str>,
-    taken: &BTreeSet<String>,
-) -> Option<String> {
-    if aliases.contains(name) {
-        return Some("a frontmatter tool alias has the same name".to_owned());
-    }
+/// Why `tool` can't be offered under `name`: a task built-in has the
+/// name, no model round could advertise it, or an earlier offered tool has
+/// it. `None` when it can be offered.
+fn offer_refusal(name: &str, tool: &ToolDescriptor, taken: &BTreeSet<String>) -> Option<String> {
     if RESERVED_TOOL_NAMES.contains(&name) {
         return Some("a task built-in has the same name".to_owned());
     }
@@ -93,10 +69,9 @@ fn offer_refusal(
 }
 
 /// Binds every tool in the prepared catalog under its full id, keyed by
-/// that id: what a script `tools.call` falls back to when no frontmatter
-/// alias matches. These bindings stay out of the tool set, so they never
-/// become globals, never enter a section's scope, and are never
-/// advertised.
+/// that id: what a script `tools.call` falls back to when the id names no
+/// offered tool. These bindings stay out of the tool set, so they never
+/// enter a section's scope and are never advertised.
 pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding> {
     ctx.tools
         .tools()
@@ -106,18 +81,6 @@ pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding
             let binding = ToolBinding::from_descriptor(&id, tool);
             (id, binding)
         })
-        .collect()
-}
-
-/// Every tool alias the prompt's frontmatter declares, filled or not: the
-/// names a Plugin prelude's globals must not take, so whether a prelude
-/// installs depends only on the frontmatter.
-pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
-    prompt
-        .frontmatter()
-        .tools()
-        .iter()
-        .map(|(alias, _)| alias.to_owned())
         .collect()
 }
 

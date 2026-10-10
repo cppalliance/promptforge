@@ -72,23 +72,14 @@ fn call_with_a_non_string_target_errors() {
 }
 
 #[test]
-fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
+fn shared_replay_sees_the_tables_and_no_tool_global_ever_installs() {
     // The `tools`/`models` tables install with Engine injection, before the
-    // replay, so shared top-level code may scope tools at load. The bare
-    // alias globals install only after the replay, so a declared alias wins
-    // over a same-named shared global.
-    let bindings = ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "search",
-            "search the web",
-            &fixture_tool("search"),
-        )],
-        Vec::new(),
-        Vec::new(),
-    );
+    // replay, so shared top-level code may scope tools at load. No tool
+    // becomes a global, before the replay or after it.
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let shared = program(
-        "tools.add('search')\n\
-         assert(search == nil, 'the bare alias global installs after the replay')",
+        "tools.offer(tools.get('fixtures/search'))\n\
+         assert(fixtures_search == nil, 'no tool installs as a global')",
     );
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
@@ -105,26 +96,24 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("the tools table must work during the shared replay");
-    vm.install_captured_bindings()
-        .expect("captured bindings must install");
 
     assert_eq!(
         run_scalar(
             &vm,
-            &program("return type(search)"),
+            &program("return type(fixtures_search)"),
             &null_emitter(),
             "Test"
         )
-        .expect("the alias global installs after the replay")
+        .expect("the probe runs after the replay")
         .as_deref(),
-        Some("userdata")
+        Some("nil")
     );
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["search"],
-        "the load-time tools.add must be recorded"
+        ["fixtures_search"],
+        "the load-time tools.offer must be recorded"
     );
 }
 
@@ -132,19 +121,11 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
 fn shared_functions_resolve_engine_globals_when_called_from_a_later_chunk() {
     // A shared function body resolves `tools`/`var` through the real globals
     // at call time, so a later chunk can mutate Engine state through it.
-    let bindings = ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "search",
-            "search the web",
-            &fixture_tool("search"),
-        )],
-        Vec::new(),
-        Vec::new(),
-    );
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let shared = program(
-        "function scope_and_store(alias)\n\
-             tools.add(alias)\n\
-             var.scoped = alias\n\
+        "function scope_and_store(id)\n\
+             tools.offer(id)\n\
+             var.scoped = id\n\
              return var.scoped\n\
          end",
     );
@@ -163,25 +144,23 @@ fn shared_functions_resolve_engine_globals_when_called_from_a_later_chunk() {
         .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("shared library must load");
-    vm.install_captured_bindings()
-        .expect("captured bindings must install");
 
     assert_eq!(
         run_scalar(
             &vm,
-            &program("return scope_and_store('search')"),
+            &program("return scope_and_store('fixtures/search')"),
             &null_emitter(),
             "Test",
         )
         .expect("the shared function must mutate Engine state when called")
         .as_deref(),
-        Some("search")
+        Some("fixtures/search")
     );
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["search"]
+        ["fixtures_search"]
     );
 }
 

@@ -1,12 +1,11 @@
 //! The Engine's setup half: one section VM's lifecycle from Engine injection
-//! through the captured alias bindings.
+//! through the shared library's replay.
 //!
 //! Every section driver - the walk's section entry and the
 //! fanout arm - runs the identical setup sequence: inject the Engine values,
 //! install the persistent Engine globals, install the control globals, install
-//! the Plugin preludes, replay the shared library as the section's first
-//! chunk, then install the captured alias bindings (so a declared alias wins
-//! over a same-named shared global).
+//! the Plugin preludes, then replay the shared library as the section's first
+//! chunk.
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (both drivers take the next run-global `id`; the arm adds its
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
@@ -87,10 +86,6 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's Plugin preludes, installed in order after the yield
     /// shims and before the shared replay.
     pub(crate) preludes: &'a [Prelude],
-    /// Every tool alias the prompt's frontmatter declares: the captured
-    /// bindings install these as globals after the preludes, so a prelude
-    /// global may not take one.
-    pub(crate) frontmatter_aliases: &'a [String],
     /// Test-only: installs the raw `tools.call_as_model` shim, so a fixture
     /// section can yield one model-issued `tool_call`.
     #[cfg(test)]
@@ -105,10 +100,9 @@ pub(crate) struct SectionVmSetup<'a> {
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
 /// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims), the run's
-/// Plugin preludes, [`SectionVm::replay_shared`], and
-/// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
-/// limits itself before calling, so a limits failure propagates without
-/// touching the VM's teardown observation path.
+/// Plugin preludes, and [`SectionVm::replay_shared`]. The caller applies
+/// the Lua limits itself before calling, so a limits failure propagates
+/// without touching the VM's teardown observation path.
 ///
 /// On failure the VM is left for the caller to tear down, so each driver's
 /// own teardown boundary stays the one place a teardown happens.
@@ -117,7 +111,7 @@ pub(crate) struct SectionVmSetup<'a> {
 /// Returns the [`Error`] of whichever step failed: Engine injection, Engine
 /// global install, `item` install, control-global install, the prelude install (a
 /// prelude that fails to load, or whose global collides), the shared
-/// replay, or the captured-binding install.
+/// replay, or the store shims' install.
 pub(crate) fn setup_section_vm<L>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
@@ -150,12 +144,7 @@ where
     // The preludes read `tools` and `store` from `_G` as they install, so
     // they follow the yield shims, and they precede the shared replay so
     // the shared library can call what they define.
-    let aliases: Vec<&str> = setup
-        .frontmatter_aliases
-        .iter()
-        .map(String::as_str)
-        .collect();
-    crate::lua::install_preludes(vm.lua(), setup.preludes, &aliases)?;
+    crate::lua::install_preludes(vm.lua(), setup.preludes)?;
     #[cfg(test)]
     if setup.raw_shims {
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
@@ -176,6 +165,5 @@ where
     // earlier would make a top-level `store.write` yield from outside a
     // coroutine. The install also switches any store function the load
     // captured, so none of them runs directly after this point.
-    crate::lua::install_store_shims(vm.lua())?;
-    vm.install_captured_bindings().map_err(Error::from)
+    crate::lua::install_store_shims(vm.lua()).map_err(Error::from)
 }

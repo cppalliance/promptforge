@@ -6,7 +6,7 @@
 //! [`PluginId`], such as `web`, and every tool it offers sits under that
 //! name, such as `web/fetch`. The Engine knows Plugins by identity alone:
 //! a prompt declares them by plain name, which makes each one required
-//! and runs its prelude, and an exact tool slot names one through its
+//! and runs its prelude, and a tool names its Plugin through its
 //! [`ToolId`] prefix. A run's catalog holds the tools of every Plugin the
 //! caller can serve, declared or not. The Plugin contract - the `Package`
 //! label, the `Plugin` trait, and the services a Plugin reads - is in

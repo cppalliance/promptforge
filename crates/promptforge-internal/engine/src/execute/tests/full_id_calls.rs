@@ -1,7 +1,8 @@
-//! Tests for script tool calls by full id: a script's `tools.call` may name
-//! any tool in the run's catalog by its full id, which binds no global and
-//! advertises nothing. `tools.add` and `tools.always` still take only
-//! aliases, and a model-issued call never resolves a full id.
+//! Tests for script tool calls by canonical id: a script's `tools.call`
+//! names an offered tool by its id and records the tool's wire name, and
+//! reaches by id a catalog tool the run could not offer, recording the id.
+//! A call binds no global and advertises nothing; a wire name is the
+//! model's alone, and a model-issued call never resolves an id.
 
 use super::models_loop::loop_models;
 use super::*;
@@ -10,6 +11,9 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 /// The echo fixture's full id.
 const ECHO_ID: &str = "tools/echo";
+
+/// The echo fixture's wire name.
+const ECHO_WIRE: &str = "tools_echo";
 
 /// The echo fixture's full id as a [`ToolId`].
 fn echo_id() -> ToolId {
@@ -25,17 +29,10 @@ fn script_origin() -> ToolCallOrigin {
     }
 }
 
-/// A one-section prompt around `lua`. `slots` holds the YAML lines under
-/// the frontmatter's `tools:` key, or is empty for a prompt that binds no
-/// alias.
-fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
-    let tools = if slots.is_empty() {
-        String::new()
-    } else {
-        format!("plugins:\n  - tools\ntools:\n{slots}")
-    };
+/// A one-section prompt around `lua`.
+fn full_id_prompt(lua: &str) -> Prompt {
     parse(&format!(
-        "---\nname: t\ndescription: d\npromptforge: 0\n{tools}---\n\n# FullId\n\n## Only\n\n```lua\n{lua}\n```\n"
+        "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# FullId\n\n## Only\n\n```lua\n{lua}\n```\n"
     ))
 }
 
@@ -49,7 +46,7 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
         .prepare(prompt, test_context(EXECUTION));
     assert!(
         requirements.is_satisfied(),
-        "the fixture prompt's slots fill: {requirements:?}"
+        "the fixture prompt prepares: {requirements:?}"
     );
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
@@ -64,7 +61,7 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
     (ctx, RunFixture::new().tools(table))
 }
 
-/// The echo fixture and a second tool the prompts never alias.
+/// The echo fixture and a second tool the prompts never offer.
 fn echo_and_concrete() -> Vec<Arc<dyn TestTool>> {
     vec![
         Arc::new(EchoTool),
@@ -72,22 +69,52 @@ fn echo_and_concrete() -> Vec<Arc<dyn TestTool>> {
     ]
 }
 
+/// A catalog tool whose wire name, `task_cancel`, is a task built-in's, so
+/// the run cannot offer it; it echoes its `value` argument.
+struct Unofferable;
+
+#[async_trait::async_trait]
+impl TestTool for Unofferable {
+    fn id(&self) -> ToolId {
+        ToolId::parse("task/cancel").expect("valid id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "A tool the run cannot offer."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object", "properties": { "value": { "type": "string" } } })
+    }
+
+    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(format!(
+            "unoffered: {}",
+            args["value"].as_str().unwrap_or_default()
+        )))
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_full_id_as_alias() {
-    let prompt = full_id_prompt("", "return tools.call('tools/echo', { value = 'hi' })");
+async fn a_script_call_by_id_records_the_offered_tools_wire_name() {
+    let prompt = full_id_prompt("return tools.call('tools/echo', { value = 'hi' })");
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler
         .drive()
         .await
-        .expect("a full-id call reaches the catalog tool");
+        .expect("an id call reaches the offered tool");
     assert_eq!(out, "echoed: hi");
     assert_eq!(
         *records.lock().expect("the tap mutex is not poisoned"),
         vec![EffectRecord::ToolCall {
             tool: echo_id(),
-            alias: ECHO_ID.to_owned(),
+            alias: ECHO_WIRE.to_owned(),
             args: json!({ "value": "hi" }),
             origin: script_origin(),
         }]
@@ -95,16 +122,48 @@ async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_ful
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alias_and_added() {
+async fn a_script_reaches_a_catalog_tool_left_out_of_the_offering_by_id() {
+    let prompt = full_id_prompt(
+        "assert(tools.get('task/cancel') == nil, 'the tool is not offered')\n\
+         return tools.call('task/cancel', { value = 'hi' })",
+    );
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(Unofferable)]);
+    assert!(
+        ctx.tool_set_snapshot()
+            .expect("the tool set mutex is not poisoned")
+            .offered()
+            .is_empty(),
+        "a tool whose wire name is a task built-in's is left out of the offering"
+    );
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
+    let records = scheduler.record_effects_for_test();
+    let out = scheduler
+        .drive()
+        .await
+        .expect("the call runs through the catalog bindings");
+    assert_eq!(out, "unoffered: hi");
+    assert_eq!(
+        *records.lock().expect("the tap mutex is not poisoned"),
+        vec![EffectRecord::ToolCall {
+            tool: ToolId::parse("task/cancel").expect("valid id"),
+            alias: "task/cancel".to_owned(),
+            args: json!({ "value": "hi" }),
+            origin: script_origin(),
+        }],
+        "the id stands as the alias of a tool the run could not offer"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_call_advertises_nothing_until_the_tool_is_offered() {
     let gateway = ScriptedChat::new(vec![resp_text("before"), resp_text("after")]);
     let prompt = full_id_prompt(
-        "  echo: tools/echo\n",
         "tools.call('tools/echo', { value = 'a' })\n\
          tools.call('tools/concrete', { value = 'b' })\n\
          local before = messages.new()\n\
          before:user('before')\n\
          models.loop(before)\n\
-         tools.add('echo')\n\
+         tools.offer('tools/echo')\n\
          local after = messages.new()\n\
          after:user('after')\n\
          models.loop(after)\n\
@@ -126,90 +185,84 @@ async fn a_full_id_call_advertises_nothing_until_the_tool_is_bound_under_an_alia
         .collect();
     assert_eq!(
         advertised,
-        vec![Vec::new(), vec!["echo".to_owned()]],
-        "a full-id call scopes nothing; only the added alias is advertised"
+        vec![Vec::new(), vec![ECHO_WIRE.to_owned()]],
+        "a script call scopes nothing; only the offered tool is advertised"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tools_add_and_tools_always_reject_a_full_id_as_an_invalid_alias() {
+async fn a_script_call_by_wire_name_or_local_looking_name_is_unbound() {
     let prompt = full_id_prompt(
-        "  echo: tools/echo\n",
-        "local add_ok, add_err = pcall(tools.add, 'tools/echo')\n\
-         local always_ok, always_err = pcall(tools.always, 'tools/echo')\n\
-         assert(not add_ok and not always_ok, 'a full id is not an alias')\n\
-         return tostring(add_err) .. '\\n' .. tostring(always_err)",
+        "local wire_ok, wire_err = pcall(tools.call, 'tools_echo', {})\n\
+         local bare_ok, bare_err = pcall(tools.call, 'echo', {})\n\
+         assert(not wire_ok and not bare_ok, 'neither name is a catalog id')\n\
+         return wire_err.kind .. ':' .. wire_err.name .. '|' .. bare_err.kind .. ':' .. bare_err.name",
     );
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
-    let out = TokioDriver::new(&ctx, fixture, None)
+    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
+    let records = scheduler.record_effects_for_test();
+    let out = scheduler
         .drive()
         .await
         .expect("both refusals are pcall-able");
-    let (add, always) = out.split_once('\n').expect("the block joins both errors");
-    for message in [add, always] {
-        assert!(
-            message.contains("invalid alias \"tools/echo\""),
-            "a full id fails alias validation, got: {message}"
-        );
-    }
+    assert_eq!(out, "unbound_tool:tools_echo|unbound_tool:echo");
+    assert!(
+        records
+            .lock()
+            .expect("the tap mutex is not poisoned")
+            .is_empty(),
+        "nothing was issued"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn no_global_is_bound_under_a_full_id() {
+async fn no_global_is_bound_under_a_wire_name_or_an_id() {
     let prompt = full_id_prompt(
-        "  echo: tools/echo\n",
-        "tools.call('tools/concrete', { value = 'x' })\n\
-         local slashed = {}\n\
+        "tools.offer('tools/echo')\n\
+         tools.call('tools/concrete', { value = 'x' })\n\
+         local named = {}\n\
          for name in next, _G do\n\
-           if type(name) == 'string' and name:find('/', 1, true) then\n\
-             slashed[#slashed + 1] = name\n\
+           if type(name) == 'string' and (name:find('/', 1, true) or name:find('tools_', 1, true)) then\n\
+             named[#named + 1] = name\n\
            end\n\
          end\n\
-         table.sort(slashed)\n\
-         return type(echo) .. '|' .. table.concat(slashed, ',')",
+         table.sort(named)\n\
+         return type(tools_echo) .. '|' .. table.concat(named, ',')",
     );
     let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
     let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the section runs");
-    assert_eq!(
-        out, "userdata|",
-        "the frontmatter alias is a global and no full id is"
-    );
+    assert_eq!(out, "nil|", "no tool is a global under any name");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_frontmatter_bound_tool_issues_the_same_effect_by_alias_and_by_full_id_apart_from_the_alias()
- {
+async fn a_script_call_by_id_and_by_tool_object_issue_the_same_effect() {
     let prompt = full_id_prompt(
-        "  echo: tools/echo\n",
-        "return tools.call('echo', { value = 'hi' }) .. '|' .. \
-         tools.call('tools/echo', { value = 'hi' })",
+        "return tools.call('tools/echo', { value = 'hi' }) .. '|' .. \
+         tools.call(tools.get('tools/echo'), { value = 'hi' })",
     );
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls reach the tool");
     assert_eq!(out, "echoed: hi|echoed: hi");
-    let call = |alias: &str| EffectRecord::ToolCall {
+    let call = EffectRecord::ToolCall {
         tool: echo_id(),
-        alias: alias.to_owned(),
+        alias: ECHO_WIRE.to_owned(),
         args: json!({ "value": "hi" }),
         origin: script_origin(),
     };
     assert_eq!(
         *records.lock().expect("the tap mutex is not poisoned"),
-        vec![call("echo"), call(ECHO_ID)]
+        vec![call.clone(), call]
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
-    let prompt = full_id_prompt(
-        "  echo: tools/echo\n",
-        "return tools.call('tools/missing', {})",
-    );
+async fn a_name_that_is_no_catalog_id_is_unbound_and_lists_the_offered_ids() {
+    let prompt = full_id_prompt("return tools.call('tools/missing', {})");
     let (ctx, fixture) = catalog_context(&prompt, &echo_and_concrete());
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
@@ -218,15 +271,21 @@ async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
         .await
         .expect_err("an unknown name fails the block");
     match &error {
-        Error::UnboundToolCall { name, bound } => {
+        Error::UnboundToolCall { name, ids } => {
             assert_eq!(name, "tools/missing");
-            assert_eq!(bound, &["echo".to_owned()], "only aliases are listed");
+            assert_eq!(
+                ids,
+                &["tools/concrete".to_owned(), ECHO_ID.to_owned()],
+                "every offered tool's id is listed"
+            );
         }
         other => panic!("expected the typed unbound-tool error, got {other:?}"),
     }
-    assert!(
-        error.to_string().contains("bound aliases: [\"echo\"]"),
-        "the message lists the bound aliases: {error}"
+    assert_eq!(
+        error.to_string(),
+        "tool \"tools/missing\" is not a tool in this run; \
+         catalog tools: [\"tools/concrete\", \"tools/echo\"]",
+        "the message lists the offered ids"
     );
     assert!(
         records
@@ -238,11 +297,10 @@ async fn a_name_that_is_neither_an_alias_nor_a_catalog_id_is_still_unbound() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_model_issued_call_never_resolves_a_full_id() {
+async fn a_model_issued_call_never_resolves_an_id() {
     let prompt = full_id_prompt(
-        "",
         "local ok, err = pcall(tools.call_as_model, 'call_1', 'tools/echo', { value = 'hi' })\n\
-         assert(not ok, 'a model-issued full-id call is refused')\n\
+         assert(not ok, 'a model-issued id call is refused')\n\
          return err.kind .. ':' .. err.name",
     );
     let (mut ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
