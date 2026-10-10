@@ -681,7 +681,7 @@ The owner set the direction for each surface in conversation, and the implementa
 
 <step-6>
 
-### Step 6: Expose the model provider on model handles
+### Step 6: Expose the model provider on model handles [completed]
 
 - Component: Model provider
 - Piece: Provider pass-through, second of the component's two pieces, built after the gateway catalog field.

@@ -140,6 +140,39 @@ async fn fetch_model_catalog_skips_entries_without_a_context_window() {
 }
 
 #[tokio::test]
+async fn fetch_model_catalog_reads_a_provider_only_when_the_entry_names_one() {
+    use axum::Router;
+    use axum::routing::get;
+
+    async fn models() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "grok", "object": "model", "kind": "chat", "description": "d",
+                  "context": 4096, "thinking": "never", "provider": "xai" },
+                { "id": "local", "object": "model", "kind": "chat", "description": "d",
+                  "context": 4096, "thinking": "never" }
+            ]
+        }))
+    }
+    let app = Router::new().route("/models", get(models));
+    let addr = spawn_models(app).await;
+
+    let catalog = fetch_model_catalog(&format!("http://{addr}"), "tok")
+        .await
+        .expect("an optional provider decodes");
+    let provider = |name: &str| {
+        catalog
+            .get(&ModelId::gateway(name).expect("valid id"))
+            .expect("the model is in the catalog")
+            .provider()
+            .map(str::to_owned)
+    };
+    assert_eq!(provider("grok").as_deref(), Some("xai"));
+    assert_eq!(provider("local"), None);
+}
+
+#[tokio::test]
 async fn fetch_model_catalog_still_rejects_a_zero_context_window() {
     use axum::Router;
     use axum::routing::get;

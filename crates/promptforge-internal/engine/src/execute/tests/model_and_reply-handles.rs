@@ -2,7 +2,7 @@
 //! model alone, `models.infer` uses the section model and never binds
 //! `reply`, `models.use` re-selection steers the next round, and a
 //! section with no current model fails `models.infer` but still infers
-//! through a handle.
+//! through a handle, and a handle's `provider` reads the catalog's.
 
 use super::*;
 
@@ -213,6 +213,35 @@ async fn models_infer_without_use_or_default_errors() {
             .contains("model binding required for section Only"),
         "the error must name the section: {error}"
     );
+}
+
+#[tokio::test]
+async fn a_handles_provider_is_the_catalog_provider_or_nil() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
+# T\n\n\
+## Only\n\n\
+```lua\n\
+return tostring(models.get('writer').provider) .. ':' .. tostring(models.get('analyst').provider)\n\
+```\n";
+    let prompt = parse(md);
+    let mut ctx = test_context(EXECUTION);
+    let descriptor = |model: &str| {
+        ModelDescriptor::new(
+            ModelId::gateway(model).expect("the test model id is valid"),
+            "A test model",
+            NonZeroU32::new(131_072).expect("131072 is non-zero"),
+            ThinkingMode::Switchable,
+        )
+    };
+    ctx.model_bindings
+        .bind("writer", descriptor("writer-model").with_provider("xai"));
+    ctx.model_bindings
+        .bind("analyst", descriptor("analyst-model"));
+    let out = match crate::test_support::run_prepared(&prompt, "", ctx, RunFixture::new()).await {
+        RunResult::Ok(out) => out,
+        other => panic!("reading handle providers must succeed: {other:?}"),
+    };
+    assert_eq!(out, "xai:nil");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
