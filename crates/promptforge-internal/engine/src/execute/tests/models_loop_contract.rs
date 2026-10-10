@@ -145,6 +145,40 @@ async fn a_number_no_argument_or_a_handle_in_the_lists_place_is_the_list_error()
     assert_eq!(gateway.call_count(), 0, "no refused call sends a request");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_list_error_still_raises_when_the_author_has_rebound_error() {
+    // A shim raise that reads the global `error` calls the author's no-op
+    // and spins, so the timed cancel ends that case as `Interrupted`
+    // instead of hanging the test.
+    use std::time::Duration;
+
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let md = loop_prompt(
+        "error = function() end\n\
+         local ok, err = pcall(models.loop, 42)\n\
+         return tostring(err)",
+    );
+    let prompt = parse(&md);
+    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
+    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
+    let canceller = driver.cancel_handle();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        canceller.cancel();
+    });
+    let result = driver.drive().await;
+    assert!(
+        !matches!(result, Err(Error::Interrupted)),
+        "the raise ends the call before the cancel fires: {result:?}"
+    );
+    assert_eq!(
+        result.expect("the list error is pcall-able"),
+        "models.loop needs a messages.new() list; build one with \
+         messages.new() and :user, :append, or :replace"
+    );
+    assert_eq!(gateway.call_count(), 0, "no round runs");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn an_empty_list_raises_unless_a_pending_notice_fills_its_round() {
     // The empty check runs at each round, after that round's drain: with
