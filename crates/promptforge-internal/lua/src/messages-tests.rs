@@ -114,15 +114,6 @@ fn the_chat_parse_refuses_a_plain_table_with_the_list_error() {
 }
 
 #[test]
-fn the_chat_parse_refuses_an_empty_list() {
-    let lua = lua_with_messages();
-    assert_eq!(
-        chat_error(chat_parse(&lua, eval(&lua, "messages.new()"))),
-        "messages must not be empty"
-    );
-}
-
-#[test]
 fn a_non_empty_list_parses_to_a_chat_request_holding_that_list() {
     let lua = lua_with_messages();
     let built = eval(

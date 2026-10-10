@@ -13,7 +13,7 @@
 //! nowhere) when a member wins.
 //!
 //! The call parks only on an empty notice queue. A task that ended during
-//! the chat round that issued the call (after the shim's drain, before
+//! the chat round that issued the call (after its dispatch's drain, before
 //! the answer arrived) has already queued its notice, and that notice is
 //! the answer at once: the model asked for results that arrived, and one
 //! has. Parking on it would hold the model for a second task's end or the

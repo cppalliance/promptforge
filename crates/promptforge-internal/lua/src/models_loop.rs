@@ -173,7 +173,6 @@ fn read_input(
             outcome: if ok { Ok(value) } else { Err(value) },
             cancelled: budget.is_cancelled(),
         }),
-        Phase::Draining => Ok(Input::Drained(answer(lua, ok, value, notices)?)),
         Phase::Chatting => Ok(Input::Answered(answer(lua, ok, value, |round| {
             chat_result(lua, round).map(Box::new)
         })?)),
@@ -214,7 +213,6 @@ fn answer<T>(
 /// as `error_table` over `Error::Raised`.
 fn act(lua: &Lua, then: Then<Value>) -> mlua::Result<MultiValue> {
     let (tag, values) = match then {
-        Then::Drain => ("yield", vec![request(lua, "drain_task_notices", [])?]),
         Then::Chat { messages, handle } => {
             let handle = handle.unwrap_or(Value::Nil);
             let fields = [("messages", messages), ("handle", handle)];
@@ -329,17 +327,6 @@ fn tool_call(lua: &Lua, call: &Table) -> mlua::Result<ToolCallEvent> {
         arguments: lua.from_value(call.raw_get("arguments")?)?,
         tool: None,
     })
-}
-
-/// A drain answer's notices, in queue order.
-fn notices(notices: Value) -> mlua::Result<Vec<String>> {
-    let Value::Table(notices) = notices else {
-        return Err(malformed("a drain answer's notices are not a table"));
-    };
-    notices
-        .sequence_values::<Value>()
-        .map(|notice| text(notice?))
-        .collect()
 }
 
 /// A Lua string's text; any other value is a malformed answer.

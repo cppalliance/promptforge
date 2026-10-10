@@ -146,9 +146,9 @@ pub(super) fn loop_owner(tail: &str) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_notice_arrives_in_the_round_after_the_task_ends() {
-    // Round 1 starts the task; the child runs and ends while the owner is
-    // between its drain and its round-2 chat, so the notice misses round 2
-    // and lands in round 3 as one user record.
+    // Round 1 starts the task; the child runs and ends after round 2's
+    // dispatch took the notice queue, so the notice misses round 2 and
+    // lands in round 3 as one user record.
     let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),

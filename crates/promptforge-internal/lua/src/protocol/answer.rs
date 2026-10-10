@@ -235,10 +235,6 @@ pub enum Answer<E> {
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
     Cancel(std::result::Result<(), E>),
-    /// The chain's undelivered model-task notices in arrival order, for a
-    /// `drain_task_notices` request; the shim appends each as a message
-    /// record. Empty when nothing ended since the last drain.
-    DrainTaskNotices(std::result::Result<Vec<String>, E>),
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
@@ -269,7 +265,6 @@ impl<E> Answer<E> {
             Answer::Concurrency(result) => Answer::Concurrency(result.map_err(map)),
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
-            Answer::DrainTaskNotices(result) => Answer::DrainTaskNotices(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
             Answer::Store(result) => Answer::Store(result.map_err(map)),

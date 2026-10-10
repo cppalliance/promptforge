@@ -1,7 +1,7 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
 //! `call`, `tool_call`, `local_tool_done`), and the
 //! malformed-yield rejections shared by every op. The task-operation
-//! requests (`spawn`, `timer`, `drain_task_notices`) are in `parse_tasks`.
+//! requests (`spawn`, `timer`, `concurrency`) are in `parse_tasks`.
 
 use super::*;
 
