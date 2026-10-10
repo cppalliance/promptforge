@@ -34,6 +34,9 @@ local yield, var_snapshot, models, tools, error_value, stash_failure,
 -- failure value so the Engine's runtime-error mapping keeps its source.
 local raw_pcall, raw_xpcall = pcall, xpcall
 
+-- error, captured so author code that rebinds `error` cannot move a raise.
+local error = error
+
 -- math.type, captured at install for the same reason: the shim's type
 -- names must not move when author code rebinds `math`.
 local math_type = math.type
@@ -328,16 +331,9 @@ local function store_exists(path)
   return store_request("exists", { path = path })
 end
 
--- The section install passes the section's namespace tables; the live H1
--- base install passes nil for both (H1's live models table exists only per
--- block, given the shim by the Engine's per-step wrap) and takes `infer` from
--- the return.
-if models then
-  models.infer = infer
-end
-if tools then
-  tools.call = tools_call
-end
+-- The install passes the VM's `models` and `tools` tables.
+models.infer = infer
+tools.call = tools_call
 
 return {
   call = call_section,
@@ -345,7 +341,6 @@ return {
   -- (`__impl_tasks.lua`, `__impl_fanout.lua`) so their shims raise the one
   -- error shape this prelude defines.
   helpers = { raise = raise, fail = fail, engine_type = engine_type },
-  infer = infer,
   loop = models_loop,
   -- The fields a model handle reads, through the registry stash.
   handle_methods = { infer = handle_infer, loop = handle_loop },
