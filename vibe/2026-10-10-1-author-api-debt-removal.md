@@ -199,7 +199,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Rename promptforge-lua internals after the offer API
+### Step 3: Rename promptforge-lua internals after the offer API [completed]
 
 - Component: Offer-API names (D1-12)
 - Component placement: third. It also edits `promptforge-lua`, so it lands as its own commit on top of Step 2, rebased if Step 2 changed shared files. It adds no behavior, so it follows the behavior fix rather than competing with it for review.

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use mlua::{Lua, Value, Variadic};
 use promptforge_types::plugins::PluginId;
 
-use super::super::decode::collect_tools_add_entries;
+use super::super::decode::collect_offer_entries;
 use super::{lua_over, tool_at};
 use crate::ToolBinding;
 use crate::handles::ToolSet;
@@ -345,7 +345,7 @@ fn tools_entries_name_the_calling_function_in_every_shape_error() {
             "tools.always_offer takes one tool plus an optional override, got extra string",
         ),
     ] {
-        let error = collect_tools_add_entries("tools.always_offer", Variadic::from_iter(args))
+        let error = collect_offer_entries("tools.always_offer", Variadic::from_iter(args))
             .err()
             .expect("the shape is refused");
         assert!(error.to_string().contains(fragment), "{fragment}: {error}");
