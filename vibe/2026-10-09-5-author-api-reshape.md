@@ -662,7 +662,7 @@ The owner set the direction for each surface in conversation, and the implementa
 
 <step-5>
 
-### Step 5: Report an optional model provider in the gateway catalog
+### Step 5: Report an optional model provider in the gateway catalog [completed]
 
 - Component: Model provider
 - Component placement: fourth. It depends on no other component and none depends on it, so it follows the dependent chain. It may land earlier, or in parallel with steps 1 to 4, without reordering them.

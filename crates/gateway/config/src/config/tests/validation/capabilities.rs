@@ -41,6 +41,49 @@ fn capabilities_default_to_absent() {
 }
 
 #[test]
+fn parses_an_optional_provider_on_models_and_local_models() {
+    for provider in ["xai", "x.ai", "open_router", "mistral-ai", "gpt4"] {
+        let extra = format!("provider = {provider:?}");
+        let config = Config::from_toml_str(&catalog_with_model_kind("chat", &extra)).unwrap();
+        assert_eq!(
+            config.models()[0].capabilities().provider.as_deref(),
+            Some(provider)
+        );
+        let config = Config::from_toml_str(&catalog_with_local_model_kind("chat", &extra)).unwrap();
+        assert_eq!(
+            config.local_models()[0].capabilities().provider.as_deref(),
+            Some(provider)
+        );
+    }
+    let config = Config::from_toml_str(&catalog_with_model_kind("chat", "")).unwrap();
+    assert_eq!(config.models()[0].capabilities().provider, None);
+    let config = Config::from_toml_str(&catalog_with_local_model_kind("chat", "")).unwrap();
+    assert_eq!(config.local_models()[0].capabilities().provider, None);
+}
+
+#[test]
+fn rejects_a_provider_outside_lowercase_letters_digits_and_separators() {
+    for provider in ["", "xAI", "x ai", "x/ai", "x:ai"] {
+        let extra = format!("provider = {provider:?}");
+        for (toml, expected) in [
+            (
+                catalog_with_model_kind("chat", &extra),
+                "model m provider must use lowercase letters, digits, '.', '_', or '-'",
+            ),
+            (
+                catalog_with_local_model_kind("chat", &extra),
+                "local_model q provider must use lowercase letters, digits, '.', '_', or '-'",
+            ),
+        ] {
+            match Config::parse_toml(&toml) {
+                Err(ConfigError::Validation(message)) => assert_eq!(message, expected),
+                other => panic!("expected provider {provider:?} to be refused, got {other:?}"),
+            }
+        }
+    }
+}
+
+#[test]
 fn rejects_default_effort_without_effort_levels() {
     let toml = catalog_with_model_kind(
         "chat",

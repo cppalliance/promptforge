@@ -114,6 +114,11 @@ pub struct Capabilities {
     /// Empty means the model exposes no fixed voice list.
     #[serde(default)]
     pub voices: Vec<String>,
+    /// The model's provider id, such as `xai`. It describes the model, not
+    /// the endpoint the gateway reaches it through, and uses only lowercase
+    /// letters, digits, `.`, `_`, and `-`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 impl Capabilities {
