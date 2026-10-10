@@ -2,8 +2,9 @@
 //! real `section_vm` setup path: the yield shims (`shims`), the error
 //! table and failure envelope contract (`errors`), the coroutine
 //! mechanics the shims rely on (`coroutine`), the Lua loop's
-//! instruction cost (`quota`), and the reserved-name list against the
-//! globals setup installs (`globals`). This file holds the fixtures every
+//! instruction cost (`quota`), the loop's one contract case no real round
+//! produces (`models_loop_contract`), and the reserved-name list against
+//! the globals setup installs (`globals`). This file holds the fixtures every
 //! sibling drives: the test model and tool sets, the VM builder, and the
 //! start-and-parse helpers.
 //!
@@ -15,6 +16,7 @@
 mod coroutine;
 mod errors;
 mod globals;
+mod models_loop_contract;
 mod quota;
 mod shims;
 
