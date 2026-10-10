@@ -219,7 +219,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Correct the ToolPerformer::call alias doc
+### Step 4: Correct the ToolPerformer::call alias doc [completed]
 
 - Component: Harness doc (D1-17)
 - Component placement: last. It depends on nothing and nothing depends on it, so any position works; last lets the plan's exit checks run once on the finished tree.
