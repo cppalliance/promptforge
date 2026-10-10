@@ -187,16 +187,6 @@ fn messages_that_are_not_a_list_are_the_calls_error() {
 }
 
 #[test]
-fn an_empty_list_is_the_calls_error() {
-    let lua = Lua::new();
-    let table = chat_request(&lua, "{}");
-    expect_chat_call_error(
-        Request::from_yield(&lua, &Value::Table(table)),
-        "messages must not be empty",
-    );
-}
-
-#[test]
 fn chat_with_the_loops_handle_holds_its_frozen_binding() {
     // A handle's `loop` yields its receiver beside the messages; the
     // binding is cloned out of the userdata at the parse, so the round runs

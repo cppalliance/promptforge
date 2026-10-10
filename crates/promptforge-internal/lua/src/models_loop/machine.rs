@@ -1,9 +1,9 @@
 //! The rules of `models.loop` over typed inputs, with no Lua VM: the
-//! round cap, the drain before each round, the order a round's answer is
-//! judged in, the batch rule, a local tool's report and re-raise, and the
-//! compactor's rules. The machine pushes every record onto the list
-//! itself, and every Lua value it only passes along is an opaque `V`, so
-//! the unit tests run over a plain `MessageList` with any `V`.
+//! round cap, the order a round's answer is judged in, the batch rule, a
+//! local tool's report and re-raise, and the compactor's rules. The
+//! machine pushes every record onto the list itself, and every Lua value
+//! it only passes along is an opaque `V`, so the unit tests run over a
+//! plain `MessageList` with any `V`.
 
 use std::collections::BTreeMap;
 
@@ -64,8 +64,6 @@ pub(super) struct Machine<V> {
 /// next.
 #[derive(Debug)]
 pub(super) enum Phase<V> {
-    /// The `drain_task_notices` answer: `(ok, notices)`.
-    Draining,
     /// The `chat` answer: `(ok, round)`.
     Chatting,
     /// The compactor's raw `pcall`: `(ok, value)`.
@@ -86,9 +84,6 @@ pub(super) enum Phase<V> {
 /// outcome.
 #[derive(Debug)]
 pub(super) enum Input<V> {
-    /// The drain answer: the notices in queue order, or the value to
-    /// raise.
-    Drained(std::result::Result<Vec<String>, V>),
     /// The `chat` answer, or the value to raise.
     Answered(std::result::Result<Box<ChatResult>, V>),
     /// A bound tool's or a task built-in's text, or the value to raise.
@@ -109,8 +104,6 @@ pub(super) enum Input<V> {
 /// What runs next, after the records the step pushed.
 #[derive(Debug)]
 pub(super) enum Then<V> {
-    /// Yield `{ op = "drain_task_notices" }`.
-    Drain,
     /// Yield `{ op = "chat", messages = messages, handle = handle }`.
     Chat { messages: V, handle: Option<V> },
     /// Yield `{ op = "tool_call", alias = call.name, args = call.arguments,
@@ -140,7 +133,7 @@ pub(super) enum Then<V> {
 
 impl<V: Clone> Machine<V> {
     /// A loop over `list`, capped at `max_rounds` rounds, and its first
-    /// step: the first round's drain, or `tool_loop_exhausted` when the
+    /// step: the first round's `chat`, or `tool_loop_exhausted` when the
     /// cap is 0.
     pub(super) fn begin(
         max_rounds: usize,
@@ -178,13 +171,6 @@ impl<V: Clone> Machine<V> {
     /// error.
     pub(super) fn step(&mut self, input: Input<V>) -> Then<V> {
         match (std::mem::replace(&mut self.phase, Phase::Done), input) {
-            (Phase::Draining, Input::Drained(Ok(notices))) => {
-                let records = notices
-                    .into_iter()
-                    .map(|notice| text_record(MessageRole::User, notice))
-                    .collect();
-                self.push(records, Self::chat)
-            }
             (Phase::Chatting, Input::Answered(Ok(round))) => self.judge(*round),
             (Phase::Compacting, Input::Called { outcome, cancelled }) => match outcome {
                 Ok(_) => Then::RaiseNew(raised(ErrorKind::Lua, COMPACTOR_RETURNED)),
@@ -212,7 +198,6 @@ impl<V: Clone> Machine<V> {
                 }
             },
             (Phase::Reporting(Some(failure)), Input::Reported(_))
-            | (Phase::Draining, Input::Drained(Err(failure)))
             | (Phase::Chatting, Input::Answered(Err(failure)))
             | (Phase::Calling, Input::Dispatched(Err(failure)))
             | (Phase::Reporting(None), Input::Reported(Err(failure))) => Then::Raise(failure),
@@ -220,19 +205,13 @@ impl<V: Clone> Machine<V> {
         }
     }
 
-    /// Starts the next round with its drain, or raises
+    /// Starts the next round with its `chat`, or raises
     /// `tool_loop_exhausted` once the cap's rounds have all started.
     fn next_round(&mut self) -> Then<V> {
         if self.rounds >= self.max_rounds {
             return Then::RaiseNew(raised(ErrorKind::ToolLoopExhausted, NOT_CONVERGED));
         }
         self.rounds += 1;
-        self.phase = Phase::Draining;
-        Then::Drain
-    }
-
-    /// The round's `chat`, after its drain.
-    fn chat(&mut self) -> Then<V> {
         self.phase = Phase::Chatting;
         Then::Chat {
             messages: self.messages.clone(),

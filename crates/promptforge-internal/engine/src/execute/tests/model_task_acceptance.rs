@@ -129,11 +129,12 @@ pub(super) fn two_child_prompt(
 
 #[tokio::test(flavor = "current_thread")]
 async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
-    // Round 1 starts the task; the child ends between round 2's drain and
-    // its chat, so round 2's status read sees it done and round 3 includes
-    // its notice as a user record ahead of the reply. The author's list
-    // holds the whole exchange in order, each tool record correlated to
-    // its call, and the task starts once and succeeds once.
+    // Round 1 starts the task; the child ends after round 2's dispatch
+    // took the notice queue, so round 2's status read sees it done and
+    // round 3 includes its notice as a user record ahead of the reply.
+    // The author's list holds the whole exchange in order, each tool
+    // record correlated to its call, and the task starts once and
+    // succeeds once.
     let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),

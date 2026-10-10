@@ -11,11 +11,11 @@
 //! its notice is never read). A model-issued `task_cancel` queues nothing:
 //! the model already read the built-in's confirmation.
 //!
-//! The queue drains in two places. The loop shim yields
-//! `drain_task_notices` ahead of every `chat` round and appends each text
-//! as a user record, so the model reads the notices in its next round;
-//! the model's `await_tasks` drains the queue when it wakes and returns
-//! the texts as its own answer. Either way each notice is read once.
+//! The queue drains in two places. The `chat` dispatch takes it ahead of
+//! every `models.loop` round and pushes each text onto the author's list
+//! as a user record, so the model reads the notices in that round; the
+//! model's `await_tasks` drains the queue when it wakes and returns the
+//! texts as its own answer. Either way each notice is read once.
 //!
 //! A completed task's final text is cross-chain model text reaching a
 //! model without the author in between, so it is nonce-wrapped as
@@ -27,7 +27,6 @@ use std::sync::atomic::Ordering;
 use promptforge_types::ids::{AbandonReason, TaskId};
 
 use crate::Error;
-use crate::execute::protocol::Answer;
 
 use super::{ChainIndex, Scheduler};
 
@@ -91,12 +90,5 @@ impl Scheduler {
                 text
             })
             .collect()
-    }
-
-    /// Dispatches the loop shim's `drain_task_notices` request: the queued
-    /// notices resume the chain at once.
-    pub(super) fn dispatch_drain_task_notices(&mut self, id: ChainIndex) {
-        let notices = self.drain_task_notices(id);
-        self.answer_inline(id, Answer::DrainTaskNotices(Ok(notices)));
     }
 }

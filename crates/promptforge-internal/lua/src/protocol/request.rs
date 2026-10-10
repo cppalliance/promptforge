@@ -133,13 +133,6 @@ pub enum Request {
         /// The task to cancel.
         task: TaskId,
     },
-    /// The loop shim's per-round drain of the chain's undelivered
-    /// model-task notices: the Engine's sentences telling the model how
-    /// the tasks it started ended, answered at once in arrival order and
-    /// appended to the author's message list ahead of the round's `chat`.
-    /// Shim-produced and argument-free: the shim yields it for every
-    /// round, so a chain with no model tasks drains an empty list.
-    DrainTaskNotices,
     /// `tools.call(alias_or_tool, args)`: suspending dispatch of a bound
     /// tool through the shared dispatch function.
     ToolCall {
@@ -172,12 +165,16 @@ pub enum Request {
         outcome: LocalToolOutcome,
     },
     /// One stateless tool-capable model round over a `messages.new()`
-    /// list, yielded by the `models.loop` shim once per round. The round
-    /// advertises the section's current tool scope, local Lua tools
-    /// included, resolved in the dispatch arm where the tool scope sits.
+    /// list, yielded by the `models.loop` shim once per round. The
+    /// dispatch arm first pushes the chain's undelivered model-task
+    /// notices onto the list as user records and refuses a list that is
+    /// still empty; the round advertises the section's current tool
+    /// scope, local Lua tools included, resolved in the dispatch arm
+    /// where the tool scope sits.
     Chat {
-        /// The list the round sends. Its records were validated as the
-        /// list added them.
+        /// The list the round sends, which may be empty, since the
+        /// dispatch pushes pending notices before it refuses an empty
+        /// list. Its records were validated as the list added them.
         list: MessageList,
         /// The receiver of a handle's `loop`, as its frozen binding cloned
         /// out of the userdata while the VM handle is live; `None` when

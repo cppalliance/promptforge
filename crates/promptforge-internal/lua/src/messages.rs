@@ -86,12 +86,6 @@ impl MessageList {
         self.state().records.len()
     }
 
-    /// Whether the list holds no records.
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.state().records.is_empty()
-    }
-
     /// The record at the 1-based `index`, if the list holds one there.
     fn record(&self, index: usize) -> Option<Arc<MessageRecord>> {
         let position = index.checked_sub(1)?;
@@ -100,7 +94,10 @@ impl MessageList {
 
     /// Appends `record`. A system record after any non-system record is
     /// refused with a message naming its position.
-    pub(crate) fn push(&self, record: MessageRecord) -> std::result::Result<(), String> {
+    ///
+    /// # Errors
+    /// Returns the refusal's message for a late system record.
+    pub fn push(&self, record: MessageRecord) -> std::result::Result<(), String> {
         let mut state = self.state();
         if record.role == MessageRole::System
             && state

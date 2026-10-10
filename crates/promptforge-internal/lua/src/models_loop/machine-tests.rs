@@ -15,7 +15,6 @@ type V = &'static str;
 /// One step as a line: the action and the values it names.
 fn show(then: &Then<V>) -> String {
     match then {
-        Then::Drain => "drain".to_owned(),
         Then::Chat { messages, handle } => format!("chat {messages} {}", handle.unwrap_or("-")),
         Then::ToolCall { call, turn } => {
             format!(
@@ -117,27 +116,21 @@ fn text(text: &str) -> Input<V> {
     Input::Dispatched(Ok(text.to_owned()))
 }
 
-/// A drain answer with no notices.
-fn drained() -> Input<V> {
-    Input::Drained(Ok(Vec::new()))
-}
-
 /// A raw `pcall`'s `outcome`, under the cancel flag `cancelled`.
 fn called(outcome: Result<V, V>, cancelled: bool) -> Input<V> {
     Input::Called { outcome, cancelled }
 }
 
-/// A `models.loop` call capped at `cap` rounds over `list`, stepped past
-/// its first drain to its first chat.
+/// A `models.loop` call capped at `cap` rounds over `list`, at its first
+/// chat.
 fn chatting(cap: usize, list: &MessageList) -> Machine<V> {
-    let (mut machine, first) = Machine::begin(cap, list.clone(), "list", None, "compactor");
-    assert_eq!(show(&first), "drain");
-    assert_eq!(show(&machine.step(drained())), "chat list -");
+    let (machine, first) = Machine::begin(cap, list.clone(), "list", None, "compactor");
+    assert_eq!(show(&first), "chat list -");
     machine
 }
 
 #[test]
-fn a_zero_cap_raises_tool_loop_exhausted_before_any_drain() {
+fn a_zero_cap_raises_tool_loop_exhausted_before_any_chat() {
     let (machine, first) = Machine::begin(0, MessageList::default(), "list", None, "compactor");
     assert_eq!(
         show(&first),
@@ -147,13 +140,15 @@ fn a_zero_cap_raises_tool_loop_exhausted_before_any_drain() {
 }
 
 #[test]
-fn a_drain_pushes_each_notice_as_a_user_record_before_the_chat_naming_the_handle() {
+fn a_round_starts_with_the_chat_naming_the_handle_and_pushes_nothing() {
     let list = MessageList::default();
-    let (mut machine, _) = Machine::begin(2, list.clone(), "list", Some("h"), "compactor");
-    let notices = Input::Drained(Ok(vec!["first".to_owned(), "second".to_owned()]));
-    assert_eq!(show(&machine.step(notices)), "chat list h");
+    let (machine, first) = Machine::begin(2, list.clone(), "list", Some("h"), "compactor");
+    assert_eq!(show(&first), "chat list h");
     assert!(matches!(machine.phase(), Phase::Chatting));
-    assert_eq!(records(&list), ["user first||", "user second||"]);
+    assert!(
+        records(&list).is_empty(),
+        "the chat dispatch adds the notices, not the machine"
+    );
 }
 
 #[test]
@@ -217,8 +212,7 @@ fn a_batch_dispatches_in_order_and_appends_its_records_only_once_complete() {
         records(&list).is_empty(),
         "a half-answered batch adds nothing"
     );
-    assert_eq!(show(&machine.step(text("two"))), "drain");
-    assert_eq!(show(&machine.step(drained())), "chat list -");
+    assert_eq!(show(&machine.step(text("two"))), "chat list -");
     assert_eq!(show(&machine.step(reply("done"))), "return");
     assert!(matches!(machine.phase(), Phase::Done));
     assert_eq!(
@@ -238,8 +232,7 @@ fn the_clean_exit_counts_answered_calls_across_batches_and_resets_per_call() {
     let mut machine = chatting(4, &list);
     for id in ["c1", "c2"] {
         machine.step(batch(&[id]));
-        assert_eq!(show(&machine.step(text("ok"))), "drain");
-        machine.step(drained());
+        assert_eq!(show(&machine.step(text("ok"))), "chat list -");
     }
     assert_eq!(show(&machine.step(stop())), "return");
     assert_eq!(
@@ -255,7 +248,7 @@ fn the_clean_exit_counts_answered_calls_across_batches_and_resets_per_call() {
 }
 
 #[test]
-fn the_cap_raises_after_the_last_allowed_batch_and_before_another_drain() {
+fn the_cap_raises_after_the_last_allowed_batch_and_before_another_chat() {
     let list = MessageList::default();
     let mut machine = chatting(1, &list);
     machine.step(batch(&["c1"]));
@@ -263,6 +256,7 @@ fn the_cap_raises_after_the_last_allowed_batch_and_before_another_drain() {
         show(&machine.step(text("ok"))),
         "new tool_loop_exhausted|tool-call loop did not converge"
     );
+    assert!(matches!(machine.phase(), Phase::Done));
     assert_eq!(records(&list), ["assistant |c1|", "tool ok||c1"]);
 }
 
@@ -287,11 +281,6 @@ fn an_empty_reply_raises_its_detail_or_the_fallback() {
 
 #[test]
 fn a_failed_answer_raises_its_value_unchanged() {
-    let (mut machine, _) = Machine::begin(2, MessageList::default(), "list", None, "compactor");
-    assert_eq!(
-        show(&machine.step(Input::Drained(Err("drain")))),
-        "raise drain"
-    );
     let mut machine = chatting(2, &MessageList::default());
     assert_eq!(
         show(&machine.step(Input::Answered(Err("chat")))),
@@ -327,7 +316,7 @@ fn a_local_call_reports_its_outcome_then_raises_the_handlers_value_first() {
     );
     assert_eq!(
         show(&machine.step(Input::Reported(Ok("text".to_owned())))),
-        "drain"
+        "chat list -"
     );
     assert_eq!(records(&list)[1], "tool text||c1");
     let mut machine = handling(&list);
@@ -390,7 +379,7 @@ fn an_input_its_phase_does_not_await_raises_internal() {
     let (mut machine, _) = Machine::begin(2, MessageList::default(), "list", None, "compactor");
     assert_eq!(show(&machine.step(text("early"))), unexpected);
     assert_eq!(
-        show(&machine.step(drained())),
+        show(&machine.step(reply("late"))),
         unexpected,
         "a raise ends the call"
     );

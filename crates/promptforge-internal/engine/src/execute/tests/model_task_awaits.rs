@@ -16,7 +16,7 @@ use crate::execute::scheduler::test_hooks::TaskState;
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     // Round 1 starts `Parked`, which never ends. Round 2 starts `Quick`,
-    // which ends between the shim's drain and the round-3 chat, so its
+    // which ends after round 3's dispatch took the notice queue, so its
     // notice is queued when round 3's `await_tasks` arrives with `Parked`
     // live and a 30s timeout. The call answers with the queued notice
     // instead of parking: no timer is allocated (the owner's third child,

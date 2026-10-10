@@ -46,13 +46,8 @@ fn an_empty_answer_with_no_empty_detail_raises_the_fallback_message() {
              .. '|' .. #msgs",
         );
         assert!(
-            matches!(parse_request(&vm, yielded), Request::DrainTaskNotices),
-            "the round opens with the drain"
-        );
-        let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
-        assert!(
             matches!(parse_request(&vm, yielded), Request::Chat { .. }),
-            "the drain is followed by the chat"
+            "the round opens with the chat"
         );
         let returned = resume_with(&vm, &thread, empty_round(finish_reason));
         let text: String = vm

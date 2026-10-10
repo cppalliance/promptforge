@@ -112,7 +112,7 @@ fn both_entries_check_their_arguments_in_order_with_the_shims_texts() {
         .unwrap();
     let not_a_list = "nil|raise|models.loop needs a messages.new() list; build one with \
                       messages.new() and :user, :append, or :replace";
-    let started = "function|yield|drain_task_notices";
+    let started = "function|yield|chat";
     assert_eq!(
         outcomes,
         [
@@ -209,10 +209,6 @@ fn parsed(lua: &Lua, then: Then<Value>) -> Request {
 #[test]
 fn act_yields_each_request_as_the_protocol_parses_it() {
     let lua = Lua::new();
-    assert!(matches!(
-        parsed(&lua, Then::Drain),
-        Request::DrainTaskNotices
-    ));
     let tool_call = Then::ToolCall {
         call: call("c1"),
         turn: 7,

@@ -1,8 +1,11 @@
 //! The `chat` arm: one stateless tool-capable model round yielded by a
 //! section VM.
 //!
-//! Dispatch resolves the round's binding and tool scope (the bound and
-//! local halves, plus the model's task built-ins once the section has run
+//! Dispatch first takes the chain's model-task notices and pushes each
+//! onto the author's list as a user record, so the model reads them in
+//! this round, then refuses a list that is still empty. It then resolves
+//! the round's binding and tool scope (the bound and local halves, plus
+//! the model's task built-ins once the section has run
 //! `tools.allow_tasks`), records the scope on the chain as `advertised`,
 //! prechecks the projected conversation, with room kept for the reply,
 //! against the model's context window (counting from the provider's usage
@@ -25,7 +28,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use promptforge_model_client::detail::tool_call_arguments;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult};
+use crate::execute::protocol::{Answer, ChatResult, MessageContent, MessageRecord, MessageRole};
 use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
@@ -61,6 +64,16 @@ fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
     }
 }
 
+/// A model-task notice as the user record the round carries it in.
+fn notice_record(notice: String) -> MessageRecord {
+    MessageRecord {
+        role: MessageRole::User,
+        content: MessageContent::Text(notice),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
+}
+
 /// How one `chat` dispatch resolved: a round issued as an effect and
 /// parked on the pending table, or an answer settled without leaving (the
 /// precheck overflow).
@@ -73,10 +86,10 @@ impl Scheduler {
     /// Dispatches a `chat` request: one tool-capable model round over the
     /// author's message list. An issued round parks the chain in the
     /// pending table; a precheck overflow answers the round on the spot
-    /// with the overflow flag; every preparation failure - the binding,
-    /// the scope, the projection, the client - is the call's answer,
-    /// resumed into the caller so an author `pcall` catches it exactly as
-    /// on the other dispatch paths.
+    /// with the overflow flag; every preparation failure - the empty list,
+    /// the binding, the scope, the projection, the client - is the call's
+    /// answer, resumed into the caller so an author `pcall` catches it
+    /// exactly as on the other dispatch paths.
     pub(super) fn dispatch_chat(
         &mut self,
         id: ChainIndex,
@@ -94,20 +107,30 @@ impl Scheduler {
         }
     }
 
-    /// The fallible half of chat dispatch: the binding (the handle whose
-    /// `loop` ran, when one did, else the section's current
-    /// model), the call-time tool scope recorded on the chain as
-    /// `advertised`, the per-dispatch projection, the context precheck,
-    /// and the issued effect. The send is recorded on the list only once
-    /// the precheck passes, so a refused round leaves the list's last send
-    /// in place.
+    /// The fallible half of chat dispatch: the chain's model-task notices
+    /// pushed onto the list in queue order, the emptiness check, the
+    /// binding (the handle whose `loop` ran, when one did, else the
+    /// section's current model), the call-time tool scope recorded on the
+    /// chain as `advertised`, the per-dispatch projection, the context
+    /// precheck, and the issued effect. The notices stay on the list
+    /// whatever the round's outcome. The send is recorded on the list only
+    /// once the precheck passes, so a refused round leaves the list's last
+    /// send in place.
     fn prepare_chat(
         &mut self,
         id: ChainIndex,
         list: &MessageList,
         binding: Option<ModelBinding>,
     ) -> Result<ChatDispatch> {
+        for notice in self.drain_task_notices(id) {
+            // The list refuses only a late system record.
+            list.push(notice_record(notice))
+                .map_err(|_| Error::internal("the list refused a notice's user record"))?;
+        }
         let messages = list.records();
+        if messages.is_empty() {
+            return Err(Error::Lua("messages must not be empty".to_owned()));
+        }
         let chain = &self.chains[id.index()];
         let section = chain.section_name().to_owned();
         let frame = chain
