@@ -73,6 +73,12 @@ impl LuaModelHandle {
         self.binding.context().get()
     }
 
+    /// Returns the model's provider id, when the catalog names one.
+    #[must_use]
+    fn provider(&self) -> Option<String> {
+        self.binding.provider().map(str::to_owned)
+    }
+
     /// Returns the frozen thinking switch, when the role declared one.
     #[must_use]
     fn thinking(&self) -> Option<bool> {
@@ -115,6 +121,7 @@ impl UserData for LuaModelHandle {
         fields.add_field_method_get("model_id", |_, this| Ok(this.model_id().to_owned()));
         fields.add_field_method_get("description", |_, this| Ok(this.description().to_owned()));
         fields.add_field_method_get("context", |_, this| Ok(this.context()));
+        fields.add_field_method_get("provider", |_, this| Ok(this.provider()));
         fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
         fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
         fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));

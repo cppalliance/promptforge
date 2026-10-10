@@ -140,8 +140,8 @@ pub enum ThinkingMode {
     Switchable,
 }
 
-/// One catalogued model: its identity, description, context window, and
-/// thinking mode.
+/// One catalogued model: its identity, description, context window,
+/// thinking mode, and the provider id the catalog names, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelDescriptor {
@@ -149,6 +149,7 @@ pub struct ModelDescriptor {
     description: String,
     context: NonZeroU32,
     thinking: ThinkingMode,
+    provider: Option<String>,
 }
 
 impl ModelDescriptor {
@@ -168,7 +169,15 @@ impl ModelDescriptor {
             description: description.into(),
             context,
             thinking,
+            provider: None,
         }
+    }
+
+    /// Sets the provider id the catalog names for this model.
+    #[must_use]
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
     }
 
     /// Returns the stable identity.
@@ -193,6 +202,12 @@ impl ModelDescriptor {
     #[must_use]
     pub fn thinking(&self) -> ThinkingMode {
         self.thinking
+    }
+
+    /// Returns the provider id, or `None` when the catalog names none.
+    #[must_use]
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
     }
 }
 

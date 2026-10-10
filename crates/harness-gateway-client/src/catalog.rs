@@ -25,6 +25,9 @@ struct ModelsListEntry {
     context: Option<u32>,
     #[serde(default)]
     thinking: Option<ThinkingMode>,
+    /// The model's provider id, when the gateway names one.
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 /// Wire shape of gateway `GET /v1/models`.
@@ -200,12 +203,11 @@ pub async fn fetch_model_catalog(
             malformed("a model declares a context window but no thinking mode")
                 .with_detail(escape_controls(id.name(), MAX_CATALOG_ERROR_BODY))
         })?;
-        descriptors.push(ModelDescriptor::new(
-            id,
-            entry.description,
-            context,
-            thinking,
-        ));
+        let descriptor = ModelDescriptor::new(id, entry.description, context, thinking);
+        descriptors.push(match entry.provider {
+            Some(provider) => descriptor.with_provider(provider),
+            None => descriptor,
+        });
     }
     ModelCatalog::new(descriptors).map_err(|error| {
         malformed("gateway returned an inconsistent model catalog")

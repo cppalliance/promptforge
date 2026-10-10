@@ -513,8 +513,10 @@ pub fn promptforge::model::ModelBinding::description(&self) -> &str
 pub fn promptforge::model::ModelBinding::id(&self) -> &promptforge::model::ModelId
 pub fn promptforge::model::ModelBinding::invocation(&self) -> &promptforge::model::ModelInvocation
 pub fn promptforge::model::ModelBinding::new(alias: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, id: promptforge::model::ModelId, invocation: promptforge::model::ModelInvocation, context: core::num::nonzero::NonZeroU32) -> Self
+pub fn promptforge::model::ModelBinding::provider(&self) -> core::option::Option<&str>
 pub fn promptforge::model::ModelBinding::with_capabilities(self, capabilities: alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn promptforge::model::ModelBinding::with_invocation(self, invocation: promptforge::model::ModelInvocation) -> Self
+pub fn promptforge::model::ModelBinding::with_provider(self, provider: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn promptforge::model::ModelBindings::is_empty(&self) -> bool
 pub fn promptforge::model::ModelBindings::len(&self) -> usize
 pub fn promptforge::model::ModelBindings::model(&self, id: &promptforge::model::ModelId) -> core::option::Option<&promptforge::model::ModelDescriptor>
@@ -530,7 +532,9 @@ pub fn promptforge::model::ModelDescriptor::context(&self) -> core::num::nonzero
 pub fn promptforge::model::ModelDescriptor::description(&self) -> &str
 pub fn promptforge::model::ModelDescriptor::id(&self) -> &promptforge::model::ModelId
 pub fn promptforge::model::ModelDescriptor::new(id: promptforge::model::ModelId, description: impl core::convert::Into<alloc::string::String>, context: core::num::nonzero::NonZeroU32, thinking: promptforge::model::ThinkingMode) -> Self
+pub fn promptforge::model::ModelDescriptor::provider(&self) -> core::option::Option<&str>
 pub fn promptforge::model::ModelDescriptor::thinking(&self) -> promptforge::model::ThinkingMode
+pub fn promptforge::model::ModelDescriptor::with_provider(self, provider: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn promptforge::model::ModelId::gateway(name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::ModelId, promptforge::model::ModelIdError>
 pub fn promptforge::model::ModelId::name(&self) -> &str
 pub fn promptforge::model::ModelId::new(server: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::ModelId, promptforge::model::ModelIdError>

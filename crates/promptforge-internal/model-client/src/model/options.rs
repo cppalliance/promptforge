@@ -96,6 +96,8 @@ pub struct ModelBinding {
     /// vocabulary, kebab-case), exposed on the Lua handle as
     /// `capabilities`. Empty for bindings built outside a role fill.
     capabilities: Vec<String>,
+    /// The model's provider id, when the catalog names one.
+    provider: Option<String>,
 }
 
 impl ModelBinding {
@@ -118,7 +120,15 @@ impl ModelBinding {
             invocation,
             context,
             capabilities: Vec::new(),
+            provider: None,
         }
+    }
+
+    /// Sets the model's provider id.
+    #[must_use]
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
     }
 
     /// Sets the bound role's capability keywords, which Lua code reads as the
@@ -170,6 +180,12 @@ impl ModelBinding {
     #[must_use]
     pub fn context(&self) -> NonZeroU32 {
         self.context
+    }
+
+    /// Returns the provider id, or `None` when the catalog names none.
+    #[must_use]
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
     }
 
     /// Builds the [`CompletionOptions`] for a completion made under this
