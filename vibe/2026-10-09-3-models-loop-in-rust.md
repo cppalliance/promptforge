@@ -937,7 +937,7 @@ Phase 0 migrates every handle-first call and adds tests for the new forms and th
 
 <step-3>
 
-### Step 3: Pin the loop's behavior with contract tests
+### Step 3: Pin the loop's behavior with contract tests [completed]
 
 - Component: Loop port
 
