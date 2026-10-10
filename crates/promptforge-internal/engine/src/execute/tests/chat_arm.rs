@@ -251,7 +251,7 @@ async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\

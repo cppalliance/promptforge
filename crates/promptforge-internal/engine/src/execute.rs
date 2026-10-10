@@ -9,14 +9,14 @@
 //! The run's outcome type ([`RunResult`]) is defined here; the rest lives in
 //! focused private children:
 //!
-//! - `bindings` - the run's journaled [`ModelBindings`] and [`ToolBindings`].
+//! - `bindings` - the run's journaled [`ModelBindings`].
 //! - `config` - the public [`RunContext`] and [`RunLimits`].
 //! - `context` - the ambient `RunState` run state.
-//! - `environment` - the public [`Environment`], whose `prepare` fills slots
-//!   against the caller's catalog; installing Plugins and taking each
-//!   run's catalog from them is the Harness's job.
+//! - `environment` - the public [`Environment`], whose `prepare` copies the
+//!   caller's catalog onto the context and binds model roles; installing
+//!   Plugins and taking each run's catalog from them is the Harness's job.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
-//! - `fill` - prepare's tool- and model-slot fill functions.
+//! - `fill` - prepare's model-role fill function.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
 //!   boundary.
 //! - `requirements` - the preflight [`Requirements`] report.
@@ -54,7 +54,7 @@ mod tools;
 mod walk_target;
 
 // Public API surface.
-pub use bindings::{ModelBindings, ToolBindings};
+pub use bindings::ModelBindings;
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
@@ -134,8 +134,8 @@ pub fn perform_vfs_op(
 ///   itself ends in [`RunResult::Cancelled`].
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 /// - [`RunErrorKind::RequirementsUnmet`] - a missing or unavailable
-///   required Plugin, a slotted tool its Plugin does not offer, a service
-///   the caller left out, a model requirement a bound model fails to meet
+///   required Plugin, a service the caller left out, a model requirement a
+///   bound model fails to meet
 ///   (a context minimum or a hard keyword), or an H1 block that failed the
 ///   prompt's hard gate.
 #[derive(Debug)]

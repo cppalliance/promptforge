@@ -145,7 +145,7 @@ impl Scheduler {
             })?
         };
         let tool_set = chain.ctx.tool_set_snapshot()?;
-        // The scope is read at call time: `tools.add` and `tools.add_local`
+        // The scope is read at call time: `tools.offer` and `tools.offer_local`
         // calls since the last model operation shape this round's
         // advertised set, which is the section's effective bindings plus
         // every local Lua tool.
@@ -267,7 +267,11 @@ impl Scheduler {
                     .as_ref()
                     .ok_or(Error::internal("a parked chat round recorded its scope"))?;
                 let global_exists = |name: &str| -> Result<bool> {
-                    Ok(chain.ctx.tool_set_snapshot()?.binding(name).is_some())
+                    Ok(chain
+                        .ctx
+                        .tool_set_snapshot()?
+                        .offered_binding(name)
+                        .is_some())
                 };
                 round.tool_calls(&served, turn, &calls, advertised, global_exists)?
             }

@@ -17,15 +17,14 @@ use crate::model::ModelDescriptor;
 use crate::tools::ToolCatalog;
 use promptforge_vfs::VfsRef;
 
-use super::bindings::{ModelBindings, ToolBindings};
+use super::bindings::ModelBindings;
 
 /// The inputs for one run of a prompt.
 ///
 /// The caller builds a context with `new` and the builder methods. The
 /// prepare step of an [`Environment`](super::Environment) then adds the
-/// tool catalog, the Plugin preludes, and the model and tool
-/// bindings. The Engine owns the context for the run. Each context
-/// belongs to exactly one run.
+/// tool catalog, the Plugin preludes, and the model bindings. The Engine
+/// owns the context for the run. Each context belongs to exactly one run.
 ///
 /// The context holds only the Engine's input. The observer, client, tool
 /// implementations, broker, and capture belong to the caller. The Engine
@@ -91,15 +90,9 @@ pub struct RunContext {
     /// The run's tool catalog: every tool of every Plugin the caller can
     /// serve, declared by the prompt or not, with each tool under its
     /// Plugin's name. Written by
-    /// [`Environment::prepare`](super::Environment::prepare); the
-    /// slot-filling step fills the prompt's tool slots against it, and the
-    /// offering draws the undeclared Plugins' tools from it.
+    /// [`Environment::prepare`](super::Environment::prepare); the run's
+    /// offering draws every tool from it.
     pub(super) tools: ToolCatalog,
-    /// The run's tool bindings, written by
-    /// [`Environment::prepare`](super::Environment::prepare)'s slot
-    /// fill against the assembled catalog: which concrete tool each
-    /// declared alias is bound to, with every fill journaled.
-    pub(super) tool_bindings: ToolBindings,
     /// The run's Plugin preludes, in declaration order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before the
@@ -139,7 +132,6 @@ impl RunContext {
             model: None,
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
-            tool_bindings: ToolBindings::default(),
             preludes: Vec::new(),
         }
     }
@@ -297,18 +289,6 @@ impl RunContext {
         &self.tools
     }
 
-    /// Returns the run's tool bindings, which map each declared alias to a
-    /// concrete tool.
-    ///
-    /// [`Environment::prepare`](super::Environment::prepare)'s slot fill
-    /// writes the bindings and records every fill. A lookup goes from an
-    /// alias to a tool id, and from the id to the tool's descriptor. On a
-    /// caller-built context, the bindings are empty until prepare runs.
-    #[must_use]
-    pub fn tool_bindings(&self) -> &ToolBindings {
-        &self.tool_bindings
-    }
-
     /// Returns the run's name, which identifies the run on every report and
     /// event.
     #[must_use]
@@ -363,7 +343,6 @@ impl fmt::Debug for RunContext {
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)
-            .field("tool_bindings", &self.tool_bindings)
             .field(
                 "preludes",
                 &self

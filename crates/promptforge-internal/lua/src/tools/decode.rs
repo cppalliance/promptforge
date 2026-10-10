@@ -1,83 +1,77 @@
 //! Shared value decoding for the `tools.*` Engine functions.
 //!
-//! The alias-or-Tool polymorphism lives here once: `tools.add`
-//! and the `tools.call` protocol parse both accept a bare
-//! alias string, an inspectable Tool object, or a tool record (a table
-//! with a string `name`, such as one `tools.offered()` returns) and
-//! resolve each to the name it stands for. The `tools.add_local`
-//! params-table-to-JSON-Schema conversion sits beside it as the
-//! namespace's other argument decode.
+//! The id-or-tool-object polymorphism lives here once: `tools.offer`,
+//! `tools.always_offer`, and the `tools.call` protocol parse all accept a
+//! bare string or a tool object and resolve each to the name it stands
+//! for, a tool object standing for its canonical id. The
+//! `tools.offer_local` params-table-to-JSON-Schema conversion sits beside
+//! it as the namespace's other argument decode.
 
-use mlua::{Table, Value, Variadic};
+use mlua::{Value, Variadic};
 use serde_json::{Value as Json, json};
 
 use super::userdata::LuaToolHandle;
 
-/// Returns the `name` a tool record stands for: its raw string `name`
-/// field, or `None` for any other table.
-fn record_name(table: &Table) -> mlua::Result<Option<String>> {
-    match table.raw_get::<Value>("name")? {
-        Value::String(name) => Ok(Some(name.to_string_lossy())),
-        _ => Ok(None),
-    }
-}
-
-/// Resolves one alias, Tool object, or tool record to the name it stands
-/// for.
+/// Resolves one string or tool object to the name it stands for.
 ///
 /// This is the single decode behind the namespace's argument polymorphism:
-/// a string is the alias verbatim, a Tool object contributes the alias it
-/// was bound under, a record contributes its `name`, and anything else is
-/// an argument error naming the three accepted forms.
+/// a string is the name verbatim (a tool id, or for `tools.call` a local
+/// alias), a tool object contributes its canonical id, and anything else
+/// is an argument error naming the accepted forms.
 ///
 /// # Errors
-/// Returns an `mlua` external error when the value is not a string, a Tool
-/// object, or a table with a string `name`.
+/// Returns an `mlua` external error when the value is neither a string nor
+/// a tool object.
 pub(crate) fn tool_alias(value: &Value) -> mlua::Result<String> {
     let rejected = || {
         mlua::Error::external(format!(
-            "tools.call alias must be a string, Tool object, or tool record, got {}",
+            "tools.call takes a tool id, a local alias, or a tool object, got {}",
             value.type_name()
         ))
     };
     match value {
         Value::String(s) => Ok(s.to_string_lossy()),
-        // A userdata that is not a Tool object (a model handle) takes the
+        // A userdata that is not a tool object (a model handle) takes the
         // same rejection as any other wrong type.
         Value::UserData(ud) => ud
             .borrow::<LuaToolHandle>()
-            .map(|handle| handle.name().to_owned())
+            .map(|handle| handle.id().to_string())
             .map_err(|_| rejected()),
-        Value::Table(table) => record_name(table)?.ok_or_else(rejected),
         _ => Err(rejected()),
     }
 }
 
-/// One flattened `tools.add` entry: alias plus optional model-description override.
+/// One flattened `tools.offer` or `tools.always_offer` entry: the name an
+/// argument stands for plus an optional model-description override.
 pub(super) struct ToolsAddEntry {
     pub(super) alias: String,
     pub(super) description_override: Option<String>,
 }
 
-/// Reads one `tools.add` element as an alias: a string, a Tool handle, or
-/// a tool record.
-fn add_alias(value: &Value) -> mlua::Result<String> {
+/// Reads one element of `call`'s arguments as a name: a string or a tool
+/// object.
+fn entry_name(call: &str, value: &Value) -> mlua::Result<String> {
     tool_alias(value).map_err(|_| {
         mlua::Error::external(format!(
-            "tools.add expects strings, Tool objects, tool records, or arrays of them, got {}",
+            "{call} takes tool ids, tool objects, or arrays of them, got {}",
             value.type_name()
         ))
     })
 }
 
-/// Flattens the `tools.add` arguments into alias/override entries.
+/// Flattens the arguments of `call` (`tools.offer` or
+/// `tools.always_offer`) into name/override entries, naming `call` in
+/// every argument-shape error.
 ///
-/// `tools.add(alias, override?)` takes one alias (string, Tool handle, or
-/// tool record) with an optional model-description override. Any other
-/// table is the array form, `tools.add({"a", "b"})` or
-/// `tools.add(tools.offered())`, which covers bulk and takes no
+/// `tools.offer(tool, override?)` takes one tool id or tool object with an
+/// optional model-description override. A table is the array form,
+/// `tools.offer({"web/search", "web/fetch"})` or
+/// `tools.offer(tools.extras())`, which covers bulk and takes no
 /// per-element overrides.
-pub(super) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
+pub(super) fn collect_tools_add_entries(
+    call: &str,
+    args: Variadic<Value>,
+) -> mlua::Result<Vec<ToolsAddEntry>> {
     let mut args = args.into_iter();
     let Some(target) = args.next() else {
         return Ok(Vec::new());
@@ -87,42 +81,42 @@ pub(super) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
         Some(Value::String(s)) => Some(s.to_string_lossy()),
         Some(other) => {
             return Err(mlua::Error::external(format!(
-                "tools.add override must be a string, got {}",
+                "{call} override must be a string, got {}",
                 other.type_name()
             )));
         }
     };
     if let Some(extra) = args.next() {
         return Err(mlua::Error::external(format!(
-            "tools.add takes one alias plus an optional override, got extra {}",
+            "{call} takes one tool plus an optional override, got extra {}",
             extra.type_name()
         )));
     }
     match target {
-        Value::Table(table) if record_name(&table)?.is_none() => {
+        Value::Table(table) => {
             if description_override.is_some() {
-                return Err(mlua::Error::external(
-                    "tools.add array form takes no override",
-                ));
+                return Err(mlua::Error::external(format!(
+                    "{call} array form takes no override"
+                )));
             }
             table
                 .sequence_values::<Value>()
                 .map(|item| {
                     Ok(ToolsAddEntry {
-                        alias: add_alias(&item?)?,
+                        alias: entry_name(call, &item?)?,
                         description_override: None,
                     })
                 })
                 .collect()
         }
         single => Ok(vec![ToolsAddEntry {
-            alias: add_alias(&single)?,
+            alias: entry_name(call, &single)?,
             description_override,
         }]),
     }
 }
 
-/// Builds the JSON Schema `parameters` object from a `tools.add_local` params
+/// Builds the JSON Schema `parameters` object from a `tools.offer_local` params
 /// table. Each value is a bare type string or a `{type, description}` array;
 /// every declared parameter is required.
 ///
@@ -143,13 +137,13 @@ pub(super) fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json
             Value::Table(t) => (t.get::<String>(1)?, t.get::<Option<String>>(2)?),
             _ => {
                 return Err(mlua::Error::external(format!(
-                    "tools.add_local param {name:?} must be a type string or a {{type, description}} array"
+                    "tools.offer_local param {name:?} must be a type string or a {{type, description}} array"
                 )));
             }
         };
         if !matches!(ty.as_str(), "string" | "integer" | "number" | "boolean") {
             return Err(mlua::Error::external(format!(
-                "tools.add_local param {name:?} has unsupported type {ty:?}: \
+                "tools.offer_local param {name:?} has unsupported type {ty:?}: \
                  expected \"string\", \"integer\", \"number\", or \"boolean\""
             )));
         }

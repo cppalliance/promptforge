@@ -1,9 +1,9 @@
 //! The yield shims installed on a scheduler-mode section VM produce
 //! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
-//! `tools.call` in their alias and handle forms, the local tool
+//! `tools.call` in their id and tool-object forms, the local tool
 //! handshake, the loop's per-call requesting turn, a model handle's
-//! `infer` method, the captured alias globals, and the `infer` and `loop`
-//! methods a model handle carries.
+//! `infer` method, and the `infer` and `loop` methods a model handle
+//! carries.
 
 use promptforge_types::ids::TaskOrigin;
 use promptforge_types::metrics::ToolCallEvent;
@@ -165,14 +165,14 @@ fn tools_call_yields_a_well_formed_request() {
     // path as the other suspending calls; its yield parses into the
     // protocol's ToolCall variant with the author's args as JSON.
     let vm = scheduler_vm(&ModelSet::default(), None);
-    match yielded_request(&vm, r#"return tools.call("echo", { value = "hi" })"#) {
+    match yielded_request(&vm, r#"return tools.call("tools/echo", { value = "hi" })"#) {
         Request::ToolCall {
             alias,
             args,
             call_id,
             turn,
         } => {
-            assert_eq!(alias, "echo");
+            assert_eq!(alias, "tools/echo");
             assert_eq!(args, json!({ "value": "hi" }));
             assert_eq!(call_id, None, "a script call leaves the call id unset");
             assert_eq!(turn, None, "a script call leaves the turn unset");
@@ -192,7 +192,7 @@ fn a_local_tool_handler_runs_inside_the_block_coroutine() {
     let (thread, yielded) = start(
         &vm,
         "local withheld\n\
-         tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            local ok, err = pcall(jump, '## Other')\n\
            withheld = not ok\n\
              and tostring(err):find('jump is unavailable inside a local tool handler', 1, true) ~= nil\n\
@@ -263,7 +263,7 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
     assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
     let call = |id: &str| ToolCallEvent {
         id: id.to_owned(),
-        name: "echo".to_owned(),
+        name: "tools_echo".to_owned(),
         arguments: json!({ "value": id }),
         tool: None,
     };
@@ -312,13 +312,16 @@ fn the_bare_tool_call_global_is_not_installed() {
 }
 
 #[test]
-fn tools_call_accepts_a_tool_handle_in_place_of_the_alias() {
-    // The captured alias global is an inspectable Tool object; passing it
-    // as the leading argument dispatches the binding it names.
+fn tools_call_accepts_a_tool_object_in_place_of_the_id() {
+    // A tool object stands for its canonical id; passing it as the leading
+    // argument dispatches the tool it names.
     let vm = scheduler_vm_with_tools(&ModelSet::default(), &test_tools(), None);
-    match yielded_request(&vm, r#"return tools.call(echo, { value = "hi" })"#) {
+    match yielded_request(
+        &vm,
+        r#"return tools.call(tools.get("tools/echo"), { value = "hi" })"#,
+    ) {
         Request::ToolCall { alias, args, .. } => {
-            assert_eq!(alias, "echo");
+            assert_eq!(alias, "tools/echo");
             assert_eq!(args, json!({ "value": "hi" }));
         }
         other => panic!("expected a tool_call request, got {other:?}"),
@@ -326,10 +329,10 @@ fn tools_call_accepts_a_tool_handle_in_place_of_the_alias() {
 }
 
 #[test]
-fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
-    // The polymorphism is alias string, Tool object, or tool record;
-    // anything else is the call's own error at the protocol boundary, so
-    // an author pcall catches it at the call site.
+fn tools_call_rejects_a_first_argument_that_is_neither_a_string_nor_a_tool() {
+    // The polymorphism is a string (a tool id or a local alias) or a tool
+    // object; anything else is the call's own error at the protocol
+    // boundary, so an author pcall catches it at the call site.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let (_thread, yielded) = start(&vm, "return tools.call(42, {})");
     let value = yielded.into_iter().next().expect("one yielded value");
@@ -337,7 +340,7 @@ fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
         YieldParse::Call(answer) => {
             let message = format!("{answer:?}");
             assert!(
-                message.contains("tools.call alias must be a string, Tool object, or tool record"),
+                message.contains("tools.call takes a tool id, a local alias, or a tool object"),
                 "the rejection names the expected forms: {message}"
             );
         }

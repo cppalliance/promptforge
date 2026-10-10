@@ -212,22 +212,25 @@ fn tool_call_without_args_parses_the_empty_object() {
 }
 
 #[test]
-fn a_tool_call_with_a_tool_object_alias_decodes_to_its_alias() {
-    // The alias-or-Tool polymorphism at the protocol boundary: a Tool
-    // object (a captured alias global) names the
-    // binding it was created from.
+fn a_tool_call_with_a_tool_object_decodes_to_its_id() {
+    // The id-or-tool-object polymorphism at the protocol boundary: a tool
+    // object stands for its canonical id, never its wire name.
     let lua = Lua::new();
     let table = request_table(&lua, "tool_call");
-    let handle = crate::LuaToolHandle::from_binding(
-        "echo",
+    let descriptor = promptforge_types::tools::ToolDescriptor::new(
+        promptforge_types::tools::ToolId::parse("tools/echo").expect("valid id"),
         "echo tool",
-        &promptforge_types::tools::ToolId::parse("tools/echo").expect("valid id"),
+        json!({ "type": "object" }),
     );
+    let handle = crate::LuaToolHandle::from_binding(&crate::ToolBinding::from_descriptor(
+        "tools_echo",
+        &descriptor,
+    ));
     let userdata = lua.create_userdata(handle).expect("userdata");
     table.raw_set("alias", userdata).expect("raw_set");
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
-        Request::ToolCall { alias, .. } => assert_eq!(alias, "echo"),
+        Request::ToolCall { alias, .. } => assert_eq!(alias, "tools/echo"),
         other => panic!("expected a tool_call request, got {other:?}"),
     }
 }
@@ -243,7 +246,7 @@ fn a_tool_call_with_a_non_alias_alias_is_the_calls_error() {
         YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
             assert_eq!(
                 message,
-                "tools.call alias must be a string, Tool object, or tool record, got integer"
+                "tools.call takes a tool id, a local alias, or a tool object, got integer"
             );
         }
         other => panic!("expected the alias call error, got {other:?}"),

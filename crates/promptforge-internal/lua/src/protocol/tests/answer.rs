@@ -161,7 +161,7 @@ fn an_ok_structured_tool_call_answer_round_trips_as_a_table() {
 }
 
 /// A fresh VM with the `tools` namespace installed and one local tool,
-/// `grab`, registered through `tools.add_local`.
+/// `grab`, registered through `tools.offer_local`.
 fn lua_with_local_grab() -> Lua {
     let lua = Lua::new();
     crate::install_tools(
@@ -177,7 +177,7 @@ fn lua_with_local_grab() -> Lua {
     )
     .expect("the tools install cannot fail on a fresh VM");
     lua.load(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, \
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
          function(args) return 'got ' .. args.value end)",
     )
     .exec()

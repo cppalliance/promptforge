@@ -1,11 +1,11 @@
-//! Script-initiated `tools.call` dispatch on the scheduler: string and
-//! table results, tool objects, unbound aliases, bound tools outside the
-//! section scope, cancellation of a slow call, untrusted output wrapping,
-//! and the model install around a call.
+//! Script-initiated `tools.call` dispatch on the scheduler by canonical id:
+//! string and table results, tool objects, unbound names, offered tools
+//! outside the section scope, cancellation of a slow call, untrusted output
+//! wrapping, and the model install around a call.
 
 use super::*;
 
-/// Arms the run's shared tool set with `bindings`, every alias in the
+/// Arms the run's shared tool set with `bindings`, every wire name in the
 /// prompt-wide `always` scope, so a section's effective scope includes them
 /// without an H1 pass; the implementations go to the test driver's tool table.
 fn arm_tool_set(
@@ -17,8 +17,8 @@ fn arm_tool_set(
 }
 
 /// Arms the run's shared tool set with `bindings` and exactly `always` as
-/// the prompt-wide scope, so a binding can sit in the document catalog
-/// without entering any section's effective scope.
+/// the prompt-wide scope, so a binding can sit in the offering without
+/// entering any section's effective scope.
 fn arm_tool_set_scoped(
     ctx: &RunState,
     fixture: RunFixture,
@@ -38,8 +38,8 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local out = tools.call('echo', { value = 'hi' })\n\
-        return out .. '|' .. tostring(tools.calls.echo)\n\
+        local out = tools.call('tools/echo', { value = 'hi' })\n\
+        return out .. '|' .. tostring(tools.calls['tools/echo'])\n\
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
@@ -57,14 +57,15 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
-    // The handle form: the captured alias global is an inspectable Tool
-    // object, and passing it as the leading argument dispatches the binding
-    // it names, identically to the bare alias string.
+    // The object form: `tools.get` reads the tool object, and passing it as
+    // the leading argument dispatches the tool it names, identically to the
+    // bare id string.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        assert(type(echo) == 'userdata', 'the captured alias is a Tool object')\n\
+        local echo = tools.get('tools/echo')\n\
+        assert(type(echo) == 'userdata', 'tools.get reads a tool object')\n\
         return tools.call(echo, { value = 'hi' })\n\
         ```\n";
     let prompt = parse(md);
@@ -82,10 +83,10 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
-    // Script-initiated resolution runs against the run's full bound
-    // catalog, so the unknown-alias error names that whole set, not the
-    // section's effective scope.
+async fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
+    // Script-initiated resolution runs against the run's whole offering,
+    // so the unknown-name error lists every offered id, not the section's
+    // effective scope.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -100,20 +101,20 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
     let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
-        .expect_err("an unbound alias fails the block");
+        .expect_err("an unbound name fails the block");
     match &error {
-        Error::UnboundToolCall { name, bound } => {
+        Error::UnboundToolCall { name, ids } => {
             assert_eq!(name, "missing");
-            assert_eq!(bound, &["echo".to_owned()]);
+            assert_eq!(ids, &["tools/echo".to_owned()]);
         }
         other => panic!("expected the typed unbound-tool error, got {other:?}"),
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
-    // A tool bound in the document catalog but never scoped into the
-    // section (no `always`, no `tools.add`) still dispatches for a script:
+async fn a_script_tools_call_reaches_an_offered_tool_outside_the_section_scope() {
+    // A tool in the run's offering but never scoped into the section (no
+    // `always_offer`, no `tools.offer`) still dispatches for a script:
     // the scope shapes what the model is offered, and the author's own
     // code is not the model. The count lands in the same shared map
     // `tools.calls` reads.
@@ -121,8 +122,8 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local out = tools.call('echo', { value = 'hi' })\n\
-        return out .. '|' .. tostring(tools.calls.echo)\n\
+        local out = tools.call('tools/echo', { value = 'hi' })\n\
+        return out .. '|' .. tostring(tools.calls['tools/echo'])\n\
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
@@ -135,7 +136,7 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
-        .expect("a bound but unscoped alias dispatches for a script");
+        .expect("an offered but unscoped tool dispatches for a script");
     assert_eq!(out, "echoed: hi|1");
 }
 
@@ -177,7 +178,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('slow', {})\n```\n";
+        ```lua\nreturn tools.call('tools/slow', {})\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
     let started = Arc::new(AtomicUsize::new(0));
@@ -229,7 +230,7 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
+        ```lua\nreturn tools.call('tools/untrusted_echo', { value = 'hi' })\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
     let fixture = arm_tool_set(
@@ -261,7 +262,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local r = tools.call('form', {})\n\
+        local r = tools.call('tools/structured', {})\n\
         return r.text .. '|' .. tostring(#r.images)\n\
         ```\n";
     let prompt = parse(md);
@@ -288,7 +289,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('form', {})\n```\n";
+        ```lua\nreturn tools.call('tools/structured', {})\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
@@ -325,7 +326,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('form', {})\n```\n";
+        ```lua\nreturn tools.call('tools/structured', {})\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
@@ -362,7 +363,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\ntools.call('echo', { value = 'x' })\n```\n\n\
+        ```lua\ntools.call('tools/echo', { value = 'x' })\n```\n\n\
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);

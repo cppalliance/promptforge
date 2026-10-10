@@ -55,11 +55,10 @@ const STARTUPS: ServiceKey<BTreeMap<String, Arc<Startup>>> = ServiceKey::new("te
 /// a failed one's tool out of a run.
 const SLOW: Package = Package::new("tests/slow", construct_starting);
 
-/// A prompt declaring `slow`, binding `echo` to its tool, and calling it
-/// once.
+/// A prompt declaring `slow` and calling its tool once by id.
 const CALLS_SLOW: &str = "---\nname: calls-slow\ndescription: d\npromptforge: 0\n\
-    plugins:\n  - slow\ntools:\n  echo: slow/echo\n---\n\n\
-    # Title\n\n## Only\n\n```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
+    plugins:\n  - slow\n---\n\n\
+    # Title\n\n## Only\n\n```lua\nreturn tools.call('slow/echo', { value = 'hi' })\n```\n";
 
 /// A prompt declaring `slow` and calling nothing.
 const DECLARES_SLOW: &str = "---\nname: declares-slow\ndescription: d\npromptforge: 0\n\
@@ -68,7 +67,7 @@ const DECLARES_SLOW: &str = "---\nname: declares-slow\ndescription: d\npromptfor
 /// A Plugin-free prompt returning how many undeclared tools the run
 /// offers.
 const COUNTS_OFFERED: &str = "---\nname: counts\ndescription: d\npromptforge: 0\n---\n\n\
-    # Title\n\n## Only\n\n```lua\nreturn #tools.offered() .. ' offered'\n```\n";
+    # Title\n\n## Only\n\n```lua\nreturn #tools.extras() .. ' offered'\n```\n";
 
 /// A Plugin whose tools wait on the test's [`Startup`].
 struct Starting {
@@ -213,7 +212,7 @@ async fn a_plugin_whose_ready_resolves_late_has_its_tools_in_the_run() {
     })
     .await
     .expect("the Harness waits on the Plugin's ready");
-    let prepared = prepared.expect("the snapshot after the wait offers the slotted tool");
+    let prepared = prepared.expect("the snapshot after the wait offers the Plugin's tool");
     let outcome = drive_run(
         prepared.run,
         prepared.performers,
@@ -302,7 +301,7 @@ async fn an_undeclared_plugin_whose_ready_fails_leaves_the_run_going_without_its
 }
 
 #[tokio::test]
-async fn a_cancel_while_a_slotted_plugin_is_still_starting_ends_the_run_cancelled_in_report_and_record()
+async fn a_cancel_while_a_declared_plugin_is_still_starting_ends_the_run_cancelled_in_report_and_record()
  {
     let (host, _moves, startup) = slow_host(Phase::Starting);
     let recorder = recorder();
@@ -332,7 +331,7 @@ async fn a_cancel_while_a_slotted_plugin_is_still_starting_ends_the_run_cancelle
     assert_eq!(
         recorder.outcome(run_id),
         Some(RunOutcome::Cancelled),
-        "the recorder holds the cancel, not the refusal the unfilled slot raised"
+        "the recorder holds the cancel, not a refusal of the unready Plugin"
     );
 }
 

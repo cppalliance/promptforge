@@ -57,10 +57,8 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// docs), and runs with the Plugin's id as its one chunk argument, so
 /// `local plugin = ...` reads the name the Plugin was installed under.
 /// The globals it defines must not collide with a reserved name
-/// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, with
-/// `aliases` (the prompt's frontmatter tool aliases, which install as
-/// globals after the shared replay), or with an earlier
-/// prelude's globals. A table global installs as an empty proxy that reads
+/// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, or with
+/// an earlier prelude's globals. A table global installs as an empty proxy that reads
 /// the prelude's table and refuses writes; any other value installs as it
 /// is.
 ///
@@ -73,7 +71,7 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// fails to load, and [`Error::Lua`] naming the Plugin, the global,
 /// and what it collides with when a global collides or is not named by a
 /// string.
-pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Result<()> {
+pub fn install_preludes(lua: &Lua, preludes: &[Prelude]) -> Result<()> {
     let globals = lua.globals();
     let mut installed: BTreeMap<String, &PluginId> = BTreeMap::new();
     for prelude in preludes {
@@ -87,7 +85,7 @@ pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Re
             .map_err(|error| load_failure(plugin, error))?;
         let defined = defined_globals(plugin, &env)?;
         for name in defined.keys() {
-            check_collision(&globals, plugin, name, &installed, aliases)?;
+            check_collision(&globals, plugin, name, &installed)?;
         }
         for (name, value) in defined {
             let value = match value {
@@ -176,8 +174,8 @@ fn defined_globals(plugin: &PluginId, env: &Table) -> Result<BTreeMap<String, Va
     Ok(defined)
 }
 
-/// Fails when `name` is already taken: by an earlier prelude, a
-/// frontmatter alias, a reserved name, or a name bound in `_G`.
+/// Fails when `name` is already taken: by an earlier prelude, a reserved
+/// name, or a name bound in `_G`.
 ///
 /// The reserved check covers the Engine globals that a raw `_G` read does
 /// not find on every VM (`ui` and `item` bind only on some, and the `_G`
@@ -188,12 +186,9 @@ fn check_collision(
     plugin: &PluginId,
     name: &str,
     installed: &BTreeMap<String, &PluginId>,
-    aliases: &[&str],
 ) -> Result<()> {
     let collides_with = if let Some(owner) = installed.get(name) {
         format!("which Plugin `{owner}`'s prelude already defines")
-    } else if aliases.contains(&name) {
-        "which the prompt's frontmatter binds as a tool alias".to_owned()
     } else if let Some(kind) = crate::reserved_name(name) {
         format!("which is reserved as {kind}")
     } else if !matches!(

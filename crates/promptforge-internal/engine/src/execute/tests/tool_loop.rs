@@ -296,10 +296,10 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
-    // The loop's scope gate: a model call naming a declared-but-unscoped
-    // alias fails with OutOfScopeToolCall holding the
-    // declared-but-unscoped hint.
+async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
+    // The loop's scope gate: a model call naming a tool the run offers but
+    // the section never offered fails with OutOfScopeToolCall holding the
+    // offered-but-unscoped hint.
     let gateway = ScriptedChat::new(vec![resp_tool_call(
         "call_1",
         "global_tool",
@@ -333,7 +333,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "global_tool");
-            assert!(*global_exists, "the alias is a bound tool slot");
+            assert!(*global_exists, "the name is an offered tool's wire name");
             assert_eq!(in_scope, &["scoped".to_owned()]);
         }
         other => panic!("expected OutOfScopeToolCall, got {other:?}"),
@@ -341,8 +341,8 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     assert!(
         error
             .to_string()
-            .contains("bound tool slot but was not added"),
-        "error message must hint declared-but-unscoped: {error}"
+            .ends_with("[\"scoped\"] (a catalog tool that was not offered in this section)"),
+        "error message must hint offered-but-unscoped: {error}"
     );
     assert_eq!(gateway.call_count(), 1, "the rejected round is the last");
 }
@@ -367,16 +367,14 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "nonexistent");
-            assert!(!*global_exists, "the alias was never a bound tool slot");
+            assert!(!*global_exists, "the name is no offered tool");
             assert_eq!(in_scope, &["echo".to_owned()]);
         }
         other => panic!("expected OutOfScopeToolCall, got {other:?}"),
     }
     assert!(
-        !error
-            .to_string()
-            .contains("bound tool slot but was not added"),
-        "pure unknown must not hint declared-but-unscoped: {error}"
+        !error.to_string().contains("not offered in this section"),
+        "pure unknown must not hint offered-but-unscoped: {error}"
     );
 }
 

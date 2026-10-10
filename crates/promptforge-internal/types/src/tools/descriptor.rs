@@ -14,9 +14,9 @@ use super::ids::ToolId;
 ///
 /// The caller collects the descriptors of every Plugin it can serve into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay with the
-/// caller, keyed by [`ToolId`]. The Engine binds its tool slots to the
-/// descriptors, offers the tools of Plugins the prompt does not declare,
-/// and advertises to the model whatever the prompt's Lua scopes in. It
+/// caller, keyed by [`ToolId`]. The Engine offers every descriptor to the
+/// prompt's Lua by id, and advertises to the model whatever the prompt's
+/// Lua scopes in. It
 /// issues each tool call as an effect that names the tool's id. The caller
 /// resolves that id to the implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

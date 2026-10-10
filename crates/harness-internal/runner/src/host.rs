@@ -9,7 +9,7 @@
 //! the Harness's preparation waits for every built Plugin to be ready, and
 //! a Plugin whose `ready` fails is unavailable to that run the same way.
 //! Then it takes a snapshot of every installed Plugin with the run's own
-//! services: the catalog the Engine fills slots against, the preludes of
+//! services: the catalog the Engine offers the run, the preludes of
 //! the Plugins the prompt declares, the requirements the snapshot cannot
 //! meet, and the performer that sends each tool call to the Plugin its id
 //! names.
@@ -159,8 +159,7 @@ impl HostContext {
     /// environment's catalog holds every usable Plugin's tools, declared
     /// or not, and its preludes are the declared, usable Plugins', in
     /// declaration order. The requirements cover every Plugin the prompt
-    /// declares or names in a tool slot. The returned context performs the
-    /// run's tool calls.
+    /// declares. The returned context performs the run's tool calls.
     pub(crate) fn begin_run(
         &self,
         services: HostServices,

@@ -219,15 +219,15 @@ async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
     );
 }
 
-/// A prompt declaring one tool slot whose Plugin is not declared at
-/// all.
-const DECLARES_ORPHAN_SLOT: &str = concat!(
+/// A prompt declaring one role that needs a long context.
+const DECLARES_LONG_CONTEXT: &str = concat!(
     "---\n",
-    "name: declares-orphan-slot\n",
+    "name: declares-long-context\n",
     "description: d\n",
     "promptforge: 0\n",
-    "tools:\n",
-    "  fetch: web/fetch\n",
+    "models:\n",
+    "  reader:\n",
+    "    min_context: 200000\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
@@ -238,24 +238,23 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
 /// model-readable notice text, line for line.
 #[tokio::test]
 async fn an_unmet_requirement_produces_todays_model_readable_notice() {
-    let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // An empty catalog: the slot's Plugin contributed nothing, which
-    // prepare reports as the missing Plugin.
+    let prompt = parse(DECLARES_LONG_CONTEXT, "declares-long-context");
     let result = run_with_fixture(
         &Environment::new(),
         &prompt,
         "",
-        context("notice"),
+        context("notice").model(current_model(32_000, ThinkingMode::Switchable)),
         RunFixture::new(),
     )
     .await;
     let RunResult::Failure(error) = result else {
-        panic!("an unfilled required slot is refused: {result:?}");
+        panic!("a role the current model cannot fill is refused: {result:?}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - missing required Plugin: web"
+         - role 'reader': requires a context of at least 200000 tokens; \
+         the current model provides 32000"
     );
 }

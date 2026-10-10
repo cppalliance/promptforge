@@ -13,7 +13,7 @@ async fn a_round_advertises_the_section_scope_with_local_tools() {
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\

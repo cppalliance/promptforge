@@ -220,8 +220,8 @@ pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
 ];
 
 /// Returns why `name` is reserved in a section VM's global namespace, or
-/// `None` when a frontmatter alias or a Plugin prelude global may take
-/// it. The match is case-sensitive, as Lua names are.
+/// `None` when a Plugin prelude global may take it. The match is
+/// case-sensitive, as Lua names are.
 #[must_use]
 pub fn reserved_name(name: &str) -> Option<Reserved> {
     RESERVED_NAMES

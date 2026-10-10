@@ -17,11 +17,8 @@ impl SectionVm {
     /// The replay runs through the normal chunk path with every Engine
     /// global already installed: `args`, `sys`, `var`, `log`,
     /// `store`, the `tools`/`models` tables, and the control globals are all
-    /// visible to shared top-level code. Only the captured tool alias
-    /// globals are absent; they install afterward via
-    /// [`install_captured_bindings`](Self::install_captured_bindings) so a
-    /// declared alias wins over a same-named shared global. A scalar
-    /// top-level return is discarded because the replay is a library load.
+    /// visible to shared top-level code. A scalar top-level return is
+    /// discarded because the replay is a library load.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shared program fails or returns a
@@ -132,8 +129,8 @@ impl SectionVm {
     ///
     /// This is the scheduler's chunk-execution path: one coroutine per Lua
     /// block, created from the block's loaded function on this persistent
-    /// VM, so the VM's globals (`var`, the bare globals, the captured
-    /// handles) roll forward across blocks as on the direct
+    /// VM, so the VM's globals (`var` and the bare globals) roll forward
+    /// across blocks as on the direct
     /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
     /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
     /// installed on the fresh thread; the main-state hook from construction
@@ -366,8 +363,8 @@ pub(crate) struct LuaOutcome {
 /// is always present (an Engine global, not a scoped tool).
 ///
 /// The `tools` table is the same validating one every section VM installs,
-/// over an empty shared set: a chunk that calls `tools.add(...)` fails loudly
-/// because no alias is bound.
+/// over an empty shared set: a chunk that calls `tools.offer(...)` fails
+/// loudly because the run offers no tool.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`

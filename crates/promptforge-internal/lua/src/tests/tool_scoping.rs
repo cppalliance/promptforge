@@ -1,16 +1,13 @@
-//! Tool scoping: filled slots and their recorded identities, the `always`
-//! and `tools.add` scope operations, frozen Tool objects, and sections with
-//! no declared slots.
+//! Tool scoping in a section VM: the prompt-wide `tools.always_offer` and
+//! the section's `tools.offer` over canonical ids and tool objects, frozen
+//! tool objects, and sections over an empty offering.
 
 use super::*;
 
 #[test]
-fn filled_slots_record_exact_aliases_descriptions_identities_and_always_scope() {
+fn always_offer_records_prompt_wide_wire_names_on_the_shared_set() {
     let set = shared_set(fixture_set(
-        &[
-            ("web_search", "search the web", "search"),
-            ("web_fetch2", "fetch a page", "fetch"),
-        ],
+        &[("fetch", "fetch a page"), ("search", "search the web")],
         &[],
     ));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
@@ -19,35 +16,32 @@ fn filled_slots_record_exact_aliases_descriptions_identities_and_always_scope() 
         .expect("values must inject");
     run_scalar(
         &vm,
-        &program("tools.always('web_search')"),
+        &program("tools.always_offer('fixtures/search')"),
         &null_emitter(),
         "Section",
     )
-    .expect("tools.always records the prompt-wide alias");
+    .expect("tools.always_offer records the prompt-wide tool");
     vm.teardown(&null_emitter(), "Section");
 
     let bindings = set.lock().expect("the shared set locks");
     assert_eq!(
         bindings
-            .bindings()
+            .offered()
             .iter()
             .map(|binding| (binding.alias(), binding.description(), binding.id().name()))
             .collect::<Vec<_>>(),
         [
-            ("web_search", "search the web", "search"),
-            ("web_fetch2", "fetch a page", "fetch"),
+            ("fixtures_fetch", "fetch a page", "fetch"),
+            ("fixtures_search", "search the web", "search"),
         ]
     );
-    assert_eq!(bindings.always(), ["web_search"]);
+    assert_eq!(bindings.always(), ["fixtures_search"]);
 }
 
 #[test]
-fn always_records_a_model_description_override() {
+fn always_offer_records_a_model_description_override() {
     let set = shared_set(fixture_set(
-        &[
-            ("web_search", "search the web", "search"),
-            ("web_fetch2", "fetch a page", "fetch"),
-        ],
+        &[("fetch", "fetch a page"), ("search", "search the web")],
         &[],
     ));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
@@ -56,35 +50,35 @@ fn always_records_a_model_description_override() {
         .expect("values must inject");
     run_scalar(
         &vm,
-        &program("tools.always('web_fetch2', 'always override')"),
+        &program("tools.always_offer('fixtures/search', 'always override')"),
         &null_emitter(),
         "Section",
     )
-    .expect("tools.always records the override");
+    .expect("tools.always_offer records the override");
     vm.teardown(&null_emitter(), "Section");
 
     let bindings = set.lock().expect("the shared set locks");
     assert_eq!(
-        bindings.bindings()[1].model_description(),
+        bindings.offered()[1].model_description(),
         Some("always override"),
-        "tools.always's second argument updates the recorded override"
+        "tools.always_offer's second argument updates the run's binding"
     );
 }
 
 #[test]
-fn tool_handles_are_frozen() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+fn tool_objects_are_frozen() {
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     let error = run_scalar(
         &vm,
-        &program("search.description = 'x'"),
+        &program("tools.get('fixtures/search').description = 'x'"),
         &null_emitter(),
         "Section",
     )
-    .expect_err("assigning .description on a Tool object must fail");
+    .expect_err("assigning .description on a tool object must fail");
     assert!(
         error.to_string().contains("description"),
         "the error must name the frozen field: {error}"
@@ -93,78 +87,33 @@ fn tool_handles_are_frozen() {
 }
 
 #[test]
-fn bound_slot_globals_are_inspectable_tool_objects() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+fn a_tool_reads_through_its_object_and_never_through_a_global() {
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("section install must expose the inspectable Tool object");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(
         &vm,
         &program(
-            "assert(search.name == 'search')\n\
+            "local search = tools.get('fixtures/search')\n\
+             assert(search.id == 'fixtures/search')\n\
              assert(search.description == 'search the web')\n\
-             assert(type(search.parameters) == 'table')\n\
-             assert(search.wire_name == 'search')\n\
-             assert(search.untrusted == false)",
+             assert(fixtures_search == nil)\n\
+             assert(_G.search == nil)",
         ),
         &null_emitter(),
         "Section",
     )
-    .expect("the bound slot's global is an inspectable Tool object");
+    .expect("the offered tool reads through its object");
     vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
-fn scoping_validates_aliases_exactly() {
-    for alias in [
-        "",
-        "_leading",
-        "has.dot",
-        "nonasciié",
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
-    ] {
-        let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
-        let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-            .expect("captured bindings must install");
-        vm.inject_values("", &json!({}), &fresh_access())
-            .expect("values must inject");
-        let error = run_scalar(
-            &vm,
-            &program(&format!("tools.add({alias:?})")),
-            &null_emitter(),
-            "Section",
-        )
-        .expect_err("invalid aliases must be rejected");
-        assert!(
-            error.to_string().contains("invalid alias"),
-            "wrong error for {alias:?}: {error}"
-        );
-        vm.teardown(&null_emitter(), "Section");
-    }
-
-    for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
-        let bindings = fixture_set(&[(valid, "a capability", "search")], &[]);
-        let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-            .expect("captured bindings must install");
-        vm.inject_values("", &json!({}), &fresh_access())
-            .expect("values must inject");
-        run_scalar(
-            &vm,
-            &program(&format!("tools.add({valid:?})")),
-            &null_emitter(),
-            "Section",
-        )
-        .expect("planned alias forms must be valid");
-        vm.teardown(&null_emitter(), "Section");
-    }
-}
-
-#[test]
 fn tools_bind_is_gone_from_every_section() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
 
@@ -191,147 +140,139 @@ fn tools_bind_is_gone_from_every_section() {
 }
 
 #[test]
-fn always_rejects_an_unbound_alias_and_is_idempotent() {
-    let set = shared_set(fixture_set(&[("search", "search the web", "search")], &[]));
+fn always_offer_refuses_an_id_the_run_does_not_offer_and_is_idempotent() {
+    let set = shared_set(fixture_set(&[("search", "search the web")], &[]));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
         .expect("the section VM builds over the shared set");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     let error = run_scalar(
         &vm,
-        &program("tools.always('missing')"),
+        &program("tools.always_offer('fixtures/missing')"),
         &null_emitter(),
         "Section",
     )
-    .expect_err("advertising an unfilled alias is an error");
+    .expect_err("offering a tool the run lacks is an error");
     assert!(
         error
             .to_string()
-            .contains("tools.always alias \"missing\" is not a bound tool slot"),
-        "the error must identify the unfilled alias: {error}"
+            .contains("tools.always_offer: \"fixtures/missing\" is not a catalog tool in this run"),
+        "the error must name the id: {error}"
     );
-    // The shared library replays into every section, so re-parking the same
-    // alias is a no-op, not a duplicate error.
+    // The shared library replays into every section, so offering the same
+    // tool again is a no-op, not a duplicate error.
     run_scalar(
         &vm,
-        &program("tools.always('search'); tools.always('search')"),
+        &program("tools.always_offer('fixtures/search'); tools.always_offer('fixtures/search')"),
         &null_emitter(),
         "Section",
     )
-    .expect("re-parking the same alias is idempotent");
+    .expect("offering the same tool again is idempotent");
     assert_eq!(
         set.lock().expect("the shared set locks").always(),
-        &["search".to_owned()],
-        "the alias is recorded exactly once"
+        &["fixtures_search".to_owned()],
+        "the tool is recorded exactly once"
     );
     vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
-fn section_scope_closes_to_always_then_added() {
+fn section_scope_closes_to_always_then_offered() {
     let bindings = fixture_set(
-        &[
-            ("search", "search the web", "search"),
-            ("fetch", "fetch a page", "fetch"),
-        ],
-        &["search"],
+        &[("fetch", "fetch a page"), ("search", "search the web")],
+        &["fixtures_search"],
     );
-    let prologue = program("tools.add({'fetch', 'search'})");
+    let prologue = program("tools.offer({'fixtures/fetch', 'fixtures/search'})");
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
-    run_scalar(&vm, &prologue, &null_emitter(), "Section").expect("section additions must record");
+    run_scalar(&vm, &prologue, &null_emitter(), "Section").expect("section offers must record");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["search", "fetch"]
+        ["fixtures_search", "fixtures_fetch"]
     );
 }
 
 #[test]
-fn tools_add_accepts_tool_objects_and_arrays() {
+fn tools_offer_accepts_tool_objects_and_arrays() {
     let bindings = fixture_set(
-        &[
-            ("search", "search the web", "search"),
-            ("fetch", "fetch a page", "fetch"),
-        ],
+        &[("fetch", "fetch a page"), ("search", "search the web")],
         &[],
     );
     let prologue = program(
-        "tools.add(search); \
-             tools.add({fetch}); \
-             tools.add({'fetch', search})",
+        "local search, fetch = tools.get('fixtures/search'), tools.get('fixtures/fetch')\n\
+         tools.offer(search)\n\
+         tools.offer({fetch})\n\
+         tools.offer({'fixtures/fetch', search})",
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
-        .expect("tools.add must accept Tool objects, strings, and arrays");
+        .expect("tools.offer must accept tool objects, ids, and arrays");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["search", "fetch"]
+        ["fixtures_search", "fixtures_fetch"]
     );
     vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
-fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
+fn empty_offer_is_a_no_op_and_failed_bulk_offer_is_atomic() {
     let bindings = fixture_set(
-        &[
-            ("search", "search the web", "search"),
-            ("fetch", "fetch a page", "fetch"),
-        ],
+        &[("fetch", "fetch a page"), ("search", "search the web")],
         &[],
     );
     let prologue = program(
-        "tools.add(); \
-             local ok = pcall(tools.add, {'search', 'missing'}); \
-             if ok then error('invalid add unexpectedly succeeded') end; \
-             tools.add('fetch')",
+        "tools.offer(); \
+             local ok = pcall(tools.offer, {'fixtures/search', 'fixtures/missing'}); \
+             if ok then error('invalid offer unexpectedly succeeded') end; \
+             tools.offer('fixtures/fetch')",
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
-        .expect("caught failed add must not poison recording");
+        .expect("caught failed offer must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["fetch"],
-        "empty add changes nothing and failed add records no partial aliases"
+        ["fixtures_fetch"],
+        "empty offer changes nothing and a failed offer records no partial entries"
     );
 }
 
 #[test]
-fn add_rejects_misshapen_override_arguments() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+fn offer_rejects_misshapen_override_arguments() {
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let prologue = program(
-        "local ok, err = pcall(tools.add, {'search'}, 'bulk override'); \
-         if ok or not string.find(tostring(err), 'array form takes no override') then \
+        "local ok, err = pcall(tools.offer, {'fixtures/search'}, 'bulk override'); \
+         if ok or not string.find(tostring(err), 'tools.offer array form takes no override') then \
              error('array form with an override must fail loudly') \
          end; \
-         local ok, err = pcall(tools.add, 'search', 42); \
-         if ok or not string.find(tostring(err), 'override must be a string') then \
+         local ok, err = pcall(tools.offer, 'fixtures/search', 42); \
+         if ok or not string.find(tostring(err), 'tools.offer override must be a string') then \
              error('a non-string override must fail loudly') \
          end; \
-         local ok, err = pcall(tools.add, 'search', 'override', 'extra'); \
-         if ok or not string.find(tostring(err), 'one alias plus an optional override') then \
+         local ok, err = pcall(tools.offer, 'fixtures/search', 'override', 'extra'); \
+         if ok or not string.find(tostring(err), 'one tool plus an optional override') then \
              error('a third argument must fail loudly') \
          end; \
-         tools.add('search')",
+         tools.offer('fixtures/search')",
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
@@ -341,8 +282,8 @@ fn add_rejects_misshapen_override_arguments() {
 
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
-        ["search"],
-        "rejected calls record nothing and the later valid add still lands"
+        ["fixtures_search"],
+        "rejected calls record nothing and the later valid offer still lands"
     );
     assert_eq!(
         scope[0].model_description(),
@@ -353,42 +294,42 @@ fn add_rejects_misshapen_override_arguments() {
 }
 
 #[test]
-fn unknown_scoped_alias_fails_before_scope_closure() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+fn an_unknown_id_fails_before_scope_closure() {
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     let error = run_scalar(
         &vm,
-        &program("tools.add('missing')"),
+        &program("tools.offer('fixtures/missing')"),
         &null_emitter(),
         "Section",
     )
-    .expect_err("only bound aliases may enter the section scope");
+    .expect_err("only offered tools may enter the section scope");
     assert!(
-        error.to_string().contains(
-            "tools.add alias \"missing\" is neither a bound tool slot nor an offered tool"
-        ),
-        "the error names the unbound alias: {error}"
+        error
+            .to_string()
+            .contains("tools.offer: \"fixtures/missing\" is not a catalog tool in this run"),
+        "the error names the id: {error}"
     );
     vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
-fn captured_bindings_are_installed_without_payload_reports() {
+fn tool_objects_install_without_payload_reports() {
     let bindings = ToolSet::for_test(
+        Vec::new(),
+        Vec::new(),
         vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
             &fixture_tool("search"),
         )],
-        Vec::new(),
-        Vec::new(),
     );
     let recorder = Recorder::default();
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Section")
-        .expect("captured binding installation must succeed");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     let trace = format!("{:?}", recorder.observations());
@@ -397,86 +338,63 @@ fn captured_bindings_are_installed_without_payload_reports() {
 }
 
 #[test]
-fn add_without_declarations_fails_as_unbound_in_a_chunk() {
-    let error = run("tools.add('web_search')", "").expect_err("an unbound alias must fail loudly");
+fn offer_over_an_empty_offering_fails_in_a_chunk() {
+    let error = run("tools.offer('web/search')", "").expect_err("an unoffered id must fail loudly");
     assert!(
-        error.to_string().contains(
-            "tools.add alias \"web_search\" is neither a bound tool slot nor an offered tool"
-        ),
-        "the error must name the unbound alias: {error}"
+        error
+            .to_string()
+            .contains("tools.offer: \"web/search\" is not a catalog tool in this run"),
+        "the error must name the id: {error}"
     );
 }
 
 #[test]
-fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
+fn offer_over_an_empty_offering_fails_in_a_prologue_without_a_shared_library() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");
     let error = run_scalar(
         &vm,
-        &program("tools.add('web_search')"),
+        &program("tools.offer('web/search')"),
         &null_emitter(),
         "Test",
     )
-    .expect_err("an unbound alias must fail loudly");
+    .expect_err("an unoffered id must fail loudly");
     assert!(
         error
             .to_string()
-            .contains("is neither a bound tool slot nor an offered tool"),
-        "the error must report the missing slot: {error}"
+            .contains("is not a catalog tool in this run"),
+        "the error must report the missing tool: {error}"
     );
     vm.teardown(&null_emitter(), "Test");
 }
 
 #[test]
-fn add_with_empty_frozen_bindings_fails_as_unbound() {
-    let bindings = ToolSet::default();
+fn offer_with_an_override_argument_records_the_model_description() {
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Test")
-        .expect("empty captured bindings must install");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    let error = run_scalar(
-        &vm,
-        &program("tools.add('web_search')"),
-        &null_emitter(),
-        "Test",
-    )
-    .expect_err("an unbound alias must fail loudly");
-    assert!(
-        error
-            .to_string()
-            .contains("is neither a bound tool slot nor an offered tool"),
-        "the error must report the missing slot: {error}"
-    );
-    vm.teardown(&null_emitter(), "Test");
-}
-
-#[test]
-fn add_with_an_override_argument_records_the_model_description() {
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Test")
-        .expect("captured bindings must install");
+        .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");
     run_scalar(
         &vm,
-        &program("tools.add('search', 'Search the web for pages matching a query.')"),
+        &program("tools.offer('fixtures/search', 'Search the web for pages matching a query.')"),
         &null_emitter(),
         "Test",
     )
-    .expect("a description passed to tools.add is the model-facing override");
+    .expect("a description passed to tools.offer is the model-facing override");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope[0].model_description(),
         Some("Search the web for pages matching a query."),
-        "the add override must reach the scoped binding"
+        "the offer override must reach the scoped binding"
     );
     vm.teardown(&null_emitter(), "Test");
 }
 
 #[test]
-fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
+fn a_section_vm_over_an_empty_offering_snapshots_to_an_empty_scope() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");

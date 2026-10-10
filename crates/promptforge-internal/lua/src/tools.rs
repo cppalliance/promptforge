@@ -1,30 +1,28 @@
 //! The `tools` namespace: scoping, invocation, and counts.
 //!
 //! One Lua table holds every tool operation, mirroring the `models.*`
-//! namespacing of model operations. The run's filled frontmatter slots
-//! arrive in the shared [`ToolSet`] beside the offering: every catalog
-//! tool of a Plugin the prompt does not declare, each under its id with
-//! `/` and `.` replaced by `_`, such as `web_fetch`. The table scopes
-//! among them by name - `offered` returns the offering as fresh plain
-//! records `{ id, name, plugin, description }`, `add` scopes slot aliases
-//! and offered names into the section, `always` parks a prompt-wide slot
-//! alias (conventionally from H1, not privileged to it), `add_local`
-//! registers a prompt-author Lua function as a tool, `call` dispatches a
-//! bound or offered tool (installed by the coroutine shim prelude, since
-//! dispatch suspends), `allow_tasks` records the section's allowlist for
-//! the model's task built-ins, and `calls` is the read-only per-alias
-//! dispatch counter surface. `add` and `call` take an alias, a Tool
-//! object, or a record, which stands for its `name`; any other table
-//! passed to `add` is a list of those. An offered tool never becomes a
-//! Lua global and reaches the model only once `add` names it. Scoping or
-//! advertising a name that is neither a filled slot nor offered is a hard
-//! error. The installation logic sits here, out of the VM driver; the VM
-//! only calls the installers in setup order.
+//! namespacing of model operations. The shared [`ToolSet`] holds every
+//! catalog tool the run can offer, each bound under its wire name: its id
+//! with `/` and `.` replaced by `_`, such as `web_fetch`. The model sees
+//! only wire names; Lua names a tool by its canonical id (`web/fetch`) or
+//! by its tool object, and never by a global. `required` and `extras` list
+//! the tool objects of the declared Plugins and of every other Plugin,
+//! `get` reads one by id, `offer` scopes tools into the section,
+//! `always_offer` offers tools prompt-wide (conventionally from H1, not
+//! privileged to it), `offer_local` registers a prompt-author Lua function
+//! as a tool, `call` dispatches a catalog or local tool (installed by the
+//! coroutine shim prelude, since dispatch suspends), `allow_tasks` records
+//! the section's allowlist for the model's task built-ins, and `calls` is
+//! the read-only dispatch counter surface, keyed by id for a catalog tool
+//! and by alias for a local one. Offering an id the run cannot offer is a
+//! hard error. The installation logic sits here, out of the VM driver;
+//! the VM only calls the installers in setup order.
 
 use std::sync::{Arc, Mutex};
 
 use mlua::{Function, Lua, MultiValue, Table, Value, Variadic};
 use promptforge_model_client::detail::tool_schema_new;
+use promptforge_types::tools::ToolId;
 
 use crate::alias::validate_alias;
 use crate::error::{Error, Result};
@@ -33,20 +31,23 @@ use crate::scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 use crate::vm::LocalTools;
 
 mod decode;
+mod objects;
 mod userdata;
 
+pub(crate) use decode::tool_alias;
+#[cfg(test)]
 pub(crate) use userdata::LuaToolHandle;
 
-pub(crate) use decode::tool_alias;
+use decode::{ToolsAddEntry, add_local_params_schema, collect_tools_add_entries};
+use objects::{install_tool_lists, install_tool_objects};
 
-use decode::{add_local_params_schema, collect_tools_add_entries};
-
-/// The registry key of the VM's local-tool handler table: `tools.add_local`
-/// writes each handler under its alias, and the scheduler's `Local` answer
-/// reads it back to hand the function to the shim.
+/// The registry key of the VM's local-tool handler table:
+/// `tools.offer_local` writes each handler under its alias, and the
+/// scheduler's `Local` answer reads it back to hand the function to the
+/// shim.
 const LOCAL_HANDLERS_REGISTRY: &str = "promptforge.tools.local_handlers";
 
-/// Reads the handler `tools.add_local` registered under `alias` from the
+/// Reads the handler `tools.offer_local` registered under `alias` from the
 /// VM's handler table.
 ///
 /// # Errors
@@ -74,12 +75,13 @@ fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, To
 }
 
 /// Installs the read-only `tools.calls` counter table over `counts`;
-/// `declared` feeds the unknown-key diagnostic.
+/// `offered`, the ids of every tool the run can offer, feeds the
+/// unknown-key diagnostic.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the Lua table or callbacks cannot be created or
 /// installed.
-fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String]) -> Result<()> {
+fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: &[String]) -> Result<()> {
     let globals = lua.globals();
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
 
@@ -87,7 +89,7 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String
     let meta = lua.create_table().map_err(Error::lua)?;
 
     let counts_for_index = counts.clone();
-    let declared: Vec<String> = declared.to_vec();
+    let offered: Vec<String> = offered.to_vec();
     let index = lua
         .create_function(move |_, (_table, key): (Table, String)| {
             let value = counts_for_index.get(&key).map_err(mlua::Error::external)?;
@@ -95,17 +97,17 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String
                 Ok(count)
             } else {
                 let seeded = counts_for_index.aliases().map_err(mlua::Error::external)?;
-                let declared_unseeded = declared.iter().any(|alias| alias == &key);
+                let offered_unseeded = offered.iter().any(|id| id == &key);
                 Err(mlua::Error::external(format!(
                     "tools.calls: {key:?} has no seeded count; \
-                     seeded aliases: {seeded:?}{}",
-                    if declared_unseeded {
-                        " (alias is a bound tool slot but was neither added to \
-                         this section's scope nor dispatched by tools.call)"
+                     seeded names: {seeded:?}{}",
+                    if offered_unseeded {
+                        " (a catalog tool that was neither offered in this section \
+                         nor called with tools.call)"
                     } else if seeded.is_empty() {
                         ""
                     } else {
-                        " - check for typos or add it via tools.add"
+                        " - check for typos or offer it with tools.offer"
                     }
                 )))
             }
@@ -127,11 +129,12 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String
 }
 
 /// Installs `tools.calls` as a read-only Lua table backed by a fresh
-/// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing an
-/// unseeded key is a hard error that names the bad key and lists the seeded
-/// set. When the key names a bound tool slot but was never seeded - neither
-/// scoped into the section nor dispatched by a script `tools.call` - the
-/// diagnostic says so.
+/// [`ToolCallCounts`] seeded with the ids of `bindings`. Each seeded key
+/// reads its live count; indexing an unseeded key is a hard error that
+/// names the bad key and lists the seeded set. When the key is the id of a
+/// tool the run offers but was never seeded - neither offered to the
+/// section nor dispatched by a script `tools.call` - the diagnostic says
+/// so.
 ///
 /// Returns the `ToolCallCounts` handle so the executor's tool loop can
 /// increment it.
@@ -143,14 +146,40 @@ pub(crate) fn install_tool_call_counts(
     bound_tools: &ToolSet,
     bindings: &[ToolBinding],
 ) -> Result<ToolCallCounts> {
-    let counts = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
-    let declared: Vec<String> = bound_tools
-        .bindings()
+    let counts = ToolCallCounts::new(bindings.iter().map(|b| b.id().to_string()));
+    let offered: Vec<String> = bound_tools
+        .offered()
         .iter()
-        .map(|binding| binding.alias().to_owned())
+        .map(|binding| binding.id().to_string())
         .collect();
-    install_lua_tool_calls(lua, &counts, &declared)?;
+    install_lua_tool_calls(lua, &counts, &offered)?;
     Ok(counts)
+}
+
+/// Resolves each of `call`'s entries to its offered binding's wire name,
+/// checking every entry before the caller records any: an entry must parse
+/// as a tool id, so a wire name, a malformed id, or a local alias is
+/// refused as an id the run does not offer.
+fn resolve_entries(
+    call: &str,
+    set: &ToolSet,
+    entries: Vec<ToolsAddEntry>,
+) -> mlua::Result<Vec<(String, Option<String>)>> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            let binding = ToolId::parse(&entry.alias)
+                .ok()
+                .and_then(|_| set.offered_binding(&entry.alias))
+                .ok_or_else(|| {
+                    mlua::Error::external(format!(
+                        "{call}: {:?} is not a catalog tool in this run",
+                        entry.alias
+                    ))
+                })?;
+            Ok((binding.alias().to_owned(), entry.description_override))
+        })
+        .collect()
 }
 
 /// Installs the tool scoping and local-tool APIs into one section VM (H1
@@ -171,136 +200,105 @@ pub(crate) fn install_tools(
     local_tools: &LocalTools,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
-
-    let frozen = Arc::clone(set);
-    let state = Arc::clone(runtime);
-    let add = lua
-        .create_function(move |_, args: Variadic<Value>| {
-            let entries = collect_tools_add_entries(args)?;
-            {
-                let set = lock_tools(&frozen)?;
-                for entry in &entries {
-                    validate_alias(&entry.alias).map_err(mlua::Error::external)?;
-                    if set.binding(&entry.alias).is_none()
-                        && set.offered_binding(&entry.alias).is_none()
-                    {
-                        return Err(mlua::Error::external(format!(
-                            "tools.add alias {:?} is neither a bound tool slot nor an offered tool",
-                            entry.alias
-                        )));
-                    }
-                }
-            }
-            let mut state = state
-                .lock()
-                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            let set = lock_tools(&frozen)?;
-            for entry in entries {
-                if let Some(description) = entry.description_override {
-                    state
-                        .description_overrides
-                        .insert(entry.alias.clone(), description);
-                }
-                if set.always.iter().any(|existing| existing == &entry.alias) {
-                    continue;
-                }
-                if !state.added.iter().any(|existing| existing == &entry.alias) {
-                    state.added.push(entry.alias);
-                }
-            }
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    tools.set("add", add).map_err(Error::lua)?;
-
-    let frozen = Arc::clone(set);
-    let always = lua
-        .create_function(
-            move |_, (alias, model_description): (String, Option<String>)| -> mlua::Result<()> {
-                validate_alias(&alias).map_err(mlua::Error::external)?;
-                let mut set = lock_tools(&frozen)?;
-                let Some(binding) = set
-                    .bindings
-                    .iter_mut()
-                    .find(|binding| binding.alias == alias)
-                else {
-                    return Err(mlua::Error::external(format!(
-                        "tools.always alias {alias:?} is not a bound tool slot"
-                    )));
-                };
-                if let Some(model_description) = model_description {
-                    binding.model_description = Some(model_description);
-                }
-                // Idempotent under the shared-library replay: every section
-                // re-runs the library, so naming the same alias again is a
-                // no-op.
-                if !set.always.iter().any(|existing| existing == &alias) {
-                    set.always.push(alias);
-                }
-                Ok(())
-            },
-        )
-        .map_err(Error::lua)?;
-    tools.set("always", always).map_err(Error::lua)?;
-    install_offered(lua, &tools, set)?;
-    install_add_local(lua, &tools, set, local_tools)?;
+    install_tool_objects(lua, &*lock_tools(set).map_err(Error::lua)?)?;
+    install_offer(lua, &tools, set, runtime)?;
+    install_always_offer(lua, &tools, set)?;
+    install_tool_lists(lua, &tools, set)?;
+    install_offer_local(lua, &tools, local_tools)?;
     install_allow_tasks(lua, &tools, runtime)?;
 
     globals.raw_set("tools", tools).map_err(Error::lua)
 }
 
-/// Installs `tools.offered()`: a fresh list of plain records
-/// `{ id, name, plugin, description }`, one per offered binding, in the
-/// offering's tool id order.
-fn install_offered(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> Result<()> {
-    let offering = Arc::clone(set);
-    let offered = lua
-        .create_function(move |lua, ()| {
-            let set = lock_tools(&offering)?;
-            let records = lua.create_table()?;
-            for binding in set.offered() {
-                let record = lua.create_table()?;
-                record.raw_set("id", binding.id().to_string())?;
-                record.raw_set("name", binding.alias())?;
-                record.raw_set("plugin", binding.id().plugin().to_string())?;
-                record.raw_set("description", binding.description())?;
-                records.raw_push(record)?;
-            }
-            Ok(records)
-        })
-        .map_err(Error::lua)?;
-    tools.set("offered", offered).map_err(Error::lua)
-}
-
-/// Installs `tools.add_local(alias, description, params, handler)` over a
-/// fresh handler table: the alias and schema register on `local_tools`
-/// for membership and advertising, and the handler is written under the
-/// alias for the scheduler's `Local` answer to read back.
-fn install_add_local(
+/// Installs `tools.offer(tool, override?)` and its array form: each tool
+/// enters the section's scope once, under its wire name, in first-offer
+/// order, with any override recorded for the section. A tool already
+/// offered prompt-wide keeps its prompt-wide place.
+fn install_offer(
     lua: &Lua,
     tools: &Table,
     set: &Arc<Mutex<ToolSet>>,
-    local_tools: &LocalTools,
+    runtime: &Arc<Mutex<ToolRuntime>>,
 ) -> Result<()> {
+    let frozen = Arc::clone(set);
+    let state = Arc::clone(runtime);
+    let offer = lua
+        .create_function(move |_, args: Variadic<Value>| {
+            let entries = collect_tools_add_entries("tools.offer", args)?;
+            let resolved = resolve_entries("tools.offer", &*lock_tools(&frozen)?, entries)?;
+            let mut state = state
+                .lock()
+                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
+            let set = lock_tools(&frozen)?;
+            for (name, description) in resolved {
+                if let Some(description) = description {
+                    state
+                        .description_overrides
+                        .insert(name.clone(), description);
+                }
+                if set.always.iter().any(|existing| existing == &name) {
+                    continue;
+                }
+                if !state.added.iter().any(|existing| existing == &name) {
+                    state.added.push(name);
+                }
+            }
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    tools.set("offer", offer).map_err(Error::lua)
+}
+
+/// Installs `tools.always_offer(tool, override?)` and its array form: each
+/// tool is offered in every section from here on, its wire name recorded
+/// once in the run's prompt-wide list, with any override set on its
+/// binding for the whole run.
+fn install_always_offer(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> Result<()> {
+    let frozen = Arc::clone(set);
+    let always_offer = lua
+        .create_function(move |_, args: Variadic<Value>| {
+            let entries = collect_tools_add_entries("tools.always_offer", args)?;
+            let mut set = lock_tools(&frozen)?;
+            let resolved = resolve_entries("tools.always_offer", &set, entries)?;
+            for (name, description) in resolved {
+                if let Some(description) = description
+                    && let Some(binding) =
+                        set.offered.iter_mut().find(|binding| binding.alias == name)
+                {
+                    binding.model_description = Some(description);
+                }
+                // Idempotent under the shared-library replay: every section
+                // re-runs the library, so offering the same tool again is a
+                // no-op.
+                if !set.always.iter().any(|existing| existing == &name) {
+                    set.always.push(name);
+                }
+            }
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    tools.set("always_offer", always_offer).map_err(Error::lua)
+}
+
+/// Installs `tools.offer_local(alias, description, params, handler)` over
+/// a fresh handler table: the alias and schema register on `local_tools`
+/// for membership and advertising, and the handler is written under the
+/// alias for the scheduler's `Local` answer to read back. An alias may
+/// equal an offered tool's wire name; the local tool wins in scope.
+fn install_offer_local(lua: &Lua, tools: &Table, local_tools: &LocalTools) -> Result<()> {
     lua.set_named_registry_value(
         LOCAL_HANDLERS_REGISTRY,
         lua.create_table().map_err(Error::lua)?,
     )
     .map_err(Error::lua)?;
-    let declared = Arc::clone(set);
     let local = local_tools.clone();
-    let add_local_fn = lua
+    let offer_local = lua
         .create_function(
             move |lua, (alias, description, params, handler): (String, String, Table, Function)| {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                if lock_tools(&declared)?.binding(&alias).is_some() {
-                    return Err(mlua::Error::external(format!(
-                        "tools.add_local alias {alias:?} duplicates a bound tool slot"
-                    )));
-                }
                 if local.contains(&alias).map_err(mlua::Error::external)? {
                     return Err(mlua::Error::external(format!(
-                        "tools.add_local alias {alias:?} is already registered"
+                        "tools.offer_local alias {alias:?} is already registered"
                     )));
                 }
                 let parameters = add_local_params_schema(&params)?;
@@ -315,7 +313,7 @@ fn install_add_local(
             },
         )
         .map_err(Error::lua)?;
-    tools.set("add_local", add_local_fn).map_err(Error::lua)
+    tools.set("offer_local", offer_local).map_err(Error::lua)
 }
 
 /// Installs `tools.allow_tasks(targets?)`, the author's opt-in for the

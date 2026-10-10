@@ -32,9 +32,9 @@ const NOTE: &str = concat!(
 /// Asks the `writer` role to reply to the note, and shouts the reply.
 const SHOUT: &str = concat!(
     "---\nname: greeter\ndescription: Replies to a note and shouts the reply.\npromptforge: 0\n",
-    "models:\n  writer: {}\ntools:\n  shout: example/text/shout\n---\n\n# Greeter\n\n## Greet\n\n",
+    "models:\n  writer: {}\n---\n\n# Greeter\n\n## Greet\n\n",
     "```lua\nstore.write('note.md', 'hello ' .. args)\nmodels.use('writer')\n",
-    "return tools.call('shout', { text = models.infer(store.read('note.md')) })\n```\n",
+    "return tools.call('example/text/shout', { text = models.infer(store.read('note.md')) })\n```\n",
 );
 
 /// Answers the store from the run's store, the model with `hi there`, and
@@ -165,9 +165,9 @@ fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
         transcript,
         [
             "Infer reply: hi there",
-            "shout (example/text/shout) for the script: HI THERE"
+            "example_text_shout (example/text/shout) for the script: HI THERE"
         ],
-        "a bound tool's result names the tool its alias resolved to"
+        "a tool's result names its wire name and the tool it resolved to"
     );
     Ok(())
 }

@@ -149,15 +149,15 @@ async fn shared_library_calls_engine_globals_at_load_time() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn captured_bindings_reach_section_call_and_fanout_vms() {
+async fn tool_objects_and_roles_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
-    // The bound slots arrive from the frontmatter: the Plugin installs
-    // the tool, the exact slot binds the alias, and the captured alias
-    // globals install in every section VM - H1 never runs a bind.
-    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
-         # Captured Bindings\n\n\
+    // The offering arrives from the catalog: the Plugin installs the tool,
+    // and every section VM reads its tool object by id - H1 never runs a
+    // bind.
+    let source = "---\nname: tool-objects\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
+         # Tool Objects\n\n\
          ```lua shared\n\
-         function binding_names() return echo.name .. ':' .. models.get('writer').name end\n\
+         function binding_names() return tools.get('tools/echo').id .. ':' .. models.get('writer').name end\n\
          ```\n\n\
          ## Parent\n\n\
          ```lua\n\
@@ -176,8 +176,8 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
     // The fixture tools' descriptors go into the catalog and their
-    // implementations into the test driver's tool table; the run's tool
-    // slot fills by id.
+    // implementations into the test driver's tool table; the run offers
+    // every catalog tool.
     let out = super::run(
         &TestPrompt {
             prompt,
@@ -189,11 +189,11 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
         silent(),
     )
     .await
-    .expect("captured bindings must be installed in every section VM");
+    .expect("the offering and the roles reach every section VM");
 
     assert_eq!(
         out,
-        "echo:writer|echo:writer|echo:writer:one,echo:writer:two"
+        "tools/echo:writer|tools/echo:writer|tools/echo:writer:one,tools/echo:writer:two"
     );
 }
 

@@ -126,25 +126,18 @@ fn a_section_vm_reads_back_an_empty_var_after_injection() {
 
 #[test]
 fn section_vm_value_injection_bypasses_shared_global_metatables() {
-    // Engine values inject before the shared replay, and the captured alias
-    // globals raw-set after it, so a metatable the shared library installs on
-    // `_G` intercepts neither.
+    // Engine values inject before the shared replay, so a metatable the
+    // shared library installs on `_G` intercepts none of them, and no tool
+    // ever installs as a global after it.
     let shared = program(
         "captured = {}\n\
              setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })",
     );
     let inspect = program(
-        "return tostring(captured.args) .. ',' .. tostring(captured.search) .. ',' .. args .. ',' .. type(search)",
+        "return tostring(captured.args) .. ',' .. tostring(captured.fixtures_search) .. ',' .. \
+         args .. ',' .. type(fixtures_search) .. ',' .. tools.get('fixtures/search').id",
     );
-    let bindings = ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "search",
-            "search the web",
-            &fixture_tool("search"),
-        )],
-        Vec::new(),
-        Vec::new(),
-    );
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
         &shared_set(bindings),
@@ -160,14 +153,12 @@ fn section_vm_value_injection_bypasses_shared_global_metatables() {
         .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("shared program must run");
-    vm.install_captured_bindings()
-        .expect("captured bindings must install");
 
     assert_eq!(
         run_scalar(&vm, &inspect, &null_emitter(), "Test")
             .expect("inspection must run")
             .as_deref(),
-        Some("nil,nil,private input,userdata")
+        Some("nil,nil,private input,nil,fixtures/search")
     );
 }
 

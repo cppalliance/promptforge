@@ -2,7 +2,7 @@
 //!
 //! A failure that crosses into author code - a shim's own argument error,
 //! a Rust-raised error answered through the `(ok, result)` envelope, a
-//! Engine function's own failure (`tools.add`, `models.get`, a `sys` or `var`
+//! Engine function's own failure (`tools.offer`, `models.get`, a `sys` or `var`
 //! guard) caught by `pcall`, or a shim raise such as
 //! `tool_loop_exhausted` - is one Lua table `{ kind, message, ... }` under
 //! a shared metatable whose `__tostring` returns `message`. A `pcall`

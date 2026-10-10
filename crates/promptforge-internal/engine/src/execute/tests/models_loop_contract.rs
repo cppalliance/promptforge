@@ -87,7 +87,7 @@ async fn a_light_userdata_compactor_is_named_userdata_as_lua_names_it() {
     // which Lua's `type()` calls `userdata`.
     let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
-        "local null = tools.call('structured', {}).none\n\
+        "local null = tools.call('tools/structured', {}).none\n\
          local other = models.get('other')\n\
          local msgs = messages.new()\n\
          msgs:user('hello')\n\

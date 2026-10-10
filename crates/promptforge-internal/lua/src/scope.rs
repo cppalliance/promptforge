@@ -2,9 +2,9 @@
 
 use super::{Arc, BTreeMap, Error, Mutex, Result};
 
-/// Shared per-VM tool-call counts, seeded at 0 for every alias the installer
-/// was given; a script dispatch seeds a missing bound alias on demand through
-/// [`ensure`](Self::ensure).
+/// Shared per-VM tool-call counts, seeded at 0 for every key the installer
+/// was given: a catalog tool's id, or a local tool's alias. A dispatch
+/// seeds a missing key on demand through [`ensure`](Self::ensure).
 ///
 /// The executor increments a count when dispatch is attempted (even if the tool
 /// later errors). Lua reads the snapshot through the `tools.calls` table.
@@ -103,12 +103,14 @@ impl TaskAllowlist {
     }
 }
 
-/// Tracks tools added to one section VM and their description overrides.
+/// Tracks tools one section VM offered and their description overrides.
 #[derive(Debug)]
 pub struct ToolRuntime {
-    /// Prompt-local aliases currently in the section's tool scope.
+    /// The wire names `tools.offer` put in the section's scope, in
+    /// first-offer order.
     pub added: Vec<String>,
-    /// Per-alias author overrides for model-facing schema descriptions.
+    /// The section's author overrides for model-facing schema
+    /// descriptions, keyed by wire name.
     pub description_overrides: BTreeMap<String, String>,
     /// The model's task allowlist, once `tools.allow_tasks` has run in the
     /// section; `None` leaves the task built-ins off the model's tool

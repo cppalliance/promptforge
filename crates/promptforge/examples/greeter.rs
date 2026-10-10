@@ -25,8 +25,6 @@ pub const GREETER: &str = concat!(
     "promptforge: 0\n",
     "models:\n",
     "  writer: {}\n",
-    "tools:\n",
-    "  shout: example/text/shout\n",
     "---\n\n",
     "# Greeter\n\n",
     "## Greet\n\n",
@@ -34,7 +32,7 @@ pub const GREETER: &str = concat!(
     "store.write('note.md', 'hello')\n",
     "models.use('writer')\n",
     "local reply = models.infer(store.read('note.md'))\n",
-    "return tools.call('shout', { text = reply })\n",
+    "return tools.call('example/text/shout', { text = reply })\n",
     "```\n",
 );
 

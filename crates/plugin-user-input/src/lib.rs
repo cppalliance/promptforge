@@ -56,13 +56,10 @@
 //!   so a prompt that passes a question fails loudly instead of losing
 //!   it.
 //! - The model can ask the operator only when the prompt's Lua opts in.
-//!   A prompt binds the ask tool under an alias in its `tools:`
-//!   frontmatter, for example `ask: user-input/ask`, and advertises that
-//!   alias with `tools.add` or `tools.always`. A prompt that does not
-//!   declare the Plugin can instead add the ask tool from
-//!   `tools.offered()`, where it is named `user-input_ask`. Neither
-//!   installing nor declaring the Plugin advertises anything to the
-//!   model.
+//!   A prompt offers the ask tool by its id, with
+//!   `tools.offer("user-input/ask")` or `tools.always_offer`, and the
+//!   model sees it as `user-input_ask`. Neither installing nor declaring
+//!   the Plugin advertises anything to the model.
 //!
 //! ## Invariants
 //!
