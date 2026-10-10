@@ -89,8 +89,9 @@ impl ToolCallOutcome {
     }
 }
 
-/// One `chat` round's outcome, resumed into the program as a plain result
-/// table.
+/// One `chat` round's outcome, resumed into the loop shim as an opaque
+/// value: a userdata with no methods, which the loop's step takes back out
+/// whole, so no Lua code reads its fields.
 ///
 /// When `overflow` is set the request was refused as too large before or
 /// by the provider: no round ran, `overflow_reason` says which of the two
@@ -101,9 +102,7 @@ impl ToolCallOutcome {
 /// `empty_detail` naming the empty product, so the loop shim applies its
 /// exit rules against `finish_reason`. Callers branch on the presence of
 /// `tool_calls` and `reply`, never on `finish_reason` alone - backends
-/// routinely finish tool-call rounds with `stop`. Absent optional fields
-/// are simply never set on the resumed table, so they read back as nil;
-/// `overflow` is always set, as a boolean, and `turn` as an integer.
+/// routinely finish tool-call rounds with `stop`.
 // No `Eq`: `metrics` holds `f64` timings transitively.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
@@ -137,6 +136,8 @@ pub struct ChatResult {
     /// call reports the round that requested it.
     pub turn: u32,
 }
+
+impl mlua::UserData for ChatResult {}
 
 /// One task's delivery to a `join_any` waiter: which member ended and how.
 ///

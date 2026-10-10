@@ -1086,7 +1086,7 @@ Phase 0 migrates every handle-first call and adds tests for the new forms and th
 
 <step-6>
 
-### Step 6: Resume the chat answer as an opaque ChatResult
+### Step 6: Resume the chat answer as an opaque ChatResult [completed]
 
 - Component: Opaque chat answer
 

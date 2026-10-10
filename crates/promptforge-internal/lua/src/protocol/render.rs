@@ -1,12 +1,12 @@
 //! The rendering half of the protocol: an answer becomes the `(ok, result)`
-//! resume envelope and a chat result becomes its plain result table.
+//! resume envelope.
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
 use crate::error_value::{ErrorValue, error_table};
 use crate::tools::local_handler;
 
-use super::answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
+use super::answer::{Answer, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
 
 /// Renders one [`TaskStatus`] as the plain Lua status table. Absent
 /// optional fields are never set, so they resume as nil; `tasks` is always
@@ -44,55 +44,6 @@ fn task_id_sequence(
         sequence.raw_set(position + 1, task.to_string())?;
     }
     Ok(sequence)
-}
-
-/// Renders one [`ChatResult`] as the plain Lua result table.
-///
-/// `overflow` is always set as a boolean, so the loop shim branches on it
-/// with a plain truth test; `overflow_reason` sits beside it as the
-/// compactor's tag when the request was refused. Absent optional fields
-/// are never set, so they resume as nil and `result.tool_calls` and
-/// `result.reply` presence-branching works; mapping them through the
-/// serde boundary would resume mlua's non-nil null sentinel instead. An
-/// empty `reply` string is dropped here as well, so an empty reply resumes
-/// as nil whether the producer left the field absent (its documented
-/// shape) or handed over `Some("")`: the shim's exit rules read presence,
-/// never length, and `empty_detail` supplies the message they raise. Each
-/// call's `arguments` and the `metrics` sections cross the serde boundary
-/// as tables (the metrics types skip absent sections in serialization, so
-/// no null enters them).
-fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table> {
-    let table = lua.create_table()?;
-    table.raw_set("overflow", result.overflow)?;
-    if let Some(reason) = result.overflow_reason {
-        table.raw_set("overflow_reason", reason.tag())?;
-    }
-    if let Some(reply) = result.reply.filter(|reply| !reply.is_empty()) {
-        table.raw_set("reply", reply)?;
-    }
-    if let Some(detail) = result.empty_detail {
-        table.raw_set("empty_detail", detail)?;
-    }
-    if let Some(calls) = result.tool_calls {
-        let sequence = lua.create_table_with_capacity(calls.len(), 0)?;
-        for (position, call) in calls.into_iter().enumerate() {
-            let entry = lua.create_table()?;
-            entry.raw_set("id", call.id)?;
-            entry.raw_set("name", call.name)?;
-            entry.raw_set("arguments", lua.to_value(&call.arguments)?)?;
-            sequence.raw_set(position + 1, entry)?;
-        }
-        table.raw_set("tool_calls", sequence)?;
-    }
-    if let Some(finish_reason) = result.finish_reason {
-        table.raw_set("finish_reason", finish_reason)?;
-    }
-    table.raw_set("model", result.model)?;
-    if let Some(metrics) = result.metrics {
-        table.raw_set("metrics", lua.to_value(&metrics)?)?;
-    }
-    table.raw_set("turn", result.turn)?;
-    Ok(table)
 }
 
 /// Renders a store op's return value: nil for the mutating ops, the text
@@ -182,7 +133,9 @@ impl<E: ErrorValue> Answer<E> {
                 Value::Function(local_handler(lua, &alias)?),
                 lua.to_value(&args)?,
             ],
-            Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
+            // Opaque to Lua: only the loop's step reads it, by taking it
+            // back out whole.
+            Answer::Chat(Ok(result)) => vec![Value::UserData(lua.create_userdata(*result)?)],
             Answer::Store(Ok(outcome)) => vec![store_value(lua, outcome)?],
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
