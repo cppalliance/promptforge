@@ -263,7 +263,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Remove the unread ChatResult fields, fix stale docs, and run exit checks
+### Step 2: Remove the unread ChatResult fields, fix stale docs, and run exit checks [completed]
 
 - Component: none
 - Covers: D1-1 with C-2, C-3, D1-15, and D1-2, then the plan's exit checks. Changes no behavior and touches no file Step 1 edits. Frontmatter todos: `d1-1-chatresult-fields`, `d1-2-messages-doc`, and `exit-checks`.

@@ -9,7 +9,7 @@
 //! on success, the error for a rejected return.
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge_types::metrics::ToolCallEvent;
 
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};
@@ -98,38 +98,37 @@ impl ToolCallOutcome {
 /// refused it, and every other field is absent or empty. Otherwise the
 /// round completed and at most one of `reply` and `tool_calls` is present:
 /// the round produced text or requested tools, never both. An empty reply
-/// is a completed round with `reply` absent (never an empty string) and
-/// `empty_detail` naming the empty product, so the loop shim applies its
-/// exit rules against `finish_reason`. Callers branch on the presence of
-/// `tool_calls` and `reply`, never on `finish_reason` alone - backends
-/// routinely finish tool-call rounds with `stop`.
-// No `Eq`: `metrics` holds `f64` timings transitively.
+/// is a completed round with no reply text (see `reply`) and, when the
+/// client named one, `empty_detail` naming the empty product, so the loop's
+/// state machine (`models_loop`) applies its exit rules against
+/// `finish_reason`. Callers branch on the presence of `tool_calls` and
+/// `reply`, never on `finish_reason` alone - backends routinely finish
+/// tool-call rounds with `stop`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
     /// Whether the request was refused as too large before or by the
-    /// provider. No round ran; the loop shim invokes the compactor.
+    /// provider. No round ran; the loop's state machine (`models_loop`)
+    /// calls the compactor.
     pub overflow: bool,
     /// Which gate refused the request when `overflow` is set: the
-    /// pre-dispatch precheck or the provider. The loop shim hands its tag
-    /// to the compactor.
+    /// pre-dispatch precheck or the provider. The loop's state machine
+    /// (`models_loop`) hands its tag to the compactor.
     pub overflow_reason: Option<OverflowReason>,
-    /// The completed reply text, when the round produced non-empty text.
+    /// The completed reply text. An empty reply usually arrives as `None`,
+    /// but a completion the caller builds can deliver an empty string; the
+    /// loop reads both as no reply.
     pub reply: Option<String>,
     /// The client's fixed phrase naming the empty product, when the round
-    /// completed with neither text nor tool calls. The loop shim raises it
-    /// as the `empty_model_reply` message when its exit rules reject the
-    /// round, so the author sees the text the client would have produced.
+    /// completed with neither text nor tool calls. The loop's state machine
+    /// (`models_loop`) raises it as the `empty_model_reply` message when its
+    /// exit rules reject the round, so the author sees the text the client
+    /// would have produced.
     pub empty_detail: Option<String>,
     /// The tool calls the model requested, unexecuted, when it requested
     /// any.
     pub tool_calls: Option<Vec<ToolCallEvent>>,
     /// The provider's finish reason, when it sent one.
     pub finish_reason: Option<String>,
-    /// The model that served the round, as the response body named it
-    /// (empty when the body named none).
-    pub model: String,
-    /// Everything measured about the round.
-    pub metrics: Option<CallMetrics>,
     /// The turn the round was reported under: the advanced counter for a
     /// served or empty round, the unchanged counter when no round ran.
     /// The loop shim passes it back with each requested tool call, so the
@@ -236,7 +235,7 @@ pub enum Answer<E> {
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
     Cancel(std::result::Result<(), E>),
-    /// The classified output for a `chat` request. Boxed so the metrics-heavy
+    /// The classified output for a `chat` request. Boxed so the field-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
     /// The classified output for a `tools.call` request.

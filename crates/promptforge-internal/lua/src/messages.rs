@@ -11,8 +11,12 @@
 //! with, as the sandbox `pairs` does for a table, while `ipairs` reads the
 //! live list.
 //!
-//! A model round's request holds a clone of the same list, so the round
-//! reads the records the author built with no second validation.
+//! Author edits validate the records they add. Records the Engine adds by
+//! calling [`MessageList::push`] itself - the loop's state machine and the
+//! chat dispatch's notices - are valid by construction and skip that
+//! validation; `push` checks only the leading-system rule. A model round's
+//! request holds a clone of the same list, so the round reads every record
+//! with no second validation.
 
 use std::fmt::Display;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
