@@ -26,7 +26,7 @@ use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::parser::Prompt;
 
 /// A run over one section whose Lua is `body`, with the `writer` role
-/// bound to `test-model` and the `echo` slot to `tools/echo`.
+/// bound to `test-model` and `tools/echo` in the catalog.
 fn bound_run(body: &str) -> Run {
     bound_sections(&format!(
         "## Only\n\n```lua\nmodels.use('writer')\n{body}\n```\n"
@@ -34,11 +34,11 @@ fn bound_run(body: &str) -> Run {
 }
 
 /// A run over `sections`, the prompt's H2 sections, with the `writer` role
-/// bound to `test-model` and the `echo` slot to `tools/echo`.
+/// bound to `test-model` and `tools/echo` in the catalog.
 fn bound_sections(sections: &str) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {{}}\n\
-         tools:\n  echo: tools/echo\n---\n\n# Run\n\n{sections}"
+         ---\n\n# Run\n\n{sections}"
     );
     let prompt = Prompt::parse(&source, "run-test")
         .0
@@ -60,7 +60,7 @@ fn bound_sections(sections: &str) -> Run {
         .prepare(&prompt, run_context().model(model));
     assert!(
         requirements.refusal().is_none(),
-        "the model and the tool fill the prompt's slots: {requirements:?}"
+        "the model fills the prompt's role: {requirements:?}"
     );
     Run::new(Arc::new(prompt), "", ctx)
 }
@@ -79,7 +79,7 @@ fn drop_next(run: &mut Run) -> (EffectRecord, AnswerRecord) {
 fn a_dropped_chat_or_tool_call_resumes_a_pcall_with_the_cancelled_error_and_the_run_continues() {
     let mut run = bound_run(
         "local chat_ok, chat_err = pcall(models.infer, 'dropped')\n\
-         local tool_ok, tool_err = pcall(tools.call, 'echo', { value = 'dropped' })\n\
+         local tool_ok, tool_err = pcall(tools.call, 'tools/echo', { value = 'dropped' })\n\
          local kept = models.infer('kept')\n\
          return tostring(chat_ok) .. ':' .. chat_err.kind .. '|' \
          .. tostring(tool_ok) .. ':' .. tool_err.kind .. '|' .. kept",
@@ -96,7 +96,7 @@ fn a_dropped_chat_or_tool_call_resumes_a_pcall_with_the_cancelled_error_and_the_
     assert!(
         matches!(
             &tool,
-            (EffectRecord::ToolCall { alias, .. }, AnswerRecord::Dropped) if alias == "echo"
+            (EffectRecord::ToolCall { alias, .. }, AnswerRecord::Dropped) if alias == "tools_echo"
         ),
         "the record holds the call and its dropped answer: {tool:?}"
     );
@@ -207,7 +207,7 @@ fn an_uncaught_dropped_chat_or_tool_call_ends_the_run_cancelled() {
     for body in [
         "return models.infer('dropped')",
         "local msgs = messages.new()\nmsgs:user('dropped')\nreturn models.loop(msgs)",
-        "return tools.call('echo', { value = 'dropped' })",
+        "return tools.call('tools/echo', { value = 'dropped' })",
     ] {
         let mut run = bound_run(body);
         let _ = drop_next(&mut run);

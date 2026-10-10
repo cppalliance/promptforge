@@ -104,7 +104,7 @@ impl ToolDispatch {
 /// # Errors
 /// Returns [`Error::Tool`] when `call_result` is the tool's failure (its
 /// typed error retained as the cause), or the counts' own error when
-/// `binding`'s alias was never seeded.
+/// `binding`'s id was never seeded.
 pub fn prepare_dispatch(
     binding: &ToolBinding,
     call_result: std::result::Result<ToolOutput, ToolError>,
@@ -115,7 +115,7 @@ pub fn prepare_dispatch(
     script: Option<ScriptReport>,
 ) -> Result<ToolDispatch> {
     if let Some(counts) = counts {
-        counts.increment(binding.alias())?;
+        counts.increment(&binding.id().to_string())?;
     }
     emitter.report(
         section,

@@ -67,10 +67,9 @@ fn prelude(plugin: &str, source: &str) -> Prelude {
     Prelude::new(PluginId::parse(plugin).expect("a valid Plugin id"), source)
 }
 
-/// Installs `preludes` with no frontmatter aliases and returns the
-/// failure's message.
+/// Installs `preludes` and returns the failure's message.
 fn install_failure(vm: &SectionVm, preludes: &[Prelude]) -> String {
-    install_preludes(vm.lua(), preludes, &[])
+    install_preludes(vm.lua(), preludes)
         .expect_err("the install must fail")
         .to_string()
 }
@@ -114,7 +113,6 @@ fn a_table_global_is_sealed_at_its_top_level() {
             "kit",
             "kit = {}\nfunction kit.greet(name) return 'hi ' .. name end",
         )],
-        &[],
     )
     .expect("the prelude installs");
 
@@ -146,7 +144,7 @@ fn a_table_global_is_sealed_at_its_top_level() {
 #[test]
 fn a_sealed_global_raises_the_whole_refusal_for_a_string_or_integer_key() {
     let vm = section_vm();
-    install_preludes(vm.lua(), &[prelude("kit", "kit = {}")], &[]).expect("the prelude installs");
+    install_preludes(vm.lua(), &[prelude("kit", "kit = {}")]).expect("the prelude installs");
     for (target, refusal) in [
         (
             "kit.extra",
@@ -174,7 +172,6 @@ fn a_non_table_global_installs_as_it_is() {
             "kit",
             "answer = 42\nlabel = 'kit'\nfunction shout(text) return string.upper(text) end",
         )],
-        &[],
     )
     .expect("the prelude installs");
 
@@ -195,7 +192,6 @@ fn a_prelude_receives_its_plugins_name_as_its_chunk_argument() {
             prelude("kit", "local plugin = ...\nkit_name = plugin"),
             prelude("other-kit", "other_name = ..."),
         ],
-        &[],
     )
     .expect("the preludes install");
     let (kit, other): (String, String) = eval(&vm, "return kit_name, other_name");
@@ -216,7 +212,6 @@ fn a_prelude_that_assigns_no_global_installs_nothing() {
             "quiet",
             "local helper = 1\nlocal function unused() return helper end",
         )],
-        &[],
     )
     .expect("the prelude installs");
     assert_eq!(global_names(&vm), before);
@@ -311,7 +306,6 @@ fn a_prelude_sets_and_reads_metatables_as_the_base_functions_do() {
                return getmetatable(t), ok, tostring(err)\n\
              end",
         )],
-        &[],
     )
     .expect("the prelude installs");
     let (field, shaped): (String, bool) =
@@ -321,20 +315,6 @@ fn a_prelude_sets_and_reads_metatables_as_the_base_functions_do() {
     assert_eq!(label, "locked");
     assert!(!ok, "a protected metatable refuses replacement");
     assert_eq!(message, "cannot change a protected metatable");
-}
-
-#[test]
-fn a_global_that_collides_with_a_frontmatter_alias_fails_naming_the_alias() {
-    let vm = section_vm();
-    let message = install_preludes(vm.lua(), &[prelude("kit", "search = {}")], &["search"])
-        .expect_err("the alias collision must fail")
-        .to_string();
-    assert!(
-        message.contains("Plugin `kit`")
-            && message.contains("`search`")
-            && message.contains("frontmatter"),
-        "the collision names the Plugin, the global, and the alias: {message}"
-    );
 }
 
 #[test]

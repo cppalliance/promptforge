@@ -9,15 +9,15 @@ use std::sync::Arc;
 
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::prompt::{ModelKeyword, ToolSlot};
+use promptforge::prompt::ModelKeyword;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::perform_vfs_op;
 use promptforge::{
     Environment, ParseErrorKind, Prompt, RequirementCheck, Run, RunContext, RunResult, Step,
 };
 
-/// Declares two files, one Plugin, one tool slot, `times` then `name`,
-/// and one model role.
+/// Declares two files, one Plugin, `times` then `name`, and one model
+/// role.
 const CONTRACT: &str = concat!(
     "---\n",
     "name: greeter\n",
@@ -26,7 +26,6 @@ const CONTRACT: &str = concat!(
     "input: { path: names.md, description: The names to greet }\n",
     "output: { path: note.md, description: The note the greeter leaves }\n",
     "plugins: [text]\n",
-    "tools: { shout: text/shout }\n",
     "args:\n",
     "  times: { type: integer, optional: true, default: 1 }\n",
     "  name: { type: string }\n",
@@ -89,15 +88,6 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name()
         .map(ToString::to_string)
         .collect();
     assert_eq!(plugins, ["text"]);
-    let slots: Vec<_> = frontmatter
-        .tools()
-        .iter()
-        .filter_map(|(alias, slot)| match slot {
-            ToolSlot::Exact(id) => Some((alias.to_string(), id.to_string())),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(slots, [("shout".to_owned(), "text/shout".to_owned())]);
     let roles: Vec<_> = frontmatter
         .models()
         .iter()

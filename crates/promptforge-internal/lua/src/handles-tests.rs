@@ -1,10 +1,11 @@
 //! Tests for the tool binding built from a catalog descriptor: the
 //! descriptor's data is copied verbatim and its structured-output flag
-//! selects the binding's output kind. The tool set keeps its offering
-//! apart from the frontmatter's slots.
+//! selects the binding's output kind. The tool set finds an offered
+//! binding by wire name or by canonical id.
 
 use std::sync::Mutex;
 
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
@@ -51,33 +52,34 @@ fn the_test_seam_overrides_only_the_description() {
 }
 
 #[test]
-fn an_offered_binding_is_found_by_its_name_and_never_as_a_declared_slot() {
-    let declared = ToolBinding::from_descriptor("fetch", &descriptor(false));
+fn an_offered_binding_is_found_by_its_wire_name_or_its_id_as_one_binding() {
     let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
-    let set = ToolSet::from_parts(vec![declared.clone()], Vec::new(), vec![offered.clone()]);
+    let set = ToolSet::from_parts(Vec::new(), Vec::new(), vec![offered.clone()]);
     assert_eq!(set.offered(), std::slice::from_ref(&offered));
     assert_eq!(set.offered_binding("tools_fetch"), Some(&offered));
     assert_eq!(
-        set.binding("tools_fetch"),
-        None,
-        "binding sees the frontmatter's slots alone"
+        set.offered_binding("tools/fetch"),
+        Some(&offered),
+        "the canonical id finds the binding the wire name finds"
     );
-    assert_eq!(
-        set.offered_binding("fetch"),
-        None,
-        "a declared slot is not part of the offering"
-    );
-    assert_eq!(set.binding("fetch"), Some(&declared));
+    for miss in ["fetch", "tools/missing", "tools_missing", "Tools/Fetch"] {
+        assert_eq!(set.offered_binding(miss), None, "{miss:?} names no binding");
+    }
 }
 
 #[test]
-fn the_view_snapshots_the_offering() {
+fn the_view_snapshots_the_declared_plugins_and_the_offering() {
     let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
+    let declared = vec![PluginId::parse("tools").expect("valid Plugin")];
     let set = Mutex::new(ToolSet::for_test(
-        Vec::new(),
+        declared.clone(),
         Vec::new(),
         vec![offered.clone()],
     ));
+    assert_eq!(
+        ToolView::declared(&set).expect("the lock is healthy"),
+        declared
+    );
     assert_eq!(
         ToolView::offered(&set).expect("the lock is healthy"),
         vec![offered]

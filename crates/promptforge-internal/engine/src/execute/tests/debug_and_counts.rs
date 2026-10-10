@@ -171,14 +171,14 @@ async fn debug_capture_none_changes_nothing() {
 #[tokio::test]
 async fn tool_calls_count_increments_on_successful_dispatch() {
     let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        tools.call('echo', { value = 'x' })\n\
-        assert(tools.calls['echo'] == 1, \
-        'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
+        tools.call('tools/echo', { value = 'x' })\n\
+        assert(tools.calls['tools/echo'] == 1, \
+        'expected 1 call, got ' .. tostring(tools.calls['tools/echo']))\n\
         return 'ok'\n\
         ```\n";
     let prompt = bound_with_tools(md);
@@ -212,7 +212,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
         "local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
          models.loop(msgs)\n\
-         return msgs[#msgs].content .. '|' .. tostring(tools.calls.echo)",
+         return msgs[#msgs].content .. '|' .. tostring(tools.calls['tools/failing'])",
     );
     let prompt = parse(&md);
     let (ctx, fixture) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
@@ -226,19 +226,58 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_model_call_and_a_script_call_count_under_the_id_and_a_local_tool_under_its_alias() {
+    use super::models_loop::{echo_tools, loop_context, loop_prompt};
+    use crate::test_support::tokio_driver::TokioDriver;
+
+    let gateway = ScriptedChat::new(vec![
+        ScriptedReply::ToolCalls {
+            model: MOCK_MODEL.to_owned(),
+            calls: vec![
+                scripted_call("call_1", "echo", r#"{"value":"model"}"#),
+                scripted_call("call_2", "grab", r#"{"value":"local"}"#),
+            ],
+        },
+        resp_text("final answer"),
+    ]);
+    let md = loop_prompt(
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
+           function(args) return 'got ' .. args.value end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('ask the model')\n\
+         models.loop(msgs)\n\
+         tools.call('tools/echo', { value = 'script' })\n\
+         local ok = pcall(function() return tools.calls.echo end)\n\
+         return tostring(tools.calls['tools/echo']) .. '|' .. tostring(tools.calls.grab) \
+           .. '|' .. tostring(ok)",
+    );
+    let prompt = parse(&md);
+    let (ctx, fixture) = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
+        .drive()
+        .await
+        .expect("the loop and the script call complete");
+    assert_eq!(
+        out, "2|1|false",
+        "the model's wire-name call and the script's id call count once each under \
+         the id, the local tool under its alias, and the wire name is no key"
+    );
+}
+
 #[tokio::test]
 async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     // The first script dispatch installs the counts seeded from the
-    // effective scope, so an added but uncalled alias reads as 0 and an
+    // effective scope, so an offered but uncalled tool reads as 0 and an
     // author assert on it fails the run with its own message.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  search: tools/search\n  other: tools/other\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
-        tools.add('search')\n\
-        local _ = tools.call('other', { value = 'x' })\n\
+        tools.offer('tools/search')\n\
+        local _ = tools.call('tools/other', { value = 'x' })\n\
         ```\n\n\
-        ```lua\nassert(tools.calls['search'] > 0, 'search was never called')\n\
+        ```lua\nassert(tools.calls['tools/search'] > 0, 'search was never called')\n\
         return 'unreached'\n```\n";
     let search = ScopedFixtureTool::new("search", "Search for things.");
     let other = ScopedFixtureTool::new("other", "Other things.");
@@ -263,14 +302,14 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  search: tools/search\nmodels:\n  writer: {}\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
-        tools.add('search')\n\
-        local _ = tools.call('search', { value = 'x' })\n\
+        tools.offer('tools/search')\n\
+        local _ = tools.call('tools/search', { value = 'x' })\n\
         ```\n\n\
-        ```lua\nlocal _ = tools.calls['serach']\n\
+        ```lua\nlocal _ = tools.calls['tools/serach']\n\
         return 'unreached'\n```\n";
     let tool = ScopedFixtureTool::new("search", "Search for things.");
     let prompt = bound_with_tools(md);
@@ -282,15 +321,16 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
         silent(),
     )
     .await
-    .expect_err("accessing a typo alias in tools.calls must hard error");
+    .expect_err("accessing a typo id in tools.calls must hard error");
     let msg = error.to_string();
     assert!(
-        msg.contains("serach") && msg.contains("has no seeded count"),
+        msg.contains("tools/serach") && msg.contains("has no seeded count"),
         "error must name the bad key and state it was never seeded: {msg}"
     );
     assert!(
-        msg.contains("search"),
-        "error must list the seeded aliases: {msg}"
+        msg.contains("seeded names: [\"tools/search\"]")
+            && msg.contains(" - check for typos or offer it with tools.offer"),
+        "error must list the seeded ids and the remedy: {msg}"
     );
 }
 

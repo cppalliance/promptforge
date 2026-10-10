@@ -31,85 +31,109 @@ struct Foreign;
 impl mlua::UserData for Foreign {}
 
 fn echo_handle() -> LuaToolHandle {
-    LuaToolHandle::from_binding(
-        "echo",
-        "echo tool",
-        &ToolId::parse("tools/echo").expect("id"),
-    )
+    LuaToolHandle::from_binding(&ToolBinding::from_descriptor("tools_echo", &echo_tool()))
 }
 
 #[test]
-fn tool_alias_accepts_a_bare_alias_string() {
+fn tool_alias_accepts_a_bare_string() {
     let lua = Lua::new();
-    let value = lua.create_string("echo").expect("string");
+    let value = lua.create_string("tools/echo").expect("string");
     assert_eq!(
         tool_alias(&Value::String(value)).expect("a string decodes"),
-        "echo"
+        "tools/echo"
     );
 }
 
 #[test]
-fn tool_alias_reads_the_alias_off_a_tool_object() {
+fn tool_alias_reads_the_id_off_a_tool_object() {
     let lua = Lua::new();
     let userdata = lua.create_userdata(echo_handle()).expect("userdata");
     assert_eq!(
-        tool_alias(&Value::UserData(userdata)).expect("a Tool object decodes"),
-        "echo",
-        "a Tool object contributes the alias it was bound under"
+        tool_alias(&Value::UserData(userdata)).expect("a tool object decodes"),
+        "tools/echo",
+        "a tool object stands for its canonical id, not its wire name"
     );
 }
 
 #[test]
-fn tool_alias_rejects_other_types_and_other_userdata() {
+fn tool_alias_rejects_tables_other_types_and_other_userdata() {
     let lua = Lua::new();
-    let number = tool_alias(&Value::Integer(42)).expect_err("a number is not an alias");
+    let number = tool_alias(&Value::Integer(42)).expect_err("a number is not a tool");
     assert!(
-        number.to_string().contains(
-            "tools.call alias must be a string, Tool object, or tool record, got integer"
-        ),
+        number
+            .to_string()
+            .contains("tools.call takes a tool id, a local alias, or a tool object, got integer"),
         "the rejection names the accepted forms: {number}"
     );
-    // A userdata that is not a Tool object takes the same rejection; the
+    let record = lua
+        .load("{ id = 'tools/echo', name = 'tools_echo' }")
+        .eval::<mlua::Table>()
+        .expect("the record evaluates");
+    let table = tool_alias(&Value::Table(record)).expect_err("a record is not a tool");
+    assert!(
+        table.to_string().contains("got table"),
+        "a plain record no longer stands for a tool: {table}"
+    );
+    // A userdata that is not a tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.
     let foreign = lua.create_userdata(Foreign).expect("userdata");
-    let other = tool_alias(&Value::UserData(foreign)).expect_err("not a Tool object");
+    let other = tool_alias(&Value::UserData(foreign)).expect_err("not a tool object");
     assert!(
-        other.to_string().contains(
-            "tools.call alias must be a string, Tool object, or tool record, got userdata"
-        ),
+        other
+            .to_string()
+            .contains("tools.call takes a tool id, a local alias, or a tool object, got userdata"),
         "a foreign userdata gets the same rejection: {other}"
     );
 }
 
 #[test]
-fn tools_add_entries_accept_strings_tools_and_arrays() {
+fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
     let lua = Lua::new();
     let tool = lua.create_userdata(echo_handle()).expect("userdata");
-    let entries = collect_tools_add_entries(Variadic::from_iter([
-        Value::String(lua.create_string("search").expect("string")),
-        Value::String(lua.create_string("an override").expect("string")),
-    ]))
-    .expect("alias plus override decodes");
+    let entries = collect_tools_add_entries(
+        "tools.offer",
+        Variadic::from_iter([
+            Value::String(lua.create_string("web/search").expect("string")),
+            Value::String(lua.create_string("an override").expect("string")),
+        ]),
+    )
+    .expect("an id plus override decodes");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].alias, "search");
+    assert_eq!(entries[0].alias, "web/search");
+    assert_eq!(
+        entries[0].description_override.as_deref(),
+        Some("an override")
+    );
+    let entries = collect_tools_add_entries(
+        "tools.offer",
+        Variadic::from_iter([
+            Value::UserData(tool.clone()),
+            Value::String(lua.create_string("an override").expect("string")),
+        ]),
+    )
+    .expect("a tool object plus override decodes");
+    assert_eq!(entries[0].alias, "tools/echo");
     assert_eq!(
         entries[0].description_override.as_deref(),
         Some("an override")
     );
 
     let array = lua
-        .create_sequence_from(vec![Value::UserData(tool.clone())])
+        .create_sequence_from(vec![Value::UserData(tool)])
         .expect("array");
     array
-        .raw_push(Value::String(lua.create_string("fetch").expect("string")))
+        .raw_push(Value::String(
+            lua.create_string("web/fetch").expect("string"),
+        ))
         .expect("push");
-    let entries = collect_tools_add_entries(Variadic::from_iter([Value::Table(array)]))
-        .expect("the array form decodes");
-    let aliases: Vec<&str> = entries.iter().map(|entry| entry.alias.as_str()).collect();
+    let entries =
+        collect_tools_add_entries("tools.offer", Variadic::from_iter([Value::Table(array)]))
+            .expect("the array form decodes");
+    let names: Vec<&str> = entries.iter().map(|entry| entry.alias.as_str()).collect();
     assert_eq!(
-        aliases,
-        vec!["echo", "fetch"],
-        "Tool objects and strings mix in the array form"
+        names,
+        vec!["tools/echo", "web/fetch"],
+        "tool objects and ids mix in the array form"
     );
 }
 
@@ -263,9 +287,9 @@ fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
 fn the_tools_namespace_exposes_scoping_without_bind_or_call() {
     // `call` is absent here on purpose: it suspends, so the coroutine shim
     // prelude installs it - this table exposes exactly the non-suspending
-    // operations. `bind` is absent too: binding is the frontmatter's.
+    // operations. `bind` is absent too.
     let lua = lua_with_tools();
-    let (has_add, has_add_local, has_always, call_is_nil, bind_is_nil): (
+    let (has_offer, has_offer_local, has_always_offer, call_is_nil, bind_is_nil): (
         bool,
         bool,
         bool,
@@ -273,15 +297,15 @@ fn the_tools_namespace_exposes_scoping_without_bind_or_call() {
         bool,
     ) = lua
         .load(
-            "return type(tools.add) == 'function', \
-                    type(tools.add_local) == 'function', \
-                    type(tools.always) == 'function', \
+            "return type(tools.offer) == 'function', \
+                    type(tools.offer_local) == 'function', \
+                    type(tools.always_offer) == 'function', \
                     tools.call == nil, \
                     tools.bind == nil",
         )
         .eval()
         .expect("the namespace probe evaluates");
-    assert!(has_add && has_add_local && has_always && call_is_nil && bind_is_nil);
+    assert!(has_offer && has_offer_local && has_always_offer && call_is_nil && bind_is_nil);
 }
 
 #[test]
@@ -305,29 +329,51 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
 }
 
 #[test]
-fn tool_call_counts_seed_read_and_reject_unknown_keys() {
+fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
     let lua = lua_with_tools();
     let bound = ToolSet::for_test(
-        vec![ToolBinding::for_test("echo", "echo tool", &echo_tool())],
         Vec::new(),
         Vec::new(),
+        vec![
+            ToolBinding::from_descriptor("tools_echo", &echo_tool()),
+            ToolBinding::from_descriptor("tools_other", &tool_at("tools/other")),
+        ],
     );
     let counts =
-        install_tool_call_counts(&lua, &bound, bound.bindings()).expect("the counts install");
-    assert_eq!(counts.get("echo").expect("read"), Some(0));
-    let error = lua
-        .load(
-            "local ok, err = pcall(function() return tools.calls.ghost end); return tostring(err)",
-        )
-        .eval::<String>()
-        .expect("the unknown-key read raises");
-    assert!(
-        error.contains("\"ghost\" has no seeded count"),
-        "an unseeded key names itself and the seeded set: {error}"
+        install_tool_call_counts(&lua, &bound, &bound.offered()[..1]).expect("the counts install");
+    assert_eq!(counts.get("tools/echo").expect("read"), Some(0));
+    assert_eq!(
+        counts.get("tools_echo").expect("read"),
+        None,
+        "counts key a catalog tool by its id, never its wire name"
     );
+    let read = |key: &str| -> String {
+        lua.load(format!(
+            "local ok, err = pcall(function() return tools.calls[{key:?}] end); return tostring(err)"
+        ))
+        .eval::<String>()
+        .expect("the unseeded read raises")
+    };
+    let offered = read("tools/other");
+    assert!(
+        offered.contains(
+            "tools.calls: \"tools/other\" has no seeded count; seeded names: [\"tools/echo\"] \
+             (a catalog tool that was neither offered in this section nor called with \
+             tools.call)"
+        ),
+        "an offered id that was never seeded says so: {offered}"
+    );
+    for key in ["ghost", "tools_echo"] {
+        let error = read(key);
+        assert!(
+            error.contains(&format!("tools.calls: {key:?} has no seeded count"))
+                && error.contains(" - check for typos or offer it with tools.offer"),
+            "an unknown key names itself and the remedy: {error}"
+        );
+    }
 }
 
-/// A trivial tool as data, so the counts test can bind an alias.
+/// A trivial tool as data, so the counts test can bind an id.
 fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
     tool_at("tools/echo")
 }

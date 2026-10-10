@@ -1,5 +1,5 @@
-//! Tests for the `plugins` and `tools` keys: Plugin names, and tool slot
-//! paths and aliases.
+//! Tests for the `plugins` key and the retired `tools` key: Plugin names,
+//! and the refusal of a leftover tool slot map.
 
 use super::*;
 
@@ -67,63 +67,24 @@ fn the_map_form_of_a_plugin_entry_is_refused_naming_the_plain_name_form() {
 }
 
 #[test]
-fn a_map_valued_tool_slot_is_rejected_naming_the_exact_path_expectation() {
-    // Exact paths are the only slot form, so a map-valued slot fails to
-    // parse.
-    let error = parse(concat!(
-        "name: x\ndescription: d\n",
-        "tools:\n",
-        "  wiki:\n",
-        "    want: searches private wikis\n",
-        "    optional: true\n",
-    ))
-    .expect_err("a map-valued tool slot must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
-    assert!(
-        error.to_string().contains("an exact tool path string"),
-        "the error must name the exact-path expectation: {error}"
-    );
-}
-
-#[test]
-fn a_malformed_exact_tool_path_is_a_parse_error() {
-    for path in ["web", "Web/fetch", "web/", "web//fetch"] {
-        let yaml = format!("name: x\ndescription: d\ntools:\n  search: {path}\n");
-        let error = parse(&yaml).expect_err("a malformed exact path must be rejected");
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{path}: {error}");
-    }
-}
-
-#[test]
-fn the_reserved_open_tool_slot_key_is_rejected() {
-    // `open` is reserved even though it satisfies the alias grammar.
-    let error = parse("name: x\ndescription: d\ntools:\n  open: true\n")
-        .expect_err("the reserved `open` key must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-    assert!(
-        error.to_string().contains("reserved"),
-        "the error must name the reservation: {error}"
-    );
-}
-
-#[test]
-fn tool_slot_aliases_must_match_the_alias_grammar() {
-    for alias in ["1search", "has space", "has/slash", "has.dot"] {
-        let yaml = format!("name: x\ndescription: d\ntools:\n  '{alias}': web/search\n");
-        let error = parse(&yaml).expect_err("a bad alias must be rejected");
+fn a_leftover_tools_key_is_refused_at_parse() {
+    // Tools are named by canonical id from Lua, so a slot map is an
+    // unknown frontmatter key, whatever its entries hold.
+    for entries in ["  search: web/search\n", "  open: true\n", "  {}\n"] {
+        let error = parse(&format!(
+            "name: x\ndescription: d\nplugins:\n  - web\ntools:\n{entries}"
+        ))
+        .expect_err("a leftover `tools:` key must be refused");
         assert_eq!(
             error.kind(),
             ParseErrorKind::Frontmatter,
-            "{alias}: {error}"
+            "{entries}: {error}"
+        );
+        assert!(
+            error.to_string().contains("unknown field `tools`"),
+            "the refusal names the key: {error}"
         );
     }
-    // The length boundary: 64 characters pass, 65 fail.
-    let longest_ok = format!("a{}", "b".repeat(63));
-    let too_long = format!("a{}", "b".repeat(64));
-    let yaml = format!("name: x\ndescription: d\ntools:\n  {longest_ok}: web/search\n");
-    parse(&yaml).expect("a 64-character alias must parse");
-    let yaml = format!("name: x\ndescription: d\ntools:\n  {too_long}: web/search\n");
-    parse(&yaml).expect_err("a 65-character alias must be rejected");
 }
 
 #[test]
@@ -143,24 +104,6 @@ fn a_plugin_declared_twice_is_refused() {
             "{entries}"
         );
     }
-}
-
-#[test]
-fn a_duplicate_plugin_that_also_backs_a_slot_reports_the_duplicate() {
-    let error = parse(concat!(
-        "name: x\ndescription: d\n",
-        "plugins:\n",
-        "  - web\n",
-        "  - web\n",
-        "tools:\n",
-        "  fetch: web/fetch\n",
-    ))
-    .expect_err("a duplicate Plugin must be rejected");
-    assert_eq!(
-        error.to_string(),
-        "invalid frontmatter: Plugin web is declared more than once under \
-         plugins"
-    );
 }
 
 #[test]

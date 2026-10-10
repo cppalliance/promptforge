@@ -157,7 +157,9 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
-    let prompt = parse(&loop_prompt("return tools.call('echo', { value = 'hi' })"));
+    let prompt = parse(&loop_prompt(
+        "return tools.call('tools/echo', { value = 'hi' })",
+    ));
     let (ctx, fixture) = effect_context(&prompt, echo_tools(), RunFixture::new());
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
@@ -181,8 +183,8 @@ async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
 async fn a_script_tool_call_records_the_section_that_made_it() {
     let prompt = parse(
         "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n\
-         ## First\n\n```lua\ntools.call('echo', { value = 'a' })\n```\n\n\
-         ## Second\n\n```lua\nreturn tools.call('echo', { value = 'b' })\n```\n",
+         ## First\n\n```lua\ntools.call('tools/echo', { value = 'a' })\n```\n\n\
+         ## Second\n\n```lua\nreturn tools.call('tools/echo', { value = 'b' })\n```\n",
     );
     let (ctx, fixture) = effect_context(&prompt, echo_tools(), RunFixture::new());
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);

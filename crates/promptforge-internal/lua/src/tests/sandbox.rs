@@ -12,7 +12,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
             .expect("library VM must not expose direct output");
     library_vm.teardown(&null_emitter(), "Section");
 
-    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("section VM must not expose direct output");
     vm.inject_values("", &json!({}), &fresh_access())

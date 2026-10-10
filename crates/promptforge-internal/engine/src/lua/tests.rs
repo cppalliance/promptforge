@@ -67,24 +67,24 @@ fn stub_tool() -> ToolDescriptor {
     )
 }
 
-/// One frozen tool set with the `echo` alias bound to the stub tool.
+/// One tool set offering the stub tool under its wire name `tools_echo`.
 fn test_tools() -> ToolSet {
     ToolSet::for_test(
-        vec![ToolBinding::for_test("echo", "echo tool", &stub_tool())],
         Vec::new(),
         Vec::new(),
+        vec![ToolBinding::from_descriptor("tools_echo", &stub_tool())],
     )
 }
 
 /// Builds a section VM through the real setup path: construction, Engine
-/// injection, the control surface with the yield shims, the shared
-/// replay, and the captured alias bindings.
+/// injection, the control surface with the yield shims, and the shared
+/// replay.
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
     scheduler_vm_with_tools(models, &ToolSet::default(), var)
 }
 
-/// [`scheduler_vm`] with an explicit frozen tool set, so the captured
-/// tool alias globals install as inspectable Tool objects.
+/// [`scheduler_vm`] with an explicit tool set, so `tools.get` reads its
+/// tool objects.
 fn scheduler_vm_with_tools(
     models: &ModelSet,
     tools: &ToolSet,
@@ -119,7 +119,6 @@ fn scheduler_vm_with_tools(
         max_tool_iterations: 24,
         ui: None,
         preludes: &[],
-        frontmatter_aliases: &[],
         raw_shims: false,
     };
     let list_callback =

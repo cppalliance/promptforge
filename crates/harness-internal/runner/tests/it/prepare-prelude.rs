@@ -34,7 +34,7 @@ fn script_call(value: &str, section: &str) -> serde_json::Value {
     json!({
         "ToolCall": {
             "tool": "speaker/echo",
-            "alias": "speaker/echo",
+            "alias": "speaker_echo",
             "args": { "value": value },
             "origin": { "execution": "session-1", "section": section, "caller": "script" },
         }

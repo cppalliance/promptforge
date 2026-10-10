@@ -1,6 +1,6 @@
 //! The per-section Lua VM: construction, Engine injection, coroutine stepping, and chunk execution.
 //!
-//! A local tool registered with `tools.add_local` runs inside the calling
+//! A local tool registered with `tools.offer_local` runs inside the calling
 //! block's coroutine, never as an Engine function. The VM keeps only each
 //! tool's alias and schema; the handler sits in the VM's handler table. A
 //! call takes two yields: the shim's `tool_call`, which the scheduler
@@ -43,8 +43,8 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 /// linear startup: apply the run's limits, inject the Engine values, install
 /// the persistent Engine globals and the control globals, replay the shared
 /// library as the section's first chunk
-/// ([`replay_shared`](Self::replay_shared)), install the captured tool/model
-/// alias globals, and only then walk the section's blocks with
+/// ([`replay_shared`](Self::replay_shared)), and only then walk the
+/// section's blocks with
 /// [`start_block_coro`](Self::start_block_coro). A single
 /// instruction hook covers every program run by this VM, on the main state
 /// and on every block coroutine, so cancellation reaches any chunk.
@@ -53,14 +53,15 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 /// hardening, Engine injection, instruction accounting, and report delivery on
 /// the one owned path. Each section must receive a new instance; dropping it
 /// destroys all Lua memory belonging to that section. Once Lua allocation
-/// succeeds, construction, shared-load, and captured-binding failures cross
-/// the same explicit observed teardown boundary as later lifecycle failures.
+/// succeeds, construction and shared-load failures cross the same explicit
+/// observed teardown boundary as later lifecycle failures.
 #[derive(Debug)]
 pub struct SectionVm {
     lua: Lua,
-    /// The run's shared tool set: the frontmatter's filled slots plus the
-    /// prompt-wide `always` aliases. Shared with the run, not snapshotted:
-    /// `tools.always` is a prompt-wide fact that later sections must see.
+    /// The run's shared tool set: the declared plugins, the offering, and
+    /// the prompt-wide offers. Shared with the run, not snapshotted:
+    /// `tools.always_offer` is a prompt-wide fact that later sections must
+    /// see.
     bound_tools: Arc<Mutex<ToolSet>>,
     /// The run's shared model set: the frontmatter's filled roles plus the
     /// prompt-wide default. Shared for the same reason (`models.default`).
@@ -180,9 +181,9 @@ pub fn section_vm_peak() -> usize {
 ///
 /// Each entry holds the tool alias and its prebuilt schema, which serve
 /// membership and advertising. The handler function itself lives in the
-/// VM's handler table, written by `tools.add_local` and read back when the
+/// VM's handler table, written by `tools.offer_local` and read back when the
 /// scheduler answers a call with it. The entries are shared with the
-/// `tools.add_local` Lua callback, which must be `Send`, hence the `Mutex`;
+/// `tools.offer_local` Lua callback, which must be `Send`, hence the `Mutex`;
 /// the VM is single-threaded, so the lock never contends.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LocalTools {
@@ -243,15 +244,15 @@ impl SectionVm {
     /// ceilings, the instruction hook, and `untrusted` (wrapping under the
     /// run's `nonce`). Everything else - the run's
     /// limits, the Engine values, the persistent Engine globals, the control
-    /// globals, the shared-library replay, and the captured alias globals -
-    /// is a separate explicit step the caller drives in that order (see the
-    /// type-level docs). Every lifecycle report goes through the emitter
-    /// the caller hands each step; the VM retains none.
+    /// globals, and the shared-library replay - is a separate explicit step
+    /// the caller drives in that order (see the type-level docs). Every
+    /// lifecycle report goes through the emitter the caller hands each
+    /// step; the VM retains none.
     ///
-    /// The VM shares the run's (possibly empty) tool and model sets, so the
-    /// validating `tools.add` installed by
-    /// [`inject_values_with_var`](Self::inject_values_with_var) rejects every
-    /// alias as unbound until prepare's filled slots arrive with the sets.
+    /// The VM shares an empty tool and model set, so the validating
+    /// `tools.offer` installed by
+    /// [`inject_values_with_var`](Self::inject_values_with_var) refuses
+    /// every id.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
@@ -309,14 +310,12 @@ impl SectionVm {
     }
     /// Creates a section VM sharing the run's tool and model sets.
     ///
-    /// The sets are the run's own handles, not snapshots: the frontmatter's
-    /// filled slots back the validating `tools`/`models` tables that
-    /// [`inject_values_with_var`](Self::inject_values_with_var) installs and the
-    /// bare tool alias globals that
-    /// [`install_captured_bindings`](Self::install_captured_bindings)
-    /// installs after the shared replay, and the prompt-wide facts a section
-    /// records (`tools.always`, `models.default`) land where every later
-    /// section sees them. H1 is section 0 on this same path.
+    /// The sets are the run's own handles, not snapshots: the offering and
+    /// the filled roles back the validating `tools`/`models` tables that
+    /// [`inject_values_with_var`](Self::inject_values_with_var) installs,
+    /// and the prompt-wide facts a section records (`tools.always_offer`,
+    /// `models.default`) land where every later section sees them. H1 is
+    /// section 0 on this same path.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.

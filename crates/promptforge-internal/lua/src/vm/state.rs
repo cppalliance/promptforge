@@ -83,11 +83,12 @@ impl SectionVm {
     }
 
     /// Installs `tools.calls` as a read-only Lua table backed by a fresh
-    /// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing
-    /// an unseeded key is a hard error that names the bad key and lists the
-    /// seeded set. When the key names a bound tool slot but was never
-    /// seeded - neither scoped into the section nor dispatched by a script
-    /// `tools.call` - the diagnostic says so.
+    /// [`ToolCallCounts`] seeded with the ids of `bindings`. Each seeded key
+    /// reads its live count; indexing an unseeded key is a hard error that
+    /// names the bad key and lists the seeded set. When the key is the id
+    /// of a tool the run offers but was never seeded - neither offered to
+    /// the section nor dispatched by a script `tools.call` - the diagnostic
+    /// says so.
     ///
     /// The installation itself sits in the `tools` module; this method only
     /// supplies the VM's own state.
@@ -99,12 +100,12 @@ impl SectionVm {
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails
     /// or the shared tool set's mutex is poisoned.
     pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
-        let declared = self
+        let tools = self
             .bound_tools
             .lock()
             .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?
             .clone();
-        install_tool_call_counts_impl(&self.lua, &declared, bindings)
+        install_tool_call_counts_impl(&self.lua, &tools, bindings)
     }
 
     /// Returns a snapshot of the shared tool set and the live section
@@ -168,16 +169,17 @@ impl SectionVm {
 }
 
 /// Reads the section's effective tool bindings without mutating the tool
-/// runtime: prompt-wide `always` aliases followed by H2 `tools.add`
-/// additions, each resolved against the frozen bindings with any author
-/// description override applied.
+/// runtime: the prompt-wide `tools.always_offer` tools followed by the
+/// section's `tools.offer` tools in first-offer order, each tool once,
+/// each resolved against the offering with any author description
+/// override applied.
 ///
-/// Rebuilt at each model operation so `tools.add` and `tools.add_local`
-/// calls between blocks reach the next model turn.
+/// Rebuilt at each model operation so `tools.offer` and
+/// `tools.offer_local` calls between blocks reach the next model turn.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the tool runtime's mutex is poisoned or an added
-/// alias has no frozen binding.
+/// Returns [`Error::Lua`] if the tool runtime's mutex is poisoned or an
+/// offered wire name has no binding.
 pub fn current_tool_bindings(
     bindings: &ToolSet,
     runtime: &Mutex<ToolRuntime>,
@@ -185,11 +187,11 @@ pub fn current_tool_bindings(
     let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-    bindings
-        .always()
+    let always = bindings.always();
+    always
         .iter()
-        .chain(runtime.added.iter())
-        .map(|alias| binding_for_scope(bindings, &runtime, alias))
+        .chain(runtime.added.iter().filter(|name| !always.contains(name)))
+        .map(|name| binding_for_scope(bindings, &runtime, name))
         .collect()
 }
 
@@ -226,19 +228,14 @@ pub fn resolve_model_binding(
     }
 }
 
-/// Clones a frozen binding, a frontmatter slot or else an offered tool,
-/// and applies any author model-description override.
-fn binding_for_scope(
-    bindings: &ToolSet,
-    runtime: &ToolRuntime,
-    alias: &str,
-) -> Result<ToolBinding> {
+/// Clones the offered binding under the wire name `name` and applies any
+/// section model-description override over the prompt-wide one.
+fn binding_for_scope(bindings: &ToolSet, runtime: &ToolRuntime, name: &str) -> Result<ToolBinding> {
     let mut binding = bindings
-        .binding(alias)
-        .or_else(|| bindings.offered_binding(alias))
+        .offered_binding(name)
         .cloned()
-        .ok_or_else(|| Error::Lua(format!("tool alias {alias:?} has no frozen binding")))?;
-    if let Some(description) = runtime.description_overrides.get(alias) {
+        .ok_or_else(|| Error::Lua(format!("tool {name:?} has no offered binding")))?;
+    if let Some(description) = runtime.description_overrides.get(name) {
         binding.model_description = Some(description.clone());
     }
     Ok(binding)

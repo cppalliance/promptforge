@@ -10,7 +10,7 @@ use super::super::models_loop::{always_tool, echo_tools};
 use super::*;
 
 /// The `grab` local tool registration every local-tool test opens with.
-const ADD_LOCAL_GRAB: &str = "tools.add_local('grab', 'Grab a value', { value = 'string' }, \
+const ADD_LOCAL_GRAB: &str = "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
      function(args) return 'got ' .. args.value end)\n";
 
 #[tokio::test(flavor = "current_thread")]
@@ -92,7 +92,7 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_called_local_handler_uses_the_store() {
     let md = arm_prompt(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            store.write('grab.txt', 'kept ' .. args.value)\n\
            return store.read('grab.txt')\n\
          end)\n\
@@ -120,7 +120,7 @@ async fn a_script_called_local_handler_uses_the_store() {
 async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
     let md = arm_prompt(
         "local raised = { kind = 'custom', message = 'handler exploded' }\n\
-         tools.add_local('grab', 'Grab a value', {}, function() error(raised) end)\n\
+         tools.offer_local('grab', 'Grab a value', {}, function() error(raised) end)\n\
          local ok, err = pcall(tools.call, 'grab', {})\n\
          assert(not ok, 'the handler raise reaches the call site')\n\
          assert(err == raised and err.kind == 'custom', 'the caller catches the handler table')\n\
@@ -157,10 +157,10 @@ async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_nested_local_call_reports_both_results_innermost_first() {
     let md = arm_prompt(
-        "tools.add_local('inner', 'Inner', { value = 'string' }, function(args)\n\
+        "tools.offer_local('inner', 'Inner', { value = 'string' }, function(args)\n\
            return 'inner ' .. args.value\n\
          end)\n\
-         tools.add_local('outer', 'Outer', { value = 'string' }, function(args)\n\
+         tools.offer_local('outer', 'Outer', { value = 'string' }, function(args)\n\
            return 'outer ' .. tools.call('inner', { value = args.value })\n\
          end)\n\
          return tools.call_as_model('call_1', 'outer', { value = 'hi' })",
@@ -191,11 +191,11 @@ async fn a_nested_local_call_reports_both_results_innermost_first() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
     let md = arm_prompt(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           return tools.call('echo', { value = args.value })\n\
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           return tools.call('tools/echo', { value = args.value })\n\
          end)\n\
          local out = tools.call('grab', { value = 'hi' })\n\
-         return out .. '|' .. tostring(tools.calls.grab) .. '|' .. tostring(tools.calls.echo)",
+         return out .. '|' .. tostring(tools.calls.grab) .. '|' .. tostring(tools.calls['tools/echo'])",
     );
     let prompt = parse(&md);
     let (ctx, fixture) = tool_context(
@@ -219,8 +219,8 @@ async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_the_handler() {
     let md = arm_prompt(
-        "tools.add_local('grab', 'Grab a value', {}, function()\n\
-           local ok, err = pcall(tools.call, 'fail', {})\n\
+        "tools.offer_local('grab', 'Grab a value', {}, function()\n\
+           local ok, err = pcall(tools.call, 'tools/failing', {})\n\
            assert(not ok, 'the bound failure raises inside the handler')\n\
            return err.kind\n\
          end)\n\
@@ -251,9 +251,9 @@ async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_th
 #[tokio::test(flavor = "current_thread")]
 async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
     let md = arm_prompt(
-        "tools.add_local('plain', 'Plain', {}, function() return 'plain text' end)\n\
-         tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           return tools.call('echo', { value = args.value })\n\
+        "tools.offer_local('plain', 'Plain', {}, function() return 'plain text' end)\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           return tools.call('tools/untrusted_echo', { value = args.value })\n\
          end)\n\
          return tools.call('plain', {}) .. '||' .. tools.call('grab', { value = 'hi' })",
     );

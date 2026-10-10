@@ -223,7 +223,7 @@ fn a_construct_failure_is_stored_and_reported_as_unavailable_with_its_reason() {
 }
 
 #[test]
-fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
+fn begin_run_reports_every_declared_plugin_it_cannot_serve() {
     let mut host = host();
     let needy = package("acme/needy").needs(NEEDS_SESSION);
     let broken = Package::new("acme/broken", backed);
@@ -235,7 +235,7 @@ fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
     let (_run, _env, requirements) = host.begin_run(
         HostServices::new(),
         BTreeMap::new(),
-        &prompt("plugins:\n  - needy\n  - absent\n  - fine\ntools:\n  b: broken/use\n"),
+        &prompt("plugins:\n  - needy\n  - absent\n  - fine\n  - broken\n"),
     );
     assert_eq!(requirements.missing_required, [name("absent")]);
     assert_eq!(
@@ -245,7 +245,7 @@ fn begin_run_reports_every_declared_or_slotted_plugin_it_cannot_serve() {
     assert_eq!(
         requirements.unavailable.len(),
         1,
-        "the slotted Plugin that failed to build is reported: {requirements:?}"
+        "the declared Plugin that failed to build is reported: {requirements:?}"
     );
     assert_eq!(requirements.unavailable[0].plugin, name("broken"));
 }

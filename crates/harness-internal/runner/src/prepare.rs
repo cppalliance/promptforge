@@ -133,9 +133,8 @@ pub enum PrepareError {
         source: ParseError,
     },
     /// The environment cannot satisfy the prompt: a Plugin the prompt
-    /// declares or slots is missing, unavailable, or lacks a service it
-    /// needs, its Plugin does not offer a slotted tool, or the current
-    /// model falls short of a role's requirements. The Engine's
+    /// declares is missing, unavailable, or lacks a service it needs, or
+    /// the current model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run is
     /// ended as failed with that notice, or as cancelled when the run's
     /// cancel had fired.
@@ -320,8 +319,8 @@ pub(crate) async fn prepare_noting_cancel(
     // The wait-snapshot-prepare-refuse ceremony: the run's whole
     // filesystem, the real directories and the declared store, goes to
     // the context as given; the snapshot is taken once every Plugin is
-    // ready or the run is cancelled, its catalog is what prepare fills
-    // slots against, its preludes go to every section VM, and the
+    // ready or the run is cancelled, its catalog is what the run offers,
+    // its preludes go to every section VM, and the
     // snapshot itself stays here as the tool performer, lending each call
     // the run's services. A refusal after a cancel ends the run cancelled,
     // as `Harness::run_to_end` reports it.

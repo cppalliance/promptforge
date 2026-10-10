@@ -71,15 +71,13 @@ fn section_vm_with_models(
     emitter: &Emitter,
     section: &str,
 ) -> Result<SectionVm> {
-    let vm = SectionVm::new_for_section(
+    Ok(SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
         &shared_tools(),
         models,
         emitter,
         section,
-    )?;
-    vm.install_captured_bindings()?;
-    Ok(vm)
+    )?)
 }
 
 /// Reads the section's effective model binding through a view over the VM's

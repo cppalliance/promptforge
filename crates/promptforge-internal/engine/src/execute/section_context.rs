@@ -204,14 +204,14 @@ impl SectionContext {
     /// The frame's tool-call counts for a script-initiated dispatch,
     /// running the same one-time scope install the first prose block
     /// performs (the counts and the Lua `tools.calls` table, the model
-    /// freeze, the `sys.model` enrichment), then seeding any alias the
-    /// effective scope has gained since. The returned handle shares the
+    /// freeze, the `sys.model` enrichment), then seeding the id of any tool
+    /// the effective scope has gained since. The returned handle shares the
     /// installed counts, so the dispatch task increments them off the
     /// driver thread.
     ///
     /// # Errors
     /// Returns the [`Error`] of the scope install or the
-    /// alias seeding.
+    /// id seeding.
     pub(super) fn script_call_counts(
         &mut self,
         ctx: &RunState,
@@ -230,7 +230,7 @@ impl SectionContext {
             .as_ref()
             .ok_or(Error::internal("the scope install seeds the counts"))?;
         for binding in effective {
-            counts.ensure(binding.alias())?;
+            counts.ensure(&binding.id().to_string())?;
         }
         Ok(counts.clone())
     }

@@ -1,56 +1,12 @@
-//! Prepare's fill functions: tool slot filling by identity against the
-//! caller-supplied catalog, and the trivial model fill.
+//! Prepare's fill function: the trivial model fill.
 
-use promptforge_parser::{ModelKeyword, ToolSlot};
+use promptforge_parser::ModelKeyword;
 
 use crate::model::ThinkingMode;
 use crate::parser::Prompt;
-use crate::tools::ToolCatalog;
 
-use super::bindings::{ModelBindings, ToolBindings};
+use super::bindings::ModelBindings;
 use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
-
-/// Fills the prompt's declared tool slots against the caller-supplied
-/// catalog, journaling every fill into the returned bindings.
-///
-/// Exact slots fill by identity: an exact path's first segment names
-/// its Plugin, so a slot whose Plugin contributed nothing to the
-/// catalog - it is not installed, cannot serve this run, or offers no
-/// valid tool - lands in
-/// [`Requirements::missing_required`] and the run fails until satisfied. A
-/// slot whose Plugin DID contribute to the catalog but not the named
-/// tool - the tool failed the caller's validation, or the Plugin
-/// never offered that name - is not a missing Plugin: installing
-/// changes nothing. The tool lands in [`Requirements::missing_tools`]
-/// instead, and the run fails until the prompt or the Plugin changes.
-pub(super) fn fill_tool_bindings(
-    prompt: &Prompt,
-    catalog: &ToolCatalog,
-    requirements: &mut Requirements,
-) -> ToolBindings {
-    let mut bindings = ToolBindings::default();
-    let slots = prompt.frontmatter().tools();
-    for (alias, slot) in slots.iter() {
-        // A posture this fill does not model leaves its alias unbound.
-        let ToolSlot::Exact(id) = slot else {
-            continue;
-        };
-        if let Some(tool) = catalog.get(id) {
-            bindings.bind(alias, tool.clone());
-            continue;
-        }
-        let plugin = id.plugin();
-        let plugin_present = catalog.tools().iter().any(|tool| plugin.contains(&tool.id));
-        if plugin_present {
-            if !requirements.missing_tools.contains(id) {
-                requirements.missing_tools.push(id.clone());
-            }
-        } else if !requirements.missing_required.contains(&plugin) {
-            requirements.missing_required.push(plugin);
-        }
-    }
-    bindings
-}
 
 /// The trivial model fill: binds every declared role to the
 /// context's current model and checks each role's hard keywords and

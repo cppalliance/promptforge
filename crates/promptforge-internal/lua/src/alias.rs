@@ -5,8 +5,8 @@ use crate::{Error, Result};
 
 /// Validates a prompt-local alias against the supported wire grammar.
 ///
-/// Aliases are the only names the model sees; tool slots and model roles
-/// share the one rule.
+/// Local tool aliases and model labels share the one rule. An alias never
+/// contains `/`, so it never reads as a tool id.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when `alias` is empty, exceeds 64 bytes, starts with

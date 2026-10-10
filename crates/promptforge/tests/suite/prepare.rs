@@ -1,6 +1,6 @@
 //! Prepare-pass integration tests: real-file claims through a shared base
-//! VFS, slot filling by identity against the caller-supplied catalog, and
-//! model satisfaction - the trivial fill binding every declared role to
+//! VFS, the caller-supplied catalog copied onto the context, and model
+//! satisfaction - the trivial fill binding every declared role to
 //! the context's current model, and the hard-keyword and context-minimum
 //! checks against its descriptor. The store-mount isolation case and the
 //! prepare-run refusals drive the run fixture in `promptforge-engine`'s
@@ -14,7 +14,6 @@
 use std::num::NonZeroU32;
 
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::plugins::PluginId;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RequirementCheck};
@@ -257,127 +256,60 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     assert_eq!(unmet.actual, "Always");
 }
 
-// ToolBindings and slot filling: exact slots fill by identity against
-// the caller-supplied catalog (an exact path's first segment names its
-// Plugin, so a slot whose Plugin contributed nothing to the
-// catalog is reported as missing), with every fill journaled into the
-// run's tool bindings as descriptors, never implementations.
+// The catalog: prepare copies the caller-supplied catalog onto the context
+// verbatim, descriptors and never implementations, and reports nothing
+// about tools. The run offers every catalog tool to the prompt's Lua by
+// id, and whether a declared Plugin is installed is the Harness's report.
 
-/// A prompt declaring `web` and one exact tool slot.
-const DECLARES_EXACT_SLOT: &str = concat!(
+/// A prompt declaring `web`.
+const DECLARES_WEB: &str = concat!(
     "---\n",
-    "name: declares-exact-slot\n",
+    "name: declares-web\n",
     "description: d\n",
     "promptforge: 0\n",
     "plugins:\n",
     "  - web\n",
-    "tools:\n",
-    "  fetch: web/fetch\n",
     "---\n\n",
     "# Title\n\n",
     "## Only\n\n",
     "Done.\n",
 );
 
-/// A prompt declaring one tool slot whose Plugin is not declared at
-/// all.
-const DECLARES_ORPHAN_SLOT: &str = concat!(
-    "---\n",
-    "name: declares-orphan-slot\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "tools:\n",
-    "  fetch: web/fetch\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// A caller-supplied descriptor for one `web` tool.
-fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
-    let id = ToolId::parse(id).expect("the fixture tool id is valid");
-    ToolDescriptor::new(
-        id.clone(),
-        description,
-        serde_json::json!({"type": "object", "properties": {}}),
-    )
-}
-
-/// `prepare` fills a slot by identity against a catalog the caller
-/// supplied directly - no installed Plugin and no tool
-/// implementation anywhere near the Engine - and the binding journals the
-/// descriptor's data.
 #[test]
-fn prepare_fills_a_slot_by_id_against_a_caller_supplied_catalog() {
-    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    let id = ToolId::parse("web/fetch").expect("the id is valid");
+fn prepare_copies_the_caller_supplied_catalog_onto_the_context() {
+    let prompt = parse(DECLARES_WEB, "declares-web");
     let descriptor = ToolDescriptor::new(
-        id.clone(),
+        ToolId::parse("web/fetch").expect("the id is valid"),
         "Fetch a web page over HTTP",
         serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )
     .structured(true);
     let catalog = ToolCatalog::new(std::slice::from_ref(&descriptor)).expect("the catalog builds");
-    let env = Environment::new().tools(catalog);
-    let (ctx, requirements) = env.prepare(&prompt, context("fill-by-id"));
+    let (ctx, requirements) = Environment::new()
+        .tools(catalog)
+        .prepare(&prompt, context("catalog"));
     assert!(
         requirements.is_satisfied(),
-        "a slot the catalog satisfies reports nothing: {requirements:?}"
+        "a catalog reports nothing: {requirements:?}"
     );
-    let bindings = ctx.tool_bindings();
-    assert_eq!(bindings.len(), 1);
-    // Handles resolve alias -> id -> descriptor, and the journaled
-    // descriptor is the catalog's entry verbatim.
-    assert_eq!(bindings.alias_id("fetch"), Some(&id));
-    assert_eq!(bindings.resolve("fetch"), Some(&descriptor));
-    assert_eq!(bindings.tool(&id), Some(&descriptor));
-    assert!(bindings.resolve("undeclared").is_none());
-    // The context's catalog is the environment's, so the caller can read
-    // back what the run was prepared against.
     assert_eq!(ctx.tools().tools(), [descriptor]);
 }
 
 #[test]
-fn an_exact_slot_whose_plugin_is_inactive_is_reported() {
-    let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // An empty catalog and no declaration: the slot's Plugin
-    // contributed nothing the Engine can fill against.
-    let (ctx, requirements) = Environment::new().prepare(&prompt, context("fill-orphan"));
-    // The exact path's first segment names its Plugin.
-    assert_eq!(
-        requirements.missing_required,
-        [PluginId::parse("web").expect("the id is valid")]
+fn prepare_reports_nothing_for_a_declared_plugin_the_catalog_lacks() {
+    let prompt = parse(DECLARES_WEB, "declares-web");
+    let other = ToolDescriptor::new(
+        ToolId::parse("other/search").expect("the id is valid"),
+        "Search somewhere else",
+        serde_json::json!({"type": "object", "properties": {}}),
     );
-    assert!(!requirements.is_satisfied());
-    assert!(ctx.tool_bindings().is_empty());
-}
-
-#[test]
-fn an_exact_slot_absent_from_a_present_plugin_is_reported_as_a_missing_tool() {
-    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    // The Plugin is present in the catalog but offers a different tool:
-    // the Plugin is not missing, the tool is.
-    let catalog = ToolCatalog::new(&[web_descriptor("web/search", "Search the web")])
-        .expect("the catalog builds");
-    let env = Environment::new().tools(catalog);
-    let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
+    let catalog = ToolCatalog::new(std::slice::from_ref(&other)).expect("the catalog builds");
+    let (ctx, requirements) = Environment::new()
+        .tools(catalog)
+        .prepare(&prompt, context("no-web"));
     assert!(
-        requirements.missing_required.is_empty(),
-        "a present Plugin is never reported missing: {:?}",
-        requirements.missing_required
+        requirements.is_satisfied(),
+        "the Engine's prepare checks model roles only: {requirements:?}"
     );
-    assert_eq!(
-        requirements.missing_tools,
-        [ToolId::parse("web/fetch").expect("the id is valid")]
-    );
-    assert!(!requirements.is_satisfied());
-    assert!(
-        requirements
-            .notice()
-            .contains("- missing tool: web/fetch; web does not offer it"),
-        "{}",
-        requirements.notice()
-    );
-    assert!(ctx.tool_bindings().is_empty());
+    assert_eq!(ctx.tools().tools(), [other]);
 }

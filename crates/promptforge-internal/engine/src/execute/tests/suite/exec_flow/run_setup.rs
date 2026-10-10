@@ -105,19 +105,18 @@ async fn default_run_context_store_handle_declares_a_fresh_store() {
 }
 
 #[tokio::test]
-async fn a_slot_its_present_plugin_does_not_offer_refuses_the_run() {
-    // An exact slot whose Plugin is active but contributed no such tool is
-    // a missing tool, not a missing Plugin: prepare refuses the run before
-    // any section advertises the alias.
+async fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
+    // An id whose Plugin is active but contributed no such tool is no
+    // catalog tool of the run: the offer fails the section before any
+    // round advertises it.
     let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  search: tools/search\n---\n\n",
+        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n",
         "# Test prompt\n\n\
-        ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
+        ## Only\n\n```lua\ntools.offer('tools/search')\nreturn 'unreachable'\n```\n"
     );
     let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
-    // The catalog holds the Plugin's `echo`, never `search`: the slot's
-    // Plugin is present, so the tool is missing, not the Plugin.
+    // The catalog holds the Plugin's `echo`, never `search`.
     let tool: Arc<dyn TestTool> = Arc::new(EchoTool);
     let table = TestToolTable::from_tools(&[tool]);
     let catalog = table
@@ -132,14 +131,14 @@ async fn a_slot_its_present_plugin_does_not_offer_refuses_the_run() {
     )
     .await
     else {
-        panic!("a slot naming a tool its Plugin does not offer must refuse the run");
+        panic!("offering a tool its Plugin does not offer must fail the run");
     };
-    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet, "{error}");
+    assert_eq!(error.kind(), RunErrorKind::Lua, "{error}");
     assert!(
         error
             .to_string()
-            .contains("- missing tool: tools/search; tools does not offer it"),
-        "the refusal names the missing tool and its Plugin: {error}"
+            .contains("tools.offer: \"tools/search\" is not a catalog tool in this run"),
+        "the failure names the id: {error}"
     );
 }
 
@@ -168,9 +167,9 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
 }
 
-/// The fixture Plugin's `echo` tool, present so a prompt's `search` slot
-/// is a missing tool rather than its Plugin missing. The implementation is
-/// never called by the missing-tool case.
+/// The fixture Plugin's `echo` tool, present so the Plugin of a prompt's
+/// `tools/search` offer is in the catalog while the tool is not. The
+/// implementation is never called by the missing-tool case.
 struct EchoTool;
 
 #[async_trait::async_trait]

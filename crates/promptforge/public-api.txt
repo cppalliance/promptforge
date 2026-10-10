@@ -15,7 +15,6 @@
 #[non_exhaustive] pub enum promptforge::plugins::PluginIdErrorKind
 #[non_exhaustive] pub enum promptforge::prompt::ArgType
 #[non_exhaustive] pub enum promptforge::prompt::ModelKeyword
-#[non_exhaustive] pub enum promptforge::prompt::ToolSlot
 #[non_exhaustive] pub enum promptforge::tools::OutputTrust
 #[non_exhaustive] pub enum promptforge::tools::ToolCatalogError
 #[non_exhaustive] pub enum promptforge::tools::ToolCatalogErrorKind
@@ -60,8 +59,6 @@
 #[non_exhaustive] pub struct promptforge::prompt::Frontmatter { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::prompt::ModelRole { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::prompt::ModelRoles { /* private fields */ }
-#[non_exhaustive] pub struct promptforge::prompt::ToolSlots { /* private fields */ }
-#[non_exhaustive] pub struct promptforge::tools::ToolBindings { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::tools::ToolCatalog { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::tools::ToolDescriptor { .. }
 #[non_exhaustive] pub struct promptforge::tools::ToolError { /* private fields */ }
@@ -154,12 +151,9 @@ auto promptforge::prompt::Frontmatter: Freeze, RefUnwindSafe, Send, Sync, Unpin,
 auto promptforge::prompt::ModelKeyword: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRole: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRoles: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::prompt::ToolSlot: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::prompt::ToolSlots: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::replay::Flags: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::timestamp::Timestamp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::OutputTrust: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::tools::ToolBindings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::ToolCatalog: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::ToolCatalogError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::ToolCatalogErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -275,12 +269,9 @@ derives promptforge::prompt::Frontmatter: Clone, Debug, Deserialize, Eq, Partial
 derives promptforge::prompt::ModelKeyword: Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd
 derives promptforge::prompt::ModelRole: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ModelRoles: Clone, Debug, Default, Deserialize, Eq, PartialEq
-derives promptforge::prompt::ToolSlot: Clone, Debug, Deserialize, Eq, PartialEq
-derives promptforge::prompt::ToolSlots: Clone, Debug, Default, Deserialize, Eq, PartialEq
 derives promptforge::replay::Flags: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize
 derives promptforge::timestamp::Timestamp: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::tools::OutputTrust: Clone, Copy, Debug, Eq, PartialEq
-derives promptforge::tools::ToolBindings: Clone, Debug, Default, Eq, PartialEq
 derives promptforge::tools::ToolCatalog: Clone, Debug, Default
 derives promptforge::tools::ToolCatalogError: Clone, Debug, Eq, PartialEq
 derives promptforge::tools::ToolCatalogErrorKind: Clone, Copy, Debug, Eq, PartialEq
@@ -435,7 +426,6 @@ pub fn promptforge::RunContext::report_debug(self, mode: promptforge::event::Deb
 pub fn promptforge::RunContext::run_flags(&self) -> promptforge::replay::Flags
 pub fn promptforge::RunContext::seed(&self) -> u64
 pub fn promptforge::RunContext::started_at(&self) -> promptforge::timestamp::Timestamp
-pub fn promptforge::RunContext::tool_bindings(&self) -> &promptforge::tools::ToolBindings
 pub fn promptforge::RunContext::tools(&self) -> &promptforge::tools::ToolCatalog
 pub fn promptforge::RunContext::ui(self, snapshot: serde_json::value::Value) -> promptforge::RunContext
 pub fn promptforge::RunContext::vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::RunContext
@@ -589,7 +579,6 @@ pub fn promptforge::prompt::Frontmatter::name(&self) -> &str
 pub fn promptforge::prompt::Frontmatter::output(&self) -> core::option::Option<&promptforge::prompt::FileDecl>
 pub fn promptforge::prompt::Frontmatter::plugins(&self) -> &[promptforge::plugins::PluginId]
 pub fn promptforge::prompt::Frontmatter::promptforge(&self) -> core::option::Option<u32>
-pub fn promptforge::prompt::Frontmatter::tools(&self) -> &promptforge::prompt::ToolSlots
 pub fn promptforge::prompt::ModelRole::description(&self) -> core::option::Option<&str>
 pub fn promptforge::prompt::ModelRole::keywords(&self) -> &[promptforge::prompt::ModelKeyword]
 pub fn promptforge::prompt::ModelRole::min_context(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
@@ -597,16 +586,7 @@ pub fn promptforge::prompt::ModelRoles::get(&self, label: &str) -> core::option:
 pub fn promptforge::prompt::ModelRoles::is_empty(&self) -> bool
 pub fn promptforge::prompt::ModelRoles::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ModelRole)>
 pub fn promptforge::prompt::ModelRoles::len(&self) -> usize
-pub fn promptforge::prompt::ToolSlots::get(&self, alias: &str) -> core::option::Option<&promptforge::prompt::ToolSlot>
-pub fn promptforge::prompt::ToolSlots::is_empty(&self) -> bool
-pub fn promptforge::prompt::ToolSlots::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ToolSlot)>
-pub fn promptforge::prompt::ToolSlots::len(&self) -> usize
 pub fn promptforge::timestamp::Timestamp::to_rfc3339(self) -> alloc::string::String
-pub fn promptforge::tools::ToolBindings::alias_id(&self, alias: &str) -> core::option::Option<&promptforge::tools::ToolId>
-pub fn promptforge::tools::ToolBindings::is_empty(&self) -> bool
-pub fn promptforge::tools::ToolBindings::len(&self) -> usize
-pub fn promptforge::tools::ToolBindings::resolve(&self, alias: &str) -> core::option::Option<&promptforge::tools::ToolDescriptor>
-pub fn promptforge::tools::ToolBindings::tool(&self, id: &promptforge::tools::ToolId) -> core::option::Option<&promptforge::tools::ToolDescriptor>
 pub fn promptforge::tools::ToolCatalog::get(&self, id: &promptforge::tools::ToolId) -> core::option::Option<&promptforge::tools::ToolDescriptor>
 pub fn promptforge::tools::ToolCatalog::new(tools: &[promptforge::tools::ToolDescriptor]) -> core::result::Result<Self, promptforge::tools::ToolCatalogError>
 pub fn promptforge::tools::ToolCatalog::tools(&self) -> &[promptforge::tools::ToolDescriptor]
@@ -720,7 +700,6 @@ pub promptforge::RequirementCheck::ContextMinimum
 pub promptforge::RequirementCheck::HardKeyword
 pub promptforge::Requirements::missing_required: alloc::vec::Vec<promptforge::plugins::PluginId>
 pub promptforge::Requirements::missing_services: alloc::vec::Vec<promptforge::MissingService>
-pub promptforge::Requirements::missing_tools: alloc::vec::Vec<promptforge::tools::ToolId>
 pub promptforge::Requirements::unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>
 pub promptforge::Requirements::unmet_requirements: alloc::vec::Vec<promptforge::UnmetRequirement>
 pub promptforge::RunErrorKind::Binding
@@ -1217,8 +1196,6 @@ pub promptforge::prompt::ModelKeyword::Frontier
 pub promptforge::prompt::ModelKeyword::NoThinking
 pub promptforge::prompt::ModelKeyword::Small
 pub promptforge::prompt::ModelKeyword::Thinking
-pub promptforge::prompt::ToolSlot::Exact(..)
-pub promptforge::prompt::ToolSlot::Exact::0: promptforge::tools::ToolId
 pub promptforge::tools::OutputTrust::Trusted
 pub promptforge::tools::OutputTrust::Untrusted
 pub promptforge::tools::ToolCatalogError::DuplicateId::id: promptforge::tools::ToolId

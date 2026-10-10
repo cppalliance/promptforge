@@ -129,8 +129,8 @@ pub fn drive(
 /// The implicit-prepare path over the tokio driver: prepares and runs
 /// `prompt` with the resources `fixture` bundles.
 ///
-/// The environment's catalog is what prepare fills slots against; a suite
-/// with fixture tools installs their descriptors there
+/// The environment's catalog is what the run offers; a suite with fixture
+/// tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
 /// implementations on `fixture` ([`RunFixture::tools`]). Plugins live
 /// outside the Engine, and none is installed here.

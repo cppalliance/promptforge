@@ -5,9 +5,10 @@
 use super::*;
 
 /// A binding for a fixture tool beside its implementation: the binding
-/// goes into the run's tool set, the implementation into the tool table
-/// [`arm_tools`] hands the test driver, so a script or model call on
-/// the alias resolves through the same id the binding journals.
+/// goes into the run's offering under `alias` as its wire name, the
+/// implementation into the tool table [`arm_tools`] hands the test driver,
+/// so a model call on the wire name or a script call on the id resolves
+/// through the same id the binding journals.
 pub(in super::super) fn fixture_binding(
     alias: &str,
     description: &str,
@@ -29,8 +30,8 @@ pub(in super::super) struct FixtureTools {
 }
 
 impl FixtureTools {
-    /// Builds the fixture from bindings paired with their implementations
-    /// and the prompt-wide `always` aliases.
+    /// Builds the fixture from offered bindings paired with their
+    /// implementations and the prompt-wide `always` wire names.
     pub(in super::super) fn new(
         bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
         always: Vec<String>,
@@ -44,7 +45,7 @@ impl FixtureTools {
             })
             .collect();
         Self {
-            set: crate::lua::ToolSet::for_test(bindings, always, Vec::new()),
+            set: crate::lua::ToolSet::for_test(Vec::new(), always, bindings),
             table,
         }
     }
@@ -73,7 +74,7 @@ impl From<crate::lua::ToolSet> for FixtureTools {
     }
 }
 
-/// Arms the run state's shared tool set with `bindings` (every alias
+/// Arms the run state's shared tool set with `bindings` (every wire name
 /// prompt-wide through `always`) and returns `fixture` carrying the
 /// implementations, so `TokioDriver::new` performs the calls.
 pub(in super::super) fn arm_tools(
@@ -100,10 +101,9 @@ pub(in super::super) fn arm_tools_scoped(
     FixtureTools::new(bindings, always).install(ctx, fixture)
 }
 
-/// The test's tools as two halves: the catalog of descriptors the run's
-/// frontmatter tool slots (under `tools`) fill against at prepare,
-/// and the table of implementations the driver's tool performer resolves
-/// a `ToolCall` effect's id in.
+/// The test's tools as two halves: the catalog of descriptors the run
+/// offers from, and the table of implementations the driver's tool
+/// performer resolves a `ToolCall` effect's id in.
 pub(in super::super) fn fixture_tools(
     tools: &[Arc<dyn TestTool>],
 ) -> (promptforge_types::tools::ToolCatalog, TestToolTable) {

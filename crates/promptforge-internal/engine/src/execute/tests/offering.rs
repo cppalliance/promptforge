@@ -1,12 +1,13 @@
-//! Tests for the offering: the run's catalog tools whose Plugin the prompt
-//! doesn't declare, bound under model-facing names that `tools.offered()`
-//! lists, `tools.add` scopes, and both script and model calls resolve.
+//! Tests for the offering: every catalog tool the run can offer, bound
+//! under its wire name, which `tools.offer` scopes by id or tool object, a
+//! model call resolves by wire name, and a script call resolves by id.
 
 use super::models_loop::loop_models;
 use super::*;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::execute::scope::{DispatchTarget, prepare_scoped_tools};
 use promptforge_model_client::detail::tool_schema_new;
+use promptforge_types::plugins::PluginId;
 
 /// A catalog tool under any id, echoing its `value` argument.
 struct Offered {
@@ -64,7 +65,7 @@ fn offering_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, 
         .prepare(prompt, test_context(EXECUTION));
     assert!(
         requirements.is_satisfied(),
-        "the fixture prompt's slots fill: {requirements:?}"
+        "the fixture prompt prepares: {requirements:?}"
     );
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
@@ -102,11 +103,8 @@ fn pair(name: &str, id: &str) -> (String, String) {
 }
 
 #[test]
-fn the_offering_binds_every_undeclared_plugins_tool_under_its_model_facing_name_in_id_order() {
-    let prompt = offering_prompt(
-        "plugins:\n  - tools\ntools:\n  echo: tools/echo\n",
-        "return 'ok'",
-    );
+fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
+    let prompt = offering_prompt("plugins:\n  - tools\n", "return 'ok'");
     let (ctx, _) = offering_context(
         &prompt,
         &[
@@ -125,12 +123,19 @@ fn the_offering_binds_every_undeclared_plugins_tool_under_its_model_facing_name_
             pair("alpha_zed", "alpha/zed"),
             pair("gh_issues_list", "gh/issues.list"),
             pair("gh_search", "gh/search"),
+            pair("tools_concrete", "tools/concrete"),
+            pair("tools_echo", "tools/echo"),
         ],
-        "a declared Plugin's tools stay out, bound to a slot or not"
+        "a declared Plugin's tools are offered beside every other Plugin's"
     );
     let set = ctx
         .tool_set_snapshot()
         .expect("the tool set mutex is not poisoned");
+    assert_eq!(
+        set.declared(),
+        [PluginId::parse("tools").expect("valid Plugin")],
+        "the set records the declared Plugins"
+    );
     let fetch = set
         .offered_binding("alpha_fetch")
         .expect("the offered name resolves");
@@ -139,18 +144,16 @@ fn the_offering_binds_every_undeclared_plugins_tool_under_its_model_facing_name_
         "alpha/fetch",
         "the binding holds the descriptor's own text"
     );
-    assert!(
-        set.binding("alpha_fetch").is_none(),
-        "an offered name is never a frontmatter slot"
+    assert_eq!(
+        set.offered_binding("alpha/fetch"),
+        Some(fetch),
+        "the canonical id finds the binding the wire name finds"
     );
 }
 
 #[test]
-fn the_offering_leaves_out_a_name_that_is_aliased_reserved_unadvertisable_or_repeated() {
-    let prompt = offering_prompt(
-        "plugins:\n  - tools\ntools:\n  gh_list: tools/echo\n",
-        "return 'ok'",
-    );
+fn the_offering_leaves_out_a_name_that_is_reserved_unadvertisable_or_repeated() {
+    let prompt = offering_prompt("plugins:\n  - tools\n", "return 'ok'");
     let (ctx, _) = offering_context(
         &prompt,
         &[
@@ -165,21 +168,26 @@ fn the_offering_leaves_out_a_name_that_is_aliased_reserved_unadvertisable_or_rep
     );
     assert_eq!(
         offered(&ctx),
-        vec![pair("dup_a_b", "dup/a/b"), pair("ok_fine", "ok/fine")],
-        "the frontmatter alias, the task built-in name, the schema no round \
-         can advertise, and the later repeat are each left out"
+        vec![
+            pair("dup_a_b", "dup/a/b"),
+            pair("gh_list", "gh/list"),
+            pair("ok_fine", "ok/fine"),
+            pair("tools_echo", "tools/echo"),
+        ],
+        "the task built-in name, the schema no round can advertise, and the \
+         later repeat are each left out"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_adds_the_offering_and_the_model_calls_an_offered_tool_by_its_name() {
+async fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_wire_name() {
     let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "tools_echo", r#"{"value":"hi"}"#),
         resp_text("done"),
     ]);
     let prompt = offering_prompt(
         "",
-        "tools.add(tools.offered())\n\
+        "tools.offer(tools.extras())\n\
          local history = messages.new()\n\
          history:user('go')\n\
          models.loop(history)\n\
@@ -219,18 +227,18 @@ async fn a_script_adds_the_offering_and_the_model_calls_an_offered_tool_by_its_n
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_calls_an_offered_tool_by_its_record_and_by_its_name_without_adding_it() {
+async fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offering_it() {
     let prompt = offering_prompt(
         "",
-        "local record = tools.offered()[1]\n\
-         return tools.call(record, { value = 'a' }) .. '|' .. \
-           tools.call('tools_echo', { value = 'b' }) .. '|' .. record.id .. '|' .. record.plugin",
+        "local tool = tools.extras()[1]\n\
+         return tools.call(tool, { value = 'a' }) .. '|' .. \
+           tools.call('tools/echo', { value = 'b' }) .. '|' .. tool.id",
     );
     let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool)]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls reach the tool");
-    assert_eq!(out, "echoed: a|echoed: b|tools/echo|tools");
+    assert_eq!(out, "echoed: a|echoed: b|tools/echo");
     let call = |value: &str| EffectRecord::ToolCall {
         tool: ToolId::parse("tools/echo").expect("valid id"),
         alias: "tools_echo".to_owned(),

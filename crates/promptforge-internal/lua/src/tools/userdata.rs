@@ -1,63 +1,49 @@
-//! Inspectable Tool object for a bound slot.
+//! The tool object: one catalog tool as Lua sees it.
 //!
-//! Presentation only: the userdata exposes a bound tool's fields to Lua and
-//! serves as the leading handle argument to `tools.call`. Authors read
-//! `.name`, `.description`, `.parameters`, `.wire_name`, and `.untrusted`.
-//! The object is frozen and methodless: model-facing description
-//! overrides are positional arguments to `tools.always` / `tools.add`,
-//! never assignments on this handle, and unlike a model handle, which
-//! carries `infer` and `loop`, it is invoked only through
-//! `tools.call(alias_or_tool, arguments)`. Existing
-//! callers that ignore the return value keep working.
+//! Presentation only: the userdata exposes an offered tool's `id` and its
+//! catalog `description`, and stands for its id wherever `tools.offer`,
+//! `tools.always_offer`, and `tools.call` take a tool. The object is frozen
+//! and methodless: model-facing description overrides are positional
+//! arguments to `tools.offer` / `tools.always_offer`, never assignments on
+//! this handle, so `description` stays the catalog text whatever a section
+//! overrides. Unlike a model handle, which carries `infer` and `loop`, it
+//! is invoked only through `tools.call(tool, arguments)`.
 
-use mlua::{LuaSerdeExt, MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
+use mlua::{MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
 use promptforge_types::tools::ToolId;
-use serde_json::{Value as Json, json};
 
-/// Inspectable Tool object for a bound slot.
-#[derive(Debug, Clone, PartialEq)]
+use crate::handles::ToolBinding;
+
+/// One catalog tool as Lua sees it: `id` and `description`, both
+/// read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LuaToolHandle {
-    name: String,
+    id: ToolId,
     description: String,
-    parameters: Json,
-    wire_name: String,
-    untrusted: bool,
 }
 
 impl LuaToolHandle {
-    /// Builds a handle from a bound alias, capability description, and identity.
-    ///
-    /// Without a live catalog lookup, `wire_name` is the identity's stable
-    /// name, `parameters` is an empty object, and `untrusted` is false.
+    /// Builds the object for an offered tool from its binding: the id and
+    /// the catalog description, never the binding's override.
     #[must_use]
-    pub(crate) fn from_binding(
-        alias: impl Into<String>,
-        description: impl Into<String>,
-        id: &ToolId,
-    ) -> Self {
+    pub(crate) fn from_binding(binding: &ToolBinding) -> Self {
         Self {
-            name: alias.into(),
-            description: description.into(),
-            parameters: json!({}),
-            wire_name: id.name().to_owned(),
-            untrusted: false,
+            id: binding.id().clone(),
+            description: binding.description().to_owned(),
         }
     }
 
-    /// Returns the prompt-local alias.
+    /// Returns the tool's canonical id, which the object stands for.
     #[must_use]
-    pub(super) fn name(&self) -> &str {
-        &self.name
+    pub(crate) fn id(&self) -> &ToolId {
+        &self.id
     }
 }
 
 impl UserData for LuaToolHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
+        fields.add_field_method_get("id", |_, this| Ok(this.id.to_string()));
         fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
-        fields.add_field_method_get("parameters", |lua, this| lua.to_value(&this.parameters));
-        fields.add_field_method_get("wire_name", |_, this| Ok(this.wire_name.clone()));
-        fields.add_field_method_get("untrusted", |_, this| Ok(this.untrusted));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

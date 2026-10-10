@@ -30,7 +30,7 @@ use promptforge_vfs::{Access, VfsRef};
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
-use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv, frontmatter_aliases};
+use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv};
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -90,7 +90,7 @@ pub(crate) struct RunState {
     /// the startup sequence needs no `Option` branch.
     shared: Arc<LuaProgram>,
     /// The run's tool set as a read-only view: built from the prepared
-    /// bindings at construction. The only writer is `tools.always` (a
+    /// catalog at construction. The only writer is `tools.always_offer` (a
     /// prompt-wide fact) through the concrete handle the section VMs
     /// share.
     tools: Arc<dyn ToolView>,
@@ -98,9 +98,9 @@ pub(crate) struct RunState {
     /// (H1 included). Readers outside the VM layer go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
     /// Every tool in the prepared catalog, bound under its full id: the
-    /// fallback a script `tools.call` resolves when no frontmatter alias
-    /// matches. Kept apart from `tool_set`, the set section VMs install
-    /// globals and scopes from, so a full id never becomes either.
+    /// fallback a script `tools.call` resolves when its id names no offered
+    /// tool. Kept apart from `tool_set`, the set section VMs scope from, so
+    /// a tool left out of the offering never enters a scope.
     catalog_bindings: Arc<BTreeMap<String, ToolBinding>>,
     /// The run's model set as a read-only view: built from the prepared
     /// bindings at construction. The only writer is `models.default` (a
@@ -120,10 +120,6 @@ pub(crate) struct RunState {
     /// The run's Plugin preludes, in install order: every section VM
     /// installs each one before the shared library replays.
     preludes: Arc<[Prelude]>,
-    /// Every tool alias the prompt's frontmatter declares: the names a
-    /// prelude's globals must not take, because the alias globals install
-    /// after the preludes and would silently replace them.
-    frontmatter_aliases: Arc<[String]>,
     /// Test-only: installs the raw `tools.call_as_model` shim in every
     /// section VM, so a fixture section can yield one model-issued
     /// `tool_call` at the scheduler's dispatch arm without going through a
@@ -135,12 +131,11 @@ pub(crate) struct RunState {
 impl RunState {
     /// Builds the context for one run of `prompt`. The turn counter is
     /// minted here (starting at zero), as are the run's shared tool
-    /// and model sets - built from the prepared bindings on `ctx` (empty on
-    /// a caller-built context that never passed through
+    /// and model sets - built from the catalog and the model bindings on
+    /// `ctx` (empty on a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// Plugin-free) - the full-id bindings of `ctx`'s catalog, and the
-    /// prompt's frontmatter alias names that `ctx`'s preludes are checked
-    /// against; the nonce derives from `ctx`'s seed and `when`
+    /// Plugin-free) - and the full-id bindings of `ctx`'s catalog; the
+    /// nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
@@ -166,7 +161,6 @@ impl RunState {
             ctx.report_debug,
         ));
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
-        let frontmatter_aliases = frontmatter_aliases(&prompt).into();
         Self {
             prompt,
             nonce: GuardNonce::from_seed(ctx.seed),
@@ -190,7 +184,6 @@ impl RunState {
             when: Arc::from(ctx.started_at.to_rfc3339()),
             ui: ctx.ui.clone().map(Arc::new),
             preludes: ctx.preludes.as_slice().into(),
-            frontmatter_aliases,
             #[cfg(test)]
             raw_shims: false,
         }
@@ -294,23 +287,23 @@ impl RunState {
         Arc::clone(&self.tool_set)
     }
 
-    /// An owned snapshot of the run's tool set (bindings, `always`, and
-    /// the offering), read through the view.
+    /// An owned snapshot of the run's tool set (the declared plugins, the
+    /// prompt-wide offers, and the offering), read through the view.
     ///
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
     /// poisoned.
     pub(super) fn tool_set_snapshot(&self) -> Result<ToolSet> {
         Ok(ToolSet::from_parts(
-            self.tools.bindings()?,
+            self.tools.declared()?,
             self.tools.always()?,
             self.tools.offered()?,
         ))
     }
 
     /// The binding for the catalog tool whose full id is `id`, the
-    /// fallback a script `tools.call` resolves when no frontmatter alias
-    /// matches.
+    /// fallback a script `tools.call` resolves when the id names no offered
+    /// tool.
     pub(super) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
         self.catalog_bindings.get(id)
     }
@@ -340,10 +333,9 @@ impl RunState {
 
     /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,
     /// set on a cheap clone so the context H1 saw stays untouched. The
-    /// tool and model sets need no delta: they were built from the
-    /// prepared bindings at construction, and H1's prompt-wide records
-    /// (`tools.always`, `models.default`) landed in the same shared sets
-    /// the views read. `when` needs none either: it is the run's
+    /// tool and model sets need no delta: they were built at construction,
+    /// and H1's prompt-wide records (`tools.always_offer`,
+    /// `models.default`) landed in the same shared sets the views read. `when` needs none either: it is the run's
     /// `started_at`, the same for the pass and the walk.
     #[must_use]
     pub(super) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {
@@ -376,9 +368,9 @@ impl RunState {
     }
 
     /// The borrowed VM-setup inputs both section drivers share, sourcing the
-    /// run-wide slots (`args`, the emitter, `shared`, the shim caps, the
-    /// preludes and the alias names they are checked against) from
-    /// this context; the driver supplies only its own deltas: the `sys`
+    /// run-wide inputs (`args`, the emitter, `shared`, the shim caps, and
+    /// the preludes) from this context; the driver supplies only its own
+    /// deltas: the `sys`
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
     /// one), and the section name.
@@ -402,7 +394,6 @@ impl RunState {
             max_tool_iterations: self.max_tool_iterations(),
             ui: self.ui.as_ref(),
             preludes: &self.preludes,
-            frontmatter_aliases: &self.frontmatter_aliases,
             #[cfg(test)]
             raw_shims: self.raw_shims,
         }
@@ -466,7 +457,6 @@ impl fmt::Debug for RunState {
                     .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
-            .field("frontmatter_aliases", &self.frontmatter_aliases)
             .finish()
     }
 }

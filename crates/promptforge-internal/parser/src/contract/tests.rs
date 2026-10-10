@@ -1,9 +1,9 @@
-//! Tests for the frontmatter contract keys: `plugins`, `tools`,
-//! `args`, and `models`.
+//! Tests for the frontmatter contract keys: `plugins`, `args`, and
+//! `models`.
 
 use std::num::NonZeroU32;
 
-use super::{ArgType, ModelKeyword, ToolSlot};
+use super::{ArgType, ModelKeyword};
 use crate::{ParseError, ParseErrorKind, Prompt};
 
 #[path = "tests-plugins.rs"]
@@ -22,9 +22,6 @@ fn the_full_contract_declaration_parses_and_round_trips() {
         "plugins:\n",
         "  - web\n",
         "  - mcp\n",
-        "tools:\n",
-        "  search: web/search\n",
-        "  fetch: web/fetch\n",
         "args:\n",
         "  use_mcp:\n",
         "    type: boolean\n",
@@ -47,17 +44,6 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     assert_eq!(plugins.len(), 2);
     assert_eq!(plugins[0].to_string(), "web");
     assert_eq!(plugins[1].to_string(), "mcp");
-
-    let tools = fm.tools();
-    assert_eq!(tools.len(), 2);
-    match tools.get("search") {
-        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "web/search"),
-        other => panic!("expected an exact slot, got {other:?}"),
-    }
-    match tools.get("fetch") {
-        Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "web/fetch"),
-        other => panic!("expected an exact slot, got {other:?}"),
-    }
 
     let arg = fm.args().get("use_mcp").expect("the arg is declared");
     assert_eq!(arg.kind(), ArgType::Boolean);
@@ -88,7 +74,6 @@ fn a_prompt_without_contract_keys_behaves_exactly_as_today() {
     let prompt = parse("name: x\ndescription: d\n").expect("a plain prompt must parse");
     let fm = prompt.frontmatter();
     assert!(fm.plugins().is_empty());
-    assert!(fm.tools().is_empty());
     assert!(fm.models().is_empty());
 }
 
@@ -113,60 +98,11 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     // `deny_unknown_fields` must hold inside each new key's entries too: a
     // typo'd field is an authoring error, not silently ignored.
     for yaml in [
-        "name: x\ndescription: d\ntools:\n  wiki:\n    wants: prose\n",
         "name: x\ndescription: d\nargs:\n  flag:\n    tipe: boolean\n",
         "name: x\ndescription: d\nmodels:\n  analyst:\n    keyword: [fast]\n",
     ] {
         let error = parse(yaml).expect_err("an unknown key inside an entry must be rejected");
         assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
-    }
-}
-
-/// One reserved name from each category, with the category the refusal
-/// names: a guarded Engine global, an Engine table, a Lua base function, and a
-/// Lua keyword (quoted so YAML keeps `true` a string).
-const RESERVED_SAMPLES: [(&str, &str); 5] = [
-    ("argv", "an Engine global"),
-    ("store", "an Engine global"),
-    ("pairs", "a Lua standard-library global"),
-    ("end", "a Lua keyword"),
-    ("true", "a Lua keyword"),
-];
-
-#[test]
-fn a_reserved_name_is_refused_as_a_tool_alias_naming_the_map_and_the_category() {
-    for (name, kind) in RESERVED_SAMPLES {
-        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': web/search\n");
-        let error = parse(&yaml).expect_err("a reserved tool alias must be rejected");
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
-        assert!(
-            error.to_string().contains(&format!(
-                "tool alias `{name}` in `tools` is reserved ({kind}): tool aliases install as \
-                 section VM globals, so none may take a reserved name"
-            )),
-            "the refusal names the alias, the map, and why: {error}"
-        );
-        assert_eq!(error.line(), Some(5), "the alias's own line: {error}");
-    }
-}
-
-#[test]
-fn every_reserved_name_is_refused_as_a_tool_alias() {
-    for (name, _) in promptforge_lua::RESERVED_NAMES {
-        // `_G` and `_VERSION` fail the grammar's leading-letter rule first.
-        let expected = if name.starts_with('_') {
-            "invalid"
-        } else {
-            "is reserved"
-        };
-        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': web/search\n");
-        let error = parse(&yaml).expect_err("a reserved name must be rejected");
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
-        assert!(
-            error.to_string().contains(&format!("`{name}`"))
-                && error.to_string().contains(expected),
-            "{name}: {error}"
-        );
     }
 }
 
@@ -185,27 +121,6 @@ fn every_reserved_name_the_grammar_allows_parses_as_a_model_role_label() {
 }
 
 #[test]
-fn a_name_that_only_resembles_a_reserved_one_still_parses() {
-    // Lua names are case-sensitive, and the rule matches whole names only.
-    for name in ["Store", "stores", "my_argv", "pairs2", "ending", "search"] {
-        let prompt = parse(&format!(
-            "name: x\ndescription: d\ntools:\n  {name}: web/search\n\
-             models:\n  {name}_model: {{}}\n"
-        ))
-        .expect("a non-reserved alias and role label parse");
-        assert!(prompt.frontmatter().tools().get(name).is_some(), "{name}");
-        assert!(
-            prompt
-                .frontmatter()
-                .models()
-                .get(&format!("{name}_model"))
-                .is_some(),
-            "{name}_model"
-        );
-    }
-}
-
-#[test]
 fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
     let prompt = parse(concat!(
         "name: x\ndescription: d\n",
@@ -218,19 +133,6 @@ fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
     let args = prompt.frontmatter().args();
     assert_eq!(args.len(), 3);
     assert!(args.get("store").is_some() && args.get("end").is_some());
-}
-
-#[test]
-fn one_name_as_both_a_tool_alias_and_a_model_role_label_parses() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "tools:\n  scout: web/search\n",
-        "models:\n  scout: {}\n",
-    ))
-    .expect("a role label may equal a tool alias");
-    let frontmatter = prompt.frontmatter();
-    assert!(frontmatter.tools().get("scout").is_some());
-    assert!(frontmatter.models().get("scout").is_some());
 }
 
 #[test]

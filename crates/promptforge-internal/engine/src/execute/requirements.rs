@@ -1,7 +1,6 @@
 //! The preflight report: [`Requirements`].
 
 use promptforge_types::plugins::PluginId;
-use promptforge_types::tools::ToolId;
 
 #[cfg(test)]
 #[path = "requirements-tests.rs"]
@@ -25,10 +24,8 @@ pub struct Requirements {
     pub unmet_requirements: Vec<UnmetRequirement>,
     /// The required Plugins that the run lacks.
     ///
-    /// The caller adds a Plugin the prompt declares or slots that is not
-    /// installed. `Environment::prepare` adds the Plugin of an exact tool
-    /// slot when that Plugin is absent from the tool catalog. The run
-    /// fails until every one is satisfied.
+    /// The caller adds a Plugin the prompt declares that is not installed.
+    /// The run fails until every one is satisfied.
     pub missing_required: Vec<PluginId>,
     /// The required Plugins that are installed but need a service
     /// the run lacks.
@@ -42,27 +39,19 @@ pub struct Requirements {
     ///
     /// The caller adds these. The run fails until the Plugin can serve.
     pub unavailable: Vec<UnavailablePlugin>,
-    /// The tools the prompt's slots name that their Plugin, present in the
-    /// catalog, does not offer.
-    ///
-    /// `Environment::prepare` adds these. Installing the Plugin changes
-    /// nothing, so the run fails until the prompt or the Plugin changes.
-    pub missing_tools: Vec<ToolId>,
 }
 
 impl Requirements {
     /// Returns whether the report lets the run proceed.
     ///
-    /// That holds when every model requirement is met, every required
-    /// Plugin is present, can serve, and has the services it needs, and
-    /// every slotted tool is offered.
+    /// That holds when every model requirement is met and every required
+    /// Plugin is present, can serve, and has the services it needs.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
             && self.missing_required.is_empty()
             && self.missing_services.is_empty()
             && self.unavailable.is_empty()
-            && self.missing_tools.is_empty()
     }
 
     /// Adds the entries of `other` to this report.
@@ -72,16 +61,12 @@ impl Requirements {
     /// The merge skips an entry the report already holds.
     ///
     /// The merge drops the `missing_required` entry of a Plugin that
-    /// lacks a service or is unavailable. That entry can come only from
-    /// the tool slot check in `Environment::prepare`. That check finds an
-    /// exact slot whose Plugin is absent from the catalog, because the
-    /// caller left the Plugin's tools out. The service or unavailable entry
+    /// lacks a service or is unavailable: the service or unavailable entry
     /// already names the real cause.
     pub fn merge(&mut self, other: Requirements) {
         push_new(&mut self.missing_required, other.missing_required);
         push_new(&mut self.missing_services, other.missing_services);
         push_new(&mut self.unavailable, other.unavailable);
-        push_new(&mut self.missing_tools, other.missing_tools);
         let (services, unavailable) = (&self.missing_services, &self.unavailable);
         self.missing_required.retain(|id| {
             !services.iter().any(|missing| missing.plugin == *id)
@@ -132,13 +117,6 @@ impl Requirements {
                 notice,
                 "\n- {} is unavailable: {}",
                 entry.plugin, entry.reason
-            );
-        }
-        for tool in &self.missing_tools {
-            let _ = write!(
-                notice,
-                "\n- missing tool: {tool}; {} does not offer it",
-                tool.plugin()
             );
         }
         for unmet in &self.unmet_requirements {

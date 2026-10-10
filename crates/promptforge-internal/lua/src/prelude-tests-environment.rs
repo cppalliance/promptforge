@@ -30,7 +30,6 @@ end";
             prelude("first", "first_global = 1"),
             prelude("probe", probe),
         ],
-        &[],
     )
     .expect("the preludes install");
 
@@ -79,7 +78,7 @@ function probe_write(path)
   end)
   return ok, tostring(err)
 end";
-    install_preludes(vm.lua(), &[prelude("probe", probe)], &[]).expect("the prelude installs");
+    install_preludes(vm.lua(), &[prelude("probe", probe)]).expect("the prelude installs");
 
     let (root, nested): (String, String) = eval(&vm, "return probe_meta()");
     assert_eq!(
@@ -114,7 +113,7 @@ function probe_set(key)
   local ok, err = pcall(function() var[key] = 1 end)
   return tostring(err)
 end";
-    install_preludes(vm.lua(), &[prelude("probe", probe)], &[]).expect("the prelude installs");
+    install_preludes(vm.lua(), &[prelude("probe", probe)]).expect("the prelude installs");
     for (key, refusal) in [
         (
             "'mode'",
@@ -138,8 +137,7 @@ fn a_prelude_function_called_from_a_block_yields_its_tool_call() {
         &[prelude(
             "kit",
             "kit = {}\nfunction kit.run(script)\n  return tools.call('kit/run', { script = script })\nend",
-        )],
-        &[],
+        )]
     )
     .expect("the prelude installs");
     let block = LuaProgram::compile(

@@ -1,4 +1,4 @@
-//! Tests for `tools.add_local`: the registration rules run end to end, and
+//! Tests for `tools.offer_local`: the registration rules run end to end, and
 //! the `models.loop` shim's local-tool rounds are driven at prompt level,
 //! so a model-issued call to a local tool runs its handler inside the
 //! block coroutine - store calls included - and its trusted result is sent
@@ -6,7 +6,6 @@
 //! runs, even through a saved reference.
 
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
-use super::run;
 use super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::lua::ToolSet;
@@ -17,7 +16,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 /// the handler function, given `args`.
 fn grab_loop(handler: &str) -> String {
     loop_prompt(&format!(
-        "tools.add_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
+        "tools.offer_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
            {handler}\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -69,7 +68,7 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     ]);
     let md = loop_prompt(
         "local calls = {}\n\
-         tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            calls[#calls + 1] = args.value\n\
            return 'ok ' .. args.value\n\
          end)\n\
@@ -209,7 +208,7 @@ async fn a_handler_that_calls_jump_fails_the_run() {
         resp_text("unreachable"),
     ]);
     let prompt = parse(&jump_prompt(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            jump('## Other')\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -235,7 +234,7 @@ const JUMP_REFUSAL: &str = "jump is unavailable inside a local tool handler";
 /// The `grab` registration whose handler calls a `jump` reference the
 /// block saved before registering it.
 const SAVED_JUMP_GRAB: &str = "local j = jump\n\
-     tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+     tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
        j('## Other')\n\
      end)\n";
 
@@ -300,8 +299,8 @@ async fn a_caller_that_catches_the_jump_refusal_continues_the_block() {
 #[tokio::test(flavor = "current_thread")]
 async fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
     let prompt = parse(&jump_prompt(&format!(
-        "tools.add_local('inner', 'Inner', {{}}, function() return 'inner' end)\n\
-         tools.add_local('outer', 'Outer', {{}}, function()\n\
+        "tools.offer_local('inner', 'Inner', {{}}, function() return 'inner' end)\n\
+         tools.offer_local('outer', 'Outer', {{}}, function()\n\
            local inner = tools.call('inner', {{}})\n\
            local ok, err = pcall(jump, '## Other')\n\
            assert(not ok, 'jump is still refused in the outer handler')\n\
@@ -326,7 +325,7 @@ async fn jump_works_in_the_same_block_after_the_loop_returns() {
         resp_text("final answer"),
     ]);
     let prompt = parse(&jump_prompt(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            return 'got ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -373,31 +372,47 @@ async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
     );
 }
 
-#[tokio::test]
-async fn local_tool_alias_cannot_shadow_a_declared_tool() {
+#[tokio::test(flavor = "current_thread")]
+async fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
+    let gateway = ScriptedChat::new(vec![
+        resp_tool_call("call_1", "tools_concrete", "{}"),
+        resp_text("final answer"),
+    ]);
     let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\ntools:\n  grab: tools/concrete\nmodels:\n  writer: {}\n---\n\n\
-# Test prompt\n\n```lua\n\
-models.default('writer')\n```\n\n\
-## Only\n\n\
-```lua\n\
-tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
-```\n",
+    let tools = FixtureTools::new(
+        vec![fixture_binding(
+            "tools_concrete",
+            "Concrete description.",
+            Arc::clone(&tool) as Arc<dyn TestTool>,
+        )],
+        Vec::new(),
     );
-
-    let error = run(
-        &prompt,
-        "",
-        &[tool as Arc<dyn TestTool>],
-        &TestStore::new(),
-        silent(),
-    )
-    .await
-    .expect_err("a local alias must not shadow a declared tool");
-    assert!(
-        error.to_string().contains("duplicates a bound tool slot"),
-        "the error must identify the bound-slot collision: {error}"
+    let prompt = parse(&loop_prompt(
+        "tools.offer('tools/concrete')\n\
+         tools.offer_local('tools_concrete', 'Local concrete', {}, function() return 'local' end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         return msgs[#msgs].content",
+    ));
+    let (ctx, fixture) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
+        .drive()
+        .await
+        .expect("the local tool answers the shared name");
+    assert_eq!(out, "final answer");
+    let bodies = gateway.requests();
+    assert_eq!(
+        bodies[0].tools.len(),
+        1,
+        "the model sees one tool under the name"
+    );
+    assert_eq!(bodies[0].tools[0].description(), "Local concrete");
+    assert_eq!(last_tool_turn_content(&bodies), "local");
+    assert_eq!(
+        tool.calls.load(Ordering::SeqCst),
+        0,
+        "the offered catalog tool is never called"
     );
 }
 
@@ -407,8 +422,8 @@ async fn local_tool_alias_cannot_be_registered_twice() {
 # Test prompt\n\n\
 ## Only\n\n\
 ```lua\n\
-tools.add_local('grab', 'First grab', {}, function() return 'first' end)\n\
-tools.add_local('grab', 'Second grab', {}, function() return 'second' end)\n\
+tools.offer_local('grab', 'First grab', {}, function() return 'first' end)\n\
+tools.offer_local('grab', 'Second grab', {}, function() return 'second' end)\n\
 ```\n";
     let error = run_offline(md)
         .await

@@ -3,7 +3,7 @@
 
 use promptforge_types::plugins::PluginId;
 
-use crate::contract::{ArgsDecl, ModelRoles, ToolSlots};
+use crate::contract::{ArgsDecl, ModelRoles};
 use crate::{Error, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
@@ -68,9 +68,6 @@ pub struct Frontmatter {
     /// each is required, and its prelude runs in every section.
     #[serde(default)]
     plugins: Vec<PluginId>,
-    /// Declared tool slots: alias to exact path.
-    #[serde(default)]
-    tools: ToolSlots,
     /// The typed args declaration; an absent `args:` key yields the default
     /// declaration (one optional string field named `prose`).
     #[serde(default)]
@@ -191,13 +188,6 @@ impl Frontmatter {
     #[must_use]
     pub fn plugins(&self) -> &[PluginId] {
         &self.plugins
-    }
-
-    /// Returns the declared tool slots, which map each alias to an exact tool
-    /// path.
-    #[must_use]
-    pub fn tools(&self) -> &ToolSlots {
-        &self.tools
     }
 
     /// Returns the typed args declaration. A prompt that omits the `args:` key

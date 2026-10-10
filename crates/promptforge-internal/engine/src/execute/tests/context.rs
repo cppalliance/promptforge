@@ -159,8 +159,7 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
 
 // The helper takes no resolver: live tool binding resolves elsewhere, so a
 // resolver argument would imply a resolution path the helper does not
-// exercise. Exact slots fill by identity against the fixture Plugin's
-// contributed tools at prepare.
+// exercise. The run offers every tool the fixture Plugin contributes.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();
     if let Some(marker) = live_source.find("```lua shared\n")
@@ -314,9 +313,8 @@ pub(super) async fn run(
     let mut ctx = test_context(opts.execution).vfs(store.vfs());
     if !tools.is_empty() {
         // With tools: the fixtures' descriptors form the catalog the run
-        // binds its frontmatter slots against, and the implementations go
-        // to the tool table the test driver's tool performer resolves a
-        // `ToolCall` effect in.
+        // offers, and the implementations go to the tool table the test
+        // driver's tool performer resolves a `ToolCall` effect in.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
         fixture = fixture.tools(table);

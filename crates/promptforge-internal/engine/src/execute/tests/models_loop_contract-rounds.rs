@@ -200,7 +200,7 @@ async fn a_handler_raising_mid_batch_leaves_the_list_untouched_and_raises_its_ow
     let md = loop_prompt(
         "local own = { reason = 'mine' }\n\
          local count = 0\n\
-         tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            count = count + 1\n\
            if count == 2 then error(own) end\n\
            return 'grabbed ' .. args.value\n\
@@ -280,9 +280,9 @@ async fn a_local_tools_first_return_value_is_its_text_and_nil_is_empty() {
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('none', 'Returns nothing', {}, function() end)\n\
-         tools.add_local('num', 'Returns a number', {}, function() return 42 end)\n\
-         tools.add_local('two', 'Returns two values', {}, function() return 'first', 'second' end)\n\
+        "tools.offer_local('none', 'Returns nothing', {}, function() end)\n\
+         tools.offer_local('num', 'Returns a number', {}, function() return 42 end)\n\
+         tools.offer_local('two', 'Returns two values', {}, function() return 'first', 'second' end)\n\
          local msgs = messages.new()\n\
          msgs:user('call all three')\n\
          models.loop(msgs)\n\
@@ -303,7 +303,7 @@ async fn a_local_tool_cancelled_mid_handler_reports_no_failed_tool_call() {
         resp_text("unreachable"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            while true do end\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -344,7 +344,7 @@ async fn the_scheduler_reports_the_whole_trace_of_a_bound_round_a_local_round_an
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\

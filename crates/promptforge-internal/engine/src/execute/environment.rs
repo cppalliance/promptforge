@@ -8,7 +8,7 @@ use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
 
 use super::config::RunContext;
-use super::fill::{fill_model_bindings, fill_tool_bindings};
+use super::fill::fill_model_bindings;
 use super::requirements::Requirements;
 
 /// The tools and Plugin preludes that a deployment makes available to
@@ -21,17 +21,15 @@ use super::requirements::Requirements;
 /// tool descriptors only. The tool implementations stay with the caller,
 /// which performs every call. The run's model arrives on the context.
 ///
-/// [`prepare`](Environment::prepare) fills a prompt's tool slots by
-/// identity against the catalog and binds its model roles to the
-/// context's current model. The run offers the catalog tools of Plugins
-/// the prompt does not declare to the prompt's Lua.
+/// [`prepare`](Environment::prepare) binds a prompt's model roles to the
+/// context's current model. The run offers every catalog tool to the
+/// prompt's Lua, which names each by its canonical id.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// The tools a run may bind or be offered, as descriptors: every tool
-    /// of every Plugin the caller can serve, declared by the prompt or not.
-    /// The default is empty, so every exact slot's Plugin is reported
-    /// missing.
+    /// The tools a run may be offered, as descriptors: every tool of every
+    /// Plugin the caller can serve, declared by the prompt or not. The
+    /// default is empty.
     tools: ToolCatalog,
     /// The Lua source of the Plugins the prompt declares, in declaration
     /// order: every section VM of a run installs each one before the shared
@@ -50,14 +48,13 @@ impl Environment {
         }
     }
 
-    /// Sets the catalog of tools that a run may bind or be offered.
+    /// Sets the catalog of tools that a run may be offered.
     ///
     /// The catalog holds the tool descriptors of every Plugin the caller
     /// can serve, whether or not the prompt declares it. The caller
-    /// installs it here before it calls [`prepare`](Environment::prepare).
-    /// `prepare` then fills the prompt's exact slots against the catalog by
-    /// identity, and the run offers the tools of the Plugins the prompt
-    /// does not declare.
+    /// installs it here before it calls [`prepare`](Environment::prepare),
+    /// which copies it onto the context, and the run offers every tool in
+    /// it.
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
         self.tools = tools;
@@ -76,8 +73,8 @@ impl Environment {
     ///
     /// A prelude fails the run as
     /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) if it fails to load,
-    /// or if it defines a global that another prelude, an Engine global, a
-    /// reserved name, or a frontmatter tool alias already holds.
+    /// or if it defines a global that another prelude, an Engine global, or
+    /// a reserved name already holds.
     /// The failure happens when the first section VM is set up, before the
     /// run issues any effect.
     #[must_use]
@@ -89,21 +86,13 @@ impl Environment {
     /// Prepares the caller's context to run `prompt` and reports what the
     /// caller must still satisfy.
     ///
-    /// `prepare` copies the catalog and the preludes onto `ctx`, fills the
-    /// prompt's tool slots, and binds its model roles. It returns the
-    /// enriched context together with the report. It uses the context's
-    /// filesystem as given, because the caller builds the run's whole
-    /// filesystem, including its real directories and the declared store.
-    ///
-    /// Tool slots fill against the catalog. An exact slot fills by
-    /// identity, and the first segment of its path names its Plugin. If
-    /// that Plugin is absent from the catalog, the Plugin is listed in
-    /// [`Requirements::missing_required`]. If the Plugin is in the catalog
-    /// but the named tool is absent, the tool is listed in
-    /// [`Requirements::missing_tools`]. Every fill is recorded in the
-    /// context's tool bindings. The caller checks before `prepare` that
-    /// each Plugin the prompt declares or slots can serve, and merges that
-    /// report into the one `prepare` returns.
+    /// `prepare` copies the catalog and the preludes onto `ctx` and binds
+    /// the prompt's model roles. It returns the enriched context together
+    /// with the report. It uses the context's filesystem as given, because
+    /// the caller builds the run's whole filesystem, including its real
+    /// directories and the declared store. The caller checks before
+    /// `prepare` that each Plugin the prompt declares can serve, and merges
+    /// that report into the one `prepare` returns.
     ///
     /// Every declared model role binds to the context's current model.
     /// `prepare` then checks each role's hard keywords (`thinking`,
@@ -120,7 +109,6 @@ impl Environment {
         let mut requirements = Requirements::default();
         ctx.tools = self.tools.clone();
         ctx.preludes.clone_from(&self.preludes);
-        ctx.tool_bindings = fill_tool_bindings(prompt, &ctx.tools, &mut requirements);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }

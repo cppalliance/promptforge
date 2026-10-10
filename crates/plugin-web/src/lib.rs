@@ -9,9 +9,10 @@
 //! under.
 //!
 //! The Plugin has no prelude, so declaring it, as in `plugins: [web]`,
-//! only makes it required. A prompt reaches the tools by binding one in
-//! its `tools:` frontmatter, as in `fetch: web/fetch`, or, when it does
-//! not declare the Plugin, by adding them from `tools.offered()`.
+//! only makes it required. A prompt reaches the tools by id from Lua,
+//! offering one to the model with `tools.offer("web/fetch")` or calling it
+//! with `tools.call("web/search", ...)`, whether or not it declares the
+//! Plugin.
 //!
 //! The Host provides two Host-wide services beside the Plugin. Its
 //! [`SearchProvider`] goes under the key [`SEARCH_PROVIDER`], and the
@@ -19,7 +20,7 @@
 //! Plugin contract's [`promptforge_plugin::TOKIO_RUNTIME`] service.
 //! Install reads both; when either is missing, the Plugin is installed as
 //! unavailable, no run receives its tools, and a prompt that declares it
-//! or binds one of its tools is refused naming the missing service.
+//! is refused naming the missing service.
 //!
 //! The fetch tool is security-critical. The model supplies the URL, so the
 //! tool is the server-side request forgery (SSRF) boundary between an

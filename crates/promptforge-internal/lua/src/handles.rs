@@ -1,5 +1,6 @@
 //! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua.
 
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
 use super::{Error, Json, Mutex, Result, ToolId, Value};
@@ -20,18 +21,19 @@ pub enum ToolOutputKind {
     Structured,
 }
 
-/// One prompt-local alias bound to one stable live tool identity, holding
-/// the tool's data - its schema, description, and output kind - and never
-/// its implementation.
+/// One catalog tool bound under the name a model sees, holding the tool's
+/// data - its schema, description, and output kind - and never its
+/// implementation.
 ///
 /// Run-time execution (schema preparation, script dispatch) reads the
 /// binding alone; a call is issued as an effect naming the identity, and
 /// performing it is the Harness's job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolBinding {
-    /// The exact prompt-local alias.
+    /// The model-facing name: an offered tool's wire name, or the full id
+    /// of a catalog tool a script reaches without an offer.
     pub alias: String,
-    /// The slot's description: the tool's own.
+    /// The tool's own catalog description.
     pub description: String,
     /// The selected stable live identity.
     pub id: ToolId,
@@ -49,9 +51,9 @@ pub struct ToolBinding {
 }
 
 impl ToolBinding {
-    /// Binds `alias` to the tool `descriptor` describes: the slot's
-    /// description is the tool's own, the output kind follows the
-    /// descriptor's structured-output flag, and no override is set.
+    /// Binds `alias` to the tool `descriptor` describes: the description is
+    /// the tool's own, the output kind follows the descriptor's
+    /// structured-output flag, and no override is set.
     #[must_use]
     pub fn from_descriptor(alias: &str, descriptor: &ToolDescriptor) -> Self {
         Self {
@@ -69,8 +71,8 @@ impl ToolBinding {
     }
 
     /// Builds a binding for a test double: the identity and schema come
-    /// from the descriptor, the slot's description is `description`, with
-    /// no override.
+    /// from the descriptor, the description is `description`, with no
+    /// override.
     ///
     /// A test helper for `promptforge-engine`'s executor tests, so it exists
     /// only under `test-support`.
@@ -83,13 +85,13 @@ impl ToolBinding {
         }
     }
 
-    /// Returns the exact prompt-local alias.
+    /// Returns the model-facing name.
     #[must_use]
     pub fn alias(&self) -> &str {
         &self.alias
     }
 
-    /// Returns the declared capability description.
+    /// Returns the tool's catalog description.
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
@@ -137,18 +139,16 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     }
 }
 
-/// The run's tool set: the frontmatter's filled tool slots, the
-/// prompt-wide `always` aliases, and the offering.
+/// The run's tool set: the declared plugins, the prompt-wide offers, and
+/// every catalog tool the run can offer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
-    /// The prompt-level bindings in declaration order.
-    pub bindings: Vec<ToolBinding>,
-    /// The prompt-wide `always` aliases in declaration order.
+    /// The plugins the frontmatter declares, in declaration order.
+    pub declared: Vec<PluginId>,
+    /// The wire names `tools.always_offer` recorded, in first-offer order.
     pub always: Vec<String>,
-    /// The offering: the tools of Plugins the prompt doesn't declare, in
-    /// tool id order, each bound under its model-facing name. These never
-    /// become Lua globals and enter a section's scope only through
-    /// `tools.add`.
+    /// Every catalog tool the run can offer, in id order, each bound under
+    /// its wire name.
     pub offered: Vec<ToolBinding>,
 }
 
@@ -160,44 +160,38 @@ impl ToolSet {
     #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn for_test(
-        bindings: Vec<ToolBinding>,
+        declared: Vec<PluginId>,
         always: Vec<String>,
         offered: Vec<ToolBinding>,
     ) -> Self {
-        Self::from_parts(bindings, always, offered)
+        Self::from_parts(declared, always, offered)
     }
 
     /// Reassembles a set from owned snapshots of its three lists (the
     /// [`ToolView`] reads).
     #[must_use]
     pub fn from_parts(
-        bindings: Vec<ToolBinding>,
+        declared: Vec<PluginId>,
         always: Vec<String>,
         offered: Vec<ToolBinding>,
     ) -> Self {
         Self {
-            bindings,
+            declared,
             always,
             offered,
         }
     }
 
-    /// Returns bindings in declaration order.
+    /// Returns the declared plugins in declaration order.
     #[must_use]
-    pub fn bindings(&self) -> &[ToolBinding] {
-        &self.bindings
+    pub fn declared(&self) -> &[PluginId] {
+        &self.declared
     }
 
-    /// Returns prompt-wide aliases in declaration order.
+    /// Returns the prompt-wide wire names in first-offer order.
     #[must_use]
     pub fn always(&self) -> &[String] {
         &self.always
-    }
-
-    /// Returns the binding for `alias`, if it was declared.
-    #[must_use]
-    pub fn binding(&self, alias: &str) -> Option<&ToolBinding> {
-        self.bindings.iter().find(|binding| binding.alias == alias)
     }
 
     /// Returns the offering in tool id order.
@@ -206,10 +200,17 @@ impl ToolSet {
         &self.offered
     }
 
-    /// Returns the offered binding under the model-facing `name`, if any.
+    /// The offered binding whose wire name or canonical id is `name`. Wire
+    /// names and local aliases never contain `/` and ids always do, so a
+    /// name matches at most one way.
     #[must_use]
     pub fn offered_binding(&self, name: &str) -> Option<&ToolBinding> {
-        self.offered.iter().find(|binding| binding.alias == name)
+        if name.contains('/') {
+            let id = ToolId::parse(name).ok()?;
+            self.offered.iter().find(|binding| binding.id == id)
+        } else {
+            self.offered.iter().find(|binding| binding.alias == name)
+        }
     }
 }
 
@@ -217,18 +218,19 @@ impl ToolSet {
 ///
 /// The run context shares the set as `Arc<dyn ToolView>`; section VMs share
 /// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, with
-/// `tools.always` the only writer (a prompt-wide fact). Every method locks
-/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
-/// call.
+/// `tools.always_offer` the only writer (a prompt-wide fact). Every method
+/// locks briefly and returns an owned snapshot: a mutex guard cannot
+/// outlive the call.
 pub trait ToolView: Send + Sync {
-    /// Returns an owned snapshot of the bindings in declaration order.
+    /// Returns an owned snapshot of the declared plugins in declaration
+    /// order.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn bindings(&self) -> Result<Vec<ToolBinding>>;
+    fn declared(&self) -> Result<Vec<PluginId>>;
 
-    /// Returns an owned snapshot of the prompt-wide `always` aliases in
-    /// declaration order.
+    /// Returns an owned snapshot of the prompt-wide wire names in
+    /// first-offer order.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
@@ -249,8 +251,8 @@ fn lock_tool_set(set: &Mutex<ToolSet>) -> Result<std::sync::MutexGuard<'_, ToolS
 }
 
 impl ToolView for Mutex<ToolSet> {
-    fn bindings(&self) -> Result<Vec<ToolBinding>> {
-        Ok(lock_tool_set(self)?.bindings.clone())
+    fn declared(&self) -> Result<Vec<PluginId>> {
+        Ok(lock_tool_set(self)?.declared.clone())
     }
 
     fn always(&self) -> Result<Vec<String>> {

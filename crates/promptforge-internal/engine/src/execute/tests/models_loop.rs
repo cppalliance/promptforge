@@ -259,7 +259,7 @@ async fn models_loop_dispatches_local_and_bound_tools() {
         resp_text("tools done"),
     ]);
     let md = loop_prompt(
-        "tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -297,7 +297,7 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
         "local msgs = messages.new()\n\
          msgs:user('first')\n\
          models.loop(msgs)\n\
-         tools.add('echo')\n\
+         tools.offer('tools/echo')\n\
          msgs:user('second')\n\
          models.loop(msgs)\n\
          assert(msgs[#msgs].content == 'scoped in', 'the second loop converged')\n\
@@ -305,7 +305,7 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
     );
     let prompt = parse(&md);
     // Nothing always-scoped: the first call advertises no tools, the
-    // `tools.add` between calls scopes `echo` in for the second.
+    // `tools.offer` between calls scopes `echo` in for the second.
     let tools = FixtureTools::new(
         vec![fixture_binding(
             "echo",
@@ -328,12 +328,12 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
     );
     assert!(
         bodies[0].tools.is_empty(),
-        "the first call predates the tools.add: {bodies:?}"
+        "the first call predates the tools.offer: {bodies:?}"
     );
     assert_eq!(
         bodies[1].tools[0].name(),
         "echo",
-        "the second call advertises the newly added tool: {bodies:?}"
+        "the second call advertises the newly offered tool: {bodies:?}"
     );
 }
 
@@ -386,7 +386,7 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
         "local msgs = messages.new()\n\
          msgs:user('grab twice')\n\
          local seen = {}\n\
-         tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            seen[#seen + 1] = #msgs\n\
            for _, m in ipairs(msgs) do\n\
              assert(m.tool_calls == nil, 'no assistant call record is visible mid-batch')\n\

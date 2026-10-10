@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use promptforge::effect::ToolCallOrigin;
 use promptforge::plugins::Prelude;
-use promptforge::prompt::ToolSlot;
 use promptforge::tools::{
     ToolCatalog, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
@@ -126,24 +125,11 @@ impl HostRunContext {
     }
 
     /// What the snapshot cannot meet for `prompt`, for each Plugin it
-    /// declares or names in a tool slot: one not installed, one that
-    /// failed to build, and one whose needs the run lacks.
+    /// declares: one not installed, one that failed to build, and one
+    /// whose needs the run lacks.
     pub(super) fn requirements(&self, prompt: &Prompt) -> Requirements {
-        let frontmatter = prompt.frontmatter();
-        let slotted = frontmatter.tools().iter().filter_map(|(_alias, slot)| {
-            let ToolSlot::Exact(tool) = slot else {
-                return None;
-            };
-            Some(tool.plugin())
-        });
-        let mut named: Vec<PluginId> = Vec::new();
-        for name in frontmatter.plugins().iter().cloned().chain(slotted) {
-            if !named.contains(&name) {
-                named.push(name);
-            }
-        }
         let mut requirements = Requirements::default();
-        for name in named {
+        for name in prompt.frontmatter().plugins().iter().cloned() {
             match self.plugins.get(&name) {
                 None => requirements.missing_required.push(name),
                 Some(RunPlugin::Unavailable(reason)) => requirements

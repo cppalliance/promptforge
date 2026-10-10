@@ -5,9 +5,6 @@ promptforge: 0
 plugins:
   - web
   - user-input
-tools:
-  fetch: web/fetch
-  search: web/search
 models:
   chat:
     min_context: 32768
@@ -23,14 +20,13 @@ a selection change takes effect on the next run.
 
 ```lua
 models.default("chat")
-tools.always("fetch")
-tools.always("search")
+tools.always_offer({"web/fetch", "web/search"})
 ```
 
 ## Conversation
 
 ```lua
-tools.add(tools.offered())
+tools.offer(tools.extras())
 local history = messages.new()
 while true do
     local text = input.ask()

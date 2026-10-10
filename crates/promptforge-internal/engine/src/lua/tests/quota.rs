@@ -37,7 +37,7 @@ const ROUND_INSTRUCTION_FLOOR: u64 = 2;
 /// cost rather than the one-time argument decode.
 const MEASURED_ROUNDS: i64 = 3;
 
-/// A completed round that requested one `echo` call.
+/// A completed round that requested one `tools_echo` call.
 fn tool_call_round() -> Answer<Error> {
     Answer::Chat(Ok(Box::new(ChatResult {
         overflow: false,
@@ -46,7 +46,7 @@ fn tool_call_round() -> Answer<Error> {
         empty_detail: None,
         tool_calls: Some(vec![ToolCallEvent {
             id: "call_1".to_owned(),
-            name: "echo".to_owned(),
+            name: "tools_echo".to_owned(),
             arguments: json!({ "value": "hi" }),
             tool: None,
         }]),
@@ -112,7 +112,7 @@ fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
         let yielded = resume_with(&vm, &thread, tool_call_round());
         match parse_request(&vm, yielded) {
             Request::ToolCall { alias, call_id, .. } => {
-                assert_eq!(alias, "echo");
+                assert_eq!(alias, "tools_echo");
                 assert_eq!(call_id.as_deref(), Some("call_1"));
             }
             other => panic!("the loop yields the model's tool call, got {other:?}"),

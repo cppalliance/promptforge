@@ -42,7 +42,7 @@ fn binding(alias: &str, tool: &ToolDescriptor) -> ToolBinding {
 #[test]
 fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
     let recorder = Recorder::default();
-    let counts = ToolCallCounts::new(["echo".to_owned()]);
+    let counts = ToolCallCounts::new(["tools/echo".to_owned()]);
     let echo = binding("echo", &echo_tool());
     let nonce = nonce();
     let outcome = prepare_dispatch(
@@ -66,9 +66,9 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
         "the untrusted marking survives"
     );
     assert_eq!(
-        counts.get("echo").expect("the counts read"),
+        counts.get("tools/echo").expect("the counts read"),
         Some(1),
-        "preparing the outcome increments the alias count"
+        "preparing the outcome increments the tool's count under its id"
     );
     assert_eq!(
         recorder.kinds(),

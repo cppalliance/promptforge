@@ -48,7 +48,7 @@ fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Run {
         .prepare(&prompt, test_context(EXECUTION).model(model));
     assert!(
         requirements.is_satisfied(),
-        "the fixture prompt's slots fill: {requirements:?}"
+        "the fixture prompt prepares: {requirements:?}"
     );
     Run::new(Arc::new(prompt), "", ctx)
 }
@@ -131,18 +131,19 @@ fn two_preludes_defining_one_global_fail_the_run_as_lua_before_its_first_effect(
 }
 
 #[test]
-fn a_prelude_global_named_like_a_frontmatter_tool_alias_fails_the_run() {
-    let md = EFFECT_FIRST.replace(
-        "promptforge: 0\n",
-        "promptforge: 0\nplugins:\n  - tools\ntools:\n  echo: tools/echo\n",
-    );
-    assert_fails_before_any_effect(
-        &md,
-        vec![prelude("echo", "echo = {}")],
-        &[
-            "Plugin `echo`: its prelude defines the global `echo`",
-            "which the prompt's frontmatter binds as a tool alias",
-        ],
+fn a_prelude_global_named_like_an_offered_tools_wire_name_installs() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n\
+        # Preludes\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tools_echo .. '|' .. tools.get('tools/echo').id\n```\n";
+    let (result, _) = drive_recorded(prelude_run(
+        md,
+        vec![prelude("echoes", "tools_echo = 'mine'")],
+    ));
+    assert_eq!(
+        succeeded(result),
+        "mine|tools/echo",
+        "no tool is a global, so the prelude's global and the tool sit side by side"
     );
 }
 
@@ -252,7 +253,7 @@ fn a_tool_call_made_inside_a_prelude_function_records_a_script_caller() {
         records,
         vec![EffectRecord::ToolCall {
             tool: ToolId::parse("tools/echo").expect("a valid id"),
-            alias: "tools/echo".to_owned(),
+            alias: "tools_echo".to_owned(),
             args: json!({ "value": "hi" }),
             origin: ToolCallOrigin {
                 execution: EXECUTION.to_owned(),

@@ -232,40 +232,40 @@ return 'epilog result'\n\
 }
 
 #[tokio::test]
-async fn add_without_h1_bindings_fails_the_run_loudly() {
-    // Input with no shared library goes through the same validated VM with
-    // empty frozen bindings, so the alias is rejected.
+async fn offer_over_an_empty_catalog_fails_the_run_loudly() {
+    // Input with no shared library goes through the same validated VM over
+    // an empty offering, so the id is rejected.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
-## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
+## Only\n\n```lua\ntools.offer('web/search')\n```\n\nThis prose must not reach a model.\n";
     let prompt = fixture(md);
     let error = run(&prompt, "", &[], &TestStore::new(), silent())
         .await
-        .expect_err("an undeclared alias must fail the run");
+        .expect_err("an unoffered id must fail the run");
     assert!(
         error
             .to_string()
-            .contains("is neither a bound tool slot nor an offered tool"),
-        "the error must report the missing slot: {error}"
+            .contains("tools.offer: \"web/search\" is not a catalog tool in this run"),
+        "the error must report the missing tool: {error}"
     );
 }
 
 #[tokio::test]
-async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
-    // A prompt whose shared library declares nothing closes over empty frozen
-    // bindings, so tools.add in a prologue is rejected the same way.
+async fn offer_with_an_empty_shared_library_fails_the_run_loudly() {
+    // A prompt whose shared library declares nothing runs over the same
+    // empty offering, so tools.offer in a prologue is rejected the same way.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
-## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
+## Only\n\n```lua\ntools.offer('web/search')\n```\n\nThis prose must not reach a model.\n";
     let error = run(&fixture(md), "", &[], &TestStore::new(), silent())
         .await
-        .expect_err("an undeclared alias must fail the run");
+        .expect_err("an unoffered id must fail the run");
     assert!(
         error
             .to_string()
-            .contains("is neither a bound tool slot nor an offered tool"),
-        "the error must report the missing slot: {error}"
+            .contains("tools.offer: \"web/search\" is not a catalog tool in this run"),
+        "the error must report the missing tool: {error}"
     );
 }
 

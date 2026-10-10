@@ -156,7 +156,7 @@ fn resp_batch(calls: &[(&str, &str, &str)]) -> ScriptedReply {
 fn grab_block(setup: &str, handler: &str) -> String {
     format!(
         "{setup}\
-         tools.add_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
+         tools.offer_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
            {handler}\n\
          end)\n\
          local msgs = messages.new()\n\
