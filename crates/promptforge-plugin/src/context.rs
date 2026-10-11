@@ -16,10 +16,13 @@ mod tests;
 ///
 /// The access is the call's own identity, forked from the calling chain's,
 /// so the chain's earlier work happens before the call's operations and
-/// the call's operations before the chain's next step. It is rooted at
-/// `/`. The context borrows everything for the call alone, so a Plugin
-/// cannot store the access, move it into a spawned task or thread, or keep
-/// it past the call.
+/// the call's operations before the chain's next step. Calls a model asks
+/// for in one round fork their identities from the chain together, so they
+/// are concurrent with each other: one call's write to a path conflicts
+/// with a sibling's read or write of it, as between fanout arms. It is
+/// rooted at `/`. The context borrows everything for the call alone, so a
+/// Plugin cannot store the access, move it into a spawned task or thread,
+/// or keep it past the call.
 ///
 /// The services are the run's, such as its input broker. The Host-wide
 /// services never reach a call; a Plugin keeps any it needs from its
