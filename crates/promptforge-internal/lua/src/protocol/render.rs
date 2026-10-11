@@ -133,6 +133,9 @@ impl<E: ErrorValue> Answer<E> {
                 Value::Function(local_handler(lua, &alias)?),
                 lua.to_value(&args)?,
             ],
+            Answer::ToolCallsResult(Ok(texts)) => {
+                vec![Value::Table(lua.create_sequence_from(texts)?)]
+            }
             // Opaque to Lua: only the loop's step reads it, by taking it
             // back out whole.
             Answer::Chat(Ok(result)) => vec![Value::UserData(lua.create_userdata(*result)?)],
@@ -149,6 +152,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
             | Answer::ToolCallResult(Err(error))
+            | Answer::ToolCallsResult(Err(error))
             | Answer::Chat(Err(error))
             | Answer::Store(Err(error)) => {
                 let table = error_table(lua, &error)?;

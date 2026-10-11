@@ -15,6 +15,7 @@
 //! that action.
 
 use mlua::{AnyUserData, Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
+use promptforge_types::metrics::ToolCallEvent;
 
 use crate::error::{Error, Result};
 use crate::error_value::{ErrorKind, error_table, normalized};
@@ -174,6 +175,7 @@ fn read_input(
                 .take::<ChatResult>()
                 .map(Box::new)
         })?)),
+        Phase::Batching => Ok(Input::Batched(answer(lua, ok, value, texts)?)),
         Phase::Calling => {
             let handler = next();
             if ok && !handler.is_nil() {
@@ -216,11 +218,27 @@ fn act(lua: &Lua, then: Then<Value>) -> mlua::Result<MultiValue> {
             let fields = [("messages", messages), ("handle", handle)];
             ("yield", vec![request(lua, "chat", fields)?])
         }
-        Then::ToolCall { call, turn } => {
+        Then::ToolCalls { calls, turn } => {
+            let entries = lua.create_table_with_capacity(calls.len(), 0)?;
+            for (position, call) in calls.iter().enumerate() {
+                let entry = lua.create_table()?;
+                for (name, value) in call_fields(lua, call)? {
+                    entry.raw_set(name, value)?;
+                }
+                entries.raw_set(position + 1, entry)?;
+            }
             let fields = [
-                ("alias", Value::String(lua.create_string(&call.name)?)),
-                ("args", lua.to_value(&call.arguments)?),
-                ("call_id", Value::String(lua.create_string(&call.id)?)),
+                ("calls", Value::Table(entries)),
+                ("turn", Value::Integer(i64::from(turn))),
+            ];
+            ("yield", vec![request(lua, "tool_calls", fields)?])
+        }
+        Then::ToolCall { call, turn } => {
+            let [alias, args, call_id] = call_fields(lua, &call)?;
+            let fields = [
+                alias,
+                args,
+                call_id,
                 ("turn", Value::Integer(i64::from(turn))),
             ];
             ("yield", vec![request(lua, "tool_call", fields)?])
@@ -249,6 +267,16 @@ fn act(lua: &Lua, then: Then<Value>) -> mlua::Result<MultiValue> {
     let mut action = MultiValue::from_vec(values);
     action.push_front(Value::String(lua.create_string(tag)?));
     Ok(action)
+}
+
+/// A requested call's `alias`, `args`, and `call_id` fields, as both the
+/// `tool_calls` entries and the `tool_call` request carry them.
+fn call_fields(lua: &Lua, call: &ToolCallEvent) -> mlua::Result<[(&'static str, Value); 3]> {
+    Ok([
+        ("alias", Value::String(lua.create_string(&call.name)?)),
+        ("args", lua.to_value(&call.arguments)?),
+        ("call_id", Value::String(lua.create_string(&call.id)?)),
+    ])
 }
 
 /// A request table as the shim built it: `op` and the given fields, each
@@ -283,6 +311,17 @@ fn text(value: Value) -> mlua::Result<String> {
         Value::String(text) => Ok(text.to_str()?.to_owned()),
         _ => Err(malformed("a loop answer's text is not a string")),
     }
+}
+
+/// A sequence of Lua strings' texts; any other value is a malformed
+/// answer.
+fn texts(value: Value) -> mlua::Result<Vec<String>> {
+    let Value::Table(sequence) = value else {
+        return Err(malformed("a batch answer is not a sequence"));
+    };
+    (1..=sequence.raw_len())
+        .map(|index| text(sequence.raw_get(index)?))
+        .collect()
 }
 
 /// Lua's truth test: everything but nil and false.

@@ -118,6 +118,11 @@ pub(super) struct Chain {
     /// notices instead of delivering the member to the shim. `None`
     /// otherwise.
     pub(super) awaiting: Option<AwaitTasks>,
+    /// The answers of the `tool_calls` batch the chain is parked on, in
+    /// call order: `None` while a call is in flight, its text or failure
+    /// once it lands. The chain is answered once no slot is open. Empty
+    /// while the chain is not parked on a batch.
+    pub(super) batch: Vec<Option<Result<String>>>,
     /// What the chain's suspended request is parked on, as `tasks.status`
     /// reports it (`chat`, `tool_call`, `store`, `timer`, `tasks`, `call`,
     /// or `queued` while the chain waits for a

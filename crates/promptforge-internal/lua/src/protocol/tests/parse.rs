@@ -1,5 +1,5 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `tool_call`, `local_tool_done`), and the
+//! `call`, `tool_call`, `tool_calls`, `local_tool_done`), and the
 //! malformed-yield rejections shared by every op. The task-operation
 //! requests (`spawn`, `timer`, `concurrency`) are in `parse_tasks`.
 
@@ -283,6 +283,38 @@ fn a_tool_call_with_an_unrepresentable_args_table_is_the_calls_error() {
             assert_eq!(message, "args must be a JSON-representable table");
         }
         other => panic!("expected the args call error, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_tool_calls_yield_missing_its_turn_a_table_per_call_or_a_call_id_is_a_malformed_yield() {
+    // Only the loop's step yields `tool_calls`, so a missing or wrong turn,
+    // entry, or call id is a corrupted yield, not a catchable call error.
+    let lua = Lua::new();
+    let whole = "{ op = 'tool_calls', turn = 7, calls = { { alias = 'echo', call_id = 'c1' } } }";
+    let table = lua_table(&lua, whole);
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::ToolCalls { calls, turn } => {
+            assert_eq!(turn, 7);
+            let echo = ToolCallRecord {
+                id: "c1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: json!({}),
+            };
+            assert_eq!(calls, [echo]);
+        }
+        other => panic!("expected a tool_calls request, got {other:?}"),
+    }
+    for source in [
+        "{ op = 'tool_calls', calls = { { alias = 'echo', call_id = 'c1' } } }",
+        "{ op = 'tool_calls', turn = 7 }",
+        "{ op = 'tool_calls', turn = 7, calls = 'c1' }",
+        "{ op = 'tool_calls', turn = 7, calls = { 'c1' } }",
+        "{ op = 'tool_calls', turn = 7, calls = { { alias = 'echo' } } }",
+        "{ op = 'tool_calls', turn = 7, calls = { { alias = 'echo', call_id = 7 } } }",
+    ] {
+        let table = lua_table(&lua, source);
+        assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
     }
 }
 

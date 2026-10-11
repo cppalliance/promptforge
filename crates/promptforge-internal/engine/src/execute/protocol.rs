@@ -12,5 +12,5 @@
 
 pub(crate) use promptforge_lua::{
     Answer, ChatResult, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request,
-    TaskDelivery, TaskStatus, ToolCallOutcome, VfsOp, VfsOutcome, YieldParse,
+    TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
 };

@@ -1,7 +1,7 @@
 //! The yield shims installed on a scheduler-mode section VM produce
 //! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
 //! `tools.call` in their id and tool-object forms, the local tool
-//! handshake, the loop's per-call requesting turn, a model handle's
+//! handshake, the loop's batch and its requesting turn, a model handle's
 //! `infer` method, and the `infer` and `loop` methods a model handle
 //! carries.
 
@@ -252,8 +252,8 @@ fn a_local_tool_handler_runs_inside_the_block_coroutine() {
 
 #[test]
 fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
-    // A round requesting two calls under turn 7: each `tool_call` yield
-    // carries that turn beside its call id, so a call reports the round
+    // A round requesting two calls under turn 7: one `tool_calls` yield
+    // carries both calls and that turn, so each call reports the round
     // that requested it however far the counter moved in between.
     let vm = scheduler_vm_with_tools(&test_models(), &test_tools(), None);
     let (thread, yielded) = start(
@@ -276,25 +276,23 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
         finish_reason: Some("tool_calls".to_owned()),
         turn: 7,
     };
-    let mut yielded = resume_with(&vm, &thread, Answer::Chat(Ok(Box::new(round))));
-    for expected in ["c1", "c2"] {
-        match parse_request(&vm, yielded) {
-            Request::ToolCall { call_id, turn, .. } => {
-                assert_eq!(call_id.as_deref(), Some(expected));
-                assert_eq!(
-                    turn,
-                    Some(7),
-                    "{expected} carries the requesting round's turn"
-                );
-            }
-            other => panic!("the loop yields the model's tool call, got {other:?}"),
+    let yielded = resume_with(&vm, &thread, Answer::Chat(Ok(Box::new(round))));
+    match parse_request(&vm, yielded) {
+        Request::ToolCalls { calls, turn } => {
+            let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
+            let args: Vec<serde_json::Value> =
+                calls.iter().map(|call| call.arguments.clone()).collect();
+            assert_eq!(ids, ["c1", "c2"]);
+            assert_eq!(args, [json!({ "value": "c1" }), json!({ "value": "c2" })]);
+            assert_eq!(turn, 7, "the batch carries the requesting round's turn");
         }
-        yielded = resume_with(
-            &vm,
-            &thread,
-            Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
-        );
+        other => panic!("the loop yields the round's calls, got {other:?}"),
     }
+    let yielded = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallsResult(Ok(vec!["echoed".to_owned(), "echoed".to_owned()])),
+    );
     assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
 }
 

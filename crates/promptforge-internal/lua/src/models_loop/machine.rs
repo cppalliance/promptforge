@@ -4,6 +4,13 @@
 //! machine pushes every record onto the list itself, and every Lua value
 //! it only passes along is an opaque `V`, so the unit tests run over a
 //! plain `MessageList` with any `V`.
+//!
+//! The batch rule: every call a round left unanswered goes out as one
+//! `tool_calls` request, even a lone one, and a call goes out alone as a
+//! `tool_call` request only when the scheduler's answer stops short of
+//! it. The scheduler decides which calls run together, so a call's route
+//! never depends on how many calls share its round. The round's records
+//! append only once every call has its result, in the model's order.
 
 use std::collections::BTreeMap;
 
@@ -50,7 +57,8 @@ pub(super) struct Machine<V> {
     /// The compactor argument, or `compactors.fail` as read when the
     /// call began, which is not type-checked, as in the shim.
     compactor: V,
-    /// The current batch's turn, sent back on every `tool_call` request.
+    /// The current batch's turn, sent back on every `tool_calls` and
+    /// `tool_call` request.
     turn: u32,
     /// The current batch's calls, in the order the model listed them.
     calls: Vec<ToolCallEvent>,
@@ -68,7 +76,10 @@ pub(super) enum Phase<V> {
     Chatting,
     /// The compactor's raw `pcall`: `(ok, value)`.
     Compacting,
-    /// The `tool_call` answer for the batch's next call:
+    /// The `tool_calls` answer for the batch's unanswered calls:
+    /// `(ok, texts)`.
+    Batching,
+    /// The `tool_call` answer for the call the scheduler stopped at:
     /// `(ok, result, handler, args)`.
     Calling,
     /// The handler's raw `pcall`: `(ok, value)`.
@@ -86,6 +97,9 @@ pub(super) enum Phase<V> {
 pub(super) enum Input<V> {
     /// The `chat` answer, or the value to raise.
     Answered(std::result::Result<Box<ChatResult>, V>),
+    /// A batch's texts, one per call the scheduler issued, or the value
+    /// to raise.
+    Batched(std::result::Result<Vec<String>, V>),
     /// A bound tool's or a task built-in's text, or the value to raise.
     Dispatched(std::result::Result<String, V>),
     /// A local tool's handler and its arguments table.
@@ -106,6 +120,12 @@ pub(super) enum Input<V> {
 pub(super) enum Then<V> {
     /// Yield `{ op = "chat", messages = messages, handle = handle }`.
     Chat { messages: V, handle: Option<V> },
+    /// Yield `{ op = "tool_calls", calls = { { alias = call.name, args =
+    /// call.arguments, call_id = call.id }, ... }, turn = turn }`.
+    ToolCalls {
+        calls: Vec<ToolCallEvent>,
+        turn: u32,
+    },
     /// Yield `{ op = "tool_call", alias = call.name, args = call.arguments,
     /// call_id = call.id, turn = turn }`.
     ToolCall { call: ToolCallEvent, turn: u32 },
@@ -177,6 +197,7 @@ impl<V: Clone> Machine<V> {
                 Err(failure) if cancelled => Then::Raise(failure),
                 Err(failure) => Then::RaiseNormalized(failure),
             },
+            (Phase::Batching, Input::Batched(Ok(texts))) => self.take_batch(texts),
             (Phase::Calling, Input::Dispatched(Ok(text)))
             | (Phase::Reporting(None), Input::Reported(Ok(text))) => {
                 self.results.push(text);
@@ -199,6 +220,7 @@ impl<V: Clone> Machine<V> {
             },
             (Phase::Reporting(Some(failure)), Input::Reported(_))
             | (Phase::Chatting, Input::Answered(Err(failure)))
+            | (Phase::Batching, Input::Batched(Err(failure)))
             | (Phase::Calling, Input::Dispatched(Err(failure)))
             | (Phase::Reporting(None), Input::Reported(Err(failure))) => Then::Raise(failure),
             _ => Then::RaiseNew(raised(ErrorKind::Internal, UNEXPECTED_INPUT)),
@@ -257,13 +279,36 @@ impl<V: Clone> Machine<V> {
         Then::RaiseNew(empty)
     }
 
-    /// The batch's next unanswered call, or the batch's records and the
-    /// next round once every call has its result.
+    /// Takes a batch answer's texts, one per call the scheduler issued.
+    /// More texts than unanswered calls is a crate bug. Fewer means the
+    /// scheduler stopped at the next call, which goes out alone.
+    fn take_batch(&mut self, texts: Vec<String>) -> Then<V> {
+        let unanswered = self.calls.len() - self.results.len();
+        if texts.len() > unanswered {
+            return Then::RaiseNew(raised(ErrorKind::Internal, UNEXPECTED_INPUT));
+        }
+        let short = texts.len() < unanswered;
+        self.results.extend(texts);
+        match self.calls.get(self.results.len()) {
+            Some(call) if short => {
+                self.phase = Phase::Calling;
+                Then::ToolCall {
+                    call: call.clone(),
+                    turn: self.turn,
+                }
+            }
+            _ => self.next_call(),
+        }
+    }
+
+    /// The batch's unanswered calls as one `tool_calls`, or the batch's
+    /// records and the next round once every call has its result.
     fn next_call(&mut self) -> Then<V> {
-        if let Some(call) = self.calls.get(self.results.len()) {
-            self.phase = Phase::Calling;
-            return Then::ToolCall {
-                call: call.clone(),
+        let unanswered = self.calls.get(self.results.len()..).unwrap_or_default();
+        if !unanswered.is_empty() {
+            self.phase = Phase::Batching;
+            return Then::ToolCalls {
+                calls: unanswered.to_vec(),
                 turn: self.turn,
             };
         }

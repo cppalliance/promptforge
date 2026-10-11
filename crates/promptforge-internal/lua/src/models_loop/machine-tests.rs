@@ -20,6 +20,10 @@ fn show(then: &Then<V>) -> String {
                 call.id, call.name, call.arguments
             )
         }
+        Then::ToolCalls { calls, turn } => {
+            let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
+            format!("tool_calls {}@{turn}", ids.join(","))
+        }
         Then::Compact { compactor, reason } => {
             format!(
                 "compact {compactor} {}",
@@ -89,6 +93,11 @@ fn text(text: &str) -> Input<V> {
     Input::Dispatched(Ok(text.to_owned()))
 }
 
+/// A batch's answer: one text per call the scheduler issued, in order.
+fn batched(texts: &[&str]) -> Input<V> {
+    Input::Batched(Ok(texts.iter().copied().map(str::to_owned).collect()))
+}
+
 /// A raw `pcall`'s `outcome`, under the cancel flag `cancelled`.
 fn called(outcome: Result<V, V>, cancelled: bool) -> Input<V> {
     Input::Called { outcome, cancelled }
@@ -142,7 +151,7 @@ fn a_round_is_judged_overflow_then_calls_then_reply_then_clean_exit_then_empty()
                 overflow: false,
                 ..full.clone()
             },
-            r#"tool_call c1 echo {"id":"c1"}@7"#,
+            "tool_calls c1@7",
         ),
         (
             ChatResult {
@@ -175,17 +184,13 @@ fn a_batch_dispatches_in_order_and_appends_its_records_only_once_complete() {
     let mut machine = chatting(3, &list);
     assert_eq!(
         show(&machine.step(batch(&["c1", "c2"]))),
-        r#"tool_call c1 echo {"id":"c1"}@7"#
-    );
-    assert_eq!(
-        show(&machine.step(text("one"))),
-        r#"tool_call c2 echo {"id":"c2"}@7"#
+        "tool_calls c1,c2@7"
     );
     assert!(
         records(&list).is_empty(),
-        "a half-answered batch adds nothing"
+        "an unanswered batch adds nothing"
     );
-    assert_eq!(show(&machine.step(text("two"))), "chat list -");
+    assert_eq!(show(&machine.step(batched(&["one", "two"]))), "chat list -");
     assert_eq!(show(&machine.step(reply("done"))), "return");
     assert!(matches!(machine.phase(), Phase::Done));
     assert_eq!(
@@ -200,12 +205,45 @@ fn a_batch_dispatches_in_order_and_appends_its_records_only_once_complete() {
 }
 
 #[test]
+fn a_short_batch_answer_sends_the_next_call_alone_then_the_rest_together() {
+    let list = MessageList::default();
+    let mut machine = chatting(3, &list);
+    assert_eq!(
+        show(&machine.step(batch(&["c1", "c2", "c3", "c4"]))),
+        "tool_calls c1,c2,c3,c4@7"
+    );
+    assert_eq!(
+        show(&machine.step(batched(&["one"]))),
+        r#"tool_call c2 echo {"id":"c2"}@7"#
+    );
+    assert_eq!(show(&machine.step(text("two"))), "tool_calls c3,c4@7");
+    assert!(
+        records(&list).is_empty(),
+        "a half-answered batch adds nothing"
+    );
+    assert_eq!(
+        show(&machine.step(batched(&["three", "four"]))),
+        "chat list -"
+    );
+    assert_eq!(
+        records(&list),
+        [
+            "assistant |c1,c2,c3,c4|",
+            "tool one||c1",
+            "tool two||c2",
+            "tool three||c3",
+            "tool four||c4"
+        ]
+    );
+}
+
+#[test]
 fn the_clean_exit_counts_answered_calls_across_batches_and_resets_per_call() {
     let list = MessageList::default();
     let mut machine = chatting(4, &list);
     for id in ["c1", "c2"] {
         machine.step(batch(&[id]));
-        assert_eq!(show(&machine.step(text("ok"))), "chat list -");
+        assert_eq!(show(&machine.step(batched(&["ok"]))), "chat list -");
     }
     assert_eq!(show(&machine.step(stop())), "return");
     assert_eq!(
@@ -226,7 +264,7 @@ fn the_cap_raises_after_the_last_allowed_batch_and_before_another_chat() {
     let mut machine = chatting(1, &list);
     machine.step(batch(&["c1"]));
     assert_eq!(
-        show(&machine.step(text("ok"))),
+        show(&machine.step(batched(&["ok"]))),
         "new tool_loop_exhausted|tool-call loop did not converge"
     );
     assert!(matches!(machine.phase(), Phase::Done));
@@ -262,8 +300,18 @@ fn a_failed_answer_raises_its_value_unchanged() {
     let mut machine = chatting(2, &MessageList::default());
     machine.step(batch(&["c1"]));
     assert_eq!(
+        show(&machine.step(batched(&[]))),
+        r#"tool_call c1 echo {"id":"c1"}@7"#
+    );
+    assert_eq!(
         show(&machine.step(Input::Dispatched(Err("tool")))),
         "raise tool"
+    );
+    let mut machine = chatting(2, &MessageList::default());
+    machine.step(batch(&["c1", "c2"]));
+    assert_eq!(
+        show(&machine.step(Input::Batched(Err("batch")))),
+        "raise batch"
     );
 }
 
@@ -271,6 +319,10 @@ fn a_failed_answer_raises_its_value_unchanged() {
 fn handling(list: &MessageList) -> Machine<V> {
     let mut machine = chatting(2, list);
     machine.step(batch(&["c1"]));
+    assert_eq!(
+        show(&machine.step(batched(&[]))),
+        r#"tool_call c1 echo {"id":"c1"}@7"#
+    );
     let local = Input::Local {
         handler: "handler",
         args: "args",
@@ -355,5 +407,12 @@ fn an_input_its_phase_does_not_await_raises_internal() {
         show(&machine.step(reply("late"))),
         unexpected,
         "a raise ends the call"
+    );
+    let mut machine = chatting(2, &MessageList::default());
+    machine.step(batch(&["c1"]));
+    assert_eq!(
+        show(&machine.step(batched(&["one", "two"]))),
+        unexpected,
+        "a batch answer holds no more texts than the calls it was sent"
     );
 }

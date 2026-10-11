@@ -393,6 +393,7 @@ mod models_loop_compactors;
 mod models_loop_contract;
 mod observations;
 mod offering;
+mod parallel_tool_calls;
 mod precheck_anchor;
 mod preludes;
 mod provenance;

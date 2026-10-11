@@ -14,20 +14,20 @@ use serde_json::json;
 use promptforge_lua::Error;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult, Request, ToolCallOutcome};
+use crate::execute::protocol::{Answer, ChatResult, Request};
 
 use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, test_tools};
 
 /// The most Lua instructions one model-tool round may spend in the loop
 /// shim's trampoline: from one `chat` yield to the next, through the
-/// `tool_call` yield and the step call after each answer. The trampoline
+/// `tool_calls` yield and the step call after each answer. The trampoline
 /// measured 20 per round when the ceiling was set, so a change that
 /// triples its cost, such as a loop rule moving back into Lua, trips this
 /// while ordinary edits do not.
 const ROUND_INSTRUCTION_CEILING: u64 = 60;
 
 /// The fewest Lua instructions a round can spend in the trampoline: one
-/// per yield in the measured span (the `tool_call` and the next `chat`).
+/// per yield in the measured span (the `tool_calls` and the next `chat`).
 /// A round under this floor means the hook is not firing on the loop
 /// thread, and the test would otherwise pass while showing nothing about
 /// the quota.
@@ -111,16 +111,19 @@ fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
     for _ in 0..=MEASURED_ROUNDS {
         let yielded = resume_with(&vm, &thread, tool_call_round());
         match parse_request(&vm, yielded) {
-            Request::ToolCall { alias, call_id, .. } => {
-                assert_eq!(alias, "tools_echo");
-                assert_eq!(call_id.as_deref(), Some("call_1"));
+            Request::ToolCalls { calls, .. } => {
+                let names: Vec<(&str, &str)> = calls
+                    .iter()
+                    .map(|call| (call.name.as_str(), call.id.as_str()))
+                    .collect();
+                assert_eq!(names, [("tools_echo", "call_1")]);
             }
             other => panic!("the loop yields the model's tool call, got {other:?}"),
         }
         let yielded = resume_with(
             &vm,
             &thread,
-            Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
+            Answer::ToolCallsResult(Ok(vec!["echoed".to_owned()])),
         );
         assert!(
             matches!(parse_request(&vm, yielded), Request::Chat { .. }),
