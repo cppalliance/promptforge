@@ -4,25 +4,25 @@ overview: Inside `models.loop`, send a model round's remaining tool calls to the
 todos:
   - id: machine
     content: "Step 1, Lua crate: Request::ToolCalls over the existing ToolCallRecord, Answer::ToolCallsResult of texts, their parse (reusing parse_tool_call per entry) and render; the machine sends every remaining call together as tool_calls, even one, and a call alone only when the Engine stopped at it"
-    status: pending
+    status: completed
   - id: scheduler
     content: "Step 1, Engine: dispatch_tool_calls issues the leading calls that are neither task built-ins nor local tools, each tagged with its slot; a preparation failure is a filled Err slot that stops issuing; apply fills slots and answers once in call order; abort_subtree orphans every pending effect, sorted by id"
-    status: pending
+    status: completed
   - id: batch-tests
     content: "Step 1: rewrite the eight tests that pin or answer the single-call request after a model reply (seven in machine-tests.rs, one in engine lua/tests/shims.rs), one new machine test plus two one-line extensions, four hand-stepped Engine tests in parallel_tool_calls.rs, one Harness test over HOLD"
-    status: pending
+    status: completed
   - id: fanout
     content: "Step 2: set fanout on the tasks table instead of as a global (two lines in coro.rs); drop fanout from RESERVED_NAMES (61 to 60); four error texts; rename every call site in 25 test files and 5 fixtures; update three exact asserts and tighten three loose ones"
-    status: pending
+    status: completed
   - id: fanout-docs
     content: "Step 2: the doc and comment lines that name the call or the global; language spec edits in ../promptforge-design committed there"
-    status: pending
+    status: completed
   - id: verify
     content: "Each step: both nextest runs, both clippy runs with warnings denied, fmt, docs and facade docs, xtask api --check, build-xtask, docs-claims"
-    status: pending
+    status: completed
   - id: close
     content: "Step 3: mark the vibe/ copy completed and commit Close plan: parallel-tool-calls; nothing is pushed"
-    status: pending
+    status: completed
 isProject: false
 ---
 
