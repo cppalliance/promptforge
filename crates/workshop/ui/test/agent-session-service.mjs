@@ -293,6 +293,69 @@ await assertNoLeaks(lifecycle, () => {
     service.dispose();
   }
 
+  // --- Open waits pin the oldest and advance on each answer -----------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.inputRequired("tok1");
+    wire.fire.inputRequired("tok2");
+    check("two open waits pin the oldest", service.pendingInputToken === "tok1");
+    service.respond("first");
+    check("answering the oldest wait pins the next", service.pendingInputToken === "tok2");
+    check("a wait still open keeps generating off", service.generating === false);
+    service.respond("second");
+    check("answering the last open wait unpins", service.pendingInputToken === null);
+    check("answering the last open wait turns generating on", service.generating === true);
+    check(
+      "each answer spent its own token",
+      isDeepStrictEqual(wire.responses, [
+        ["tok1", "first"],
+        ["tok2", "second"],
+      ]),
+    );
+    service.dispose();
+  }
+
+  // --- A cancelled wait leaves wherever it sits in the open waits ------------
+
+  {
+    const openTwo = () => {
+      const wire = makeWire();
+      const service = new AgentSessionService(wire);
+      wire.fire.inputRequired("tok1");
+      wire.fire.inputRequired("tok2");
+      return { wire, service };
+    };
+    const oldest = openTwo();
+    oldest.wire.fire.inputCancelled("tok1");
+    check("cancelling the oldest wait pins the next", oldest.service.pendingInputToken === "tok2");
+    oldest.service.dispose();
+    const newer = openTwo();
+    newer.wire.fire.inputCancelled("tok2");
+    check("cancelling a newer wait keeps the oldest pinned", newer.service.pendingInputToken === "tok1");
+    newer.service.dispose();
+  }
+
+  // --- A reattach pins the oldest unresolved wait ----------------------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    wire.fire.inputRequired("tok2");
+    wire.fire.session("s1");
+    wire.fire.inputRequired("tok1");
+    wire.fire.inputRequired("tok2");
+    check("the reattach resend pins the oldest unresolved wait", service.pendingInputToken === "tok1");
+    service.respond("first");
+    check("answering after the resend pins the newer wait", service.pendingInputToken === "tok2");
+    service.respond("second");
+    check("two answers drain the resent waits", service.pendingInputToken === null);
+    service.dispose();
+  }
+
   // --- A failed respond keeps the pin and folds a local error ---------------
 
   {
@@ -497,6 +560,10 @@ await assertNoLeaks(lifecycle, () => {
     });
     wire.fire.inputRequired("tok1");
     check("an open wait keeps generating off", service.generating === false);
+    // Each wait closes before its result lands, as it does in the shipped
+    // UI; a cancel, not a respond, so generating is still off and only the
+    // result can turn it on.
+    wire.fire.inputCancelled("tok1");
     wire.fire.event("tool_call_update", "operator answer", { tool_call_id: "c1" });
     check(
       "a tool_call_update answering a model batch call turns generating on",
@@ -504,6 +571,7 @@ await assertNoLeaks(lifecycle, () => {
     );
     wire.fire.inputRequired("tok2");
     check("input_required turns generating off", service.generating === false);
+    wire.fire.inputCancelled("tok2");
     wire.fire.event("user_message", "second turn");
     wire.fire.event("tool_call_update", "stray", { tool_call_id: "c1" });
     check(
@@ -523,6 +591,30 @@ await assertNoLeaks(lifecycle, () => {
     check("a same-session acknowledgment leaves generating alone", service.generating === true);
     wire.fire.session("s2");
     check("an acknowledgment with a new session id turns generating off", service.generating === false);
+    service.dispose();
+  }
+
+  // --- A sibling call's result does not end an open wait --------------------
+
+  {
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    wire.fire.session("s1");
+    wire.fire.event("user_message", "parallel round");
+    wire.fire.event(
+      "tool_call",
+      JSON.stringify([
+        { id: "c1", name: "ask", arguments: {}, tool: "user-input/ask" },
+        { id: "c2", name: "fetch", arguments: {}, tool: "web/fetch" },
+      ]),
+      { reply: 0 },
+    );
+    wire.fire.inputRequired("tok1");
+    wire.fire.event("tool_call_update", "page body", { tool_call_id: "c2" });
+    check("a sibling call's result while a wait is open leaves generating off", service.generating === false);
+    check("a sibling call's result leaves the wait pinned", service.pendingInputToken === "tok1");
+    service.respond("answer");
+    check("answering the open wait after a sibling's result turns generating on", service.generating === true);
     service.dispose();
   }
 

@@ -205,6 +205,12 @@ export class AgentSessionService extends Disposable {
    * streaming under an idle composer.
    */
   private stopped = false;
+  /**
+   * The open wait tokens in the order the server announced them. A
+   * round's calls run in parallel, so several waits can be open at once;
+   * the oldest is the pin the operator answers next.
+   */
+  private openWaits: string[] = [];
   private pinnedToken: string | null = null;
   private working = false;
   private dropped = false;
@@ -263,7 +269,11 @@ export class AgentSessionService extends Disposable {
         // The relaunched agent is waiting: the cancel grace window is over.
         this.stopped = false;
         this.setGenerating(false);
-        this.setPinnedToken(token);
+        // A reattach resend repeats tokens that may already be open.
+        if (!this.openWaits.includes(token)) {
+          this.openWaits.push(token);
+        }
+        this.pinOldestWait();
         if (closed) {
           this._onDidChangeTranscript.fire();
         }
@@ -271,10 +281,10 @@ export class AgentSessionService extends Disposable {
     );
     this._register(
       wire.onInputCancelled((token) => {
-        // Only the announced wait dies; a newer pin stays.
-        if (this.pinnedToken === token) {
-          this.setPinnedToken(null);
-        }
+        // Only the announced wait dies, wherever it sits; the oldest
+        // wait still open keeps or takes the pin.
+        this.openWaits = this.openWaits.filter((open) => open !== token);
+        this.pinOldestWait();
       }),
     );
     this._register(wire.onError((message) => this.foldError(message, null)));
@@ -298,13 +308,14 @@ export class AgentSessionService extends Disposable {
 
   /** The pending wait's token, or null while the agent is working. */
   get pendingInputToken(): string | null {
-    return this.pinnedToken;
+    return this.openWaits[0] ?? null;
   }
 
   /**
    * True while the agent is working on the operator's last message: on
-   * after a send (and after an answered tool call), off when the reply
-   * lands, a wait opens, an error arrives, or a cancel is sent.
+   * after a send or an answered tool call that leaves no wait open, off
+   * when the reply lands, a wait opens, an error arrives, or a cancel is
+   * sent.
    */
   get generating(): boolean {
     return this.working;
@@ -328,17 +339,18 @@ export class AgentSessionService extends Disposable {
   }
 
   /**
-   * Answers the pending wait with the operator's text, byte-exact. The
-   * text never enters the transcript here: the server records it and the
-   * durable `user_message` event renders it, so the view shows exactly
-   * what the log holds. False when no wait is pinned or the socket is
-   * down; a failed send keeps the pin (the wait is still open
-   * server-side) and folds a local error item, because a downed socket
-   * is the one failure the server can never report. A sent answer starts
-   * the turn's work, so `generating` turns on.
+   * Answers the pinned wait - the oldest open one - with the operator's
+   * text, byte-exact. The text never enters the transcript here: the
+   * server records it and the durable `user_message` event renders it,
+   * so the view shows exactly what the log holds. False when no wait is
+   * open or the socket is down; a failed send keeps every open wait (each
+   * is still open server-side) and folds a local error item, because a
+   * downed socket is the one failure the server can never report. A sent
+   * answer spends its token and pins the next oldest wait; `generating`
+   * turns on only once no wait remains open.
    */
   respond(text: string): boolean {
-    const token = this.pinnedToken;
+    const token = this.pendingInputToken;
     if (token === null) {
       return false;
     }
@@ -349,8 +361,11 @@ export class AgentSessionService extends Disposable {
     // The answer restarts the turn's work, so a stop no longer applies.
     this.stopped = false;
     // The token is single-use; the response just spent it.
-    this.setPinnedToken(null);
-    this.setGenerating(true);
+    this.openWaits = this.openWaits.filter((open) => open !== token);
+    this.pinOldestWait();
+    if (this.openWaits.length === 0) {
+      this.setGenerating(true);
+    }
     return true;
   }
 
@@ -378,9 +393,10 @@ export class AgentSessionService extends Disposable {
    * Folds a session acknowledgment. A different session id means a
    * different event log replaying from index zero, so the transcript
    * resets with it; a same-session reattach keeps the transcript (the
-   * socket's cursor already deduplicates the replay). Wait pinning
-   * resets on every acknowledgment: the server resends unresolved waits
-   * right after, so a stale prompt vanishes by its token's absence. The
+   * socket's cursor already deduplicates the replay). The open waits
+   * reset on every acknowledgment: the server resends unresolved waits
+   * right after, in creation order, so the list rebuilds oldest first
+   * and a stale prompt vanishes by its token's absence. The
    * acknowledgment also ends a reconnect.
    */
   private acknowledge(frame: AgentSessionFrame): void {
@@ -394,6 +410,7 @@ export class AgentSessionService extends Disposable {
       this.setGenerating(false);
       this._onDidChangeTranscript.fire();
     }
+    this.openWaits = [];
     this.setPinnedToken(null);
     this.setReconnecting(false);
     this._onDidChangeSession.fire(frame);
@@ -455,11 +472,12 @@ export class AgentSessionService extends Disposable {
       }
       case "tool_call_update": {
         // An answered model call means the agent has its result and is
-        // working again - this is also what ends the wait of a model's
-        // own ask. Checked before the result lands so the scan reads
-        // only the calls.
+        // working again, unless a wait is still open: a round's calls run
+        // in parallel, so a sibling's result does not end the operator's
+        // turn. Checked before the result lands so the scan reads only
+        // the calls.
         const toolCallId = event.tool_call_id ?? null;
-        if (toolCallId !== null && this.answersModelCall(toolCallId)) {
+        if (toolCallId !== null && this.openWaits.length === 0 && this.answersModelCall(toolCallId)) {
           this.setGenerating(true);
         }
         this.transcript.push({
@@ -627,6 +645,11 @@ export class AgentSessionService extends Disposable {
       }
     }
     return -1;
+  }
+
+  /** Pins the oldest open wait, or clears the pin when none is open. */
+  private pinOldestWait(): void {
+    this.setPinnedToken(this.openWaits[0] ?? null);
   }
 
   /** Pins or clears the wait token, firing only on a real change. */

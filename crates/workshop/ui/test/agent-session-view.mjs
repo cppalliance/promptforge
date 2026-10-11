@@ -1343,6 +1343,28 @@ await assertNoLeaks(lifecycle, async () => {
     dispose();
   }
 
+  {
+    // A sibling call finishing while the round's ask waits must not offer Stop.
+    const { wire, service, send, dispose } = setup();
+    wire.fire.session("s-parallel");
+    wire.fire.event("user_message", "go");
+    wire.fire.event(
+      "tool_call",
+      JSON.stringify([
+        { id: "c1", name: "ask", arguments: {}, tool: "user-input/ask" },
+        { id: "c2", name: "fetch", arguments: {}, tool: "web/fetch" },
+      ]),
+      { reply: 0 },
+    );
+    wire.fire.inputRequired("tok1");
+    wire.fire.event("tool_call_update", "page body", { tool_call_id: "c2" });
+    check(
+      "a sibling call's result while the ask waits keeps the action on send",
+      service.generating === false && send.getAttribute("data-action") === "send",
+    );
+    dispose();
+  }
+
   // --- The mode follows the toolbar's chip onto the action button ------------------------------
 
   {
