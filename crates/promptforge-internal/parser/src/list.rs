@@ -18,7 +18,7 @@ use crate::{Error, Result};
 /// # Errors
 /// Returns a list-classified parse error when a line is a non-list line, an
 /// empty marker, or when no items were found.
-pub(super) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<String>> {
+pub(super) fn parse_bullet_items<'a>(prose: &'a str, section: &str) -> Result<Vec<&'a str>> {
     let mut items = Vec::new();
     for line in prose.lines() {
         let trimmed = line.trim();
@@ -26,7 +26,7 @@ pub(super) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<Strin
             continue;
         }
         match classify_list_line(trimmed) {
-            ListLine::Item(content) => items.push(content.to_string()),
+            ListLine::Item(content) => items.push(content),
             ListLine::EmptyMarker => {
                 return Err(Error::parse(
                     ParseErrorKind::List,
