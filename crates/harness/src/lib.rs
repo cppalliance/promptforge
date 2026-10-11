@@ -1,11 +1,13 @@
 //! The Harness, which runs one prompt for a Host and records the run.
 //!
-//! A Host installs its Plugins once, in a [`plugin::HostContext`], and
-//! builds one Harness for each run. [`Harness::new`] takes the Host's
-//! recorder, inference broker, timer, installed Plugins, and the run's own
-//! services. [`Harness::run`] runs the prompt to its end and returns its
-//! [`RunReport`]. While the run goes on, the Host steers it through the
-//! [`RunControl`] it took from `Harness::control` before the run started.
+//! A Host adds its Plugin packages to a [`plugin::PackageRegistry`],
+//! builds one [`plugin::HostContext`] over it, and installs Plugins by
+//! package name. It installs them once and builds one Harness for each
+//! run. [`Harness::new`] takes the Host's recorder, inference broker,
+//! timer, installed Plugins, and the run's own services. [`Harness::run`]
+//! runs the prompt to its end and returns its [`RunReport`]. While the run
+//! goes on, the Host steers it through the [`RunControl`] it took from
+//! `Harness::control` before the run started.
 //!
 //! The crate's `run-prompt` example runs one prompt from start to end.
 
@@ -23,12 +25,15 @@ pub use harness_runner::performers::InferenceBroker;
 pub use harness_runner::performers::Timer;
 
 pub mod plugin {
-    //! The context a Host installs its Plugins in, the services maps a
-    //! Host fills, and the names Plugins are installed under. The Plugin
-    //! crates themselves are the Host's own dependencies.
+    //! The registry a Host lists and installs packages from, the context
+    //! a Host installs its Plugins in, the services maps a Host fills, and
+    //! the names Plugins are installed under. The Plugin crates themselves
+    //! are the Host's own dependencies.
 
     pub use harness_runner::HostContext;
     pub use harness_runner::InstallError;
+    pub use harness_runner::PackageRegistry;
+    pub use harness_runner::PluginKind;
     pub use promptforge_plugin::HostServices;
     pub use promptforge_plugin::PluginId;
 }

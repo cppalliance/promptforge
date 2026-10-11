@@ -99,9 +99,9 @@ pub trait Plugin: Send + Sync {
 /// A Plugin crate's label, exported as a constant such as
 /// `plugin_web::PACKAGE`.
 ///
-/// It is fixed data the Host reads before anything is built. Passing it to
-/// the Harness's install is also what links the Plugin crate into the
-/// Host. A Plugin crate builds it with [`Package::new`], adding a
+/// It is fixed data the Host reads before anything is built. Adding it to
+/// the Harness's package registry is also what links the Plugin crate into
+/// the Host. A Plugin crate builds it with [`Package::new`], adding a
 /// [`Package::description`], and [`Package::prelude`] and
 /// [`Package::needs`] only where it has them:
 ///

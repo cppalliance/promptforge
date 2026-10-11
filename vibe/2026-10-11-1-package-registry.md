@@ -462,7 +462,7 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
 
 <step-2>
 
-### Step 2: Install Plugins by name from a package registry
+### Step 2: Install Plugins by name from a package registry [completed]
 
 - Component: `none`
 - Work items: `registry`, `install`, `callers`, `docs`, and `verify`. They land together, because changing `HostContext::new` and `install` breaks every caller at once. The Technical Design's Step 2 list holds the details for each artifact below.
@@ -499,7 +499,12 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `crates/promptforge-plugin/src/plugin.rs`: the `Package` doc's linking sentence becomes "Adding it to the Harness's package registry is also what links the Plugin crate into the Host."
 - Tests, named as in the Testing Plan:
   - `packages-tests.rs`: `natives_offer_no_tools_prelude_or_needs`, looping over `NATIVE`
-  - new `crates/harness-internal/runner/tests/it/packages.rs`, declared with `mod packages;` beside `mod prepare;` in `main.rs`: the three registry tests and the three install tests, built from `echo_package`
+  - new `crates/harness-internal/runner/tests/it/packages.rs`, declared with `mod packages;` beside `mod prepare;` in `main.rs`: the three registry tests and the three install tests, built from `echo_package`, which together cover every case below:
+    - `PackageRegistry::new().list()` yields exactly `promptforge/subagents` as `PluginKind::Native` with a non-empty description. After adding `acme/web`, it yields `acme/web` (`PluginKind::Linked`) before `promptforge/subagents`. A package added with needs lists those needs.
+    - `add`: a second `acme/web` and a package named `promptforge/subagents` are both `DuplicatePackage`. The six names `web`, `acme/web/extra`, `/web`, `acme/`, `Acme/web`, and `acme/Web` are each `InvalidPackage`.
+    - `install`: `acme/missing` and `promptforge/tasks` are both `UnknownPackage`; the second pins that `tasks` is not a package.
+    - `install`: `acme/subagents` with no name, `acme/web` named `subagents`, and `promptforge/subagents` named `other` are each `ReservedName`, and the test checks the `ReservedName` message text once.
+    - `install`: `promptforge/subagents` with no name returns `subagents`, and a second install is `NameTaken`.
   - `host-tests.rs`: `a_declared_native_is_met_when_installed_and_missing_when_not` and `an_installed_native_adds_no_catalog_tool_and_no_prelude`
   - `crates/workshop/server/src/agents/tests.rs`: `a_prompt_declaring_subagents_prepares_on_the_servers_installed_plugins`
   - Every existing install, snapshot, preparation, and `tasks` test passes with only its call site changed.

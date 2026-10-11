@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use harness_runner::recorder::MemoryRecorder;
-use harness_runner::{Harness, HostContext, RunRequest};
+use harness_runner::{Harness, HostContext, PackageRegistry, RunRequest};
 use promptforge::vfs::VfsRef;
 use promptforge_plugin::HostServices;
 use serde_json::json;
@@ -18,7 +18,9 @@ use super::{
     HookedBackend, PendingTimer, RunOutcome, answers_to, answers_where, calls, plain_harness,
     request, run_beside, until,
 };
+use crate::asker::ASKER;
 use crate::scripted::{Held, HeldTimer, Operator, ScriptedBroker, held_broker, with_asker};
+use crate::support::registry;
 
 /// A main section parked under a `pcall` on a 30-second timed
 /// `tasks.join_any` over a child that asks the operator. Once the wait
@@ -64,7 +66,10 @@ const WRITES_THEN_INFERS: &str = "---\nname: writes-infers\ndescription: d\nprom
 
 /// A Host holding only the fixture ask Plugin, as `user-input`.
 fn asker_host() -> Arc<HostContext> {
-    Arc::new(with_asker(HostContext::new(HostServices::new())))
+    Arc::new(with_asker(HostContext::new(
+        registry(&[ASKER]),
+        HostServices::new(),
+    )))
 }
 
 /// A store whose every write raises a stop through `harness`'s control.
@@ -138,7 +143,10 @@ async fn a_stop_seen_before_a_steps_effects_start_drops_the_round_in_flight_and_
         recorder.clone(),
         Arc::new(held_broker(&chat)),
         Arc::new(PendingTimer::default()),
-        Arc::new(HostContext::new(HostServices::new())),
+        Arc::new(HostContext::new(
+            PackageRegistry::new(),
+            HostServices::new(),
+        )),
         HostServices::new(),
     );
     let vfs = stopping_store(&harness);

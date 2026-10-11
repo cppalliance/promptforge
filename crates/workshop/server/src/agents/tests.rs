@@ -1,5 +1,6 @@
 //! The agent conversations' Harness setup: a prompt declaring
-//! `web` prepares over the server's installed Plugins, a Host without the
+//! `web` or the native `subagents` prepares over the server's installed
+//! Plugins, a Host without the
 //! search provider installs web as unavailable and refuses the prompt
 //! naming that service, outside a runtime the services leave the runtime
 //! out, and the ask id names the ask tool under the name user-input was
@@ -133,6 +134,18 @@ async fn a_prompt_declaring_web_prepares_on_the_servers_installed_plugins() {
             final_text: "browsed".to_owned(),
         }),
         "the server installs web and provides both services its install reads"
+    );
+}
+
+#[tokio::test]
+async fn a_prompt_declaring_subagents_prepares_on_the_servers_installed_plugins() {
+    let (host, _ask) = host_context(&Registry::new(), None);
+    assert_eq!(
+        run_prompt(&Arc::new(host), requiring("subagents")).await,
+        Some(RunOutcome::Completed {
+            final_text: "browsed".to_owned(),
+        }),
+        "the server installs the native subagents"
     );
 }
 

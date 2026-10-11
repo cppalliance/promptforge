@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use harness::plugin::{HostContext, HostServices};
+use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use promptforge_plugin::{
     Package, Plugin, PluginFuture, PluginId, ServiceId, ServiceKey, ToolContext, ToolDescriptor,
     ToolError, ToolId, ToolOutput,
@@ -40,8 +40,12 @@ pub(crate) trait AskBroker: Send + Sync {
 
 /// A Host with the fixture installed as `user-input`.
 pub(crate) fn asker_host() -> Arc<HostContext> {
-    let mut host = HostContext::new(HostServices::new());
-    if let Err(error) = host.install(ASKER, None, Value::Null) {
+    let mut packages = PackageRegistry::new();
+    if let Err(error) = packages.add(ASKER) {
+        panic!("a new registry takes the fixture: {error}");
+    }
+    let mut host = HostContext::new(packages, HostServices::new());
+    if let Err(error) = host.install(ASKER.name, None, Value::Null) {
         panic!("an empty Host installs the fixture: {error}");
     }
     Arc::new(host)

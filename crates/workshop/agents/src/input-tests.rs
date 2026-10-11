@@ -4,7 +4,7 @@ use super::*;
 
 use std::sync::Arc;
 
-use harness::plugin::{HostContext, HostServices};
+use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
@@ -267,9 +267,17 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\
                   plugins:\n  - user-input\n---\n\n\
                   # Ask\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
-    let mut host = HostContext::new(HostServices::new());
-    host.install(plugin_user_input::PACKAGE, None, serde_json::Value::Null)
-        .expect("an empty Host installs the Plugin");
+    let mut packages = PackageRegistry::new();
+    packages
+        .add(plugin_user_input::PACKAGE)
+        .expect("a new registry takes the Plugin");
+    let mut host = HostContext::new(packages, HostServices::new());
+    host.install(
+        plugin_user_input::PACKAGE.name,
+        None,
+        serde_json::Value::Null,
+    )
+    .expect("an empty Host installs the Plugin");
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
     let recorder = Arc::new(MemoryRecorder::new());

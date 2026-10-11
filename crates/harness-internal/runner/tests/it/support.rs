@@ -1,10 +1,12 @@
 //! Fixtures shared by the runner's suites: a one-section prompt, a run
-//! over it, and fake performers that answer by script.
+//! over it, fake performers that answer by script, and a package registry
+//! holding a suite's packages.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
+use harness_runner::PackageRegistry;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, ToolPerformer};
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
@@ -20,10 +22,21 @@ use promptforge::vfs::{
     VfsRef,
 };
 use promptforge::{Environment, Prompt, Run, RunContext};
+use promptforge_plugin::Package;
 use serde_json::{Value, json};
 
 /// The run's execution identifier.
 pub(crate) const EXECUTION: &str = "runner-test";
+
+/// A registry holding the natives and each of `packages`, which a suite
+/// builds its Host over before it installs them by name.
+pub(crate) fn registry(packages: &[Package]) -> PackageRegistry {
+    let mut registry = PackageRegistry::new();
+    for package in packages {
+        registry.add(*package).unwrap();
+    }
+    registry
+}
 
 /// A section body that calls the fixture wait tool by its full id and
 /// returns its answer: the section parks until the test's tool performer
