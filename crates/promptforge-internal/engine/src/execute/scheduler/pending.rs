@@ -54,23 +54,57 @@ pub(super) struct VfsContinuation {
 
 /// What a bound `tool_call`'s answer is applied with: the binding the call
 /// resolved to (its alias, output kind, and trust rules), the coordinates
-/// the `ToolResult` reports under, the model's call id when the model
-/// issued the call, and the call's identity the answer joins.
+/// the `ToolResult` reports under, the call's site, and the call's
+/// identity the answer joins.
 pub(super) struct ToolCallContinuation {
     /// The binding the alias resolved to at dispatch.
     pub(super) binding: ToolBinding,
     /// The turn the call fired in.
     pub(super) report: ScriptReport,
-    /// The model-issued call id, or `None` for a script call.
-    pub(super) call_id: Option<String>,
+    /// Who asked for the call, and where its answer goes.
+    pub(super) site: CallSite,
     /// The call's own identity, forked from the chain's access at
     /// dispatch. The answer, or the call's abort, ends it and joins it
     /// back into the chain.
     pub(super) exec: ExecId,
-    /// The call's position in the batch the chain is parked on, whose
-    /// slot the answer fills; `None` for a call sent alone, which the
-    /// answer resumes directly.
-    pub(super) slot: Option<usize>,
+}
+
+/// Who asked for one tool call, and where its answer goes. Only a
+/// model-issued call carries a call id, and only a batched one a slot.
+pub(super) enum CallSite {
+    /// A script's `tools.call`, under the turn its request named, if any.
+    /// The answer resumes the chain directly, classified by the binding's
+    /// declared output kind, and reports under no call id.
+    Script { turn: Option<u32> },
+    /// A model-issued call sent alone, under the turn of the round that
+    /// requested it, if the request named one. The answer resumes the
+    /// chain directly as content under the model's call id.
+    Model { call_id: String, turn: Option<u32> },
+    /// A model-issued call sent in a `tool_calls` batch, under the round's
+    /// turn. The answer fills `slot` of the batch the chain is parked on.
+    Batch {
+        call_id: String,
+        turn: u32,
+        slot: usize,
+    },
+}
+
+impl CallSite {
+    /// The model's call id, or `None` for a script call.
+    pub(super) fn call_id(&self) -> Option<&str> {
+        match self {
+            Self::Script { .. } => None,
+            Self::Model { call_id, .. } | Self::Batch { call_id, .. } => Some(call_id.as_str()),
+        }
+    }
+
+    /// The turn the request named, if any.
+    pub(super) fn turn(&self) -> Option<u32> {
+        match self {
+            Self::Script { turn } | Self::Model { turn, .. } => *turn,
+            Self::Batch { turn, .. } => Some(*turn),
+        }
+    }
 }
 
 /// One in-flight leaf effect's pending entry: the chain parked on it and
