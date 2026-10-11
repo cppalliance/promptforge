@@ -243,7 +243,7 @@ pub enum InstallError {
     },
     /// The registry holds no package by the name the install asked for.
     #[error(
-        "Plugin package `{package}` is not in the registry; add it with PackageRegistry::add before installing it"
+        "Plugin package `{package}` is not in the registry; add it with PackageRegistry::add before building the HostContext"
     )]
     UnknownPackage {
         /// The package name the install asked for.
