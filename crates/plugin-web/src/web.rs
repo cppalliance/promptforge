@@ -26,7 +26,8 @@ use crate::search::WebSearch;
 /// `construct` reads [`SEARCH_PROVIDER`] and the Plugin contract's
 /// [`promptforge_plugin::TOKIO_RUNTIME`] service from the Host-wide
 /// services and takes no configuration but `null` or `{}`.
-pub const PACKAGE: Package = Package::new("promptforge/web", construct);
+pub const PACKAGE: Package =
+    Package::new("promptforge/web", construct).description("Search the web and fetch pages");
 
 /// The service key for the Host's search provider.
 ///
