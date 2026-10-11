@@ -4,10 +4,10 @@ overview: "Remove the debt that parallel tool calls exposed in the Workshop agen
 todos:
   - id: ui-waits
     content: "D1-1 and C1-1: track open waits oldest first in agent-session.ts, gate the tool_call_update generating flip on no open wait, and add the service and view regression tests"
-    status: pending
+    status: completed
   - id: verify
     content: Run npm test and typecheck in crates/workshop and the docs-claims scan; confirm each new test fails at 83d40b1b9
-    status: pending
+    status: completed
 isProject: false
 ---
 
