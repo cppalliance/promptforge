@@ -15,7 +15,7 @@ use promptforge_types::ids::ChainId;
 
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::execute::walk_target::{h1_visible_sections, section_position};
-use crate::heading_address;
+use crate::heading_address::{self, Visible};
 use crate::{Error, Result};
 
 use super::{ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
@@ -145,7 +145,7 @@ impl Scheduler {
     ) -> Result<()> {
         let prompt = self.prompt();
         let sections = h1_visible_sections(&prompt);
-        let target = heading_address::resolve_visible(heading, sections)?;
+        let target = heading_address::resolve_visible(heading, Visible::all(sections))?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",
         ))?;

@@ -10,7 +10,7 @@
 //! `prompt.list` reads resolve through them too, so every surface agrees on
 //! what a heading may name.
 
-use crate::heading_address;
+use crate::heading_address::{self, Visible};
 use crate::lua::SectionText;
 use crate::parser::{Prompt, Section};
 use crate::{Error, Result};
@@ -50,13 +50,14 @@ pub(super) fn h1_visible_sections(prompt: &Prompt) -> &[Section] {
 }
 
 /// What a prompt read sees of the section `heading` names in a caller's
-/// visible set: its own raw Markdown and its pre-parsed list items, or
-/// `None` when no visible section has that heading.
+/// visible set, read in place through `visible`: its own raw Markdown and
+/// its pre-parsed list items, or `None` when no visible section has that
+/// heading.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed or matches more
 /// than one visible section (see [`heading_address::find_visible`]).
-pub(super) fn read_visible(heading: &str, visible: &[Section]) -> Result<Option<SectionText>> {
+pub(super) fn read_visible(heading: &str, visible: Visible<'_>) -> Result<Option<SectionText>> {
     Ok(
         heading_address::find_visible(heading, visible)?.map(|section| SectionText {
             markdown: section.markdown().to_owned(),
@@ -74,10 +75,11 @@ pub(super) enum JumpTarget {
     Child(usize),
 }
 
-/// Resolves `heading` against the jumper's visible set (its sibling slice
-/// minus itself, plus its direct children) and classifies the target: a
-/// direct child of the jumper starts a child-level walk; anything else is a
-/// sibling within the jumper's own slice.
+/// Resolves `heading` against the visible set of `siblings[jumper]` (the
+/// sibling slice minus the jumper, plus its direct children), read in place
+/// through [`Visible::of`], and classifies the target: a direct child of
+/// the jumper starts a child-level walk; anything else is a sibling within
+/// the jumper's own slice.
 ///
 /// Resolution is an exact `(level, name)` match (see
 /// [`heading_address::resolve_visible`]): two visible sections sharing an
@@ -90,14 +92,16 @@ pub(super) enum JumpTarget {
 pub(super) fn resolve_jump_target(
     heading: &str,
     siblings: &[Section],
-    jumper: &Section,
+    jumper: usize,
 ) -> Result<JumpTarget> {
-    let visible = visible_sections(siblings, jumper);
-    let target = heading_address::resolve_visible(heading, &visible)?;
-    if let Some(index) = section_position(jumper.children(), target) {
+    let jumper_section = siblings.get(jumper).ok_or(Error::internal(
+        "a jumping section is absent from its sibling slice",
+    ))?;
+    let target = heading_address::resolve_visible(heading, Visible::of(siblings, jumper))?;
+    if let Some(index) = section_position(jumper_section.children(), target) {
         return Ok(JumpTarget::Child(index));
     }
-    // `target` was resolved out of the visible set built from exactly these
+    // `target` was resolved out of the visible set read from exactly these
     // two slices, so a miss here is an internal invariant violation, not a
     // user-facing Lua error.
     section_position(siblings, target)
