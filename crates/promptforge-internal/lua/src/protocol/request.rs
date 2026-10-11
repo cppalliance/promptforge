@@ -70,8 +70,8 @@ pub enum Request {
         /// Whether the spawn is a `fanout` arm. Shim-produced: the `fanout`
         /// shim says `true`, `tasks.spawn` leaves it absent. The depth-cap
         /// refusal is named after the author-facing call that tripped it
-        /// (`fanout` or `call`), so the typed error uses the wording the
-        /// author reads and no shim re-match is needed.
+        /// (`tasks.fanout` or `call`), so the typed error uses the wording
+        /// the author reads and no shim re-match is needed.
         fanout: bool,
     },
     /// The wait shims' internal timeout timer: a leaf request whose work

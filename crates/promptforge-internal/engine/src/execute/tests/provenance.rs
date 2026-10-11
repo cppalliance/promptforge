@@ -61,7 +61,7 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'a', 'b', 'c'})\n\
+        local r = tasks.fanout('### Worker', {'a', 'b', 'c'})\n\
         return r[1].text .. r[2].text .. r[3].text\n\
         ```\n\n\
         ### Worker\n\n\

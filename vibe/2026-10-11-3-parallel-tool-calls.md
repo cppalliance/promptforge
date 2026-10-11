@@ -499,7 +499,7 @@ This plan lands the parallel-tool-call and `tasks.fanout` parts of the subagents
 
 <step-2>
 
-### Step 2: Move fanout into the tasks table as tasks.fanout
+### Step 2: Move fanout into the tasks table as tasks.fanout [completed]
 
 - Component: `none`
 - Work items: `fanout`, `fanout-docs`, and `verify`, detailed in the Technical Design's Step 2 list. The install change, the `RESERVED_NAMES` entry, the call-site renames, and the error-text asserts land in one `promptforge` commit, because the tests fail with any one of them alone.

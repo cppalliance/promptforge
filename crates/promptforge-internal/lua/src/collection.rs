@@ -1,13 +1,13 @@
 //! The fanout collection's member enumeration and the item renderer, the
 //! two captures the `fanout` shim runs over.
 //!
-//! A section's Lua calls `fanout(worker, collection)`; the collection is any
-//! Lua table, and the shim spawns one arm per member in a fixed order. The
-//! array part (`1..=#t`) comes first, in order; the hash part follows as
-//! `{ key, value }` pair tables sorted by key, because Lua's `pairs` order
-//! depends on the string hash seed and a fanout's arm order must not. An
-//! array member arrives as the arm's `item` value as itself; a hash member
-//! arrives as the pair table (`item.key` / `item.value`).
+//! A section's Lua calls `tasks.fanout(worker, collection)`; the collection
+//! is any Lua table, and the shim spawns one arm per member in a fixed
+//! order. The array part (`1..=#t`) comes first, in order; the hash part
+//! follows as `{ key, value }` pair tables sorted by key, because Lua's
+//! `pairs` order depends on the string hash seed and a fanout's arm order
+//! must not. An array member arrives as the arm's `item` value as itself; a
+//! hash member arrives as the pair table (`item.key` / `item.value`).
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
@@ -31,7 +31,7 @@ pub(crate) use order::{KeyError, SortKey, sort_key};
 pub(crate) fn collection_members(lua: &Lua, collection: &Value) -> Result<Table> {
     let Value::Table(table) = collection else {
         return Err(Error::Lua(
-            "fanout's second parameter is a collection; for a list section use prompt.list(heading), which returns nil when no visible section has that heading".to_owned(),
+            "tasks.fanout's second parameter is a collection; for a list section use prompt.list(heading), which returns nil when no visible section has that heading".to_owned(),
         ));
     };
     let members = lua.create_table().map_err(Error::lua)?;

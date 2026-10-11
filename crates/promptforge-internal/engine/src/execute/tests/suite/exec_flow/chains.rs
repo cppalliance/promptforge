@@ -307,7 +307,7 @@ async fn fanout_arms_take_child_ids_in_collection_order_and_a_per_fanout_index()
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'a', 'b'})\n\
+local r = tasks.fanout('### Worker', {'a', 'b'})\n\
 local function parts(s) return string.match(s, '^(%d+):([%d%.]+)$') end\n\
 local i1, id1 = parts(r[1].text)\n\
 local i2, id2 = parts(r[2].text)\n\
@@ -358,7 +358,7 @@ async fn sys_taskid_inside_a_fanout_arm_is_the_arms_own_task() {
 ## Parent\n\n\
 ```lua\n\
 assert(sys.taskid == '0', 'the main walk is task 0, got ' .. sys.taskid)\n\
-local results = fanout('### Worker', {'a'})\n\
+local results = tasks.fanout('### Worker', {'a'})\n\
 return results[1].text\n\
 ```\n\n\
 ### Worker\n\n\

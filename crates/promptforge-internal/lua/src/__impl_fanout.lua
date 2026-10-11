@@ -3,7 +3,7 @@
 -- is an ordinary yield and the scheduler keeps no fanout state of its own.
 --
 -- The Engine installs this after the coroutine prelude (`__impl_coro.lua`)
--- and installs the returned function as the `fanout` global. The chunk
+-- and installs the returned function as `tasks.fanout`. The chunk
 -- arguments are privileged captures, never globals: `yield` is
 -- coroutine.yield, `var_snapshot` is the Engine helper returning the hidden
 -- `var` data table as a plain deep copy, `helpers` is the prelude's shared
@@ -39,7 +39,7 @@ local function fanout_result(item, text, ok, exhausted)
   local function render() return text end
   return setmetatable({}, {
     __index = fields,
-    __newindex = function() error("fanout results are read-only", 2) end,
+    __newindex = function() error("tasks.fanout results are read-only", 2) end,
     __tostring = render,
     __metatable = { __tostring = render },
   })
@@ -51,16 +51,16 @@ local function exhausted_stub(item)
   return "## " .. render_item(item) .. "\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
 end
 
--- fanout(worker, collection): run `worker` once per collection member as
--- a task chain and return the results in collection order. The members
--- enumerate (array part in order, then the hash part as `{ key, value }`
--- pairs sorted by key), an empty collection raises before any spawn, and
--- every arm is spawned up front - before any join - so no arm is ordered
--- after a sibling: arms never see each other's writes, whatever the
--- scheduler's admission order. Each arm is spawned with the member as
--- its `item`, its 1-based position as `sys.index`, and the `fanout` mark
--- (so the spawn arm's depth-cap refusal is named after `fanout`, the name
--- the cap always had on this path, and re-raises here as the retained
+-- tasks.fanout(worker, collection): run `worker` once per collection
+-- member as a task chain and return the results in collection order. The
+-- members enumerate (array part in order, then the hash part as
+-- `{ key, value }` pairs sorted by key), an empty collection raises before
+-- any spawn, and every arm is spawned up front - before any join - so no
+-- arm is ordered after a sibling: arms never see each other's writes,
+-- whatever the scheduler's admission order. Each arm is spawned with the
+-- member as its `item`, its 1-based position as `sys.index`, and the
+-- `fanout` mark (so the spawn arm's depth-cap refusal is named after
+-- `tasks.fanout` rather than `call`, and re-raises here as the retained
 -- typed error). The scheduler admits the arms under the chain's
 -- concurrency limit, and `join_any` over the live set delivers the arms
 -- as they end. A `tool_loop_exhausted` arm
@@ -75,7 +75,7 @@ local function fanout(worker, collection)
   end
   local count = #members
   if count == 0 then
-    raise("lua", { message = "fanout over an empty collection: no work is likely a bug" })
+    raise("lua", { message = "tasks.fanout over an empty collection: no work is likely a bug" })
   end
   -- One snapshot serves every arm: the caller is suspended inside this
   -- call, so its `var` cannot move between spawns.

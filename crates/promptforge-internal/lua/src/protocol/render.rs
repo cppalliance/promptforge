@@ -63,7 +63,8 @@ fn store_value(lua: &Lua, outcome: VfsOutcome) -> mlua::Result<Value> {
 /// failure rendered as the error table the shim hands back unraised, so
 /// `join` reports it without raising. The failure is also returned as
 /// the typed error to retain: a shim that re-raises the member's failure at
-/// once (`fanout` on a fatal arm) surfaces the member's own typed error.
+/// once (`tasks.fanout` on a fatal arm) surfaces the member's own typed
+/// error.
 fn delivery_values<E: ErrorValue>(
     lua: &Lua,
     delivery: TaskDelivery<E>,

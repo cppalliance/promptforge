@@ -78,7 +78,7 @@ var.from_h1 = 'seeded'\n\
 ```\n\n\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'a', 'b'})\n\
+local r = tasks.fanout('### Worker', {'a', 'b'})\n\
 assert(var.a == nil and var.b == nil, 'arm writes must not reach the caller')\n\
 return r[1].text .. r[2].text\n\
 ```\n\n\

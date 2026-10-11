@@ -38,7 +38,7 @@ const SEVEN_ARM_FANOUT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n--
     ## Parent\n\n\
     ```lua\n\
     local topics = { 'a', 'b', 'c', 'd', 'e', 'f', 'g' }\n\
-    local results = fanout('### Worker', topics)\n\
+    local results = tasks.fanout('### Worker', topics)\n\
     local parts = {}\n\
     for i = 1, #results do parts[i] = store.read('research/' .. i .. '.md') end\n\
     store.write('research.md', table.concat(parts, '\\n\\n'))\n\

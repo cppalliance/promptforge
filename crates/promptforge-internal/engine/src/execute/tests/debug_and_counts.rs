@@ -110,7 +110,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         models.default('writer')\n```\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha'})\n\
+        local r = tasks.fanout('### Worker', {'alpha'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\

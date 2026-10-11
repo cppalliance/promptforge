@@ -112,7 +112,7 @@ impl Scheduler {
     /// runs. Every dispatch failure - the depth cap, target resolution, the
     /// worker check, chain construction - is the call's answer, resumed
     /// into the spawner so an author `pcall` can catch it. `fanout` marks
-    /// a `fanout` arm, whose depth-cap refusal is named after `fanout`.
+    /// a `fanout` arm, whose depth-cap refusal is named after `tasks.fanout`.
     #[expect(
         clippy::too_many_arguments,
         reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
@@ -144,7 +144,7 @@ impl Scheduler {
     /// The fallible half of spawn dispatch, shared with the model's `task`
     /// built-in: `call`'s depth cap against the spawner's call-depth field
     /// (the refusal named after the author-facing call that tripped it,
-    /// `fanout` for an arm and `call` otherwise), `call`'s target
+    /// `tasks.fanout` for an arm and `call` otherwise), `call`'s target
     /// resolution over the spawner's visible set, the worker-template
     /// check (a list section is not a target), then the task chain one
     /// level deeper under the spawn's `args` and `var` snapshot, with its
@@ -175,7 +175,7 @@ impl Scheduler {
         // another section.
         let spawner_section = chain.section_name().to_owned();
         if depth > MAX_CALL_DEPTH {
-            let tripped = if fanout { "fanout" } else { "call" };
+            let tripped = if fanout { "tasks.fanout" } else { "call" };
             return Err(Error::Lua(format!(
                 "{tripped} recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));

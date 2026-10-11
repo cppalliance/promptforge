@@ -83,7 +83,7 @@ async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
-## Parent\n\n```lua\nlocal r = fanout('### Worker', prompt.list('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
+## Parent\n\n```lua\nlocal r = tasks.fanout('### Worker', prompt.list('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
 ### Worker\n\n```lua\ntools.call('tools/echo', { value = item })\n```\n\n\
 ```lua\nreturn sys.model .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";
@@ -106,7 +106,7 @@ models.default('writer')\n```\n\n\
 async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
-## Parent\n\n```lua\nlocal r = fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
+## Parent\n\n```lua\nlocal r = tasks.fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
 ### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let out = run(

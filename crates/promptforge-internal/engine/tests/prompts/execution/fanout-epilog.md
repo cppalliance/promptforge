@@ -12,7 +12,7 @@ promptforge: 0
 ```
 
 ```lua
-local replies = fanout("### Worker", prompt.list("### Items"))
+local replies = tasks.fanout("### Worker", prompt.list("### Items"))
 return table.concat(replies, ",")
 ```
 

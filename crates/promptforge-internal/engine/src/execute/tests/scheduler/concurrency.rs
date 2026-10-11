@@ -344,7 +344,7 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         ```lua\n\
         local n = tasks.concurrency(2)\n\
         assert(n == 2, 'the effective limit is 2, got ' .. n)\n\
-        local r = fanout('#### Sub', {'x', 'y', 'z', 'w'})\n\
+        local r = tasks.fanout('#### Sub', {'x', 'y', 'z', 'w'})\n\
         return table.concat(r, ',')\n\
         ```\n\n\
         #### Sub\n\n\
@@ -385,12 +385,12 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Arm', {'a', 'b', 'c'})\n\
+        local r = tasks.fanout('### Arm', {'a', 'b', 'c'})\n\
         return table.concat(r, ',')\n\
         ```\n\n\
         ### Arm\n\n\
         ```lua\n\
-        local inner = fanout('#### Sub', {'x', 'y', 'z'})\n\
+        local inner = tasks.fanout('#### Sub', {'x', 'y', 'z'})\n\
         local parts = {}\n\
         for i = 1, #inner do parts[i] = inner[i].text end\n\
         return item .. ':' .. table.concat(parts, '+')\n\

@@ -185,7 +185,7 @@ fn the_shared_chunk_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
         ```\n\n\
         ## Main\n\n\
         ```lua\n\
-        local arms = fanout('### Arm', { 'arm' })\n\
+        local arms = tasks.fanout('### Arm', { 'arm' })\n\
         local t = tasks.spawn('## Child')\n\
         local _, ok, child = tasks.join_any({ t })\n\
         assert(ok, tostring(child))\n\
