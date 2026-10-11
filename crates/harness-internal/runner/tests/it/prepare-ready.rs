@@ -143,9 +143,9 @@ fn starting_host(names: &[&str], phase: Phase) -> (HostContext, Vec<StartupHandl
     }
     let mut wide = HostServices::new();
     wide.provide(&STARTUPS, Arc::new(startups)).unwrap();
-    let mut host = HostContext::new(wide);
+    let mut host = HostContext::new(registry(&[SLOW]), wide);
     for name in names {
-        host.install(SLOW, Some(PluginId::parse(name).unwrap()), Value::Null)
+        host.install(SLOW.name, Some(PluginId::parse(name).unwrap()), Value::Null)
             .unwrap();
     }
     (host, handles)

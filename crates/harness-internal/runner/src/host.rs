@@ -1,13 +1,15 @@
-//! The Host's installed Plugins: [`HostContext`], built once at startup and
-//! shared by every run, and the snapshot each run takes of it.
+//! The Host's installed Plugins: [`HostContext`], built once at startup
+//! over a [`PackageRegistry`] and shared by every run, and the snapshot
+//! each run takes of it.
 //!
-//! A Host installs each Plugin crate's [`Package`] under a local name, and
-//! install calls the package's `construct` once to build the one Plugin
-//! object every run shares. A construct failure is not an install error:
-//! the Plugin is stored as unavailable with the failure as its reason, and
-//! every run that needs it is refused naming that reason. Before each run,
-//! the Harness's preparation waits for every built Plugin to be ready, and
-//! a Plugin whose `ready` fails is unavailable to that run the same way.
+//! A Host installs a package by the name the registry holds, under a local
+//! name, and install calls the package's `construct` once to build the one
+//! Plugin object every run shares. A construct failure is not an install
+//! error: the Plugin is stored as unavailable with the failure as its
+//! reason, and every run that needs it is refused naming that reason.
+//! Before each run, the Harness's preparation waits for every built Plugin
+//! to be ready, and a Plugin whose `ready` fails is unavailable to that run
+//! the same way.
 //! Then it takes a snapshot of every installed Plugin with the run's own
 //! services: the catalog the Engine offers the run, the preludes of
 //! the Plugins the prompt declares, the requirements the snapshot cannot
@@ -24,6 +26,8 @@ use promptforge::cancel::CancelHandle;
 use promptforge::{Environment, Prompt, Requirements};
 use promptforge_plugin::{HostServices, Package, Plugin, PluginId};
 
+use crate::packages::{PackageRegistry, PluginKind};
+
 #[path = "host-run.rs"]
 mod run;
 
@@ -33,13 +37,14 @@ pub(crate) use run::HostRunContext;
 #[path = "host-tests.rs"]
 mod tests;
 
-/// Every Plugin a Host installed, and the Host-wide services their
-/// `construct` functions read.
+/// Every Plugin a Host installed, the registry it installed them from,
+/// and the Host-wide services their `construct` functions read.
 ///
 /// A Host builds one at startup, installs its Plugins, and shares it with
 /// every Harness behind an `Arc`. Dropping it drops the Plugin objects,
 /// which is where a Plugin cleans up.
 pub struct HostContext {
+    packages: PackageRegistry,
     services: HostServices,
     installed: Vec<Installed>,
 }
@@ -53,22 +58,24 @@ struct Installed {
 }
 
 impl HostContext {
-    /// A context with no Plugins, whose installs hand `services` to each
-    /// package's `construct`.
+    /// A context with no Plugins, which installs from the packages
+    /// `packages` holds and hands `services` to each package's
+    /// `construct`.
     ///
     /// `services` are Host-wide, such as a search provider. They reach
     /// only `construct`; a tool call reads the run's own services instead.
     #[must_use]
-    pub fn new(services: HostServices) -> HostContext {
+    pub fn new(packages: PackageRegistry, services: HostServices) -> HostContext {
         HostContext {
+            packages,
             services,
             installed: Vec::new(),
         }
     }
 
-    /// Builds the Plugin with `package.construct` and adds it under `name`,
-    /// or under the package name's second segment when `name` is `None`,
-    /// and returns the name it used.
+    /// Builds the Plugin of the package the registry holds as `package`
+    /// and adds it under `name`, or under the package name's second
+    /// segment when `name` is `None`, and returns the name it used.
     ///
     /// `construct` runs once, here, with the name, `config`, and the
     /// Host-wide services. A `construct` failure is not an error here: the
@@ -76,20 +83,34 @@ impl HostContext {
     /// run that needs it is refused.
     ///
     /// # Errors
-    /// Returns [`InstallError::InvalidPackage`] when the package name is
-    /// not a `vendor/name` pair of valid one-segment names, and
-    /// [`InstallError::NameTaken`] when the name is installed already or
-    /// differs from an installed name only by `-`, `_`, or `.`.
+    /// Returns [`InstallError::UnknownPackage`] when the registry does not
+    /// hold `package`, [`InstallError::ReservedName`] when a native is
+    /// asked for under a name other than its own or another package under
+    /// a native's name, and [`InstallError::NameTaken`] when the name is
+    /// installed already or differs from an installed name only by `-`,
+    /// `_`, or `.`.
     pub fn install(
         &mut self,
-        package: Package,
+        package: &str,
         name: Option<PluginId>,
         config: serde_json::Value,
     ) -> Result<PluginId, InstallError> {
-        let default = package_name(package.name).ok_or(InstallError::InvalidPackage {
-            package: package.name,
-        })?;
-        let name = name.unwrap_or(default);
+        let Some((package, kind, default)) = self.packages.entry(package) else {
+            return Err(InstallError::UnknownPackage {
+                package: package.to_owned(),
+            });
+        };
+        let name = name.unwrap_or_else(|| default.clone());
+        let reserved = match kind {
+            PluginKind::Native => name != *default,
+            PluginKind::Linked => self.packages.reserves(&name),
+        };
+        if reserved {
+            return Err(InstallError::ReservedName {
+                package: package.name,
+                name,
+            });
+        }
         let twin = normalize(&name);
         if let Some(existing) = self
             .installed
@@ -182,7 +203,8 @@ impl HostContext {
 }
 
 impl fmt::Debug for HostContext {
-    /// Shows the services and each installed name with whether it built.
+    /// Shows the services, each installed name with whether it built, and
+    /// the registry.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let installed: Vec<(&PluginId, bool)> = self
             .installed
@@ -192,24 +214,51 @@ impl fmt::Debug for HostContext {
         f.debug_struct("HostContext")
             .field("services", &self.services)
             .field("installed", &installed)
+            .field("packages", &self.packages)
             .finish()
     }
 }
 
-/// A mistake [`HostContext::install`] refuses outright, so the Host's
-/// author sees it at startup.
+/// A mistake [`PackageRegistry::add`] or [`HostContext::install`] refuses
+/// outright, so the Host's author sees it at startup.
 ///
 /// A Plugin whose `construct` fails is not one of these; it is installed
 /// as unavailable instead.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum InstallError {
-    /// The package name is not `vendor/name`, or a segment of it is not a
-    /// valid one-segment name.
+    /// The added package's name is not `vendor/name`, or a segment of it
+    /// is not a valid one-segment name.
     #[error("Plugin package name `{package}` is not a vendor/name pair")]
     InvalidPackage {
         /// The package name as the label spells it.
         package: &'static str,
+    },
+    /// The registry holds the added package's name already, as a native or
+    /// as a package added before.
+    #[error("Plugin package `{package}` is already in the registry")]
+    DuplicatePackage {
+        /// The package name as the label spells it.
+        package: &'static str,
+    },
+    /// The registry holds no package by the name the install asked for.
+    #[error(
+        "Plugin package `{package}` is not in the registry; add it with PackageRegistry::add before installing it"
+    )]
+    UnknownPackage {
+        /// The package name the install asked for.
+        package: String,
+    },
+    /// A native was asked for under a name other than its own, or another
+    /// package under a native's name.
+    #[error(
+        "Plugin package `{package}` cannot be installed as {name}: a native Plugin keeps its own name, and no other package may take it"
+    )]
+    ReservedName {
+        /// The package name as the label spells it.
+        package: &'static str,
+        /// The name the install asked for.
+        name: PluginId,
     },
     /// The name is installed already (`existing` equals `name`), or it
     /// differs from the installed `existing` only by `-`, `_`, or `.`, as
@@ -224,14 +273,6 @@ pub enum InstallError {
         /// The installed name it collides with.
         existing: PluginId,
     },
-}
-
-/// The default local name for the package name `vendor/name`: its second
-/// segment, when both segments are valid one-segment names.
-fn package_name(package: &str) -> Option<PluginId> {
-    let (vendor, name) = package.split_once('/')?;
-    PluginId::parse(vendor).ok()?;
-    PluginId::parse(name).ok()
 }
 
 /// A name with each `-`, `_`, and `.` mapped to `-`, so two names that

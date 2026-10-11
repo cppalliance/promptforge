@@ -29,7 +29,7 @@ use promptforge_plugin::{
 };
 use serde_json::{Value, json};
 
-use crate::support::Unused;
+use crate::support::{Unused, registry};
 
 #[path = "prepare-files.rs"]
 mod files;
@@ -88,13 +88,13 @@ fn recorded_parse_events(recorder: &MemoryRecorder, run_id: RunId) -> Vec<Event>
 
 /// A Host with no Plugins.
 pub(crate) fn bare() -> HostContext {
-    HostContext::new(HostServices::new())
+    HostContext::new(registry(&[]), HostServices::new())
 }
 
 /// A Host with `package` installed under its default name.
 pub(crate) fn installing(package: Package) -> HostContext {
-    let mut host = bare();
-    host.install(package, None, Value::Null).unwrap();
+    let mut host = HostContext::new(registry(&[package]), HostServices::new());
+    host.install(package.name, None, Value::Null).unwrap();
     host
 }
 
@@ -379,9 +379,11 @@ async fn the_lists_split_the_offering_by_declared_plugin_and_a_script_calls_a_to
         local extra = extras[1]\n\
         return #required .. ':' .. required[1].id .. '|' .. #extras .. ':' .. extra.id .. '|' .. \
           tools.call(extra, { value = 'hi' })\n```\n";
-    let mut host = installing(TOOLS);
-    host.install(echo_package("tests/extra", None), None, Value::Null)
-        .unwrap();
+    let extra = echo_package("tests/extra", None);
+    let mut host = HostContext::new(registry(&[TOOLS, extra]), HostServices::new());
+    for package in [TOOLS, extra] {
+        host.install(package.name, None, Value::Null).unwrap();
+    }
     assert_eq!(
         completed(drive_over(offering, host).await),
         "1:tools/echo|1:extra/echo|hi",

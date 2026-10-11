@@ -78,10 +78,11 @@ async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_tha
 
 #[tokio::test]
 async fn preludes_install_in_the_prompts_declaration_order_not_the_install_order() {
-    let mut host = bare();
-    for name in ["tests/first", "tests/second"] {
-        host.install(echo_package(name, Some("shared = 1\n")), None, Value::Null)
-            .unwrap();
+    let packages =
+        ["tests/first", "tests/second"].map(|name| echo_package(name, Some("shared = 1\n")));
+    let mut host = HostContext::new(registry(&packages), HostServices::new());
+    for package in packages {
+        host.install(package.name, None, Value::Null).unwrap();
     }
     let declares_second_first = "---\nname: order\ndescription: d\npromptforge: 0\n\
         plugins:\n  - second\n  - first\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'ran'\n```\n";

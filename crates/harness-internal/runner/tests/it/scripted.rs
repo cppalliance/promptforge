@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::asker::{ASKER, AskBroker, broker_services};
+use crate::support::registry;
 
 /// The one model the scripted broker lists.
 pub(crate) const MODEL: &str = "m";
@@ -260,15 +261,16 @@ pub(crate) fn surviving_hold_host(held: &Arc<Held>) -> HostContext {
 fn host_holding(held: &Arc<Held>, survives_stop: bool) -> HostContext {
     let mut services = HostServices::new();
     services.provide(&HELD, Arc::clone(held)).unwrap();
-    let mut host = HostContext::new(services);
-    host.install(HOLD, None, json!({ "survives_stop": survives_stop }))
+    let mut host = HostContext::new(registry(&[HOLD, ASKER]), services);
+    host.install(HOLD.name, None, json!({ "survives_stop": survives_stop }))
         .unwrap();
     host
 }
 
-/// `host` with the fixture ask Plugin installed as `user-input`.
+/// `host`, whose registry holds the fixture ask Plugin, with it installed
+/// as `user-input`.
 pub(crate) fn with_asker(mut host: HostContext) -> HostContext {
-    host.install(ASKER, None, Value::Null).unwrap();
+    host.install(ASKER.name, None, Value::Null).unwrap();
     host
 }
 

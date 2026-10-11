@@ -26,6 +26,11 @@
 //! - The loop never reads an event to decide anything; control comes
 //!   from the run's own word (`Step`, `Run::decided`), the cancel flag,
 //!   and the Host's stop.
+//! - A Host installs a Plugin only by a package name its
+//!   [`PackageRegistry`] holds. The registry holds the native
+//!   `promptforge/subagents` from the start and refuses a duplicate name,
+//!   and install refuses the native's local name to every other package,
+//!   so no other Plugin can take `subagents`.
 
 mod display_chain;
 pub mod effect_loop;
@@ -33,6 +38,7 @@ pub mod environment;
 pub mod files;
 mod harness;
 mod host;
+mod packages;
 pub mod performers;
 pub mod prepare;
 pub mod recorder;
@@ -40,6 +46,7 @@ pub mod recorder;
 pub use display_chain::display_chain;
 pub use harness::{Harness, HarnessError, RunControl, RunReport, RunRequest};
 pub use host::{HostContext, InstallError};
+pub use packages::{PackageRegistry, PluginKind};
 pub use recorder::{
     MemoryRecorder, Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome,
     RunRecorder,

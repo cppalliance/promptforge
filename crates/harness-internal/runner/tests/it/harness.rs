@@ -18,7 +18,9 @@ use std::time::Duration;
 use harness_runner::environment::HostSnapshot;
 use harness_runner::files::OutputError;
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
-use harness_runner::{Harness, HarnessError, HostContext, RunControl, RunReport, RunRequest};
+use harness_runner::{
+    Harness, HarnessError, HostContext, PackageRegistry, RunControl, RunReport, RunRequest,
+};
 use promptforge::vfs::VfsRef;
 use promptforge_plugin::HostServices;
 use serde_json::{Value, json};
@@ -63,7 +65,10 @@ fn plain_harness(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker) -> Harn
         recorder.clone(),
         Arc::new(broker),
         Arc::new(PendingTimer::default()),
-        Arc::new(HostContext::new(HostServices::new())),
+        Arc::new(HostContext::new(
+            PackageRegistry::new(),
+            HostServices::new(),
+        )),
         HostServices::new(),
     )
 }

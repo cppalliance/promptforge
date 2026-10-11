@@ -10,8 +10,8 @@
 //! recorder tee on a handle of the run log's [`TursoRecorder`] that names
 //! the launched agent, a per-run broker over
 //! the server's inference broker ([`broker`]), the tokio timer, the
-//! server's [`HostContext`] with web, user-input, and the MCP servers of
-//! the configured `mcp.json` installed, and the
+//! server's [`HostContext`] with web, user-input, the native subagents,
+//! and the MCP servers of the configured `mcp.json` installed, and the
 //! conversation's own services, which hold its input broker. The Harness reaches the gateway
 //! only through that broker, which follows the live gateway binding and
 //! sends each round to the dropdown's current pick. The
@@ -43,7 +43,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use harness::plugin::{HostContext, HostServices};
+use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::RunId;
 use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
@@ -138,23 +138,34 @@ fn read_mcp_servers(setting: Option<&Path>) -> Vec<(String, Value)> {
 }
 
 /// A Host over the Host-wide `services` with the Plugins agents may
-/// declare installed: `web`, and `user-input`, so they can ask the
-/// operator, under their default names, then each of `servers` as an MCP
-/// Plugin under its name lowercased in ASCII, with its entry as the
-/// configuration. A name that does not parse as a Plugin id, or that is
-/// taken or differs from an installed name only by punctuation, is skipped
-/// with a warning, and the other servers still install. The ask tool's id
-/// is `<name>/ask` under the name the user-input install returned, and
-/// `None` only if that install was refused.
+/// declare installed: `web`, `user-input`, so they can ask the operator,
+/// and the native `subagents`, under their default names, then each of
+/// `servers` as an MCP Plugin under its name lowercased in ASCII, with its
+/// entry as the configuration. A name that does not parse as a Plugin id,
+/// or that is taken, reserved for the native, or differs from an installed
+/// name only by punctuation, is skipped with a warning, and the other
+/// servers still install. The ask tool's id is `<name>/ask` under the name
+/// the user-input install returned, and `None` only if that install was
+/// refused.
 fn with_plugins(
     services: HostServices,
     servers: Vec<(String, Value)>,
 ) -> (HostContext, Option<ToolId>) {
-    let mut host = HostContext::new(services);
-    if let Err(error) = host.install(plugin_web::PACKAGE, None, Value::Null) {
+    let mut packages = PackageRegistry::new();
+    for package in [
+        plugin_web::PACKAGE,
+        plugin_user_input::PACKAGE,
+        plugin_mcp::PACKAGE,
+    ] {
+        if let Err(error) = packages.add(package) {
+            tracing::warn!(%error, "the Plugin package was not added");
+        }
+    }
+    let mut host = HostContext::new(packages, services);
+    if let Err(error) = host.install(plugin_web::PACKAGE.name, None, Value::Null) {
         tracing::warn!(%error, "the web Plugin was not installed");
     }
-    let ask = match host.install(plugin_user_input::PACKAGE, None, Value::Null) {
+    let ask = match host.install(plugin_user_input::PACKAGE.name, None, Value::Null) {
         Ok(name) => ToolId::parse(&format!("{name}/{}", plugin_user_input::ASK))
             .inspect_err(|error| tracing::warn!(%error, "the ask tool's id does not parse"))
             .ok(),
@@ -163,6 +174,9 @@ fn with_plugins(
             None
         }
     };
+    if let Err(error) = host.install("promptforge/subagents", None, Value::Null) {
+        tracing::warn!(%error, "the subagents Plugin was not installed");
+    }
     for (server, entry) in servers {
         let id = match PluginId::parse(&server.to_ascii_lowercase()) {
             Ok(id) => id,
@@ -171,7 +185,7 @@ fn with_plugins(
                 continue;
             }
         };
-        if let Err(error) = host.install(plugin_mcp::PACKAGE, Some(id), entry) {
+        if let Err(error) = host.install(plugin_mcp::PACKAGE.name, Some(id), entry) {
             tracing::warn!(%server, %error, "the MCP server was not installed");
         }
     }
