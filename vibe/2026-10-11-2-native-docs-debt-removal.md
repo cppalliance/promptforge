@@ -4,22 +4,22 @@ overview: "Remove the debt found in the 13 unpushed promptforge commits, plus th
 todos:
   - id: native-text
     content: "D1-1: rewrite the NATIVE description, the PluginKind::Native doc, and the AGENTS.md Engine-native clause to say the native reserves the subagents name and offers nothing yet"
-    status: pending
+    status: completed
   - id: package-docs
     content: "CH-1: change the three PACKAGE doc lines (plugin-web, plugin-user-input, plugin-mcp) to say a Host adds the constant to its package registry"
-    status: pending
+    status: completed
   - id: unknown-advice
     content: "D1-10: change the UnknownPackage error text in host.rs to say add the package before building the HostContext"
-    status: pending
+    status: completed
   - id: visible-in-place
     content: "D1-17 part 1: replace the copied Vec<Section> visible sets with a borrowed Visible view; reads, jump, call, and fanout look sections up in the shared Arc<Prompt>; move SlicePath to walk_target.rs"
-    status: pending
+    status: completed
   - id: shared-body
     content: "D1-17 part 2: keep the parsed body as one Arc<str>; Section markdown, items, and prose become BodyText offsets into it; names stay owned; H1 prose points into its masked copy; pending prose shares instead of copying"
-    status: pending
+    status: completed
   - id: verify
     content: "Run the Testing Plan exit checks: both full nextest runs, both clippy runs, fmt, docs builds, xtask api --check, build-xtask, docs-claims, and the rg checks"
-    status: pending
+    status: completed
 isProject: false
 ---
 
