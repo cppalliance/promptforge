@@ -34,7 +34,8 @@ pub struct PackageRegistry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginKind {
-    /// Built into every registry; what it does lives in the Engine.
+    /// Built into every registry; its behavior will live in the Engine, and
+    /// today's one native, `promptforge/subagents`, has none yet.
     Native,
     /// Added by the Host with [`PackageRegistry::add`].
     Linked,
@@ -114,8 +115,9 @@ impl PackageRegistry {
 /// like any other Plugin, so a native must never offer tools, carry a
 /// prelude, or need services. Its `call` is unreachable, because the run
 /// snapshot routes a call only to a tool in a Plugin's own list.
-const NATIVE: [Package; 1] = [Package::new("promptforge/subagents", native)
-    .description("Lets the model start, wait for, and cancel subagents")];
+const NATIVE: [Package; 1] = [Package::new("promptforge/subagents", native).description(
+    "Reserves the subagents name for the Engine's subagent tools, which are not built yet",
+)];
 
 /// Builds a native's [`Native`] object; see [`NATIVE`].
 #[expect(

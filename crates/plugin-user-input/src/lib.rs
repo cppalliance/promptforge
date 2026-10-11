@@ -76,7 +76,7 @@ mod ask;
 
 use promptforge_plugin::{Package, ServiceId, ServiceKey, ToolError};
 
-/// The Plugin's label, which a Host passes to its install.
+/// The Plugin's label, which a Host adds to its package registry.
 ///
 /// Its name is `promptforge/user-input`, so a Host that picks no name
 /// installs it as `user-input`. It has a prelude and needs the run's

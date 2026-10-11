@@ -79,7 +79,7 @@ use tokio::sync::watch;
 use crate::entry::Vars;
 use crate::server::{Server, State};
 
-/// The Plugin's label, which a Host passes to its install.
+/// The Plugin's label, which a Host adds to its package registry.
 ///
 /// Its name is `promptforge/mcp`. The Host installs it once per server,
 /// passing the server's `mcp.json` entry as the configuration, and

@@ -19,7 +19,7 @@ use crate::fetch::{FetchClient, WebFetch};
 use crate::provider::SearchProvider;
 use crate::search::WebSearch;
 
-/// The Plugin's label, which a Host passes to its install.
+/// The Plugin's label, which a Host adds to its package registry.
 ///
 /// Its name is `promptforge/web`, so a Host that picks no name installs it
 /// as `web`. It has no prelude and needs no per-run service; its
