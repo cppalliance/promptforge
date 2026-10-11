@@ -14,11 +14,11 @@ use std::sync::Arc;
 use promptforge_types::ids::ChainId;
 
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::execute::walk_target::{h1_visible_sections, section_position};
+use crate::execute::walk_target::{SlicePath, h1_visible_sections, section_position};
 use crate::heading_address::{self, Visible};
 use crate::{Error, Result};
 
-use super::{ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
+use super::{ChainIndex, Counters, Scheduler, prompt_origin};
 
 impl Scheduler {
     /// Starts the H1 pass as the driver loop's first chain: the prompt's

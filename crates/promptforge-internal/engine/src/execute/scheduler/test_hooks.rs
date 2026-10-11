@@ -6,9 +6,10 @@
 use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::Result;
+use crate::execute::walk_target::SlicePath;
 
 pub(crate) use super::tasks::TaskState;
-use super::{ChainIndex, Counters, Scheduler, SlicePath};
+use super::{ChainIndex, Counters, Scheduler};
 
 impl Scheduler {
     /// Shrinks the chain-count bound so a test can drive the

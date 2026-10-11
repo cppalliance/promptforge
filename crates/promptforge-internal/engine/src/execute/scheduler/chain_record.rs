@@ -14,13 +14,14 @@ use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
 use crate::execute::scope::DispatchTarget;
 use crate::execute::section_context::{SectionContext, TaskSeed};
+use crate::execute::walk_target::SlicePath;
 use crate::lua::UsageAnchor;
 use crate::model::{Message, ModelId};
 use crate::parser::{Block, Prompt, Section};
 use crate::{Error, Result};
 
 use super::await_tasks::AwaitTasks;
-use super::{ChainIndex, Counters, SlicePath, SpawnRecord};
+use super::{ChainIndex, Counters, SpawnRecord};
 
 /// What the chain's `chat` rounds taught the context precheck about token
 /// counts: the provider's numbers for the newest round that reported usage.
