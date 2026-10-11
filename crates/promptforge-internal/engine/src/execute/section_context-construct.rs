@@ -12,13 +12,12 @@ use std::sync::Arc;
 
 use promptforge_types::ids::{ChainId, TaskId};
 
-use crate::Result;
 use crate::execute::context::RunState;
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::walk_target::{h1_visible_sections, read_visible, visible_sections};
+use crate::execute::walk_target::{SlicePath, h1_visible_sections, read_visible};
 use crate::heading_address::Visible;
 use crate::lua::SectionVm;
-use crate::parser::Section;
+use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_vfs::Access;
 
@@ -33,9 +32,10 @@ impl SectionContext {
     /// the rest of the shared setup half (Engine injection, Engine globals, the
     /// Plugin preludes, the shared replay, the store yield shims).
     ///
-    /// `siblings` is the caller's own walk slice, from which the section's
-    /// visible set (its siblings minus itself, plus its direct children) is
-    /// built for the `prompt` reads. `section_id` is the
+    /// `home` is the path of the caller's own walk slice and `index` the
+    /// section's place in it. Each `prompt` read resolves that slice from
+    /// the shared prompt and reads the section's visible set (its siblings
+    /// minus itself, plus its direct children) in place. `section_id` is the
     /// section's `sys.id`: the entering chain's hierarchical id extended
     /// by its local entry counter, allocated by the scheduler; `task_id`
     /// is the entering chain's `sys.taskid`. `var` is the walk's current
@@ -44,24 +44,31 @@ impl SectionContext {
     /// every other entry.
     ///
     /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
+    /// Returns [`Error::Internal`] when `index` is past the `home` slice,
+    /// and otherwise the [`Error`] of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the walk frame keeps its context, capability, section, visible slice, entry id, task id, var seed, and task seed explicit and linear"
+        reason = "the walk frame keeps its context, capability, slice path, section index, entry id, task id, var seed, and task seed explicit and linear"
     )]
     pub(crate) fn new(
         ctx: &RunState,
         access: &Arc<Access>,
-        section: &Section,
-        siblings: &[Section],
+        home: &SlicePath,
+        index: usize,
         section_id: &str,
         task_id: &TaskId,
         var: &serde_json::Value,
         seed: TaskSeed,
     ) -> Result<Self> {
+        let section = home
+            .resolve(ctx.prompt())
+            .get(index)
+            .ok_or(Error::internal(
+                "an entered section is absent from its slice",
+            ))?;
         let mut sys = ctx.sys_json(section_id, task_id, section.name());
         // A spawned chain's `sys.index` is the spawn's own value, verbatim;
         // absent otherwise, so a walked section reading `sys.index` raises
@@ -89,8 +96,11 @@ impl SectionContext {
         // The `prompt` reads resolve over the section's visible set; the
         // suspending calls (`call`, `fanout`, `models.infer`) are the
         // yield shims the setup half installs.
-        let visible = visible_sections(siblings, section);
-        let read = move |heading: String| read_visible(&heading, Visible::all(&visible));
+        let prompt = Arc::clone(ctx.prompt_arc());
+        let home = home.clone();
+        let read = move |heading: String| {
+            read_visible(&heading, Visible::of(home.resolve(&prompt), index))
+        };
         // The setup half of the section lifecycle - Engine injection, Engine
         // globals, the control surface, the shared replay, and the captured
         // alias bindings - is shared with the H1 pass; only the seed, the
@@ -139,7 +149,7 @@ impl SectionContext {
     /// as the visible set behind the `prompt` reads.
     ///
     /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
+    /// Returns the [`Error`] of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
@@ -166,8 +176,10 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        let visible = h1_visible_sections(ctx.prompt()).to_vec();
-        let read = move |heading: String| read_visible(&heading, Visible::all(&visible));
+        let prompt = Arc::clone(ctx.prompt_arc());
+        let read = move |heading: String| {
+            read_visible(&heading, Visible::all(h1_visible_sections(&prompt)))
+        };
         // H1's one privilege: `argv` installs writable, so the repair
         // pattern can assign it; the executor reads the value back at the
         // freeze (see the scheduler's H1-to-walk handoff).

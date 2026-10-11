@@ -10,9 +10,10 @@ use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
 use crate::execute::run::EffectId;
 use crate::execute::support::GENERIC_COMPLETION;
+use crate::execute::walk_target::SlicePath;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, ChatAnchor, Continuation, Counters, Pending, Scheduler, SlicePath};
+use super::{Chain, ChainIndex, ChatAnchor, Continuation, Counters, Pending, Scheduler};
 
 impl Scheduler {
     /// Allocates the next child id under `owner`'s chain: the owner's id

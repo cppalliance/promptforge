@@ -15,13 +15,13 @@ use promptforge_types::ids::ChainId;
 
 use crate::execute::section_context::SectionContext;
 use crate::execute::walk_target::{
-    JumpTarget, h1_visible_sections, resolve_jump_target, section_position,
+    JumpTarget, SlicePath, h1_visible_sections, resolve_jump_target, section_position,
 };
 use crate::heading_address::{self, Visible};
 use crate::parser::Block;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
+use super::{Chain, ChainIndex, Counters, Scheduler, prompt_origin};
 use promptforge_vfs::Access;
 
 /// A heading resolved against a chain's visible set: the slice the walk or
@@ -160,8 +160,8 @@ impl Scheduler {
         let frame = SectionContext::new(
             &chain.ctx,
             chain.access()?,
-            &slice[index],
-            slice,
+            &chain.slice,
+            index,
             &section_id,
             &task,
             &chain.var,

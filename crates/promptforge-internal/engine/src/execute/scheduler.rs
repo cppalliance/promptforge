@@ -26,8 +26,8 @@
 //! merged: `RunState` is cloned into callbacks, while the scheduler must
 //! stay unreachable from the callback layer. The prompt tree is shared
 //! through the context's `Arc`, so a chain names its position in it by
-//! path ([`SlicePath`]) rather than by borrow, and the scheduler owns
-//! itself outright.
+//! path ([`SlicePath`](super::walk_target::SlicePath)) rather than by
+//! borrow, and the scheduler owns itself outright.
 //!
 //! This file holds the scheduler core: the chain arena, the
 //! ready queue, the admission queues (spawned tasks wait there until
@@ -88,7 +88,7 @@ use promptforge_types::ids::{Provenance, RoundId, TaskId};
 use promptforge_vfs::Origin;
 use promptforge_vfs::detail::ScopeHandle;
 
-use crate::parser::{Block, Prompt, Section};
+use crate::parser::{Block, Prompt};
 use crate::{Error, Result};
 use promptforge_types::event::{ReplyOrigin, lifecycle};
 
@@ -99,49 +99,6 @@ use chain_record::{Chain, ChatAnchor};
 use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
 pub(in crate::execute) use tool_call::RESERVED_TOOL_NAMES;
-
-/// Where a sibling slice sits in the prompt tree: the index of each
-/// ancestor section from the top level down to the slice's parent. The
-/// empty path is the top-level slice. A chain names its walk position by
-/// path so it borrows nothing from the tree the run shares through its
-/// `Arc<Prompt>`; the path resolves to the slice on demand.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct SlicePath(Vec<usize>);
-
-impl SlicePath {
-    /// The top-level slice.
-    fn root() -> Self {
-        Self::default()
-    }
-
-    /// The slice of `parent`'s children, where `parent` is the section at
-    /// `index` of this slice.
-    fn child(&self, index: usize) -> Self {
-        let mut path = self.0.clone();
-        path.push(index);
-        Self(path)
-    }
-
-    /// Resolves the path against `prompt`. A path the scheduler built is
-    /// always in range; an out-of-range index resolves to the empty slice,
-    /// which the walk treats as exhausted rather than panicking.
-    fn resolve<'p>(&self, prompt: &'p Prompt) -> &'p [Section] {
-        let mut slice = promptforge_parser::detail::sections(prompt);
-        for &index in &self.0 {
-            slice = slice.get(index).map_or(&[], Section::children);
-        }
-        slice
-    }
-
-    /// The name of the slice's section at `index`, or the prompt's title
-    /// when `index` is past the slice: a chain's section name before its
-    /// first entry.
-    fn name_at<'p>(&self, prompt: &'p Prompt, index: usize) -> &'p str {
-        self.resolve(prompt)
-            .get(index)
-            .map_or(prompt.title(), Section::name)
-    }
-}
 
 /// The most precise prompt-source line known for `blocks`: the first
 /// compiled chunk's absolute source line, else the prompt's opening line.

@@ -431,7 +431,7 @@ impl BodyText {
 
 <step-4>
 
-### Step 4: Read prompt sections in place at section entry
+### Step 4: Read prompt sections in place at section entry [completed]
 
 - Component: In-place visible sets
 - Piece: section-entry reads in place. Follows the target-lookup piece, whose `Visible` and view-taking `read_visible` it uses.
