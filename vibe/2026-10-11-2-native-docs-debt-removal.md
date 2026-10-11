@@ -398,7 +398,7 @@ impl BodyText {
 
 <step-2>
 
-### Step 2: Make the UnknownPackage advice followable
+### Step 2: Make the UnknownPackage advice followable [completed]
 
 - Component: Plugin package docs
 - Piece: install refusal advice (D1-10). Follows the doc pass and shares no file with it.
