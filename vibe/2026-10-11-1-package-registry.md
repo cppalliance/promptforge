@@ -4,25 +4,25 @@ overview: Add a string-keyed PackageRegistry to the Harness so a Host lists its 
 todos:
   - id: descriptions
     content: "Step 1: Package::description field and builder in promptforge-plugin; descriptions on the web, user-input, and mcp packages"
-    status: pending
+    status: completed
   - id: registry
     content: "Step 2: new runner packages.rs: PackageRegistry (new and Default hold the native, add, list yielding (&Package, PluginKind)), PluginKind { Native, Linked }, and the private native Package constant for promptforge/subagents with its tool-less Plugin; two guards: a doc comment on the stub saying built-in behavior lives in the Engine and the stub never gains tools, and a packages-tests.rs test that every native builds a Plugin with no tools, no prelude, and no needs"
-    status: pending
+    status: completed
   - id: install
     content: "Step 2: HostContext::new(packages, services) takes the registry by value; install takes a package name; InstallError gains DuplicatePackage, UnknownPackage, and ReservedName, and InvalidPackage moves from install to add"
-    status: pending
+    status: completed
   - id: callers
     content: "Step 2: runner and harness facade re-export PackageRegistry and PluginKind; Workshop with_plugins installs web, user-input, subagents, and each MCP server by name; run-prompt example; every test call site through a per-crate registry helper"
-    status: pending
+    status: completed
   - id: docs
     content: "Step 2: AGENTS.md Plugin definition with three kinds, subagents the one native; host.rs, harness lib.rs, and Package docs say Hosts add packages to a registry and install by name"
-    status: pending
+    status: completed
   - id: verify
     content: Both nextest runs, both clippy runs with warnings denied, fmt, docs and facade docs builds, xtask api --check, build-xtask tests, and the docs-claims test
-    status: pending
+    status: completed
   - id: close
     content: "Step 3: mark the vibe/ copy completed and commit Close plan: package-registry with the Plan trailer; nothing is pushed"
-    status: pending
+    status: completed
 isProject: false
 ---
 
