@@ -7,12 +7,13 @@
 //! the facade compiles into [`Block`]s.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 use promptforge_types::emitter::Emitter;
 
-use super::build::{line_add, newlines_before, nz_source_line};
+use super::build::{body_text, line_add, newlines_before, nz_source_line};
 use super::{Block, LuaProgram, ParseErrorKind};
 use crate::{Error, Result};
 
@@ -81,12 +82,15 @@ pub(super) fn split_h1(
             "internal H1 source masking failed",
         )
     })?;
+    // H1 prose can hold blanked stretches the prompt body doesn't, so it
+    // reads from its own shared copy.
+    let h1_content: Arc<str> = Arc::from(h1_content);
     let raw_blocks = split_section_blocks(&h1_content, title)?;
     let mut blocks = Vec::with_capacity(raw_blocks.len());
     for raw in raw_blocks {
         match raw {
             RawBlock::Prose(text) => blocks.push(Block::Prose {
-                text: text.to_owned(),
+                text: body_text(&h1_content, text)?,
             }),
             RawBlock::Lua {
                 source,
@@ -105,14 +109,14 @@ pub(super) fn split_h1(
     }
     if matches!(
         blocks.as_slice(),
-        [Block::Prose { text }] if text.is_empty()
+        [Block::Prose { text }] if text.as_str().is_empty()
     ) {
         blocks.clear();
     }
     let description_text = blocks
         .iter()
         .filter_map(|block| match block {
-            Block::Prose { text, .. } if !text.is_empty() => Some(text.as_str()),
+            Block::Prose { text, .. } if !text.as_str().is_empty() => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()

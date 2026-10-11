@@ -5,7 +5,7 @@
 //! crate's tests cannot construct them literally; these constructors are the
 //! cross-crate seam for synthetic section trees.
 
-use crate::{Block, Section};
+use crate::{Block, BodyText, Section};
 
 /// Builds a synthetic section with the given blocks, so each test fixture
 /// states only its own deltas (a prose block) instead of restating the
@@ -18,7 +18,7 @@ pub fn synthetic_section(name: &str, level: u8, blocks: Vec<Block>) -> Section {
         blocks,
         children: Vec::new(),
         items: Vec::new(),
-        markdown: String::new(),
+        markdown: BodyText::from_owned(String::new()),
     }
 }
 
@@ -26,5 +26,7 @@ pub fn synthetic_section(name: &str, level: u8, blocks: Vec<Block>) -> Section {
 /// fixtures need to construct directly.
 #[must_use]
 pub fn prose_block(text: String) -> Block {
-    Block::Prose { text }
+    Block::Prose {
+        text: BodyText::from_owned(text),
+    }
 }

@@ -12,7 +12,7 @@ use mlua::Thread;
 
 use crate::execute::protocol::{Answer, YieldParse};
 use crate::lua::{CoroStep, LuaBlockResult};
-use crate::parser::Block;
+use crate::parser::{Block, BodyText};
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 
@@ -156,7 +156,9 @@ impl Scheduler {
             .frame
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
-        if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
+        if let Err(error) =
+            frame.install_lazy_prose(&chain.ctx, pending.as_ref().map_or("", BodyText::as_str))
+        {
             emitter.report(&name, lifecycle::LUA_CHUNK_FAILED);
             return Err(error);
         }

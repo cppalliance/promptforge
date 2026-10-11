@@ -19,4 +19,4 @@
 //! The implementation sits in the `promptforge-parser` crate and is
 //! re-exported here unchanged for the Engine's own imports.
 
-pub(crate) use promptforge_parser::{Block, ParseError, ParseErrorKind, Prompt, Section};
+pub(crate) use promptforge_parser::{Block, BodyText, ParseError, ParseErrorKind, Prompt, Section};

@@ -4,6 +4,7 @@
 //! tree.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -11,7 +12,7 @@ use promptforge_types::emitter::Emitter;
 
 use super::fence::{RawBlock, lua_block_location, split_section_blocks, trim_leading_blank_lines};
 use super::list::{is_all_list_markers, parse_bullet_items};
-use super::{Block, LuaProgram, ParseErrorKind, Section};
+use super::{Block, BodyText, LuaProgram, ParseErrorKind, Section};
 use crate::{Error, Result};
 
 #[path = "build-frontmatter.rs"]
@@ -44,6 +45,16 @@ pub(crate) fn nz_source_line(line: u32) -> Result<std::num::NonZeroU32> {
 pub(crate) fn line_add(a: u32, b: u32) -> Result<u32> {
     a.checked_add(b)
         .ok_or(Error::Internal("parser: source line arithmetic overflowed"))
+}
+
+/// Locates `part` inside the shared `text` it was sliced from.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when `part` is not a slice of `text`.
+pub(crate) fn body_text(text: &Arc<str>, part: &str) -> Result<BodyText> {
+    BodyText::within(text, part).ok_or(Error::Internal(
+        "parser: section text is not a slice of the prompt body",
+    ))
 }
 
 /// A heading with its title and the prose/Lua that follows it (before the next
@@ -153,7 +164,9 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading<'_>>> {
 }
 
 /// Builds one heading's executable blocks while preserving source positions.
+/// Prose reads in place from `body`, the shared text `heading` was sliced from.
 fn build_heading_blocks(
+    body: &Arc<str>,
     heading: &Heading<'_>,
     name: &str,
     frontmatter_lines: u32,
@@ -169,7 +182,7 @@ fn build_heading_blocks(
     for (index, raw) in raw_blocks.into_iter().enumerate() {
         match raw {
             RawBlock::Prose(text) => blocks.push(Block::Prose {
-                text: text.to_owned(),
+                text: body_text(body, text)?,
             }),
             RawBlock::Lua {
                 source,
@@ -230,7 +243,7 @@ fn section_name(heading: &Heading<'_>, level: u8) -> Result<String> {
 /// is a list only when it has no Lua and every nonblank prose line is a list
 /// marker; one incidental bullet in mixed prose leaves a non-marker line, so
 /// the section stays prose.
-fn list_items(blocks: &[Block], name: &str) -> Result<Vec<String>> {
+fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyText>> {
     let has_no_lua = blocks
         .iter()
         .all(|block| matches!(block, Block::Prose { .. }));
@@ -242,10 +255,10 @@ fn list_items(blocks: &[Block], name: &str) -> Result<Vec<String>> {
         && let Some(prose) = prose_for_items
         && is_all_list_markers(prose)
     {
-        Ok(parse_bullet_items(prose, name)?
+        parse_bullet_items(prose, name)?
             .into_iter()
-            .map(str::to_owned)
-            .collect())
+            .map(|item| body_text(body, item))
+            .collect()
     } else {
         Ok(Vec::new())
     }
@@ -285,8 +298,10 @@ fn check_unique_sibling(
 /// Returns [`Error::ParseStructured`] for an orphan heading, an empty heading,
 /// duplicate sibling names, or malformed section content. Propagates
 /// [`Error::LuaCompile`] or [`Error::Lua`] from Lua compilation and
-/// [`Error::Internal`] from invalid or overflowing source-line calculations.
+/// [`Error::Internal`] from invalid or overflowing source-line calculations,
+/// or from section text that is not a slice of `body`.
 pub(crate) fn build_sections(
+    body: &Arc<str>,
     headings: &[Heading<'_>],
     pos: &mut usize,
     parent_level: u8,
@@ -306,10 +321,10 @@ pub(crate) fn build_sections(
         check_child_level(h, parent_level)?;
         let name = section_name(h, level)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
-        let blocks = build_heading_blocks(h, &name, frontmatter_lines, emitter)?;
+        let blocks = build_heading_blocks(body, h, &name, frontmatter_lines, emitter)?;
         *pos += 1;
-        let children = build_sections(headings, pos, level, frontmatter_lines, emitter)?;
-        let items = list_items(&blocks, &name)?;
+        let children = build_sections(body, headings, pos, level, frontmatter_lines, emitter)?;
+        let items = list_items(body, &blocks, &name)?;
         check_unique_sibling(&sibling_lines, &name, h, heading_abs_line)?;
         sibling_lines.push((name.clone(), heading_abs_line));
 
@@ -319,7 +334,7 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
-            markdown: trim_leading_blank_lines(h.content).trim_end().to_owned(),
+            markdown: body_text(body, trim_leading_blank_lines(h.content).trim_end())?,
         });
     }
     Ok(result)

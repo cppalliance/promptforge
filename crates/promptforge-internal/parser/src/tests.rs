@@ -200,7 +200,7 @@ Prose for the second section.\n";
     assert_eq!(
         p.h1_blocks,
         vec![Block::Prose {
-            text: "Human-readable intro text.".to_owned(),
+            text: BodyText::from_owned("Human-readable intro text.".to_owned()),
         }]
     );
     assert_eq!(p.description_text, "Human-readable intro text.");

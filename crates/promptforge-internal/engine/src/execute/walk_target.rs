@@ -86,7 +86,11 @@ pub(super) fn read_visible(heading: &str, visible: Visible<'_>) -> Result<Option
     Ok(
         heading_address::find_visible(heading, visible)?.map(|section| SectionText {
             markdown: section.markdown().to_owned(),
-            items: section.items().to_vec(),
+            items: section
+                .items()
+                .iter()
+                .map(|item| item.as_str().to_owned())
+                .collect(),
         }),
     )
 }

@@ -13,7 +13,7 @@ fn leading_break_resets_prose_and_content_below_parses() {
     assert_eq!(section.blocks().len(), 3);
     assert!(matches!(
         &section.blocks()[0],
-        Block::Prose { text } if text.is_empty()
+        Block::Prose { text } if text.as_str().is_empty()
     ));
     assert!(matches!(
         &section.blocks()[1],
@@ -88,7 +88,7 @@ fn h1_break_resets_prose_and_shared_fence_below_stays_live() {
     assert_eq!(
         prompt.h1_blocks,
         vec![Block::Prose {
-            text: "Below prose.".to_owned(),
+            text: BodyText::from_owned("Below prose.".to_owned()),
         }]
     );
 }
@@ -194,8 +194,8 @@ fn a_thematic_break_resets_the_pending_buffer() {
     match &section.blocks()[0] {
         Block::Prose { text } => {
             assert_eq!(text, "Ask the question.");
-            assert!(!text.contains("Draft notes."));
-            assert!(!text.contains("---"));
+            assert!(!text.as_str().contains("Draft notes."));
+            assert!(!text.as_str().contains("---"));
         }
         other => panic!("expected pending prose, got {other:?}"),
     }
