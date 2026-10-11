@@ -238,7 +238,7 @@ async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_par
         ## Sub\n\n\
         ```lua\n\
         store.append('ids.txt', 'sub:' .. sys.id .. '\\n')\n\
-        local r = fanout('## Worker', {'a', 'b'})\n\
+        local r = tasks.fanout('## Worker', {'a', 'b'})\n\
         store.append('ids.txt', r[1].text .. '\\n' .. r[2].text .. '\\n')\n\
         return 'sub-done'\n\
         ```\n\n\
@@ -271,7 +271,7 @@ async fn two_runs_of_the_same_prompt_produce_identical_ids() {
         ```lua\n\
         local ids = { sys.id }\n\
         ids[#ids + 1] = call('## Sub')\n\
-        local r = fanout('## Worker', {'x', 'y', 'z'})\n\
+        local r = tasks.fanout('## Worker', {'x', 'y', 'z'})\n\
         for i = 1, #r do ids[#ids + 1] = r[i].text end\n\
         ids[#ids + 1] = call('## Sub')\n\
         var.ids = table.concat(ids, ',')\n\

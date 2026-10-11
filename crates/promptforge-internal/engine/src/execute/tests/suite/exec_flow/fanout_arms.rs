@@ -11,7 +11,7 @@ const ARM_FANOUT_PARENT: &str = flow_prompt!(
     "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
+local r = tasks.fanout('### Worker', {'alpha'})\n\
 return r[1].text\n\
 ```\n\n"
 );
@@ -55,7 +55,7 @@ async fn call_inside_a_fanout_arm_runs_a_contained_chain() {
 ## Parent\n\n\
 ```lua\n\
 tasks.concurrency(1)\n\
-local r = fanout('### Worker', {'alpha'})\n\
+local r = tasks.fanout('### Worker', {'alpha'})\n\
 return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
@@ -69,7 +69,7 @@ return 'worker:' .. got .. ':' .. item\n\
 assert(sys.id == '0.0.0.0', 'a contained chain is the arm chain child and starts at entry 0')\n\
 assert(item == nil, 'a contained chain runs as a plain section')\n\
 assert(sys.section_count == 1, 'a contained chain sees the run section count')\n\
-local leaves = fanout('#### Leaf', {'x', 'y'})\n\
+local leaves = tasks.fanout('#### Leaf', {'x', 'y'})\n\
 var.leaves = leaves[1].text .. leaves[2].text\n\
 ```\n\n\
 #### Leaf\n\n\
@@ -97,12 +97,12 @@ async fn fanout_inside_a_fanout_arm_maps_over_a_collection() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Outer', {'a', 'b'})\n\
+local r = tasks.fanout('### Outer', {'a', 'b'})\n\
 return table.concat({r[1].text, r[2].text}, ';')\n\
 ```\n\n\
 ### Outer\n\n\
 ```lua\n\
-local inner = fanout('### Inner', {item .. '1', item .. '2'})\n\
+local inner = tasks.fanout('### Inner', {item .. '1', item .. '2'})\n\
 assert(inner[1].ok and inner[2].ok)\n\
 return item .. ':' .. inner[1].text .. ',' .. inner[2].text\n\
 ```\n\n\
@@ -294,7 +294,7 @@ local ok, v = pcall(store.read, 'n.txt')\n\
 local n = tonumber(ok and v or '0') + 1\n\
 store.write('n.txt', tostring(n))\n\
 if n >= 5 then\n\
-  return fanout('## W', {'x'})\n\
+  return tasks.fanout('## W', {'x'})\n\
 end\n\
 return call('## B')\n\
 ```\n\n\
@@ -313,7 +313,7 @@ return item\n\
         .expect_err("a fanout at the call cap must fail");
     let rendered = format!("{error:?}");
     assert!(
-        rendered.contains("fanout recursion exceeded cap of 8"),
+        rendered.contains("tasks.fanout recursion exceeded cap of 8"),
         "expected the fanout recursion-cap error, got: {rendered}"
     );
 }
@@ -339,7 +339,7 @@ local ok, v = pcall(store.read, 'n.txt')\n\
 local n = tonumber(ok and v or '0') + 1\n\
 store.write('n.txt', tostring(n))\n\
 if n >= 4 then\n\
-  local r = fanout('## W', {'x'})\n\
+  local r = tasks.fanout('## W', {'x'})\n\
   return r[1].text\n\
 end\n\
 return call('## A')\n\
@@ -373,7 +373,7 @@ async fn fanout_arm_without_output_and_no_incoming_reply_yields_empty_text() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
+local r = tasks.fanout('### Worker', {'alpha'})\n\
 assert(r[1].ok, 'the arm succeeded')\n\
 assert(r[1].text == '', 'a no-reply arm yields empty text')\n\
 return 'ok'\n\

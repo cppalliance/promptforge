@@ -324,7 +324,7 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
         # Tasks\n\n\
         ## Main\n\n\
         ```lua\n\
-        local ok, err = pcall(fanout, '## Worker', {'spawner', 'boom'})\n\
+        local ok, err = pcall(tasks.fanout, '## Worker', {'spawner', 'boom'})\n\
         assert(not ok, 'the fatal arm fails the fanout')\n\
         return tostring(err)\n\
         ```\n\n\

@@ -54,7 +54,7 @@ async fn fanout_from_h1_to_an_unknown_section_fails_the_run() {
         "\
 # Test prompt\n\n\
 ```lua\n\
-fanout('## Nope', {'a'})\n\
+tasks.fanout('## Nope', {'a'})\n\
 ```\n"
     );
     let error = run_offline(md)

@@ -10,7 +10,7 @@ async fn fanout_returns_structured_results() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', prompt.list('### Items'))\n\
+local r = tasks.fanout('### Worker', prompt.list('### Items'))\n\
 assert(r[1].text == 'alpha-1')\n\
 assert(r[1].ok == true)\n\
 assert(r[1].item == 'alpha')\n\
@@ -43,7 +43,7 @@ async fn off_walk_worker_runs_as_a_fanout_arm() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', prompt.list('### Items'))\n\
+local r = tasks.fanout('### Worker', prompt.list('### Items'))\n\
 return r[1].text .. ',' .. r[2].text\n\
 ```\n\n\
 ### Worker\n\n\
@@ -72,7 +72,7 @@ async fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
 ```lua\n\
 local members = {}\n\
 for i = 1, 1025 do members[i] = 'm' .. i end\n\
-local r = fanout('### Worker', members)\n\
+local r = tasks.fanout('### Worker', members)\n\
 assert(#r == 1025, 'every member ran')\n\
 return r[1025].text\n\
 ```\n\n\
@@ -95,7 +95,7 @@ async fn fanout_collection_array_members_arrive_as_themselves_in_order() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'b', 2, true, {nested='x'}})\n\
+local r = tasks.fanout('### Worker', {'b', 2, true, {nested='x'}})\n\
 assert(#r == 4)\n\
 assert(r[1].text == 'string:b')\n\
 assert(r[2].text == 'number:2')\n\
@@ -123,7 +123,7 @@ async fn fanout_collection_hash_members_arrive_as_pair_tables() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {alpha=1, beta='two'})\n\
+local r = tasks.fanout('### Worker', {alpha=1, beta='two'})\n\
 assert(#r == 2)\n\
 local seen = {}\n\
 for i = 1, #r do\n\
@@ -152,7 +152,7 @@ async fn fanout_collection_empty_errors() {
         "\
 ## Parent\n\n\
 ```lua\n\
-fanout('### Worker', {})\n\
+tasks.fanout('### Worker', {})\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n"
@@ -174,7 +174,7 @@ async fn fanout_collection_item_round_trips_members() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {1, 'two', {n=3}})\n\
+local r = tasks.fanout('### Worker', {1, 'two', {n=3}})\n\
 assert(r[1].item == 1)\n\
 assert(r[2].item == 'two')\n\
 assert(type(r[3].item) == 'table' and r[3].item.n == 3)\n\
@@ -197,7 +197,7 @@ async fn fanout_worker_resolves_as_a_sibling() {
         "\
 ## Main\n\n\
 ```lua\n\
-local r = fanout('## Worker', {'x'})\n\
+local r = tasks.fanout('## Worker', {'x'})\n\
 return r[1].text\n\
 ```\n\n\
 ## Worker\n\n\
@@ -217,12 +217,12 @@ async fn fanout_worker_shared_by_two_sibling_callers() {
         "\
 ## A\n\n\
 ```lua\n\
-local r = fanout('## Worker', {'a'})\n\
+local r = tasks.fanout('## Worker', {'a'})\n\
 store.write('a.txt', r[1].text)\n\
 ```\n\n\
 ## B\n\n\
 ```lua\n\
-local r = fanout('## Worker', {'b'})\n\
+local r = tasks.fanout('## Worker', {'b'})\n\
 return store.read('a.txt') .. ',' .. r[1].text\n\
 ```\n\n\
 ## Worker\n\n\
@@ -243,7 +243,7 @@ async fn fanout_niece_worker_is_not_visible() {
         "\
 ## Main\n\n\
 ```lua\n\
-fanout('### Niece', {'x'})\n\
+tasks.fanout('### Niece', {'x'})\n\
 ```\n\n\
 ## Other\n\n\
 ```lua\nlocal x = 1\n```\n\n\
@@ -266,7 +266,7 @@ async fn fanout_string_second_parameter_errors_pointing_at_prompt_list() {
         "\
 ## Parent\n\n\
 ```lua\n\
-fanout('### Worker', '### Items')\n\
+tasks.fanout('### Worker', '### Items')\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n\n\
@@ -278,7 +278,7 @@ fanout('### Worker', '### Items')\n\
         .expect_err("the two-string form must be rejected");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("fanout's second parameter is a collection"),
+        rendered.contains("tasks.fanout's second parameter is a collection"),
         "error was: {rendered}"
     );
     assert!(
@@ -294,9 +294,9 @@ async fn fanout_number_and_boolean_second_parameters_error() {
         "\
 ## Parent\n\n\
 ```lua\n\
-local ok_n, err_n = pcall(fanout, '### Worker', 5)\n\
+local ok_n, err_n = pcall(tasks.fanout, '### Worker', 5)\n\
 assert(not ok_n and tostring(err_n):find('collection'), tostring(err_n))\n\
-local ok_b, err_b = pcall(fanout, '### Worker', true)\n\
+local ok_b, err_b = pcall(tasks.fanout, '### Worker', true)\n\
 assert(not ok_b and tostring(err_b):find('collection'), tostring(err_b))\n\
 return 'ok'\n\
 ```\n\n\
@@ -316,7 +316,7 @@ async fn fanout_function_member_errors_naming_the_index() {
         "\
 ## Parent\n\n\
 ```lua\n\
-fanout('### Worker', {'a', function() end})\n\
+tasks.fanout('### Worker', {'a', function() end})\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n"
@@ -338,7 +338,7 @@ async fn fanout_table_keyed_member_errors() {
 ```lua\n\
 local t = {}\n\
 t[{}] = 'x'\n\
-fanout('### Worker', t)\n\
+tasks.fanout('### Worker', t)\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n"
@@ -359,7 +359,7 @@ async fn fanout_worker_that_is_a_list_section_errors() {
         "\
 ## Parent\n\n\
 ```lua\n\
-fanout('### Items', {'x'})\n\
+tasks.fanout('### Items', {'x'})\n\
 ```\n\n\
 ### Items\n\n\
 - a\n\

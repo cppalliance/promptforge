@@ -13,7 +13,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -39,7 +39,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        fanout('### Worker', {'alpha'})\n\
+        tasks.fanout('### Worker', {'alpha'})\n\
         ```\n\n\
         ### Worker\n\n\
         Ask the model about {{ item }}.\n\n\
@@ -83,7 +83,7 @@ async fn the_shared_replay_sees_the_arm_item() {
         ```\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha'})\n\
+        local r = tasks.fanout('### Worker', {'alpha'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -125,7 +125,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha'})\n\
+        local r = tasks.fanout('### Worker', {'alpha'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -169,7 +169,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha'})\n\
+        local r = tasks.fanout('### Worker', {'alpha'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -215,7 +215,7 @@ async fn fanout_hash_collection_iterates_in_sorted_key_order() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', { zeta = 1, alpha = 2, mid = 3 })\n\
+        local r = tasks.fanout('### Worker', { zeta = 1, alpha = 2, mid = 3 })\n\
         assert(r[1].item.key == 'alpha' and r[3].item.key == 'zeta', 'results land by sorted key')\n\
         return table.concat(r, ',')\n\
         ```\n\n\
@@ -245,9 +245,9 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
         local ok, err = pcall(function() r[1].text = 'forged' end)\n\
-        assert(not ok and tostring(err):find('read-only', 1, true), 'a write raises: ' .. tostring(err))\n\
+        assert(not ok and tostring(err):find('tasks.fanout results are read-only', 1, true), 'a write raises: ' .. tostring(err))\n\
         ok, err = pcall(setmetatable, r[1], nil)\n\
         assert(not ok and tostring(err):find('protected metatable', 1, true), 'setmetatable is refused: ' .. tostring(err))\n\
         ok, err = pcall(setmetatable, r[1], {})\n\

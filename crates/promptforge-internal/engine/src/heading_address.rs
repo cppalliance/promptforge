@@ -3,7 +3,7 @@
 //!
 //! A section's Lua names other sections by heading string - `call`, `jump`,
 //! `prompt.section`, `prompt.list`, `tasks.spawn`, and
-//! `fanout(worker, collection)` (which runs the worker template once per
+//! `tasks.fanout(worker, collection)` (which runs the worker template once per
 //! collection member: the array part in order, then the hash part as
 //! `{ key, value }` pairs sorted by key, a list section's pre-parsed items
 //! feeding in through `prompt.list`). The `fanout` shim itself is Lua over

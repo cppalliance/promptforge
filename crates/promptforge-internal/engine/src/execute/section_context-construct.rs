@@ -94,7 +94,7 @@ impl SectionContext {
             ctx.limits().lua_logs().get(),
         )?;
         // The `prompt` reads resolve over the section's visible set; the
-        // suspending calls (`call`, `fanout`, `models.infer`) are the
+        // suspending calls (`call`, `tasks.fanout`, `models.infer`) are the
         // yield shims the setup half installs.
         let prompt = Arc::clone(ctx.prompt_arc());
         let home = home.clone();

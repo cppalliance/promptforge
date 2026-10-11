@@ -147,7 +147,7 @@ const ARM_FANOUT_PARENT: &str = flow_prompt!(
     "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
+local r = tasks.fanout('### Worker', {'alpha'})\n\
 return r[1].text\n\
 ```\n\n"
 );

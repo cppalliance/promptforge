@@ -189,7 +189,7 @@ impl SectionVm {
     /// Installs the scheduler-mode control surface: `jump` and the
     /// `prompt` reads as Rust callbacks (none suspends).
     ///
-    /// The suspending calls (`models.infer`, `call`, `fanout`,
+    /// The suspending calls (`models.infer`, `call`, `tasks.fanout`,
     /// `tools.call`, `tasks.*`) are the yield shims installed by
     /// [`install_coro_shims`](Self::install_coro_shims).
     ///
@@ -206,10 +206,10 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `call`,
-    /// `fanout`, `tools.call`, the `tasks` namespace). `max_tool_iterations`
-    /// is the run's resolved round cap for the `models.loop` shim a section
-    /// install adds afterward; a VM that never installs the loop shim
-    /// passes any value.
+    /// `tasks.fanout`, `tools.call`, the `tasks` namespace).
+    /// `max_tool_iterations` is the run's resolved round cap for the
+    /// `models.loop` shim a section install adds afterward; a VM that never
+    /// installs the loop shim passes any value.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.

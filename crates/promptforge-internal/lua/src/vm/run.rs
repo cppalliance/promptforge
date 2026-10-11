@@ -58,7 +58,7 @@ impl SectionVm {
     /// `log` reports go to the emitter captured by
     /// [`install_engine_globals`](Self::install_engine_globals); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
-    /// the chunk may call `call`, `jump`, or `fanout`, those must
+    /// the chunk may call `call`, `jump`, or `tasks.fanout`, those must
     /// already be installed by `install_control_globals`.
     ///
     /// # Errors

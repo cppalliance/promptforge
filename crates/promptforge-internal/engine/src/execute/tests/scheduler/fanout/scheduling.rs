@@ -17,7 +17,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'one', 'two'})\n\
+        local r = tasks.fanout('### Worker', {'one', 'two'})\n\
         return r[1].text .. '|' .. r[2].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -60,7 +60,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'one', 'two'})\n\
+        local r = tasks.fanout('### Worker', {'one', 'two'})\n\
         return r[1].text .. '|' .. r[2].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -105,7 +105,7 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'x', 'y', 'z'})\n\
+        local r = tasks.fanout('### Worker', {'x', 'y', 'z'})\n\
         return r[1].text .. '|' .. r[2].text .. '|' .. r[3].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -147,7 +147,7 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'a', 'b'})\n\
+        local r = tasks.fanout('### Worker', {'a', 'b'})\n\
         assert(r[1].ok and r[2].ok, 'both arms succeed')\n\
         assert(r[2].item == 'b', 'the result object holds the item')\n\
         store.append('ids.txt', 'parent:' .. sys.id .. '\\n')\n\
@@ -201,7 +201,7 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
         ```lua\n\
         local items = {}\n\
         for i = 1, 1025 do items[i] = tostring(i) end\n\
-        local r = fanout('### Worker', items)\n\
+        local r = tasks.fanout('### Worker', items)\n\
         return #r .. ':' .. r[1].text .. ':' .. r[1025].text\n\
         ```\n\n\
         ### Worker\n\n\

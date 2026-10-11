@@ -2,10 +2,10 @@
 //! suspending Engine calls.
 //!
 //! Yield cannot cross the C boundary, so `models.infer`, `call`,
-//! `tools.call`, the `tasks` namespace, and `fanout` are Lua shims (source
-//! in the `__impl_*.lua` files beside this one) that `coroutine.yield` a
-//! request table and interpret the resume values as the `(ok, result)`
-//! envelope; coroutine driving itself
+//! `tools.call`, the `tasks` namespace, and `tasks.fanout` are Lua shims
+//! (source in the `__impl_*.lua` files beside this one) that
+//! `coroutine.yield` a request table and interpret the resume values as the
+//! `(ok, result)` envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
 //! pulled in with `include_str!` so chunk line 1 is file line 1, compiled
 //! once through the usual [`LuaProgram`] machinery, and loaded per VM. The
@@ -134,13 +134,13 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// `yield` and `var_snapshot` captures plus the prelude's returned failure
 /// helpers, and installed as the `tasks` global; `fanout` is a third, run
 /// over the same captures plus the collection enumerator and the item
-/// renderer, and installed as the `fanout` global. The `models.loop` shim
-/// is stashed in the registry for [`install_section_loop_shim`], and the
-/// chunk's `handle_methods` table, a model handle's `infer` and `loop`, for
-/// [`handle_method`]. `max_tool_iterations`, the run's resolved round cap,
-/// and the `compactors` table go to
-/// [`loop_begin`](crate::models_loop::loop_begin), which runs the loop's
-/// rules behind the shim's trampoline.
+/// renderer, and installed on the `tasks` table as `tasks.fanout`. The
+/// `models.loop` shim is stashed in the registry for
+/// [`install_section_loop_shim`], and the chunk's `handle_methods` table, a
+/// model handle's `infer` and `loop`, for [`handle_method`].
+/// `max_tool_iterations`, the run's resolved round cap, and the
+/// `compactors` table go to [`loop_begin`](crate::models_loop::loop_begin),
+/// which runs the loop's rules behind the shim's trampoline.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -229,7 +229,7 @@ pub(crate) fn install_shim_prelude(
         .load(lua)?
         .call((yield_fn.clone(), var_snapshot.clone(), helpers.clone()))
         .map_err(Error::lua)?;
-    globals.raw_set("tasks", tasks).map_err(Error::lua)?;
+    globals.raw_set("tasks", &tasks).map_err(Error::lua)?;
     // The enumerator answers `(members)` or `(nil, message)` so the shim
     // raises the message as its own call error, exactly as the other
     // author-argument failures surface at the call site.
@@ -261,7 +261,7 @@ pub(crate) fn install_shim_prelude(
             render_item,
         ))
         .map_err(Error::lua)?;
-    globals.raw_set("fanout", fanout).map_err(Error::lua)?;
+    tasks.raw_set("fanout", fanout).map_err(Error::lua)?;
     stash_shims(lua, &shims)?;
     globals
         .raw_set("coroutine", Value::Nil)

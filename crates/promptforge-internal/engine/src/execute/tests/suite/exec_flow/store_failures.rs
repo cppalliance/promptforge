@@ -191,7 +191,7 @@ store.write('shared.txt', 'seed')\n\
 ```\n\n\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha', 'beta'})\n\
+local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
 return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
@@ -221,7 +221,7 @@ local ok = pcall(function() store.write('shared.txt', 'seed') end)\n\
 ```\n\n\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha', 'beta'})\n\
+local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
 return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
@@ -261,7 +261,7 @@ async fn a_captured_store_function_conflict_caught_with_pcall_still_ends_the_run
         CAPTURED_STORE_WRITE,
         "## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {'alpha', 'beta'})\n\
+local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
 return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\

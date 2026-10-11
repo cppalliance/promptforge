@@ -123,7 +123,7 @@ async fn fanout_from_h1_runs_the_worker_over_the_collection() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\n\
-        local r = fanout('## Worker', {'a', 'b'})\n\
+        local r = tasks.fanout('## Worker', {'a', 'b'})\n\
         var.answer = r[1].text .. '|' .. r[2].text\n\
         ```\n\n\
         ## Result\n\n\

@@ -121,7 +121,7 @@ const FANOUT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
     ## Parent\n\n\
     ```lua\n\
     store.write('seed.txt', 'planted')\n\
-    local r = fanout('### Worker', {'a', 'b', 'c'})\n\
+    local r = tasks.fanout('### Worker', {'a', 'b', 'c'})\n\
     return sys.id .. '|' .. r[1].text .. '|' .. r[2].text .. '|' .. r[3].text\n\
     ```\n\n\
     ### Worker\n\n\

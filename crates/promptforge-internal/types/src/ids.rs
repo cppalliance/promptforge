@@ -250,8 +250,8 @@ impl RoundId {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum TaskOrigin {
-    /// The prompt's author, through `tasks.spawn` or `fanout`, which is
-    /// built on it.
+    /// The prompt's author, through `tasks.spawn` or `tasks.fanout`, which
+    /// is built on it.
     Author,
     /// The model, through its `task` tool.
     Model,

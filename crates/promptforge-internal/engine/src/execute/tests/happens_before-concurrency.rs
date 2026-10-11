@@ -55,7 +55,7 @@ const TRACE_12: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
     assert(n == 2, 'the effective limit is 2, got ' .. n)\n\
     local items = {}\n\
     for i = 1, 10 do items[i] = tostring(i) end\n\
-    local r = fanout('#### Sub', items)\n\
+    local r = tasks.fanout('#### Sub', items)\n\
     return table.concat(r, '|')\n\
     ```\n\n\
     #### Sub\n\n\

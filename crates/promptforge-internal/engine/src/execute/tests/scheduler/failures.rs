@@ -20,7 +20,7 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
         return table.concat(r, ',')\n\
         ```\n\n\
         ### Worker\n\n\
@@ -59,7 +59,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'only'})\n\
+        local r = tasks.fanout('### Worker', {'only'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -88,8 +88,8 @@ async fn sequential_fanouts_may_write_one_path() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local a = fanout('### Worker', {'one'})\n\
-        local b = fanout('### Worker', {'two'})\n\
+        local a = tasks.fanout('### Worker', {'one'})\n\
+        local b = tasks.fanout('### Worker', {'two'})\n\
         return b[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -120,7 +120,7 @@ async fn fatal_arm_aborts_queued_siblings() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
-        ```lua\nfanout('### Worker', {'boom', 'beta', 'gamma'})\n```\n\n\
+        ```lua\ntasks.fanout('### Worker', {'boom', 'beta', 'gamma'})\n```\n\n\
         ### Worker\n\n\
         ```lua\n\
         store.append('log.txt', item .. '\\n')\n\
@@ -184,7 +184,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
-        ```lua\nfanout('### Worker', {'boom', 'slow'})\n```\n\n\
+        ```lua\ntasks.fanout('### Worker', {'boom', 'slow'})\n```\n\n\
         ### Worker\n\n\
         ```lua\n\
         local a = models.infer(item .. ':1')\n\
@@ -259,7 +259,7 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local ok, err = pcall(fanout, '### Worker', {'boom', 'slow'})\n\
+        local ok, err = pcall(tasks.fanout, '### Worker', {'boom', 'slow'})\n\
         assert(not ok, 'the fatal arm error reaches the caller')\n\
         local a = models.infer('after')\n\
         return 'caught:' .. a\n\
@@ -303,7 +303,7 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local r = fanout('### Worker', {'one', 'two'})\n\
+        local r = tasks.fanout('### Worker', {'one', 'two'})\n\
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
@@ -379,7 +379,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
-        local ok, err = pcall(fanout, '### Worker', {'one', 'two', 'three'})\n\
+        local ok, err = pcall(tasks.fanout, '### Worker', {'one', 'two', 'three'})\n\
         assert(not ok, 'the spawn failure reaches the caller')\n\
         return 'caught:' .. models.infer('after')\n\
         ```\n\n\

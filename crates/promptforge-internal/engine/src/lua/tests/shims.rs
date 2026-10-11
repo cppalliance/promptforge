@@ -1,5 +1,5 @@
 //! The yield shims installed on a scheduler-mode section VM produce
-//! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
+//! well-formed protocol requests: `models.infer`, `call`, `tasks.fanout`, and
 //! `tools.call` in their id and tool-object forms, the local tool
 //! handshake, the loop's batch and its requesting turn, a model handle's
 //! `infer` method, and the `infer` and `loop` methods a model handle
@@ -52,7 +52,10 @@ fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
     // member as the `item` seed, its 1-based position as `index`, the
     // caller's `var` snapshot, the author origin, and the fanout mark.
     let vm = scheduler_vm(&ModelSet::default(), None);
-    match yielded_request(&vm, r####"return fanout("### Worker", {"a", "b"})"####) {
+    match yielded_request(
+        &vm,
+        r####"return tasks.fanout("### Worker", {"a", "b"})"####,
+    ) {
         Request::Spawn {
             target,
             input,
@@ -83,7 +86,7 @@ fn fanout_rejects_an_empty_collection_before_any_spawn() {
     let (kind, message): (String, String) = vm
         .lua()
         .load(
-            "local ok, err = pcall(fanout, '### Worker', {})\n\
+            "local ok, err = pcall(tasks.fanout, '### Worker', {})\n\
              assert(not ok, 'an empty collection must fail')\n\
              return err.kind, tostring(err)",
         )
@@ -92,7 +95,7 @@ fn fanout_rejects_an_empty_collection_before_any_spawn() {
     assert_eq!(kind, "lua");
     assert_eq!(
         message,
-        "fanout over an empty collection: no work is likely a bug"
+        "tasks.fanout over an empty collection: no work is likely a bug"
     );
 }
 
