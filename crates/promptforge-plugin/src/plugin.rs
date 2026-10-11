@@ -101,11 +101,13 @@ pub trait Plugin: Send + Sync {
 ///
 /// It is fixed data the Host reads before anything is built. Passing it to
 /// the Harness's install is also what links the Plugin crate into the
-/// Host. A Plugin crate builds it with [`Package::new`], adding
-/// [`Package::prelude`] and [`Package::needs`] only where it has them:
+/// Host. A Plugin crate builds it with [`Package::new`], adding a
+/// [`Package::description`], and [`Package::prelude`] and
+/// [`Package::needs`] only where it has them:
 ///
 /// ```text
 /// pub const PACKAGE: Package = Package::new("acme/greeter", construct)
+///     .description("Greet the person running the prompt")
 ///     .prelude(PRELUDE)
 ///     .needs(NEEDS);
 /// ```
@@ -139,11 +141,14 @@ pub struct Package {
         config: serde_json::Value,
         services: &HostServices,
     ) -> Result<Arc<dyn Plugin>, ToolError>,
+    /// One line saying what the Plugin offers, for a Host listing the
+    /// packages it can install; empty unless the Plugin crate sets it.
+    pub description: &'static str,
 }
 
 impl Package {
-    /// Builds the label for the package `name`, with no prelude and no
-    /// needs.
+    /// Builds the label for the package `name`, with an empty description,
+    /// no prelude, and no needs.
     #[expect(
         clippy::type_complexity,
         reason = "spelled out so a Plugin author reads the signature construct implements in one place"
@@ -162,6 +167,16 @@ impl Package {
             prelude: None,
             needs: &[],
             construct,
+            description: "",
+        }
+    }
+
+    /// Sets the one line saying what the Plugin offers.
+    #[must_use]
+    pub const fn description(self, description: &'static str) -> Package {
+        Package {
+            description,
+            ..self
         }
     }
 
@@ -182,10 +197,12 @@ impl Package {
 }
 
 impl fmt::Debug for Package {
-    /// Shows the name, whether a prelude exists, and the needs.
+    /// Shows the name, the description, whether a prelude exists, and the
+    /// needs.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Package")
             .field("name", &self.name)
+            .field("description", &self.description)
             .field("prelude", &self.prelude.is_some())
             .field("needs", &self.needs)
             .finish_non_exhaustive()

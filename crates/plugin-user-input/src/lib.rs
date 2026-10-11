@@ -82,6 +82,7 @@ use promptforge_plugin::{Package, ServiceId, ServiceKey, ToolError};
 /// installs it as `user-input`. It has a prelude and needs the run's
 /// [`INPUT_BROKER`].
 pub const PACKAGE: Package = Package::new("promptforge/user-input", ask::construct)
+    .description("Ask the person running the prompt")
     .prelude(PRELUDE)
     .needs(NEEDS);
 

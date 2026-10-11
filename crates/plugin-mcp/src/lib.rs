@@ -85,7 +85,8 @@ use crate::server::{Server, State};
 /// passing the server's `mcp.json` entry as the configuration, and
 /// provides the Plugin contract's [`promptforge_plugin::TOKIO_RUNTIME`]
 /// service. It has no prelude and needs no per-run service.
-pub const PACKAGE: Package = Package::new("promptforge/mcp", construct);
+pub const PACKAGE: Package =
+    Package::new("promptforge/mcp", construct).description("Tools from one MCP server");
 
 /// The key `construct` reads the Host's runtime through.
 const RUNTIME: ServiceKey<Handle> = ServiceKey::new(TOKIO_RUNTIME);
