@@ -96,7 +96,7 @@ use super::context::RunState;
 use super::protocol::Answer;
 use super::run::{Effect, EffectAnswer, EffectId, Round};
 use chain_record::{Chain, ChatAnchor};
-use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
+use pending::{CallSite, Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
 pub(in crate::execute) use tool_call::RESERVED_TOOL_NAMES;
 

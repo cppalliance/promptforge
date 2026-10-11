@@ -29,7 +29,8 @@ use crate::{Error, Result};
 use super::dispatch::classify_vfs_failure;
 use super::tasks::{TaskBacking, TaskState};
 use super::{
-    ChainIndex, Continuation, EffectAnswer, EffectId, Pending, Scheduler, ToolCallContinuation,
+    CallSite, ChainIndex, Continuation, EffectAnswer, EffectId, Pending, Scheduler,
+    ToolCallContinuation,
 };
 
 /// The cancelled answer for a chain parked on `resume`'s kind of effect:
@@ -80,7 +81,10 @@ impl Scheduler {
         let slot = match &resume {
             Continuation::ToolCall(call) => {
                 self.end_tool_call(chain, call.exec);
-                call.slot
+                match call.site {
+                    CallSite::Batch { slot, .. } => Some(slot),
+                    CallSite::Script { .. } | CallSite::Model { .. } => None,
+                }
             }
             _ => None,
         };
@@ -177,11 +181,11 @@ impl Scheduler {
         let emitter = chain.ctx.emitter();
         let section = chain.section_name();
         let nonce = chain.ctx.nonce();
-        match &call.call_id {
-            // Model-issued: the content always resumes, plain - it is the
-            // tool record's text for the next round, never classified by
-            // output kind.
-            Some(call_id) => {
+        match &call.site {
+            // Model-issued, alone or batched: the content always resumes,
+            // plain - it is the tool record's text for the next round,
+            // never classified by output kind.
+            CallSite::Model { call_id, .. } | CallSite::Batch { call_id, .. } => {
                 let report = ModelReport {
                     script: call.report,
                     call_id: call_id.clone(),
@@ -198,7 +202,7 @@ impl Scheduler {
                 .map(|outcome| ToolCallOutcome::Plain(outcome.into_content()))
                 .map_err(Error::from)
             }
-            None => match prepare_dispatch(
+            CallSite::Script { .. } => match prepare_dispatch(
                 &call.binding,
                 result,
                 None,

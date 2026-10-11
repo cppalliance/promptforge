@@ -3,32 +3,32 @@
 //! model's `call_id`), plus the `local_tool_done` arm that closes a local
 //! tool call.
 //!
-//! Three things resolve on the driver thread before any leaf work: the
-//! four reserved model built-in names (`task`, `task_cancel`, `task_status`,
-//! `await_tasks`) are recognized before any lookup - a model-issued call
-//! to the first three is answered by the `builtins` module over the task
-//! arena, `await_tasks` by its own module (answered at once or parked on
-//! the chain's model tasks), and a script call to any of them answers as
-//! unbound; a local Lua tool is answered with its handler; a catalog tool
+//! Each call's route is decided once, by `tool_route`, on the driver
+//! thread before any leaf work. The four reserved model built-in names
+//! (`task`, `task_cancel`, `task_status`, `await_tasks`) are recognized
+//! before any lookup - a model-issued call to the first three is answered
+//! by the `builtins` module over the task arena, `await_tasks` by its own
+//! module (answered at once or parked on the chain's model tasks), and a
+//! script call to any of them answers as unbound; a local Lua tool is
+//! answered with its handler; anything else is a catalog tool, which
 //! resolves against the run's offering (a model call by wire name, a
 //! script call by canonical id, which also reaches a catalog tool left
-//! out of the offering), its attempt is counted, and the call is
-//! issued as a `ToolCall` effect, carrying an identity forked from the
-//! chain's access, whose answer the driver applies through
-//! the shared dispatch body. `call_id: Some` always resumes a bound tool
-//! with content - a tool's own failure becomes untrusted failure text -
-//! and `ToolResult` fires under the id and the turn of the round that
-//! requested the call; `call_id: None` keeps the raise-at-call-site
-//! behavior, and its `ToolResult` fires under no id and the turn at
-//! dispatch.
+//! out of the offering), has its attempt counted, and is issued as a
+//! `ToolCall` effect, carrying an identity forked from the chain's
+//! access, whose answer the driver applies through the shared dispatch
+//! body. The call's `CallSite` names who asked. A model-issued call,
+//! alone or batched, always resumes a bound tool with content - a tool's
+//! own failure becomes untrusted failure text - and `ToolResult` fires
+//! under the id and the turn of the round that requested the call; a
+//! script call keeps the raise-at-call-site behavior, and its
+//! `ToolResult` fires under no id and the turn at dispatch.
 //!
 //! The loop sends a round's unanswered calls together as one
 //! `tool_calls` request. The arm walks them in the model's order and
 //! issues each catalog call at once into a slot of the chain's batch,
-//! stopping at the first call that must run alone: a reserved built-in
-//! name or a local tool, the two checks `prepare_tool_call` makes before
-//! any catalog lookup. A call that fails to prepare fills its slot with
-//! the error and stops the batch too. Each landed answer fills its call's
+//! stopping at the first call whose route is a reserved built-in name or
+//! a local tool. A call that fails to route or to prepare fills its slot
+//! with the error and stops the batch too. Each landed answer fills its call's
 //! slot, and the chain is answered once no slot is open: every text in
 //! call order, or the first failure in call order. Fewer texts than
 //! calls tells the loop where the batch stopped, and the loop sends that
@@ -51,7 +51,7 @@ use std::sync::atomic::Ordering;
 use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome, ToolCallRecord};
 use crate::execute::run::{Effect, ToolCallOrigin, ToolCaller};
 use crate::execute::section_context::LocalCall;
-use crate::lua::{ScriptReport, current_tool_bindings};
+use crate::lua::{ScriptReport, ToolCallCounts, ToolSet, current_tool_bindings};
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::tools::{OutputTrust, ToolId};
@@ -59,7 +59,7 @@ use promptforge_vfs::detail::{access_id, access_spawn};
 
 use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
-use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation, prompt_origin};
+use super::{CallSite, ChainIndex, Continuation, Scheduler, ToolCallContinuation, prompt_origin};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before any lookup so no catalog or local tool can shadow
@@ -74,14 +74,26 @@ pub(in crate::execute) const RESERVED_TOOL_NAMES: [&str; 4] =
 /// (a local Lua tool's handler, a task built-in), such an answer plus the
 /// task chain a `task` built-in started, enqueued behind the caller, or
 /// the chain parked in the model's `await_tasks` on its live tasks,
-/// answered when one ends or its timer fires. A batched call resolves
-/// only as `Issued`: the batch stops before any call that would resolve
-/// another way.
+/// answered when one ends or its timer fires.
 pub(super) enum ToolCallDispatch {
     Issued,
     Answered(Answer<Error>),
     Started(Answer<Error>, ChainIndex),
     Parked,
+}
+
+/// Where one tool call is answered, decided before any catalog lookup so
+/// a lone call and a batched one route alike.
+enum ToolRoute {
+    /// A reserved model built-in name: a model-issued task built-in is
+    /// answered over the task arena, and anything else is unbound.
+    Builtin,
+    /// A local Lua tool of the chain's section VM, answered with its
+    /// handler.
+    Local,
+    /// A catalog tool, resolved against the run's offering and issued as
+    /// an effect.
+    Catalog,
 }
 
 impl Scheduler {
@@ -99,7 +111,11 @@ impl Scheduler {
         call_id: Option<String>,
         turn: Option<u32>,
     ) {
-        match self.prepare_tool_call(id, alias, args, call_id, turn, None) {
+        let site = match call_id {
+            Some(call_id) => CallSite::Model { call_id, turn },
+            None => CallSite::Script { turn },
+        };
+        match self.prepare_tool_call(id, alias, args, site) {
             // An issued call is parked on the pending table; a parked
             // wait was recorded on the chain, and a member's end or the
             // timer's firing answers it.
@@ -120,12 +136,12 @@ impl Scheduler {
     }
 
     /// Dispatches a `tool_calls` request: the unanswered calls of one
-    /// model round, in the model's order. Each call before the first that
-    /// must run alone is prepared under the round's `turn` and its own
-    /// slot, so every catalog call issues in this step. A call that fails
-    /// to prepare fills its slot with the error and stops the batch. The
-    /// slots park on the chain, which is answered at once when none is
-    /// open.
+    /// model round, in the model's order. Each call before the first
+    /// whose route is not the catalog is issued as a `CallSite::Batch`
+    /// under the round's `turn` and its own slot, so every catalog call
+    /// issues in this step. A call that fails to route or to prepare
+    /// fills its slot with the error and stops the batch. The slots park
+    /// on the chain, which is answered at once when none is open.
     pub(super) fn dispatch_tool_calls(
         &mut self,
         id: ChainIndex,
@@ -134,23 +150,18 @@ impl Scheduler {
     ) {
         let mut batch = Vec::with_capacity(calls.len());
         for (slot, call) in calls.into_iter().enumerate() {
-            let issued = match self.runs_alone(id, &call.name) {
-                Ok(true) => break,
-                Ok(false) => self
-                    .prepare_tool_call(
-                        id,
-                        &call.name,
-                        call.arguments,
-                        Some(call.id),
-                        Some(turn),
-                        Some(slot),
-                    )
-                    .and_then(|dispatch| match dispatch {
-                        ToolCallDispatch::Issued => Ok(()),
-                        _ => Err(Error::internal(
-                            "a batched catalog call is issued as an effect",
-                        )),
-                    }),
+            let issued = match self.tool_route(id, &call.name) {
+                Ok(ToolRoute::Builtin | ToolRoute::Local) => break,
+                Ok(ToolRoute::Catalog) => self.prepare_catalog_call(
+                    id,
+                    &call.name,
+                    call.arguments,
+                    CallSite::Batch {
+                        call_id: call.id,
+                        turn,
+                        slot,
+                    },
+                ),
                 Err(error) => Err(error),
             };
             match issued {
@@ -165,18 +176,45 @@ impl Scheduler {
         self.answer_full_batch(id);
     }
 
-    /// Whether the call named `name` must run alone rather than in a
-    /// batch: a reserved built-in name, or a local tool of the chain's
-    /// section VM.
-    fn runs_alone(&self, id: ChainIndex, name: &str) -> Result<bool> {
-        if RESERVED_TOOL_NAMES.contains(&name) {
-            return Ok(true);
+    /// Decides the route of the call named `alias`, the one decision a
+    /// lone call and a batch share. The reservation wins over every
+    /// lookup: a bound or local tool registered under a reserved name is
+    /// never reachable. A local tool of the chain's section VM wins over
+    /// the catalog.
+    fn tool_route(&self, id: ChainIndex, alias: &str) -> Result<ToolRoute> {
+        if RESERVED_TOOL_NAMES.contains(&alias) {
+            return Ok(ToolRoute::Builtin);
         }
         let frame = self.chains[id.index()]
             .frame
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
-        Ok(frame.vm()?.has_local_tool(name)?)
+        if frame.vm()?.has_local_tool(alias)? {
+            return Ok(ToolRoute::Local);
+        }
+        Ok(ToolRoute::Catalog)
+    }
+
+    /// The turn every report of a call at `site` carries: the requesting
+    /// round's turn when the site names one, else the chain's turn
+    /// counter at dispatch.
+    fn call_turn(&self, id: ChainIndex, site: &CallSite) -> u32 {
+        site.turn()
+            .unwrap_or_else(|| self.chains[id.index()].ctx.turns().load(Ordering::Relaxed))
+    }
+
+    /// The chain's tool set and its section's tool-call counts, which the
+    /// section's first call installs.
+    fn section_call_counts(&mut self, id: ChainIndex) -> Result<(ToolSet, ToolCallCounts)> {
+        let chain = &mut self.chains[id.index()];
+        let tool_set = chain.ctx.tool_set_snapshot()?;
+        let frame = chain
+            .frame
+            .as_mut()
+            .ok_or(Error::internal("a live chain holds its frame"))?;
+        let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
+        let counts = frame.script_call_counts(&chain.ctx, &effective)?;
+        Ok((tool_set, counts))
     }
 
     /// Fills `slot` of the batch the chain is parked on with a landed
@@ -227,82 +265,98 @@ impl Scheduler {
         self.answer_inline(id, Answer::ToolCallsResult(answer));
     }
 
-    /// The fallible half of tool-call dispatch: the reserved-name check
-    /// (a model-issued task built-in answered over the arena, a script
-    /// call to a reserved name unbound), the one-time counts install, the
-    /// local tool's handler answer, then the catalog tool resolved: a
-    /// model call's wire name against the run's offering, a script call's
-    /// canonical id against the offering and then the full catalog, the
-    /// id then standing as the alias of a tool the run could not offer
-    /// (the section's effective scope shapes what the model is offered,
-    /// and the author's own script is not the model, so the scope does
-    /// not gate it); then the attempt counted under the tool's id, the
-    /// call's identity forked from the chain's access, and the issued
-    /// effect, whose origin names the model as caller when a `call_id` is
-    /// present and the script otherwise. The
-    /// answer's rules - the model-issued body under a `call_id`, else the
-    /// script body classified by the binding's declared output kind - are
-    /// the continuation's, applied when the answer lands.
+    /// The fallible half of tool-call dispatch, by the call's route: a
+    /// reserved name (a model-issued task built-in answered over the
+    /// arena, a script call to a reserved name unbound), a local tool (the
+    /// one-time counts install, the attempt counted, then the handler's
+    /// answer), or a catalog tool, which `prepare_catalog_call` issues.
     ///
-    /// Every report the call makes carries `turn`, the turn of the model
-    /// round that requested it, so a local handler earlier in the same
-    /// batch that runs model rounds cannot shift it. A script call, or a
-    /// model-issued one yielded without a turn, reports the counter's value
-    /// at dispatch. `slot` is the call's position in a `tool_calls` batch,
-    /// kept on the continuation so the answer fills that slot.
+    /// Every report the call makes carries the turn of the model round
+    /// that requested it, so a local handler earlier in the same batch
+    /// that runs model rounds cannot shift it. A script call, or a
+    /// model-issued one yielded without a turn, reports the counter's
+    /// value at dispatch.
     fn prepare_tool_call(
         &mut self,
         id: ChainIndex,
         alias: &str,
         args: serde_json::Value,
-        call_id: Option<String>,
-        turn: Option<u32>,
-        slot: Option<usize>,
+        site: CallSite,
     ) -> Result<ToolCallDispatch> {
-        let chain = &self.chains[id.index()];
-        let tool_set = chain.ctx.tool_set_snapshot()?;
-        let turn = turn.unwrap_or_else(|| chain.ctx.turns().load(Ordering::Relaxed));
-        // The reservation wins over every lookup: a bound or local tool
-        // registered under one of these names is never reachable here. The
-        // built-ins serve the model; the author's own script reaches the
-        // arena through the `tasks` namespace, so a script call stays
-        // unbound.
-        if RESERVED_TOOL_NAMES.contains(&alias) {
-            if let Some(call_id) = call_id.as_deref().filter(|_| is_task_builtin(alias)) {
-                return self.answer_task_builtin(id, alias, &args, call_id, turn);
+        match self.tool_route(id, alias)? {
+            // The built-ins serve the model; the author's own script
+            // reaches the arena through the `tasks` namespace, so a script
+            // call stays unbound.
+            ToolRoute::Builtin => {
+                let tool_set = self.chains[id.index()].ctx.tool_set_snapshot()?;
+                if let Some(call_id) = site.call_id().filter(|_| is_task_builtin(alias)) {
+                    let turn = self.call_turn(id, &site);
+                    return self.answer_task_builtin(id, alias, &args, call_id, turn);
+                }
+                Err(unbound_tool_call(&tool_set, alias))
             }
-            return Err(unbound_tool_call(&tool_set, alias));
+            ToolRoute::Local => {
+                let report = ScriptReport {
+                    turn: self.call_turn(id, &site),
+                };
+                let (_, counts) = self.section_call_counts(id)?;
+                // The attempt counts at dispatch, before the handler runs, so
+                // a handler that then fails still counts.
+                counts.ensure(alias)?;
+                counts.increment(alias)?;
+                self.chains[id.index()]
+                    .frame
+                    .as_mut()
+                    .ok_or(Error::internal("a live chain holds its frame"))?
+                    .push_local_call(LocalCall {
+                        alias: alias.to_owned(),
+                        call_id: site.call_id().map(str::to_owned),
+                        report,
+                    });
+                Ok(ToolCallDispatch::Answered(Answer::ToolCallResult(Ok(
+                    ToolCallOutcome::Local {
+                        alias: alias.to_owned(),
+                        args,
+                    },
+                ))))
+            }
+            ToolRoute::Catalog => {
+                self.prepare_catalog_call(id, alias, args, site)?;
+                Ok(ToolCallDispatch::Issued)
+            }
         }
-        let chain = &mut self.chains[id.index()];
-        let ctx = chain.ctx.clone();
-        let report = ScriptReport { turn };
-        let frame = chain
-            .frame
-            .as_mut()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-        let counts = frame.script_call_counts(&ctx, &effective)?;
-        if frame.vm()?.has_local_tool(alias)? {
-            // The attempt counts at dispatch, before the handler runs, so
-            // a handler that then fails still counts.
-            counts.ensure(alias)?;
-            counts.increment(alias)?;
-            frame.push_local_call(LocalCall {
-                alias: alias.to_owned(),
-                call_id,
-                report,
-            });
-            return Ok(ToolCallDispatch::Answered(Answer::ToolCallResult(Ok(
-                ToolCallOutcome::Local {
-                    alias: alias.to_owned(),
-                    args,
-                },
-            ))));
-        }
+    }
+
+    /// Issues a catalog call: the one-time counts install, then the tool
+    /// resolved - a model call's wire name against the run's offering, a
+    /// script call's canonical id against the offering and then the full
+    /// catalog, the id then standing as the alias of a tool the run could
+    /// not offer (the section's effective scope shapes what the model is
+    /// offered, and the author's own script is not the model, so the scope
+    /// does not gate it); then the attempt counted under the tool's id,
+    /// the call's identity forked from the chain's access, and the issued
+    /// effect, whose origin names the model as caller for a `Model` or
+    /// `Batch` site and the script for a `Script` site. The answer's
+    /// rules - the model-issued body under the call id, else the script
+    /// body classified by the binding's declared output kind - and a
+    /// `Batch` site's slot are the continuation's, applied when the answer
+    /// lands.
+    fn prepare_catalog_call(
+        &mut self,
+        id: ChainIndex,
+        alias: &str,
+        args: serde_json::Value,
+        site: CallSite,
+    ) -> Result<()> {
+        let report = ScriptReport {
+            turn: self.call_turn(id, &site),
+        };
+        let (tool_set, counts) = self.section_call_counts(id)?;
+        let ctx = &self.chains[id.index()].ctx;
         // A model reaches only the wire names a round advertised; a script
         // names a catalog tool by its canonical id, and only a script falls
         // back to a catalog tool the run could not offer.
-        let binding = if call_id.is_some() {
+        let binding = if site.call_id().is_some() {
             tool_set.wire_binding(alias)
         } else if ToolId::parse(alias).is_ok() {
             tool_set
@@ -335,12 +389,11 @@ impl Scheduler {
         .map_err(Error::store)?;
         let exec = access_id(&access);
         let origin = ToolCallOrigin {
-            execution: ctx.execution().to_owned(),
+            execution: chain.ctx.execution().to_owned(),
             section: chain.section_name().to_owned(),
-            caller: if call_id.is_some() {
-                ToolCaller::Model
-            } else {
-                ToolCaller::Script
+            caller: match &site {
+                CallSite::Script { .. } => ToolCaller::Script,
+                CallSite::Model { .. } | CallSite::Batch { .. } => ToolCaller::Model,
             },
         };
         let effect = Effect::ToolCall {
@@ -353,12 +406,11 @@ impl Scheduler {
         let resume = Continuation::ToolCall(ToolCallContinuation {
             binding,
             report,
-            call_id,
+            site,
             exec,
-            slot,
         });
         self.issue(id, effect, resume);
-        Ok(ToolCallDispatch::Issued)
+        Ok(())
     }
 
     /// Dispatches a `local_tool_done` request: closes the chain's
