@@ -2,9 +2,10 @@
 //!
 //! The submodules follow the protocol's own split: `parse` the generic
 //! yield-to-request validation, `parse_chat` the message-list request,
-//! `parse_tasks` the task-operation requests, `answer` the
-//! answer-to-envelope round trips, and `answer_chat` the `chat` answer's
-//! typed error. The helpers below are shared.
+//! `parse_tasks` the task-operation requests, `parse_tool_call` the
+//! `tool_call` request, `answer` the answer-to-envelope round trips, and
+//! `answer_chat` the `chat` answer's typed error. The helpers below are
+//! shared.
 
 use std::num::NonZeroU32;
 
@@ -107,3 +108,4 @@ mod answer_chat;
 mod parse;
 mod parse_chat;
 mod parse_tasks;
+mod parse_tool_call;
