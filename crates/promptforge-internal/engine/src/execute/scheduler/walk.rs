@@ -17,7 +17,7 @@ use crate::execute::section_context::SectionContext;
 use crate::execute::walk_target::{
     JumpTarget, h1_visible_sections, resolve_jump_target, section_position,
 };
-use crate::heading_address;
+use crate::heading_address::{self, Visible};
 use crate::parser::Block;
 use crate::{Error, Result};
 
@@ -287,7 +287,7 @@ impl Scheduler {
         let chain = &self.chains[id.index()];
         if chain.h1 {
             let sections = h1_visible_sections(prompt);
-            let target = heading_address::resolve_visible(heading, sections)?;
+            let target = heading_address::resolve_visible(heading, Visible::all(sections))?;
             let index = section_position(sections, target).ok_or(Error::internal(
                 "a resolved H1 target is absent from the top-level slice",
             ))?;
@@ -299,8 +299,7 @@ impl Scheduler {
         }
         let slice = chain.slice.resolve(prompt);
         let index = chain.index;
-        let jumper = &slice[index];
-        match resolve_jump_target(heading, slice, jumper)? {
+        match resolve_jump_target(heading, slice, index)? {
             JumpTarget::Child(child) => Ok(ChainTarget {
                 slice: chain.slice.child(index),
                 index: child,

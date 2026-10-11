@@ -11,13 +11,63 @@
 //! one task per member - every arm up front, before any join, so no arm is
 //! ordered after a sibling - and waits on the live set while the scheduler's
 //! admission limit bounds how many arms run at once. This module defines
-//! [`find_visible`], the one heading lookup those surfaces share, and
-//! [`resolve_visible`], its adapter for surfaces where a miss is an error;
-//! the collection enumeration sits in the `promptforge-lua` crate, beside the
-//! VM and the coroutine protocol that consume it.
+//! [`Visible`], the view of a caller's visible set read in place over the
+//! shared prompt, [`find_visible`], the one heading lookup those surfaces
+//! share, and [`resolve_visible`], its adapter for surfaces where a miss is
+//! an error; the collection enumeration sits in the `promptforge-lua` crate,
+//! beside the VM and the coroutine protocol that consume it.
 
 use crate::parser::Section;
 use crate::{Error, Result};
+
+/// A section's visible set, read in place: its home slice minus itself,
+/// plus its direct children.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Visible<'a> {
+    home: &'a [Section],
+    caller: Option<usize>,
+    children: &'a [Section],
+}
+
+impl<'a> Visible<'a> {
+    /// A walked section's set: `home` minus `home[caller]`, plus
+    /// `home[caller]`'s children. `caller` must index `home`; an
+    /// out-of-range one yields all of `home` and no children, the same set
+    /// as [`Visible::all`].
+    pub(crate) fn of(home: &'a [Section], caller: usize) -> Visible<'a> {
+        debug_assert!(
+            caller < home.len(),
+            "a walked section lies inside its home slice"
+        );
+        Visible {
+            home,
+            caller: Some(caller),
+            children: home.get(caller).map_or(&[][..], Section::children),
+        }
+    }
+
+    /// A whole slice and nothing else: the H1 pass's top-level set, and
+    /// synthetic sets in tests.
+    pub(crate) fn all(slice: &'a [Section]) -> Visible<'a> {
+        Visible {
+            home: slice,
+            caller: None,
+            children: &[],
+        }
+    }
+
+    /// The sections in order: the home slice in order with the caller
+    /// skipped, then the children.
+    pub(crate) fn iter(self) -> impl Iterator<Item = &'a Section> {
+        let caller = self.caller;
+        self.home
+            .iter()
+            .enumerate()
+            .filter(move |&(index, _)| Some(index) != caller)
+            .map(|(_, section)| section)
+            .chain(self.children)
+    }
+}
 
 /// Parses a section heading like `"### Name"` into an exact `(level, name)`
 /// address.
@@ -56,8 +106,9 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
     Ok((level, name.to_owned()))
 }
 
-/// Looks up a heading string like `"### Name"` in a caller's visible
-/// sections, returning the single matching section or `None`.
+/// Looks up a heading string like `"### Name"` in a caller's visible set,
+/// read in place through `visible`, returning the single matching section
+/// or `None`.
 ///
 /// The heading is parsed into an exact `(level, name)` address; a section
 /// matches only when BOTH its level and name are equal. A heading outside the
@@ -70,10 +121,7 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
 /// Returns [`Error::Lua`] when the heading is malformed (see
 /// [`parse_heading_address`]) or when more than one visible section matches
 /// the exact address.
-pub(crate) fn find_visible<'a>(
-    heading: &str,
-    visible: &'a [Section],
-) -> Result<Option<&'a Section>> {
+pub(crate) fn find_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<Option<&'a Section>> {
     let (level, name) = parse_heading_address(heading)?;
     let mut matches = visible
         .iter()
@@ -95,9 +143,9 @@ pub(crate) fn find_visible<'a>(
 /// # Errors
 /// Returns [`Error::Lua`] for every [`find_visible`] error, and when no
 /// visible section matches the exact address. The not-found message lists the
-/// visible sections and nothing else, so the error channel cannot leak the
-/// rest of the document's structure.
-pub(crate) fn resolve_visible<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
+/// view's sections in its order and nothing else, so the error channel
+/// cannot leak the rest of the document's structure.
+pub(crate) fn resolve_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<&'a Section> {
     find_visible(heading, visible)?.ok_or_else(|| {
         let available: Vec<String> = visible
             .iter()

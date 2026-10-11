@@ -412,7 +412,7 @@ impl BodyText {
 
 <step-3>
 
-### Step 3: Resolve jump, call, and fanout targets in place
+### Step 3: Resolve jump, call, and fanout targets in place [completed]
 
 - Component: In-place visible sets
 - Component placement: second. It depends on nothing and uses only the existing `Section` API. It precedes the shared-body component because both edit `read_visible`, so the parser's field-type change lands on readers that already borrow.
