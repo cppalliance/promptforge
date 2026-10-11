@@ -125,7 +125,7 @@ impl Prompt {
         let title = h1.title.clone();
         let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
         let shared_fences = exact_shared_openings(body);
-        let h1_shared_fences = exact_shared_openings(&h1.content);
+        let h1_shared_fences = exact_shared_openings(h1.content);
         if shared_fences.len() > 1 {
             return Err(Error::parse(
                 ParseErrorKind::Fence,
@@ -140,11 +140,11 @@ impl Prompt {
             ));
         }
         let (replay, h1_blocks, description_text) =
-            split_h1(&h1.content, &title, h1_content_abs_line, emitter)?;
+            split_h1(h1.content, &title, h1_content_abs_line, emitter)?;
 
         // Everything before the H1 is preface and has no prompt semantics.
         // Sections are headings after the H1 at level 2 or deeper.
-        let section_headings: Vec<Heading> = headings
+        let section_headings: Vec<Heading<'_>> = headings
             .into_iter()
             .skip(*h1_index + 1)
             .filter(|h| h.level >= 2)

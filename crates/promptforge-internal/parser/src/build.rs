@@ -49,10 +49,10 @@ pub(crate) fn line_add(a: u32, b: u32) -> Result<u32> {
 /// A heading with its title and the prose/Lua that follows it (before the next
 /// heading of any level).
 #[derive(Debug, Clone)]
-pub(crate) struct Heading {
+pub(crate) struct Heading<'a> {
     pub(crate) level: u8,
     pub(crate) title: String,
-    pub(crate) content: String,
+    pub(crate) content: &'a str,
     /// 1-based line number within `body` where `content` begins.
     pub(crate) content_start_line: u32,
     /// 1-based line number within `body` of the heading line itself.
@@ -91,7 +91,7 @@ fn level_num(level: HeadingLevel) -> u8 {
 ///
 /// A heading inside a block quote or list item is not a section boundary; its
 /// text stays in the enclosing heading's content.
-pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
+pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading<'_>>> {
     // First pass: find each heading's level, title, and source byte range.
     struct Raw {
         level: u8,
@@ -143,7 +143,7 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
         headings.push(Heading {
             level: raws[i].level,
             title: raws[i].title.clone(),
-            content: content.to_string(),
+            content,
             content_start_line,
             source_line,
             span: raws[i].range.clone(),
@@ -154,13 +154,13 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
 
 /// Builds one heading's executable blocks while preserving source positions.
 fn build_heading_blocks(
-    heading: &Heading,
+    heading: &Heading<'_>,
     name: &str,
     frontmatter_lines: u32,
     emitter: &Emitter,
 ) -> Result<Vec<Block>> {
     let content_abs_line = line_add(frontmatter_lines, heading.content_start_line)?;
-    let raw_blocks = split_section_blocks(&heading.content, name)?;
+    let raw_blocks = split_section_blocks(heading.content, name)?;
     let has_prose = raw_blocks
         .iter()
         .any(|block| matches!(block, RawBlock::Prose(_)));
@@ -168,7 +168,9 @@ fn build_heading_blocks(
     let mut blocks = Vec::with_capacity(total);
     for (index, raw) in raw_blocks.into_iter().enumerate() {
         match raw {
-            RawBlock::Prose(text) => blocks.push(Block::Prose { text }),
+            RawBlock::Prose(text) => blocks.push(Block::Prose {
+                text: text.to_owned(),
+            }),
             RawBlock::Lua {
                 source,
                 line_offset,
@@ -193,7 +195,7 @@ fn build_heading_blocks(
 /// H2 with no intervening H3, or an H3/H4 top-level section with no parent H2).
 /// Such a heading has no well-defined parent, so reject it rather than
 /// silently reparenting it to a shallower ancestor.
-fn check_child_level(heading: &Heading, parent_level: u8) -> Result<()> {
+fn check_child_level(heading: &Heading<'_>, parent_level: u8) -> Result<()> {
     let level = heading.level;
     if level > parent_level + 1 {
         return Err(Error::parse_at(
@@ -212,7 +214,7 @@ fn check_child_level(heading: &Heading, parent_level: u8) -> Result<()> {
 /// Returns the heading's section name. A section's name is its runtime address
 /// (jumps, lookups, fanout), so an empty/whitespace heading is unaddressable
 /// and must be rejected at parse.
-fn section_name(heading: &Heading, level: u8) -> Result<String> {
+fn section_name(heading: &Heading<'_>, level: u8) -> Result<String> {
     let name = heading.title.clone();
     if name.trim().is_empty() {
         return Err(Error::parse_at(
@@ -240,7 +242,10 @@ fn list_items(blocks: &[Block], name: &str) -> Result<Vec<String>> {
         && let Some(prose) = prose_for_items
         && is_all_list_markers(prose)
     {
-        parse_bullet_items(prose, name)
+        Ok(parse_bullet_items(prose, name)?
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
     } else {
         Ok(Vec::new())
     }
@@ -253,7 +258,7 @@ fn list_items(blocks: &[Block], name: &str) -> Result<Vec<String>> {
 fn check_unique_sibling(
     siblings: &[(String, u32)],
     name: &str,
-    heading: &Heading,
+    heading: &Heading<'_>,
     heading_abs_line: u32,
 ) -> Result<()> {
     if let Some((_, first_line)) = siblings.iter().find(|(n, _)| n == name) {
@@ -282,7 +287,7 @@ fn check_unique_sibling(
 /// [`Error::LuaCompile`] or [`Error::Lua`] from Lua compilation and
 /// [`Error::Internal`] from invalid or overflowing source-line calculations.
 pub(crate) fn build_sections(
-    headings: &[Heading],
+    headings: &[Heading<'_>],
     pos: &mut usize,
     parent_level: u8,
     frontmatter_lines: u32,
@@ -314,7 +319,7 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
-            markdown: trim_leading_blank_lines(&h.content).trim_end().to_owned(),
+            markdown: trim_leading_blank_lines(h.content).trim_end().to_owned(),
         });
     }
     Ok(result)

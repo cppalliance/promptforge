@@ -17,13 +17,13 @@ use super::{Block, LuaProgram, ParseErrorKind};
 use crate::{Error, Result};
 
 /// Uncompiled block produced while scanning section content.
-pub(super) enum RawBlock {
+pub(super) enum RawBlock<'a> {
     Lua {
         source: String,
         /// Lines before the first line of Lua source within section content.
         line_offset: u32,
     },
-    Prose(String),
+    Prose(&'a str),
 }
 
 /// Extracts the optional exact `lua shared` library from H1 and compiles the
@@ -85,7 +85,9 @@ pub(super) fn split_h1(
     let mut blocks = Vec::with_capacity(raw_blocks.len());
     for raw in raw_blocks {
         match raw {
-            RawBlock::Prose(text) => blocks.push(Block::Prose { text }),
+            RawBlock::Prose(text) => blocks.push(Block::Prose {
+                text: text.to_owned(),
+            }),
             RawBlock::Lua {
                 source,
                 line_offset,
@@ -251,12 +253,15 @@ fn pending_prose<'a>(content: &'a str, segment: Range<usize>, rules: &[Range<usi
 /// # Errors
 /// Returns a fence-classified parse error when an exact `lua` fence is not
 /// closed.
-pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<RawBlock>> {
+pub(super) fn split_section_blocks<'a>(
+    content: &'a str,
+    section: &str,
+) -> Result<Vec<RawBlock<'a>>> {
     let openings = exact_lua_openings(content);
     let rules = rule_ranges(content);
     if openings.is_empty() {
         let pending = pending_prose(content, 0..content.len(), &rules);
-        return Ok(vec![RawBlock::Prose(pending.trim().to_string())]);
+        return Ok(vec![RawBlock::Prose(pending.trim())]);
     }
 
     let leading_start = leading_content_start(content);
@@ -289,7 +294,7 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
 
         if !(pos == 0 && opening == leading_start) {
             let pending = pending_prose(content, pos..opening, &rules);
-            blocks.push(RawBlock::Prose(pending.trim().to_string()));
+            blocks.push(RawBlock::Prose(pending.trim()));
         }
 
         let line_offset = line_add(newlines_before(content, opening)?, 1)?;
@@ -302,7 +307,7 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
 
     let trailing = pending_prose(content, pos..content.len(), &rules).trim();
     if !trailing.is_empty() {
-        blocks.push(RawBlock::Prose(trailing.to_string()));
+        blocks.push(RawBlock::Prose(trailing));
     }
 
     Ok(blocks)

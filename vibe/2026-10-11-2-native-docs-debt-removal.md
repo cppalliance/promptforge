@@ -448,7 +448,7 @@ impl BodyText {
 
 <step-5>
 
-### Step 5: Borrow parser intermediates from the body
+### Step 5: Borrow parser intermediates from the body [completed]
 
 - Component: Shared prompt body
 - Component placement: third and last. It depends on the in-place component because both edit `read_visible`, and its Engine reader changes land on the in-place code.
