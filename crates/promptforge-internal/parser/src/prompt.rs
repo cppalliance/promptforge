@@ -6,8 +6,8 @@
 //! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.
 
-use crate::LuaProgram;
 use crate::build::Frontmatter;
+use crate::{BodyText, LuaProgram};
 
 /// One executable block inside a section: a compiled Lua fence or prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub enum Block {
     #[non_exhaustive]
     Prose {
         /// Captured Markdown, trimmed of surrounding blank lines.
-        text: String,
+        text: BodyText,
     },
 }
 
@@ -39,9 +39,9 @@ pub struct Section {
     pub(crate) children: Vec<Section>,
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
     /// Empty for non-list sections.
-    pub(crate) items: Vec<String>,
+    pub(crate) items: Vec<BodyText>,
     /// The section's own raw Markdown, without its heading line or children.
-    pub(crate) markdown: String,
+    pub(crate) markdown: BodyText,
 }
 
 impl Section {
@@ -71,7 +71,7 @@ impl Section {
 
     /// Returns the pre-parsed bullet items for a list-only section.
     #[must_use]
-    pub fn items(&self) -> &[String] {
+    pub fn items(&self) -> &[BodyText] {
         &self.items
     }
 
@@ -79,7 +79,7 @@ impl Section {
     /// heading of any level, leading blank lines and trailing whitespace trimmed.
     #[must_use]
     pub fn markdown(&self) -> &str {
-        &self.markdown
+        self.markdown.as_str()
     }
 
     /// Classic leading Lua fence when the first block is Lua.

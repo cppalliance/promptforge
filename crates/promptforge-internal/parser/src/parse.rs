@@ -1,6 +1,8 @@
 //! The parse entry point: frontmatter decoding, H1 validation, and the
 //! assembly of a [`Prompt`] from its headings, fences, and sections.
 
+use std::sync::Arc;
+
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_types::event::{Event, lifecycle};
 
@@ -62,6 +64,7 @@ impl Prompt {
 
     fn parse_inner(input: &str, emitter: &Emitter) -> Result<Prompt> {
         let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
+        let body: Arc<str> = Arc::from(body);
         let frontmatter: Frontmatter = serde_yaml_ng::from_str(&yaml).map_err(|e| {
             // Retain the YAML decode failure as the `#[source]` cause and
             // surface its location, so the public parse error exposes the
@@ -94,10 +97,11 @@ impl Prompt {
 
     fn parse_body(
         frontmatter: Frontmatter,
-        body: &str,
+        shared: &Arc<str>,
         frontmatter_lines: u32,
         emitter: &Emitter,
     ) -> Result<Prompt> {
+        let body: &str = shared;
         let headings = collect_headings(body)?;
 
         let h1_positions: Vec<usize> = headings
@@ -150,7 +154,14 @@ impl Prompt {
             .filter(|h| h.level >= 2)
             .collect();
         let mut pos = 0;
-        let sections = build_sections(&section_headings, &mut pos, 1, frontmatter_lines, emitter)?;
+        let sections = build_sections(
+            shared,
+            &section_headings,
+            &mut pos,
+            1,
+            frontmatter_lines,
+            emitter,
+        )?;
 
         Ok(Prompt {
             frontmatter,

@@ -17,7 +17,7 @@ use crate::execute::section_context::{SectionContext, TaskSeed};
 use crate::execute::walk_target::SlicePath;
 use crate::lua::UsageAnchor;
 use crate::model::{Message, ModelId};
-use crate::parser::{Block, Prompt, Section};
+use crate::parser::{Block, BodyText, Prompt, Section};
 use crate::{Error, Result};
 
 use super::await_tasks::AwaitTasks;
@@ -183,7 +183,7 @@ pub(super) struct Chain {
     /// consumes, installed as that block's lazy `prose` template when the
     /// coroutine starts. Cleared at every section entry; an unconsumed
     /// buffer drops with the section, never evaluated.
-    pub(super) pending_prose: Option<String>,
+    pub(super) pending_prose: Option<BodyText>,
     /// The walk's `var` table: seeds each section's VM at entry; the
     /// section's final `var` is read back before teardown and replaces the
     /// slot. A call chain's slot seeds from the caller's snapshot and

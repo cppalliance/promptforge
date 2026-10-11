@@ -467,7 +467,7 @@ impl BodyText {
 
 <step-6>
 
-### Step 6: Store each prompt's text once as BodyText
+### Step 6: Store each prompt's text once as BodyText [completed]
 
 - Component: Shared prompt body
 - Piece: shared-body storage and its readers. Follows the borrowed-intermediates piece. The parser field changes and the Engine reader changes share one step because changing the `Section` and `Block::Prose` field types breaks the Engine readers at compile time.

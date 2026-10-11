@@ -24,6 +24,7 @@
 
 pub use promptforge_lua::LuaProgram;
 
+mod body_text;
 mod build;
 mod contract;
 pub mod detail;
@@ -36,6 +37,7 @@ mod prompt;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
+pub use body_text::BodyText;
 pub use build::{
     FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
 };
