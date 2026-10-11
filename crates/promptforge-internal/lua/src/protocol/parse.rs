@@ -24,7 +24,7 @@ use crate::tools::tool_name;
 use crate::{Error, LuaModelHandle, Result, resolve_section_target, scalar_return};
 
 use super::answer::Answer;
-use super::request::{LocalToolOutcome, Request};
+use super::request::{LocalToolOutcome, Request, ToolCallRecord};
 
 /// The fixed failure for a yield that is not a well-formed request table.
 ///
@@ -208,6 +208,9 @@ impl Request {
             "cancel" => classify(parse_cancel(table), |error| Answer::Cancel(Err(error))),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
+            }),
+            "tool_calls" => classify(parse_tool_calls(lua, table), |error| {
+                Answer::ToolCallsResult(Err(error))
             }),
             "local_tool_done" => match parse_local_tool_done(table) {
                 Some(request) => YieldParse::Request(request),
@@ -401,6 +404,38 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         call_id,
         turn,
     })
+}
+
+/// Parses a `tool_calls` request, which only the loop's step yields: the
+/// required `turn` and the `calls` sequence, each entry read as a
+/// `tool_call` request's `alias`, `args`, and required `call_id`. Any
+/// other shape is a malformed yield.
+fn parse_tool_calls(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let turn = shim_optional_u32(table, "turn")?.ok_or(FieldFailure::Malformed)?;
+    let Ok(Value::Table(entries)) = table.raw_get::<Value>("calls") else {
+        return Err(FieldFailure::Malformed);
+    };
+    let calls = (1..=entries.raw_len())
+        .map(|index| {
+            let Ok(Value::Table(entry)) = entries.raw_get::<Value>(index) else {
+                return Err(FieldFailure::Malformed);
+            };
+            match parse_tool_call(lua, &entry)? {
+                Request::ToolCall {
+                    alias,
+                    args,
+                    call_id: Some(id),
+                    ..
+                } => Ok(ToolCallRecord {
+                    id,
+                    name: alias,
+                    arguments: args,
+                }),
+                _ => Err(FieldFailure::Malformed),
+            }
+        })
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(Request::ToolCalls { calls, turn })
 }
 
 /// Parses a `local_tool_done` request: the shim-produced `ok` flag and,

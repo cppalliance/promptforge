@@ -67,6 +67,10 @@ pub(super) struct ToolCallContinuation {
     /// dispatch. The answer, or the call's abort, ends it and joins it
     /// back into the chain.
     pub(super) exec: ExecId,
+    /// The call's position in the batch the chain is parked on, whose
+    /// slot the answer fills; `None` for a call sent alone, which the
+    /// answer resumes directly.
+    pub(super) slot: Option<usize>,
 }
 
 /// One in-flight leaf effect's pending entry: the chain parked on it and

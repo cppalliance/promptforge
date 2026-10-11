@@ -22,6 +22,19 @@
 //! behavior, and its `ToolResult` fires under no id and the turn at
 //! dispatch.
 //!
+//! The loop sends a round's unanswered calls together as one
+//! `tool_calls` request. The arm walks them in the model's order and
+//! issues each catalog call at once into a slot of the chain's batch,
+//! stopping at the first call that must run alone: a reserved built-in
+//! name or a local tool, the two checks `prepare_tool_call` makes before
+//! any catalog lookup. A call that fails to prepare fills its slot with
+//! the error and stops the batch too. Each landed answer fills its call's
+//! slot, and the chain is answered once no slot is open: every text in
+//! call order, or the first failure in call order. Fewer texts than
+//! calls tells the loop where the batch stopped, and the loop sends that
+//! call alone as an ordinary `tool_call`. The calls in flight run
+//! concurrently, each under its own forked identity.
+//!
 //! A local tool call is a two-yield handshake. The `tool_call` answer is
 //! [`ToolCallOutcome::Local`], which hands the shim the handler, and the
 //! frame opens a [`LocalCall`] for it. The shim runs the handler inside the
@@ -35,7 +48,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome};
+use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome, ToolCallRecord};
 use crate::execute::run::{Effect, ToolCallOrigin, ToolCaller};
 use crate::execute::section_context::LocalCall;
 use crate::lua::{ScriptReport, current_tool_bindings};
@@ -61,7 +74,9 @@ pub(in crate::execute) const RESERVED_TOOL_NAMES: [&str; 4] =
 /// (a local Lua tool's handler, a task built-in), such an answer plus the
 /// task chain a `task` built-in started, enqueued behind the caller, or
 /// the chain parked in the model's `await_tasks` on its live tasks,
-/// answered when one ends or its timer fires.
+/// answered when one ends or its timer fires. A batched call resolves
+/// only as `Issued`: the batch stops before any call that would resolve
+/// another way.
 pub(super) enum ToolCallDispatch {
     Issued,
     Answered(Answer<Error>),
@@ -84,7 +99,7 @@ impl Scheduler {
         call_id: Option<String>,
         turn: Option<u32>,
     ) {
-        match self.prepare_tool_call(id, alias, args, call_id, turn) {
+        match self.prepare_tool_call(id, alias, args, call_id, turn, None) {
             // An issued call is parked on the pending table; a parked
             // wait was recorded on the chain, and a member's end or the
             // timer's firing answers it.
@@ -102,6 +117,114 @@ impl Scheduler {
                 self.answer_inline(id, Answer::ToolCallResult(Err(error)));
             }
         }
+    }
+
+    /// Dispatches a `tool_calls` request: the unanswered calls of one
+    /// model round, in the model's order. Each call before the first that
+    /// must run alone is prepared under the round's `turn` and its own
+    /// slot, so every catalog call issues in this step. A call that fails
+    /// to prepare fills its slot with the error and stops the batch. The
+    /// slots park on the chain, which is answered at once when none is
+    /// open.
+    pub(super) fn dispatch_tool_calls(
+        &mut self,
+        id: ChainIndex,
+        calls: Vec<ToolCallRecord>,
+        turn: u32,
+    ) {
+        let mut batch = Vec::with_capacity(calls.len());
+        for (slot, call) in calls.into_iter().enumerate() {
+            let issued = match self.runs_alone(id, &call.name) {
+                Ok(true) => break,
+                Ok(false) => self
+                    .prepare_tool_call(
+                        id,
+                        &call.name,
+                        call.arguments,
+                        Some(call.id),
+                        Some(turn),
+                        Some(slot),
+                    )
+                    .and_then(|dispatch| match dispatch {
+                        ToolCallDispatch::Issued => Ok(()),
+                        _ => Err(Error::internal(
+                            "a batched catalog call is issued as an effect",
+                        )),
+                    }),
+                Err(error) => Err(error),
+            };
+            match issued {
+                Ok(()) => batch.push(None),
+                Err(error) => {
+                    batch.push(Some(Err(error)));
+                    break;
+                }
+            }
+        }
+        self.chains[id.index()].batch = batch;
+        self.answer_full_batch(id);
+    }
+
+    /// Whether the call named `name` must run alone rather than in a
+    /// batch: a reserved built-in name, or a local tool of the chain's
+    /// section VM.
+    fn runs_alone(&self, id: ChainIndex, name: &str) -> Result<bool> {
+        if RESERVED_TOOL_NAMES.contains(&name) {
+            return Ok(true);
+        }
+        let frame = self.chains[id.index()]
+            .frame
+            .as_ref()
+            .ok_or(Error::internal("a live chain holds its frame"))?;
+        Ok(frame.vm()?.has_local_tool(name)?)
+    }
+
+    /// Fills `slot` of the batch the chain is parked on with a landed
+    /// call's answer: a plain text as the text, a failure as the failure,
+    /// and any other outcome, which a model-issued call never resumes
+    /// with, as an internal error. Once no slot is open the chain is
+    /// answered.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the chain holds no such slot,
+    /// which only an answer the scheduler should have orphaned produces.
+    pub(super) fn fill_batch_slot(
+        &mut self,
+        id: ChainIndex,
+        slot: usize,
+        answer: Answer<Error>,
+    ) -> Result<()> {
+        let landed = match answer {
+            Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(text))) => Ok(text),
+            Answer::ToolCallResult(Err(error)) => Err(error),
+            _ => Err(Error::internal(
+                "a batched call lands as plain text or a failure",
+            )),
+        };
+        let open = self.chains[id.index()]
+            .batch
+            .get_mut(slot)
+            .filter(|open| open.is_none())
+            .ok_or(Error::internal(
+                "a batched call's answer fills an open slot of its chain's batch",
+            ))?;
+        *open = Some(landed);
+        self.answer_full_batch(id);
+        Ok(())
+    }
+
+    /// Answers the chain parked on a batch once no slot is open: every
+    /// text in call order, or the first failure in call order.
+    fn answer_full_batch(&mut self, id: ChainIndex) {
+        let chain = &mut self.chains[id.index()];
+        if chain.batch.iter().any(Option::is_none) {
+            return;
+        }
+        let answer = std::mem::take(&mut chain.batch)
+            .into_iter()
+            .flatten()
+            .collect::<Result<Vec<String>>>();
+        self.answer_inline(id, Answer::ToolCallsResult(answer));
     }
 
     /// The fallible half of tool-call dispatch: the reserved-name check
@@ -125,7 +248,8 @@ impl Scheduler {
     /// round that requested it, so a local handler earlier in the same
     /// batch that runs model rounds cannot shift it. A script call, or a
     /// model-issued one yielded without a turn, reports the counter's value
-    /// at dispatch.
+    /// at dispatch. `slot` is the call's position in a `tool_calls` batch,
+    /// kept on the continuation so the answer fills that slot.
     fn prepare_tool_call(
         &mut self,
         id: ChainIndex,
@@ -133,6 +257,7 @@ impl Scheduler {
         args: serde_json::Value,
         call_id: Option<String>,
         turn: Option<u32>,
+        slot: Option<usize>,
     ) -> Result<ToolCallDispatch> {
         let chain = &self.chains[id.index()];
         let tool_set = chain.ctx.tool_set_snapshot()?;
@@ -230,6 +355,7 @@ impl Scheduler {
             report,
             call_id,
             exec,
+            slot,
         });
         self.issue(id, effect, resume);
         Ok(ToolCallDispatch::Issued)

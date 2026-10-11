@@ -1,7 +1,8 @@
 //! A stop and a cancel reaching the effects in flight: `stop_round` drops
 //! a chat round, a tool call, and a timer and leaves the run's cancel
 //! flag clear, so a `pcall` keeps the run alive while an uncaught drop
-//! ends it `Cancelled`; a prompt shaped like `chat` returns to its
+//! ends it `Cancelled`; two calls one round requested are in flight at
+//! once and one stop drops both; a prompt shaped like `chat` returns to its
 //! question after a stop during a tool call; and a stop leaves a question
 //! to the operator, or any call whose descriptor survives stops, open,
 //! while a cancel drops it.
@@ -66,6 +67,18 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
     \x20   history:user(text)\n\
     \x20   pcall(function() return models.loop(history) end)\n\
     end\n```\n";
+
+/// A model loop under a `pcall` with the held tool advertised, reporting
+/// how the loop call ended.
+const LOOPS_ONCE: &str = "---\nname: loops\ndescription: d\npromptforge: 0\n\
+    plugins:\n  - harness\n\
+    models:\n  writer: {}\n---\n\n\
+    # Loops\n\n```lua\nmodels.default('writer')\ntools.always_offer('harness/hold')\n```\n\n\
+    ## Only\n\n```lua\n\
+    local msgs = messages.new()\n\
+    msgs:user('hold twice')\n\
+    local ok, err = pcall(models.loop, msgs)\n\
+    return tostring(ok) .. ':' .. err.kind\n```\n";
 
 /// A prompt that returns the operator's answer to one question.
 const ASKS: &str = "---\nname: asks\ndescription: d\npromptforge: 0\n\
@@ -166,6 +179,60 @@ fn calls_hold_once() -> ScriptedBroker {
             Completion::from_result(CompletionResult::ToolCalls(vec![call]), MODEL).map(Box::new)
         })
     })
+}
+
+/// The round that asks for the held tool twice: the model's first round
+/// calls its wire name `harness_hold` as `c1` and `c2`, and every later
+/// round replies with text.
+fn calls_hold_twice() -> ScriptedBroker {
+    ScriptedBroker::new(|round, _messages| {
+        Box::pin(async move {
+            if round.id.get() > 0 {
+                return reply("done");
+            }
+            let calls = vec![
+                ToolCall::from_parts("c1", "harness_hold", json!({}))?,
+                ToolCall::from_parts("c2", "harness_hold", json!({}))?,
+            ];
+            Completion::from_result(CompletionResult::ToolCalls(calls), MODEL).map(Box::new)
+        })
+    })
+}
+
+#[tokio::test]
+async fn two_calls_in_one_round_are_in_flight_at_once_and_a_stop_drops_both() {
+    let held = Arc::new(Held::default());
+    let recorder = Arc::new(MemoryRecorder::new());
+    let harness = Harness::new(
+        recorder.clone(),
+        Arc::new(calls_hold_twice()),
+        Arc::new(PendingTimer::default()),
+        Arc::new(hold_host(&held)),
+        HostServices::new(),
+    );
+    let watched = Arc::clone(&held);
+
+    let report = run_beside(harness, request(LOOPS_ONCE), |control| async move {
+        until("both calls are in flight", || watched.started() == 2).await;
+        control.stop_round();
+    })
+    .await
+    .expect("the run reaches an outcome");
+
+    assert_eq!(
+        report.outcome,
+        RunOutcome::Completed {
+            final_text: "false:cancelled".to_owned()
+        },
+        "the loop's pcall caught the dropped batch"
+    );
+    assert_eq!(held.dropped(), 2, "the stop tore both calls down");
+    let records = recorder.records(report.run_id.expect("the run began"));
+    assert_eq!(
+        answers_to(&records, "ToolCall"),
+        [json!("Dropped"), json!("Dropped")],
+        "the stop answered both calls Dropped"
+    );
 }
 
 #[tokio::test]

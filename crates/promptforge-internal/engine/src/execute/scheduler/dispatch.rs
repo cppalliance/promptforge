@@ -5,9 +5,9 @@
 //! lands. Every store operation is a leaf yield, handed to the caller
 //! uniformly for all backends - no inline fast path - so interleaving
 //! behavior never depends on which backend serves the mount.
-//! The `tool_call`, `local_tool_done`, `chat`, `spawn`, `timer`, and task
-//! wait, inspection, note, concurrency, and cancel arms are defined in
-//! their own modules.
+//! The `tool_call`, `tool_calls`, `local_tool_done`, `chat`, `spawn`,
+//! `timer`, and task wait, inspection, note, concurrency, and cancel arms
+//! are defined in their own modules.
 
 use std::sync::Arc;
 
@@ -82,7 +82,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         Request::Infer { .. } | Request::Chat { .. } => Some("chat"),
         Request::Call { .. } => Some("call"),
         Request::JoinAny { .. } => Some("tasks"),
-        Request::ToolCall { .. } => Some("tool_call"),
+        Request::ToolCall { .. } | Request::ToolCalls { .. } => Some("tool_call"),
         Request::Store { .. } => Some("store"),
         Request::Spawn { .. }
         | Request::Timer { .. }
@@ -188,6 +188,10 @@ impl Scheduler {
                 turn,
             } => {
                 self.dispatch_tool_call(id, &alias, args, call_id, turn);
+                Ok(())
+            }
+            Request::ToolCalls { calls, turn } => {
+                self.dispatch_tool_calls(id, calls, turn);
                 Ok(())
             }
             Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),

@@ -87,6 +87,7 @@ impl Scheduler {
             seed: None,
             waiting_on: Vec::new(),
             awaiting: None,
+            batch: Vec::new(),
             blocked: None,
             task_notices: Vec::new(),
             note: None,
@@ -219,7 +220,7 @@ impl Scheduler {
     /// its call children and the tasks it spawned (a fanout's arms among
     /// them; each abandoned as `owner_aborted`, its own subtree aborted in
     /// turn): the chain leaves the ready queue and the pending table, its
-    /// in-flight leaf effect is orphaned, and its state drops in the
+    /// in-flight leaf effects are orphaned, and its state drops in the
     /// teardown order (the suspended coroutine, then the frame unarmed - no
     /// `SECTION_FINISHED`). The chain's own task slot, if it is a task, is
     /// the caller's to settle: the owner's chain end abandons it, a cancel
@@ -241,14 +242,19 @@ impl Scheduler {
         // one to reach, so the leaked-author list is moot here.
         self.abandon_owned_tasks(id, AbandonReason::OwnerAborted);
         self.ready.retain(|ready| *ready != id);
-        // The chain's own parked leaf effect. A timer the chain owned is
-        // keyed under it too, but `abandon_owned_tasks` above already
-        // aborted every live one, so this is the only entry left.
-        let effect = self
+        // The chain's own parked leaf effects: one, or every call of a
+        // `tool_calls` batch. A timer the chain owned is keyed under it
+        // too, but `abandon_owned_tasks` above already aborted every live
+        // one. Each tool call's identity ends as it is orphaned, so the
+        // entries go in issue order rather than the table's.
+        let mut effects: Vec<EffectId> = self
             .pending
             .iter()
-            .find_map(|(effect, pending)| (pending.chain == id).then_some(*effect));
-        if let Some(effect) = effect {
+            .filter(|(_, pending)| pending.chain == id)
+            .map(|(effect, _)| *effect)
+            .collect();
+        effects.sort_unstable_by_key(|effect| effect.get());
+        for effect in effects {
             self.abort_effect(effect);
         }
         let access = {
@@ -261,6 +267,7 @@ impl Scheduler {
             // other owned slots.
             chain.waiting_on.clear();
             chain.awaiting = None;
+            chain.batch.clear();
             chain.blocked = None;
             chain.frame = None;
             chain.access.take()

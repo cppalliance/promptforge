@@ -51,9 +51,11 @@ impl Scheduler {
     /// Applies one performed effect's answer: removes the effect's pending
     /// entry, turns the raw answer into the parked chain's protocol answer
     /// under the effect's continuation (emitting the round's events), and
-    /// re-queues the chain. A timer's firing completes its slot and wakes
-    /// its waiter instead. A `Dropped` answer is the caller giving the
-    /// effect up: the chain resumes with the cancelled error. Every answer
+    /// re-queues the chain. A batched tool call's answer fills its slot
+    /// instead, and the chain re-queues once the whole batch has landed.
+    /// A timer's firing completes its slot and wakes its waiter instead.
+    /// A `Dropped` answer is the caller giving the effect up: the chain
+    /// resumes with the cancelled error. Every answer
     /// to a tool call, `Dropped` included, first ends the call's identity
     /// through [`Scheduler::end_tool_call`], so whatever the tool did
     /// happens before the chain's next step and nothing it tries after is
@@ -63,7 +65,8 @@ impl Scheduler {
     /// Returns [`Error::Internal`] when no pending entry explains the id
     /// (`resume` has already ruled out an orphan, so the caller answered
     /// an effect the run never issued or answered one twice - which fails
-    /// loudly), or when the answer's kind does not match the effect's.
+    /// loudly), when the answer's kind does not match the effect's, or
+    /// when a batched call's answer finds no open slot to fill.
     /// Returns [`Error::Determinism`] when a store answer reports a
     /// claims-model conflict: the run ends on the spot rather than
     /// resuming the conflict into Lua, where an author `pcall` could catch
@@ -74,9 +77,13 @@ impl Scheduler {
                 "an answer arrived for an effect the run did not issue or already answered",
             ));
         };
-        if let Continuation::ToolCall(call) = &resume {
-            self.end_tool_call(chain, call.exec);
-        }
+        let slot = match &resume {
+            Continuation::ToolCall(call) => {
+                self.end_tool_call(chain, call.exec);
+                call.slot
+            }
+            _ => None,
+        };
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
                 self.drop_timer(id);
@@ -108,6 +115,9 @@ impl Scheduler {
                 ));
             }
         };
+        if let Some(slot) = slot {
+            return self.fill_batch_slot(chain, slot, answer);
+        }
         self.answer_inline(chain, answer);
         Ok(())
     }

@@ -240,6 +240,10 @@ pub enum Answer<E> {
     Chat(std::result::Result<Box<ChatResult>, E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
+    /// The texts of a `tool_calls` request's issued calls in call order,
+    /// or the first failure in call order. Fewer texts than calls means
+    /// the scheduler stopped at the call after the last one answered.
+    ToolCallsResult(std::result::Result<Vec<String>, E>),
     /// The outcome of a `store` request: the operation's return value.
     Store(std::result::Result<VfsOutcome, E>),
 }
@@ -266,6 +270,7 @@ impl<E> Answer<E> {
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
+            Answer::ToolCallsResult(result) => Answer::ToolCallsResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
             Answer::Store(result) => Answer::Store(result.map_err(map)),
         }
