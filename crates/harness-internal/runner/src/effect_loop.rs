@@ -32,7 +32,8 @@
 //! loop steps again instead of awaiting an answer. A Vfs effect is never in
 //! flight at a cancel or a stop: it is answered before the loop waits
 //! again. A drop is an answer, recorded like any other, so every effect
-//! record has exactly one answer record.
+//! record has exactly one answer record. Tool calls beyond the performer's
+//! cap wait, oldest first, and a cancel, a stop, or a withdrawal reaches them.
 //!
 //! A performer that panics is caught where its future is polled: its
 //! effect is answered `Dropped` and the panic is logged, so a lost
@@ -113,12 +114,13 @@ pub(crate) async fn drive(
     cancel: CancelHandle,
     stop: Arc<StopSignal>,
 ) -> Result<RunOutcome, DriveError> {
+    let cap = performers.tool.max_in_flight();
     let mut driver = Driver {
         run,
         performers,
         recorder,
         run_id,
-        flights: Flights::new(),
+        flights: Flights::new(cap),
         cancel,
         stop,
     };
@@ -131,9 +133,9 @@ struct Driver {
     performers: Performers,
     recorder: Arc<dyn RunRecorder>,
     run_id: RunId,
-    /// The chat, tool-call, and timer effects in flight. Dropping the
-    /// driver drops their futures, so nothing a performer holds outlives
-    /// the drive however it ends.
+    /// The chat, tool-call, and timer effects in flight and the tool calls
+    /// waiting for a slot. Dropping the driver drops their futures, so
+    /// nothing a performer holds outlives the drive however it ends.
     flights: Flights,
     cancel: CancelHandle,
     stop: Arc<StopSignal>,
@@ -162,7 +164,9 @@ impl Driver {
                     return Ok(outcome);
                 }
                 Step::Pending {
-                    effects, events, ..
+                    effects,
+                    events,
+                    withdrawn,
                 } => {
                     // The run's own word, not a scan of its events: the
                     // events are a report, not a control channel. A cancel
@@ -200,6 +204,11 @@ impl Driver {
                             self.answer(id, &provenance, answer).await?;
                             answered = true;
                         }
+                    }
+                    // A step can issue a call and withdraw it, so withdrawal follows queuing.
+                    if !withdrawn.is_empty() {
+                        self.drop_in_flight(Reach::Withdrawn(&withdrawn)).await?;
+                        answered = true;
                     }
                     if answered {
                         // Stepping again, not awaiting: the answers just
@@ -277,11 +286,11 @@ impl Driver {
         Ok(())
     }
 
-    /// Aborts the effects in flight that `reach` takes and answers each
-    /// `Dropped`, in effect order. The aborted futures are then torn down,
+    /// Answers `Dropped`, in effect order, each effect waiting or in
+    /// flight that `reach` takes. The aborted futures are then torn down,
     /// so whatever a dropped performer held is gone before the run steps
     /// on; an effect `reach` spared that landed meanwhile is answered too.
-    async fn drop_in_flight(&mut self, reach: Reach) -> Result<(), RecorderError> {
+    async fn drop_in_flight(&mut self, reach: Reach<'_>) -> Result<(), RecorderError> {
         for (id, provenance) in self.flights.abort(reach) {
             self.drop_effect(id, &provenance).await?;
         }
@@ -311,9 +320,9 @@ impl Driver {
     }
 
     /// Puts the performer future of a chat, tool-call, or timer effect in
-    /// flight and returns `None`. The performer is called inside its
-    /// future, so a performer that panics as it is called is caught like
-    /// one that panics as it runs.
+    /// flight, where a tool call may wait for a slot, and returns `None`.
+    /// The performer is called inside its future, so a performer that
+    /// panics as it is called is caught like one that panics as it runs.
     ///
     /// A Vfs effect goes nowhere and is handed back as the access and
     /// operation it carries, for the caller to answer inline.
@@ -323,7 +332,7 @@ impl Driver {
         provenance: &Provenance,
         effect: Effect,
     ) -> Option<(Arc<Access>, VfsOp)> {
-        let (answer, survives_stop): (BoxFuture<EffectAnswer>, bool) = match effect {
+        let answer: BoxFuture<EffectAnswer> = match effect {
             Effect::Chat {
                 binding,
                 messages,
@@ -337,7 +346,7 @@ impl Driver {
                     let completion = broker.chat(binding, messages, tools, options, round).await;
                     EffectAnswer::Chat(completion)
                 };
-                (Box::pin(round), false)
+                Box::pin(round)
             }
             Effect::ToolCall {
                 tool,
@@ -351,7 +360,9 @@ impl Driver {
                 let call = async move {
                     EffectAnswer::ToolCall(performer.call(tool, alias, access, origin, args).await)
                 };
-                (Box::pin(call), survives_stop)
+                self.flights
+                    .queue(id, provenance.clone(), survives_stop, Box::pin(call));
+                return None;
             }
             Effect::Vfs { access, op } => return Some((access, op)),
             Effect::Timer { seconds } => {
@@ -360,11 +371,10 @@ impl Driver {
                     timer.sleep(seconds).await;
                     EffectAnswer::Timer
                 };
-                (Box::pin(sleep), false)
+                Box::pin(sleep)
             }
         };
-        self.flights
-            .start(id, provenance.clone(), survives_stop, answer);
+        self.flights.start(id, provenance.clone(), answer);
         None
     }
 

@@ -569,7 +569,7 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
 
 <step-2>
 
-### Step 2: Run at most the cap of tool calls, oldest first
+### Step 2: Run at most the cap of tool calls, oldest first [completed]
 
 - Component: `none`
 - Tests: Verify runs every command below as written, in this order, from the `promptforge` repository root. Setting `$env:` variables persists for the session, so the API check below clears `CARGO_BUILD_WARNINGS` first.

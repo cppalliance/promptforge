@@ -45,6 +45,9 @@ impl RunControl {
     /// A `pcall` around a dropped call catches its cancelled error.
     /// Otherwise, the error ends the run cancelled.
     ///
+    /// A stop also drops the tool calls waiting for a slot, unstarted,
+    /// except those that survive stops, which start once a slot frees.
+    ///
     /// A stop reaches only the effects in flight when the loop that drives
     /// the run sees it. The loop looks for a stop while it waits for an
     /// answer and before it starts a step's effects. It drops the effects
@@ -56,9 +59,11 @@ impl RunControl {
     /// Cancels the run.
     ///
     /// Every effect in flight, tool calls that survive stops included, is
-    /// answered `Dropped`, and the run ends cancelled. A cancel raised
-    /// before the run begins ends the run before it reaches the recorder.
-    /// Calling `cancel` more than once is the same as calling it once.
+    /// answered `Dropped`, and the run ends cancelled. Every tool call
+    /// waiting for a slot is answered `Dropped` too, unstarted. A cancel
+    /// raised before the run begins ends the run before it reaches the
+    /// recorder. Calling `cancel` more than once is the same as calling it
+    /// once.
     pub fn cancel(&self) {
         self.cancel.cancel();
     }
