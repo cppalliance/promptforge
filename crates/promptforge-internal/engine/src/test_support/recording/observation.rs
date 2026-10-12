@@ -87,7 +87,8 @@ pub(crate) mod detail {
 
 /// One typed operational observation, as the suites name it: the
 /// payload-free view of a lifecycle [`Event`](promptforge_types::event::Event),
-/// the author's `log` checkpoint, or a task boundary with its seeds.
+/// a library load with its library, the author's `log` checkpoint, or a
+/// task boundary with its seeds.
 ///
 /// Every fixed variant maps 1:1 to an event variant; its [`Display`](fmt::Display)
 /// rendering is the stable trace string the suites compare.
@@ -131,6 +132,21 @@ pub enum Observation {
     LuaSharedLoadSucceeded,
     /// A section VM failed to load or execute its shared program.
     LuaSharedLoadFailed,
+    /// A section VM began loading a library section.
+    LuaLibraryLoadStarted {
+        /// The library section's heading with its markers.
+        library: String,
+    },
+    /// A section VM loaded a library section and ran its blocks.
+    LuaLibraryLoadSucceeded {
+        /// The library section's heading with its markers.
+        library: String,
+    },
+    /// A section VM failed to load a library section or run its blocks.
+    LuaLibraryLoadFailed {
+        /// The library section's heading with its markers.
+        library: String,
+    },
     /// A section VM began executing a Lua chunk.
     LuaChunkStarted,
     /// A section VM executed a Lua chunk successfully.
@@ -261,6 +277,9 @@ impl Observation {
             Observation::LuaSharedLoadStarted => "Lua shared load started",
             Observation::LuaSharedLoadSucceeded => "Lua shared load succeeded",
             Observation::LuaSharedLoadFailed => "Lua shared load failed",
+            Observation::LuaLibraryLoadStarted { .. } => "Lua library load started",
+            Observation::LuaLibraryLoadSucceeded { .. } => "Lua library load succeeded",
+            Observation::LuaLibraryLoadFailed { .. } => "Lua library load failed",
             Observation::LuaChunkStarted => "Lua chunk started",
             Observation::LuaChunkSucceeded => "Lua chunk succeeded",
             Observation::LuaChunkFailed => "Lua chunk failed",
@@ -309,6 +328,11 @@ impl fmt::Display for Observation {
             Observation::Other(message) => f.write_str(message),
             Observation::TaskAbandoned { reason, .. } => {
                 write!(f, "Task abandoned: {}", reason.why())
+            }
+            Observation::LuaLibraryLoadStarted { library }
+            | Observation::LuaLibraryLoadSucceeded { library }
+            | Observation::LuaLibraryLoadFailed { library } => {
+                write!(f, "{}: {library}", self.label().unwrap_or_default())
             }
             fixed => f.write_str(fixed.label().unwrap_or_default()),
         }

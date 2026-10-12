@@ -18,9 +18,10 @@
 //! key every event by `provenance` alone, without inspecting the payload.
 //!
 //! # Sensitivity
-//! Lifecycle variants have no payload beyond their coordinates, and the
-//! coordinates themselves are author-controlled (`execution` is caller
-//! chosen, `section` is prompt-authored heading text); the exception is
+//! Lifecycle variants have no payload beyond their coordinates and, for
+//! the library loads, the library's heading, all author-controlled
+//! (`execution` is caller chosen, `section` and `library` are
+//! prompt-authored heading text); the exception is
 //! `ModelMetadataDegraded`, whose message may quote values from a
 //! backend's response. Content variants hold model-, tool-, or
 //! user-authored text; task variants hold the author's spawn seeds; debug
@@ -208,6 +209,24 @@ events! {
         LuaSharedLoadSucceeded {},
         /// A section VM failed to load or execute its shared program.
         LuaSharedLoadFailed {},
+        /// A section VM began loading a library section into the reporting
+        /// section's environment.
+        LuaLibraryLoadStarted {
+            /// The library section's heading with its markers, such as
+            /// `## shared_stuff`.
+            library: String,
+        },
+        /// A section VM loaded a library section and ran its blocks
+        /// successfully.
+        LuaLibraryLoadSucceeded {
+            /// The library section's heading with its markers.
+            library: String,
+        },
+        /// A section VM failed to load a library section or run its blocks.
+        LuaLibraryLoadFailed {
+            /// The library section's heading with its markers.
+            library: String,
+        },
         /// A section VM began executing a Lua chunk.
         LuaChunkStarted {},
         /// A section VM executed a Lua chunk successfully.

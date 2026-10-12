@@ -14,12 +14,16 @@ use promptforge_types::event::Event;
 use promptforge_types::tools::ToolId;
 
 /// One event folded to what a suite compares: a payload-free boundary by
-/// its serialized `kind`, the author's `log` checkpoint with its message,
-/// or anything else by its kind.
+/// its serialized `kind`, a library load by its kind with its library, the
+/// author's `log` checkpoint with its message, or anything else by its
+/// kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Observation {
     /// A payload-free lifecycle boundary, named by its `kind` label.
     Lifecycle(&'static str),
+    /// A library-load boundary, by its `kind` label, with the library
+    /// section's heading.
+    Library { kind: String, library: String },
     /// The author's `log(message)` checkpoint.
     Lua(String),
     /// Any other event, by its `kind` label.
@@ -30,6 +34,7 @@ impl std::fmt::Display for Observation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Observation::Lifecycle(kind) => f.write_str(kind),
+            Observation::Library { kind, library } => write!(f, "{kind}: {library}"),
             Observation::Lua(message) => write!(f, "Lua: {message}"),
             Observation::Other(kind) => f.write_str(kind),
         }
@@ -91,8 +96,17 @@ fn kind(event: &Event) -> String {
 
 /// Folds one event to the record a suite compares.
 fn observation(event: &Event) -> Observation {
-    if let Event::Lua { message, .. } = event {
-        return Observation::Lua(message.clone());
+    match event {
+        Event::Lua { message, .. } => return Observation::Lua(message.clone()),
+        Event::LuaLibraryLoadStarted { library, .. }
+        | Event::LuaLibraryLoadSucceeded { library, .. }
+        | Event::LuaLibraryLoadFailed { library, .. } => {
+            return Observation::Library {
+                kind: kind(event),
+                library: library.clone(),
+            };
+        }
+        _ => {}
     }
     let kind = kind(event);
     KINDS

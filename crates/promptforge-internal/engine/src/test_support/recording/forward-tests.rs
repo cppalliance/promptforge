@@ -1,7 +1,7 @@
 //! Tests for the recording emitter's forwarding of event groups to their
-//! seams: a batch reaches its seams in order, a debug event without a
-//! capture is dropped, and every `Event` variant the suite names reaches
-//! exactly one seam.
+//! seams: a batch reaches its seams in order, a library load keeps its
+//! library, a debug event without a capture is dropped, and every `Event`
+//! variant the suite names reaches exactly one seam.
 
 use std::sync::Mutex;
 
@@ -255,6 +255,52 @@ fn a_reply_forwards_its_origin_to_the_observer() {
                 .to_owned(),
         ],
         "the observer must see the reply's origin"
+    );
+}
+
+#[test]
+fn a_library_load_forwards_its_library_to_the_observer() {
+    let recorder = Recorder::default();
+    forward(
+        vec![
+            Event::LuaLibraryLoadStarted {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                library: "## shared_stuff".to_owned(),
+            },
+            Event::LuaLibraryLoadSucceeded {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                library: "## shared_stuff".to_owned(),
+            },
+            Event::LuaLibraryLoadFailed {
+                execution: "run".to_owned(),
+                section: "B".to_owned(),
+                provenance: provenance(),
+                library: "## helpers".to_owned(),
+            },
+        ],
+        &recorder,
+    );
+    assert_eq!(
+        *recorder.observed.lock().expect("not poisoned"),
+        vec![
+            (
+                "A".to_owned(),
+                "Lua library load started: ## shared_stuff".to_owned()
+            ),
+            (
+                "A".to_owned(),
+                "Lua library load succeeded: ## shared_stuff".to_owned()
+            ),
+            (
+                "B".to_owned(),
+                "Lua library load failed: ## helpers".to_owned()
+            ),
+        ],
+        "each phase reaches its own observation with the library it named"
     );
 }
 

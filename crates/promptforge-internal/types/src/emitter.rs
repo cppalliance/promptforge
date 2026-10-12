@@ -53,6 +53,18 @@ pub enum DebugMode {
     On,
 }
 
+/// One boundary of loading a library section into a section's
+/// environment: the phase [`Emitter::library_load`] reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryLoad {
+    /// Loading began.
+    Started,
+    /// The library's blocks ran to completion.
+    Succeeded,
+    /// Loading the library or running its blocks returned an error.
+    Failed,
+}
+
 /// The run's event buffer: the events not yet drained, plus one sequence
 /// counter per task the run has reported under.
 #[derive(Debug, Default)]
@@ -231,6 +243,32 @@ impl Emitter {
     /// Reports one payload-free lifecycle boundary under `section`.
     pub fn report(&self, section: &str, boundary: Lifecycle) {
         self.emit(section, boundary);
+    }
+
+    /// Reports one boundary of loading `library`, the library section's
+    /// heading with its markers, into `section`'s environment.
+    pub fn library_load(&self, section: &str, library: &str, phase: LibraryLoad) {
+        let library = library.to_owned();
+        self.emit(section, |execution, section, provenance| match phase {
+            LibraryLoad::Started => Event::LuaLibraryLoadStarted {
+                execution,
+                section,
+                provenance,
+                library,
+            },
+            LibraryLoad::Succeeded => Event::LuaLibraryLoadSucceeded {
+                execution,
+                section,
+                provenance,
+                library,
+            },
+            LibraryLoad::Failed => Event::LuaLibraryLoadFailed {
+                execution,
+                section,
+                provenance,
+                library,
+            },
+        });
     }
 
     /// Reports the author's `log(message)` checkpoint.

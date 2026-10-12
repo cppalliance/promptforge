@@ -9,6 +9,9 @@ use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
 use crate::tools::ToolId;
 
+#[path = "event-tests-library.rs"]
+mod library;
+
 fn task(path: &str) -> TaskId {
     path.parse().expect("a task id parses")
 }
@@ -114,6 +117,9 @@ fn lifecycle_of(event: &Event) -> Option<Lifecycle> {
         Event::VfsExistsSucceeded { .. } => Some(lifecycle::VFS_EXISTS_SUCCEEDED),
         Event::VfsExistsFailed { .. } => Some(lifecycle::VFS_EXISTS_FAILED),
         Event::ModelMetadataDegraded { .. }
+        | Event::LuaLibraryLoadStarted { .. }
+        | Event::LuaLibraryLoadSucceeded { .. }
+        | Event::LuaLibraryLoadFailed { .. }
         | Event::Lua { .. }
         | Event::TaskStarted { .. }
         | Event::TaskSucceeded { .. }
@@ -136,6 +142,7 @@ fn lifecycle_of(event: &Event) -> Option<Lifecycle> {
 /// come from `lifecycle::ALL`.
 fn payload_samples() -> Vec<Event> {
     let mut samples = lifecycle_payload_samples();
+    samples.extend(library::samples());
     samples.extend(task_samples());
     samples.extend(content_samples());
     samples.extend(debug_samples());

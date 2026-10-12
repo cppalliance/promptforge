@@ -117,6 +117,33 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
             Seam::Observed,
         ),
         (
+            Event::LuaLibraryLoadStarted {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                library: "## lib".to_owned(),
+            },
+            Seam::Observed,
+        ),
+        (
+            Event::LuaLibraryLoadSucceeded {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                library: "## lib".to_owned(),
+            },
+            Seam::Observed,
+        ),
+        (
+            Event::LuaLibraryLoadFailed {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                library: "## lib".to_owned(),
+            },
+            Seam::Observed,
+        ),
+        (
             Event::Lua {
                 execution: "run".to_owned(),
                 section: "A".to_owned(),

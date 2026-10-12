@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{DebugMode, Emitter, EventSink};
+use super::{DebugMode, Emitter, EventSink, LibraryLoad};
 use crate::event::{Event, lifecycle};
 use crate::ids::{AbandonReason, ChainId, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::tools::{OutputTrust, ToolId};
@@ -145,6 +145,40 @@ fn payload_variants_cross_field_for_field() {
         Event::TaskAbandoned { task: ended, reason: AbandonReason::OwnerFailed, .. } if *ended == task
     ));
     assert!(matches!(&events[2], Event::Lua { message, .. } if message == "checkpoint"));
+}
+
+#[test]
+fn a_library_load_report_stamps_the_coordinates_and_the_library() {
+    let sink = EventSink::default();
+    let walk = emitter(&sink, root());
+    walk.library_load("Main", "## shared_stuff", LibraryLoad::Started);
+    walk.library_load("Main", "## shared_stuff", LibraryLoad::Succeeded);
+    walk.library_load("Other", "## helpers", LibraryLoad::Failed);
+    let stamp = |seq| Provenance { task: root(), seq };
+    assert_eq!(
+        sink.take(),
+        vec![
+            Event::LuaLibraryLoadStarted {
+                execution: "run-1".to_owned(),
+                section: "Main".to_owned(),
+                provenance: stamp(0),
+                library: "## shared_stuff".to_owned(),
+            },
+            Event::LuaLibraryLoadSucceeded {
+                execution: "run-1".to_owned(),
+                section: "Main".to_owned(),
+                provenance: stamp(1),
+                library: "## shared_stuff".to_owned(),
+            },
+            Event::LuaLibraryLoadFailed {
+                execution: "run-1".to_owned(),
+                section: "Other".to_owned(),
+                provenance: stamp(2),
+                library: "## helpers".to_owned(),
+            },
+        ],
+        "each phase builds its own variant under the loading section"
+    );
 }
 
 #[test]

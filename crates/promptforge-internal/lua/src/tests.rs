@@ -21,6 +21,7 @@ mod argv;
 mod budgets;
 mod cancellation;
 mod diagnostics;
+mod library_load;
 mod logging;
 mod sandbox;
 mod section_vm;

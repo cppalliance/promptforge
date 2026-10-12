@@ -87,6 +87,9 @@ lifecycle_pairs! {
 macro_rules! task_lifecycle_variants {
     () => {
         Event::ModelMetadataDegraded { .. }
+            | Event::LuaLibraryLoadStarted { .. }
+            | Event::LuaLibraryLoadSucceeded { .. }
+            | Event::LuaLibraryLoadFailed { .. }
             | Event::Lua { .. }
             | Event::TaskStarted { .. }
             | Event::TaskSucceeded { .. }
@@ -176,6 +179,36 @@ fn forward_lifecycle(event: Event, observer: &dyn Observer) {
             &execution,
             &section,
             Observation::Other(format!("Model metadata degraded: {message}")),
+        ),
+        Event::LuaLibraryLoadStarted {
+            execution,
+            section,
+            library,
+            ..
+        } => observer.observe(
+            &execution,
+            &section,
+            Observation::LuaLibraryLoadStarted { library },
+        ),
+        Event::LuaLibraryLoadSucceeded {
+            execution,
+            section,
+            library,
+            ..
+        } => observer.observe(
+            &execution,
+            &section,
+            Observation::LuaLibraryLoadSucceeded { library },
+        ),
+        Event::LuaLibraryLoadFailed {
+            execution,
+            section,
+            library,
+            ..
+        } => observer.observe(
+            &execution,
+            &section,
+            Observation::LuaLibraryLoadFailed { library },
         ),
         Event::Lua {
             execution,

@@ -859,6 +859,21 @@ pub promptforge::event::Event::LuaCompilationSucceeded { .. }
 pub promptforge::event::Event::LuaCompilationSucceeded::execution: alloc::string::String
 pub promptforge::event::Event::LuaCompilationSucceeded::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::LuaCompilationSucceeded::section: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadFailed { .. }
+pub promptforge::event::Event::LuaLibraryLoadFailed::execution: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadFailed::library: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaLibraryLoadFailed::section: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadStarted { .. }
+pub promptforge::event::Event::LuaLibraryLoadStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadStarted::library: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaLibraryLoadStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadSucceeded { .. }
+pub promptforge::event::Event::LuaLibraryLoadSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadSucceeded::library: alloc::string::String
+pub promptforge::event::Event::LuaLibraryLoadSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaLibraryLoadSucceeded::section: alloc::string::String
 pub promptforge::event::Event::LuaReplyBindingFailed { .. }
 pub promptforge::event::Event::LuaReplyBindingFailed::execution: alloc::string::String
 pub promptforge::event::Event::LuaReplyBindingFailed::provenance: promptforge::ids::Provenance
