@@ -326,7 +326,7 @@ Add the three events that name a loaded library. Today's shared-library load eve
 
 <step-2>
 
-### Step 2: Lua-side `require` loader
+### Step 2: Lua-side `require` loader [completed]
 
 - Component: `require` runtime
 - Tests: `cargo nextest run --locked -p promptforge-lua -p promptforge-engine --all-features`; `cargo fmt --all --check`

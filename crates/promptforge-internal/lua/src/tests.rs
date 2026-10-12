@@ -23,6 +23,7 @@ mod cancellation;
 mod diagnostics;
 mod library_load;
 mod logging;
+mod require;
 mod sandbox;
 mod section_vm;
 mod shared_replay;

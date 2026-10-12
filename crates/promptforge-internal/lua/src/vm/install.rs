@@ -5,9 +5,9 @@ use super::{SectionVm, pack_sequence};
 #[cfg(test)]
 use crate::var_to_json;
 use crate::{
-    Access, Arc, Argv, Emitter, Error, Json, Mutex, Ordering, ProseState, Result, SectionText,
-    Value, guarded_var, install_compactors, install_log, install_messages, install_models,
-    install_plugins, install_shim_prelude, install_store_table, install_tools,
+    Access, Arc, Argv, Emitter, Error, Json, Library, LibraryKey, Mutex, Ordering, ProseState,
+    Result, SectionText, Value, guarded_var, install_compactors, install_log, install_messages,
+    install_models, install_plugins, install_shim_prelude, install_store_table, install_tools,
     resolve_section_target, seal_sys,
 };
 
@@ -222,9 +222,40 @@ impl SectionVm {
         )
     }
 
+    /// Installs PromptForge's `require` as a persistent global for the
+    /// section's whole lifecycle.
+    ///
+    /// `resolver` finds a library from the heading as written. While a
+    /// library loads, a `require` passes that library's key, so the
+    /// library's own helpers resolve from its position wherever it is
+    /// required from; every other call passes `None`. An out-of-reach or
+    /// malformed heading is the resolver's error, raised at the call. Each
+    /// first load reports through a clone of `emitter` under `section`, and
+    /// `jump` refuses while any library loads.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the loader cannot install.
+    pub fn install_require<R, E>(&self, resolver: R, emitter: &Emitter, section: &str) -> Result<()>
+    where
+        R: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, E>
+            + Send
+            + Sync
+            + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        crate::require::install(
+            &self.lua,
+            resolver,
+            emitter,
+            section,
+            &self.library_load_depth,
+        )
+    }
+
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {
         let jump_slot = Arc::clone(&self.jump_slot);
         let local_handler_depth = Arc::clone(&self.local_handler_depth);
+        let library_load_depth = Arc::clone(&self.library_load_depth);
         let jump_fn = self
             .lua
             .create_function(move |_, target: Value| -> mlua::Result<()> {
@@ -232,6 +263,12 @@ impl SectionVm {
                     return Err(mlua::Error::external(
                         "jump is unavailable inside a local tool handler: return a value from \
                          the handler and call jump from the block after the tool call returns",
+                    ));
+                }
+                if library_load_depth.load(Ordering::Relaxed) > 0 {
+                    return Err(mlua::Error::external(
+                        "jump is unavailable while a library loads: return a value from the \
+                         library and call jump from the section after require returns",
                     ));
                 }
                 let heading = resolve_section_target(target)?;

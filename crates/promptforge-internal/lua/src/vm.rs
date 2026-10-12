@@ -75,6 +75,9 @@ pub struct SectionVm {
     /// How many local tool handlers are running on this VM; `jump` refuses
     /// while it is above zero.
     local_handler_depth: Arc<AtomicU32>,
+    /// How many libraries `require` is loading on this VM; `jump` refuses
+    /// while it is above zero.
+    library_load_depth: Arc<AtomicU32>,
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
@@ -281,6 +284,7 @@ impl SectionVm {
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
             local_handler_depth: Arc::new(AtomicU32::new(0)),
+            library_load_depth: Arc::new(AtomicU32::new(0)),
             sys_live: Arc::new(Mutex::new(None)),
             access: None,
             store_conflicts: Arc::new(Mutex::new(None)),

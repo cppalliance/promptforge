@@ -51,11 +51,40 @@ fn safe_stdlib_present() {
 #[test]
 fn dangerous_globals_absent() {
     let out = run(
-            "return tostring(io) .. ',' .. tostring(os) .. ',' .. tostring(require) .. ',' .. tostring(load)",
+            "return tostring(io) .. ',' .. tostring(os) .. ',' .. tostring(require) .. ',' .. tostring(load) .. ',' .. tostring(package)",
             "",
         )
         .unwrap();
-    assert_eq!(out.returned.as_deref(), Some("nil,nil,nil,nil"));
+    assert_eq!(out.returned.as_deref(), Some("nil,nil,nil,nil,nil"));
+}
+
+#[test]
+fn an_installed_require_is_promptforges_and_loads_no_module() {
+    let vm = shim_vm(None);
+    vm.install_require(
+        |heading, _| {
+            Err::<Library, _>(Error::Lua(format!(
+                "no section `{heading}` within reach of require"
+            )))
+        },
+        &null_emitter(),
+        "Section",
+    )
+    .expect("require must install");
+    let step = vm
+        .start_block_coro(&program(
+            "local ok, err = pcall(require, 'os')\n\
+             return type(require) .. '|' .. tostring(ok) .. '|' .. tostring(err) .. '|' \
+               .. tostring(os) .. '|' .. tostring(package)",
+        ))
+        .expect("the refused require is caught");
+    let CoroStep::Done(LuaBlockResult::Returned(Some(returned))) = step else {
+        panic!("the block must return a string, got {step:?}");
+    };
+    assert_eq!(
+        returned,
+        "function|false|no section `os` within reach of require|nil|nil"
+    );
 }
 
 #[test]

@@ -148,6 +148,50 @@ pub struct SectionText {
     pub items: Vec<String>,
 }
 
+/// Which library a `require` resolved to, opaque to this crate.
+///
+/// The caller encodes a library section's position in the identity
+/// string; `require`'s cache keys on that identity, never on the heading
+/// text, so one heading resolved from two positions names two libraries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LibraryKey(String);
+
+impl LibraryKey {
+    /// A key whose stable identity is `identity`.
+    #[must_use]
+    pub fn new(identity: String) -> Self {
+        Self(identity)
+    }
+
+    /// The identity the key was built from.
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What `require` loads from one library section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Library {
+    /// Which library this is: the cache key, and the position a `require`
+    /// made while it loads resolves from.
+    pub key: LibraryKey,
+    /// The library section's heading with its markers, such as
+    /// `## helpers`, which its load reports and a cycle error name.
+    pub heading: String,
+    /// The section's blocks in order.
+    pub blocks: Vec<LibraryBlock>,
+}
+
+/// One block of a library section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryBlock {
+    /// The block's compiled Lua.
+    pub program: crate::LuaProgram,
+    /// The block's prose template, the Markdown before it.
+    pub prose: String,
+}
+
 /// The run's tool set: the declared plugins, the prompt-wide offers, and
 /// every catalog tool the run can offer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

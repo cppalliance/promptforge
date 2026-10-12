@@ -144,6 +144,7 @@ mod program;
 mod projection;
 mod prose;
 mod proxy;
+mod require;
 mod scope;
 mod vm;
 use handles::resolve_section_target;
@@ -164,7 +165,10 @@ pub use dispatch::{
 };
 pub use engine_globals::{run_store_op, store_error_message};
 pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
-pub use handles::{LuaBlockResult, SectionText, ToolBinding, ToolOutputKind, ToolSet, ToolView};
+pub use handles::{
+    Library, LibraryBlock, LibraryKey, LuaBlockResult, SectionText, ToolBinding, ToolOutputKind,
+    ToolSet, ToolView,
+};
 pub use messages::MessageList;
 pub use models::ModelRuntime;
 pub use prelude::install_preludes;
