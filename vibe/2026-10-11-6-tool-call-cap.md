@@ -4,19 +4,19 @@ overview: Bound the Plugin tool calls running at once across a run, with the cap
 todos:
   - id: engine-withdrawn
     content: "Step 1: EffectId derives PartialOrd and Ord; Step::Pending gains withdrawn, filled by abort_effect for tool-call continuations and cleared when the run is decided; update every exhaustive Step::Pending pattern; bless and review public-api.txt; three Engine tests in parallel_tool_calls.rs"
-    status: pending
+    status: completed
   - id: harness-cap
     content: "Step 2: ToolPerformer::max_in_flight, a default method returning 10; Flights keeps waiting futures in a BTreeMap by EffectId, caps tool calls in flight, starts the lowest id when a slot frees, and drains waiting calls in abort(reach), which gains Reach::Withdrawn; start drops its survives_stop parameter"
-    status: pending
+    status: completed
   - id: harness-driver
     content: "Step 2: Driver builds Flights with the performer's cap, sends tool calls through Flights::queue, and drops the step's withdrawn ids through drop_in_flight after starting its new effects; RunControl and Harness::new docs name the cap and waiting calls"
-    status: pending
+    status: completed
   - id: harness-tests
     content: "Step 2: end-to-end tests: the cap holds extra calls, waiting calls start oldest first, a call withdrawn in the step that issued it never starts, cancelling a task drops its waiting and running calls, a cancel and a stop drop waiting calls unstarted, a stop starts a waiting call that survives stops"
-    status: pending
+    status: completed
   - id: verify
     content: "Each step: both nextest runs, both clippy runs, fmt, both docs runs, xtask api --check, build-xtask, docs-claims"
-    status: pending
+    status: completed
 isProject: false
 ---
 
