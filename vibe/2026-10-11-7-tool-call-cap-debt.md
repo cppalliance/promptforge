@@ -4,13 +4,13 @@ overview: "Remove the one debt the tool-call-cap work added: the public Plugin c
 todos:
   - id: d1-1-docs
     content: "D1-1: make Plugin::call's # Invariants the full drop-occasion list; point the promptforge-plugin crate doc and plugin-user-input (lines 33, 72-73) at it; make ToolDescriptor::survives_stop's field doc accurate. D1-14: add the no-waiting-on-another-call bullet to the same # Invariants. D1-16: 'in flight or waiting' in RunControl::stop_round (harness-control.rs line 51)"
-    status: pending
+    status: completed
   - id: d1-1-pin
     content: "D1-1: add cancelling_a_task_drops_its_question_to_the_operator to tests/it/harness-stop-cap.rs, holding Main's after round until the question is torn down"
-    status: pending
+    status: completed
   - id: verify
     content: Focused stop_cap tests, contract read-through, git grep for 'only a cancel', docs builds, docs-claims, API check with CARGO_BUILD_WARNINGS cleared, and the full exit gates
-    status: pending
+    status: completed
 isProject: false
 ---
 
