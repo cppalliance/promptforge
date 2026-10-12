@@ -25,6 +25,7 @@
 //! [`InferenceBroker`] and the [`Timer`].
 
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -73,6 +74,10 @@ pub trait InferenceBroker: Send + Sync {
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>>;
 }
 
+/// The tool calls a run has in flight at once unless its performer says
+/// otherwise.
+const DEFAULT_MAX_IN_FLIGHT: NonZeroUsize = NonZeroUsize::MIN.saturating_add(9);
+
 /// Performs a `ToolCall` effect: resolves `tool` to an implementation and
 /// calls it with `args`, lending it the call's `access` and `origin`.
 pub trait ToolPerformer: Send + Sync {
@@ -95,6 +100,12 @@ pub trait ToolPerformer: Send + Sync {
     /// `survives_stop` flag. A stop drops every other call in flight; a
     /// cancel drops this one too.
     fn survives_stop(&self, tool: &ToolId) -> bool;
+
+    /// The most tool calls the Harness runs at once across the run; calls
+    /// beyond it wait and start oldest first. The default is 10.
+    fn max_in_flight(&self) -> NonZeroUsize {
+        DEFAULT_MAX_IN_FLIGHT
+    }
 }
 
 /// The Host's clock, which performs each `Timer` effect as one sleep.

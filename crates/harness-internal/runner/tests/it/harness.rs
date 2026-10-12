@@ -4,9 +4,10 @@
 //! recorded failed run; a Vfs effect is answered inline as it is issued;
 //! and one run completes under a thread-parking executor with no runtime
 //! behind it. How a stop and a cancel reach the effects in flight sits in
-//! the `stop` child module, how what a stop reaches depends on when the
-//! loop sees it in the `stop_timing` child module, and every error `run`
-//! returns in the `errors` child module.
+//! the `stop` child module, how a stop reaches the tool calls waiting for
+//! a slot in the `stop_cap` child module, how what a stop reaches depends
+//! on when the loop sees it in the `stop_timing` child module, and every
+//! error `run` returns in the `errors` child module.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -32,6 +33,8 @@ use crate::support::{HookedBackend, PendingTimer};
 mod errors;
 #[path = "harness-stop.rs"]
 mod stop;
+#[path = "harness-stop-cap.rs"]
+mod stop_cap;
 #[path = "harness-stop-timing.rs"]
 mod stop_timing;
 

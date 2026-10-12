@@ -129,7 +129,9 @@ impl Harness {
     /// run's model and gets the model's replies through `broker`. It sleeps
     /// through `timer`. Its tool calls go to the Plugins installed in
     /// `host`, and each call is lent `services`, the run's own, such as
-    /// its input broker. All of this work happens in [`Harness::run`].
+    /// its input broker. A run has at most 10 tool calls in flight; the
+    /// rest wait and start oldest first. All of this work happens in
+    /// [`Harness::run`].
     #[must_use]
     pub fn new(
         recorder: Arc<dyn RunRecorder>,
