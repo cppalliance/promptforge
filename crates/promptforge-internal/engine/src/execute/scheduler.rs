@@ -218,6 +218,9 @@ pub(crate) struct Scheduler {
     /// set when its answer arrives, so the set stays bounded by the
     /// orphans whose answers have not landed.
     orphaned: HashSet<EffectId>,
+    /// Tool-call effects orphaned since the last step, drained into
+    /// `Step::Pending`.
+    withdrawn: Vec<EffectId>,
     /// The run's phase.
     phase: Phase,
     /// The most chains one run may start: the arena indexes chains by
@@ -262,6 +265,7 @@ impl Scheduler {
             tasks: HashMap::new(),
             issued: Vec::new(),
             orphaned: HashSet::new(),
+            withdrawn: Vec::new(),
             phase: Phase::Fresh,
             max_chains: u32::MAX as usize,
             next_effect: 0,

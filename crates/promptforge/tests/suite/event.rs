@@ -55,7 +55,9 @@ fn answer(effect: Effect) -> EffectAnswer {
 fn drive(mut run: Run, mut record: impl FnMut(Vec<Event>)) -> RunResult {
     loop {
         match run.step() {
-            Step::Pending { effects, events } => {
+            Step::Pending {
+                effects, events, ..
+            } => {
                 record(events);
                 for (id, _provenance, effect) in effects {
                     run.resume(id, answer(effect));

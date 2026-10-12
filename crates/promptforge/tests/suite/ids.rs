@@ -101,6 +101,7 @@ fn drive(
             Step::Pending {
                 effects: batch,
                 events: reported,
+                ..
             } => {
                 assert!(
                     !batch.is_empty() || run.decided(),

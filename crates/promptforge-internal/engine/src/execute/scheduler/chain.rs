@@ -253,7 +253,7 @@ impl Scheduler {
             .filter(|(_, pending)| pending.chain == id)
             .map(|(effect, _)| *effect)
             .collect();
-        effects.sort_unstable_by_key(|effect| effect.get());
+        effects.sort_unstable();
         for effect in effects {
             self.abort_effect(effect);
         }
@@ -290,7 +290,8 @@ impl Scheduler {
     /// when it arrives, is discarded rather than failing the run. A tool
     /// call's identity ends here as its answer would end it, so what the
     /// tool already did is joined into the parked chain and anything it
-    /// tries later is refused. The caller still owes the answer: `Done`
+    /// tries later is refused. A tool call is also listed as withdrawn,
+    /// for the step to report. The caller still owes the answer: `Done`
     /// waits for every issued effect, so the run ends only once the
     /// caller has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
@@ -300,6 +301,7 @@ impl Scheduler {
         }) = self.pending.remove(&effect)
         {
             self.end_tool_call(chain, call.exec);
+            self.withdrawn.push(effect);
         }
         self.orphaned.insert(effect);
     }

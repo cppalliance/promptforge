@@ -54,6 +54,8 @@ impl Scheduler {
             )));
         }
         let effects = std::mem::take(&mut self.issued);
+        let mut withdrawn = std::mem::take(&mut self.withdrawn);
+        withdrawn.sort_unstable();
         let events = self.ctx.take_events();
         match &self.phase {
             Phase::Ending(_) if self.pending.is_empty() && self.orphaned.is_empty() => {
@@ -79,7 +81,11 @@ impl Scheduler {
                 ))),
                 events,
             },
-            Phase::Fresh | Phase::Running | Phase::Ending(_) => Step::Pending { effects, events },
+            Phase::Fresh | Phase::Running | Phase::Ending(_) => Step::Pending {
+                effects,
+                events,
+                withdrawn,
+            },
         }
     }
 
@@ -175,6 +181,9 @@ impl Scheduler {
         }
         self.settle_all_tasks(AbandonReason::RunTerminated);
         self.teardown();
+        // Settling withdrew the abandoned tasks' calls, but teardown orphans
+        // the rest unlisted, so a decided run lists none rather than some.
+        self.withdrawn.clear();
         self.ctx.emitter().report(
             self.ctx.prompt().title(),
             if result.is_ok() {

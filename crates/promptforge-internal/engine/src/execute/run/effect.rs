@@ -39,8 +39,9 @@ use crate::execute::protocol::{VfsOp, VfsOutcome};
 /// [`Effect`] with its [`EffectAnswer`].
 ///
 /// The id is opaque. The run allocates it from a run-wide counter, so the
-/// same effect may get a different id in another run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// same effect may get a different id in another run. Ids order by issue
+/// within a run: an effect issued later has a greater id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectId(pub(crate) u64);
 
 impl EffectId {

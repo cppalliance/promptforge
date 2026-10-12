@@ -38,13 +38,20 @@ pub enum Step {
     /// perform, in issue order. Each comes with the provenance of the task
     /// that built it. An empty list means every chain is waiting on an
     /// effect that an earlier step issued. `events` lists the events the
-    /// step reported, in order.
+    /// step reported, in order. `withdrawn` lists the tool calls the step
+    /// orphaned while the run goes on. It may name a call that `effects`
+    /// lists, because one step can issue a call and then orphan it.
     Pending {
         /// The effects the caller must perform and answer through
         /// [`Run::resume`].
         effects: Vec<(EffectId, Provenance, Effect)>,
         /// The events the step reported.
         events: Vec<Event>,
+        /// The tool-call effects this step orphaned, in effect-id order.
+        /// Their answers will be discarded, so the caller may drop each one
+        /// it still holds; it still owes each one answer. Empty once the
+        /// run is decided, when the caller may drop everything it holds.
+        withdrawn: Vec<EffectId>,
     },
     /// The run is over.
     ///

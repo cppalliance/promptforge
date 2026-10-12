@@ -4,8 +4,10 @@
 //! records append in call order. A local tool or a task built-in stops the
 //! batch and runs alone between its neighbors, a call that cannot be
 //! bound stops it and raises once the issued calls land, and a task
-//! cancelled while parked on a batch orphans every call in it. Each test
-//! steps a `Run` by hand, so it sees exactly what each step issued.
+//! cancelled while parked on a batch orphans every call in it and lists
+//! each in the step's `withdrawn`, which a decided run leaves empty. Each
+//! test steps a `Run` by hand, so it sees exactly what each step issued
+//! and withdrew.
 
 use promptforge_types::event::{Event, ReplyOrigin};
 
@@ -18,7 +20,10 @@ use crate::model::{Completion, CompletionResult, ToolCall};
 /// The effects one step issued, in issue order, and the events it
 /// reported. Panics when the run is over.
 fn pending(step: Step) -> (Vec<(EffectId, Effect)>, Vec<Event>) {
-    let Step::Pending { effects, events } = step else {
+    let Step::Pending {
+        effects, events, ..
+    } = step
+    else {
         panic!("the run is still going: {step:?}");
     };
     let effects = effects
@@ -294,3 +299,6 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
     };
     assert_eq!(text_of(result), "cancelled");
 }
+
+#[path = "parallel_tool_calls-withdrawn.rs"]
+mod withdrawn;
