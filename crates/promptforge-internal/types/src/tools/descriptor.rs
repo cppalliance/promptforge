@@ -33,8 +33,9 @@ pub struct ToolDescriptor {
     /// script receives it as a string.
     pub structured_output: bool,
     /// Whether a stop leaves the tool's calls in flight. A stop cancels
-    /// every other call in flight and lets the run go on; a cancel still
-    /// ends this one. A question to the operator sets it, so the question
+    /// every other call in flight and lets the run go on; the run's end
+    /// and the early end of the task that made the call still end this
+    /// one. A question to the operator sets it, so the question
     /// stays open. A descriptor serialized without the field reads as
     /// `false`.
     #[serde(default)]

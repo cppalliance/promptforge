@@ -82,8 +82,15 @@ pub trait Plugin: Send + Sync {
     ///   embeds data an attacker can influence is
     ///   [`ToolOutput::untrusted`].
     /// - `call` is cancellation-aware. The Harness drops the returned
-    ///   future on a stop or a cancel, unless the tool's descriptor sets
-    ///   `survives_stop`, in which case only a cancel drops it.
+    ///   future on a stop, when the run ends (a cancel included), and when
+    ///   the task that made the call ends early: it is cancelled, its owner
+    ///   ends, or an ancestor is aborted. Only a stop spares a call whose
+    ///   tool's descriptor sets `survives_stop`. After a stop or a task's
+    ///   early end, the run goes on.
+    /// - `call` must not wait for another call of the same run to finish.
+    ///   The Harness runs a bounded number of a run's tool calls at once
+    ///   and holds the rest, so a call that waits on one held behind it can
+    ///   stall the run until a stop or a cancel.
     ///
     /// # Errors
     /// Returns a [`ToolError`], whose message is safe to show the model,

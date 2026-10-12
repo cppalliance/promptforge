@@ -48,10 +48,10 @@ impl RunControl {
     /// A stop also drops the tool calls waiting for a slot, unstarted,
     /// except those that survive stops, which start once a slot frees.
     ///
-    /// A stop reaches only the effects in flight when the loop that drives
-    /// the run sees it. The loop looks for a stop while it waits for an
-    /// answer and before it starts a step's effects. It drops the effects
-    /// the stop reaches, if any, then lowers the stop.
+    /// A stop reaches only the effects in flight or waiting when the loop
+    /// that drives the run sees it. The loop looks for a stop while it
+    /// waits for an answer and before it starts a step's effects. It drops
+    /// the effects the stop reaches, if any, then lowers the stop.
     pub fn stop_round(&self) {
         self.stop.raise();
     }
