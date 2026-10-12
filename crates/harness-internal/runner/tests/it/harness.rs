@@ -5,9 +5,10 @@
 //! and one run completes under a thread-parking executor with no runtime
 //! behind it. How a stop and a cancel reach the effects in flight sits in
 //! the `stop` child module, how a stop reaches the tool calls waiting for
-//! a slot in the `stop_cap` child module, how what a stop reaches depends
-//! on when the loop sees it in the `stop_timing` child module, and every
-//! error `run` returns in the `errors` child module.
+//! a slot and how a task's early end drops its stop-surviving call while
+//! the run goes on in the `stop_cap` child module, how what a stop
+//! reaches depends on when the loop sees it in the `stop_timing` child
+//! module, and every error `run` returns in the `errors` child module.
 
 use std::future::Future;
 use std::pin::Pin;

@@ -319,7 +319,7 @@ Acceptance:
 
 <step-2>
 
-### Step 2: Pin that cancelling a task drops its question to the operator
+### Step 2: Pin that cancelling a task drops its question to the operator [completed]
 
 - Component: `none`
 - Tests:
