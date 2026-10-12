@@ -51,9 +51,8 @@
 //! - [`Plugin::call`] marks the trust of every output correctly: output
 //!   that embeds data an attacker can influence is
 //!   [`ToolOutput::untrusted`].
-//! - [`Plugin::call`] is cancellation-aware. Its future is dropped on a
-//!   stop or a cancel, except that a stop spares a call whose tool's
-//!   descriptor sets `survives_stop`.
+//! - [`Plugin::call`] is cancellation-aware: its future may be dropped
+//!   before it finishes, on the occasions its invariants list.
 
 mod context;
 mod plugin;
