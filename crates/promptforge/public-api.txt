@@ -211,7 +211,7 @@ derives promptforge::effect::AnswerRecord: Clone, Debug, Deserialize, PartialEq,
 derives promptforge::effect::ChatAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::Effect: Debug
 derives promptforge::effect::EffectAnswer: Debug
-derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::effect::Round: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
@@ -735,6 +735,7 @@ pub promptforge::Step::Done::result: promptforge::RunResult
 pub promptforge::Step::Pending { .. }
 pub promptforge::Step::Pending::effects: alloc::vec::Vec<(promptforge::effect::EffectId, promptforge::ids::Provenance, promptforge::effect::Effect)>
 pub promptforge::Step::Pending::events: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::Step::Pending::withdrawn: alloc::vec::Vec<promptforge::effect::EffectId>
 pub promptforge::UnavailablePlugin::plugin: promptforge::plugins::PluginId
 pub promptforge::UnavailablePlugin::reason: alloc::string::String
 pub promptforge::UnmetRequirement::actual: alloc::string::String

@@ -101,7 +101,9 @@ pub fn drive(
                 reported.extend(events);
                 return (result, reported);
             }
-            Step::Pending { effects, events } => {
+            Step::Pending {
+                effects, events, ..
+            } => {
                 reported.extend(events);
                 if effects.is_empty() {
                     // Every effect is answered the step it is issued, so a

@@ -46,7 +46,9 @@ fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResul
                 forward(events, recorder);
                 return result;
             }
-            Step::Pending { effects, events } => {
+            Step::Pending {
+                effects, events, ..
+            } => {
                 forward(events, recorder);
                 assert!(
                     !effects.is_empty() || cancelled,

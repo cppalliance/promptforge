@@ -197,7 +197,9 @@ impl<'a> TokioDriver<'a> {
                         RunResult::Failure(error) => Err(error.into_inner()),
                     };
                 }
-                Step::Pending { effects, events } => {
+                Step::Pending {
+                    effects, events, ..
+                } => {
                     // The run's own word, not a scan of its events: the
                     // events are a report only.
                     let decided = self.run.decided();

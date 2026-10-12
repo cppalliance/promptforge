@@ -199,6 +199,7 @@ pub(super) fn drive_batched(mut run: Run, batching: Batching) -> Outcome {
             Step::Pending {
                 effects: issued,
                 events: more,
+                ..
             } => {
                 events.extend(more);
                 for (id, provenance, effect) in issued {

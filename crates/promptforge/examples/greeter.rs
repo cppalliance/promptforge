@@ -104,7 +104,9 @@ pub fn greet() -> Result<String, Box<dyn Error>> {
     //    effect exactly once.
     let result = loop {
         match run.step() {
-            Step::Pending { effects, events } => {
+            Step::Pending {
+                effects, events, ..
+            } => {
                 log.extend(events);
                 for (id, _provenance, effect) in effects {
                     if run.decided() {

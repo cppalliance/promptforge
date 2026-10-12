@@ -283,7 +283,10 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
     // its answer, so `Done` waits.
     run.cancel();
     let step = run.step();
-    let Step::Pending { effects, events } = step else {
+    let Step::Pending {
+        effects, events, ..
+    } = step
+    else {
         panic!("Done is withheld while the store effect is unanswered, got {step:?}");
     };
     assert!(effects.is_empty(), "a torn-down run issues nothing");
