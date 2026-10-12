@@ -1,6 +1,8 @@
 //! A stop under the real performer's default cap of 10: the stop drops
 //! the calls waiting for a slot without starting them, and a waiting call
-//! that survives stops starts once the stop frees a slot.
+//! that survives stops starts once the stop frees a slot. A task's early
+//! end spares no call that survives stops: cancelling a task drops its
+//! question to the operator while the run goes on.
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -70,6 +72,41 @@ async fn settle() {
     for _ in 0..16 {
         tokio::task::yield_now().await;
     }
+}
+
+/// Main spawns Child, which asks the operator; Main then waits on a
+/// `wait` round, cancels Child, and waits on an `after` round.
+const CANCELS_AN_ASKER: &str = "---\nname: cancels\ndescription: d\npromptforge: 0\n\
+    plugins:\n  - user-input\nmodels:\n  writer: {}\n---\n\n\
+    # Cancels\n\n```lua\nmodels.default('writer')\n```\n\n\
+    ## Main\n\n```lua\n\
+    local t = tasks.spawn('## Child')\n\
+    models.infer('wait')\n\
+    tasks.cancel(t)\n\
+    models.infer('after')\n\
+    return 'cancelled'\n```\n\n\
+    ## Child\n\n```lua\nreturn (input.ask())\n```\n";
+
+/// A broker that answers the `wait` round once `operator` has been asked,
+/// and every other round once the question has been torn down. It waits
+/// without bound, so a question left open fails the test through
+/// `run_beside`'s patience.
+fn holds_back(operator: &Operator) -> ScriptedBroker {
+    let asked = Arc::clone(&operator.asked);
+    let abandoned = Arc::clone(&operator.abandoned);
+    ScriptedBroker::new(move |_round, messages| {
+        let text = messages
+            .last()
+            .map(|message| message.content().to_owned())
+            .unwrap_or_default();
+        let gate = Arc::clone(if text == "wait" { &asked } else { &abandoned });
+        Box::pin(async move {
+            while gate.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+            reply(format!("re: {text}"))
+        })
+    })
 }
 
 #[tokio::test]
@@ -173,5 +210,41 @@ async fn a_stop_starts_a_waiting_call_that_survives_stops() {
     assert_eq!(
         asks[0]["ToolCall"]["Ok"]["text"], "kept",
         "the question survived the stop and was answered"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_task_drops_its_question_to_the_operator() {
+    let (operator, _answers) = Operator::new();
+    let recorder = Arc::new(MemoryRecorder::new());
+    let harness = Harness::new(
+        recorder.clone(),
+        Arc::new(holds_back(&operator)),
+        Arc::new(PendingTimer::default()),
+        Arc::new(with_asker(hold_host(&Arc::default()))),
+        operator.services(),
+    );
+
+    let report = run_beside(harness, request(CANCELS_AN_ASKER), |_control| async {})
+        .await
+        .expect("the run reaches an outcome");
+
+    assert_eq!(
+        report.outcome,
+        RunOutcome::Completed {
+            final_text: "cancelled".to_owned()
+        },
+        "the run went on past the cancelled task"
+    );
+    assert_eq!(
+        operator.abandoned.load(Ordering::SeqCst),
+        1,
+        "cancelling the task tore its question down"
+    );
+    let records = recorder.records(report.run_id.expect("the run began"));
+    assert_eq!(
+        answers_where(&records, "ToolCall", calls(ASK_TOOL)),
+        vec![json!("Dropped")],
+        "the question that survives stops was answered Dropped"
     );
 }
