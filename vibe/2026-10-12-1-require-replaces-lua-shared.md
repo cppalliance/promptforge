@@ -398,7 +398,7 @@ Give library blocks their own `prose`, and make library errors report the librar
 
 <step-4>
 
-### Step 4: Reach lookup and library construction
+### Step 4: Reach lookup and library construction [completed]
 
 - Component: `require` in prompts
 - Tests: `cargo nextest run --locked -p promptforge-engine --all-features`; `cargo fmt --all --check`

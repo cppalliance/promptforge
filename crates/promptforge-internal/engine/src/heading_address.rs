@@ -16,6 +16,14 @@
 //! share, and [`resolve_visible`], its adapter for surfaces where a miss is
 //! an error; the collection enumeration sits in the `promptforge-lua` crate,
 //! beside the VM and the coroutine protocol that consume it.
+//!
+//! `require` names a library section the same way but reaches wider: a
+//! walked section's direct children, its siblings, and the siblings of each
+//! of its ancestors up to the top level, or every top-level section from
+//! the H1. [`Reachable`] is that view, [`find_reachable`] its lookup, and
+//! [`resolve_reachable`] its adapter where a miss is an error. Each scope
+//! of a reach sits at its own heading level and sibling names are unique,
+//! so an exact address names at most one reachable section.
 
 use crate::parser::Section;
 use crate::{Error, Result};
@@ -67,6 +75,110 @@ impl<'a> Visible<'a> {
             .map(|(_, section)| section)
             .chain(self.children)
     }
+}
+
+/// What `require` can name from one place, read in place: from a walked
+/// section, its home slice minus itself, its direct children, and each
+/// ancestor's slice minus that ancestor; from the H1, the top-level slice.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests call it until section setup installs `require`"
+    )
+)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Reachable<'a> {
+    root: &'a [Section],
+    path: &'a [usize],
+    caller: Option<usize>,
+}
+
+/// A reachable section and where it sits: the path of its slice, each
+/// ancestor's index from the top level down, and its index in that slice.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests call it until section setup installs `require`"
+    )
+)]
+#[derive(Debug)]
+pub(crate) struct Reached<'a> {
+    pub(crate) section: &'a Section,
+    pub(crate) path: Vec<usize>,
+    pub(crate) index: usize,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests call it until section setup installs `require`"
+    )
+)]
+impl<'a> Reachable<'a> {
+    /// A walked section's reach: the section at `caller` of the slice that
+    /// `path` leads to from `root`. An out-of-range index along the way
+    /// leads to an empty slice, as a walk path's does.
+    pub(crate) fn of(root: &'a [Section], path: &'a [usize], caller: usize) -> Reachable<'a> {
+        Reachable {
+            root,
+            path,
+            caller: Some(caller),
+        }
+    }
+
+    /// The H1's reach: every top-level section.
+    pub(crate) fn top(root: &'a [Section]) -> Reachable<'a> {
+        Reachable {
+            root,
+            path: &[],
+            caller: None,
+        }
+    }
+
+    /// The sections with their positions, nearest scope first: the home
+    /// slice with the caller skipped, the caller's children, then each
+    /// ancestor's slice with that ancestor skipped, from the parent's
+    /// outward to the top level.
+    pub(crate) fn iter(self) -> impl Iterator<Item = Reached<'a>> {
+        let mut slices = Vec::with_capacity(self.path.len());
+        let mut home = self.root;
+        for &index in self.path {
+            slices.push(home);
+            home = home.get(index).map_or(&[][..], Section::children);
+        }
+        let mut scopes = vec![(self.path.to_vec(), home, self.caller)];
+        if let Some(caller) = self.caller {
+            let mut path = self.path.to_vec();
+            path.push(caller);
+            scopes.push((
+                path,
+                home.get(caller).map_or(&[][..], Section::children),
+                None,
+            ));
+        }
+        for (depth, (&slice, &ancestor)) in slices.iter().zip(self.path).enumerate().rev() {
+            scopes.push((self.path[..depth].to_vec(), slice, Some(ancestor)));
+        }
+        scopes.into_iter().flat_map(|(path, slice, skip)| {
+            slice
+                .iter()
+                .enumerate()
+                .filter(move |&(index, _)| Some(index) != skip)
+                .map(move |(index, section)| Reached {
+                    section,
+                    path: path.clone(),
+                    index,
+                })
+        })
+    }
+}
+
+/// A section's heading with its markers, such as `### Name`.
+pub(crate) fn section_heading(section: &Section) -> String {
+    format!("{} {}", "#".repeat(section.level().into()), section.name())
 }
 
 /// Parses a section heading like `"### Name"` into an exact `(level, name)`
@@ -122,19 +234,69 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
 /// [`parse_heading_address`]) or when more than one visible section matches
 /// the exact address.
 pub(crate) fn find_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<Option<&'a Section>> {
+    find_one(heading, visible.iter(), |section| *section, "visible")
+}
+
+/// [`find_visible`] over a [`Reachable`] view: the single reachable section
+/// at `heading`'s exact address, with its position, or `None`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the heading is malformed (see
+/// [`parse_heading_address`]) or when more than one reachable section
+/// matches the exact address.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests call it until section setup installs `require`"
+    )
+)]
+pub(crate) fn find_reachable<'a>(
+    heading: &str,
+    reach: Reachable<'a>,
+) -> Result<Option<Reached<'a>>> {
+    find_one(
+        heading,
+        reach.iter(),
+        |reached| reached.section,
+        "reachable",
+    )
+}
+
+/// The one candidate whose section has `heading`'s exact address, or
+/// `None`; `set` names the candidates in the ambiguity error.
+fn find_one<'a, T>(
+    heading: &str,
+    candidates: impl Iterator<Item = T>,
+    section: impl Fn(&T) -> &'a Section,
+    set: &str,
+) -> Result<Option<T>> {
     let (level, name) = parse_heading_address(heading)?;
-    let mut matches = visible
-        .iter()
-        .filter(|section| usize::from(section.level()) == level && section.name() == name);
+    let mut matches = candidates.filter(|candidate| {
+        let section = section(candidate);
+        usize::from(section.level()) == level && section.name() == name
+    });
     let found = matches.next();
     if found.is_some() && matches.next().is_some() {
         return Err(Error::Lua(format!(
-            "section heading `{}` is ambiguous; more than one visible section matches {} {name}",
+            "section heading `{}` is ambiguous; more than one {set} section matches {} {name}",
             heading.trim(),
             "#".repeat(level)
         )));
     }
     Ok(found)
+}
+
+/// The miss error for `heading`, listing `available` in order and nothing
+/// else, so the error channel cannot leak the rest of the document's
+/// structure.
+fn not_found<'a>(heading: &str, available: impl Iterator<Item = &'a Section>) -> Error {
+    let available: Vec<String> = available.map(section_heading).collect();
+    Error::Lua(format!(
+        "section heading `{}` not found; available sections: {}",
+        heading.trim(),
+        available.join(", ")
+    ))
 }
 
 /// [`find_visible`] where a heading with no visible match is an error, for
@@ -146,17 +308,26 @@ pub(crate) fn find_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<Op
 /// view's sections in its order and nothing else, so the error channel
 /// cannot leak the rest of the document's structure.
 pub(crate) fn resolve_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<&'a Section> {
-    find_visible(heading, visible)?.ok_or_else(|| {
-        let available: Vec<String> = visible
-            .iter()
-            .map(|s| format!("{} {}", "#".repeat(s.level().into()), s.name()))
-            .collect();
-        Error::Lua(format!(
-            "section heading `{}` not found; available sections: {}",
-            heading.trim(),
-            available.join(", ")
-        ))
-    })
+    find_visible(heading, visible)?.ok_or_else(|| not_found(heading, visible.iter()))
+}
+
+/// [`find_reachable`] where a heading with no reachable match is an error,
+/// for `require`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] for every [`find_reachable`] error, and when no
+/// reachable section matches the exact address. The not-found message
+/// lists the reach in its order and nothing else.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests call it until section setup installs `require`"
+    )
+)]
+pub(crate) fn resolve_reachable<'a>(heading: &str, reach: Reachable<'a>) -> Result<Reached<'a>> {
+    find_reachable(heading, reach)?
+        .ok_or_else(|| not_found(heading, reach.iter().map(|reached| reached.section)))
 }
 
 #[cfg(test)]
