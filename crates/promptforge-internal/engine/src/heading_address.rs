@@ -80,13 +80,6 @@ impl<'a> Visible<'a> {
 /// What `require` can name from one place, read in place: from a walked
 /// section, its home slice minus itself, its direct children, and each
 /// ancestor's slice minus that ancestor; from the H1, the top-level slice.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Reachable<'a> {
     root: &'a [Section],
@@ -96,13 +89,6 @@ pub(crate) struct Reachable<'a> {
 
 /// A reachable section and where it sits: the path of its slice, each
 /// ancestor's index from the top level down, and its index in that slice.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 #[derive(Debug)]
 pub(crate) struct Reached<'a> {
     pub(crate) section: &'a Section,
@@ -110,13 +96,6 @@ pub(crate) struct Reached<'a> {
     pub(crate) index: usize,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 impl<'a> Reachable<'a> {
     /// A walked section's reach: the section at `caller` of the slice that
     /// `path` leads to from `root`. An out-of-range index along the way
@@ -244,13 +223,6 @@ pub(crate) fn find_visible<'a>(heading: &str, visible: Visible<'a>) -> Result<Op
 /// Returns [`Error::Lua`] when the heading is malformed (see
 /// [`parse_heading_address`]) or when more than one reachable section
 /// matches the exact address.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 pub(crate) fn find_reachable<'a>(
     heading: &str,
     reach: Reachable<'a>,
@@ -318,13 +290,6 @@ pub(crate) fn resolve_visible<'a>(heading: &str, visible: Visible<'a>) -> Result
 /// Returns [`Error::Lua`] for every [`find_reachable`] error, and when no
 /// reachable section matches the exact address. The not-found message
 /// lists the reach in its order and nothing else.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 pub(crate) fn resolve_reachable<'a>(heading: &str, reach: Reachable<'a>) -> Result<Reached<'a>> {
     find_reachable(heading, reach)?
         .ok_or_else(|| not_found(heading, reach.iter().map(|reached| reached.section)))

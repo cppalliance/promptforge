@@ -2,11 +2,11 @@
 //! author writes them and drives their execution against the runtime
 //! without a live gateway. Split by domain - parsing contracts, section
 //! execution, fanout, control flow, the args/argv and lazy-prose surfaces,
-//! an author's own `_G` metatable, and the prepare pass - over shared
-//! fixture support in [`support`]. Its
-//! cases reach engine-only items (the test drivers and recorders, the store
-//! facade, the parser's Lua programs), so they run here rather than
-//! against the `promptforge` facade, whose own suite holds the rest.
+//! an author's own `_G` metatable, `require`, and the prepare pass - over
+//! shared fixture support in [`support`]. Its cases reach engine-only
+//! items (the test drivers and recorders, the store facade, the parser's
+//! Lua programs), so they run here rather than against the `promptforge`
+//! facade, whose own suite holds the rest.
 
 mod args_surface;
 mod exec_flow;
@@ -16,5 +16,6 @@ mod global_metatable;
 mod lazy_prose;
 mod parsing;
 mod prepare;
+mod require;
 mod support;
 mod vfs;

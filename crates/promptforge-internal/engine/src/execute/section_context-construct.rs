@@ -4,9 +4,9 @@
 //! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
 //! setup half (Engine injection, Engine globals, the control surface, the
-//! Plugin preludes, the shared replay, the store yield shims) is shared;
-//! only the seed, the `sys` extras, and the visible set behind the
-//! `prompt` reads differ.
+//! Plugin preludes, `require`, the shared replay, the store yield shims) is
+//! shared; only the seed, the `sys` extras, the visible set behind the
+//! `prompt` reads, and the origin `require` resolves from differ.
 
 use std::sync::Arc;
 
@@ -14,14 +14,29 @@ use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::execute::context::RunState;
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::walk_target::{SlicePath, h1_visible_sections, read_visible};
+use crate::execute::walk_target::{
+    RequireOrigin, SlicePath, h1_visible_sections, read_visible, resolve_library,
+};
 use crate::heading_address::Visible;
-use crate::lua::SectionVm;
+use crate::lua::{Library, LibraryKey, SectionVm};
+use crate::parser::Prompt;
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_vfs::Access;
 
-use super::{SectionContext, TaskSeed};
+use super::{SectionContext, TaskSeed, prose_renderer};
+
+/// The resolver behind a frame's `require`: each heading resolves in
+/// `prompt` from the position a loading library's key names, or from
+/// `origin` when no library is loading.
+fn library_resolver(
+    prompt: Arc<Prompt>,
+    origin: RequireOrigin,
+) -> impl Fn(String, Option<LibraryKey>) -> Result<Library> + Send + Sync + 'static {
+    move |heading: String, key: Option<LibraryKey>| {
+        resolve_library(&prompt, &origin, &heading, key.as_ref())
+    }
+}
 
 impl SectionContext {
     /// Constructs the frame for one walked section and runs its setup
@@ -30,13 +45,14 @@ impl SectionContext {
     /// `prompt` reads resolved over the section's visible set, plus the
     /// coroutine yield shims for the suspending calls), and
     /// the rest of the shared setup half (Engine injection, Engine globals, the
-    /// Plugin preludes, the shared replay, the store yield shims).
+    /// Plugin preludes, `require`, the shared replay, the store yield shims).
     ///
     /// `home` is the path of the caller's own walk slice and `index` the
     /// section's place in it. Each `prompt` read resolves that slice from
     /// the shared prompt and reads the section's visible set (its siblings
-    /// minus itself, plus its direct children) in place. `section_id` is the
-    /// section's `sys.id`: the entering chain's hierarchical id extended
+    /// minus itself, plus its direct children) in place, and `require`
+    /// resolves from the same position over its wider reach. `section_id`
+    /// is the section's `sys.id`: the entering chain's hierarchical id extended
     /// by its local entry counter, allocated by the scheduler; `task_id`
     /// is the entering chain's `sys.taskid`. `var` is the walk's current
     /// `var` table, seeded into the section's VM. `seed` holds a spawned
@@ -93,6 +109,11 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
+        let resolve = library_resolver(
+            Arc::clone(ctx.prompt_arc()),
+            RequireOrigin::Section(home.clone(), index),
+        );
+        let render = prose_renderer(ctx, seed.item.clone());
         // The `prompt` reads resolve over the section's visible set; the
         // suspending calls (`call`, `tasks.fanout`, `models.infer`) are the
         // yield shims the setup half installs.
@@ -102,9 +123,10 @@ impl SectionContext {
             read_visible(&heading, Visible::of(home.resolve(&prompt), index))
         };
         // The setup half of the section lifecycle - Engine injection, Engine
-        // globals, the control surface, the shared replay, and the captured
-        // alias bindings - is shared with the H1 pass; only the seed, the
-        // `sys` extras, and the callback's visible set are the walk's own.
+        // globals, the control surface, `require`, the shared replay, and
+        // the captured alias bindings - is shared with the H1 pass; only the
+        // seed, the `sys` extras, and the callbacks' position are the walk's
+        // own.
         let setup = ctx.vm_setup(
             &sys,
             VmSeed {
@@ -116,7 +138,7 @@ impl SectionContext {
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, read) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, read, resolve, render) {
             vm.teardown(ctx.emitter(), section.name());
             return Err(error);
         }
@@ -140,13 +162,15 @@ impl SectionContext {
     /// `when` like every section after it), VM construction over the
     /// run's shared sets, limits, and the shared
     /// setup half (Engine injection, Engine globals, the control surface, the
-    /// coroutine shims, the Plugin preludes, the shared replay, the
-    /// store yield shims).
+    /// coroutine shims, the Plugin preludes, `require`, the shared replay,
+    /// the store yield shims).
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed
-    /// (it runs first and is never re-entered), and [`h1_visible_sections`]
-    /// as the visible set behind the `prompt` reads.
+    /// (it runs first and is never re-entered), [`h1_visible_sections`]
+    /// as the visible set behind the `prompt` reads, and
+    /// [`RequireOrigin::H1`], which reaches every top-level section, behind
+    /// `require`.
     ///
     /// # Errors
     /// Returns the [`Error`] of whichever step failed. A VM
@@ -176,6 +200,8 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
+        let resolve = library_resolver(Arc::clone(ctx.prompt_arc()), RequireOrigin::H1);
+        let render = prose_renderer(ctx, None);
         let prompt = Arc::clone(ctx.prompt_arc());
         let read = move |heading: String| {
             read_visible(&heading, Visible::all(h1_visible_sections(&prompt)))
@@ -187,7 +213,7 @@ impl SectionContext {
         setup.argv_writable = true;
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, read) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, read, resolve, render) {
             vm.teardown(ctx.emitter(), title);
             return Err(error);
         }

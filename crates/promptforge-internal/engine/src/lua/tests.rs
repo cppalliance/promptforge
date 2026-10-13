@@ -30,7 +30,7 @@ use promptforge_lua::Error;
 
 use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::tools::ToolId;
@@ -122,7 +122,15 @@ fn scheduler_vm_with_tools(
         raw_shims: false,
     };
     let read = |_: String| -> std::result::Result<Option<SectionText>, crate::Error> { Ok(None) };
-    setup_section_vm(&mut vm, &setup, read).expect("the setup installs");
+    let resolve = |heading: String, _| -> std::result::Result<Library, crate::Error> {
+        Err(crate::Error::Lua(format!(
+            "no library `{heading}` in reach"
+        )))
+    };
+    setup_section_vm(&mut vm, &setup, read, resolve, |template, _| {
+        Ok(template.to_owned())
+    })
+    .expect("the setup installs");
     vm
 }
 

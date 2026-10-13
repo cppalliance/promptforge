@@ -2,7 +2,8 @@
 //! executor's real setup path, compared in both directions: every global a
 //! walked section or the H1 pass leaves in `_G` is a reserved name, and
 //! every reserved global reads non-nil once the VM binds its conditional
-//! ones (`ui`, `item`, `prose`). No Plugin prelude installs here, so what
+//! ones (`ui`, `item`, `prose`) and `require` installs over a resolver and
+//! a renderer. No Plugin prelude installs here, so what
 //! `_G` holds is exactly what the Engine installs. Model roles bind here
 //! too, since a role label is never a global, and the run offers tools of
 //! a declared Plugin and of another one, since a tool is never a global
@@ -21,7 +22,7 @@ use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
@@ -83,8 +84,8 @@ fn offering() -> ToolSet {
 /// Engine global bound: a caller-supplied application-state snapshot
 /// (`ui`), a collection member (`item`), a non-nil `argv` (writable as in
 /// the H1 pass, or frozen as in every other section), a block's lazy
-/// `prose`, the model roles in [`ROLE_LABELS`], and the tools of
-/// [`offering`].
+/// `prose`, the model roles in [`ROLE_LABELS`], the tools of
+/// [`offering`], and a `require` whose resolver reaches no library.
 fn fully_bound_vm(argv_writable: bool) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
@@ -124,7 +125,15 @@ fn fully_bound_vm(argv_writable: bool) -> SectionVm {
         raw_shims: false,
     };
     let read = |_: String| -> std::result::Result<Option<SectionText>, crate::Error> { Ok(None) };
-    setup_section_vm(&mut vm, &setup, read).expect("the setup installs");
+    let resolve = |heading: String, _| -> std::result::Result<Library, crate::Error> {
+        Err(crate::Error::Lua(format!(
+            "no library `{heading}` in reach"
+        )))
+    };
+    setup_section_vm(&mut vm, &setup, read, resolve, |template, _| {
+        Ok(template.to_owned())
+    })
+    .expect("the setup installs");
     vm.install_lazy_prose(|_| Ok("the block's prose".to_owned()))
         .expect("the prose guard installs");
     vm

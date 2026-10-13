@@ -144,13 +144,6 @@ pub(super) fn resolve_jump_target(
 }
 
 /// Where a `require` resolves from: the H1 pass, or a walked section.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RequireOrigin {
     /// The H1 pass, which reaches every top-level section.
@@ -159,13 +152,6 @@ pub(super) enum RequireOrigin {
     Section(SlicePath, usize),
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 impl RequireOrigin {
     /// The position `key` names: its library section's own.
     ///
@@ -197,13 +183,6 @@ impl RequireOrigin {
 
 /// The key naming the section at `index` of the slice at `path`: every
 /// index, dot-joined, so each position has its own.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 fn library_key(path: &[usize], index: usize) -> LibraryKey {
     let indices: Vec<String> = path.iter().chain([&index]).map(usize::to_string).collect();
     LibraryKey::new(indices.join("."))
@@ -218,13 +197,6 @@ fn library_key(path: &[usize], index: usize) -> LibraryKey {
 /// section in the reach, the miss listing the reach and nothing else, and
 /// [`Error::Internal`] for a key [`library_key`] did not build or a block
 /// kind the Engine cannot run.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 pub(super) fn resolve_library(
     prompt: &Prompt,
     origin: &RequireOrigin,
@@ -244,13 +216,6 @@ pub(super) fn resolve_library(
 ///
 /// # Errors
 /// Returns [`Error::Internal`] for a block kind the Engine cannot run.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests call it until section setup installs `require`"
-    )
-)]
 fn build_library(section: &Section, key: LibraryKey) -> Result<Library> {
     let mut blocks = Vec::new();
     let mut pending = "";

@@ -429,7 +429,7 @@ Add the engine's lookup for `require`'s wider reach and the code that turns a pa
 
 <step-5>
 
-### Step 5: Install `require` in section setup
+### Step 5: Install `require` in section setup [completed]
 
 - Component: `require` in prompts
 - Tests: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`; `node --test crates/workshop/ui/test/docs-claims.mjs`; `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`; `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo fmt --all --check`
@@ -440,6 +440,7 @@ Make `require` available in every section's Lua environment, the H1 included, an
   - `crates/promptforge-internal/engine/src/execute/section_vm.rs`: `SectionVmSetup` and `setup_section_vm` take the library resolver and the prose renderer, and setup calls `SectionVm::install_require` right after `install_preludes`, before the shared replay (which Step 7 removes) and before `install_store_shims`.
   - `crates/promptforge-internal/engine/src/execute/section_context-construct.rs`: `SectionContext::new` builds the resolver over its section's origin (its `SlicePath` and index) with Step 4's `resolve_library`, and `SectionContext::new_live_h1` over the H1's. Both build the renderer from the inputs `SectionContext::install_lazy_prose` feeds `subst::Sources` (`engine/src/execute/section_context.rs` lines 172-191): the run's `args` and `argv` and the frame's `item`.
   - `crates/promptforge-internal/engine/src/lua.rs`: re-export the new Lua crate items the engine names.
+  - Remove Step 4's temporary `cfg_attr(not(test), expect(dead_code, ...))` markers once setup calls the code: in `engine/src/heading_address.rs` on `Reachable`, `Reached`, `impl Reachable`, `find_reachable`, and `resolve_reachable`; in `engine/src/execute/walk_target.rs` on `RequireOrigin`, `impl RequireOrigin`, `library_key`, `resolve_library`, and `build_library`. Any marker whose item stays unused outside tests points to missing wiring.
   - `crates/promptforge-internal/lua/src/globals.rs`: add `("require", Reserved::EngineGlobal)` to `RESERVED_NAMES`, whose array length becomes 61. The engine tests in `engine/src/lua/tests/globals.rs` compare the list with a fully set-up VM in both directions, so their `fully_bound_vm` helper passes a resolver and a renderer.
   - Whole-prompt tests in new files under `crates/promptforge-internal/engine/src/execute/tests/suite/`, for example `require.rs` with topic siblings, or a `suite/require/` directory at three or more files, wired in `suite.rs`. They use `run_fixture` from `suite/support.rs`, plus the scripted gateway and fixture tools other suite tests use.
 - Behavior:

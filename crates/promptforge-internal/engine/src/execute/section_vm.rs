@@ -4,15 +4,16 @@
 //! Every section driver - the walk's section entry and the
 //! fanout arm - runs the identical setup sequence: inject the Engine values,
 //! install the persistent Engine globals, install the control globals, install
-//! the Plugin preludes, then replay the shared library as the section's first
-//! chunk.
+//! the Plugin preludes, install `require`, then replay the shared library as
+//! the section's first chunk.
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (both drivers take the next run-global `id`; the arm adds its
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
 //! `var`; an arm
 //! adds its collection `item` to the caller's cloned `var`), and supplies
 //! the `read` callback behind the `prompt` reads, resolved over its own
-//! visible set.
+//! visible set, the library resolver behind `require`, resolved over its
+//! own reach, and the renderer for library prose templates.
 //!
 //! VM construction and the Lua limits install stay with the driver. A
 //! construction failure's handling differs (the walk propagates, the arm
@@ -27,7 +28,7 @@ use std::sync::Arc;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::plugins::Prelude;
 
-use crate::lua::{LuaProgram, SectionText, SectionVm};
+use crate::lua::{Library, LibraryKey, LuaProgram, ProseState, SectionText, SectionVm};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
@@ -70,7 +71,8 @@ pub(crate) struct SectionVmSetup<'a> {
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
     /// The chain's emitter: the persistent Engine globals (`log`, `store`)
-    /// capture a clone, and the shared-library replay reports through it.
+    /// capture a clone, and the shared-library replay and `require`'s
+    /// library loads report through it.
     pub(crate) emitter: &'a Emitter,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
@@ -101,7 +103,8 @@ pub(crate) struct SectionVmSetup<'a> {
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and the
 /// `prompt` reads, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims), the run's
-/// Plugin preludes, and [`SectionVm::replay_shared`]. The caller applies
+/// Plugin preludes, [`SectionVm::install_require`] over `resolve` and
+/// `render`, and [`SectionVm::replay_shared`]. The caller applies
 /// the Lua limits itself before calling, so a limits failure propagates
 /// without touching the VM's teardown observation path.
 ///
@@ -111,15 +114,22 @@ pub(crate) struct SectionVmSetup<'a> {
 /// # Errors
 /// Returns the [`Error`] of whichever step failed: Engine injection, Engine
 /// global install, `item` install, control-global install, the prelude install (a
-/// prelude that fails to load, or whose global collides), the shared
-/// replay, or the store shims' install.
-pub(crate) fn setup_section_vm<R>(
+/// prelude that fails to load, or whose global collides), the `require`
+/// install, the shared replay, or the store shims' install.
+pub(crate) fn setup_section_vm<R, L, P>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
     read: R,
+    resolve: L,
+    render: P,
 ) -> Result<()>
 where
     R: Fn(String) -> std::result::Result<Option<SectionText>, Error> + Send + Sync + 'static,
+    L: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, Error>
+        + Send
+        + Sync
+        + 'static,
+    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
 {
     // The raw-model-id fallback reads its flag during Engine injection, so
     // the snapshot's opt-in lands first.
@@ -146,6 +156,9 @@ where
     // they follow the yield shims, and they precede the shared replay so
     // the shared library can call what they define.
     crate::lua::install_preludes(vm.lua(), setup.preludes)?;
+    // `require` follows the preludes, so a prelude that calls it while it
+    // installs finds none.
+    vm.install_require(resolve, render, setup.emitter, setup.section_name)?;
     #[cfg(test)]
     if setup.raw_shims {
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;

@@ -171,22 +171,9 @@ impl SectionContext {
     /// [`Error::Internal`] if the VM is gone.
     pub(super) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
         let template = template.to_owned();
-        let raw_args = ctx.args().to_owned();
-        let argv = ctx.argv().cloned();
-        let item = self.item.clone();
+        let render = prose_renderer(ctx, self.item.clone());
         self.vm()?
-            .install_lazy_prose(move |state: ProseState| -> mlua::Result<String> {
-                let globals = |name: &str| (state.globals)(name).map_err(Error::from);
-                let sources = subst::Sources {
-                    args: &raw_args,
-                    argv: argv.as_ref(),
-                    item: item.as_ref(),
-                    var: &state.var,
-                    sys: &state.sys,
-                    globals: &globals,
-                };
-                subst::substitute(&template, &sources).map_err(mlua::Error::external)
-            })?;
+            .install_lazy_prose(move |state: ProseState| render(&template, state))?;
         Ok(())
     }
 
@@ -243,6 +230,30 @@ impl SectionContext {
     /// Closes the innermost open local tool call; `None` when none is open.
     pub(super) fn pop_local_call(&mut self) -> Option<LocalCall> {
         self.local_calls.pop()
+    }
+}
+
+/// The `{{ }}` renderer for one frame's prose templates, its own blocks'
+/// and the libraries `require` loads alike: each render substitutes from
+/// the run's `args` and `argv`, the frame's `item`, and the section state
+/// the first read snapshots.
+fn prose_renderer(
+    ctx: &RunState,
+    item: Option<serde_json::Value>,
+) -> impl Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static {
+    let raw_args = ctx.args().to_owned();
+    let argv = ctx.argv().cloned();
+    move |template: &str, state: ProseState| -> mlua::Result<String> {
+        let globals = |name: &str| (state.globals)(name).map_err(Error::from);
+        let sources = subst::Sources {
+            args: &raw_args,
+            argv: argv.as_ref(),
+            item: item.as_ref(),
+            var: &state.var,
+            sys: &state.sys,
+            globals: &globals,
+        };
+        subst::substitute(template, &sources).map_err(mlua::Error::external)
     }
 }
 
