@@ -189,12 +189,6 @@ jobs:
       - name: Test (workshop-workspace, Windows jail)
         run: cargo nextest run --locked -p workshop-workspace --all-features
 
-      # The headless feature swaps the webview asset layer for a no-op so
-      # server-only integration tests run without the UI bundle. It is not
-      # a default feature, so it needs its own invocation.
-      - name: Test (workshop-server headless)
-        run: cargo nextest run --locked -p workshop-server --features headless
-
       - name: Docs (workshop-server, private items)
         env:
           RUSTDOCFLAGS: -D warnings

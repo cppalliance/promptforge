@@ -62,10 +62,6 @@ workspace-hack.workspace = true
 
 [features]
 default = []
-# Drops the webview asset layer: the build script skips the esbuild UI
-# build, and the asset routes serve through a no-op implementation, so
-# server-only integration tests run without Node.js or the UI bundle.
-headless = []
 test-fixtures = [
     "dep:tempfile",
     "workshop-gateway/test-fixtures",

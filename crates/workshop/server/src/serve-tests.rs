@@ -55,16 +55,10 @@ async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
         .await
         .expect("the health endpoint answers");
     assert_eq!(health.status(), reqwest::StatusCode::OK);
-    // Under the headless feature the asset layer is a no-op by design, so
-    // the UI index answers 404; the boot-and-health behavior above is
-    // what this test proves in that configuration.
-    #[cfg(not(feature = "headless"))]
-    {
-        let index = reqwest::get(format!("{url}/"))
-            .await
-            .expect("the UI answers");
-        assert_eq!(index.status(), reqwest::StatusCode::OK);
-    }
+    let index = reqwest::get(format!("{url}/"))
+        .await
+        .expect("the UI answers");
+    assert_eq!(index.status(), reqwest::StatusCode::OK);
 
     server.shutdown().expect("graceful shutdown succeeds");
 }
