@@ -17,6 +17,7 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 mlua.workspace = true
+promptforge-lua = { workspace = true, features = ["test-support"] }
 
 [features]
 test-support = []

@@ -103,9 +103,10 @@ impl SectionVm {
     /// A coroutine that returns ends the block under the direct path's
     /// contract: a recorded jump takes precedence over the chunk's own
     /// error, genuine failures map through
-    /// [`LuaProgram::map_runtime_error`], and the scalar-return rule
-    /// applies to the return values. A coroutine that yields suspends with
-    /// the shim's request table; the driver resumes it with
+    /// `LuaProgram::map_runtime_error_among` with the VM's loaded library
+    /// programs, and the scalar-return rule applies to the return values.
+    /// A coroutine that yields suspends with the shim's request table; the
+    /// driver resumes it with
     /// [`resume_block_coro`](Self::resume_block_coro). No observation
     /// events fire here; the driver owns the chunk observation boundaries.
     ///
@@ -236,11 +237,11 @@ impl SectionVm {
     /// the raise-point traceback onto a Lua-raised error first (the guard's
     /// re-raise is what killed the coroutine, so mlua's own traceback shows
     /// only the guard's frame); cancellation and Engine quotas then map
-    /// through [`LuaProgram::map_runtime_error`]; otherwise a structured
-    /// error table the guard stashed is kept as [`Error::Raised`], except a
-    /// `lua`-kind table, whose mapped runtime error keeps the same
-    /// message with its source and the mapped prompt line. The stash is
-    /// taken on every failure so it never goes stale.
+    /// through [`map_chunk_failure`](Self::map_chunk_failure); otherwise a
+    /// structured error table the guard stashed is kept as
+    /// [`Error::Raised`], except a `lua`-kind table, whose mapped runtime
+    /// error keeps the same message with its source and the mapped prompt
+    /// line. The stash is taken on every failure so it never goes stale.
     fn block_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Result<Error> {
         let stashed = take_failure(&self.lua)?;
         let mapped = self.map_chunk_failure(program, &stashed.restore_traceback(error));
@@ -256,7 +257,7 @@ impl SectionVm {
     /// Maps one chunk's Lua failure to its typed outcome: a chunk the
     /// instruction hook aborted under the run's cancel flag is
     /// [`Error::Interrupted`], whatever the raw error says; everything
-    /// else maps through [`LuaProgram::map_runtime_error`] of `program`
+    /// else maps through `LuaProgram::map_runtime_error_among` of `program`
     /// and of every library block `require` loaded into this VM.
     fn map_chunk_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Error {
         if self.instruction_budget.is_cancelled() {

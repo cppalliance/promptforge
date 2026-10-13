@@ -256,7 +256,7 @@ Fixes D1-1 and D1-2 by separating mapping identity from the display name.
 
 <step-2>
 
-### Step 2: Gate `map_runtime_error` behind test-support and pass the exit checks
+### Step 2: Gate `map_runtime_error` behind test-support and pass the exit checks [completed]
 
 - Component: `none`
 - Tests:

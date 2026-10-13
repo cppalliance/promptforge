@@ -115,8 +115,8 @@ pub(crate) enum Error {
     /// alongside the mapped prompt-location message.
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: the Lua
-    /// crate builds it from a concrete `mlua::Error` (see
-    /// [`promptforge_lua::LuaProgram::map_runtime_error`]) and the conversion from
+    /// crate builds it from a concrete `mlua::Error` (see the runtime-error
+    /// mapping on [`promptforge_lua::LuaProgram`]) and the conversion from
     /// that crate's error keeps it intact, so the failure chain survives
     /// through the public wrappers' `source()` instead of being flattened to
     /// a string.

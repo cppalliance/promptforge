@@ -174,24 +174,27 @@ impl LuaProgram {
             .map_err(Error::lua)
     }
 
-    /// Maps a Lua runtime failure to its ordered core outcome.
-    ///
-    /// A recognized Engine quota returns [`Error::LuaQuota`]. All remaining
-    /// failures return [`Error::LuaRuntime`] with this program's
-    /// chunk-relative line rewritten to an absolute prompt-source line. Nested
-    /// errors from other chunks (for example a fanout arm) are left unchanged.
-    /// Cancellation is the VM's to classify: a chunk the instruction hook
-    /// aborted under the run's cancel flag is [`Error::Interrupted`] before
-    /// the raw error reaches here.
+    /// Maps a Lua runtime failure of a chunk that ran with no library
+    /// programs loaded beside it: `map_runtime_error_among` with none
+    /// loaded.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
         self.map_runtime_error_among(error, &[])
     }
 
-    /// [`map_runtime_error`](Self::map_runtime_error) for a chunk that ran
-    /// beside `loaded`, the programs of the libraries loaded into its VM:
-    /// each chunk's lines are rewritten by the program that owns them,
-    /// this one first when two share a chunk name.
+    /// Maps a Lua runtime failure to its ordered core outcome, for a chunk
+    /// that ran beside `loaded`, the programs of the libraries loaded into
+    /// its VM.
+    ///
+    /// A recognized Engine quota returns [`Error::LuaQuota`]. All remaining
+    /// failures return [`Error::LuaRuntime`] with each chunk-relative line
+    /// rewritten to an absolute prompt-source line by the program that owns
+    /// that chunk, this one first when two share a chunk name. Nested errors
+    /// from other chunks (for example a fanout arm) are left unchanged.
+    /// Cancellation is the VM's to classify: a chunk the instruction hook
+    /// aborted under the run's cancel flag is [`Error::Interrupted`] before
+    /// the raw error reaches here.
     pub(crate) fn map_runtime_error_among(&self, error: &mlua::Error, loaded: &[Self]) -> Error {
         let raw = error.to_string();
         // An Engine-quota refusal is a stable typed error, not an authoring error.

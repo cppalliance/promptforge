@@ -63,7 +63,7 @@ pub enum Error {
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
     /// from a concrete `mlua::Error` (see `Error::lua` and
-    /// [`crate::LuaProgram::map_runtime_error`]), so the failure chain
+    /// `LuaProgram::map_runtime_error_among`), so the failure chain
     /// survives through the public wrappers' `source()` instead of being
     /// flattened to a string.
     #[error("{message}")]
