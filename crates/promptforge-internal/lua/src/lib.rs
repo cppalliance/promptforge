@@ -37,7 +37,8 @@
 //! objects of the declared Plugins and of every other Plugin, and
 //! `tools.offer` scopes a tool into a section by id or tool object. The
 //! `plugins` table holds one object per Plugin the run knows, whose
-//! `tools` lists that Plugin's tool objects.
+//! `tools` lists that Plugin's tool objects, and `plugins.offer` scopes
+//! every tool of a Plugin into a section.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade

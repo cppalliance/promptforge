@@ -2,7 +2,6 @@
 //! `plugins.get`, the shared Plugin objects and their `tools`, and a tool
 //! object's `plugin` getter.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use mlua::Lua;
@@ -47,17 +46,13 @@ fn plugin_set() -> ToolSet {
 }
 
 /// Installs `tools` and then `plugins` over `set` on a fresh VM, the
-/// section setup order, and returns it with the runtime `tools.offer`
-/// records into and the shared set.
+/// section setup order, and returns it with the runtime `tools.offer` and
+/// `plugins.offer` record into and the shared set.
 fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>) {
     let lua = Lua::new();
     let globals = lua.globals();
     let set = Arc::new(Mutex::new(set));
-    let runtime = Arc::new(Mutex::new(ToolRuntime {
-        added: Vec::new(),
-        description_overrides: BTreeMap::default(),
-        allowed_tasks: None,
-    }));
+    let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
     install_tools(
         &lua,
         &globals,
@@ -66,8 +61,29 @@ fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>)
         &crate::vm::LocalTools::default(),
     )
     .expect("the tools install on a fresh VM");
-    install_plugins(&lua, &globals, &set).expect("the plugins install on a fresh VM");
+    install_plugins(&lua, &globals, &set, &runtime).expect("the plugins install on a fresh VM");
     (lua, set, runtime)
+}
+
+/// The Plugins `plugins.offer` recorded in `runtime`, by name.
+fn offered_plugins(runtime: &Mutex<ToolRuntime>) -> Vec<String> {
+    runtime
+        .lock()
+        .expect("the runtime mutex is not poisoned")
+        .plugins
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// The wire names a round over `set` and `runtime` advertises, in order.
+fn scoped(set: &Mutex<ToolSet>, runtime: &Mutex<ToolRuntime>) -> Vec<String> {
+    let snapshot = set.lock().expect("the set mutex is not poisoned").clone();
+    crate::current_tool_bindings(&snapshot, runtime)
+        .expect("the scope resolves")
+        .iter()
+        .map(|binding| binding.alias().to_owned())
+        .collect()
 }
 
 /// A Lua helper joining the `name` of each Plugin object in a list.
@@ -212,5 +228,107 @@ fn every_tool_objects_plugin_is_its_plugins_object() {
     assert_eq!(
         mismatched, "",
         "each tool object's plugin is == to its Plugin's object"
+    );
+}
+
+#[test]
+fn offer_records_each_plugin_once_from_a_name_an_object_or_a_list() {
+    let (lua, _, runtime) = lua_over(plugin_set());
+    lua.load(
+        "plugins.offer('gh')\n\
+         plugins.offer(plugins.get('alpha'))\n\
+         plugins.offer({ 'gh', plugins.get('web') })\n\
+         plugins.offer(plugins.required())\n\
+         plugins.offer({})\n\
+         assert(select('#', plugins.offer('gh')) == 0, 'the verb returns nothing')",
+    )
+    .exec()
+    .expect("every accepted shape offers");
+    assert_eq!(
+        offered_plugins(&runtime),
+        ["gh", "alpha", "web", "mail"],
+        "each Plugin is recorded once, in first-offer order"
+    );
+    assert!(
+        runtime
+            .lock()
+            .expect("the runtime mutex is not poisoned")
+            .added
+            .is_empty(),
+        "a Plugin offer never records a wire name"
+    );
+}
+
+#[test]
+fn offer_refuses_a_wrong_or_extra_argument_and_an_absent_plugin_and_records_nothing() {
+    let (lua, _, runtime) = lua_over(plugin_set());
+    let shape = "plugins.offer takes a Plugin name, a Plugin object, or a list of them, got";
+    let absent = "plugins.offer: no Plugin named \"mcp\" in this run; declare it under \
+                  plugins: to require it, or offer it only when plugins.get(\"mcp\") returns it";
+    for (call, expected) in [
+        ("plugins.offer(nil)", format!("{shape} nil")),
+        ("plugins.offer()", format!("{shape} nil")),
+        ("plugins.offer(42)", format!("{shape} integer")),
+        (
+            "plugins.offer(tools.get('web/fetch'))",
+            format!("{shape} userdata"),
+        ),
+        ("plugins.offer({ 'web', 42 })", format!("{shape} integer")),
+        (
+            "plugins.offer('web/fetch')",
+            format!("{shape} \"web/fetch\""),
+        ),
+        (
+            "plugins.offer('web', 'gh')",
+            "plugins.offer takes one Plugin or a list of them, got extra string".to_owned(),
+        ),
+        ("plugins.offer('mcp')", absent.to_owned()),
+        ("plugins.offer({ 'web', 'mcp' })", absent.to_owned()),
+    ] {
+        let error: String = lua
+            .load(format!(
+                "local ok, err = pcall(function() {call} end)\n\
+                 assert(not ok, 'the call is refused')\n\
+                 return tostring(err)"
+            ))
+            .eval()
+            .unwrap_or_else(|error| panic!("{call}: {error}"));
+        assert!(error.contains(&expected), "{call}: {error}");
+    }
+    assert!(
+        offered_plugins(&runtime).is_empty(),
+        "a refused call records no Plugin"
+    );
+}
+
+#[test]
+fn the_scope_lists_section_tools_then_each_offered_plugins_tools_each_name_once() {
+    let (lua, set, runtime) = lua_over(plugin_set());
+    lua.load(
+        "tools.offer('web/search')\n\
+         plugins.offer({ 'gh', 'web', 'alpha' })",
+    )
+    .exec()
+    .expect("the offers record");
+    let before = scoped(&set, &runtime);
+    assert_eq!(
+        before,
+        [
+            "web_search",
+            "gh_issues_list",
+            "gh_search",
+            "web_fetch",
+            "alpha_zed"
+        ],
+        "section tools first, then Plugins in offer order with tools in id order, \
+         each name at its first place"
+    );
+    lua.load("plugins.offer('mail')")
+        .exec()
+        .expect("a declared Plugin with no tools is accepted");
+    assert_eq!(
+        scoped(&set, &runtime),
+        before,
+        "a Plugin with no tools adds nothing"
     );
 }

@@ -87,7 +87,7 @@ impl SectionVm {
             &self.tool_runtime,
             &self.local_tools,
         )?;
-        install_plugins(&self.lua, &globals, &self.bound_tools)?;
+        install_plugins(&self.lua, &globals, &self.bound_tools, &self.tool_runtime)?;
         install_models(
             &self.lua,
             &globals,

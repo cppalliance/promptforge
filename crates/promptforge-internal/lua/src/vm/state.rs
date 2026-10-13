@@ -169,12 +169,14 @@ impl SectionVm {
 }
 
 /// Reads the section's effective tool bindings without mutating the tool
-/// runtime: the prompt-wide `tools.always_offer` tools followed by the
-/// section's `tools.offer` tools in first-offer order, each tool once,
-/// each resolved against the offering with any author description
-/// override applied.
+/// runtime: the prompt-wide `tools.always_offer` tools, then the section's
+/// `tools.offer` tools in first-offer order, then every offered tool of
+/// each `plugins.offer` Plugin, Plugins in first-offer order and each
+/// Plugin's tools in id order. Each tool appears once, at its first place,
+/// resolved against the offering with any author description override
+/// applied.
 ///
-/// Rebuilt at each model operation so `tools.offer` and
+/// Rebuilt at each model operation so `tools.offer`, `plugins.offer`, and
 /// `tools.offer_local` calls between blocks reach the next model turn.
 ///
 /// # Errors
@@ -187,10 +189,27 @@ pub fn current_tool_bindings(
     let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-    let always = bindings.always();
-    always
+    let plugin_tools = runtime.plugins.iter().flat_map(|plugin| {
+        bindings
+            .offered()
+            .iter()
+            .filter(move |binding| binding.id().plugin() == *plugin)
+            .map(ToolBinding::alias)
+    });
+    let mut names: Vec<&str> = Vec::new();
+    for name in bindings
+        .always()
         .iter()
-        .chain(runtime.added.iter().filter(|name| !always.contains(name)))
+        .chain(&runtime.added)
+        .map(String::as_str)
+        .chain(plugin_tools)
+    {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
         .map(|name| binding_for_scope(bindings, &runtime, name))
         .collect()
 }

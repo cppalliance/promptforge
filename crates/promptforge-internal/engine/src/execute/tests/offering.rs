@@ -378,3 +378,6 @@ fn a_round_leaves_out_an_offered_binding_a_local_tool_shares_a_name_with() {
         "the local tool answers the name: {dispatch:?}"
     );
 }
+
+#[path = "offering-plugins.rs"]
+mod plugins;

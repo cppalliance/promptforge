@@ -6,16 +6,21 @@
 //! `plugins.extras()`, `plugins.get`, and a tool object's `plugin` getter
 //! hand out the same userdata for a Plugin, while each list call builds a
 //! fresh array. A Plugin object's `tools` reads the shared tool objects,
-//! so it passes straight to `tools.offer`.
+//! so it passes straight to `tools.offer`. `plugins.offer` puts every tool
+//! of a Plugin in the section's scope, recording the Plugin's name rather
+//! than its tools' wire names.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use mlua::{AnyUserData, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value};
+use mlua::{
+    AnyUserData, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value, Variadic,
+};
 use promptforge_types::plugins::PluginId;
 
 use crate::error::{Error, Result};
 use crate::handles::ToolSet;
+use crate::scope::ToolRuntime;
 use crate::tools::tool_object;
 
 /// The registry key of the VM's plugin-object table, keyed by name.
@@ -74,12 +79,18 @@ pub(crate) fn plugin_object(lua: &Lua, name: &str) -> mlua::Result<Option<AnyUse
 
 /// Builds one plugin object per declared Plugin and per other Plugin with
 /// offered tools, then installs `plugins.required()`, the declared
-/// Plugins, `plugins.extras()`, the others, both in name order, and
-/// `plugins.get(name)`.
+/// Plugins, `plugins.extras()`, the others, both in name order,
+/// `plugins.get(name)`, and `plugins.offer`, which records into the
+/// section's `runtime`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if an object or function cannot be created or installed.
-pub(crate) fn install_plugins(lua: &Lua, globals: &Table, set: &Arc<Mutex<ToolSet>>) -> Result<()> {
+pub(crate) fn install_plugins(
+    lua: &Lua,
+    globals: &Table,
+    set: &Arc<Mutex<ToolSet>>,
+    runtime: &Arc<Mutex<ToolRuntime>>,
+) -> Result<()> {
     let (plugins, declared) = {
         let set = set
             .lock()
@@ -128,7 +139,78 @@ pub(crate) fn install_plugins(lua: &Lua, globals: &Table, set: &Arc<Mutex<ToolSe
         })
         .map_err(Error::lua)?;
     table.set("get", get).map_err(Error::lua)?;
+    install_offer(lua, &table, runtime)?;
     globals.raw_set("plugins", table).map_err(Error::lua)
+}
+
+/// Installs `plugins.offer(plugin)` and its array form: each Plugin enters
+/// the section's scope once, by name, in first-offer order.
+fn install_offer(lua: &Lua, table: &Table, runtime: &Arc<Mutex<ToolRuntime>>) -> Result<()> {
+    let state = Arc::clone(runtime);
+    let offer = lua
+        .create_function(move |lua, args: Variadic<Value>| {
+            let names = plugin_names(lua, args)?;
+            let mut state = state
+                .lock()
+                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
+            for name in names {
+                if !state.plugins.contains(&name) {
+                    state.plugins.push(name);
+                }
+            }
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    table.set("offer", offer).map_err(Error::lua)
+}
+
+/// Reads `plugins.offer`'s one argument, a Plugin name, a Plugin object,
+/// or an array of either, as the names of Plugins the run knows, checking
+/// every entry before returning any.
+fn plugin_names(lua: &Lua, args: Variadic<Value>) -> mlua::Result<Vec<PluginId>> {
+    let mut args = args.into_iter();
+    let target = args.next().unwrap_or(Value::Nil);
+    if let Some(extra) = args.next() {
+        return Err(mlua::Error::external(format!(
+            "plugins.offer takes one Plugin or a list of them, got extra {}",
+            extra.type_name()
+        )));
+    }
+    match target {
+        Value::Table(list) => list
+            .sequence_values::<Value>()
+            .map(|entry| plugin_name(lua, &entry?))
+            .collect(),
+        single => Ok(vec![plugin_name(lua, &single)?]),
+    }
+}
+
+/// Reads one name or Plugin object as the name of a Plugin the run knows.
+fn plugin_name(lua: &Lua, value: &Value) -> mlua::Result<PluginId> {
+    let rejected = |found: String| {
+        mlua::Error::external(format!(
+            "plugins.offer takes a Plugin name, a Plugin object, or a list of them, got {found}"
+        ))
+    };
+    match value {
+        Value::String(text) => {
+            let text = text.to_string_lossy();
+            let name = PluginId::parse(&text).map_err(|_| rejected(format!("{text:?}")))?;
+            if plugin_object(lua, &text)?.is_none() {
+                return Err(mlua::Error::external(format!(
+                    "plugins.offer: no Plugin named {text:?} in this run; declare it under \
+                     plugins: to require it, or offer it only when plugins.get({text:?}) \
+                     returns it"
+                )));
+            }
+            Ok(name)
+        }
+        Value::UserData(object) => object
+            .borrow::<LuaPluginHandle>()
+            .map(|handle| handle.name.clone())
+            .map_err(|_| rejected(value.type_name().to_owned())),
+        other => Err(rejected(other.type_name().to_owned())),
+    }
 }
 
 /// Each Plugin the run knows, in name order, with the ids of its offered

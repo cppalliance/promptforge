@@ -24,11 +24,7 @@ fn offered_tools_are_not_injected_without_an_offer() {
         vec![fixture_binding("tools_concrete", "capability", tool)],
         Vec::new(),
     );
-    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
-        added: Vec::new(),
-        description_overrides: BTreeMap::new(),
-        allowed_tasks: None,
-    });
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
     let effective = current_tool_bindings(tools.set(), &runtime).expect("the scope must snapshot");
     assert!(
         effective.is_empty(),
@@ -48,11 +44,7 @@ async fn always_offer_advertises_the_concrete_schema_under_its_wire_name_and_dis
         )],
         vec!["tools_concrete".to_owned()],
     );
-    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
-        added: Vec::new(),
-        description_overrides: BTreeMap::new(),
-        allowed_tasks: None,
-    });
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
     let effective =
         current_tool_bindings(tools.set(), &runtime).expect("the always scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");

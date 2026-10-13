@@ -1,6 +1,5 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
-use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

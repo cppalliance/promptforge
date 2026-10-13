@@ -168,11 +168,7 @@ fn lua_with_local_grab() -> Lua {
         &lua,
         &lua.globals(),
         &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolSet::default())),
-        &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolRuntime {
-            added: Vec::new(),
-            description_overrides: std::collections::BTreeMap::default(),
-            allowed_tasks: None,
-        })),
+        &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolRuntime::default())),
         &crate::vm::LocalTools::default(),
     )
     .expect("the tools install cannot fail on a fresh VM");

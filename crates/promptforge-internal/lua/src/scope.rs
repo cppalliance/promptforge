@@ -1,5 +1,7 @@
 //! Per-VM tool runtime state: call counts, the task allowlist, and the scoped tool set a section sees.
 
+use promptforge_types::plugins::PluginId;
+
 use super::{Arc, BTreeMap, Error, Mutex, Result};
 
 /// Shared per-VM tool-call counts, seeded at 0 for every key the installer
@@ -103,12 +105,16 @@ impl TaskAllowlist {
     }
 }
 
-/// Tracks tools one section VM offered and their description overrides.
-#[derive(Debug)]
+/// Tracks the tools and Plugins one section VM offered and the tools'
+/// description overrides.
+#[derive(Debug, Default)]
 pub struct ToolRuntime {
     /// The wire names `tools.offer` put in the section's scope, in
     /// first-offer order.
     pub added: Vec<String>,
+    /// The Plugins `plugins.offer` put in the section's scope, in
+    /// first-offer order.
+    pub plugins: Vec<PluginId>,
     /// The section's author overrides for model-facing schema
     /// descriptions, keyed by wire name.
     pub description_overrides: BTreeMap<String, String>,

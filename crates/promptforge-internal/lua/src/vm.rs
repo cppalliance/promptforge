@@ -14,11 +14,11 @@ mod run;
 mod state;
 
 use super::{
-    Access, Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
-    DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, GuardNonce, InstructionBudget, Json, Lua, LuaOptions,
-    LuaProgram, ModelRuntime, ModelSet, Mutex, Ordering, Result, StdLib, ToolRuntime, ToolSet,
-    harden, install_deterministic_iteration, install_instruction_budget, install_untrusted,
-    lifecycle, log_byte_budget,
+    Access, Arc, AtomicU32, AtomicUsize, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Emitter,
+    Error, GuardNonce, InstructionBudget, Json, Lua, LuaOptions, LuaProgram, ModelRuntime,
+    ModelSet, Mutex, Ordering, Result, StdLib, ToolRuntime, ToolSet, harden,
+    install_deterministic_iteration, install_instruction_budget, install_untrusted, lifecycle,
+    log_byte_budget,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -278,11 +278,7 @@ impl SectionVm {
             lua,
             bound_tools: Arc::new(Mutex::new(ToolSet::default())),
             bound_models: Arc::new(Mutex::new(ModelSet::default())),
-            tool_runtime: Arc::new(Mutex::new(ToolRuntime {
-                added: Vec::new(),
-                description_overrides: BTreeMap::new(),
-                allowed_tasks: None,
-            })),
+            tool_runtime: Arc::new(Mutex::new(ToolRuntime::default())),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
             local_handler_depth: Arc::new(AtomicU32::new(0)),

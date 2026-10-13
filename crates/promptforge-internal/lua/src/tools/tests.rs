@@ -204,11 +204,7 @@ fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>)
     let lua = Lua::new();
     let globals = lua.globals();
     let set = Arc::new(Mutex::new(set));
-    let runtime = Arc::new(Mutex::new(ToolRuntime {
-        added: Vec::new(),
-        description_overrides: std::collections::BTreeMap::default(),
-        allowed_tasks: None,
-    }));
+    let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
     install_tools(
         &lua,
         &globals,
