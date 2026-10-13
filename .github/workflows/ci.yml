@@ -179,29 +179,28 @@ jobs:
           CARGO_BUILD_WARNINGS: deny
         run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets
 
-      - name: Test (workshop, concurrent via nextest)
-        run: cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api
-
-      # The trio run above does not execute a dependency's own tests, so the
-      # workspace jail's Windows paths (verbatim, UNC, junctions, alternate
-      # data streams, symlinks) need their own invocation. It stays separate
-      # because the trio never takes --all-features.
-      - name: Test (workshop-workspace, Windows jail)
-        run: cargo nextest run --locked -p workshop-workspace --all-features
+      # One build runs every Windows-only test: the Workshop crates' suites
+      # (the workspace jail's Windows paths included) and the gateway's
+      # process-ownership races, the only tests the filter selects from the
+      # gateway and gateway-api-discovery suites.
+      - name: Test (Windows)
+        shell: bash
+        run: >-
+          cargo nextest run --locked --no-default-features --features gateway/test-fixtures
+          -p workshop -p workshop-server -p workshop-server-api -p workshop-workspace
+          -p gateway-api-discovery -p gateway
+          -E 'package(workshop) | package(workshop-server) | package(workshop-server-api)
+          | package(workshop-workspace)
+          | (package(gateway-api-discovery) & test(a_process_lifetime_lease_recovers_after_its_owner_is_terminated))
+          | (package(gateway) & binary(it) & (test(simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff)
+          | test(workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot)
+          | test(a_direct_launch_recovers_the_lease_from_a_terminated_owner)
+          | test(a_silent_process_lease_owner_causes_a_bounded_console_only_failure)))'
 
       - name: Docs (workshop-server, private items)
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked --no-deps -p workshop-server --document-private-items
-
-      - name: Test Gateway process ownership races
-        shell: bash
-        run: |
-          cargo test --locked -p gateway-api-discovery a_process_lifetime_lease_recovers_after_its_owner_is_terminated
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_direct_launch_recovers_the_lease_from_a_terminated_owner
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_silent_process_lease_owner_causes_a_bounded_console_only_failure
 
       - name: Remove Gateway sidecar
         if: always()
@@ -255,15 +254,6 @@ jobs:
 
       - name: Build (workshop, Linux)
         run: cargo build --locked -p workshop
-
-      - name: Test Gateway process ownership races
-        shell: bash
-        run: |
-          cargo test --locked -p gateway-api-discovery a_process_lifetime_lease_recovers_after_its_owner_is_terminated
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_direct_launch_recovers_the_lease_from_a_terminated_owner
-          cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_silent_process_lease_owner_causes_a_bounded_console_only_failure
 
       - name: Remove Gateway sidecar
         if: always()

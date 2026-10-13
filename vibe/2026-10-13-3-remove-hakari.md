@@ -405,7 +405,7 @@ Behavior:
 
 <step-2>
 
-### Step 2: Run the Windows Workshop tests as one nextest command
+### Step 2: Run the Windows Workshop tests as one nextest command [completed]
 
 - Component: One Workshop test build
 - Tests:
