@@ -420,7 +420,7 @@ fn a_context_without_a_caller_handle_shares_its_one_flag_with_prepare_and_the_ru
         .0
         .expect("the run test prompt parses");
     // The flag `prepare` hands the Plugins is the context's own.
-    let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, run_context());
+    let (ctx, _) = run_context().prepare(&prompt);
     let plugins_flag = ctx.cancel.clone();
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     assert!(!plugins_flag.is_cancelled());

@@ -20,7 +20,7 @@ use promptforge::model::{
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
-use promptforge::{Environment, Prompt, Run, RunContext};
+use promptforge::{Prompt, Run, RunContext};
 use serde_json::{Value, json};
 use tokio::sync::{Notify, Semaphore};
 
@@ -87,7 +87,7 @@ fn run_of(sections: &str) -> Run {
     );
     let catalog = ToolCatalog::new(&[tool]).expect("the one-tool catalog is valid");
     let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, requirements) = Environment::new().tools(catalog).prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the bound model and the catalog satisfy the fixture: {requirements:?}"

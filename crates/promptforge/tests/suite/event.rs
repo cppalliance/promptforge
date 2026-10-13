@@ -12,7 +12,7 @@ use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId,
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 /// Writes `hello` and the run's argument to a note and reads it back.
 const NOTE: &str = concat!(
@@ -71,8 +71,8 @@ fn drive(mut run: Run, mut record: impl FnMut(Vec<Event>)) -> RunResult {
     }
 }
 
-/// The canned model and an environment that offers the shout tool.
-fn shout_offer() -> Result<(ModelDescriptor, Environment), Box<dyn Error>> {
+/// The canned model and a catalog that offers the shout tool.
+fn shout_offer() -> Result<(ModelDescriptor, ToolCatalog), Box<dyn Error>> {
     let model = ModelDescriptor::new(
         ModelId::gateway("canned")?,
         "Replies hi there",
@@ -85,7 +85,7 @@ fn shout_offer() -> Result<(ModelDescriptor, Environment), Box<dyn Error>> {
         "Shouts the text.",
         schema,
     );
-    Ok((model, Environment::new().tools(ToolCatalog::new(&[shout])?)))
+    Ok((model, ToolCatalog::new(&[shout])?))
 }
 
 #[test]
@@ -122,9 +122,9 @@ fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
 -> Result<(), Box<dyn Error>> {
     let (parsed, _parse_events) = Prompt::parse(SHOUT, "greeter");
     let prompt = parsed?;
-    let (model, environment) = shout_offer()?;
+    let (model, catalog) = shout_offer()?;
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, requirements) = environment.prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(requirements.refusal().is_none());
 
     let mut log = Vec::new();
@@ -179,12 +179,12 @@ fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> Resul
 {
     let (parsed, _parse_events) = Prompt::parse(SHOUT, "greeter");
     let prompt = Arc::new(parsed?);
-    let (model, environment) = shout_offer()?;
+    let (model, catalog) = shout_offer()?;
 
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
         .model(model.clone())
         .report_debug(DebugMode::On);
-    let (ctx, _requirements) = environment.prepare(&prompt, ctx);
+    let (ctx, _requirements) = ctx.tools(catalog.clone()).prepare(&prompt);
     let mut log = Vec::new();
     let captured = drive(Run::new(Arc::clone(&prompt), "world", ctx), |events| {
         log.extend(events);
@@ -202,7 +202,7 @@ fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> Resul
     assert_eq!(requests, responses);
 
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, _requirements) = environment.prepare(&prompt, ctx);
+    let (ctx, _requirements) = ctx.tools(catalog).prepare(&prompt);
     let mut quiet_log = Vec::new();
     let quiet = drive(Run::new(prompt, "world", ctx), |events| {
         quiet_log.extend(events);

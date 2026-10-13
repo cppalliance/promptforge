@@ -16,7 +16,7 @@ use std::num::NonZeroU32;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
-use promptforge::{Environment, Prompt, RequirementCheck};
+use promptforge::{Prompt, RequirementCheck};
 
 use super::support::context;
 
@@ -76,10 +76,9 @@ fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
         )
         .store("/my/store", promptforge::vfs::MemoryBackend::new())
         .build();
-    let env = Environment::new();
     let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let (ctx_a, _) = env.prepare(&prompt, context("run-a").vfs(vfs.clone()));
-    let (ctx_b, _) = env.prepare(&prompt, context("run-b").vfs(vfs));
+    let (ctx_a, _) = context("run-a").vfs(vfs.clone()).prepare(&prompt);
+    let (ctx_b, _) = context("run-b").vfs(vfs).prepare(&prompt);
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))
@@ -177,9 +176,8 @@ fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
 #[test]
 fn every_declared_role_resolves_to_the_current_model() {
     let prompt = parse(DECLARES_SOFT_ROLES, "declares-soft-roles");
-    let env = Environment::new();
     let model = current_model(32_000, ThinkingMode::Never);
-    let (ctx, requirements) = env.prepare(&prompt, context("fill").model(model.clone()));
+    let (ctx, requirements) = context("fill").model(model.clone()).prepare(&prompt);
     // Soft keywords document intent and the roles declare no minimum:
     // nothing is reported.
     assert!(requirements.is_satisfied());
@@ -197,12 +195,10 @@ fn every_declared_role_resolves_to_the_current_model() {
 #[test]
 fn a_context_minimum_above_the_current_models_is_reported() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    let env = Environment::new();
     // min_context 200000 against the model's 32000.
-    let (_ctx, requirements) = env.prepare(
-        &prompt,
-        context("fill").model(current_model(32_000, ThinkingMode::Always)),
-    );
+    let (_ctx, requirements) = context("fill")
+        .model(current_model(32_000, ThinkingMode::Always))
+        .prepare(&prompt);
     assert!(!requirements.is_satisfied());
     assert_eq!(requirements.missing_required, []);
     let [unmet] = requirements.unmet_requirements.as_slice() else {
@@ -220,13 +216,11 @@ fn a_context_minimum_above_the_current_models_is_reported() {
 #[test]
 fn a_hard_keyword_the_current_model_fails_is_reported() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    let env = Environment::new();
     // `thinking` against a Never model, with the context minimum met so
     // only the keyword check fires.
-    let (_ctx, requirements) = env.prepare(
-        &prompt,
-        context("fill").model(current_model(200_000, ThinkingMode::Never)),
-    );
+    let (_ctx, requirements) = context("fill")
+        .model(current_model(200_000, ThinkingMode::Never))
+        .prepare(&prompt);
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         panic!(
             "exactly one requirement is unmet: {:?}",
@@ -240,10 +234,9 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
     // `no-thinking` against an Always model.
-    let (_ctx, requirements) = env.prepare(
-        &prompt,
-        context("fill").model(current_model(32_000, ThinkingMode::Always)),
-    );
+    let (_ctx, requirements) = context("fill")
+        .model(current_model(32_000, ThinkingMode::Always))
+        .prepare(&prompt);
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         panic!(
             "exactly one requirement is unmet: {:?}",
@@ -256,9 +249,9 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     assert_eq!(unmet.actual, "Always");
 }
 
-// The catalog: prepare copies the caller-supplied catalog onto the context
-// verbatim, descriptors and never implementations, and reports nothing
-// about tools. The run offers every catalog tool to the prompt's Lua by
+// The catalog: a prepared context keeps the caller-supplied catalog
+// verbatim, descriptors and never implementations, and prepare reports
+// nothing about tools. The run offers every catalog tool to the prompt's Lua by
 // id, and whether a declared Plugin is installed is the Harness's report.
 
 /// A prompt declaring `web`.
@@ -276,7 +269,7 @@ const DECLARES_WEB: &str = concat!(
 );
 
 #[test]
-fn prepare_copies_the_caller_supplied_catalog_onto_the_context() {
+fn a_prepared_context_keeps_the_caller_supplied_catalog() {
     let prompt = parse(DECLARES_WEB, "declares-web");
     let descriptor = ToolDescriptor::new(
         ToolId::parse("web/fetch").expect("the id is valid"),
@@ -285,14 +278,12 @@ fn prepare_copies_the_caller_supplied_catalog_onto_the_context() {
     )
     .structured(true);
     let catalog = ToolCatalog::new(std::slice::from_ref(&descriptor)).expect("the catalog builds");
-    let (ctx, requirements) = Environment::new()
-        .tools(catalog)
-        .prepare(&prompt, context("catalog"));
+    let (ctx, requirements) = context("catalog").tools(catalog).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "a catalog reports nothing: {requirements:?}"
     );
-    assert_eq!(ctx.tools().tools(), [descriptor]);
+    assert_eq!(ctx.catalog().tools(), [descriptor]);
 }
 
 #[test]
@@ -304,12 +295,10 @@ fn prepare_reports_nothing_for_a_declared_plugin_the_catalog_lacks() {
         serde_json::json!({"type": "object", "properties": {}}),
     );
     let catalog = ToolCatalog::new(std::slice::from_ref(&other)).expect("the catalog builds");
-    let (ctx, requirements) = Environment::new()
-        .tools(catalog)
-        .prepare(&prompt, context("no-web"));
+    let (ctx, requirements) = context("no-web").tools(catalog).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the Engine's prepare checks model roles only: {requirements:?}"
     );
-    assert_eq!(ctx.tools().tools(), [other]);
+    assert_eq!(ctx.catalog().tools(), [other]);
 }

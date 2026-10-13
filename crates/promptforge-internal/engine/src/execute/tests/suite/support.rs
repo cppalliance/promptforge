@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crate::parser::Prompt;
 use crate::test_support::recording::{Observation, Observer};
 use crate::test_support::{RunFixture, TestTool, run_prepared};
-use crate::{Environment, RunContext, RunError, RunResult};
+use crate::{RunContext, RunError, RunResult};
 use promptforge_types::timestamp::Timestamp;
 use promptforge_vfs::{Origin, VfsError, VfsRef};
 
@@ -55,7 +55,7 @@ impl RunOptions {
     }
 }
 
-/// Prepares a fixture run against the default environment and returns the
+/// Prepares a fixture run under a default context and returns the
 /// prepared context, the [`RunFixture`] that holds the observer, and the
 /// run's own VFS handle - the prepared router - for seeding before the run
 /// and extraction after. The fixture tools are accepted for signature parity
@@ -67,9 +67,8 @@ pub(super) fn prepare_run(
     opts: RunOptions,
 ) -> (RunContext, RunFixture, VfsRef) {
     let _ = tools;
-    let env = Environment::new();
     let execution = opts.execution;
-    let (ctx, requirements) = env.prepare(prompt, context(execution));
+    let (ctx, requirements) = context(execution).prepare(prompt);
     assert!(
         requirements.is_satisfied(),
         "fixture prompts declare no Plugins or model roles: {requirements:?}"

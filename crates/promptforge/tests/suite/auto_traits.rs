@@ -5,7 +5,7 @@ use promptforge::cancel::{CancelHandle, Cancelled};
 use promptforge::event::Event;
 use promptforge::tools::{ToolCatalog, ToolError};
 use promptforge::vfs::{Access, VfsRef};
-use promptforge::{Environment, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult};
+use promptforge::{Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult};
 
 const fn assert_send<T: Send>() {}
 const fn assert_send_sync<T: Send + Sync>() {}
@@ -19,7 +19,6 @@ fn a_run_can_move_between_threads_between_calls() {
 
 #[test]
 fn the_run_configuration_and_outcome_types_are_send_sync_and_static() {
-    assert_send_sync_static::<Environment>();
     assert_send_sync_static::<RunContext>();
     assert_send_sync_static::<RunLimits>();
     assert_send_sync_static::<RunResult>();

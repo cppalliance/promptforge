@@ -5,14 +5,14 @@
 //! the run's seed from the OS CSPRNG and its `started_at` from the wall
 //! clock, both handed to the recorder when the run begins, before anything
 //! else, so the record holds them verbatim. Then
-//! the ceremony the Engine's `Environment` expects of the Harness:
+//! the ceremony `RunContext::prepare` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
 //! directories and the declared store, to the context as given; wait for
 //! every built Plugin to be ready, or for the run's cancel; take the
 //! run's snapshot of the Host's Plugins with the run's own services,
-//! which yields the catalog, the preludes, and the tool performer;
-//! install the catalog and the preludes and prepare the context; merge
+//! which yields the catalog, the roster, the preludes, and the tool
+//! performer; set the first three on the context and prepare it; merge
 //! the snapshot's report into prepare's and refuse an unsatisfiable
 //! prompt with the Engine's model-readable notice; and build the `Run`
 //! beside its performers.
@@ -40,14 +40,14 @@ use promptforge::model::ModelDescriptor;
 use promptforge::prompt::FileDecl;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::VfsRef;
-use promptforge::{ParseError, Prompt, Run, RunContext, RunError};
+use promptforge::{ParseError, Prompt, Requirements, Run, RunContext, RunError};
 use promptforge_plugin::HostServices;
 use sha2::{Digest as _, Sha256};
 
 use crate::display_chain::display_chain;
 use crate::effect_loop::failed_outcome;
 use crate::files::{InputFileError, stage_input};
-use crate::host::HostContext;
+use crate::host::{HostContext, HostRunContext};
 use crate::performers::{InferenceBroker, Performers, Timer};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
 
@@ -191,8 +191,9 @@ impl PrepareError {
 /// seed and start and begins the run at its recorder, parses the prompt,
 /// puts its declared input file in place, waits for every built Plugin
 /// to be ready or for the run's cancel, takes the run's snapshot of the
-/// Host's Plugins, prepares the context, refuses an unsatisfiable prompt,
-/// and builds the `Run` and its performers.
+/// Host's Plugins, sets the snapshot's catalog, roster, and declared
+/// preludes on the context and prepares it, refuses an unsatisfiable
+/// prompt, and builds the `Run` and its performers.
 ///
 /// A Plugin whose `ready` fails is unavailable to this run, with its
 /// error as the reason. A cancel ends the wait, and each Plugin is
@@ -320,14 +321,15 @@ pub(crate) async fn prepare_noting_cancel(
     // filesystem, the real directories and the declared store, goes to
     // the context as given; the snapshot is taken once every Plugin is
     // ready or the run is cancelled, its catalog is what the run offers,
-    // its preludes go to every section VM, and the
+    // its roster gives each Plugin's object in the run's Lua, its preludes
+    // go to every section VM, and the
     // snapshot itself stays here as the tool performer, lending each call
     // the run's services. A refusal after a cancel ends the run cancelled,
     // as `Harness::run_to_end` reports it.
     let ctx = ctx.vfs(vfs);
     let failures = host.wait_ready(&cancel).await;
-    let (snapshot, env, unmet) = host.begin_run(services, failures, &prompt);
-    let (ctx, mut requirements) = env.prepare(&prompt, ctx);
+    let (snapshot, unmet) = host.begin_run(services, failures, &prompt);
+    let (ctx, mut requirements) = prepare_from_snapshot(ctx, &snapshot, &prompt);
     requirements.merge(unmet);
     if let Some(error) = requirements.refusal() {
         let cancelled = cancel.is_cancelled();
@@ -352,6 +354,20 @@ pub(crate) async fn prepare_noting_cancel(
         performers,
         output_path,
     })
+}
+
+/// Sets `snapshot`'s catalog, roster, and declared preludes on `ctx`, then
+/// prepares it for `prompt`.
+fn prepare_from_snapshot(
+    ctx: RunContext,
+    snapshot: &HostRunContext,
+    prompt: &Prompt,
+) -> (RunContext, Requirements) {
+    let (usable, unavailable) = snapshot.roster();
+    ctx.tools(snapshot.catalog())
+        .plugins(usable, unavailable)
+        .preludes(snapshot.preludes(prompt))
+        .prepare(prompt)
 }
 
 /// The failed outcome of a run that ended in preparation: `kind` names the

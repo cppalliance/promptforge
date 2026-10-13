@@ -97,8 +97,9 @@ impl Run {
     /// `ctx`.
     ///
     /// A context that skipped
-    /// [`Environment::prepare`](super::Environment::prepare) runs with empty
-    /// tool and model sets.
+    /// [`RunContext::prepare`](super::RunContext::prepare) runs with an
+    /// empty model set. Its tool set holds whatever catalog and roster the
+    /// context's builders set.
     ///
     /// A run that fails to start is still built, and its first `step`
     /// returns `Done` with the failure. A run fails to start when the

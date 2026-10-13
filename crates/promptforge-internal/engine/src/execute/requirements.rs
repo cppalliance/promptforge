@@ -8,7 +8,7 @@ mod tests;
 
 /// A report of what the caller must still satisfy before a prompt can run.
 ///
-/// [`Environment::prepare`](super::Environment::prepare) returns one
+/// [`RunContext::prepare`](super::RunContext::prepare) returns one
 /// together with the prepared context. The report lists only what needs a
 /// person's attention.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub struct Requirements {
     /// required versus what the model provides. Examples are a
     /// `min_context` of 200000 against a model with a 32k context, and
     /// `thinking` against a model whose thinking mode is `Never`. Only
-    /// model binding in `Environment::prepare` adds these.
+    /// model binding in `RunContext::prepare` adds these.
     pub unmet_requirements: Vec<UnmetRequirement>,
     /// The required Plugins that the run lacks.
     ///
@@ -57,7 +57,7 @@ impl Requirements {
     /// Adds the entries of `other` to this report.
     ///
     /// Use it to combine the caller's Plugin report with the report
-    /// from `Environment::prepare`, so that one refusal names every gap.
+    /// from `RunContext::prepare`, so that one refusal names every gap.
     /// The merge skips an entry the report already holds.
     ///
     /// The merge drops the `missing_required` entry of a Plugin that
@@ -151,7 +151,7 @@ fn push_new<T: PartialEq>(entries: &mut Vec<T>, incoming: Vec<T>) {
 ///
 /// The caller's Plugin report lists each one the prompt declares, and the
 /// run's roster, set with
-/// [`Environment::plugins`](super::Environment::plugins), lists every one,
+/// [`RunContext::plugins`](super::RunContext::plugins), lists every one,
 /// declared or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]

@@ -37,12 +37,10 @@ pub(super) fn test_context(name: impl Into<String>) -> RunContext {
 ///
 /// `RunContext` holds `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
-/// boundaries; the typed error/limit/result surfaces and the environment must
-/// be too.
+/// boundaries; the typed error/limit/result surfaces must be too.
 const fn _public_execution_types_are_send_sync_static() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     const fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync_static::<Environment>();
     assert_send_sync_static::<RunContext>();
     assert_send_sync_static::<RunLimits>();
     assert_send_sync_static::<RunResult>();
@@ -214,7 +212,8 @@ impl TestStore {
 }
 
 /// Builds a [`RunContext`] and its [`RunFixture`] from the test-local
-/// [`RunOptions`], for the tests that call [`Environment::run`] directly.
+/// [`RunOptions`], for the tests that call
+/// [`run_with_fixture`](crate::test_support::run_with_fixture) directly.
 /// The context sets the test model as the current selection, so prepare's
 /// trivial fill binds every declared role to it; the observer, client, and
 /// capture go on the fixture the test driver performs and reports through.
@@ -284,7 +283,6 @@ pub(super) async fn run(
     store: &TestStore,
     opts: RunOptions,
 ) -> Result<String> {
-    let mut env = Environment::new();
     let mut fixture = RunFixture::new().observer(opts.observer);
     // The test store's handle is the run's whole filesystem: the context
     // takes it as given, so post-run assertions read what the run
@@ -295,7 +293,7 @@ pub(super) async fn run(
         // offers, and the implementations go to the tool table the test
         // driver's tool performer resolves a `ToolCall` effect in.
         let (catalog, table) = fixture_tools(tools);
-        env = env.tools(catalog);
+        ctx = ctx.tools(catalog);
         fixture = fixture.tools(table);
     }
     // The context holds the current model, and
@@ -310,7 +308,7 @@ pub(super) async fn run(
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
         fixture = fixture.debug(debug);
     }
-    match crate::test_support::run_with_fixture(&env, &test.prompt, args, ctx, fixture).await {
+    match crate::test_support::run_with_fixture(&test.prompt, args, ctx, fixture).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
@@ -319,14 +317,13 @@ pub(super) async fn run(
 
 /// The test-support driver ([`crate::test_support::run_with_fixture`]) with the
 /// context and fixture [`to_context`] assembled (observer, client, capture).
-pub(super) async fn env_run(
-    env: &Environment,
+pub(super) async fn run_assembled(
     prompt: &Prompt,
     args: &str,
     prepared: (RunContext, RunFixture),
 ) -> RunResult {
     let (ctx, fixture) = prepared;
-    crate::test_support::run_with_fixture(env, prompt, args, ctx, fixture).await
+    crate::test_support::run_with_fixture(prompt, args, ctx, fixture).await
 }
 
 /// Runs a fixture offline through the test-support driver
@@ -337,7 +334,6 @@ pub(super) async fn run_with_context(
     test: &TestPrompt,
     configure: impl FnOnce(RunContext, RunFixture) -> (RunContext, RunFixture),
 ) -> std::result::Result<String, RunError> {
-    let env = Environment::new();
     let (mut ctx, fixture) = configure(test_context(EXECUTION), RunFixture::new());
     ctx = ctx.vfs(TestStore::new().vfs());
     if ctx.model.is_none()
@@ -345,7 +341,7 @@ pub(super) async fn run_with_context(
     {
         ctx = ctx.model(model.clone());
     }
-    match crate::test_support::run_with_fixture(&env, &test.prompt, "", ctx, fixture).await {
+    match crate::test_support::run_with_fixture(&test.prompt, "", ctx, fixture).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),

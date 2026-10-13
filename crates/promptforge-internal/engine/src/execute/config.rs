@@ -15,18 +15,23 @@ pub use limits::RunLimits;
 
 use crate::cancel::CancelHandle;
 use crate::model::ModelDescriptor;
+use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
 use promptforge_vfs::VfsRef;
 
 use super::bindings::ModelBindings;
+use super::fill::fill_model_bindings;
+use super::requirements::{Requirements, UnavailablePlugin};
 
 /// The inputs for one run of a prompt.
 ///
-/// The caller builds a context with `new` and the builder methods. The
-/// prepare step of an [`Environment`](super::Environment) then adds the
-/// tool catalog, the Plugin roster, the Plugin preludes, and the model
-/// bindings. The Engine owns the context for the run. Each context belongs
-/// to exactly one run.
+/// The caller builds a context with `new` and the builder methods, among
+/// them the run's tool catalog ([`tools`](RunContext::tools)), Plugin
+/// roster ([`plugins`](RunContext::plugins)), and Plugin preludes
+/// ([`preludes`](RunContext::preludes)). Then it calls
+/// [`prepare`](RunContext::prepare), which binds the prompt's model roles
+/// and reports what the caller must still satisfy. The Engine owns the
+/// context for the run. Each context belongs to exactly one run.
 ///
 /// The context holds only the Engine's input. The observer, client, tool
 /// implementations, broker, and capture belong to the caller. The Engine
@@ -86,27 +91,22 @@ pub struct RunContext {
     /// declared role to it.
     pub(super) model: Option<ModelDescriptor>,
     /// The run's model satisfaction, written by
-    /// [`Environment::prepare`](super::Environment::prepare)'s fill
-    /// function: which concrete model each declared role is bound to.
+    /// [`prepare`](RunContext::prepare)'s fill function: which concrete
+    /// model each declared role is bound to.
     pub(super) model_bindings: ModelBindings,
     /// The run's tool catalog: every tool of every Plugin the caller can
     /// serve, declared by the prompt or not, with each tool under its
-    /// Plugin's name. Written by
-    /// [`Environment::prepare`](super::Environment::prepare); the run's
-    /// offering draws every tool from it.
+    /// Plugin's name. Set with [`tools`](RunContext::tools); the run's
+    /// offering draws every tool from it. Empty by default.
     pub(super) tools: ToolCatalog,
     /// The run's roster: every installed Plugin the caller reports, by
     /// name, with no reason when it can serve the run and the reason when
-    /// it can't. Written by
-    /// [`Environment::prepare`](super::Environment::prepare) from the
-    /// environment's roster; empty on a caller-built context that was
-    /// never prepared.
+    /// it can't. Set with [`plugins`](RunContext::plugins). Empty by
+    /// default.
     pub(super) roster: BTreeMap<PluginId, Option<String>>,
-    /// The run's Plugin preludes, in declaration order. Written by
-    /// [`Environment::prepare`](super::Environment::prepare) from the
-    /// environment's list; every section VM installs each one before
-    /// `require`. Empty on a caller-built context that was
-    /// never prepared.
+    /// The run's Plugin preludes, in declaration order. Set with
+    /// [`preludes`](RunContext::preludes); every section VM installs each
+    /// one before `require`. Empty by default.
     pub(super) preludes: Vec<Prelude>,
 }
 
@@ -220,7 +220,7 @@ impl RunContext {
 
     /// Sets the run's current model, which the caller chooses.
     ///
-    /// [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// [`prepare`](RunContext::prepare)'s fill
     /// function binds every declared role to this model. It also checks
     /// each role's hard keywords and context minimum against the model's
     /// descriptor. With the default, `None`, the model bindings stay empty,
@@ -237,7 +237,7 @@ impl RunContext {
     /// that every section's `store` table operates on. The default is a
     /// fresh memory store at `/`.
     ///
-    /// [`Environment::prepare`](super::Environment::prepare) keeps a handle
+    /// [`prepare`](RunContext::prepare) keeps a handle
     /// set here as given. Every tool call effect carries an access to this
     /// same filesystem, so the tools and the run share one set of files.
     /// The caller seeds files before the run and extracts output after it
@@ -247,6 +247,90 @@ impl RunContext {
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
         self
+    }
+
+    /// Sets the run's tool catalog: the descriptors of every tool of every
+    /// Plugin the caller can serve this run, declared by the prompt or not.
+    /// The run offers every tool in it, and the caller performs every call.
+    /// Read it back with [`catalog`](RunContext::catalog).
+    #[must_use]
+    pub fn tools(mut self, tools: ToolCatalog) -> RunContext {
+        self.tools = tools;
+        self
+    }
+
+    /// Sets the run's roster: every installed Plugin that can serve the run,
+    /// declared by the prompt or not, and every one that can't, with the
+    /// reason.
+    ///
+    /// Each usable Plugin gets an object in the run's Lua, with or without
+    /// tools. An unavailable one gets none, and offering it raises its
+    /// reason. A name in both lists counts as unavailable. Without a roster,
+    /// the run's Lua sees the declared Plugins and the Plugins with a tool
+    /// in the catalog.
+    #[must_use]
+    pub fn plugins(
+        mut self,
+        usable: Vec<PluginId>,
+        unavailable: Vec<UnavailablePlugin>,
+    ) -> RunContext {
+        self.roster = usable
+            .into_iter()
+            .map(|plugin| (plugin, None))
+            .chain(
+                unavailable
+                    .into_iter()
+                    .map(|entry| (entry.plugin, Some(entry.reason))),
+            )
+            .collect();
+        self
+    }
+
+    /// Sets the Plugin preludes that every section VM of the run installs.
+    ///
+    /// A prelude is Lua source that a Plugin the prompt declares
+    /// contributed. The caller passes them in the order the prompt
+    /// declares the Plugins. Every section VM of the run installs each
+    /// prelude after the Engine globals and before any block runs, so every
+    /// block, and every library a block loads with `require`, can call what
+    /// the preludes define.
+    ///
+    /// A prelude fails the run as
+    /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) if it fails to load,
+    /// or if it defines a global that another prelude, an Engine global, or
+    /// a reserved name already holds.
+    /// The failure happens when the first section VM is set up, before the
+    /// run issues any effect.
+    #[must_use]
+    pub fn preludes(mut self, preludes: Vec<Prelude>) -> RunContext {
+        self.preludes = preludes;
+        self
+    }
+
+    /// Binds `prompt`'s model roles to the context's current model and
+    /// reports what the caller must still satisfy, returning the context
+    /// beside the report.
+    ///
+    /// `prepare` uses the context's filesystem as given, because the caller
+    /// builds the run's whole filesystem, including its real directories and
+    /// the declared store. The caller checks before `prepare` that each
+    /// Plugin the prompt declares can serve, and merges that report into the
+    /// one `prepare` returns.
+    ///
+    /// Every declared model role binds to the context's current model.
+    /// `prepare` then checks each role's hard keywords (`thinking`,
+    /// `no-thinking`) and context minimum against the model's descriptor.
+    /// Each failed check is listed in [`Requirements::unmet_requirements`]
+    /// with the required and actual values, and the role stays bound to
+    /// the current model. Soft keywords record the author's intent only,
+    /// so `prepare` skips them. When the context's current model is
+    /// `None`, `prepare` skips the fill and the checks, and the model
+    /// bindings stay empty.
+    #[must_use]
+    pub fn prepare(mut self, prompt: &Prompt) -> (RunContext, Requirements) {
+        let mut requirements = Requirements::default();
+        self.model_bindings = fill_model_bindings(prompt, self.model.as_ref(), &mut requirements);
+        (self, requirements)
     }
 
     /// Returns the run's VFS handle, which is the run's whole filesystem.
@@ -280,7 +364,7 @@ impl RunContext {
     /// concrete model.
     ///
     /// The bindings also hold the descriptors of the models this run may
-    /// use. [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// use. [`prepare`](RunContext::prepare)'s fill
     /// function writes them. A lookup goes from a role's label to a model
     /// id, and from the id to the model's descriptor.
     #[must_use]
@@ -288,14 +372,10 @@ impl RunContext {
         &self.model_bindings
     }
 
-    /// Returns the run's tool catalog.
-    ///
-    /// [`Environment::prepare`](super::Environment::prepare) copies the
-    /// environment's catalog here: every tool of every Plugin the caller
-    /// can serve, declared by the prompt or not. On a caller-built context,
-    /// the catalog is empty until prepare runs.
+    /// Returns the run's tool catalog, set with [`tools`](RunContext::tools).
+    /// It is empty by default.
     #[must_use]
-    pub fn tools(&self) -> &ToolCatalog {
+    pub fn catalog(&self) -> &ToolCatalog {
         &self.tools
     }
 

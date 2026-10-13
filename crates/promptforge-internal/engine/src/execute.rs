@@ -10,11 +10,10 @@
 //! focused private children:
 //!
 //! - `bindings` - the run's journaled [`ModelBindings`].
-//! - `config` - the public [`RunContext`] and [`RunLimits`].
+//! - `config` - the public [`RunContext`], whose `prepare` binds model
+//!   roles, and [`RunLimits`]; installing Plugins and taking each run's
+//!   catalog from them is the Harness's job.
 //! - `context` - the ambient `RunState` run state.
-//! - `environment` - the public [`Environment`], whose `prepare` copies the
-//!   caller's catalog onto the context and binds model roles; installing
-//!   Plugins and taking each run's catalog from them is the Harness's job.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's model-role fill function.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
@@ -39,7 +38,6 @@
 mod bindings;
 mod config;
 pub(crate) mod context;
-mod environment;
 mod error;
 mod fill;
 pub(crate) mod protocol;
@@ -56,7 +54,6 @@ mod walk_target;
 // Public API surface.
 pub use bindings::ModelBindings;
 pub use config::{RunContext, RunLimits};
-pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{
     MissingService, RequirementCheck, Requirements, UnavailablePlugin, UnmetRequirement,

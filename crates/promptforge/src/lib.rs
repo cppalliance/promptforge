@@ -5,12 +5,11 @@
 //! [`Run::step`] returns [`Step::Pending`] with the effects the run waits on.
 //! The caller performs each effect and hands its answer to [`Run::resume`].
 //! The run ends at [`Step::Done`] with its [`RunResult`].
-//! Before the run starts, [`Environment::prepare`] binds the prompt's model
-//! roles and puts the tools a run may offer into its [`RunContext`].
+//! Before the run starts, the caller puts the tools a run may offer on its
+//! [`RunContext`], and [`RunContext::prepare`] binds the prompt's model roles.
 //!
 //! The crate's `greeter` example is that whole loop in one program.
 
-pub use promptforge_engine::Environment;
 pub use promptforge_engine::MissingService;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;

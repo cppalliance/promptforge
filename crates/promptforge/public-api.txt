@@ -27,7 +27,6 @@
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::DuplicateId { .. }
-#[non_exhaustive] pub struct promptforge::Environment { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::MissingService { .. }
 #[non_exhaustive] pub struct promptforge::ParseError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::Prompt { /* private fields */ }
@@ -70,7 +69,6 @@
 #[non_exhaustive] pub struct promptforge::vfs::Origin { .. }
 #[non_exhaustive] pub struct promptforge::vfs::RealBackend { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::vfs::Stat { .. }
-auto promptforge::Environment: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::MissingService: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -188,7 +186,6 @@ auto promptforge::vfs::VfsPath: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwind
 auto promptforge::vfs::VfsPathBuf: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::VfsRefBuilder: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
-derives promptforge::Environment: Clone, Debug, Default
 derives promptforge::MissingService: Clone, Debug, Eq, PartialEq
 derives promptforge::ParseError: Debug
 derives promptforge::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
@@ -387,11 +384,6 @@ pub enum promptforge::vfs::Mode
 pub enum promptforge::vfs::Op
 pub enum promptforge::vfs::Verdict
 pub enum promptforge::vfs::VfsOutcome
-pub fn promptforge::Environment::new() -> promptforge::Environment
-pub fn promptforge::Environment::plugins(self, usable: alloc::vec::Vec<promptforge::plugins::PluginId>, unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>) -> promptforge::Environment
-pub fn promptforge::Environment::preludes(self, preludes: alloc::vec::Vec<promptforge::plugins::Prelude>) -> promptforge::Environment
-pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
-pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment
 pub fn promptforge::MissingService::new(plugin: promptforge::plugins::PluginId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
 pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
 pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
@@ -414,6 +406,7 @@ pub fn promptforge::Run::resume(&mut self, id: promptforge::effect::EffectId, an
 pub fn promptforge::Run::step(&mut self) -> promptforge::Step
 pub fn promptforge::RunContext::cancel(self, handle: promptforge::cancel::CancelHandle) -> promptforge::RunContext
 pub fn promptforge::RunContext::cancel_handle(&self) -> promptforge::cancel::CancelHandle
+pub fn promptforge::RunContext::catalog(&self) -> &promptforge::tools::ToolCatalog
 pub fn promptforge::RunContext::current_model(&self) -> core::option::Option<&promptforge::model::ModelDescriptor>
 pub fn promptforge::RunContext::depth(&self) -> u32
 pub fn promptforge::RunContext::flags(self, flags: promptforge::replay::Flags) -> promptforge::RunContext
@@ -422,12 +415,15 @@ pub fn promptforge::RunContext::model(self, model: promptforge::model::ModelDesc
 pub fn promptforge::RunContext::model_bindings(&self) -> &promptforge::model::ModelBindings
 pub fn promptforge::RunContext::name(&self) -> &str
 pub fn promptforge::RunContext::new(name: impl core::convert::Into<alloc::string::String>, seed: u64, started_at: promptforge::timestamp::Timestamp) -> promptforge::RunContext
+pub fn promptforge::RunContext::plugins(self, usable: alloc::vec::Vec<promptforge::plugins::PluginId>, unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>) -> promptforge::RunContext
+pub fn promptforge::RunContext::preludes(self, preludes: alloc::vec::Vec<promptforge::plugins::Prelude>) -> promptforge::RunContext
+pub fn promptforge::RunContext::prepare(self, prompt: &promptforge::Prompt) -> (promptforge::RunContext, promptforge::Requirements)
 pub fn promptforge::RunContext::provenance_start(self, start: u32) -> promptforge::RunContext
 pub fn promptforge::RunContext::report_debug(self, mode: promptforge::event::DebugMode) -> promptforge::RunContext
 pub fn promptforge::RunContext::run_flags(&self) -> promptforge::replay::Flags
 pub fn promptforge::RunContext::seed(&self) -> u64
 pub fn promptforge::RunContext::started_at(&self) -> promptforge::timestamp::Timestamp
-pub fn promptforge::RunContext::tools(&self) -> &promptforge::tools::ToolCatalog
+pub fn promptforge::RunContext::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::RunContext
 pub fn promptforge::RunContext::ui(self, snapshot: serde_json::value::Value) -> promptforge::RunContext
 pub fn promptforge::RunContext::vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::RunContext
 pub fn promptforge::RunContext::vfs_handle(&self) -> &promptforge::vfs::VfsRef

@@ -21,7 +21,7 @@ pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 /// The seed list for the retired-symbol scan. Live Engine source (outside
 /// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
 /// identifier on it.
-const RETIRED_SEEDS: [&str; 31] = [
+const RETIRED_SEEDS: [&str; 32] = [
     "install_agent_chat_shim",
     "EventsSnapshot",
     "install_runtime_events",
@@ -53,6 +53,7 @@ const RETIRED_SEEDS: [&str; 31] = [
     "ToolView",
     "lock_tool_set",
     "tool_set_snapshot",
+    "Environment",
 ];
 
 /// Every Engine crate directory: the named root crates first, whether or

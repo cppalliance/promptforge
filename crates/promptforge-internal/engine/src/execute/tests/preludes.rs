@@ -1,5 +1,5 @@
 //! Plugin preludes in a run: every section VM installs the preludes
-//! handed to `Environment::preludes`, fanout arms and spawned task chains
+//! handed to `RunContext::preludes`, fanout arms and spawned task chains
 //! included, and the libraries a section requires see them; a prelude
 //! that fails to load or whose global collides fails the run as a Lua
 //! failure before it issues any effect; a store conflict a prelude's
@@ -44,10 +44,11 @@ fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Run {
         .first()
         .cloned()
         .expect("the test catalog holds one model");
-    let (ctx, requirements) = Environment::new()
+    let (ctx, requirements) = test_context(EXECUTION)
+        .model(model)
         .tools(catalog)
         .preludes(preludes)
-        .prepare(&prompt, test_context(EXECUTION).model(model));
+        .prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the fixture prompt prepares: {requirements:?}"

@@ -33,9 +33,7 @@ use std::sync::Arc;
 use promptforge_types::event::Event;
 
 use crate::Error;
-use crate::execute::{
-    Effect, EffectAnswer, EffectId, Environment, Run, RunContext, RunError, RunResult, Step,
-};
+use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunContext, RunError, RunResult, Step};
 use crate::parser::Prompt;
 
 mod fixture;
@@ -131,9 +129,9 @@ pub fn drive(
 /// The implicit-prepare path over the tokio driver: prepares and runs
 /// `prompt` with the resources `fixture` bundles.
 ///
-/// The environment's catalog is what the run offers; a suite with fixture
-/// tools installs their descriptors there
-/// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
+/// The context's catalog is what the run offers; a suite with fixture
+/// tools sets their descriptors there
+/// ([`RunContext::tools`] over [`TestToolTable::catalog`]) and the
 /// implementations on `fixture` ([`RunFixture::tools`]). Plugins live
 /// outside the Engine, and none is installed here.
 ///
@@ -142,13 +140,12 @@ pub fn drive(
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.
 pub async fn run_with_fixture(
-    env: &Environment,
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
     fixture: RunFixture,
 ) -> RunResult {
-    let (ctx, requirements) = env.prepare(prompt, ctx);
+    let (ctx, requirements) = ctx.prepare(prompt);
     if let Some(refusal) = requirements.refusal() {
         return RunResult::Failure(refusal);
     }

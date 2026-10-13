@@ -15,8 +15,7 @@ async fn live_h1_infer_runs_once() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    let RunResult::Ok(out) = run_assembled(&prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("live H1 path must run");
     };
@@ -28,7 +27,7 @@ async fn live_h1_infer_runs_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_callers_client_serves_a_run_the_context_never_names() {
     // The context is the Engine's input; the client lives on the test's
-    // `RunFixture`, and `Environment::run` performs the run's completions
+    // `RunFixture`, and `run_with_fixture` performs the run's completions
     // with it. Nothing about the gateway crosses the Engine's boundary.
     let gateway = ScriptedChat::new(vec![resp_text("canned answer")]);
 
@@ -41,11 +40,9 @@ async fn the_callers_client_serves_a_run_the_context_never_names() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let env = Environment::new();
     let fixture = RunFixture::new().client(gateway_client(&gateway));
     let (ctx, _fixture) = to_context(silent());
-    let RunResult::Ok(out) =
-        crate::test_support::run_with_fixture(&env, &prompt, "", ctx, fixture).await
+    let RunResult::Ok(out) = crate::test_support::run_with_fixture(&prompt, "", ctx, fixture).await
     else {
         panic!("the fixture's client must serve the run");
     };
@@ -99,9 +96,8 @@ async fn a_library_function_resolves_engine_globals_when_called() {
         function read_args() return args end\n\
         ```\n";
     let prompt = parse(source);
-    let env = Environment::new();
     let RunResult::Ok(out) =
-        env_run(&env, &prompt, "later canned value", to_context(silent())).await
+        run_assembled(&prompt, "later canned value", to_context(silent())).await
     else {
         panic!("a library function must resolve Engine globals when called");
     };
@@ -124,12 +120,11 @@ async fn a_library_calls_engine_globals_at_load_time() {
         log('library loaded')\n\
         ```\n";
     let prompt = parse(source);
-    let env = Environment::new();
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
     let (ctx, _fixture) = to_context(silent());
-    let (ctx, requirements) = env.prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the fixture declares nothing: {requirements:?}"
@@ -217,8 +212,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
-    let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    let RunResult::Ok(out) = run_assembled(&prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("live H1 models.infer must run");
     };
@@ -260,10 +254,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let recorder = Arc::new(Recorder::default());
-    let env = Environment::new();
-
-    let RunResult::Ok(out) = env_run(
-        &env,
+    let RunResult::Ok(out) = run_assembled(
         &prompt,
         "",
         to_context(RunOptions {
@@ -324,14 +315,13 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .await;
         canceller.cancel();
     });
-    let env = Environment::new();
     let ctx = test_context(EXECUTION)
         .model(test_model_catalog().models()[0].clone())
         .cancel(cancel);
     let fixture = RunFixture::new()
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .client(gateway_client(&gateway));
-    let result = env_run(&env, &prompt, "", (ctx, fixture)).await;
+    let result = run_assembled(&prompt, "", (ctx, fixture)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"
@@ -401,8 +391,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         return var.first .. ':' .. var.executions\n\
         ```\n";
     let prompt = parse(source);
-    let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    let RunResult::Ok(out) = run_assembled(&prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("live H1 prose infers explicitly");
     };
@@ -431,8 +420,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(source);
-    let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(&gateway))).await
+    let RunResult::Ok(out) = run_assembled(&prompt, "", to_context(gatewayed(&gateway))).await
     else {
         panic!("H1 prose and H2 prose each infer explicitly");
     };
@@ -471,8 +459,7 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         return 'ok'\n\
         ```\n";
     let prompt = parse(source);
-    let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(silent())).await else {
+    let RunResult::Ok(out) = run_assembled(&prompt, "", to_context(silent())).await else {
         panic!("the H1 chunk takes root entry 0 and the first walked section root entry 1");
     };
 

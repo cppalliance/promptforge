@@ -28,9 +28,7 @@ const STREAM_FIXTURES: [(&str, &str); 4] = [
 /// forwarding adapter - and returns the raw outcome and event stream.
 fn drive_serially(md: &str) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
-    let env = Environment::new();
-    let ctx = test_context(EXECUTION);
-    let (ctx, requirements) = env.prepare(&prompt, ctx);
+    let (ctx, requirements) = test_context(EXECUTION).prepare(&prompt);
     assert!(
         requirements.refusal().is_none(),
         "the fixtures declare nothing prepare could refuse"

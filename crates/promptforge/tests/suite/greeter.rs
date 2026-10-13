@@ -12,7 +12,7 @@ use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 #[path = "../../examples/greeter.rs"]
 #[expect(
@@ -88,21 +88,21 @@ fn canned_model() -> Result<ModelDescriptor, Box<dyn Error>> {
     ))
 }
 
-/// An environment whose catalog holds the shout tool alone.
-fn shout_environment() -> Result<Environment, Box<dyn Error>> {
+/// A catalog that holds the shout tool alone.
+fn shout_catalog() -> Result<ToolCatalog, Box<dyn Error>> {
     let shout = ToolDescriptor::new(
         ToolId::parse("example/text/shout")?,
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );
-    Ok(Environment::new().tools(ToolCatalog::new(&[shout])?))
+    Ok(ToolCatalog::new(&[shout])?)
 }
 
 /// The shouting greeter, prepared with the canned model and the shout tool.
 fn shout_run() -> Result<Run, Box<dyn Error>> {
     let prompt = parse(GREETER)?;
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(canned_model()?);
-    let (ctx, requirements) = shout_environment()?.prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(shout_catalog()?).prepare(&prompt);
     if let Some(refusal) = requirements.refusal() {
         return Err(refusal.into());
     }
@@ -129,7 +129,7 @@ fn prepare_fills_the_writer_role_and_the_canned_reply_becomes_the_result()
 -> Result<(), Box<dyn Error>> {
     let prompt = parse(REPLY)?;
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(canned_model()?);
-    let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.prepare(&prompt);
     assert!(requirements.refusal().is_none());
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     assert!(matches!(drive(&mut run), RunResult::Ok(text) if text == "hi there"));
@@ -140,7 +140,7 @@ fn prepare_fills_the_writer_role_and_the_canned_reply_becomes_the_result()
 fn trusted_tool_output_reaches_the_calling_lua_unchanged() -> Result<(), Box<dyn Error>> {
     let prompt = parse(GREETER)?;
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(canned_model()?);
-    let (ctx, requirements) = shout_environment()?.prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(shout_catalog()?).prepare(&prompt);
     assert!(requirements.refusal().is_none());
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     assert!(matches!(drive(&mut run), RunResult::Ok(text) if text == "HI THERE"));

@@ -7,7 +7,7 @@ use crate::model::{ModelDescriptor, ModelId};
 /// The models bound for a run: which model each declared role uses, and
 /// the descriptor of every model the run may use.
 ///
-/// [`prepare`](super::Environment::prepare) fills these bindings. It binds
+/// [`prepare`](super::RunContext::prepare) fills these bindings. It binds
 /// every declared role to the run context's current model.
 ///
 /// A lookup goes from a role label to a model identity, and from that

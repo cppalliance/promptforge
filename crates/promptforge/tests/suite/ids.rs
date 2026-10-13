@@ -14,7 +14,7 @@ use promptforge::model::{
     Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode, ToolCall,
 };
 use promptforge::timestamp::Timestamp;
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 /// Starts two tasks on `## Reply`, waits for both, and joins their replies.
 const GREETER: &str = concat!(
@@ -81,7 +81,7 @@ fn start(source: &str) -> Result<(Run, Vec<Event>), Box<dyn Error>> {
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
         .provenance_start(u32::try_from(parse_events.len())?)
         .model(model);
-    let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.prepare(&prompt);
     if let Some(refusal) = requirements.refusal() {
         return Err(refusal.into());
     }

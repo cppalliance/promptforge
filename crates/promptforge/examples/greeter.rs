@@ -15,7 +15,7 @@ use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId,
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 /// Writes a note, asks the `writer` role to reply, and shouts the reply.
 pub const GREETER: &str = concat!(
@@ -89,8 +89,8 @@ pub fn greet() -> Result<String, Box<dyn Error>> {
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );
-    let environment = Environment::new().tools(ToolCatalog::new(&[shout])?);
-    let (ctx, requirements) = environment.prepare(&prompt, ctx);
+    let catalog = ToolCatalog::new(&[shout])?;
+    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     if let Some(refusal) = requirements.refusal() {
         return Err(refusal.into());
     }

@@ -13,7 +13,7 @@ use promptforge::model::{
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Environment, Prompt, Run, RunContext, RunErrorKind, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunErrorKind, RunResult, Step};
 
 /// Declares `writer` and `checker`, and asks `writer` once for a reply to
 /// its note.
@@ -55,7 +55,7 @@ fn run_greeter(
     let (parsed, _parse_events) = Prompt::parse(GREETER, "greeter");
     let prompt = parsed?;
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model.clone());
-    let (ctx, _requirements) = Environment::new().prepare(&prompt, ctx);
+    let (ctx, _requirements) = ctx.prepare(&prompt);
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     loop {
         let effects = match run.step() {

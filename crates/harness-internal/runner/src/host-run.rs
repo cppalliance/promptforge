@@ -89,7 +89,7 @@ impl HostRunContext {
     }
 
     /// Every usable Plugin's tools, declared by the prompt or not.
-    pub(super) fn catalog(&self) -> ToolCatalog {
+    pub(crate) fn catalog(&self) -> ToolCatalog {
         let tools: Vec<ToolDescriptor> = self
             .plugins
             .values()
@@ -111,7 +111,7 @@ impl HostRunContext {
     /// The run's roster: the names of the usable Plugins, declared by the
     /// prompt or not, with or without tools, and an entry with the reason
     /// for each one that can't serve, both in name order.
-    pub(super) fn roster(&self) -> (Vec<PluginId>, Vec<UnavailablePlugin>) {
+    pub(crate) fn roster(&self) -> (Vec<PluginId>, Vec<UnavailablePlugin>) {
         let mut usable = Vec::new();
         let mut unavailable = Vec::new();
         for (name, plugin) in &self.plugins {
@@ -135,7 +135,7 @@ impl HostRunContext {
 
     /// The preludes of the usable Plugins `prompt` declares, in
     /// declaration order, each under the Plugin's installed name.
-    pub(super) fn preludes(&self, prompt: &Prompt) -> Vec<Prelude> {
+    pub(crate) fn preludes(&self, prompt: &Prompt) -> Vec<Prelude> {
         prompt
             .frontmatter()
             .plugins()

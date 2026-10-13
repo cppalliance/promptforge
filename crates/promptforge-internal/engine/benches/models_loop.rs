@@ -23,7 +23,7 @@ use std::num::NonZeroU32;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_engine::test_support::{BoxFuture, ChatClient, RunFixture, run_with_fixture};
-use promptforge_engine::{Environment, RunContext, RunLimits, RunResult};
+use promptforge_engine::{RunContext, RunLimits, RunResult};
 use promptforge_model_client::client::{Completion, Message, ToolSchema};
 use promptforge_model_client::model::{CompletionError, CompletionOptions};
 use promptforge_parser::Prompt;
@@ -114,12 +114,6 @@ fn parse_loop_prompt() -> Prompt {
         .expect("the bench prompt parses")
 }
 
-/// The environment every bench run shares: no registry and no tools, so
-/// the loop is one terminal turn.
-fn bench_env() -> Environment {
-    Environment::new()
-}
-
 /// One `models.loop` turn end to end: parse is excluded, so the measurement
 /// covers VM setup, projection, the round, and the terminal-record append.
 fn models_loop(c: &mut Criterion) {
@@ -130,11 +124,9 @@ fn models_loop(c: &mut Criterion) {
         .expect("the bench runtime builds");
     let chat = bench_chat();
     let prompt = parse_loop_prompt();
-    let env = bench_env();
     c.bench_function("models_loop", |b| {
         b.iter(|| {
             let result = runtime.block_on(run_with_fixture(
-                &env,
                 &prompt,
                 "",
                 RunContext::new(
@@ -168,11 +160,9 @@ fn compactors_fail(c: &mut Criterion) {
         .expect("the bench runtime builds");
     let chat = bench_chat();
     let prompt = parse_loop_prompt();
-    let env = bench_env();
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
             let result = runtime.block_on(run_with_fixture(
-                &env,
                 &prompt,
                 "",
                 RunContext::new(

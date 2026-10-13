@@ -96,8 +96,8 @@ impl RunFixture {
     }
 
     /// Sets the implementations `ToolCall` effects resolve their ids in.
-    /// The catalog the Engine binds against is the caller's to install on
-    /// the [`Environment`](crate::execute::Environment) (see
+    /// The catalog the Engine binds against is the caller's to set with
+    /// [`RunContext::tools`](crate::execute::RunContext::tools) (see
     /// [`TestToolTable::catalog`]).
     #[must_use]
     pub fn tools(mut self, tools: TestToolTable) -> RunFixture {

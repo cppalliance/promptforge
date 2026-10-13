@@ -21,7 +21,7 @@ use promptforge::vfs::{
     Access, AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
     VfsRef,
 };
-use promptforge::{Environment, Prompt, Run, RunContext};
+use promptforge::{Prompt, Run, RunContext};
 use promptforge_plugin::Package;
 use serde_json::{Value, json};
 
@@ -70,7 +70,7 @@ fn prompt(lua: &str) -> Arc<Prompt> {
 /// `vfs`.
 fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
     let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).vfs(vfs);
-    let (ctx, requirements) = Environment::new().tools(catalog()).prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(catalog()).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the runner fixture prompt declares nothing the environment must supply: {requirements:?}"

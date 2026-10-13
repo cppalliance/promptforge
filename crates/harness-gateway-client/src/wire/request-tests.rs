@@ -15,7 +15,7 @@ use promptforge::model::{
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 use serde_json::json;
 
 use super::*;
@@ -68,7 +68,7 @@ fn tool_round(offered: &[Offered]) -> Round {
     );
     let ctx = RunContext::new("round", 7, Timestamp::UNIX_EPOCH).model(model);
     let catalog = ToolCatalog::new(&descriptors).expect("the offered tools are distinct");
-    let (ctx, requirements) = Environment::new().tools(catalog).prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(requirements.refusal().is_none(), "the round prepares");
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     let mut rounds = Vec::new();

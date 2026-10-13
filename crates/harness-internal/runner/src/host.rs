@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use futures_util::future::{Either, join_all, select};
 use promptforge::cancel::CancelHandle;
-use promptforge::{Environment, Prompt, Requirements};
+use promptforge::{Prompt, Requirements};
 use promptforge_plugin::{HostServices, Package, Plugin, PluginId};
 
 use crate::packages::{PackageRegistry, PluginKind};
@@ -172,23 +172,23 @@ impl HostContext {
     }
 
     /// Takes one run's snapshot of every installed Plugin with `services`,
-    /// the run's own services, and builds what the Engine needs for
-    /// `prompt`.
+    /// the run's own services, and reports the requirements it cannot meet
+    /// for `prompt`.
     ///
     /// `failures` holds the reason of each Plugin whose `ready` failed
-    /// before this run, which the run treats as unavailable. The
-    /// environment's catalog holds every usable Plugin's tools, declared
-    /// or not, its roster names every installed Plugin with the reason of
-    /// each one that can't serve, and its preludes are the declared, usable
-    /// Plugins', in declaration order. The requirements cover every Plugin
-    /// the prompt declares. The returned context performs the run's tool
-    /// calls.
+    /// before this run, which the run treats as unavailable. The snapshot
+    /// gives the run's catalog, which holds every usable Plugin's tools,
+    /// declared or not, its roster, which names every installed Plugin with
+    /// the reason of each one that can't serve, and its declared preludes,
+    /// the declared, usable Plugins', in declaration order. It also performs
+    /// the run's tool calls. The requirements cover every Plugin the prompt
+    /// declares.
     pub(crate) fn begin_run(
         &self,
         services: HostServices,
         failures: BTreeMap<PluginId, String>,
         prompt: &Prompt,
-    ) -> (HostRunContext, Environment, Requirements) {
+    ) -> (HostRunContext, Requirements) {
         let run = HostRunContext::snapshot(
             self.installed
                 .iter()
@@ -196,13 +196,8 @@ impl HostContext {
             services,
             failures,
         );
-        let (usable, unavailable) = run.roster();
-        let env = Environment::new()
-            .tools(run.catalog())
-            .plugins(usable, unavailable)
-            .preludes(run.preludes(prompt));
         let requirements = run.requirements(prompt);
-        (run, env, requirements)
+        (run, requirements)
     }
 }
 

@@ -8,19 +8,19 @@ use promptforge_types::plugins::{PluginId, Prelude};
 
 use crate::parser::Prompt;
 use crate::test_support::{RunFixture, run_with_fixture};
-use crate::{Environment, RunErrorKind, RunResult};
+use crate::{RunErrorKind, RunResult};
 
 use super::super::support::context;
 use super::*;
 
-/// Runs `md` under the default environment with `preludes` installed in
-/// every section VM.
+/// Runs `md` under a default context with `preludes` installed in every
+/// section VM.
 async fn run_with_preludes(md: &str, preludes: Vec<Prelude>) -> Result<String, RunError> {
     let prompt = Prompt::parse(md, EXECUTION)
         .0
         .expect("the fixture prompt parses");
-    let env = Environment::new().preludes(preludes);
-    match run_with_fixture(&env, &prompt, "", context(EXECUTION), RunFixture::new()).await {
+    let ctx = context(EXECUTION).preludes(preludes);
+    match run_with_fixture(&prompt, "", ctx, RunFixture::new()).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Failure(error) => Err(error),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),

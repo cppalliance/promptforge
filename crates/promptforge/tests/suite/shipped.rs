@@ -15,7 +15,7 @@ use promptforge::model::{
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 use serde_json::json;
 
 const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
@@ -87,7 +87,7 @@ fn the_shipped_research_prompt_offers_its_web_tools_by_id_and_runs_end_to_end()
     );
     let catalog = ToolCatalog::new(&[web_tool("web/fetch")?, web_tool("web/search")?])?;
     let ctx = RunContext::new("research", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, requirements) = Environment::new().tools(catalog).prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     if let Some(refusal) = requirements.refusal() {
         return Err(refusal.into());
     }

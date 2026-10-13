@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 
 use crate::parser::Prompt;
 use crate::test_support::{RunFixture, run_prepared, run_with_fixture};
-use crate::{Environment, RunErrorKind, RunResult};
+use crate::{RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
@@ -37,9 +37,8 @@ fn parse(source: &str, execution: &str) -> Prompt {
 #[test]
 fn two_runs_writing_the_same_store_path_do_not_conflict() {
     let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let env = Environment::new();
-    let (ctx_a, _) = env.prepare(&prompt, context("run-a"));
-    let (ctx_b, _) = env.prepare(&prompt, context("run-b"));
+    let (ctx_a, _) = context("run-a").prepare(&prompt);
+    let (ctx_b, _) = context("run-b").prepare(&prompt);
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))
@@ -92,11 +91,9 @@ fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
 }
 
 #[tokio::test]
-async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
+async fn run_with_fixture_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    let env = Environment::new();
     let result = run_with_fixture(
-        &env,
         &prompt,
         "",
         context("refuse").model(current_model(32_000, ThinkingMode::Never)),
@@ -131,13 +128,11 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
 }
 
 #[tokio::test]
-async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
+async fn run_with_fixture_prepares_implicitly_and_runs_a_satisfiable_prompt() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    let env = Environment::new();
     // `run_with_fixture` prepares implicitly, and the declared role's
     // requirements are met by the current model.
     let result = run_with_fixture(
-        &env,
         &prompt,
         "",
         context("implicit").model(current_model(200_000, ThinkingMode::Always)),
@@ -173,10 +168,9 @@ const DECLARES_NO_THINKING: &str = concat!(
 async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let (ctx, requirements) = Environment::new().prepare(
-        &prompt,
-        context("switchable").model(current_model(32_000, ThinkingMode::Switchable)),
-    );
+    let (ctx, requirements) = context("switchable")
+        .model(current_model(32_000, ThinkingMode::Switchable))
+        .prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "a switchable model can turn thinking off: {requirements:?}"
@@ -198,7 +192,6 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
 async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
     let result = run_with_fixture(
-        &Environment::new(),
         &prompt,
         "",
         context("always").model(current_model(32_000, ThinkingMode::Always)),
@@ -240,7 +233,6 @@ const DECLARES_LONG_CONTEXT: &str = concat!(
 async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_LONG_CONTEXT, "declares-long-context");
     let result = run_with_fixture(
-        &Environment::new(),
         &prompt,
         "",
         context("notice").model(current_model(32_000, ThinkingMode::Switchable)),

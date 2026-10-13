@@ -141,14 +141,12 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {
         let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
-        let env = Environment::new().tools(catalog);
-        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
+        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT).tools(catalog);
         let fixture = RunFixture::new().tools(table);
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let out = match crate::test_support::run_with_fixture(&env, &test.prompt, "", ctx, fixture)
-            .await
+        let out = match crate::test_support::run_with_fixture(&test.prompt, "", ctx, fixture).await
         {
             RunResult::Ok(out) => out,
             other => panic!("the echo run succeeds: {other:?}"),

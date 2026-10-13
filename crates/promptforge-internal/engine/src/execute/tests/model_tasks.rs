@@ -49,9 +49,7 @@ pub(super) fn model_task_context_with(
     park: Arc<dyn TestTool>,
 ) -> (RunState, RunFixture) {
     let (catalog, table) = fixture_tools(&[park]);
-    let (prepared, requirements) = Environment::new()
-        .tools(catalog)
-        .prepare(prompt, test_context(EXECUTION));
+    let (prepared, requirements) = test_context(EXECUTION).tools(catalog).prepare(prompt);
     assert!(
         requirements.is_satisfied(),
         "the model-task prompt declares nothing the environment must supply: {requirements:?}"

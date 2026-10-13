@@ -60,9 +60,7 @@ impl TestTool for Offered {
 /// implementations.
 fn offering_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, RunFixture) {
     let (catalog, table) = fixture_tools(tools);
-    let (prepared, requirements) = Environment::new()
-        .tools(catalog)
-        .prepare(prompt, test_context(EXECUTION));
+    let (prepared, requirements) = test_context(EXECUTION).tools(catalog).prepare(prompt);
     assert!(
         requirements.is_satisfied(),
         "the fixture prompt prepares: {requirements:?}"

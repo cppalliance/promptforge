@@ -18,7 +18,7 @@ use promptforge::model::{
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
-use promptforge::{Environment, Prompt, Run, RunContext};
+use promptforge::{Prompt, Run, RunContext};
 use serde_json::{Value, json};
 
 use super::begun_log;
@@ -49,7 +49,7 @@ fn infers_then_chats() -> Run {
         ThinkingMode::Never,
     );
     let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+    let (ctx, requirements) = ctx.prepare(&prompt);
     assert!(
         requirements.is_satisfied(),
         "the bound model satisfies the fixture's one role: {requirements:?}"

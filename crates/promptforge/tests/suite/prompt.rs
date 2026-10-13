@@ -12,9 +12,7 @@ use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::prompt::ModelKeyword;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{
-    Environment, ParseErrorKind, Prompt, RequirementCheck, Run, RunContext, RunResult, Step,
-};
+use promptforge::{ParseErrorKind, Prompt, RequirementCheck, Run, RunContext, RunResult, Step};
 
 /// Declares two files, one Plugin, `times` then `name`, and one model
 /// role.
@@ -193,7 +191,7 @@ fn a_role_check_by_hand_finds_the_same_shortfall_prepare_reports() -> Result<(),
     assert_eq!(misses, [("checker", true, false)]);
 
     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (_ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+    let (_ctx, requirements) = ctx.prepare(&prompt);
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         return Err("only the checker falls short".into());
     };

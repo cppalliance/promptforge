@@ -124,12 +124,12 @@ impl RunState {
     /// Builds the context for one run of `prompt`. The turn counter is
     /// minted here (starting at zero), as are the run's shared tool
     /// and model sets - built from the catalog and the model bindings on
-    /// `ctx` (empty on a caller-built context that never passed through
-    /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// Plugin-free) - and the full-id bindings of `ctx`'s catalog; the
-    /// nonce derives from `ctx`'s seed and `when`
-    /// renders `ctx`'s `started_at`, so two contexts over the same inputs
-    /// agree on both.
+    /// `ctx` (only the bindings come from
+    /// [`RunContext::prepare`](super::RunContext::prepare), and they stay
+    /// empty on a caller-built context that skipped it) - and the full-id
+    /// bindings of `ctx`'s catalog; the nonce derives from `ctx`'s seed and
+    /// `when` renders `ctx`'s `started_at`, so two contexts over the same
+    /// inputs agree on both.
     #[must_use]
     pub(super) fn new(prompt: Arc<Prompt>, args: &str, vfs: &VfsRef, ctx: &RunContext) -> Self {
         let tool_set = Arc::new(bound_tool_set(&prompt, ctx));

@@ -1,12 +1,12 @@
-//! What a run starts with: its store handle, the default environment,
-//! and the tool and model bindings its frontmatter declares.
+//! What a run starts with: its store handle, a default context, and the
+//! tool and model bindings its frontmatter declares.
 
 use super::*;
 
 use crate::RunErrorKind;
+use crate::RunResult;
 use crate::test_support::recording::Observer;
 use crate::test_support::{RunFixture, TestToolTable, run_with_fixture};
-use crate::{Environment, RunResult};
 use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
 use promptforge_vfs::VfsRef;
 use serde_json::{Value, json};
@@ -15,7 +15,7 @@ use super::super::support::{Recorder, context, parse_execution_fixture};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
 /// with [`RunErrorKind::Vfs`]: every run needs a declared store.
-/// (`Environment::prepare` never replaces the handle, so the raw handle's
+/// (`RunContext::prepare` never replaces the handle, so the raw handle's
 /// declaration is what the run sees.)
 #[tokio::test]
 async fn a_handle_without_a_declared_store_fails_the_run() {
@@ -73,9 +73,9 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
 }
 
 #[tokio::test]
-async fn default_environment_runs_a_plugin_free_prompt() {
-    // A prompt declaring no Plugins runs under the default
-    // `Environment`: no registry, no client, no real roots.
+async fn a_default_context_runs_a_plugin_free_prompt() {
+    // A prompt declaring no Plugins runs under a default context: no
+    // catalog, no roster, no client, no real roots.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## Only\n\n```lua\nreturn 'no Plugins'\n```\n"
@@ -83,7 +83,7 @@ async fn default_environment_runs_a_plugin_free_prompt() {
     let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
         .await
         .result
-        .expect("a Plugin-free prompt runs under the default environment");
+        .expect("a Plugin-free prompt runs under a default context");
     assert_eq!(out, "no Plugins");
 }
 
@@ -123,10 +123,9 @@ async fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
         .catalog()
         .expect("the fixture tools have distinct ids");
     let RunResult::Failure(error) = run_with_fixture(
-        &Environment::new().tools(catalog),
         &prompt,
         "",
-        context(EXECUTION),
+        context(EXECUTION).tools(catalog),
         RunFixture::new().tools(table),
     )
     .await
@@ -154,9 +153,8 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
     let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
-    let env = Environment::new();
     let RunResult::Failure(error) =
-        run_with_fixture(&env, &prompt, "", context(EXECUTION), RunFixture::new()).await
+        run_with_fixture(&prompt, "", context(EXECUTION), RunFixture::new()).await
     else {
         panic!("a models.bind call must fail");
     };

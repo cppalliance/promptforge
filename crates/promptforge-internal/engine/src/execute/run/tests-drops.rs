@@ -17,7 +17,6 @@ use promptforge_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use serde_json::json;
 
 use super::{only_effect, run_context};
-use crate::execute::Environment;
 use crate::execute::RunResult;
 use crate::execute::run::{
     AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,
@@ -55,9 +54,7 @@ fn bound_sections(sections: &str) -> Run {
         json!({ "type": "object" }),
     );
     let catalog = ToolCatalog::new(&[echo]).expect("one tool is a valid catalog");
-    let (ctx, requirements) = Environment::new()
-        .tools(catalog)
-        .prepare(&prompt, run_context().model(model));
+    let (ctx, requirements) = run_context().model(model).tools(catalog).prepare(&prompt);
     assert!(
         requirements.refusal().is_none(),
         "the model fills the prompt's role: {requirements:?}"
