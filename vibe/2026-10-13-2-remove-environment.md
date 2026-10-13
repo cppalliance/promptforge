@@ -4,10 +4,10 @@ overview: Removes the Engine's Environment type. Its three per-run inputs (tool 
 todos:
   - id: remove-env
     content: "D1-1: remove Environment; add the RunContext builders tools, plugins, and preludes and RunContext::prepare; rename the getter RunContext::tools to catalog; Harness composes the context in prepare.rs; migrate every caller and test helper, and rename the tests, helpers, and docs that refer to the removed type; RETIRED_SEEDS gains Environment; bless the public API"
-    status: pending
+    status: completed
   - id: mcp-retry
     content: "plugin-mcp: after a failed start, retry in the background (1 s doubling to 60 s) until the server answers; runs never wait after the first attempt; switchable fixture flag and tests; crate docs; the Plugin trait's ready docs in promptforge-plugin say a failure holds for that run, not forever"
-    status: pending
+    status: completed
 isProject: false
 ---
 
