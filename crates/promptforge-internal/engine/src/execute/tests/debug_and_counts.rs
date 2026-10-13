@@ -201,7 +201,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     // `tools.calls` records exactly one call even though the tool errors
     // (the count is incremented before dispatch). The tool's own failure is
     // the call's error result, so the loop continues to the terminal reply.
-    use super::models_loop::{always_tool, loop_context, loop_prompt};
+    use super::models_loop::{bound_tool, loop_context, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 
     let gateway = ScriptedChat::new(vec![
@@ -209,13 +209,14 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
         resp_text("final answer"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/failing')\n\
+         local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content .. '|' .. tostring(tools.calls['tools/failing'])",
     );
     let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
+    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(FailingTool)));
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
@@ -242,7 +243,8 @@ async fn a_model_call_and_a_script_call_count_under_the_id_and_a_local_tool_unde
         resp_text("final answer"),
     ]);
     let md = loop_prompt(
-        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
+        "tools.offer('tools/echo')\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
            function(args) return 'got ' .. args.value end)\n\
          local msgs = messages.new()\n\
          msgs:user('ask the model')\n\

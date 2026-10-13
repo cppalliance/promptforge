@@ -80,18 +80,16 @@ pub(super) fn loop_context(
     loop_context_observed(prompt, tools, Arc::new(NullObserver::default()))
 }
 
-/// The tool set with `tool` bound as `alias` and always in scope, beside
-/// its implementation.
-pub(super) fn always_tool(alias: &str, tool: Arc<dyn TestTool>) -> FixtureTools {
-    FixtureTools::new(
-        vec![fixture_binding(alias, "fixture capability", tool)],
-        vec![alias.to_owned()],
-    )
+/// The tool set with `tool` bound as `alias`, beside its implementation;
+/// a section puts it in scope by offering its id.
+pub(super) fn bound_tool(alias: &str, tool: Arc<dyn TestTool>) -> FixtureTools {
+    FixtureTools::new(vec![fixture_binding(alias, "fixture capability", tool)])
 }
 
-/// The tool set with the `echo` fixture bound and always in scope.
+/// The tool set with the `echo` fixture bound; a section puts it in scope
+/// with `tools.offer('tools/echo')`.
 pub(super) fn echo_tools() -> FixtureTools {
-    always_tool("echo", Arc::new(EchoTool))
+    bound_tool("echo", Arc::new(EchoTool))
 }
 
 /// The model-turn and tool-call observations `recorder` saw, in order,
@@ -161,7 +159,8 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
         resp_text("both done"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('echo twice')\n\
          models.loop(msgs)\n\
          assert(#msgs == 6, 'user plus two exchanges plus the terminal record')\n\
@@ -211,7 +210,8 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('echo once')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",
@@ -257,7 +257,8 @@ async fn models_loop_dispatches_local_and_bound_tools() {
         resp_text("tools done"),
     ]);
     let md = loop_prompt(
-        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer('tools/echo')\n\
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -302,16 +303,13 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    // Nothing always-scoped: the first call advertises no tools, the
+    // Nothing in scope at first: the first call advertises no tools, the
     // `tools.offer` between calls scopes `echo` in for the second.
-    let tools = FixtureTools::new(
-        vec![fixture_binding(
-            "echo",
-            "echo capability",
-            Arc::new(EchoTool),
-        )],
-        Vec::new(),
-    );
+    let tools = FixtureTools::new(vec![fixture_binding(
+        "echo",
+        "echo capability",
+        Arc::new(EchoTool),
+    )]);
     let (ctx, fixture) = loop_context(&prompt, tools);
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()

@@ -6,7 +6,7 @@
 //! raises kind `tool` in the handler and whose untrusted wrapper
 //! survives.
 
-use super::super::models_loop::{always_tool, echo_tools};
+use super::super::models_loop::{bound_tool, echo_tools};
 use super::*;
 
 /// The `grab` local tool registration every local-tool test opens with.
@@ -191,7 +191,8 @@ async fn a_nested_local_call_reports_both_results_innermost_first() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
     let md = arm_prompt(
-        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+        "tools.offer('tools/echo')\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            return tools.call('tools/echo', { value = args.value })\n\
          end)\n\
          local out = tools.call('grab', { value = 'hi' })\n\
@@ -219,7 +220,8 @@ async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_the_handler() {
     let md = arm_prompt(
-        "tools.offer_local('grab', 'Grab a value', {}, function()\n\
+        "tools.offer('tools/failing')\n\
+         tools.offer_local('grab', 'Grab a value', {}, function()\n\
            local ok, err = pcall(tools.call, 'tools/failing', {})\n\
            assert(not ok, 'the bound failure raises inside the handler')\n\
            return err.kind\n\
@@ -251,7 +253,8 @@ async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_th
 #[tokio::test(flavor = "current_thread")]
 async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
     let md = arm_prompt(
-        "tools.offer_local('plain', 'Plain', {}, function() return 'plain text' end)\n\
+        "tools.offer('tools/untrusted_echo')\n\
+         tools.offer_local('plain', 'Plain', {}, function() return 'plain text' end)\n\
          tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
            return tools.call('tools/untrusted_echo', { value = args.value })\n\
          end)\n\
@@ -261,7 +264,7 @@ async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
     let recorder = Arc::new(ToolRecorder::default());
     let (ctx, fixture) = tool_context(
         &prompt,
-        always_tool("echo", Arc::new(UntrustedEchoTool)),
+        bound_tool("echo", Arc::new(UntrustedEchoTool)),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
     let out = TokioDriver::new(&ctx, fixture, None)

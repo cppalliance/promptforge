@@ -5,23 +5,26 @@
 use super::*;
 
 /// The run offers `scoped` (id `tools/scoped`) and `global_tool` (id
-/// `tools/global_tool`), and only `scoped` is in scope.
+/// `tools/global_tool`); [`scoped_loop`] offers only `scoped`.
 fn scoped_and_global_tools() -> FixtureTools {
-    FixtureTools::new(
-        vec![
-            fixture_binding(
-                "scoped",
-                "A scoped tool.",
-                Arc::new(ScopedFixtureTool::new("scoped", "A scoped tool.")),
-            ),
-            fixture_binding(
-                "global_tool",
-                "A global tool.",
-                Arc::new(ScopedFixtureTool::new("global_tool", "A global tool.")),
-            ),
-        ],
-        vec!["scoped".to_owned()],
-    )
+    FixtureTools::new(vec![
+        fixture_binding(
+            "scoped",
+            "A scoped tool.",
+            Arc::new(ScopedFixtureTool::new("scoped", "A scoped tool.")),
+        ),
+        fixture_binding(
+            "global_tool",
+            "A global tool.",
+            Arc::new(ScopedFixtureTool::new("global_tool", "A global tool.")),
+        ),
+    ])
+}
+
+/// The loop section that offers `tools/scoped` and leaves
+/// `tools/global_tool` unoffered.
+fn scoped_loop() -> String {
+    loop_prompt(&format!("tools.offer('tools/scoped')\n{LOOP_TO_TEXT}"))
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -34,7 +37,7 @@ async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
         "global_tool",
         "{\"value\":\"x\"}",
     )]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&scoped_loop());
     let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -72,7 +75,7 @@ async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_su
         "tools/scoped",
         "{\"value\":\"x\"}",
     )]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&scoped_loop());
     let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -108,7 +111,9 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         "nonexistent",
         "{\"value\":\"x\"}",
     )]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
+    )));
     let (ctx, fixture) = loop_context(&prompt, echo_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()

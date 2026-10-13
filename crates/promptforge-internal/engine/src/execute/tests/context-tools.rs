@@ -2,6 +2,8 @@
 //! set beside the test driver's tool table behind it, and the helpers that
 //! arm a run state with them.
 
+use std::fmt::Write as _;
+
 use super::*;
 
 /// A binding for a fixture tool beside its implementation: the binding
@@ -31,10 +33,10 @@ pub(in super::super) struct FixtureTools {
 
 impl FixtureTools {
     /// Builds the fixture from offered bindings paired with their
-    /// implementations and the prompt-wide `always` wire names.
+    /// implementations, none of them in any section's scope until the
+    /// section offers it.
     pub(in super::super) fn new(
         bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-        always: Vec<String>,
     ) -> Self {
         let mut table = TestToolTable::new();
         let bindings = bindings
@@ -45,7 +47,7 @@ impl FixtureTools {
             })
             .collect();
         Self {
-            set: crate::lua::ToolSet::for_test(Vec::new(), always, bindings),
+            set: crate::lua::ToolSet::for_test(Vec::new(), Vec::new(), bindings),
             table,
         }
     }
@@ -53,6 +55,18 @@ impl FixtureTools {
     /// The bindings as the run's set, for a test that inspects them.
     pub(in super::super) fn set(&self) -> &crate::lua::ToolSet {
         &self.set
+    }
+
+    /// One `tools.offer('<id>')` line per binding, in binding order, for a
+    /// test section whose rounds use the fixture's tools; empty when the
+    /// fixture binds nothing.
+    pub(in super::super) fn offer_lines(&self) -> String {
+        let mut lines = String::new();
+        for binding in self.set.offered() {
+            writeln!(lines, "tools.offer('{}')", binding.id())
+                .expect("writing to a String cannot fail");
+        }
+        lines
     }
 
     /// Installs the set on the run state and returns `fixture` carrying the
@@ -74,31 +88,15 @@ impl From<crate::lua::ToolSet> for FixtureTools {
     }
 }
 
-/// Arms the run state's shared tool set with `bindings` (every wire name
-/// prompt-wide through `always`) and returns `fixture` carrying the
-/// implementations, so `TokioDriver::new` performs the calls.
+/// Arms the run state's shared tool set with `bindings`, none of them in
+/// any section's scope until the section offers it, and returns `fixture`
+/// carrying the implementations, so `TokioDriver::new` performs the calls.
 pub(in super::super) fn arm_tools(
     ctx: &RunState,
     fixture: RunFixture,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
 ) -> RunFixture {
-    let always = bindings
-        .iter()
-        .map(|(binding, _)| binding.alias().to_owned())
-        .collect();
-    arm_tools_scoped(ctx, fixture, bindings, always)
-}
-
-/// Arms the run state's shared tool set with `bindings` and exactly
-/// `always` as the prompt-wide scope, returning `fixture` carrying the
-/// implementations.
-pub(in super::super) fn arm_tools_scoped(
-    ctx: &RunState,
-    fixture: RunFixture,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-    always: Vec<String>,
-) -> RunFixture {
-    FixtureTools::new(bindings, always).install(ctx, fixture)
+    FixtureTools::new(bindings).install(ctx, fixture)
 }
 
 /// The test's tools as two halves: the catalog of descriptors the run

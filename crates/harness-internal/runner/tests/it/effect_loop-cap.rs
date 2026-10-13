@@ -38,10 +38,10 @@ const TOOL: &str = "tests/cap/park";
 const WIRE: &str = "tests_cap_park";
 
 /// The frontmatter and setup every run here shares: one model role bound
-/// as the default, and [`TOOL`] offered to every model round.
+/// as the default.
 const PREAMBLE: &str = "---\nname: runner-cap\ndescription: caps tool calls\npromptforge: 0\n\
     models:\n  writer: {}\n---\n\n\
-    # Cap\n\n```lua\nmodels.default('writer')\ntools.always_offer('tests/cap/park')\n```\n\n";
+    # Cap\n\n```lua\nmodels.default('writer')\n```\n\n";
 
 /// Main spawns Child and waits on a `wait` round while Child's loop asks
 /// its round, then cancels Child and lingers on a second round.
@@ -59,12 +59,12 @@ const MAIN_JOINS: &str = "## Main\n\n```lua\n\
     tasks.join({ a, b })\n\
     return 'joined'\n```\n\n";
 
-/// A section that runs a model loop over one user message, `user`, and
-/// returns `result`.
+/// A section that offers [`TOOL`], runs a model loop over one user
+/// message, `user`, and returns `result`.
 fn looping(section: &str, user: &str, result: &str) -> String {
     format!(
-        "## {section}\n\n```lua\nlocal msgs = messages.new()\nmsgs:user('{user}')\n\
-         models.loop(msgs)\nreturn '{result}'\n```\n\n"
+        "## {section}\n\n```lua\ntools.offer('{TOOL}')\nlocal msgs = messages.new()\n\
+         msgs:user('{user}')\nmodels.loop(msgs)\nreturn '{result}'\n```\n\n"
     )
 }
 

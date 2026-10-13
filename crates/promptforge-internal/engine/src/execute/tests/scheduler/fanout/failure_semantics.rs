@@ -143,6 +143,7 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
         ```\n\n\
         ### Worker\n\n\
         ```lua\n\
+        tools.offer('tools/echo')\n\
         if item == 'loop' then\n\
           local msgs = messages.new()\n\
           msgs:user('loop forever')\n\

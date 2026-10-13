@@ -374,6 +374,7 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         ```\n\n\
         ### Worker\n\n\
         ```lua\n\
+        tools.offer('tools/echo')\n\
         local msgs = messages.new()\n\
         msgs:user(item)\n\
         models.loop(msgs)\n\

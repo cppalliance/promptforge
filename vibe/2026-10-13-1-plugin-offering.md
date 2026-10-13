@@ -470,7 +470,7 @@ Constraints: the Engine stays sans-IO and deterministic, and scope resolution wa
 
 <step-2>
 
-### Step 2: Move every prompt and fixture off the run-wide offer list
+### Step 2: Move every prompt and fixture off the run-wide offer list [completed]
 
 - Component: Run-wide offer retirement
 - Tests:

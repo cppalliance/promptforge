@@ -38,12 +38,12 @@ impl Sent {
     }
 }
 
-/// Drives `lua` as a loop section with `echo` bound, answering the model
-/// rounds from `replies` in order and every tool call with trusted text,
-/// and returns the section's result beside each round as it was sent, in
-/// issue order.
+/// Drives `lua` as a loop section with `echo` bound and offered, answering
+/// the model rounds from `replies` in order and every tool call with
+/// trusted text, and returns the section's result beside each round as it
+/// was sent, in issue order.
 fn drive_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (String, Vec<Sent>) {
-    let prompt = parse(&loop_prompt(lua));
+    let prompt = parse(&loop_prompt(&format!("tools.offer('tools/echo')\n{lua}")));
     let (state, _fixture) = loop_context(&prompt, echo_tools());
     let mut replies = replies.into_iter();
     let mut sent = Vec::new();

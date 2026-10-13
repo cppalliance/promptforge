@@ -85,17 +85,14 @@ fn tool_context(
     (ctx, fixture)
 }
 
-/// The tool set with the always-failing fixture bound as `fail` and in
-/// scope.
+/// The tool set with the always-failing fixture bound as `fail`; a section
+/// offers it as `tools/failing`.
 fn failing_tools() -> FixtureTools {
-    FixtureTools::new(
-        vec![fixture_binding(
-            "fail",
-            "failing capability",
-            Arc::new(FailingTool),
-        )],
-        vec!["fail".to_owned()],
-    )
+    FixtureTools::new(vec![fixture_binding(
+        "fail",
+        "failing capability",
+        Arc::new(FailingTool),
+    )])
 }
 
 /// The one-section prompt shell every arm test drives.
@@ -108,7 +105,8 @@ fn arm_prompt(lua: &str) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text() {
     let md = arm_prompt(
-        "local out = tools.call_as_model('call_1', 'fail', {})\n\
+        "tools.offer('tools/failing')\n\
+         local out = tools.call_as_model('call_1', 'fail', {})\n\
          assert(type(out) == 'string', 'a model-issued call always resumes with content')\n\
          return out",
     );
@@ -149,7 +147,8 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
 #[tokio::test(flavor = "current_thread")]
 async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
     let md = arm_prompt(
-        "local ok, err = pcall(tools.call, 'tools/failing', {})\n\
+        "tools.offer('tools/failing')\n\
+         local ok, err = pcall(tools.call, 'tools/failing', {})\n\
          assert(not ok, 'a script call raises the tool failure at the call site')\n\
          return err.kind .. '|' .. tostring(err)",
     );
@@ -186,7 +185,8 @@ async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_a
     // answers the effect with the error instead of a call, and a script
     // call raises it at the call site.
     let md = arm_prompt(
-        "local ok, err = pcall(tools.call, 'tools/echo', { value = 'hi' })\n\
+        "tools.offer('tools/echo')\n\
+         local ok, err = pcall(tools.call, 'tools/echo', { value = 'hi' })\n\
          assert(not ok, 'an unresolvable identity raises at the call site')\n\
          return err.kind .. '|' .. tostring(err)",
     );
@@ -196,7 +196,7 @@ async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_a
     let recorder = Arc::new(ToolRecorder::default());
     let (ctx, fixture) = tool_context(
         &prompt,
-        ToolSet::for_test(Vec::new(), vec!["tools_echo".to_owned()], vec![binding]),
+        ToolSet::for_test(Vec::new(), Vec::new(), vec![binding]),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
     let out = TokioDriver::new(&ctx, fixture, None)

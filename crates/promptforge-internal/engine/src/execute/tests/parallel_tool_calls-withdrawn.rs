@@ -31,6 +31,7 @@ const CANCELLED_CHILD: &str = "---\nname: loop\ndescription: d\npromptforge: 0\n
      models.infer('linger')\n\
      return 'cancelled'\n```\n\n\
      ## Child\n\n```lua\n\
+     tools.offer('tools/echo')\n\
      local msgs = messages.new()\n\
      msgs:user('go')\n\
      models.loop(msgs)\n\
@@ -181,11 +182,13 @@ const CANCELLED_PAIR: &str = "---\nname: loop\ndescription: d\npromptforge: 0\n-
      models.infer('linger')\n\
      return 'cancelled'\n```\n\n\
      ## A\n\n```lua\n\
+     tools.offer('tools/echo')\n\
      local msgs = messages.new()\n\
      msgs:user('a')\n\
      models.loop(msgs)\n\
      return 'a done'\n```\n\n\
      ## B\n\n```lua\n\
+     tools.offer('tools/echo')\n\
      local msgs = messages.new()\n\
      msgs:user('b')\n\
      models.loop(msgs)\n\

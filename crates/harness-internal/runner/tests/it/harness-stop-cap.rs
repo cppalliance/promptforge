@@ -33,13 +33,13 @@ fn loops_offering(tools: &[&str]) -> String {
     for tool in tools {
         let plugin = tool.split('/').next().unwrap_or_default();
         writeln!(plugins, "  - {plugin}").unwrap();
-        writeln!(offers, "tools.always_offer('{tool}')").unwrap();
+        writeln!(offers, "tools.offer('{tool}')").unwrap();
     }
     format!(
         "---\nname: loops\ndescription: d\npromptforge: 0\nplugins:\n{plugins}\
          models:\n  writer: {{}}\n---\n\n\
-         # Loops\n\n```lua\nmodels.default('writer')\n{offers}```\n\n\
-         ## Only\n\n```lua\nlocal msgs = messages.new()\nmsgs:user('hold')\n\
+         # Loops\n\n```lua\nmodels.default('writer')\n```\n\n\
+         ## Only\n\n```lua\n{offers}local msgs = messages.new()\nmsgs:user('hold')\n\
          local ok, err = pcall(models.loop, msgs)\n\
          return tostring(ok) .. ':' .. err.kind\n```\n"
     )

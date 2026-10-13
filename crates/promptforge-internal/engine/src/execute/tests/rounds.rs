@@ -12,8 +12,10 @@ use crate::execute::run::{Effect, EffectAnswer, Round, Run};
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
 
-/// Infers once, then loops over one tool round and its closing reply.
-const INFER_THEN_LOOP: &str = "local first = models.infer('first')\n\
+/// Offers `echo`, infers once, then loops over one tool round and its
+/// closing reply.
+const INFER_THEN_LOOP: &str = "tools.offer('tools/echo')\n\
+    local first = models.infer('first')\n\
     local msgs = messages.new()\n\
     msgs:user('second')\n\
     models.loop(msgs)\n\

@@ -379,14 +379,11 @@ async fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
         resp_text("final answer"),
     ]);
     let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let tools = FixtureTools::new(
-        vec![fixture_binding(
-            "tools_concrete",
-            "Concrete description.",
-            Arc::clone(&tool) as Arc<dyn TestTool>,
-        )],
-        Vec::new(),
-    );
+    let tools = FixtureTools::new(vec![fixture_binding(
+        "tools_concrete",
+        "Concrete description.",
+        Arc::clone(&tool) as Arc<dyn TestTool>,
+    )]);
     let prompt = parse(&loop_prompt(
         "tools.offer('tools/concrete')\n\
          tools.offer_local('tools_concrete', 'Local concrete', {}, function() return 'local' end)\n\

@@ -59,8 +59,9 @@ const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\npromptforge: 
 const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
     plugins:\n  - harness\n  - user-input\n\
     models:\n  writer: {}\n---\n\n\
-    # Chats\n\n```lua\nmodels.default('writer')\ntools.always_offer('harness/hold')\n```\n\n\
+    # Chats\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Conversation\n\n```lua\n\
+    tools.offer('harness/hold')\n\
     local history = messages.new()\n\
     while true do\n\
     \x20   local text = input.ask()\n\
@@ -73,8 +74,9 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
 const LOOPS_ONCE: &str = "---\nname: loops\ndescription: d\npromptforge: 0\n\
     plugins:\n  - harness\n\
     models:\n  writer: {}\n---\n\n\
-    # Loops\n\n```lua\nmodels.default('writer')\ntools.always_offer('harness/hold')\n```\n\n\
+    # Loops\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\n\
+    tools.offer('harness/hold')\n\
     local msgs = messages.new()\n\
     msgs:user('hold twice')\n\
     local ok, err = pcall(models.loop, msgs)\n\

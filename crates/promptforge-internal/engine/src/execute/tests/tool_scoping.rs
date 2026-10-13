@@ -1,5 +1,4 @@
-//! Tests for model-visible tool scoping through `tools.always_offer` and
-//! `tools.offer`.
+//! Tests for model-visible tool scoping through `tools.offer`.
 
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
@@ -13,17 +12,14 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      return msgs[#msgs].content";
 
 /// An offered tool stays out of the model-visible scope until
-/// `tools.always_offer` or `tools.offer` names it: the scope snapshot over
-/// an untouched runtime is empty. (The advertised-set half of this rule is
-/// the loop's schema build, pinned by the offer tests below.)
+/// `tools.offer` names it: the scope snapshot over an untouched runtime is
+/// empty. (The advertised-set half of this rule is the loop's schema
+/// build, pinned by the offer tests below.)
 #[test]
 fn offered_tools_are_not_injected_without_an_offer() {
     let tool: Arc<dyn TestTool> =
         Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let tools = FixtureTools::new(
-        vec![fixture_binding("tools_concrete", "capability", tool)],
-        Vec::new(),
-    );
+    let tools = FixtureTools::new(vec![fixture_binding("tools_concrete", "capability", tool)]);
     let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
     let effective = current_tool_bindings(tools.set(), &runtime).expect("the scope must snapshot");
     assert!(
@@ -33,20 +29,20 @@ fn offered_tools_are_not_injected_without_an_offer() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn always_offer_advertises_the_concrete_schema_under_its_wire_name_and_dispatches_by_id() {
+async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispatches_by_id() {
     let gateway = ScriptedChat::new(aliased_tool_script("tools_concrete"));
     let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let tools = FixtureTools::new(
-        vec![fixture_binding(
-            "tools_concrete",
-            "Concrete description.",
-            Arc::clone(&tool) as Arc<dyn TestTool>,
-        )],
-        vec!["tools_concrete".to_owned()],
-    );
-    let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
+    let tools = FixtureTools::new(vec![fixture_binding(
+        "tools_concrete",
+        "Concrete description.",
+        Arc::clone(&tool) as Arc<dyn TestTool>,
+    )]);
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
+        added: vec!["tools_concrete".to_owned()],
+        ..promptforge_lua::ToolRuntime::default()
+    });
     let effective =
-        current_tool_bindings(tools.set(), &runtime).expect("the always scope snapshots");
+        current_tool_bindings(tools.set(), &runtime).expect("the offered scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(tool_schema_name(&schemas[0]), "tools_concrete");
@@ -55,12 +51,14 @@ async fn always_offer_advertises_the_concrete_schema_under_its_wire_name_and_dis
         "Concrete description."
     );
 
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/concrete')\n{LOOP_TO_TEXT}"
+    )));
     let (ctx, fixture) = loop_context(&prompt, tools);
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
-        .expect("the prompt-wide tool dispatches");
+        .expect("the offered tool dispatches");
 
     assert_eq!(out, "aliased final");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
@@ -82,14 +80,11 @@ async fn always_offer_advertises_the_concrete_schema_under_its_wire_name_and_dis
 async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     let gateway = ScriptedChat::new(aliased_tool_script("tools_section"));
     let tool = Arc::new(ScopedFixtureTool::new("section", "Section concrete."));
-    let tools = FixtureTools::new(
-        vec![fixture_binding(
-            "tools_section",
-            "capability",
-            Arc::clone(&tool) as Arc<dyn TestTool>,
-        )],
-        Vec::new(),
-    );
+    let tools = FixtureTools::new(vec![fixture_binding(
+        "tools_section",
+        "capability",
+        Arc::clone(&tool) as Arc<dyn TestTool>,
+    )]);
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
         &Arc::new(Mutex::new(tools.set().clone())),

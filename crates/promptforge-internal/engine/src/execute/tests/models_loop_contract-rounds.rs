@@ -7,7 +7,7 @@ use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::TaskId;
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
-use super::super::models_loop::{always_tool, echo_tools, loop_events};
+use super::super::models_loop::{bound_tool, echo_tools, loop_events};
 use super::super::serial_driver::{text_of, tool_call_reply};
 use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
@@ -138,7 +138,8 @@ async fn a_failing_bound_tool_counts_toward_the_clean_exit() {
         resp_text_finish("", "stop"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/failing')\n\
+         local msgs = messages.new()\n\
          msgs:user('try the tool')\n\
          local result = models.loop(msgs)\n\
          return tostring(result) .. '|' .. #msgs .. '|' .. msgs[3].role \
@@ -147,7 +148,7 @@ async fn a_failing_bound_tool_counts_toward_the_clean_exit() {
     let recorder = Arc::new(Recorder::default());
     let out = drive_observed(
         &md,
-        always_tool("fail", Arc::new(FailingTool)),
+        bound_tool("fail", Arc::new(FailingTool)),
         &gateway,
         Arc::clone(&recorder) as Arc<dyn Observer>,
     )
@@ -173,7 +174,8 @@ async fn the_clean_exit_counts_only_the_calls_of_its_own_loop_call() {
         resp_text_finish("", "stop"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('first')\n\
          models.loop(msgs)\n\
          msgs:user('second')\n\
@@ -237,7 +239,8 @@ async fn a_handler_raising_mid_batch_leaves_the_list_untouched_and_raises_its_ow
 #[test]
 fn a_dropped_model_issued_call_raises_cancelled_at_the_loop_call_site() {
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('asked')\n\
          local ok, err = pcall(models.loop, msgs)\n\
          return tostring(ok) .. ':' .. err.kind .. '|' .. #msgs .. '|' .. msgs[1].role",
@@ -344,7 +347,8 @@ async fn the_scheduler_reports_the_whole_trace_of_a_bound_round_a_local_round_an
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer('tools/echo')\n\
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\

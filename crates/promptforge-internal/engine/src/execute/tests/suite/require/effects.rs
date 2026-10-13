@@ -68,6 +68,7 @@ require '## setup'\n\
 ```\n\n\
 ## Main\n\n\
 ```lua\n\
+require '## offers'\n\
 local msgs = messages.new()\n\
 msgs:user('ping')\n\
 models.loop(msgs)\n\
@@ -76,7 +77,10 @@ return msgs[#msgs].content\n\
 ## setup\n\n\
 ```lua\n\
 models.default('writer')\n\
-tools.always_offer('tools/echo')\n\
+```\n\n\
+## offers\n\n\
+```lua\n\
+tools.offer('tools/echo')\n\
 ```\n"
     );
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
@@ -97,6 +101,6 @@ tools.always_offer('tools/echo')\n\
     assert_eq!(
         offered,
         ["tools_echo"],
-        "the H1 library's prompt-wide offer reaches a later section's round"
+        "the offers library's offer reaches the requiring section's round"
     );
 }

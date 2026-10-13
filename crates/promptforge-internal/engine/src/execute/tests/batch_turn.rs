@@ -169,6 +169,9 @@ fn grab_block(setup: &str, handler: &str) -> String {
 /// The `grab` handler body that runs one inference round.
 const INFER_HANDLER: &str = "return 'inferred ' .. models.infer('inner prompt')";
 
+/// The [`grab_block`] setup that puts the `echo` fixture in scope.
+const OFFER_ECHO: &str = "tools.offer('tools/echo')\n";
+
 /// Drives `md` against `replies` under `tools`, returning the run's output
 /// and the recorder.
 async fn drive(
@@ -191,7 +194,7 @@ async fn drive(
 #[tokio::test(flavor = "current_thread")]
 async fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
     let (out, recorder) = drive(
-        &loop_prompt(&grab_block("", INFER_HANDLER)),
+        &loop_prompt(&grab_block(OFFER_ECHO, INFER_HANDLER)),
         echo_tools(),
         vec![
             resp_batch(&[
@@ -231,7 +234,7 @@ async fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_tur
                    models.loop(inner)\n\
                    return inner[#inner].content";
     let (out, recorder) = drive(
-        &loop_prompt(&grab_block("", handler)),
+        &loop_prompt(&grab_block(OFFER_ECHO, handler)),
         echo_tools(),
         vec![
             resp_batch(&[
@@ -267,7 +270,7 @@ async fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_
     let md = format!(
         "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{}\n```\n\n\
          ## Helper\n\n```lua\nreturn models.infer('helper prompt')\n```\n",
-        grab_block("", "return call('## Helper')")
+        grab_block(OFFER_ECHO, "return call('## Helper')")
     );
     let (out, recorder) = drive(
         &md,

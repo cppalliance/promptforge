@@ -82,7 +82,8 @@ fn tool_messages(effect: &Effect) -> Vec<String> {
 #[test]
 fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('echo twice')\n\
          models.loop(msgs)\n\
          return msgs[3].tool_call_id .. '=' .. msgs[3].content \
@@ -152,7 +153,8 @@ fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
 #[test]
 fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
     let md = loop_prompt(
-        "tools.allow_tasks()\n\
+        "tools.offer('tools/echo')\n\
+         tools.allow_tasks()\n\
          tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
@@ -205,20 +207,20 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
 
 #[test]
 fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls_land() {
+    // A Plugin offer drops a tool the offering loses from the scope, where
+    // a `tools.offer` of it would fail the scope rebuild at c1's dispatch.
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "plugins.offer('tools')\n\
+         local msgs = messages.new()\n\
          msgs:user('asked')\n\
          local ok, err = pcall(models.loop, msgs)\n\
          return tostring(ok) .. ':' .. err.kind .. '|' .. #msgs",
     );
     let prompt = parse(&md);
-    let tools = FixtureTools::new(
-        vec![
-            fixture_binding("echo", "echo capability", Arc::new(EchoTool)),
-            fixture_binding("nope", "failing capability", Arc::new(FailingTool)),
-        ],
-        vec!["echo".to_owned(), "nope".to_owned()],
-    );
+    let tools = FixtureTools::new(vec![
+        fixture_binding("echo", "echo capability", Arc::new(EchoTool)),
+        fixture_binding("nope", "failing capability", Arc::new(FailingTool)),
+    ]);
     let (state, _fixture) = loop_context(&prompt, tools);
     let ctx = state.clone();
     let mut run = Run::from_state(state);
@@ -253,6 +255,7 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
               models.infer('linger')\n\
               return 'cancelled'\n```\n\n\
               ## Child\n\n```lua\n\
+              tools.offer('tools/echo')\n\
               local msgs = messages.new()\n\
               msgs:user('go')\n\
               models.loop(msgs)\n\

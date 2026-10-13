@@ -8,7 +8,7 @@
 //! paths, and handle calls in `models_loop`.
 
 use super::models_loop::{
-    always_tool, echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
+    bound_tool, echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
 };
 use super::*;
 use crate::lua::ToolSet;
@@ -31,9 +31,10 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      return msgs[#msgs].content";
 
 /// The tool set with the always-failing fixture bound as `echo` (the name
-/// the scripted tool-call replies ask for) and in scope.
+/// the scripted tool-call replies ask for); a section offers it as
+/// `tools/failing`.
 fn failing_echo_tools() -> FixtureTools {
-    always_tool("echo", Arc::new(FailingTool))
+    bound_tool("echo", Arc::new(FailingTool))
 }
 
 /// A never-converging model: `rounds` tool-call replies for `echo`, each
@@ -53,7 +54,10 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // trips against a never-converging model, then exhaust.
     let cap = 3;
     let gateway = ScriptedChat::new(never_converging_script(cap));
-    let prompt = parse(&capped_loop_prompt(cap, LOOP_TO_TEXT));
+    let prompt = parse(&capped_loop_prompt(
+        cap,
+        &format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"),
+    ));
     let (ctx, fixture) = loop_context(&prompt, echo_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -75,7 +79,8 @@ async fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges
     let gateway = ScriptedChat::new(never_converging_script(2));
     let md = capped_loop_prompt(
         2,
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('loop forever')\n\
          local ok, err = pcall(models.loop, msgs)\n\
          assert(not ok, 'the cap raises')\n\
@@ -99,7 +104,9 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     // A prompt declaring no budget runs the limits default: exactly
     // `DEFAULT_MAX_TOOL_ITERATIONS` round trips.
     let gateway = ScriptedChat::new(never_converging_script(DEFAULT_MAX_TOOL_ITERATIONS));
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
+    )));
     let (ctx, fixture) = loop_context(&prompt, echo_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -137,7 +144,9 @@ async fn tool_loop_dispatches_then_returns_text() {
     // One tool-call round and one text round: the terminal text is the
     // list's last record and the run's turn counter advanced twice.
     let gateway = ScriptedChat::new(echo_then_text_script());
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
+    )));
     let (ctx, fixture) = loop_context(&prompt, echo_tools());
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -161,7 +170,8 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
         resp_text("final answer"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/failing')\n\
+         local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
          models.loop(msgs)\n\
          assert(msgs[3].role == 'tool' and msgs[3].tool_call_id == 'call_x', 'the failure is the call record')\n\
@@ -219,7 +229,10 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
     // exactly `max_tool_iterations`.
     let cap = 3;
     let gateway = ScriptedChat::new(never_converging_script(cap));
-    let prompt = parse(&capped_loop_prompt(cap, LOOP_TO_TEXT));
+    let prompt = parse(&capped_loop_prompt(
+        cap,
+        &format!("tools.offer('tools/failing')\n{LOOP_TO_TEXT}"),
+    ));
     let (ctx, fixture) = loop_context(&prompt, failing_echo_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -301,8 +314,10 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
 #[tokio::test(flavor = "current_thread")]
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let gateway = ScriptedChat::new(echo_then_text_script());
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, always_tool("echo", Arc::new(UntrustedEchoTool)));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
+    )));
+    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(UntrustedEchoTool)));
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
@@ -334,8 +349,10 @@ async fn untrusted_nonce_is_stable_across_rounds() {
         resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
         resp_text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, always_tool("echo", Arc::new(UntrustedEchoTool)));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
+    )));
+    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(UntrustedEchoTool)));
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
@@ -356,7 +373,9 @@ async fn untrusted_nonce_is_stable_across_rounds() {
 #[tokio::test(flavor = "current_thread")]
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let gateway = ScriptedChat::new(echo_then_text_script());
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
+    )));
     let (ctx, fixture) = loop_context(&prompt, echo_tools());
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
@@ -380,8 +399,10 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     use std::time::{Duration, Instant};
 
     let gateway = ScriptedChat::new(echo_then_text_script());
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, always_tool("echo", Arc::new(SlowTool)));
+    let prompt = parse(&loop_prompt(&format!(
+        "tools.offer('test/tools/slow')\n{LOOP_TO_TEXT}"
+    )));
+    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(SlowTool)));
 
     let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();

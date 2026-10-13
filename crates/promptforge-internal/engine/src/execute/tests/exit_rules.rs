@@ -168,7 +168,7 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      models.loop(msgs)\n\
      return #msgs .. '|' .. msgs[#msgs].content";
 
-/// Drives `LOOP_TO_TEXT` against `replies` with `tools` in scope, returning
+/// Drives `LOOP_TO_TEXT` against `replies` with `tools` offered, returning
 /// the section's result, the loop's observation sequence, and the run's
 /// turn count.
 async fn drive_loop(
@@ -176,7 +176,11 @@ async fn drive_loop(
     tools: impl Into<FixtureTools>,
 ) -> (Result<String>, Vec<String>, u32) {
     let gateway = ScriptedChat::new(replies);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let tools = tools.into();
+    let prompt = parse(&loop_prompt(&format!(
+        "{}{LOOP_TO_TEXT}",
+        tools.offer_lines()
+    )));
     let recorder = Arc::new(Recorder::default());
     let (ctx, fixture) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);

@@ -146,7 +146,8 @@ fn rich_text_reply(content: &str) -> ScriptedReply {
 async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     let gateway = ScriptedChat::new(vec![rich_text_reply("final answer")]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('hello')\n\
          models.loop(msgs)\n\
          assert(#msgs == 2, 'the loop appends the reply')\n\
@@ -197,7 +198,8 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('call the tool')\n\
          models.loop(msgs)\n\
          local call = msgs[2].tool_calls[1]\n\
@@ -251,7 +253,8 @@ async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one
         resp_text("done"),
     ]);
     let md = loop_prompt(
-        "tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+        "tools.offer('tools/echo')\n\
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
            return 'grabbed ' .. args.value\n\
          end)\n\
          local msgs = messages.new()\n\
@@ -286,7 +289,8 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     // loop's exact message, and typed when it escapes the section.
     let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('go rogue')\n\
          local ok, err = pcall(models.loop, msgs)\n\
          assert(not ok, 'an out-of-scope call raises')\n\
@@ -318,7 +322,8 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
 
     let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('go rogue')\n\
          models.loop(msgs)\n\
          return 'unreachable'",

@@ -24,7 +24,7 @@ fn discovery_lists_sorted_markdown_stems_and_tolerates_a_missing_dir() {
 }
 
 #[test]
-fn the_built_in_chat_is_always_offered_and_a_dir_file_shadows_its_source() {
+fn the_built_in_chat_is_always_listed_and_a_dir_file_shadows_its_source() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     assert_eq!(
         discover_agents(dir.path()),

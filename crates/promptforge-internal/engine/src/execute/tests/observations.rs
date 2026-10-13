@@ -335,9 +335,8 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
     let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
-         tools.always_offer('tools/echo')\n\
          models.default('writer')\n```\n\n\
-         ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
+         ## Gather\n\n```lua\ntools.offer('tools/echo')\nstore.write('state.txt', 'before')\n```\n\n\
          Use the echo tool.\n\n\
          ```lua\n\
          local text = models.infer(prose)\n\
@@ -412,7 +411,8 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
 
     let gateway = ScriptedChat::new(echo_then_text_script());
     let md = loop_prompt(
-        "local msgs = messages.new()\n\
+        "tools.offer('tools/echo')\n\
+         local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",

@@ -16,7 +16,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 #[path = "models_loop_contract-rounds.rs"]
 mod rounds;
 
-/// Drives `md` with `tools` in scope against `gateway`, reporting to
+/// Drives `md` with `tools` bound against `gateway`, reporting to
 /// `observer`, and returns the section's result.
 async fn drive_observed(
     md: &str,
@@ -87,7 +87,8 @@ async fn a_light_userdata_compactor_is_named_userdata_as_lua_names_it() {
     // which Lua's `type()` calls `userdata`.
     let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
-        "local null = tools.call('tools/structured', {}).none\n\
+        "tools.offer('tools/structured')\n\
+         local null = tools.call('tools/structured', {}).none\n\
          local other = models.get('other')\n\
          local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -104,7 +105,7 @@ async fn a_light_userdata_compactor_is_named_userdata_as_lua_names_it() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let tools = FixtureTools::new(vec![binding], vec!["structured".to_owned()]);
+    let tools = FixtureTools::new(vec![binding]);
     let out = drive(&md, tools, &gateway)
         .await
         .expect("the refusal is pcall-able");

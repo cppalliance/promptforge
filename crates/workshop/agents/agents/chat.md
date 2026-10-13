@@ -20,12 +20,12 @@ a selection change takes effect on the next run.
 
 ```lua
 models.default("chat")
-tools.always_offer({"web/fetch", "web/search"})
 ```
 
 ## Conversation
 
 ```lua
+plugins.offer("web")
 tools.offer(tools.extras())
 local history = messages.new()
 while true do
