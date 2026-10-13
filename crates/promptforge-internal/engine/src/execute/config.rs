@@ -1,12 +1,13 @@
 //! Per-run context and resource limits: [`RunContext`] and [`RunLimits`].
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[path = "config-limits.rs"]
 mod limits;
 
 use promptforge_types::emitter::DebugMode;
-use promptforge_types::plugins::Prelude;
+use promptforge_types::plugins::{PluginId, Prelude};
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
@@ -23,8 +24,9 @@ use super::bindings::ModelBindings;
 ///
 /// The caller builds a context with `new` and the builder methods. The
 /// prepare step of an [`Environment`](super::Environment) then adds the
-/// tool catalog, the Plugin preludes, and the model bindings. The Engine
-/// owns the context for the run. Each context belongs to exactly one run.
+/// tool catalog, the Plugin roster, the Plugin preludes, and the model
+/// bindings. The Engine owns the context for the run. Each context belongs
+/// to exactly one run.
 ///
 /// The context holds only the Engine's input. The observer, client, tool
 /// implementations, broker, and capture belong to the caller. The Engine
@@ -93,6 +95,13 @@ pub struct RunContext {
     /// [`Environment::prepare`](super::Environment::prepare); the run's
     /// offering draws every tool from it.
     pub(super) tools: ToolCatalog,
+    /// The run's roster: every installed Plugin the caller reports, by
+    /// name, with no reason when it can serve the run and the reason when
+    /// it can't. Written by
+    /// [`Environment::prepare`](super::Environment::prepare) from the
+    /// environment's roster; empty on a caller-built context that was
+    /// never prepared.
+    pub(super) roster: BTreeMap<PluginId, Option<String>>,
     /// The run's Plugin preludes, in declaration order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
     /// environment's list; every section VM installs each one before
@@ -132,6 +141,7 @@ impl RunContext {
             model: None,
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
+            roster: BTreeMap::new(),
             preludes: Vec::new(),
         }
     }
@@ -343,6 +353,7 @@ impl fmt::Debug for RunContext {
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)
+            .field("roster", &self.roster)
             .field(
                 "preludes",
                 &self

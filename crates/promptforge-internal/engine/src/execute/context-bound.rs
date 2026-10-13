@@ -14,14 +14,15 @@ use crate::parser::Prompt;
 
 use super::super::config::RunContext;
 
-/// Builds the run's shared tool set: the frontmatter's declared plugins,
-/// and every catalog tool the run can offer bound with the tool's
-/// descriptor data (its schema, description, and output kind), so run-time
-/// execution never consults the catalog again and never holds an
-/// implementation.
+/// Builds the run's shared tool set: the frontmatter's declared Plugins,
+/// the context's roster, and every catalog tool the run can offer bound
+/// with the tool's descriptor data (its schema, description, and output
+/// kind), so run-time execution never consults the catalog again and never
+/// holds an implementation.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
     ToolSet {
         declared: prompt.frontmatter().plugins().to_vec(),
+        roster: ctx.roster.clone(),
         offered: offered_bindings(ctx),
     }
 }

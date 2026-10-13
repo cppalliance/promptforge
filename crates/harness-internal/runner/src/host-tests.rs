@@ -275,6 +275,35 @@ fn an_installed_native_adds_no_catalog_tool_and_no_prelude() {
 }
 
 #[test]
+fn the_roster_lists_the_native_stub_as_usable_and_each_plugin_that_cannot_serve_with_its_reason() {
+    let needy = package("acme/needy").needs(NEEDS_SESSION);
+    let mut host = host(&[package("acme/kit"), needy]);
+    host.install("promptforge/subagents", None, Value::Null)
+        .unwrap();
+    host.install("acme/kit", None, Value::Null).unwrap();
+    host.install(needy.name, None, Value::Null).unwrap();
+    let failures = BTreeMap::from([(name("kit"), "the kit server is down".to_owned())]);
+    let (run, _env, _requirements) = host.begin_run(HostServices::new(), failures, &prompt(""));
+    let (usable, unavailable) = run.roster();
+    assert_eq!(
+        usable,
+        [name("subagents")],
+        "the undeclared stub with no tools is on the roster"
+    );
+    assert_eq!(
+        unavailable,
+        [
+            UnavailablePlugin::new(name("kit"), "the kit server is down"),
+            UnavailablePlugin::new(
+                name("needy"),
+                "the run lacks the services it needs: tests/session"
+            ),
+        ],
+        "a failed ready and an unmet need each carry their reason"
+    );
+}
+
+#[test]
 fn begin_run_drops_a_tool_outside_its_plugin_and_a_repeated_id() {
     let mut host = host(&[package("acme/kit")]);
     let config = json!([tool("kit/good"), tool("other/escape"), tool("kit/good")]);

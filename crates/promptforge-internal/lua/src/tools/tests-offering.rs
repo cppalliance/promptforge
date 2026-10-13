@@ -24,6 +24,7 @@ fn offering_set() -> ToolSet {
             ToolBinding::from_descriptor("web_fetch", &tool_at("web/fetch")),
             ToolBinding::from_descriptor("web_search", &tool_at("web/search")),
         ],
+        ..ToolSet::default()
     }
 }
 

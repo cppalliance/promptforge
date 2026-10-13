@@ -1,11 +1,12 @@
 //! Readiness at preparation: the Harness waits for every built Plugin's
 //! `ready` before the run's snapshot, asking each one before any answers,
 //! so a Plugin still starting has its tools in the run once it is ready, a
-//! Plugin whose `ready` fails is unavailable to that run, a cancel during
-//! the wait ends the run as cancelled in both the report and the record, a
-//! cancel that lands while a refusal is recorded leaves the report holding
-//! what the record holds, and a Plugin that keeps the default `ready`
-//! serves as before.
+//! Plugin whose `ready` fails is unavailable to that run and offering it
+//! raises its reason, an installed Plugin with no tools still reaches the
+//! prompt's Lua, a cancel during the wait ends the run as cancelled in both
+//! the report and the record, a cancel that lands while a refusal is
+//! recorded leaves the report holding what the record holds, and a Plugin
+//! that keeps the default `ready` serves as before.
 
 use super::*;
 
@@ -297,6 +298,41 @@ async fn an_undeclared_plugin_whose_ready_fails_leaves_the_run_going_without_its
         completed(drive_over(COUNTS_OFFERED, host).await),
         "0 offered",
         "the failed Plugin's listed tool stays out of the run's offering"
+    );
+}
+
+#[tokio::test]
+async fn an_undeclared_plugin_whose_ready_fails_raises_its_reason_when_the_prompt_offers_it() {
+    let offers_slow = "---\nname: offers-slow\ndescription: d\npromptforge: 0\n---\n\n\
+        # Title\n\n## Only\n\n```lua\nplugins.offer('slow')\nreturn 'offered'\n```\n";
+    let (host, _moves, _startup) = slow_host(Phase::Failed("the fixture server is down"));
+    let outcome = drive_over(offers_slow, host).await;
+    let RunOutcome::Failed { message, .. } = &outcome else {
+        panic!("offering an unavailable Plugin fails the run: {outcome:?}");
+    };
+    assert!(
+        message.contains(
+            "plugins.offer: the slow Plugin is unavailable in this run: \
+             the fixture server is down"
+        ),
+        "the failure names the Plugin and its ready failure: {message}"
+    );
+}
+
+#[tokio::test]
+async fn an_undeclared_installed_native_with_no_tools_has_an_object_the_prompt_can_offer() {
+    let reads_stub = "---\nname: reads-stub\ndescription: d\npromptforge: 0\n---\n\n\
+        # Title\n\n## Only\n\n```lua\n\
+        local stub = plugins.get('subagents')\n\
+        plugins.offer('subagents')\n\
+        return stub.name .. ':' .. #stub.tools\n```\n";
+    let mut host = HostContext::new(registry(&[]), HostServices::new());
+    host.install("promptforge/subagents", None, Value::Null)
+        .unwrap();
+    assert_eq!(
+        completed(drive_over(reads_stub, host).await),
+        "subagents:0",
+        "the stub is on the roster, so Lua sees it and offers it"
     );
 }
 

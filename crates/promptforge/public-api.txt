@@ -388,6 +388,7 @@ pub enum promptforge::vfs::Op
 pub enum promptforge::vfs::Verdict
 pub enum promptforge::vfs::VfsOutcome
 pub fn promptforge::Environment::new() -> promptforge::Environment
+pub fn promptforge::Environment::plugins(self, usable: alloc::vec::Vec<promptforge::plugins::PluginId>, unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>) -> promptforge::Environment
 pub fn promptforge::Environment::preludes(self, preludes: alloc::vec::Vec<promptforge::plugins::Prelude>) -> promptforge::Environment
 pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
 pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment

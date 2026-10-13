@@ -76,6 +76,7 @@ fn offering() -> ToolSet {
             bind("gh_search", "gh/search"),
             bind("web_search", "web/search"),
         ],
+        ..ToolSet::default()
     }
 }
 

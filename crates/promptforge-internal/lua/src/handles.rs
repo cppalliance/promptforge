@@ -1,5 +1,7 @@
 //! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua, and the section text a prompt read sees.
 
+use std::collections::BTreeMap;
+
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
@@ -179,13 +181,17 @@ pub struct LibraryBlock {
     pub prose: String,
 }
 
-/// The run's tool set: the declared plugins and every catalog tool the run
-/// can offer. Nothing changes it during a run, so the run and every
-/// section VM share one `Arc<ToolSet>`.
+/// The run's tool set: the declared Plugins, the run's roster, and every
+/// catalog tool the run can offer. Nothing changes it during a run, so the
+/// run and every section VM share one `Arc<ToolSet>`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
-    /// The plugins the frontmatter declares, in declaration order.
+    /// The Plugins the frontmatter declares, in declaration order.
     pub declared: Vec<PluginId>,
+    /// Every installed Plugin the caller reports, declared or not, with or
+    /// without tools: no reason when it can serve the run, and the reason,
+    /// written for the model, when it can't.
+    pub roster: BTreeMap<PluginId, Option<String>>,
     /// Every catalog tool the run can offer, in id order, each bound under
     /// its wire name.
     pub offered: Vec<ToolBinding>,

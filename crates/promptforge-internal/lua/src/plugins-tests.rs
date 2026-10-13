@@ -1,6 +1,7 @@
 //! Tests for the `plugins` table: the `required` and `extras` lists,
-//! `plugins.get`, the shared Plugin objects and their `tools`, and a tool
-//! object's `plugin` getter.
+//! `plugins.get`, the shared Plugin objects and their `tools`, a tool
+//! object's `plugin` getter, and the roster's usable and unavailable
+//! Plugins.
 
 use std::sync::{Arc, Mutex};
 
@@ -41,6 +42,25 @@ fn plugin_set() -> ToolSet {
             bind("web/fetch"),
             bind("web/search"),
         ],
+        ..ToolSet::default()
+    }
+}
+
+/// [`plugin_set`] with a roster: `web` and `gh`, which also offer tools,
+/// and `subagents`, which offers none, can serve the run, and `mcp`
+/// can't.
+fn roster_set() -> ToolSet {
+    let plugin = |name: &str| PluginId::parse(name).expect("valid Plugin");
+    ToolSet {
+        roster: [
+            (plugin("gh"), None),
+            (plugin("mcp"), Some("the mcp server is down".to_owned())),
+            (plugin("subagents"), None),
+            (plugin("web"), None),
+        ]
+        .into_iter()
+        .collect(),
+        ..plugin_set()
     }
 }
 
@@ -327,5 +347,69 @@ fn the_scope_lists_section_tools_then_each_offered_plugins_tools_each_name_once(
         scoped(&set, &runtime),
         before,
         "a Plugin with no tools adds nothing"
+    );
+}
+
+#[test]
+fn a_usable_roster_plugin_with_no_tools_has_an_object_and_is_an_extra_in_name_order() {
+    let (lua, set, runtime) = lua_over(roster_set());
+    let result: (String, String, String, i64) = lua
+        .load(format!(
+            "{NAMES}\
+             plugins.offer('subagents')\n\
+             local stub = plugins.get('subagents')\n\
+             return names(plugins.required()), names(plugins.extras()), stub.name, #stub.tools"
+        ))
+        .eval()
+        .expect("the probe evaluates");
+    assert_eq!(
+        result,
+        (
+            "mail,web".to_owned(),
+            "alpha,gh,subagents".to_owned(),
+            "subagents".to_owned(),
+            0
+        ),
+        "a usable Plugin with no tools is an extra once, beside the ones with tools"
+    );
+    assert_eq!(offered_plugins(&runtime), ["subagents"]);
+    assert!(
+        scoped(&set, &runtime).is_empty(),
+        "offering a Plugin with no tools adds nothing to a round"
+    );
+}
+
+#[test]
+fn an_unavailable_roster_plugin_reads_nil_stays_out_of_the_lists_and_offer_raises_its_reason() {
+    let (lua, _, runtime) = lua_over(roster_set());
+    let listed: (bool, String, String) = lua
+        .load(format!(
+            "{NAMES}\
+             return plugins.get('mcp') == nil, names(plugins.required()), \
+               names(plugins.extras())"
+        ))
+        .eval()
+        .expect("the probe evaluates");
+    assert_eq!(
+        listed,
+        (true, "mail,web".to_owned(), "alpha,gh,subagents".to_owned()),
+        "an unavailable Plugin has no object and is in neither list"
+    );
+    let unavailable = "plugins.offer: the mcp Plugin is unavailable in this run: \
+                       the mcp server is down";
+    for call in ["plugins.offer('mcp')", "plugins.offer({ 'web', 'mcp' })"] {
+        let error: String = lua
+            .load(format!(
+                "local ok, err = pcall(function() {call} end)\n\
+                 assert(not ok, 'the call is refused')\n\
+                 return tostring(err)"
+            ))
+            .eval()
+            .unwrap_or_else(|error| panic!("{call}: {error}"));
+        assert!(error.contains(unavailable), "{call}: {error}");
+    }
+    assert!(
+        offered_plugins(&runtime).is_empty(),
+        "a refused call records no Plugin"
     );
 }

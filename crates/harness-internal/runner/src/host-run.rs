@@ -108,6 +108,31 @@ impl HostRunContext {
         })
     }
 
+    /// The run's roster: the names of the usable Plugins, declared by the
+    /// prompt or not, with or without tools, and an entry with the reason
+    /// for each one that can't serve, both in name order.
+    pub(super) fn roster(&self) -> (Vec<PluginId>, Vec<UnavailablePlugin>) {
+        let mut usable = Vec::new();
+        let mut unavailable = Vec::new();
+        for (name, plugin) in &self.plugins {
+            match plugin {
+                RunPlugin::Usable { .. } => usable.push(name.clone()),
+                RunPlugin::Unavailable(reason) => {
+                    unavailable.push(UnavailablePlugin::new(name.clone(), reason.clone()));
+                }
+                RunPlugin::NeedsUnmet(unmet) => {
+                    let services: Vec<String> = unmet.iter().map(ToString::to_string).collect();
+                    let reason = format!(
+                        "the run lacks the services it needs: {}",
+                        services.join(", ")
+                    );
+                    unavailable.push(UnavailablePlugin::new(name.clone(), reason));
+                }
+            }
+        }
+        (usable, unavailable)
+    }
+
     /// The preludes of the usable Plugins `prompt` declares, in
     /// declaration order, each under the Plugin's installed name.
     pub(super) fn preludes(&self, prompt: &Prompt) -> Vec<Prelude> {

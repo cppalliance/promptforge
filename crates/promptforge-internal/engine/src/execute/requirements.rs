@@ -147,11 +147,16 @@ fn push_new<T: PartialEq>(entries: &mut Vec<T>, incoming: Vec<T>) {
     }
 }
 
-/// A required Plugin that is installed but cannot serve, and why.
+/// An installed Plugin that cannot serve the run, and why.
+///
+/// The caller's Plugin report lists each one the prompt declares, and the
+/// run's roster, set with
+/// [`Environment::plugins`](super::Environment::plugins), lists every one,
+/// declared or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct UnavailablePlugin {
-    /// The installed, required Plugin.
+    /// The installed Plugin.
     pub plugin: PluginId,
     /// Why it cannot serve, written for the model that reads the refusal.
     pub reason: String,
@@ -161,7 +166,7 @@ impl UnavailablePlugin {
     /// Creates an entry stating that `plugin` cannot serve, because of
     /// `reason`.
     ///
-    /// Only the caller's Plugin report holds these.
+    /// Only the caller builds these, for its Plugin report and its roster.
     #[must_use]
     pub fn new(plugin: PluginId, reason: impl Into<String>) -> UnavailablePlugin {
         UnavailablePlugin {

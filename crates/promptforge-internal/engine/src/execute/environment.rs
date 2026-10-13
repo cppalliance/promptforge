@@ -1,21 +1,23 @@
 //! The deployment environment: [`Environment`].
 
+use std::collections::BTreeMap;
 use std::fmt;
 
-use promptforge_types::plugins::Prelude;
+use promptforge_types::plugins::{PluginId, Prelude};
 
 use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
 
 use super::config::RunContext;
 use super::fill::fill_model_bindings;
-use super::requirements::Requirements;
+use super::requirements::{Requirements, UnavailablePlugin};
 
-/// The tools and Plugin preludes that a deployment makes available to
-/// its runs.
+/// The tools, Plugin roster, and Plugin preludes that a deployment makes
+/// available to its runs.
 ///
-/// An environment holds the catalog of tools the caller has made
-/// available and the Lua preludes of the Plugins the prompt declares.
+/// An environment holds the catalog of tools the caller has made available,
+/// the roster of installed Plugins with the reason each one that can't
+/// serve gives, and the Lua preludes of the Plugins the prompt declares.
 /// It is safe to share across concurrent runs (it is `Sync`). Everything
 /// that can change per run sits on the [`RunContext`]. The catalog holds
 /// tool descriptors only. The tool implementations stay with the caller,
@@ -31,6 +33,10 @@ pub struct Environment {
     /// Plugin the caller can serve, declared by the prompt or not. The
     /// default is empty.
     tools: ToolCatalog,
+    /// Every installed Plugin the caller reports, by name: no reason when
+    /// it can serve the run, and the reason, written for the model, when it
+    /// can't. The default is empty.
+    roster: BTreeMap<PluginId, Option<String>>,
     /// The Lua source of the Plugins the prompt declares, in declaration
     /// order: every section VM of a run installs each one before `require`.
     /// The default is empty.
@@ -38,12 +44,13 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Builds the default environment: an empty catalog and an empty
-    /// prelude list.
+    /// Builds the default environment: an empty catalog, an empty roster,
+    /// and an empty prelude list.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
             tools: ToolCatalog::default(),
+            roster: BTreeMap::new(),
             preludes: Vec::new(),
         }
     }
@@ -58,6 +65,33 @@ impl Environment {
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
         self.tools = tools;
+        self
+    }
+
+    /// Sets the run's roster: every installed Plugin that can serve the
+    /// run, declared by the prompt or not, and every installed Plugin that
+    /// can't, with the reason.
+    ///
+    /// [`prepare`](Environment::prepare) copies the roster onto the
+    /// context. Each usable Plugin gets an object in the run's Lua, with or
+    /// without tools. An unavailable one gets none, and offering it raises
+    /// its reason. Without a roster, the run's Lua sees the declared
+    /// Plugins and the Plugins with a tool in the catalog.
+    #[must_use]
+    pub fn plugins(
+        mut self,
+        usable: Vec<PluginId>,
+        unavailable: Vec<UnavailablePlugin>,
+    ) -> Environment {
+        self.roster = usable
+            .into_iter()
+            .map(|plugin| (plugin, None))
+            .chain(
+                unavailable
+                    .into_iter()
+                    .map(|entry| (entry.plugin, Some(entry.reason))),
+            )
+            .collect();
         self
     }
 
@@ -86,13 +120,13 @@ impl Environment {
     /// Prepares the caller's context to run `prompt` and reports what the
     /// caller must still satisfy.
     ///
-    /// `prepare` copies the catalog and the preludes onto `ctx` and binds
-    /// the prompt's model roles. It returns the enriched context together
-    /// with the report. It uses the context's filesystem as given, because
-    /// the caller builds the run's whole filesystem, including its real
-    /// directories and the declared store. The caller checks before
-    /// `prepare` that each Plugin the prompt declares can serve, and merges
-    /// that report into the one `prepare` returns.
+    /// `prepare` copies the catalog, the roster, and the preludes onto
+    /// `ctx` and binds the prompt's model roles. It returns the enriched
+    /// context together with the report. It uses the context's filesystem
+    /// as given, because the caller builds the run's whole filesystem,
+    /// including its real directories and the declared store. The caller
+    /// checks before `prepare` that each Plugin the prompt declares can
+    /// serve, and merges that report into the one `prepare` returns.
     ///
     /// Every declared model role binds to the context's current model.
     /// `prepare` then checks each role's hard keywords (`thinking`,
@@ -108,6 +142,7 @@ impl Environment {
         let mut ctx = ctx;
         let mut requirements = Requirements::default();
         ctx.tools = self.tools.clone();
+        ctx.roster.clone_from(&self.roster);
         ctx.preludes.clone_from(&self.preludes);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
@@ -124,6 +159,7 @@ impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment")
             .field("tools", &self.tools)
+            .field("roster", &self.roster)
             .field(
                 "preludes",
                 &self

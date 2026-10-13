@@ -178,9 +178,11 @@ impl HostContext {
     /// `failures` holds the reason of each Plugin whose `ready` failed
     /// before this run, which the run treats as unavailable. The
     /// environment's catalog holds every usable Plugin's tools, declared
-    /// or not, and its preludes are the declared, usable Plugins', in
-    /// declaration order. The requirements cover every Plugin the prompt
-    /// declares. The returned context performs the run's tool calls.
+    /// or not, its roster names every installed Plugin with the reason of
+    /// each one that can't serve, and its preludes are the declared, usable
+    /// Plugins', in declaration order. The requirements cover every Plugin
+    /// the prompt declares. The returned context performs the run's tool
+    /// calls.
     pub(crate) fn begin_run(
         &self,
         services: HostServices,
@@ -194,8 +196,10 @@ impl HostContext {
             services,
             failures,
         );
+        let (usable, unavailable) = run.roster();
         let env = Environment::new()
             .tools(run.catalog())
+            .plugins(usable, unavailable)
             .preludes(run.preludes(prompt));
         let requirements = run.requirements(prompt);
         (run, env, requirements)

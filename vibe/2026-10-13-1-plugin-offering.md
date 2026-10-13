@@ -625,7 +625,7 @@ Test cases:
 
 <step-5>
 
-### Step 5: Give Lua an object for every usable installed Plugin
+### Step 5: Give Lua an object for every usable installed Plugin [completed]
 
 - Component: Plugin roster
 - Tests:
