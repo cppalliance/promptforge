@@ -86,12 +86,12 @@ async fn run_infer_round(reply: ScriptedReply) -> (String, Vec<String>) {
     let gateway = ScriptedChat::new(vec![reply]);
     let recorder = Arc::new(InferRoundRecorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         return models.get('writer'):infer('say hello')\n\
-        ```\n";
+        ```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,

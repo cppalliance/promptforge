@@ -1,7 +1,7 @@
 //! What a fanout arm runs with and hands back: a pre-cancelled fanout, an
-//! arm infer with no model binding, the shared replay seeing `item`, jumps
-//! from an arm into child walks, a hash collection in sorted key order, and
-//! sealed results.
+//! arm infer with no model binding, a library the arm requires seeing
+//! `item`, jumps from an arm into child walks, a hash collection in sorted
+//! key order, and sealed results.
 
 use super::*;
 
@@ -70,17 +70,12 @@ async fn model_required_when_arm_infer_has_no_binding() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn the_shared_replay_sees_the_arm_item() {
-    // The `item` global installs before `replay_shared`, so the shared
-    // library's top-level code may read `item`; moving the install after
-    // the replay would capture nil in the arm and fail this test. The
-    // context holds the prompt's real compiled shared library, not the
-    // empty stand-in the other scheduler tests use.
+async fn a_library_required_in_an_arm_sees_the_arm_item() {
+    // The library's top-level code runs in the arm's environment, so it
+    // reads the arm's `item`; a load that ran before the arm installs
+    // `item`, or in an environment of its own, would capture nil.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
-        ```lua shared\n\
-        captured_by_shared = item\n\
-        ```\n\n\
         ## Parent\n\n\
         ```lua\n\
         local r = tasks.fanout('### Worker', {'alpha'})\n\
@@ -88,27 +83,23 @@ async fn the_shared_replay_sees_the_arm_item() {
         ```\n\n\
         ### Worker\n\n\
         ```lua\n\
-        return tostring(captured_by_shared) .. '|' .. tostring(item)\n\
+        require '## capture'\n\
+        return tostring(captured_by_library) .. '|' .. tostring(item)\n\
+        ```\n\n\
+        ## capture\n\n\
+        ```lua\n\
+        captured_by_library = item\n\
         ```\n";
     let prompt = parse(md);
-    let shared = promptforge_parser::detail::replay(&prompt)
-        .cloned()
-        .expect("the prompt's shared chunk compiles at parse");
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        shared,
-        &test_context(EXECUTION),
-    );
-    let out = TokioDriver::new(&ctx, RunFixture::new(), None)
+    let (ctx, fixture) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
         .expect("the arm must succeed");
 
     assert_eq!(
         out, "alpha|alpha",
-        "the shared chunk captured the item before the worker ran"
+        "the library captured the arm's item while it loaded"
     );
 }
 

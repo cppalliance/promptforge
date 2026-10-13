@@ -469,7 +469,7 @@ Make `require` available in every section's Lua environment, the H1 included, an
 
 <step-6>
 
-### Step 6: Move tests and fixtures to `require`
+### Step 6: Move tests and fixtures to `require` [completed]
 
 - Component: `lua shared` retirement
 - Tests: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`; `node --test crates/workshop/ui/test/docs-claims.mjs`; `cargo fmt --all --check`
@@ -482,7 +482,7 @@ Move every test and fixture that uses the `lua shared` fence for some other purp
   - A test named for the replay that has a `require` counterpart is rewritten as that counterpart and renamed:
     - the shared chunk seeing a prelude global becomes a library seeing it;
     - the shared replay seeing a fanout arm's `item` becomes a library required in an arm seeing `item`;
-    - a shared replay failure in the H1 keeping its Lua kind becomes a failing library required from the H1 keeping it;
+    - a shared replay failure in the H1 keeping its Lua kind becomes a failing library required from the H1 that ends the run as `RequirementsUnmet`, with the library's message as the notice. The library runs inside the H1's chunk, and an uncaught H1 chunk error is the failed assertion (`engine/src/execute/scheduler/step.rs` lines 192-207); only the replay ran outside the chunk. Production error classification stays as it is;
     - the shared library calling Engine globals at load becomes a library doing so;
     - prompt reads in the shared library become prompt reads in a library, resolving from the calling section;
     - the shared library's `_G` metatable and prose-assignment cases become library cases;
@@ -511,7 +511,7 @@ Remove the shared replay chain, its events, and the fence, and reject the fence 
   - Remove `RunState.shared` and its read through `detail::replay` (`engine/src/execute/run.rs` lines 256-259; `engine/src/execute/context.rs` lines 89-91, 146, 178, and 377-393), `SectionVmSetup.shared`, and the `replay_shared` call in `setup_section_vm`.
   - Keep the `take_store_conflict` check after `install_preludes`: a prelude's store call while it installs still reaches the direct store closures. Update its comment and the store-shim ordering comment, which explain both by the replay.
   - Remove the empty shared library from test helpers (`tests/effects.rs`, `tests/models_loop.rs`, `tests/scheduler.rs`, `engine/src/lua/tests/globals.rs`, and others the compiler finds), and delete the tests that drive the replay directly.
-  - Update the docs that describe the replay: `execute/section_vm.rs`, `execute/section_context-construct.rs`, `execute/config.rs` line 99, `execute/environment.rs` line 71, and `engine/src/parser.rs` line 4.
+  - Update the docs that describe the replay: `execute/section_vm.rs`, `execute/section_context-construct.rs`, `execute/config.rs` line 99, `execute/environment.rs` line 71, `engine/src/parser.rs` line 4, and the H1 error-remap comment in `execute/scheduler/step.rs` (lines 192-201), which names "the shared replay" as machinery outside the chunk without the literal `lua shared`.
 - Lua crate:
   - Remove `SectionVm::replay_shared` (`lua/src/vm/run.rs` lines 15-51) and the test helper `section_vm_with_shared` (`lua/src/tests.rs`).
   - Delete `lua/src/tests/shared_replay.rs`, moving its tests that aren't about the replay, such as `call` with a non-string target, to `tests/section_vm.rs`. Tests that used the replay to run code (`tests/section_vm.rs`, `store_reports.rs`, `store_errors.rs`, `budgets.rs`, `sandbox.rs`, `tool_scoping.rs`, `models-tests.rs`, and `globals-tests.rs`) switch to `run_chunk` or a block coroutine.

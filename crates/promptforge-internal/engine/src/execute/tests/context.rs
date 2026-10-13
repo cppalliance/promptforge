@@ -125,21 +125,8 @@ fn ensure_model_h1(md: &str) -> String {
     if source.contains("models.default") || source.contains("models.bind") {
         return declare_writer(&source);
     }
-    let source = declare_writer(&source);
-    // Positions come from the post-declaration text: the declaration
-    // insertion shifts every later index.
-    let first_section = source.find("\n\n## ");
-    let mut source = source;
-    if let Some(marker) = source.find("```lua\n")
-        && first_section.is_none_or(|section| marker < section)
-    {
-        source.replace_range(marker..marker + "```lua".len(), "```lua shared");
-        if let Some(pos) = source.find("\n\n## ") {
-            source.insert_str(pos + 2, MODEL_DEFAULT_H1);
-        }
-        return source;
-    }
-    if let Some(pos) = first_section {
+    let mut source = declare_writer(&source);
+    if let Some(pos) = source.find("\n\n## ") {
         source.insert_str(pos + 2, MODEL_DEFAULT_H1);
         return source;
     }
@@ -161,15 +148,7 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
 // resolver argument would imply a resolution path the helper does not
 // exercise. The run offers every tool the fixture Plugin contributes.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
-    let mut live_source = md.to_owned();
-    if let Some(marker) = live_source.find("```lua shared\n")
-        && live_source
-            .find("\n\n## ")
-            .is_none_or(|section| marker < section)
-    {
-        live_source.replace_range(marker..marker + "```lua shared".len(), "```lua");
-    }
-    let source = ensure_model_h1(&live_source);
+    let source = ensure_model_h1(md);
     TestPrompt {
         prompt: parse(&source),
         models: if source.contains("models.") {

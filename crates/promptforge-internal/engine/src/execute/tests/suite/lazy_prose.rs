@@ -224,25 +224,27 @@ return 'ok'\n\
 }
 
 #[tokio::test]
-async fn lazy_prose_composes_with_a_shared_library_metatable() {
-    // A shared library's `_G` metatable keeps working after the prose
-    // guard installs over it: its `__newindex` still captures ordinary
-    // globals, and `prose` stays read-only and lazy.
+async fn lazy_prose_composes_with_a_library_metatable() {
+    // A library's `_G` metatable keeps working beside the prose guard:
+    // its `__newindex` still captures ordinary globals, and `prose` stays
+    // read-only and lazy.
     let md = prose_prompt!(
         "# T\n\n\
-```lua shared\n\
-captured = {}\n\
-setmetatable(_G, { __newindex = function(_, k, v) captured[k] = v end })\n\
-```\n\n\
 ## Only\n\n\
 Hello {{ var.word }}.\n\n\
 ```lua\n\
+require '## capture'\n\
 var.word = 'world'\n\
 plain = 'x'\n\
-assert(captured.plain == 'x', 'the shared __newindex still captures')\n\
+assert(captured.plain == 'x', 'the library __newindex still captures')\n\
 local ok = pcall(function() prose = 'y' end)\n\
-assert(not ok, 'prose stays read-only over a shared metatable')\n\
+assert(not ok, 'prose stays read-only over a library metatable')\n\
 return prose\n\
+```\n\n\
+## capture\n\n\
+```lua\n\
+captured = {}\n\
+setmetatable(_G, { __newindex = function(_, k, v) captured[k] = v end })\n\
 ```\n"
     );
     let out = run_offline(md).await.expect("the run succeeds");

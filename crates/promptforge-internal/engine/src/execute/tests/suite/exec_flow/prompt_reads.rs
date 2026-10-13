@@ -1,6 +1,6 @@
 //! `prompt.section` and `prompt.list`: what each returns over the caller's
-//! visible set, the only calls that raise, and the reads from H1 and the
-//! shared library.
+//! visible set, the only calls that raise, and the reads from H1 and a
+//! library.
 
 use super::*;
 
@@ -129,43 +129,47 @@ return 'ok'\n\
 }
 
 /// Both reads work in H1, whose visible set is the whole top-level slice
-/// (every top-level section and no child), and in the shared library: at
-/// load time, where each VM's replay resolves over that VM's own visible
-/// set, and from a shared function, which resolves over the visible set of
-/// whichever section calls it.
+/// (every top-level section and no child), and in a library, which reads
+/// from the calling section: at load time, where each requiring section's
+/// load resolves over that section's own visible set, and from a library
+/// function, which resolves over the visible set of whichever section
+/// calls it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prompt_reads_work_in_h1_and_the_shared_library() {
+async fn prompt_reads_work_in_h1_and_a_library() {
     let md = [
         flow_prompt!(
             "\
 # Test prompt\n\n\
-```lua shared\n\
-kids_at_load = prompt.list('### Kid')\n\
-function kid_items()\n\
-  return prompt.list('### Kid')\n\
-end\n\
-```\n\n\
 ```lua\n\
+require '## kid_reader'\n\
 assert(prompt.section('## Main') ~= nil, 'H1 sees every top-level section')\n\
 assert(prompt.section('### Kid') == nil, 'H1 sees no child')\n\
-assert(kids_at_load == nil, 'the load-time read in the H1 replay resolves over the H1 visible set')\n\
-assert(kid_items() == nil, 'a shared function reads over the H1 visible set')\n\
+assert(kids_at_load == nil, 'the load-time read in the H1 resolves over the H1 visible set')\n\
+assert(kid_items() == nil, 'a library function reads over the H1 visible set')\n\
 var.nums = table.concat(prompt.list('## Nums'), ',')\n\
 ```\n\n\
 ## Main\n\n\
 ```lua\n\
-assert(kids_at_load ~= nil, 'the load-time read in the Main replay resolves over the Main visible set')\n\
+require '## kid_reader'\n\
+assert(kids_at_load ~= nil, 'the load-time read in Main resolves over the Main visible set')\n\
 return var.nums .. '|' .. table.concat(kids_at_load, ',') .. '|' .. table.concat(kid_items(), ',')\n\
 ```\n\n"
         ),
         DOCUMENT.concat().as_str(),
+        "\n## kid_reader\n\n\
+```lua\n\
+kids_at_load = prompt.list('### Kid')\n\
+function kid_items()\n\
+  return prompt.list('### Kid')\n\
+end\n\
+```\n",
     ]
     .concat();
     let out = run_offline(&md)
         .await
-        .expect("both reads must work in H1 and the shared library");
+        .expect("both reads must work in H1 and a library");
     assert_eq!(
         out, "one,two,three|kid-one,kid-two|kid-one,kid-two",
-        "H1 reads the top-level list, and both the load-time read and the shared function read the caller's child"
+        "H1 reads the top-level list, and both the load-time read and the library function read the caller's child"
     );
 }

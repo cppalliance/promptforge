@@ -1,6 +1,6 @@
 //! How store failures reach the author and the run: caught error tables,
 //! uncaught run errors, the store view's confinement, and write conflicts
-//! from the shared library.
+//! from library code.
 
 use super::*;
 
@@ -177,18 +177,13 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
-/// The shared library replays in every section VM through the direct
-/// store closures, so its top-level write runs under each arm's own
+/// A library's top-level write runs under each requiring arm's own
 /// identity: the second arm's load meets the first's standing write
-/// claim and the run ends with a determinism violation, even though the
-/// write never yields through the scheduler.
+/// claim and the run ends with a determinism violation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_shared_library_write_across_two_arms_ends_the_run_with_determinism() {
+async fn a_library_write_across_two_arms_ends_the_run_with_determinism() {
     let md = flow_prompt!(
         "\
-```lua shared\n\
-store.write('shared.txt', 'seed')\n\
-```\n\n\
 ## Parent\n\n\
 ```lua\n\
 local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
@@ -196,12 +191,17 @@ return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\n\
+require '## seeder'\n\
 return item\n\
+```\n\n\
+## seeder\n\n\
+```lua\n\
+store.write('seeded.txt', 'seed')\n\
 ```\n"
     );
     let error = run_offline(md)
         .await
-        .expect_err("the shared library's cross-arm write must end the run");
+        .expect_err("the library's cross-arm write must end the run");
     assert_eq!(
         error.kind(),
         RunErrorKind::Determinism,
@@ -209,16 +209,12 @@ return item\n\
     );
 }
 
-/// A conflict the shared library caught with its own `pcall` still ends
-/// the run with a determinism violation: the direct closures record the
-/// conflict, and the load's setup reads it when the load returns.
+/// A conflict a library caught with its own `pcall` while loading still
+/// ends the run with a determinism violation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_shared_library_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
+async fn a_library_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
     let md = flow_prompt!(
         "\
-```lua shared\n\
-local ok = pcall(function() store.write('shared.txt', 'seed') end)\n\
-```\n\n\
 ## Parent\n\n\
 ```lua\n\
 local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
@@ -226,7 +222,12 @@ return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\n\
+require '## seeder'\n\
 return item\n\
+```\n\n\
+## seeder\n\n\
+```lua\n\
+local ok = pcall(function() store.write('seeded.txt', 'seed') end)\n\
 ```\n"
     );
     let error = run_offline(md)
@@ -239,36 +240,40 @@ return item\n\
     );
 }
 
-/// The shared library the captured-store cases load: `store.write`
-/// captured in a local at load time, reached later only through a helper.
-const CAPTURED_STORE_WRITE: &str = "\
-```lua shared\n\
+/// The library the captured-store cases require: `store.write` captured
+/// in a local at load time, reached later only through a helper.
+const CAPTURED_STORE_WRITE: &str = "\n\n\
+## notes\n\n\
+```lua\n\
 local write = store.write\n\
 function save_note(path, text)\n\
   write(path, text)\n\
 end\n\
-```\n\n";
+```\n";
 
-/// A store function the shared library captured at load time follows the
-/// load phase: called after load it yields like `store.*`, so two arms
-/// racing on one path through it end the run with a determinism violation
-/// even though each arm caught its own failure.
+/// A store function a library captured at load time yields like
+/// `store.*` when called after the load, so two arms racing on one path
+/// through it end the run with a determinism violation even though each
+/// arm caught its own failure.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_captured_store_function_conflict_caught_with_pcall_still_ends_the_run_with_determinism()
 {
     let md = [
-        flow_prompt!(""),
-        CAPTURED_STORE_WRITE,
-        "## Parent\n\n\
+        flow_prompt!(
+            "\
+## Parent\n\n\
 ```lua\n\
 local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
 return r[1].text\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\n\
+require '## notes'\n\
 pcall(save_note, 'note.txt', item)\n\
 return item\n\
-```\n",
+```"
+        ),
+        CAPTURED_STORE_WRITE,
     ]
     .concat();
     let error = run_offline(&md)
@@ -281,8 +286,8 @@ return item\n\
     );
 }
 
-/// A store function the shared library captured at load time reaches the
-/// caller as an `Effect::Vfs` when called after load, like `store.*` does.
+/// A store function a library captured at load time reaches the caller
+/// as an `Effect::Vfs` when called after load, like `store.*` does.
 #[test]
 fn a_captured_store_function_called_after_load_reaches_the_caller_as_a_store_effect() {
     use super::super::super::context::{parse, test_context};
@@ -291,13 +296,16 @@ fn a_captured_store_function_called_after_load_reaches_the_caller_as_a_store_eff
     use promptforge_lua::VfsOp;
 
     let md = [
-        flow_prompt!(""),
-        CAPTURED_STORE_WRITE,
-        "## Only\n\n\
+        flow_prompt!(
+            "\
+## Only\n\n\
 ```lua\n\
+require '## notes'\n\
 save_note('note.txt', 'kept')\n\
 return 'saved'\n\
-```\n",
+```"
+        ),
+        CAPTURED_STORE_WRITE,
     ]
     .concat();
     let run = Run::new(Arc::new(parse(&md)), "", test_context(EXECUTION));

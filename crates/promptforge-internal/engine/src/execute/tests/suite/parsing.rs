@@ -22,9 +22,9 @@ const VALID_FIXTURES: &[ValidFixture] = &[
         verify: verify_minimal,
     },
     ValidFixture {
-        name: "valid/shared-library.md",
-        source: include_str!("../../../../tests/prompts/valid/shared-library.md"),
-        verify: verify_shared_library,
+        name: "valid/require-library.md",
+        source: include_str!("../../../../tests/prompts/valid/require-library.md"),
+        verify: verify_require_library,
     },
     ValidFixture {
         name: "valid/prologue-prose-epilog.md",
@@ -61,26 +61,26 @@ fn verify_minimal(prompt: &Prompt) {
     assert!(entry.epilog().is_none());
 }
 
-fn verify_shared_library(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter().name(), "shared_library");
+fn verify_require_library(prompt: &Prompt) {
+    assert_eq!(prompt.frontmatter().name(), "require_library");
     assert_eq!(
         prompt.frontmatter().description(),
-        "Exercise an H1 shared library and nested author prose"
+        "Exercise a required library section and nested author prose"
     );
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
-    assert_eq!(prompt.title(), "Shared Library");
-    assert_eq!(
-        detail::replay(prompt).map(LuaProgram::source),
-        Some("function normalize(value)\n    return string.lower(value)\nend")
-    );
-    assert_eq!(detail::sections(prompt).len(), 2);
+    assert_eq!(prompt.title(), "Require Library");
+    assert!(detail::replay(prompt).is_none());
+    assert_eq!(detail::sections(prompt).len(), 3);
 
     let prepare = &detail::sections(prompt)[0];
     assert_eq!(prepare.name(), "Prepare");
     assert_eq!(prepare.level(), 2);
     assert_eq!(prepare.prose(), "Normalize the supplied subject.");
     assert!(prepare.prologue().is_none());
-    assert!(prepare.epilog().is_none());
+    assert_eq!(
+        prepare.epilog().map(LuaProgram::source),
+        Some("require '## helpers'\nvar.subject = normalize(args)")
+    );
     assert_eq!(prepare.children().len(), 1);
     assert_eq!(prepare.children()[0].name(), "Author note");
     assert_eq!(prepare.children()[0].level(), 3);
@@ -92,7 +92,20 @@ fn verify_shared_library(prompt: &Prompt) {
     let finish = &detail::sections(prompt)[1];
     assert_eq!(finish.name(), "Finish");
     assert_eq!(finish.prose(), "Return the normalized subject.");
+    assert_eq!(
+        finish.epilog().map(LuaProgram::source),
+        Some("require '## helpers'\nreturn normalize(var.subject)")
+    );
     assert!(finish.children().is_empty());
+
+    let helpers = &detail::sections(prompt)[2];
+    assert_eq!(helpers.name(), "helpers");
+    assert_eq!(helpers.level(), 2);
+    assert_eq!(
+        helpers.prologue().map(LuaProgram::source),
+        Some("function normalize(value)\n    return string.lower(value)\nend")
+    );
+    assert!(helpers.epilog().is_none());
 }
 
 fn verify_prologue_prose_epilog(prompt: &Prompt) {

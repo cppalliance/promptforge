@@ -1,9 +1,9 @@
 //! Plugin preludes in a run: every section VM installs the preludes
-//! handed to `Environment::preludes`, the shared chunk, fanout arms, and
-//! spawned task chains included; a prelude that fails to load or whose
-//! global collides fails the run as a Lua failure before it issues any
-//! effect; and a prelude's functions, called from a block, reach the
-//! yielding store and tool shims.
+//! handed to `Environment::preludes`, fanout arms and spawned task chains
+//! included, and the libraries a section requires see them; a prelude
+//! that fails to load or whose global collides fails the run as a Lua
+//! failure before it issues any effect; and a prelude's functions, called
+//! from a block, reach the yielding store and tool shims.
 
 use promptforge_types::plugins::{PluginId, Prelude};
 
@@ -176,30 +176,32 @@ fn a_prelude_defining_ui_or_item_collides_on_a_run_that_binds_neither() {
 }
 
 #[test]
-fn the_shared_chunk_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
+fn a_library_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Preludes\n\n\
-        ```lua shared\n\
-        local at_load = greeter.greet('shared')\n\
-        function shared_greeting() return at_load end\n\
-        ```\n\n\
         ## Main\n\n\
         ```lua\n\
+        require '## greetings'\n\
         local arms = tasks.fanout('### Arm', { 'arm' })\n\
         local t = tasks.spawn('## Child')\n\
         local _, ok, child = tasks.join_any({ t })\n\
         assert(ok, tostring(child))\n\
-        return shared_greeting() .. '|' .. arms[1].text .. '|' .. child\n\
+        return library_greeting() .. '|' .. arms[1].text .. '|' .. child\n\
         ```\n\n\
         ### Arm\n\n\
         ```lua\nreturn greeter.greet(item)\n```\n\n\
         ## Child\n\n\
-        ```lua\nreturn greeter.greet('task')\n```\n";
+        ```lua\nreturn greeter.greet('task')\n```\n\n\
+        ## greetings\n\n\
+        ```lua\n\
+        local at_load = greeter.greet('library')\n\
+        function library_greeting() return at_load end\n\
+        ```\n";
     let (result, _) = drive_recorded(prelude_run(md, vec![prelude("greeter", GREETER)]));
     assert_eq!(
         succeeded(result),
-        "hello shared|hello arm|hello task",
-        "the shared chunk reads the prelude while loading, and the arm and the task chain see it"
+        "hello library|hello arm|hello task",
+        "the library reads the prelude while loading, and the arm and the task chain see it"
     );
 }
 

@@ -284,14 +284,15 @@ This prose must not reach a model.\n\n\
 }
 
 #[tokio::test]
-async fn shared_helper_survives_prologue_model_and_epilog() {
+async fn a_required_helper_survives_prologue_model_and_epilog() {
     let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
-```lua shared\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
-## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
+## Only\n\n```lua\nrequire '## helpers'\nvar.question = decorate(args)\n```\n\n\
 Ask using {{ var.question }}.\n\n\
-```lua\nreturn decorate(models.infer(prose))\n```\n";
+```lua\nreturn decorate(models.infer(prose))\n```\n\n\
+## helpers\n\n\
+```lua\nfunction decorate(value) return '<' .. value .. '>' end\n```\n";
     let recorder = Arc::new(Recorder::default());
     let out = run(
         &bound_for_model(md),
@@ -347,6 +348,14 @@ Ask using {{ var.question }}.\n\n\
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
             ),
             ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
+            (
+                "Only".to_owned(),
+                "Lua library load started: ## helpers".to_owned(),
+            ),
+            (
+                "Only".to_owned(),
+                "Lua library load succeeded: ## helpers".to_owned(),
+            ),
             ("Only".to_owned(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_string(),),

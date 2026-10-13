@@ -1,6 +1,6 @@
 //! An author's own metatable on `_G`: it keeps working for every other
 //! global (defaults, strict errors, write hooks) in the H1 pass and in
-//! later sections, across the shared replay and across fences, while
+//! later sections, set by a required library and across fences, while
 //! `argv` and `prose` stay guarded whatever author code does to `_G`'s
 //! metatable.
 
@@ -31,14 +31,11 @@ macro_rules! args_prompt {
 }
 
 #[tokio::test]
-async fn a_shared_defaults_metatable_works_beside_frozen_argv_and_read_only_prose() {
+async fn a_library_defaults_metatable_works_beside_frozen_argv_and_read_only_prose() {
     let md = args_prompt!(
         "# T\n\n\
-```lua shared\n\
-defaults = { tone = 'friendly' }\n\
-setmetatable(_G, { __index = defaults })\n\
-```\n\n\
 ```lua\n\
+require '## defaults'\n\
 assert(tone == 'friendly', 'H1 reads the default')\n\
 argv = { query = 'repaired' }\n\
 assert(not pcall(function() prose = 'x' end), 'prose is read-only in H1')\n\
@@ -46,6 +43,7 @@ assert(not pcall(function() prose = 'x' end), 'prose is read-only in H1')\n\
 ## First\n\n\
 Tone: {{ tone }}.\n\n\
 ```lua\n\
+require '## defaults'\n\
 assert(prose == 'Tone: friendly.', 'a default renders in prose: ' .. prose)\n\
 assert(missing == nil, 'a global with no default reads nil')\n\
 local ok, err = pcall(function() argv = 'hijacked' end)\n\
@@ -61,9 +59,15 @@ assert(tone == 'friendly', 'the default survives the second fence')\n\
 ```\n\n\
 ## Second\n\n\
 ```lua\n\
+require '## defaults'\n\
 assert(argv.query == 'repaired', 'the H1 repair reaches a later section')\n\
 assert(not pcall(function() argv = 'hijacked' end), 'argv stays frozen in a later section')\n\
 return argv.query .. ' ' .. tone\n\
+```\n\n\
+## defaults\n\n\
+```lua\n\
+defaults = { tone = 'friendly' }\n\
+setmetatable(_G, { __index = defaults })\n\
 ```\n"
     );
     let out = run_args(md, "broken json").await.expect("the run succeeds");
@@ -74,25 +78,28 @@ return argv.query .. ' ' .. tone\n\
 async fn a_strict_metatable_raises_its_own_error_while_the_guard_serves_argv_and_prose() {
     let md = args_prompt!(
         "# T\n\n\
-```lua shared\n\
-setmetatable(_G, {\n\
-  __index = function(_, key) error('undefined global ' .. key, 2) end,\n\
-})\n\
-```\n\n\
 ```lua\n\
+require '## strict'\n\
 local ok, err = pcall(function() return undefined_in_h1 end)\n\
 assert(not ok and tostring(err):find('undefined global undefined_in_h1', 1, true), 'H1 is strict: ' .. tostring(err))\n\
 ```\n\n\
 ## Only\n\n\
 Hi.\n\n\
 ```lua\n\
+require '## strict'\n\
 local ok, err = pcall(function() return undefined_here end)\n\
 assert(not ok, 'an undefined global raises')\n\
 assert(type(err) == 'string', 'the author error comes back as raised, got ' .. type(err))\n\
-assert(err:find(']:1: undefined global undefined_here', 1, true), 'the error names the reading line: ' .. err)\n\
+assert(err:find(']:2: undefined global undefined_here', 1, true), 'the error names the reading line: ' .. err)\n\
 assert(argv.query == 'x', 'the guard serves argv, not the strict handler')\n\
 assert(prose == 'Hi.', 'the guard serves prose, not the strict handler')\n\
 return 'strict'\n\
+```\n\n\
+## strict\n\n\
+```lua\n\
+setmetatable(_G, {\n\
+  __index = function(_, key) error('undefined global ' .. key, 2) end,\n\
+})\n\
 ```\n"
     );
     let out = run_args(md, "{\"query\":\"x\"}")
@@ -105,21 +112,24 @@ return 'strict'\n\
 async fn an_h1_repair_lands_under_a_strict_index_and_a_write_hook() {
     let md = args_prompt!(
         "# T\n\n\
-```lua shared\n\
-seen = {}\n\
-setmetatable(_G, {\n\
-  __index = function(_, key) error('undefined global ' .. key, 2) end,\n\
-  __newindex = function(_, key, value) seen[key] = value end,\n\
-})\n\
-```\n\n\
 ```lua\n\
+require '## hooks'\n\
 if argv == nil then argv = { query = 'repaired' } end\n\
 assert(seen.argv == nil, 'the write hook never sees argv')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\n\
+require '## hooks'\n\
 assert(argv.query == 'repaired', 'the repair reaches the walk')\n\
 return argv.query\n\
+```\n\n\
+## hooks\n\n\
+```lua\n\
+seen = {}\n\
+setmetatable(_G, {\n\
+  __index = function(_, key) error('undefined global ' .. key, 2) end,\n\
+  __newindex = function(_, key, value) seen[key] = value end,\n\
+})\n\
 ```\n"
     );
     let out = run_args(md, "broken json").await.expect("the run succeeds");
@@ -161,20 +171,23 @@ return 'guarded'\n\
 }
 
 #[tokio::test]
-async fn the_shared_library_cannot_assign_prose_before_the_first_block() {
+async fn a_library_cannot_assign_prose() {
     let md = args_prompt!(
         "# T\n\n\
-```lua shared\n\
-shared_prose = type(prose)\n\
-local ok, err = pcall(function() prose = 'shadowed' end)\n\
-shared_refusal = not ok and tostring(err)\n\
-```\n\n\
 ## Only\n\n\
 The real prose.\n\n\
 ```lua\n\
-assert(shared_prose == 'nil', 'prose reads nil while the library loads')\n\
-assert(shared_refusal and shared_refusal:find('prose is read-only', 1, true), 'the library cannot assign prose: ' .. tostring(shared_refusal))\n\
+require '## lib'\n\
+assert(library_prose == 'Library prose.', 'the library reads its own prose: ' .. tostring(library_prose))\n\
+assert(library_refusal and library_refusal:find('prose is read-only', 1, true), 'the library cannot assign prose: ' .. tostring(library_refusal))\n\
 return prose\n\
+```\n\n\
+## lib\n\n\
+Library prose.\n\n\
+```lua\n\
+library_prose = prose\n\
+local ok, err = pcall(function() prose = 'shadowed' end)\n\
+library_refusal = not ok and tostring(err)\n\
 ```\n"
     );
     let out = run_args(md, "{\"query\":\"x\"}")
@@ -184,21 +197,23 @@ return prose\n\
 }
 
 #[tokio::test]
-async fn getmetatable_on_g_returns_the_shared_librarys_metatable_and_edits_apply_live() {
+async fn getmetatable_on_g_returns_a_librarys_metatable_and_edits_apply_live() {
     let md = args_prompt!(
         "# T\n\n\
-```lua shared\n\
-author_mt = { __index = { tone = 'friendly' } }\n\
-setmetatable(_G, author_mt)\n\
-```\n\n\
 ## Only\n\n\
 ```lua\n\
+require '## metatable'\n\
 assert(getmetatable(_G) == author_mt, 'getmetatable(_G) is the library metatable')\n\
 getmetatable(_G).__index = function(_, key) return 'live ' .. key end\n\
 assert(tone == 'live tone', 'an edit applies at once')\n\
 getmetatable(_G).__newindex = function() end\n\
 assert(not pcall(function() argv = 'x' end), 'an edit cannot free argv')\n\
 return tone\n\
+```\n\n\
+## metatable\n\n\
+```lua\n\
+author_mt = { __index = { tone = 'friendly' } }\n\
+setmetatable(_G, author_mt)\n\
 ```\n"
     );
     let out = run_args(md, "{\"query\":\"x\"}")

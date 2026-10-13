@@ -275,10 +275,10 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // to the next as long as the caller draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
-        ```lua\nreturn tools.call('tools/untrusted_echo', { value = 'hi' })\n```\n";
+        ```lua\nreturn tools.call('tools/untrusted_echo', { value = 'hi' })\n```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let test = bound_with_tools(md);
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {

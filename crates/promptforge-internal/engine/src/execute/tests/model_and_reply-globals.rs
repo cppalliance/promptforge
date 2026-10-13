@@ -8,15 +8,15 @@
 use super::*;
 
 #[tokio::test]
-async fn shared_function_sees_sys_model_unknown_before_scope_close() {
+async fn a_library_function_sees_sys_model_unknown_before_scope_close() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n\
 ```lua\nmodels.default('writer')\n```\n\n\
-```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
-## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
+## Only\n\n```lua\nrequire '## sys_reader'\nreturn read_sys_model()\n```\n\nprose\n\n\
+## sys_reader\n\n```lua\nfunction read_sys_model()\n  return sys.model\nend\n```\n";
     let error = run(&bound_for_model(md), "", &[], &TestStore::new(), silent())
         .await
-        .expect_err("shared function must not read sys.model before scope close");
+        .expect_err("a library function must not read sys.model before scope close");
     assert!(
         error.to_string().contains("unknown sys field 'model'"),
         "error must name the missing field: {error}"
@@ -42,10 +42,10 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
     // enriches `sys.model` with the bound catalog id; a prose read after it
     // substitutes the catalog id, not the alias.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-models.default('writer')\n```\n\n\
+# Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
 ## Only\n\n```lua\ntools.call('tools/echo', { value = 'x' })\n```\n\nModel id is {{ sys.model }}.\n\n\
-```lua\nreturn prose\n```\n";
+```lua\nreturn prose\n```\n\n\
+## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
@@ -62,9 +62,9 @@ models.default('writer')\n```\n\n\
 #[tokio::test]
 async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-models.default('writer')\n```\n\n\
-## Only\n\n```lua\ntools.call('tools/echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n";
+# Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
+## Only\n\n```lua\ntools.call('tools/echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n\n\
+## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
@@ -81,12 +81,12 @@ models.default('writer')\n```\n\n\
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-models.default('writer')\n```\n\n\
+# Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
 ## Parent\n\n```lua\nlocal r = tasks.fanout('### Worker', prompt.list('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
 ### Worker\n\n```lua\ntools.call('tools/echo', { value = item })\n```\n\n\
 ```lua\nreturn sys.model .. ':' .. item\n```\n\n\
-### Items\n\n- a\n";
+### Items\n\n- a\n\n\
+## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,

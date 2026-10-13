@@ -58,13 +58,13 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = models.get('writer'):infer('say hello')\n\
         return text\n\
-        ```\n";
+        ```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
@@ -106,8 +106,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
     let gateway = ScriptedChat::new(vec![resp_text("arm reply")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Parent\n\n\
         ```lua\n\
         local r = tasks.fanout('### Worker', {'alpha'})\n\
@@ -115,7 +114,8 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         ```\n\n\
         ### Worker\n\n\
         Reply about {{ item }}.\n\n\
-        ```lua\nreturn models.infer(prose)\n```\n";
+        ```lua\nreturn models.infer(prose)\n```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
@@ -172,15 +172,15 @@ async fn debug_capture_none_changes_nothing() {
 async fn tool_calls_count_increments_on_successful_dispatch() {
     let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         tools.call('tools/echo', { value = 'x' })\n\
         assert(tools.calls['tools/echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['tools/echo']))\n\
         return 'ok'\n\
-        ```\n";
+        ```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
@@ -271,14 +271,14 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     // effective scope, so an offered but uncalled tool reads as 0 and an
     // author assert on it fails the run with its own message.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n```lua\n\
         tools.offer('tools/search')\n\
         local _ = tools.call('tools/other', { value = 'x' })\n\
         ```\n\n\
         ```lua\nassert(tools.calls['tools/search'] > 0, 'search was never called')\n\
-        return 'unreached'\n```\n";
+        return 'unreached'\n```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let search = ScopedFixtureTool::new("search", "Search for things.");
     let other = ScopedFixtureTool::new("other", "Other things.");
     let prompt = bound_with_tools(md);
@@ -303,14 +303,14 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n```lua\n\
         tools.offer('tools/search')\n\
         local _ = tools.call('tools/search', { value = 'x' })\n\
         ```\n\n\
         ```lua\nlocal _ = tools.calls['tools/serach']\n\
-        return 'unreached'\n```\n";
+        return 'unreached'\n```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let tool = ScopedFixtureTool::new("search", "Search for things.");
     let prompt = bound_with_tools(md);
     let error = run(
@@ -340,8 +340,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     // sets `reply` or `sys.reply_finish_reason`.
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        models.default('writer')\n```\n\n\
+        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = models.get('writer'):infer('say hello')\n\
@@ -351,7 +350,8 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         assert(not pcall(function() return sys.reply_finish_reason end),\n\
             'infer must not touch sys')\n\
         return text\n\
-        ```\n";
+        ```\n\n\
+        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
     let prompt = bound_with_tools(md);
     let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(&gateway))
         .await

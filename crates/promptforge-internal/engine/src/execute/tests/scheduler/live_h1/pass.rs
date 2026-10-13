@@ -1,8 +1,8 @@
 //! The live H1 pass itself: its infer and default-model selection, the
 //! root entry ids of the chunk and the first walked section, H1 assertion
 //! failures and their reports, `var` read back after a scalar return, a
-//! shared-replay failure's Lua kind, and the section boundaries the pass
-//! does not fire.
+//! failing H1 library as the failed gate, and the section boundaries the
+//! pass does not fire.
 
 use super::*;
 
@@ -192,43 +192,33 @@ async fn an_h1_scalar_return_still_reads_var_back() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
-    // The other half of the remap's boundary: the shared replay is
-    // machinery around the prompt's chunk, not the chunk itself, so its
-    // failure is a prompt bug under the Lua kind, never the H1 gate's
-    // RequirementsUnmet. The context holds the prompt's real compiled
-    // shared library, not the empty stand-in the other H1 tests use.
+async fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
+    // A library runs inside the H1 chunk that requires it, so its
+    // uncaught raise is the chunk's own failure: the failed H1 gate,
+    // with the library's message as the notice.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
-        ```lua shared\n\
-        error('shared boom')\n\
-        ```\n\n\
         ```lua\n\
+        require '## broken'\n\
         var.ok = true\n\
+        ```\n\n\
+        ## broken\n\n\
+        ```lua\n\
+        error('library boom')\n\
         ```\n";
     let prompt = parse(md);
-    let shared = promptforge_parser::detail::replay(&prompt)
-        .cloned()
-        .expect("the prompt's shared chunk compiles at parse");
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        shared,
-        &test_context(EXECUTION),
-    );
-    let error = TokioDriver::new(&ctx, RunFixture::new(), None)
+    let (ctx, fixture) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
-        .expect_err("a failing shared replay must fail the run");
+        .expect_err("a failing library load must fail the run");
 
+    let Error::RequirementsUnmet { notice } = &error else {
+        panic!("the library's raise is the failed H1 gate: {error}");
+    };
     assert!(
-        matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }),
-        "the shared replay failure keeps its Lua kind: {error}"
-    );
-    assert!(
-        error.to_string().contains("shared boom"),
-        "the failure names the shared chunk's error: {error}"
+        notice.contains("library boom"),
+        "the notice is the library's message: {notice}"
     );
 }
 

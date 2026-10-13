@@ -1,4 +1,4 @@
-//! Tests for live `models.infer` against a scripted gateway, including H1 chunks and shared libraries.
+//! Tests for live `models.infer` against a scripted gateway, including H1 chunks and required libraries.
 
 use super::*;
 
@@ -89,38 +89,40 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_function_resolves_engine_globals_when_called() {
-    let source = "---\nname: shared-globals\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Globals\n\n\
-        ```lua shared\n\
-        function read_args() return args end\n\
-        ```\n\n\
+async fn a_library_function_resolves_engine_globals_when_called() {
+    let source = "---\nname: library-globals\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Library Globals\n\n\
         ## Result\n\n\
-        ```lua\nreturn read_args()\n```\n";
+        ```lua\nrequire '## helpers'\nreturn read_args()\n```\n\n\
+        ## helpers\n\n\
+        ```lua\n\
+        function read_args() return args end\n\
+        ```\n";
     let prompt = parse(source);
     let env = Environment::new();
     let RunResult::Ok(out) =
         env_run(&env, &prompt, "later canned value", to_context(silent())).await
     else {
-        panic!("shared function must resolve Engine globals when called");
+        panic!("a library function must resolve Engine globals when called");
     };
 
     assert_eq!(out, "later canned value");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_library_calls_engine_globals_at_load_time() {
-    // The shared library replays as each section's first chunk with every
-    // Engine global installed, so top-level shared code may use `store`,
+async fn a_library_calls_engine_globals_at_load_time() {
+    // A library loads into the requiring section's environment with every
+    // Engine global installed, so its top-level code may use `store`,
     // `log`, and `args` at load.
-    let source = "---\nname: shared-globals-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Globals Load\n\n\
-        ```lua shared\n\
-        store.write('loaded.txt', args)\n\
-        log('shared loaded')\n\
-        ```\n\n\
+    let source = "---\nname: library-globals-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Library Globals Load\n\n\
         ## Result\n\n\
-        ```lua\nreturn store.read('loaded.txt')\n```\n";
+        ```lua\nrequire '## loader'\nreturn store.read('loaded.txt')\n```\n\n\
+        ## loader\n\n\
+        ```lua\n\
+        store.write('loaded.txt', args)\n\
+        log('library loaded')\n\
+        ```\n";
     let prompt = parse(source);
     let env = Environment::new();
     // The multi-step path: prepare builds the run's own router, and the
@@ -136,7 +138,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
     let RunResult::Ok(out) =
         crate::test_support::run_prepared(&prompt, "load-time args", ctx, RunFixture::new()).await
     else {
-        panic!("top-level shared Engine calls must succeed");
+        panic!("top-level library Engine calls must succeed");
     };
 
     assert_eq!(out, "load-time args");
@@ -156,23 +158,25 @@ async fn tool_objects_and_roles_reach_section_call_and_fanout_vms() {
     // bind.
     let source = "---\nname: tool-objects\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
          # Tool Objects\n\n\
-         ```lua shared\n\
-         function binding_names() return tools.get('tools/echo').id .. ':' .. models.get('writer').name end\n\
-         ```\n\n\
          ## Parent\n\n\
          ```lua\n\
+         require '## bindings'\n\
          local direct = binding_names()\n\
          local called = call('## Called')\n\
          local arms = tasks.fanout('### Worker', prompt.list('### Items'))\n\
          return direct .. '|' .. called .. '|' .. table.concat(arms, ',')\n\
          ```\n\n\
          ### Worker\n\n\
-         ```lua\nreturn binding_names() .. ':' .. item\n```\n\n\
+         ```lua\nrequire '## bindings'\nreturn binding_names() .. ':' .. item\n```\n\n\
          ### Items\n\n\
          - one\n\
          - two\n\n\
          ## Called\n\n\
-         ```lua\nreturn binding_names()\n```\n";
+         ```lua\nrequire '## bindings'\nreturn binding_names()\n```\n\n\
+         ## bindings\n\n\
+         ```lua\n\
+         function binding_names() return tools.get('tools/echo').id .. ':' .. models.get('writer').name end\n\
+         ```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
     // The fixture tools' descriptors go into the catalog and their
