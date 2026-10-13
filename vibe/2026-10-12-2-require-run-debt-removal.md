@@ -4,13 +4,13 @@ overview: "Remove the debt the require plan's eight commits (43245d4b5..67be0273
 todos:
   - id: chunk-ids
     content: "D1-1, D1-2: compile prompt blocks under a short `line {source_line}` chunk name, map through it to the display location, add the five regression tests"
-    status: pending
+    status: completed
   - id: gate-mapper
     content: "D1-3: gate `map_runtime_error` behind test-support, add the parser dev-dependency, rewrite the stale docs"
-    status: pending
+    status: completed
   - id: exit-checks
     content: "Run the exit checks: workspace nextest, clippy and docs with warnings denied, `cargo test -p build-xtask`, fmt"
-    status: pending
+    status: completed
 isProject: false
 ---
 
