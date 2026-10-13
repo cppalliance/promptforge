@@ -886,18 +886,6 @@ pub promptforge::event::Event::LuaReplyBindingSucceeded { .. }
 pub promptforge::event::Event::LuaReplyBindingSucceeded::execution: alloc::string::String
 pub promptforge::event::Event::LuaReplyBindingSucceeded::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::LuaReplyBindingSucceeded::section: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadFailed { .. }
-pub promptforge::event::Event::LuaSharedLoadFailed::execution: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::LuaSharedLoadFailed::section: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadStarted { .. }
-pub promptforge::event::Event::LuaSharedLoadStarted::execution: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadStarted::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::LuaSharedLoadStarted::section: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadSucceeded { .. }
-pub promptforge::event::Event::LuaSharedLoadSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::LuaSharedLoadSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::LuaSharedLoadSucceeded::section: alloc::string::String
 pub promptforge::event::Event::LuaTeardownStarted { .. }
 pub promptforge::event::Event::LuaTeardownStarted::execution: alloc::string::String
 pub promptforge::event::Event::LuaTeardownStarted::provenance: promptforge::ids::Provenance

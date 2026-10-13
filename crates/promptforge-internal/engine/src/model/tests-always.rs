@@ -118,8 +118,8 @@ fn models_default_is_idempotent_and_never_changes_mid_run() {
     let mut vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access()).unwrap();
-    // The shared library replays into every section, so re-naming the same
-    // default is a no-op.
+    // A library every section requires re-runs in each, so re-naming the
+    // same default is a no-op.
     vm.run_chunk(
         &chunk(r#"models.default("writer"); models.default("writer")"#),
         &null_emitter(),

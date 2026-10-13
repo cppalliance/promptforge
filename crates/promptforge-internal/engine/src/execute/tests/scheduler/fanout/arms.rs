@@ -45,12 +45,10 @@ async fn model_required_when_arm_infer_has_no_binding() {
         Ask the model about {{ item }}.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        shared,
         &test_context(EXECUTION),
     );
     let error = TokioDriver::new(&ctx, RunFixture::new(), None)

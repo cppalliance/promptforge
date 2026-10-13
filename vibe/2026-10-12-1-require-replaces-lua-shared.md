@@ -495,7 +495,7 @@ Move every test and fixture that uses the `lua shared` fence for some other purp
 
 <step-7>
 
-### Step 7: Remove `lua shared`
+### Step 7: Remove `lua shared` [completed]
 
 - Component: `lua shared` retirement
 - Tests: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`; `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`; `node --test crates/workshop/ui/test/docs-claims.mjs`; `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`; `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`; `cargo check -p gateway --no-default-features`; `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`; `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo +nightly-2026-09-05 xtask api --check`; `cargo fmt --all --check`; `rg -n --hidden -g '!target' -g '!**/node_modules/**' -g '!.git' -g '!vibe/**' 'lua shared'`

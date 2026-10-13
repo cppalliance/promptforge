@@ -26,7 +26,6 @@ mod logging;
 mod require;
 mod sandbox;
 mod section_vm;
-mod shared_replay;
 mod store;
 mod store_errors;
 mod store_reports;
@@ -267,11 +266,11 @@ fn section_vm_with_bindings(
     section_vm_with_set(&shared_set(bindings.clone()), emitter, section)
 }
 
-/// Builds a section VM through the Engine's startup order for a shared
-/// library: construction, Engine injection, persistent Engine globals, then
-/// the shared replay. Tests that need control globals add them by hand.
-fn section_vm_with_shared(
-    shared: &LuaProgram,
+/// Builds a section VM through construction, Engine injection, and the
+/// persistent Engine globals, then runs `first` as its first chunk. Tests
+/// that need control globals add them by hand.
+fn section_vm_after(
+    first: &LuaProgram,
     args: &str,
     access: &Arc<Access>,
     emitter: &Emitter,
@@ -280,7 +279,7 @@ fn section_vm_with_shared(
     let mut vm = SectionVm::new(&test_nonce(), emitter, section)?;
     vm.inject_values(args, &json!({}), access)?;
     vm.install_engine_globals(emitter, section)?;
-    vm.replay_shared(shared, emitter, section)?;
+    run_scalar(&vm, first, emitter, section)?;
     Ok(vm)
 }
 

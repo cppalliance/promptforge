@@ -100,14 +100,6 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
                 detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
@@ -123,14 +115,6 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
             ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
             ("Only".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string()),
@@ -185,14 +169,6 @@ return 'epilog result'\n\
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
                 detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
@@ -208,14 +184,6 @@ return 'epilog result'\n\
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
             ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
             ("Only".to_string(), detail::VFS_WRITE_SUCCEEDED.to_string()),
@@ -233,8 +201,8 @@ return 'epilog result'\n\
 
 #[tokio::test]
 async fn offer_over_an_empty_catalog_fails_the_run_loudly() {
-    // Input with no shared library goes through the same validated VM over
-    // an empty offering, so the id is rejected.
+    // A prompt with no H1 Lua goes through the same validated VM over an
+    // empty offering, so the id is rejected.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.offer('web/search')\n```\n\nThis prose must not reach a model.\n";
@@ -251,9 +219,9 @@ async fn offer_over_an_empty_catalog_fails_the_run_loudly() {
 }
 
 #[tokio::test]
-async fn offer_with_an_empty_shared_library_fails_the_run_loudly() {
-    // A prompt whose shared library declares nothing runs over the same
-    // empty offering, so tools.offer in a prologue is rejected the same way.
+async fn offer_after_an_h1_helper_fails_the_run_loudly() {
+    // A prompt whose H1 Lua declares nothing runs over the same empty
+    // offering, so tools.offer in a prologue is rejected the same way.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
@@ -316,14 +284,6 @@ Ask using {{ var.question }}.\n\n\
             ("Test prompt".to_owned(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Test prompt".to_owned(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
-            (
-                "Test prompt".to_owned(),
                 detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
@@ -339,14 +299,6 @@ Ask using {{ var.question }}.\n\n\
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_owned(), detail::SECTION_STARTED.to_string()),
-            (
-                "Only".to_owned(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string(),
-            ),
-            (
-                "Only".to_owned(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
-            ),
             ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
             (
                 "Only".to_owned(),

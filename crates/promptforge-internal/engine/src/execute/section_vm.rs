@@ -1,11 +1,11 @@
 //! The Engine's setup half: one section VM's lifecycle from Engine injection
-//! through the shared library's replay.
+//! through the store yield shims' install.
 //!
 //! Every section driver - the walk's section entry and the
 //! fanout arm - runs the identical setup sequence: inject the Engine values,
 //! install the persistent Engine globals, install the control globals, install
-//! the Plugin preludes, install `require`, then replay the shared library as
-//! the section's first chunk.
+//! the Plugin preludes, install `require`, then install the store yield
+//! shims.
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (both drivers take the next run-global `id`; the arm adds its
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::plugins::Prelude;
 
-use crate::lua::{Library, LibraryKey, LuaProgram, ProseState, SectionText, SectionVm};
+use crate::lua::{Library, LibraryKey, ProseState, SectionText, SectionVm};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
@@ -36,8 +36,7 @@ use promptforge_vfs::Access;
 ///
 /// Both fields install through the same serde bridge: `var` seeds the hidden
 /// data table behind the guarded `var` proxy, and `item` installs as the
-/// `item` global after the Engine globals so [`SectionVm::replay_shared`] - whose
-/// top-level code may read `item` - sees it.
+/// `item` global after the Engine globals, ahead of every block.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VmSeed<'a> {
     /// The walk's current `var`: rolled forward across sections on one walk,
@@ -71,13 +70,10 @@ pub(crate) struct SectionVmSetup<'a> {
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
     /// The chain's emitter: the persistent Engine globals (`log`, `store`)
-    /// capture a clone, and the shared-library replay and `require`'s
-    /// library loads report through it.
+    /// capture a clone, and `require`'s library loads report through it.
     pub(crate) emitter: &'a Emitter,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
-    /// The shared library replayed as the section's first chunk.
-    pub(crate) shared: &'a LuaProgram,
     /// The run's resolved per-section tool-loop cap, captured by the
     /// `models.loop` shim as its round cap.
     pub(crate) max_tool_iterations: usize,
@@ -86,8 +82,8 @@ pub(crate) struct SectionVmSetup<'a> {
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
     /// so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
-    /// The run's Plugin preludes, installed in order after the yield
-    /// shims and before the shared replay.
+    /// The run's Plugin preludes, installed in order after the coroutine
+    /// shims and before `require`.
     pub(crate) preludes: &'a [Prelude],
     /// Test-only: installs the raw `tools.call_as_model` shim, so a fixture
     /// section can yield one model-issued `tool_call`.
@@ -104,7 +100,7 @@ pub(crate) struct SectionVmSetup<'a> {
 /// `prompt` reads, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims), the run's
 /// Plugin preludes, [`SectionVm::install_require`] over `resolve` and
-/// `render`, and [`SectionVm::replay_shared`]. The caller applies
+/// `render`, and the store yield shims. The caller applies
 /// the Lua limits itself before calling, so a limits failure propagates
 /// without touching the VM's teardown observation path.
 ///
@@ -114,8 +110,9 @@ pub(crate) struct SectionVmSetup<'a> {
 /// # Errors
 /// Returns the [`Error`] of whichever step failed: Engine injection, Engine
 /// global install, `item` install, control-global install, the prelude install (a
-/// prelude that fails to load, or whose global collides), the `require`
-/// install, the shared replay, or the store shims' install.
+/// prelude that fails to load, or whose global collides, or a store
+/// conflict a prelude's store call recorded), the `require` install, or
+/// the store shims' install.
 pub(crate) fn setup_section_vm<R, L, P>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
@@ -153,9 +150,16 @@ where
     vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     // The preludes read `tools` and `store` from `_G` as they install, so
-    // they follow the yield shims, and they precede the shared replay so
-    // the shared library can call what they define.
-    crate::lua::install_preludes(vm.lua(), setup.preludes)?;
+    // they follow the yield shims.
+    let installed = crate::lua::install_preludes(vm.lua(), setup.preludes);
+    // A store conflict the direct closures recorded while a prelude
+    // installed ends the run with a determinism violation when the install
+    // returns - caught by `pcall` or not - so the conflict wins over the
+    // install's own outcome.
+    if let Some(detail) = vm.take_store_conflict() {
+        return Err(Error::Determinism(detail));
+    }
+    installed?;
     // `require` follows the preludes, so a prelude that calls it while it
     // installs finds none.
     vm.install_require(resolve, render, setup.emitter, setup.section_name)?;
@@ -163,21 +167,12 @@ where
     if setup.raw_shims {
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
     }
-    let replay = vm.replay_shared(setup.shared, setup.emitter, setup.section_name);
-    // A store conflict the direct closures recorded during the load ends
-    // the run with a determinism violation when the load returns - caught
-    // by `pcall` or not - so the conflict wins over the load's own
-    // outcome.
-    if let Some(detail) = vm.take_store_conflict() {
-        return Err(Error::Determinism(detail));
-    }
-    replay?;
-    // The store yield shims install after the shared replay: the shared
-    // chunk runs as a main chunk, not a coroutine, so load-time store
-    // calls must hit the direct closures (which capture the same
-    // Arc<Access>, leaving claims attribution unchanged). Installing
-    // earlier would make a top-level `store.write` yield from outside a
-    // coroutine. The install also switches any store function the load
-    // captured, so none of them runs directly after this point.
+    // The store yield shims install after the preludes: a prelude runs as a
+    // main chunk, not a coroutine, so its store calls while it installs
+    // must hit the direct closures (which capture the same Arc<Access>,
+    // leaving claims attribution unchanged). Installing earlier would make
+    // a prelude's top-level `store.write` yield from outside a coroutine.
+    // The install also switches any store function a prelude captured, so
+    // none of them runs directly after this point.
     crate::lua::install_store_shims(vm.lua()).map_err(Error::from)
 }

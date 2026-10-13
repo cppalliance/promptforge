@@ -77,8 +77,8 @@ fn test_tools() -> ToolSet {
 }
 
 /// Builds a section VM through the real setup path: construction, Engine
-/// injection, the control surface with the yield shims, and the shared
-/// replay.
+/// injection, the control surface with the yield shims, `require`, and the
+/// store yield shims.
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
     scheduler_vm_with_tools(models, &ToolSet::default(), var)
 }
@@ -99,7 +99,6 @@ fn scheduler_vm_with_tools(
         "Test",
     )
     .expect("the section VM builds");
-    let shared = LuaProgram::empty().expect("the empty shared program compiles");
     let sys = json!({});
     let access = Arc::new(
         promptforge_vfs::VfsRef::default()
@@ -115,7 +114,6 @@ fn scheduler_vm_with_tools(
         seed: VmSeed { var, item: None },
         emitter: &emitter,
         section_name: "Test",
-        shared: &shared,
         max_tool_iterations: 24,
         ui: None,
         preludes: &[],

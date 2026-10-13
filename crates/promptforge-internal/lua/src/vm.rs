@@ -41,10 +41,8 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 /// The VM owns one Lua environment from construction until drop. Construction
 /// hardens the sandbox and installs `untrusted`; the caller then drives one
 /// linear startup: apply the run's limits, inject the Engine values, install
-/// the persistent Engine globals and the control globals, replay the shared
-/// library as the section's first chunk
-/// ([`replay_shared`](Self::replay_shared)), and only then walk the
-/// section's blocks with
+/// the persistent Engine globals, the control globals, and `require`, and
+/// only then walk the section's blocks with
 /// [`start_block_coro`](Self::start_block_coro). A single
 /// instruction hook covers every program run by this VM, on the main state
 /// and on every block coroutine, so cancellation reaches any chunk.
@@ -53,7 +51,7 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 /// hardening, Engine injection, instruction accounting, and report delivery on
 /// the one owned path. Each section must receive a new instance; dropping it
 /// destroys all Lua memory belonging to that section. Once Lua allocation
-/// succeeds, construction and shared-load failures cross the same explicit
+/// succeeds, construction and setup failures cross the same explicit
 /// observed teardown boundary as later lifecycle failures.
 #[derive(Debug)]
 pub struct SectionVm {
@@ -90,8 +88,8 @@ pub struct SectionVm {
     /// executor installed for this chain step.
     access: Option<Arc<Access>>,
     /// The slot the direct store closures record a claims-model conflict
-    /// into during the shared replay, for the executor to read when the
-    /// load returns via
+    /// into while the Plugin preludes install, for the executor to read
+    /// once they return via
     /// [`take_store_conflict`](Self::take_store_conflict).
     store_conflicts: Arc<Mutex<Option<String>>>,
     values_injected: bool,
@@ -251,8 +249,8 @@ impl SectionVm {
     /// ceilings, the instruction hook, and `untrusted` (wrapping under the
     /// run's `nonce`). Everything else - the run's
     /// limits, the Engine values, the persistent Engine globals, the control
-    /// globals, and the shared-library replay - is a separate explicit step
-    /// the caller drives in that order (see the type-level docs). Every
+    /// globals, and `require` - is a separate explicit step the caller
+    /// drives in that order (see the type-level docs). Every
     /// lifecycle report goes through the emitter the caller hands each
     /// step; the VM retains none.
     ///
@@ -365,9 +363,9 @@ impl SectionVm {
     ///
     /// Sets the heap ceiling (`lua_memory_bytes`) and resets the `log()` event
     /// budget (`lua_log_events`). Called by the executor right after
-    /// construction, ahead of the shared replay, so the replay already spends
-    /// the caller's run limits rather than only the safe non-env defaults
-    /// installed in [`SectionVm::new`].
+    /// construction, ahead of the Plugin preludes and every block, so they
+    /// already spend the caller's run limits rather than only the safe
+    /// non-env defaults installed in [`SectionVm::new`].
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.

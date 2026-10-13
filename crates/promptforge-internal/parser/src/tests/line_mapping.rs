@@ -209,7 +209,7 @@ fn sections_sharing_a_title_get_locations_named_by_heading_line() {
 }
 
 #[test]
-fn shared_library_source_line_is_correct() {
+fn removed_shared_fence_error_reports_the_fence_line() {
     // Lines:
     //  1: ---
     //  2: name: x
@@ -218,16 +218,13 @@ fn shared_library_source_line_is_correct() {
     //  5: (empty)
     //  6: # T
     //  7: (empty)
-    //  8: ```lua shared <- shared opens
-    //  9: function f()  <- source_line = 9
+    //  8: ```lua shared <- the error points here
+    //  9: function f()
     // 10: end
     // 11: ```
-    // 12: (empty)
-    // 13: ## S
-    // 14: (empty)
-    // 15: p
     let src = prompt_src("```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n");
-    let prompt = parse(&src).expect("prompt must parse");
-    let replay = prompt.replay.as_ref().expect("replay must exist");
-    assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
+    let error = parse(&src).expect_err("the removed shared fence must fail");
+    assert_eq!(error.line(), Some(8), "{error}");
+    assert_eq!(error.column(), Some(1), "{error}");
+    assert!(error.span().is_some(), "{error}");
 }

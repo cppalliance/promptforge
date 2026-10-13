@@ -33,13 +33,7 @@ fn h1_context_on(
             ),
         );
     }
-    let state = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &store.vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
-        &ctx,
-    );
+    let state = RunState::new(Arc::new(prompt.clone()), "", &store.vfs(), &ctx);
     (state, RunFixture::new().observer(observer))
 }
 

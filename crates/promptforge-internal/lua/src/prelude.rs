@@ -1,6 +1,5 @@
 //! Plugin preludes: the Lua source each Plugin the prompt declares
-//! contributes, installed into every section VM before the shared library
-//! replays.
+//! contributes, installed into every section VM before `require`.
 //!
 //! A prelude runs once per VM as a main chunk whose `...` is its Plugin's
 //! local name, in an environment table of its own. That table's metatable `__index` is a lookup table of the base
@@ -63,8 +62,8 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// is.
 ///
 /// The Engine's section setup calls this after the coroutine yield shims
-/// install and before the shared library replays. The chunk is not a
-/// coroutine, so a prelude that calls `tools.call` while loading fails.
+/// install and before `require` does. The chunk is not a coroutine, so a
+/// prelude that calls `tools.call` while loading fails.
 ///
 /// # Errors
 /// Returns [`Error::LuaRuntime`] naming the Plugin when a prelude

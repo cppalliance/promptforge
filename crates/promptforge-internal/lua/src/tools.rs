@@ -268,8 +268,8 @@ fn install_always_offer(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> 
                 {
                     binding.model_description = Some(description);
                 }
-                // Idempotent under the shared-library replay: every section
-                // re-runs the library, so offering the same tool again is a
+                // Idempotent under `require`: every section that requires a
+                // library re-runs it, so offering the same tool again is a
                 // no-op.
                 if !set.always.iter().any(|existing| existing == &name) {
                     set.always.push(name);

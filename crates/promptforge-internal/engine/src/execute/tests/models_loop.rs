@@ -50,9 +50,8 @@ pub(super) fn loop_models() -> ModelSet {
 }
 
 /// Builds the run context and its observing fixture for a loop test: the
-/// parsed prompt, an empty shared library, and the shared model and tool
-/// sets pre-filled (the scheduler tests bypass the live H1 pass that would
-/// fill them).
+/// parsed prompt and the shared model and tool sets pre-filled (the
+/// scheduler tests bypass the live H1 pass that would fill them).
 pub(super) fn loop_context_observed(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
@@ -62,7 +61,6 @@ pub(super) fn loop_context_observed(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &test_context(EXECUTION),
     );
     *ctx.model_set()

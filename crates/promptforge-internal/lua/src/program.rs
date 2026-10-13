@@ -111,34 +111,14 @@ impl LuaProgram {
         })
     }
 
-    /// Returns a compiled empty chunk standing in for an absent shared library.
-    ///
-    /// Section startup replays the shared library unconditionally; a prompt
-    /// without a `lua shared` fence replays this chunk instead. The
-    /// compilation is internal bookkeeping and emits no observations.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created.
-    pub fn empty() -> Result<Self> {
-        let bytecode = compile_chunk("", "shared library").map_err(|error| match error {
-            CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
-        })?;
-        Ok(Self {
-            source: String::new(),
-            bytecode,
-            location: "shared library".to_owned(),
-            source_line: NonZeroU32::MIN,
-        })
-    }
-
     /// Compiles an internal chunk (the coroutine shim prelude) without
     /// observations.
     ///
-    /// Internal chunks are crate source, not author prompt source, so like
-    /// [`empty`](Self::empty) the compilation is bookkeeping. `location` is
-    /// the chunk name verbatim; an `@`-prefixed name renders as a file path
-    /// in errors, which the line mapper never rewrites (it only touches a
-    /// section's own `[string "{location}"]:` marker).
+    /// Internal chunks are crate source, not author prompt source, so the
+    /// compilation is bookkeeping. `location` is the chunk name verbatim;
+    /// an `@`-prefixed name renders as a file path in errors, which the line
+    /// mapper never rewrites (it only touches a section's own
+    /// `[string "{location}"]:` marker).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created

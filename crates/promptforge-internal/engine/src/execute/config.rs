@@ -95,8 +95,8 @@ pub struct RunContext {
     pub(super) tools: ToolCatalog,
     /// The run's Plugin preludes, in declaration order. Written by
     /// [`Environment::prepare`](super::Environment::prepare) from the
-    /// environment's list; every section VM installs each one before the
-    /// shared library replays. Empty on a caller-built context that was
+    /// environment's list; every section VM installs each one before
+    /// `require`. Empty on a caller-built context that was
     /// never prepared.
     pub(super) preludes: Vec<Prelude>,
 }

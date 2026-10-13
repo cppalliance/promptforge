@@ -113,9 +113,9 @@ impl Scheduler {
     }
 
     /// Starts the run's first chain: the H1 pass when the prompt has H1
-    /// blocks; an H1-less prompt goes straight to the walk, so its shared
-    /// library is never replayed for a throwaway section 0. A prompt with
-    /// neither ends at once with the generic completion.
+    /// blocks; an H1-less prompt goes straight to the walk, so no VM is set
+    /// up for a throwaway section 0. A prompt with neither ends at once
+    /// with the generic completion.
     fn start(&mut self) -> Result<()> {
         let prompt = self.prompt();
         if promptforge_parser::detail::h1_blocks(&prompt).is_empty() {

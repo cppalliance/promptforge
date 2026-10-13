@@ -323,8 +323,8 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
 #[test]
 fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
     let (lua, set, _) = models_vm();
-    // The shared library replays into every section, so re-naming the same
-    // default must be a no-op.
+    // A library every section requires re-runs in each, so re-naming the
+    // same default must be a no-op.
     lua.load("models.default('writer'); models.default('writer')")
         .exec()
         .expect("re-naming the same default is a no-op");

@@ -73,7 +73,6 @@ fn tool_context(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &test_context(EXECUTION),
     );
     *ctx.model_set()

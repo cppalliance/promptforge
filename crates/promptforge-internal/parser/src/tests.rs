@@ -75,7 +75,7 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
 }
 
 #[test]
-fn orphan_empty_heading_and_misplaced_shared_fence_errors_report_a_line() {
+fn orphan_empty_heading_and_removed_shared_fence_errors_report_a_line() {
     // `prompt_src` puts `# T` on line 6 and the body from line 8.
     for (body, line, kind) in [
         ("## A\n\na\n\n#### D\n\nd\n", 12, ParseErrorKind::Structure),
@@ -196,7 +196,6 @@ Prose for the second section.\n";
     assert_eq!(p.frontmatter.name, "demo");
     assert_eq!(p.frontmatter.description, "A demo");
     assert_eq!(p.title, "Demo Title");
-    assert!(p.replay.is_none());
     assert_eq!(
         p.h1_blocks,
         vec![Block::Prose {

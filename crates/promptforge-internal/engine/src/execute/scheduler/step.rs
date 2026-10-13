@@ -193,9 +193,9 @@ impl Scheduler {
                 // H1's remaining job is the prompt's hard gates, so the
                 // prompt chunk's own Lua failure IS the failed assertion
                 // and its message is the failure notice. Only the chunk's
-                // error remaps: the machinery around it (the shared
-                // replay, the final `var` read-back, jump-target
-                // resolution) keeps its own kind - a prompt bug under
+                // error remaps: the machinery around it (section setup,
+                // the final `var` read-back, jump-target resolution)
+                // keeps its own kind - a prompt bug under
                 // `Error::Lua`, not an unsatisfiable environment. Fatal
                 // run conditions (cancellation, the claims violation)
                 // keep their own classification either way.

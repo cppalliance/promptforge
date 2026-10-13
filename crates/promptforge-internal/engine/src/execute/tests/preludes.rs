@@ -2,8 +2,10 @@
 //! handed to `Environment::preludes`, fanout arms and spawned task chains
 //! included, and the libraries a section requires see them; a prelude
 //! that fails to load or whose global collides fails the run as a Lua
-//! failure before it issues any effect; and a prelude's functions, called
-//! from a block, reach the yielding store and tool shims.
+//! failure before it issues any effect; a store conflict a prelude's
+//! install-time write meets ends the run with a determinism violation,
+//! caught or not; and a prelude's functions, called from a block, reach
+//! the yielding store and tool shims.
 
 use promptforge_types::plugins::{PluginId, Prelude};
 
@@ -203,6 +205,33 @@ fn a_library_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
         "hello library|hello arm|hello task",
         "the library reads the prelude while loading, and the arm and the task chain see it"
     );
+}
+
+#[test]
+fn a_prelude_write_across_two_arms_ends_the_run_with_determinism_caught_or_not() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Preludes\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = tasks.fanout('### Worker', { 'alpha', 'beta' })\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\nreturn item\n```\n";
+    for source in [
+        "store.write('seeded.txt', 'seed')",
+        "pcall(function() store.write('seeded.txt', 'seed') end)",
+    ] {
+        let (result, _) = drive_recorded(prelude_run(md, vec![prelude("seeder", source)]));
+        let RunResult::Failure(error) = result else {
+            panic!("the second arm's install-time write ends the run: `{source}`: {result:?}");
+        };
+        assert_eq!(
+            error.kind(),
+            RunErrorKind::Determinism,
+            "the conflict wins over the prelude's own outcome: `{source}`: {error:?}"
+        );
+    }
 }
 
 #[test]

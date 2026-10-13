@@ -1,18 +1,18 @@
 //! The store error value: each failure's reason tag, fields, and message,
-//! as rendered through the Lua boundary and as caught during the
-//! shared-library load.
+//! as rendered through the Lua boundary and as caught from a direct store
+//! closure.
 
 use super::*;
 
 #[test]
-fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
-    // The shared library loads through the direct store closures, before
-    // the yield shims install. A non-conflict failure caught by the shim's
-    // `pcall` must render the same shape the effect path renders: kind
-    // `store`, the `reason` tag, and the variant's fields.
-    let shared = program(
+fn direct_store_failure_caught_by_pcall_carries_the_reason_tag() {
+    // Before the store yield shims install, a store call runs its direct
+    // closure. A non-conflict failure caught by the shim's `pcall` must
+    // render the same shape the effect path renders: kind `store`, the
+    // `reason` tag, and the variant's fields.
+    let catch = program(
         "local ok, err = pcall(function() return store.read('missing.txt') end)\n\
-             shared_store_error = err",
+             direct_store_error = err",
     );
     let access = fresh_access();
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
@@ -21,13 +21,12 @@ fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
     vm.install_engine_globals(&null_emitter(), "Test")
         .expect("Engine globals must install");
     vm.install_coro_shims(1).expect("coro shims must install");
-    vm.replay_shared(&shared, &null_emitter(), "Test")
-        .expect("the shared library must load");
+    run_scalar(&vm, &catch, &null_emitter(), "Test").expect("the catching chunk must run");
     let out = run_scalar(
         &vm,
         &program(
-            "return shared_store_error.kind .. '|' .. shared_store_error.reason .. '|' \
-                 .. shared_store_error.path .. '|' .. tostring(shared_store_error)",
+            "return direct_store_error.kind .. '|' .. direct_store_error.reason .. '|' \
+                 .. direct_store_error.path .. '|' .. tostring(direct_store_error)",
         ),
         &null_emitter(),
         "Test",
@@ -36,7 +35,7 @@ fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
     assert_eq!(
         out.as_deref(),
         Some("store|not_found|missing.txt|file not found in store: missing.txt"),
-        "the shared-load store failure must carry the documented shape"
+        "the direct store failure must carry the documented shape"
     );
 }
 

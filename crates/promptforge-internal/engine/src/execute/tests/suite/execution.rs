@@ -92,7 +92,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
     assert_eq!(
         checkpoints(&run.recorder.records(), LOG_EXECUTION),
         [
-            Record::new(LOG_EXECUTION, "Log Checkpoints", "Lua: shared loaded"),
+            Record::new(LOG_EXECUTION, "Log Checkpoints", "Lua: H1 ran"),
             Record::new(LOG_EXECUTION, "Prepare", "Lua: prepare started"),
             Record::new(LOG_EXECUTION, "Prepare", "Lua: prepare finished"),
             Record::new(LOG_EXECUTION, "Finish", "Lua: finish started"),

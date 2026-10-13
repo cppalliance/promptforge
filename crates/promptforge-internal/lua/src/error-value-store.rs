@@ -77,8 +77,8 @@ pub fn store_error_fields(error: &promptforge_vfs::VfsError) -> Vec<(String, Err
 /// the variant's own fields from [`store_error_fields`].
 ///
 /// One source for the shape, so a failure the direct closures raise
-/// during a shared library load and one answered through the executor's
-/// effect path are indistinguishable to author code.
+/// while a Plugin prelude installs and one answered through the
+/// executor's effect path are indistinguishable to Lua code.
 #[must_use]
 pub fn store_error_value_fields(error: &promptforge_vfs::VfsError) -> Vec<(String, ErrorField)> {
     let mut fields = vec![(

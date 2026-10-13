@@ -1,8 +1,8 @@
 -- The `store` table's function values for a section VM: each one forwards
 -- to its direct Engine closure until the store yield shims install, then to
--- the matching shim (`__impl_coro.lua`), so a function the shared library
--- captured at load time (`local write = store.write`) follows the load
--- phase exactly as a fresh `store.write` lookup does.
+-- the matching shim (`__impl_coro.lua`), so a function a Plugin prelude
+-- captured while it installed (`local write = store.write`) follows the
+-- install phase exactly as a fresh `store.write` lookup does.
 --
 -- The Engine builds one dispatcher per operation with the returned
 -- `dispatcher(name, direct)` and keeps the returned `phase` table; the

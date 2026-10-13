@@ -116,7 +116,7 @@ pub(crate) enum Error {
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: the Lua
     /// crate builds it from a concrete `mlua::Error` (see
-    /// [`crate::lua::LuaProgram::map_runtime_error`]) and the conversion from
+    /// [`promptforge_lua::LuaProgram::map_runtime_error`]) and the conversion from
     /// that crate's error keeps it intact, so the failure chain survives
     /// through the public wrappers' `source()` instead of being flattened to
     /// a string.

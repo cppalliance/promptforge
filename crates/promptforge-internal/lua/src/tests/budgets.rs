@@ -1,5 +1,5 @@
-//! Execution budgets: no instruction ceiling, the configured log budget
-//! during the shared replay, and the memory ceiling.
+//! Execution budgets: no instruction ceiling, the configured log budget,
+//! and the memory ceiling.
 
 use super::*;
 
@@ -17,9 +17,10 @@ fn a_loop_exceeding_the_old_instruction_budget_completes() {
 }
 
 #[test]
-fn shared_replay_consumes_the_configured_log_budget() {
-    // `apply_lua_limits` lands before the replay, so the replay spends the
-    // configured log budget rather than the construction defaults.
+fn the_first_chunk_consumes_the_configured_log_budget() {
+    // `apply_lua_limits` lands before any chunk runs, so the first chunk
+    // spends the configured log budget rather than the construction
+    // defaults.
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 1)
         .expect("limits apply");
@@ -28,13 +29,13 @@ fn shared_replay_consumes_the_configured_log_budget() {
     let observer = null_emitter();
     vm.install_engine_globals(&observer, "Budget")
         .expect("Engine globals must install");
-    let error = vm
-        .replay_shared(
-            &program("log('one')\nlog('two')"),
-            &null_emitter(),
-            "Budget",
-        )
-        .expect_err("the second log must exhaust the configured budget");
+    let error = run_scalar(
+        &vm,
+        &program("log('one')\nlog('two')"),
+        &null_emitter(),
+        "Budget",
+    )
+    .expect_err("the second log must exhaust the configured budget");
     assert!(
         matches!(
             error,

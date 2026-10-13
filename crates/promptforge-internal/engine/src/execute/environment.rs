@@ -32,8 +32,8 @@ pub struct Environment {
     /// default is empty.
     tools: ToolCatalog,
     /// The Lua source of the Plugins the prompt declares, in declaration
-    /// order: every section VM of a run installs each one before the shared
-    /// library replays. The default is empty.
+    /// order: every section VM of a run installs each one before `require`.
+    /// The default is empty.
     preludes: Vec<Prelude>,
 }
 
@@ -68,8 +68,8 @@ impl Environment {
     /// declares the Plugins.
     /// [`prepare`](Environment::prepare) copies them onto the context.
     /// Every section VM of the run installs each prelude after the Engine
-    /// globals and before the shared library replays, so the shared library
-    /// can call what the preludes define.
+    /// globals and before any block runs, so every block, and every library
+    /// a block loads with `require`, can call what the preludes define.
     ///
     /// A prelude fails the run as
     /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) if it fails to load,

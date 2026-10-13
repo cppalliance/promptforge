@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl SectionVm {
-    /// Installs the section's Engine values, ahead of the shared replay.
+    /// Installs the section's Engine values, ahead of the Plugin preludes.
     ///
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. `log` and `store` are installed once for
@@ -139,10 +139,9 @@ impl SectionVm {
     }
 
     /// Takes the claims-model conflict the direct store closures recorded
-    /// during the shared replay, clearing the slot. The executor reads it
-    /// when [`replay_shared`](Self::replay_shared) returns, so a conflict
-    /// author code caught with `pcall` still ends the run with a
-    /// determinism violation.
+    /// while the Plugin preludes installed, clearing the slot. The executor
+    /// reads it once the preludes return, so a conflict a prelude caught
+    /// with `pcall` still ends the run with a determinism violation.
     #[must_use]
     pub fn take_store_conflict(&self) -> Option<String> {
         self.store_conflicts

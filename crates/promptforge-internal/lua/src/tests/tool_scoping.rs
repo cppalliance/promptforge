@@ -159,8 +159,8 @@ fn always_offer_refuses_an_id_the_run_does_not_offer_and_is_idempotent() {
             .contains("tools.always_offer: \"fixtures/missing\" is not a catalog tool in this run"),
         "the error must name the id: {error}"
     );
-    // The shared library replays into every section, so offering the same
-    // tool again is a no-op, not a duplicate error.
+    // A library every section requires re-runs in each, so offering the
+    // same tool again is a no-op, not a duplicate error.
     run_scalar(
         &vm,
         &program("tools.always_offer('fixtures/search'); tools.always_offer('fixtures/search')"),
@@ -349,7 +349,7 @@ fn offer_over_an_empty_offering_fails_in_a_chunk() {
 }
 
 #[test]
-fn offer_over_an_empty_offering_fails_in_a_prologue_without_a_shared_library() {
+fn offer_over_an_empty_offering_fails_in_a_prologue() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");

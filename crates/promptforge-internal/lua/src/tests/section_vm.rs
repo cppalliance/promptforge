@@ -1,6 +1,7 @@
-//! Section VM construction and phases: one environment across the shared
-//! replay and every chunk, delayed single Engine injection, scalar returns,
-//! isolation between VMs, and the lifecycle reports around them.
+//! Section VM construction and phases: one environment across every
+//! chunk, delayed single Engine injection, scalar returns, isolation
+//! between VMs, the control globals' target checks, and the lifecycle
+//! reports around them.
 
 use super::*;
 
@@ -40,23 +41,21 @@ fn two_fresh_section_vms_yield_the_same_key_order() {
 
 #[test]
 fn section_vm_preserves_one_environment_across_all_phases() {
-    // The shared library replays as the section's first chunk with every
-    // Engine global installed, so its top level reads `args` and `store`
-    // at load; the functions it defines resolve the same globals when later
-    // chunks call them.
-    let shared = program(
-        "shared_saw_args = args\n\
-             shared_saw_store = store.read('seed.txt')\n\
+    // The first chunk runs with every Engine global installed, so its top
+    // level reads `args` and `store`; the functions it defines resolve the
+    // same globals when later chunks call them.
+    let first = program(
+        "first_saw_args = args\n\
+             first_saw_store = store.read('seed.txt')\n\
              function decorate(value) return '<' .. value .. '>' end",
     );
     let prologue = program(
-        "var.from_shared = decorate(args)\n\
-             store.write('phase.txt', var.from_shared)",
+        "var.decorated = decorate(args)\n\
+             store.write('phase.txt', var.decorated)",
     );
     let between = program("phase_marker = 'model answer'");
-    let epilog = program(
-        "return decorate(phase_marker) .. ':' .. shared_saw_args .. ':' .. shared_saw_store",
-    );
+    let epilog =
+        program("return decorate(phase_marker) .. ':' .. first_saw_args .. ':' .. first_saw_store");
     let access = fresh_access();
     let store = store_view(&access);
     store
@@ -67,8 +66,8 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         .expect("Engine values must inject");
     vm.install_engine_globals(&null_emitter(), "Test")
         .expect("Engine globals must install");
-    vm.replay_shared(&shared, &null_emitter(), "Test")
-        .expect("shared program must run with the full environment");
+    run_scalar(&vm, &first, &null_emitter(), "Test")
+        .expect("the first chunk must run with the full environment");
 
     assert_eq!(
         run_scalar(&vm, &prologue, &null_emitter(), "Test").expect("prologue must run"),
@@ -77,7 +76,7 @@ fn section_vm_preserves_one_environment_across_all_phases() {
     assert_eq!(
         vm.var()
             .expect("var must serialize")
-            .get("from_shared")
+            .get("decorated")
             .and_then(Json::as_str),
         Some("<input>")
     );
@@ -125,11 +124,11 @@ fn a_section_vm_reads_back_an_empty_var_after_injection() {
 }
 
 #[test]
-fn section_vm_value_injection_bypasses_shared_global_metatables() {
-    // Engine values inject before the shared replay, so a metatable the
-    // shared library installs on `_G` intercepts none of them, and no tool
-    // ever installs as a global after it.
-    let shared = program(
+fn section_vm_value_injection_bypasses_chunk_global_metatables() {
+    // Engine values inject before any chunk runs, so a metatable a chunk
+    // installs on `_G` intercepts none of them, and no tool ever installs
+    // as a global after it.
+    let intercept = program(
         "captured = {}\n\
              setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })",
     );
@@ -151,8 +150,7 @@ fn section_vm_value_injection_bypasses_shared_global_metatables() {
     let observer = null_emitter();
     vm.install_engine_globals(&observer, "Test")
         .expect("Engine globals must install");
-    vm.replay_shared(&shared, &null_emitter(), "Test")
-        .expect("shared program must run");
+    run_scalar(&vm, &intercept, &null_emitter(), "Test").expect("the intercepting chunk must run");
 
     assert_eq!(
         run_scalar(&vm, &inspect, &null_emitter(), "Test")
@@ -226,13 +224,13 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
 }
 
 #[test]
-fn section_vms_isolate_mutated_shared_globals() {
-    let shared = program("counter = 0");
+fn section_vms_isolate_mutated_globals() {
+    let seed = program("counter = 0");
     let increment = program("counter = counter + 1; return counter");
     let access = fresh_access();
-    let first = section_vm_with_shared(&shared, "", &access, &null_emitter(), "First")
+    let first = section_vm_after(&seed, "", &access, &null_emitter(), "First")
         .expect("first VM must build");
-    let second = section_vm_with_shared(&shared, "", &access, &null_emitter(), "Second")
+    let second = section_vm_after(&seed, "", &access, &null_emitter(), "Second")
         .expect("second VM must build");
 
     assert_eq!(
@@ -257,7 +255,7 @@ fn section_vms_isolate_mutated_shared_globals() {
 
 #[test]
 fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
-    let shared = program("private_global = 'shared secret'");
+    let first = program("private_global = 'chunk secret'");
     let prologue = program("var.value = args");
     let epilog = program("return 'epilog done'");
     let recorder = Arc::new(Recorder::default());
@@ -268,8 +266,7 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let observer = recorder.emitter().clone();
     vm.install_engine_globals(&observer, "Gather")
         .expect("Engine globals must install");
-    vm.replay_shared(&shared, recorder.emitter(), "Gather")
-        .expect("shared program must run");
+    run_scalar(&vm, &first, recorder.emitter(), "Gather").expect("the first chunk must run");
     run_scalar(&vm, &prologue, recorder.emitter(), "Gather").expect("prologue must run");
     run_scalar(&vm, &epilog, recorder.emitter(), "Gather").expect("epilog must run");
     vm.teardown(recorder.emitter(), "Gather");
@@ -278,8 +275,8 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     assert_eq!(
         observations,
         [
-            detail::LUA_SHARED_LOAD_STARTED,
-            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_CHUNK_STARTED,
+            detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_CHUNK_STARTED,
             detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_CHUNK_STARTED,
@@ -292,36 +289,38 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
         .collect::<Vec<_>>()
     );
     let trace = format!("{observations:?}");
-    assert!(!trace.contains("shared secret"));
+    assert!(!trace.contains("chunk secret"));
     assert!(!trace.contains("private input"));
 }
 
 #[test]
 fn section_lifecycle_failures_report_their_phase() {
     let recorder = Arc::new(Recorder::default());
-    let failing_shared = program("error('private shared failure')");
+    let failing = program("error('private chunk failure')");
     let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
+        SectionVm::new(&test_nonce(), recorder.emitter(), "Failing").expect("VM must build");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Shared")
+    vm.install_engine_globals(&observer, "Failing")
         .expect("Engine globals must install");
-    vm.replay_shared(&failing_shared, recorder.emitter(), "Shared")
-        .expect_err("shared execution must fail");
-    vm.teardown(recorder.emitter(), "Shared");
+    run_scalar(&vm, &failing, recorder.emitter(), "Failing")
+        .expect_err("the failing chunk must fail");
+    vm.teardown(recorder.emitter(), "Failing");
+    let observations = recorder.observations();
     assert_eq!(
-        recorder.observations(),
+        observations,
         [
-            detail::LUA_SHARED_LOAD_STARTED,
-            detail::LUA_SHARED_LOAD_FAILED,
+            detail::LUA_CHUNK_STARTED,
+            detail::LUA_CHUNK_FAILED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Shared".to_owned(), detail.clone()))
+        .map(|detail| ("Failing".to_owned(), detail.clone()))
         .collect::<Vec<_>>()
     );
+    assert!(!format!("{observations:?}").contains("private chunk failure"));
 
     let recorder = Recorder::default();
     let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Prologue").expect("VM must build");
@@ -332,5 +331,127 @@ fn section_lifecycle_failures_report_their_phase() {
             .observations()
             .iter()
             .any(|(_, event)| *event == detail::LUA_CHUNK_FAILED)
+    );
+}
+
+#[test]
+fn call_with_a_non_string_target_errors() {
+    // The control callback resolves its target through the same
+    // `resolve_section_target` boundary as the Engine: a number is not a
+    // heading, and the error says so.
+    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
+    let observer = null_emitter();
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
+    vm.install_control_globals(
+        |target, _, _| resolve_section_target(target).map_err(Error::lua),
+        |_| Err(Error::Lua("prompt reads are not needed here".to_owned())),
+    )
+    .expect("control globals must install");
+    let out = run_scalar(
+        &vm,
+        &program(
+            "local ok, err = pcall(call, 42)\n\
+             assert(not ok and tostring(err):find('section target must be a string'), tostring(err))\n\
+             return 'ok'",
+        ),
+        &null_emitter(),
+        "Test",
+    )
+    .expect("a non-string call target must error");
+    assert_eq!(out.as_deref(), Some("ok"));
+    vm.teardown(&null_emitter(), "Test");
+}
+
+#[test]
+fn a_chunk_sees_the_tools_table_and_no_tool_global_ever_installs() {
+    // The `tools`/`models` tables install with Engine injection, before any
+    // chunk runs, so top-level code may scope tools. No tool becomes a
+    // global, during the chunk or after it.
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let scope = program(
+        "tools.offer(tools.get('fixtures/search'))\n\
+         assert(fixtures_search == nil, 'no tool installs as a global')",
+    );
+    let mut vm = SectionVm::new_for_section(
+        &test_nonce(),
+        &shared_set(bindings),
+        &Arc::new(Mutex::new(ModelSet::default())),
+        &null_emitter(),
+        "Test",
+    )
+    .expect("VM must build");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
+    let observer = null_emitter();
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
+    run_scalar(&vm, &scope, &null_emitter(), "Test").expect("the tools table must work");
+
+    assert_eq!(
+        run_scalar(
+            &vm,
+            &program("return type(fixtures_search)"),
+            &null_emitter(),
+            "Test"
+        )
+        .expect("the probe runs after the scoping chunk")
+        .as_deref(),
+        Some("nil")
+    );
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+    assert_eq!(
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
+        ["fixtures_search"],
+        "the top-level tools.offer must be recorded"
+    );
+}
+
+#[test]
+fn functions_resolve_engine_globals_when_called_from_a_later_chunk() {
+    // A function body resolves `tools`/`var` through the real globals at
+    // call time, so a later chunk can mutate Engine state through it.
+    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let define = program(
+        "function scope_and_store(id)\n\
+             tools.offer(id)\n\
+             var.scoped = id\n\
+             return var.scoped\n\
+         end",
+    );
+    let mut vm = SectionVm::new_for_section(
+        &test_nonce(),
+        &shared_set(bindings),
+        &Arc::new(Mutex::new(ModelSet::default())),
+        &null_emitter(),
+        "Test",
+    )
+    .expect("VM must build");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
+    let observer = null_emitter();
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
+    run_scalar(&vm, &define, &null_emitter(), "Test").expect("the defining chunk must run");
+
+    assert_eq!(
+        run_scalar(
+            &vm,
+            &program("return scope_and_store('fixtures/search')"),
+            &null_emitter(),
+            "Test",
+        )
+        .expect("the function must mutate Engine state when called")
+        .as_deref(),
+        Some("fixtures/search")
+    );
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+    assert_eq!(
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
+        ["fixtures_search"]
     );
 }

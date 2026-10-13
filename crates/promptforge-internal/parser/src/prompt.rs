@@ -135,8 +135,6 @@ pub struct Prompt {
     pub(crate) frontmatter: Frontmatter,
     /// The required H1 title.
     pub(crate) title: String,
-    /// The compiled `lua shared` library loaded into section VMs.
-    pub(crate) replay: Option<LuaProgram>,
     /// Ordered live Lua and prose blocks from the H1.
     pub(crate) h1_blocks: Vec<Block>,
     /// Human-readable prose from the H1.
@@ -156,13 +154,6 @@ impl Prompt {
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
-    }
-
-    /// Returns the compiled `lua shared` library, when the prompt declares one;
-    /// the Engine reaches it through [`crate::detail::replay`].
-    #[must_use]
-    pub(crate) fn replay(&self) -> Option<&LuaProgram> {
-        self.replay.as_ref()
     }
 
     /// Returns the ordered live Lua and prose blocks from the H1; the Engine

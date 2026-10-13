@@ -203,12 +203,6 @@ events! {
         LuaCompilationSucceeded {},
         /// Lua source compilation returned an error.
         LuaCompilationFailed {},
-        /// A section VM began loading and executing its shared program.
-        LuaSharedLoadStarted {},
-        /// A section VM loaded and executed its shared program successfully.
-        LuaSharedLoadSucceeded {},
-        /// A section VM failed to load or execute its shared program.
-        LuaSharedLoadFailed {},
         /// A section VM began loading a library section into the reporting
         /// section's environment.
         LuaLibraryLoadStarted {

@@ -1,7 +1,7 @@
 //! Prompt file parser.
 //!
 //! A prompt is one markdown file: YAML frontmatter, a required H1, optional H1
-//! blocks and one optional `lua shared` library fence, then H2 sections.
+//! blocks, then H2 sections.
 //! H1 and section content are alternating sequences of exact `lua` fences and
 //! prose ([`Block`]). Sections nest recursively (H3 under H2, H4 under H3, and
 //! so on through H6). Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.

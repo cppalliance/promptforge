@@ -74,23 +74,20 @@ fn a_break_resets_list_item_capture() {
 }
 
 #[test]
-fn h1_break_resets_prose_and_shared_fence_below_stays_live() {
+fn h1_break_resets_prose_and_lua_fence_below_stays_live() {
     // The H1 follows the same reset rule: Markdown above the break is
-    // commentary excluded from the description, and a `lua shared` fence
-    // below the break is live because a break makes nothing reader-only.
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua shared\nlocal shared = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
+    // commentary excluded from the description, and a `lua` fence below
+    // the break is live because a break makes nothing reader-only.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua\nlocal live = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
     let prompt = parse(src).unwrap();
-    assert_eq!(
-        prompt.replay.as_ref().map(LuaProgram::source),
-        Some("local shared = 1")
-    );
     assert_eq!(prompt.description_text, "Below prose.");
-    assert_eq!(
-        prompt.h1_blocks,
-        vec![Block::Prose {
-            text: BodyText::from_owned("Below prose.".to_owned()),
-        }]
-    );
+    assert!(matches!(
+        prompt.h1_blocks.as_slice(),
+        [Block::Prose { text: above }, Block::Lua(program), Block::Prose { text: below }]
+            if above.as_str().is_empty()
+                && program.source() == "local live = 1"
+                && below == "Below prose."
+    ));
 }
 
 #[test]

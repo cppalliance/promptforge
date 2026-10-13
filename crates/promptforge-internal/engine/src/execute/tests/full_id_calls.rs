@@ -52,7 +52,6 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &prepared,
     );
     *ctx.model_set()

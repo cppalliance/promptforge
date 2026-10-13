@@ -4,21 +4,13 @@
 //! The `promptforge` facade never re-exports this module, so only Engine
 //! crates reach it.
 
-use crate::{
-    Block, Error, Frontmatter, LuaProgram, MaxToolIterations, ParseError, Prompt, Section,
-};
+use crate::{Block, Error, Frontmatter, MaxToolIterations, ParseError, Prompt, Section};
 
 /// Unwraps a parse failure into the internal error it classifies, so the
 /// Engine can map it onto its own internal error type variant for variant.
 #[must_use]
 pub fn parse_error_into_inner(error: ParseError) -> Error {
     error.into_inner()
-}
-
-/// Returns the compiled `lua shared` library, when the prompt declares one.
-#[must_use]
-pub fn replay(prompt: &Prompt) -> Option<&LuaProgram> {
-    prompt.replay()
 }
 
 /// Returns the ordered live Lua and prose blocks from the H1.

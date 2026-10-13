@@ -17,7 +17,6 @@ fn test_context(prompt: &Prompt) -> RunState {
         Arc::new(prompt.clone()),
         "",
         &promptforge_vfs::VfsRef::default(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(
             "run-context-test",
             1,
@@ -82,7 +81,6 @@ fn the_root_task_sequence_starts_where_the_context_says() {
         Arc::new(prompt),
         "",
         &promptforge_vfs::VfsRef::default(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(
             "run-context-test",
             1,

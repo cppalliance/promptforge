@@ -225,9 +225,9 @@ impl ModelRuntime {
 /// applies to rounds on that selection and to the handle it returns, while
 /// `models.default(label)` records the prompt-wide default in the shared
 /// set - a static prompt-wide fact, conventionally called from H1 but not
-/// privileged to it. Re-selecting the same label is a no-op, so a shared
-/// library replayed into every section may name the default; naming a
-/// different label errors. There is no `models.bind`: binding is the
+/// privileged to it. Re-selecting the same label is a no-op, so a library
+/// section that every section loads with `require` may name the default;
+/// naming a different label errors. There is no `models.bind`: binding is the
 /// frontmatter's, and an unknown label is a hard error.
 ///
 /// `raw_ids` is the raw-model-id fallback, on whenever the caller passes an
@@ -292,9 +292,9 @@ pub(crate) fn install_models(
                     ))
                 })?;
             match &set.default {
-                // Idempotent under the shared-library replay: every
-                // section re-runs the library, so naming the same default
-                // again is a no-op.
+                // Idempotent under `require`: every section that requires
+                // a library re-runs it, so naming the same default again is
+                // a no-op.
                 Some(existing) if existing == &label => {}
                 Some(existing) => {
                     return Err(mlua::Error::external(format!(

@@ -31,9 +31,9 @@ fn assert_round_trips(records: &[EffectRecord]) {
 }
 
 /// Builds the run context and its fixture for an effect test: the parsed
-/// prompt, an empty shared library, and the shared model and tool sets
-/// pre-filled (the scheduler tests bypass the live H1 pass that would fill
-/// them), under the given fixture.
+/// prompt and the shared model and tool sets pre-filled (the scheduler
+/// tests bypass the live H1 pass that would fill them), under the given
+/// fixture.
 fn effect_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
@@ -43,7 +43,6 @@ fn effect_context(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &test_context(EXECUTION),
     );
     *ctx.model_set()

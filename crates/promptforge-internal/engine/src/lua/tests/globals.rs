@@ -22,7 +22,7 @@ use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{Library, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
@@ -96,7 +96,6 @@ fn fully_bound_vm(argv_writable: bool) -> SectionVm {
         "Globals",
     )
     .expect("the section VM builds");
-    let shared = LuaProgram::empty().expect("the empty shared program compiles");
     let sys = json!({});
     let argv = json!({ "prose": "" });
     let item = json!("member");
@@ -118,7 +117,6 @@ fn fully_bound_vm(argv_writable: bool) -> SectionVm {
         },
         emitter: &emitter,
         section_name: "Globals",
-        shared: &shared,
         max_tool_iterations: 24,
         ui: Some(&ui),
         preludes: &[],

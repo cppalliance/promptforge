@@ -1,13 +1,13 @@
 ---
 name: log_checkpoints
-description: Record deterministic checkpoints across shared, prologue, and epilog phases
+description: Record deterministic checkpoints across H1, prologue, and epilog phases
 promptforge: 0
 ---
 
 # Log Checkpoints
 
 ```lua
-log("shared loaded")
+log("H1 ran")
 ```
 
 ## Prepare

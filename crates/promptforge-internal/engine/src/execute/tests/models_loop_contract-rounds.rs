@@ -370,8 +370,6 @@ async fn the_scheduler_reports_the_whole_trace_of_a_bound_round_a_local_round_an
     let mut expected = vec![
         "Loop: Run started",
         "Only: Section started",
-        "Only: Lua shared load started",
-        "Only: Lua shared load succeeded",
         "Only: Lua chunk started",
     ];
     expected.extend(validated);

@@ -31,7 +31,7 @@ fn writer_models() -> ModelSet {
 }
 
 /// Builds the run context and its silent fixture for a scheduler test: the
-/// parsed prompt, an empty shared library, and the model set pre-filled.
+/// parsed prompt and the model set pre-filled.
 fn scheduler_context(prompt: &Prompt) -> (RunState, RunFixture) {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
@@ -53,8 +53,8 @@ pub(super) fn scheduler_context_on(
 }
 
 /// Builds the run context from a finished `RunContext` and its `RunFixture` on
-/// the given store: the parsed prompt, an empty shared library, and the
-/// model set pre-filled. Every scheduler-side context builder routes through
+/// the given store: the parsed prompt and the model set pre-filled. Every
+/// scheduler-side context builder routes through
 /// here so a test that needs an observer, limits, or both composes the
 /// `RunContext` and the `RunFixture` itself.
 pub(super) fn scheduler_context_from(
@@ -63,13 +63,7 @@ pub(super) fn scheduler_context_from(
     run_context: &RunContext,
     fixture: RunFixture,
 ) -> (RunState, RunFixture) {
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &store.vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
-        run_context,
-    );
+    let ctx = RunState::new(Arc::new(prompt.clone()), "", &store.vfs(), run_context);
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = writer_models();

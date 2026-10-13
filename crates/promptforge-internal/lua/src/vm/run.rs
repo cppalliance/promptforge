@@ -1,55 +1,18 @@
-//! Section VM execution: the shared-library replay, direct chunk runs,
-//! and block coroutines, from their start through each resume to the
-//! classified end.
+//! Section VM execution: direct chunk runs and block coroutines, from
+//! their start through each resume to the classified end.
 
 use super::SectionVm;
 use crate::protocol::{Answer, Request, YieldParse};
 #[cfg(test)]
 use crate::{Access, Arc, GuardNonce, Json};
+#[cfg(any(test, feature = "test-support"))]
+use crate::{Emitter, lifecycle};
 use crate::{
-    Emitter, Error, IntoLuaMulti, LuaBlockResult, LuaProgram, MultiValue, Result, Thread,
-    ThreadStatus, Value, block_guard, lifecycle, scalar_return, take_failure,
+    Error, IntoLuaMulti, LuaBlockResult, LuaProgram, MultiValue, Result, Thread, ThreadStatus,
+    Value, block_guard, scalar_return, take_failure,
 };
 
 impl SectionVm {
-    /// Replays the shared library as the section's first chunk.
-    ///
-    /// The replay runs through the normal chunk path with every Engine
-    /// global already installed: `args`, `sys`, `var`, `log`,
-    /// `store`, the `tools`/`models` tables, and the control globals are all
-    /// visible to shared top-level code. A scalar top-level return is
-    /// discarded because the replay is a library load.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the shared program fails or returns a
-    /// non-scalar value, or if it calls `jump`: load-time control transfer
-    /// has no coherent meaning, so a recorded jump becomes the hard error
-    /// "jump is not available during shared library load".
-    pub fn replay_shared(
-        &self,
-        program: &LuaProgram,
-        emitter: &Emitter,
-        section: &str,
-    ) -> Result<()> {
-        emitter.report(section, lifecycle::LUA_SHARED_LOAD_STARTED);
-        match self.run_loaded_with_control(program) {
-            Ok(LuaBlockResult::Returned(_)) => {
-                emitter.report(section, lifecycle::LUA_SHARED_LOAD_SUCCEEDED);
-                Ok(())
-            }
-            Ok(LuaBlockResult::Jump(_)) => {
-                emitter.report(section, lifecycle::LUA_SHARED_LOAD_FAILED);
-                Err(Error::Lua(
-                    "jump is not available during shared library load".to_owned(),
-                ))
-            }
-            Err(error) => {
-                emitter.report(section, lifecycle::LUA_SHARED_LOAD_FAILED);
-                Err(error)
-            }
-        }
-    }
-
     /// Executes a compiled Lua chunk in this VM's persistent environment.
     ///
     /// This is the direct, scheduler-free path for running a section's Lua
@@ -105,6 +68,7 @@ impl SectionVm {
         Ok(slot.take())
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     fn run_loaded_with_control(&self, program: &LuaProgram) -> Result<LuaBlockResult> {
         {
             let mut slot = self
@@ -340,7 +304,8 @@ pub enum CoroStep {
     /// the request table.
     Yielded(Thread, MultiValue),
     /// The coroutine ended (return, jump, or error); the block outcome
-    /// follows the `run_loaded_with_control` contract.
+    /// follows the direct chunk path's contract: a recorded jump wins over
+    /// the chunk's own error, and the scalar-return rule applies.
     Done(LuaBlockResult),
 }
 

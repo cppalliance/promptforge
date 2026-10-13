@@ -1,72 +1,70 @@
 //! Store operation reports: the pair each operation reports from a chunk
-//! and from the shared library, their order against later Lua side
+//! through the direct store closures, their order against later Lua side
 //! effects, and their freedom from payloads.
 
 use super::*;
 
 #[test]
-fn store_exists_reports_its_pair_from_the_shared_library() {
-    // The shared library loads through the direct store closures, before
-    // the yield shims install; `store.exists` must report its pair there
-    // exactly as it does from a chunk, for both a present and an absent
-    // file, and for a failure the library catches with `pcall`.
-    let shared = program("store.exists('seed.txt')\nstore.exists('missing.txt')");
+fn store_exists_reports_its_pair_through_the_direct_closures() {
+    // Before the yield shims install, a store call runs its direct closure;
+    // `store.exists` must report its pair there for both a present and an
+    // absent file, and for a failure the chunk catches with `pcall`.
+    let checks = program("store.exists('seed.txt')\nstore.exists('missing.txt')");
     let access = fresh_access();
     store_view(&access)
         .write("seed.txt", b"planted")
         .expect("the memory store can prepare a file");
     let recorder = Arc::new(Recorder::default());
     let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
+        SectionVm::new(&test_nonce(), recorder.emitter(), "Direct").expect("VM must build");
     vm.inject_values("", &json!({}), &access)
         .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Shared")
+    vm.install_engine_globals(&observer, "Direct")
         .expect("Engine globals must install");
-    vm.replay_shared(&shared, recorder.emitter(), "Shared")
-        .expect("the shared library must load");
-    vm.teardown(recorder.emitter(), "Shared");
+    run_scalar(&vm, &checks, recorder.emitter(), "Direct").expect("the checks must run");
+    vm.teardown(recorder.emitter(), "Direct");
     assert_eq!(
         recorder.observations(),
         [
-            detail::LUA_SHARED_LOAD_STARTED,
+            detail::LUA_CHUNK_STARTED,
             detail::VFS_EXISTS_SUCCEEDED,
             detail::VFS_EXISTS_SUCCEEDED,
-            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Shared".to_owned(), detail.clone()))
+        .map(|detail| ("Direct".to_owned(), detail.clone()))
         .collect::<Vec<_>>()
     );
 
-    let failing_shared = program(
+    let failing_check = program(
         "local ok = pcall(function() return store.exists('a.txt') end)\n\
          assert(not ok, 'the failing backend must refuse the check')",
     );
     let recorder = Arc::new(Recorder::default());
     let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
+        SectionVm::new(&test_nonce(), recorder.emitter(), "Direct").expect("VM must build");
     vm.inject_values("", &json!({}), &failing_access())
         .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Shared")
+    vm.install_engine_globals(&observer, "Direct")
         .expect("Engine globals must install");
-    vm.replay_shared(&failing_shared, recorder.emitter(), "Shared")
-        .expect("the pcall-caught failure must not abort the load");
-    vm.teardown(recorder.emitter(), "Shared");
+    run_scalar(&vm, &failing_check, recorder.emitter(), "Direct")
+        .expect("the pcall-caught failure must not abort the chunk");
+    vm.teardown(recorder.emitter(), "Direct");
     assert_eq!(
         recorder.observations(),
         [
-            detail::LUA_SHARED_LOAD_STARTED,
+            detail::LUA_CHUNK_STARTED,
             detail::VFS_EXISTS_FAILED,
-            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Shared".to_owned(), detail.clone()))
+        .map(|detail| ("Direct".to_owned(), detail.clone()))
         .collect::<Vec<_>>()
     );
 }

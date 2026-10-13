@@ -37,12 +37,12 @@ impl Prompt {
     ///   title is empty, a section heading skips a level (such as an H4
     ///   directly under an H2), a section heading is empty, or two sibling
     ///   sections have the same name.
-    /// - `Fence` when the H1 opens with a `lua prompt` fence, a `lua` or
-    ///   `lua shared` fence is left open, more than one `lua shared` fence
-    ///   exists, or a `lua shared` fence is outside the H1.
+    /// - `Fence` when the H1 opens with a `lua prompt` fence, a `lua` fence
+    ///   is left open, or the prompt has a `lua shared` fence, a removed form
+    ///   whose code belongs in a section loaded with `require`.
     /// - `List` when a section made up only of list items has an empty item.
-    /// - `Lua` when the `lua shared` library or a Lua block in the H1 or in a
-    ///   section fails to compile as Lua.
+    /// - `Lua` when a Lua block in the H1 or in a section fails to compile as
+    ///   Lua.
     pub fn parse(
         input: &str,
         execution: &str,
@@ -128,23 +128,15 @@ impl Prompt {
         }
         let title = h1.title.clone();
         let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
-        let shared_fences = exact_shared_openings(body);
-        let h1_shared_fences = exact_shared_openings(h1.content);
-        if shared_fences.len() > 1 {
-            return Err(Error::parse(
-                ParseErrorKind::Fence,
-                "prompt allows at most one `lua shared` fence",
-            ));
-        }
-        if let ([start], true) = (shared_fences.as_slice(), h1_shared_fences.is_empty()) {
+        if let Some(&start) = exact_shared_openings(body).first() {
             return Err(Error::parse_at(
                 ParseErrorKind::Fence,
-                *start..*start + "```lua shared".len(),
-                "`lua shared` fence is allowed only in H1",
+                start..start + "```lua shared".len(),
+                "the `lua shared` fence form was removed; put shared code in a section and load it with `require '## heading'`",
             ));
         }
-        let (replay, h1_blocks, description_text) =
-            split_h1(h1.content, &title, h1_content_abs_line, emitter)?;
+        let (h1_blocks, description_text) =
+            split_h1(shared, h1.content, &title, h1_content_abs_line, emitter)?;
 
         // Everything before the H1 is preface and has no prompt semantics.
         // Sections are headings after the H1 at level 2 or deeper.
@@ -166,7 +158,6 @@ impl Prompt {
         Ok(Prompt {
             frontmatter,
             title,
-            replay,
             h1_blocks,
             description_text,
             sections,

@@ -27,8 +27,8 @@
 //! In scheduler mode the VM also holds `tasks`, the shims for spawning,
 //! waiting on, checking, noting, and cancelling tasks. Plugin preludes
 //! are the Lua source each Plugin the prompt declares contributes: each
-//! runs once per VM in an environment of its own before the shared library
-//! replays, and its globals are checked against the reserved-name list and
+//! runs once per VM in an environment of its own before `require`
+//! installs, and its globals are checked against the reserved-name list and
 //! raw-set into `_G`. The `input` table that `user-input` defines is one:
 //! `input.ask()` is an ordinary tool call to that Plugin's ask tool.
 //!

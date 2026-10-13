@@ -24,7 +24,7 @@ const STORE_SOURCE: &str = include_str!("__impl_store.lua");
 
 /// The registry key of the store dispatchers' phase table, kept by
 /// [`install_store_table`] so [`route_store_to_shims`] can switch every
-/// dispatcher to the yield shims once the shared library has loaded.
+/// dispatcher to the yield shims once the Plugin preludes have installed.
 const STORE_PHASE_REGISTRY: &str = "promptforge.engine.store_phase";
 
 /// The store dispatcher program, compiled once and loaded per VM under the
@@ -106,10 +106,10 @@ pub fn store_error_message(
     }
 }
 
-/// Records a store conflict in the shared slot the Engine reads when a
-/// shared library load returns: a conflict the author caught with `pcall`
-/// must still end the run with a determinism violation, so the direct
-/// closures write it here rather than only raising it.
+/// Records a store conflict in the shared slot the Engine reads when the
+/// Plugin preludes return: a conflict a prelude caught with `pcall` must
+/// still end the run with a determinism violation, so the direct closures
+/// write it here rather than only raising it.
 fn record_store_conflict<T>(
     conflicts: &Mutex<Option<String>>,
     result: &std::result::Result<T, promptforge_vfs::VfsError>,
@@ -146,16 +146,16 @@ fn record_store_conflict<T>(
 /// what the claims model attributes operations to: a fanout arm's view is
 /// spawned from the caller's, so two unordered arms touching one path
 /// surface the conflict as [`VfsError::Conflict`]. A conflict these direct
-/// closures see - during a shared library load, before the yield shims
-/// install - is recorded in `conflicts`, the shared slot the Engine reads
-/// when the load returns, so the run ends with a determinism violation
-/// even if author code caught the error.
+/// closures see - while the Plugin preludes install, before the yield
+/// shims install - is recorded in `conflicts`, the shared slot the Engine
+/// reads when the preludes return, so the run ends with a determinism
+/// violation even if the prelude caught the error.
 ///
 /// The table's function values are Lua dispatchers over those closures,
 /// not the closures themselves: each runs its closure until
 /// [`route_store_to_shims`] switches it to the matching yield shim. So a
-/// function the shared library captured at load time runs directly during
-/// the load and yields like `store.*` afterward.
+/// function a prelude captured while it installed runs directly during
+/// the install and yields like `store.*` afterward.
 ///
 /// [`VfsError`]: promptforge_vfs::VfsError
 ///
@@ -353,7 +353,7 @@ pub(crate) fn install_store_table(
 
 /// Switches every store dispatcher [`install_store_table`] built on this
 /// VM to the yield shims in `shims`, whichever reference the prompt
-/// holds: a function the shared library captured at load time yields
+/// holds: a function a Plugin prelude captured while it installed yields
 /// from here on exactly as `store.*` does.
 ///
 /// # Errors

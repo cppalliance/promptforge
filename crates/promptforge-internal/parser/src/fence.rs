@@ -1,10 +1,10 @@
-//! Exact `lua` / `lua shared` fence recognition and block splitting.
+//! Exact `lua` fence recognition and block splitting.
 //!
 //! H1 and section content is an alternating sequence of exact, unindented
 //! triple-backtick `lua` fences and prose. This module recognizes those fences
-//! (never near-misses or fences nested inside longer code blocks), extracts the
-//! optional `lua shared` H1 library, and splits content into [`RawBlock`]s that
-//! the facade compiles into [`Block`]s.
+//! (never near-misses or fences nested inside longer code blocks), finds the
+//! removed `lua shared` form so the parse can reject it, and splits content
+//! into [`RawBlock`]s that the facade compiles into [`Block`]s.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -27,70 +27,35 @@ pub(super) enum RawBlock<'a> {
     Prose(&'a str),
 }
 
-/// Extracts the optional exact `lua shared` library from H1 and compiles the
-/// remaining H1 content as alternating live Lua and prose blocks.
+/// Compiles H1 content as alternating live Lua and prose blocks.
 ///
-/// `content_abs_line` is the 1-based line number in the full input where
-/// `content` begins.
+/// `content` is the H1's stretch of `body`, and `content_abs_line` is the
+/// 1-based line number in the full input where `content` begins.
 ///
 /// # Errors
 /// Returns a fence-classified parse error for a leading `lua prompt` fence or
 /// an unclosed fence, and a Lua compilation error for invalid Lua.
 pub(super) fn split_h1(
+    body: &Arc<str>,
     content: &str,
     title: &str,
     content_abs_line: u32,
     emitter: &Emitter,
-) -> Result<(Option<LuaProgram>, Vec<Block>, String)> {
+) -> Result<(Vec<Block>, String)> {
     let leading = trim_leading_blank_lines(content);
     if leading.lines().next() == Some("```lua prompt") {
         return Err(Error::parse(
             ParseErrorKind::Fence,
-            "the `lua prompt` fence form was removed; use `lua` for a live H1 block or `lua shared` for the shared library",
+            "the `lua prompt` fence form was removed; use `lua` for a live H1 block and `require` for shared code",
         ));
     }
 
-    let shared_opening = exact_shared_openings(content).into_iter().next();
-    let mut h1_content = content.as_bytes().to_vec();
-    let replay = if let Some(opening) = shared_opening {
-        let after_open = strip_exact_shared_opening(&content[opening..]).ok_or_else(|| {
-            Error::parse(
-                ParseErrorKind::Structure,
-                "internal shared fence classification mismatch",
-            )
-        })?;
-        let (source, rest) = extract_exact_fence(after_open, "prompt `lua shared`")?;
-        let fence_end = content.len() - rest.len();
-        blank_preserving_newlines(&mut h1_content[opening..fence_end]);
-        Some(LuaProgram::compile(
-            &source,
-            "prompt shared library",
-            nz_source_line(line_add(
-                line_add(content_abs_line, newlines_before(content, opening)?)?,
-                1,
-            )?)?,
-            emitter,
-            title,
-        )?)
-    } else {
-        None
-    };
-
-    let h1_content = String::from_utf8(h1_content).map_err(|_| {
-        Error::parse(
-            ParseErrorKind::Structure,
-            "internal H1 source masking failed",
-        )
-    })?;
-    // H1 prose can hold blanked stretches the prompt body doesn't, so it
-    // reads from its own shared copy.
-    let h1_content: Arc<str> = Arc::from(h1_content);
-    let raw_blocks = split_section_blocks(&h1_content, title)?;
+    let raw_blocks = split_section_blocks(content, title)?;
     let mut blocks = Vec::with_capacity(raw_blocks.len());
     for raw in raw_blocks {
         match raw {
             RawBlock::Prose(text) => blocks.push(Block::Prose {
-                text: body_text(&h1_content, text)?,
+                text: body_text(body, text)?,
             }),
             RawBlock::Lua {
                 source,
@@ -121,7 +86,7 @@ pub(super) fn split_h1(
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    Ok((replay, blocks, description_text))
+    Ok((blocks, description_text))
 }
 
 /// Removes complete leading lines that contain only whitespace.
@@ -164,14 +129,6 @@ fn strip_exact_lua_opening(content: &str) -> Option<&str> {
         .or_else(|| (content == "```lua").then_some(""))
 }
 
-/// Removes one exact unindented `lua shared` opening line from `content`.
-fn strip_exact_shared_opening(content: &str) -> Option<&str> {
-    content
-        .strip_prefix("```lua shared\r\n")
-        .or_else(|| content.strip_prefix("```lua shared\n"))
-        .or_else(|| (content == "```lua shared").then_some(""))
-}
-
 /// Returns byte offsets of top-level fences whose opening line is `marker`.
 fn exact_fence_openings(content: &str, marker: &str) -> Vec<usize> {
     Parser::new_ext(content, Options::empty())
@@ -199,7 +156,8 @@ fn exact_lua_openings(content: &str) -> Vec<usize> {
     exact_fence_openings(content, "```lua")
 }
 
-/// Returns the byte offsets of top-level exact `lua shared` opening lines.
+/// Returns the byte offsets of top-level exact `lua shared` opening lines,
+/// the removed fence form the parse rejects.
 pub(super) fn exact_shared_openings(content: &str) -> Vec<usize> {
     exact_fence_openings(content, "```lua shared")
 }
@@ -207,16 +165,6 @@ pub(super) fn exact_shared_openings(content: &str) -> Vec<usize> {
 /// Byte offset where leading blank lines end.
 fn leading_content_start(content: &str) -> usize {
     content.len() - trim_leading_blank_lines(content).len()
-}
-
-/// Blanks a byte slice in place, preserving `\r` and `\n` so source-line
-/// numbers still map back to the original file.
-fn blank_preserving_newlines(bytes: &mut [u8]) {
-    for byte in bytes {
-        if !matches!(*byte, b'\r' | b'\n') {
-            *byte = b' ';
-        }
-    }
 }
 
 /// Byte ranges of every genuine thematic break in `content`.

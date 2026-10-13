@@ -1,7 +1,7 @@
 -- Coroutine-protocol shim prelude for a scheduler-mode section VM.
 --
 -- The Engine installs this after the Engine globals exist and before the
--- shared library replays. The chunk arguments are privileged captures, never
+-- Plugin preludes. The chunk arguments are privileged captures, never
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the Engine helper returning the hidden `var` data table as a plain deep

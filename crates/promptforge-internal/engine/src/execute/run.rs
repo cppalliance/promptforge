@@ -231,13 +231,13 @@ impl Run {
 }
 
 /// Assembles the run state from the caller's context, checking the version
-/// gate, the shared library, and the declared store in that order.
+/// gate and then the declared store.
 ///
 /// # Errors
 /// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
-/// prompt that is not a supported promptforge prompt, the Lua error when
-/// the empty shared chunk cannot compile, or [`Error::Store`] when the
-/// handle declares no store or the store's backend fails the probe.
+/// prompt that is not a supported promptforge prompt, or [`Error::Store`]
+/// when the handle declares no store or the store's backend fails the
+/// probe.
 fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<RunState> {
     match prompt.frontmatter().promptforge() {
         Some(0) => {}
@@ -250,13 +250,6 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
             .with_prompt_name(prompt.frontmatter().name()));
         }
     }
-    // Section startup replays the shared library unconditionally; a prompt
-    // without one replays an empty compiled chunk instead, so the startup
-    // sequence always has a program to replay.
-    let shared = match promptforge_parser::detail::replay(&prompt) {
-        Some(program) => program.clone(),
-        None => crate::lua::LuaProgram::empty()?,
-    };
     // Every run and every store call needs a declared store: the probe
     // stats the store root through a throwaway capability, so a handle
     // with no declaration fails here rather than on the first store call,
@@ -266,7 +259,7 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
         .acquire(promptforge_vfs::Origin::new("store mount probe"))
         .map_err(Error::store)?;
     promptforge_vfs::detail::probe_store(&probe).map_err(Error::store)?;
-    Ok(RunState::new(prompt, args, &ctx.vfs, shared, ctx))
+    Ok(RunState::new(prompt, args, &ctx.vfs, ctx))
 }
 
 #[cfg(test)]

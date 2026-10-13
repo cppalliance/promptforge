@@ -49,9 +49,6 @@ pub(crate) mod detail {
         LUA_COMPILATION_STARTED => LuaCompilationStarted,
         LUA_COMPILATION_SUCCEEDED => LuaCompilationSucceeded,
         LUA_COMPILATION_FAILED => LuaCompilationFailed,
-        LUA_SHARED_LOAD_STARTED => LuaSharedLoadStarted,
-        LUA_SHARED_LOAD_SUCCEEDED => LuaSharedLoadSucceeded,
-        LUA_SHARED_LOAD_FAILED => LuaSharedLoadFailed,
         LUA_CHUNK_STARTED => LuaChunkStarted,
         LUA_CHUNK_SUCCEEDED => LuaChunkSucceeded,
         LUA_CHUNK_FAILED => LuaChunkFailed,
@@ -126,12 +123,6 @@ pub enum Observation {
     LuaCompilationSucceeded,
     /// Lua source compilation returned an error.
     LuaCompilationFailed,
-    /// A section VM began loading and executing its shared program.
-    LuaSharedLoadStarted,
-    /// A section VM loaded and executed its shared program successfully.
-    LuaSharedLoadSucceeded,
-    /// A section VM failed to load or execute its shared program.
-    LuaSharedLoadFailed,
     /// A section VM began loading a library section.
     LuaLibraryLoadStarted {
         /// The library section's heading with its markers.
@@ -274,9 +265,6 @@ impl Observation {
             Observation::LuaCompilationStarted => "Lua compilation started",
             Observation::LuaCompilationSucceeded => "Lua compilation succeeded",
             Observation::LuaCompilationFailed => "Lua compilation failed",
-            Observation::LuaSharedLoadStarted => "Lua shared load started",
-            Observation::LuaSharedLoadSucceeded => "Lua shared load succeeded",
-            Observation::LuaSharedLoadFailed => "Lua shared load failed",
             Observation::LuaLibraryLoadStarted { .. } => "Lua library load started",
             Observation::LuaLibraryLoadSucceeded { .. } => "Lua library load succeeded",
             Observation::LuaLibraryLoadFailed { .. } => "Lua library load failed",

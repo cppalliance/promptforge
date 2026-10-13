@@ -61,7 +61,6 @@ pub(super) fn model_task_context_with(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
         &prepared,
     );
     *ctx.model_set()

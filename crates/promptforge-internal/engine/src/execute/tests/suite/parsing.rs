@@ -50,7 +50,6 @@ fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter().description(), "minimum valid");
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Test");
-    assert!(detail::replay(prompt).is_none());
     assert!(detail::h1_blocks(prompt).is_empty());
     assert_eq!(detail::sections(prompt).len(), 1);
     let entry = detail::entry(prompt).expect("fixture has sections");
@@ -69,7 +68,6 @@ fn verify_require_library(prompt: &Prompt) {
     );
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Require Library");
-    assert!(detail::replay(prompt).is_none());
     assert_eq!(detail::sections(prompt).len(), 3);
 
     let prepare = &detail::sections(prompt)[0];
@@ -120,7 +118,6 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
         NonZeroU32::new(3)
     );
     assert_eq!(prompt.title(), "Phase Boundaries");
-    assert!(detail::replay(prompt).is_none());
     assert_eq!(detail::sections(prompt).len(), 2);
 
     let transform = detail::entry(prompt).expect("fixture has sections");

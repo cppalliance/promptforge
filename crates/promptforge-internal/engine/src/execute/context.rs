@@ -21,7 +21,7 @@ use promptforge_types::plugins::Prelude;
 
 use crate::Result;
 use crate::cancel::CancelHandle;
-use crate::lua::{LuaProgram, ToolBinding, ToolSet, ToolView};
+use crate::lua::{ToolBinding, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
 use crate::untrusted::GuardNonce;
@@ -69,9 +69,9 @@ pub(crate) struct RunState {
     events: EventSink,
     /// This context's task-scoped emitter: the root task's at
     /// construction, a spawned chain's own after [`with_task`](Self::with_task).
-    /// The Lua layer's seams (the shared replay, `log`, teardown, the
-    /// shared tool-dispatch body) take it too, so their reports land in the
-    /// buffer in order with the scheduler's own.
+    /// The Lua layer's seams (`require`'s library loads, `log`, teardown,
+    /// the shared tool-dispatch body) take it too, so their reports land in
+    /// the buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
@@ -85,10 +85,6 @@ pub(crate) struct RunState {
     /// The model-turn counter this context advances: the run's, or a
     /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
-    /// The shared library replayed as every section's first chunk; an empty
-    /// compiled chunk when the prompt declares no `lua shared` library, so
-    /// the startup sequence needs no `Option` branch.
-    shared: Arc<LuaProgram>,
     /// The run's tool set as a read-only view: built from the prepared
     /// catalog at construction. The only writer is `tools.always_offer` (a
     /// prompt-wide fact) through the concrete handle the section VMs
@@ -118,7 +114,7 @@ pub(crate) struct RunState {
     /// fallback.
     ui: Option<Arc<serde_json::Value>>,
     /// The run's Plugin preludes, in install order: every section VM
-    /// installs each one before the shared library replays.
+    /// installs each one before `require`.
     preludes: Arc<[Prelude]>,
     /// Test-only: installs the raw `tools.call_as_model` shim in every
     /// section VM, so a fixture section can yield one model-issued
@@ -139,13 +135,7 @@ impl RunState {
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
-    pub(super) fn new(
-        prompt: Arc<Prompt>,
-        args: &str,
-        vfs: &VfsRef,
-        shared: LuaProgram,
-        ctx: &RunContext,
-    ) -> Self {
+    pub(super) fn new(prompt: Arc<Prompt>, args: &str, vfs: &VfsRef, ctx: &RunContext) -> Self {
         let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
         let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
@@ -175,7 +165,6 @@ impl RunState {
             #[cfg(test)]
             tap: None,
             turns: Arc::new(AtomicU32::new(0)),
-            shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
             catalog_bindings: Arc::new(catalog_bindings(ctx)),
@@ -368,8 +357,8 @@ impl RunState {
     }
 
     /// The borrowed VM-setup inputs both section drivers share, sourcing the
-    /// run-wide inputs (`args`, the emitter, `shared`, the shim caps, and
-    /// the preludes) from this context; the driver supplies only its own
+    /// run-wide inputs (`args`, the emitter, the shim caps, and the
+    /// preludes) from this context; the driver supplies only its own
     /// deltas: the `sys`
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
@@ -390,7 +379,6 @@ impl RunState {
             seed,
             emitter: &self.emitter,
             section_name,
-            shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),
             ui: self.ui.as_ref(),
             preludes: &self.preludes,
@@ -438,7 +426,6 @@ impl fmt::Debug for RunState {
             .field("emitter", &self.emitter)
             .field("cancel", &self.cancel)
             .field("turns", &self.turns)
-            .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
             .field(
