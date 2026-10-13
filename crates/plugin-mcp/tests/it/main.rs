@@ -239,11 +239,42 @@ async fn a_rejecting_server_fails_ready_with_a_reason_that_holds_no_header_value
         .expect("a rejection settles")
         .expect_err("a 401 fails the start");
     assert!(!reason.to_string().contains(SECRET), "{reason}");
+    tokio::time::timeout(Duration::from_secs(1), plugin.ready())
+        .await
+        .expect("a later ready answers at once while retries go on")
+        .expect_err("the server still rejects");
     assert!(plugin.tools().is_empty());
     let refused = call(&plugin, "remote/echo", json!({}))
         .await
         .expect_err("no call goes out");
     assert!(!refused.to_string().contains(SECRET));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_rejects_its_first_connection_lists_its_tools_once_it_accepts() {
+    let fixture = Fixture::rejecting().await;
+    let plugin = install(&fixture, &json!({}));
+    tokio::time::timeout(Duration::from_secs(30), plugin.ready())
+        .await
+        .expect("a rejection settles")
+        .expect_err("a 401 fails the start");
+    assert!(plugin.tools().is_empty());
+
+    fixture.accept();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while plugin.tools().is_empty() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("a later attempt connects once the server accepts");
+
+    let ids: Vec<String> = plugin.tools().iter().map(|t| t.id.to_string()).collect();
+    assert!(ids.contains(&"remote/echo".to_owned()), "{ids:?}");
+    let text = call(&plugin, "remote/echo", json!({ "q": "hello" }))
+        .await
+        .expect("succeeds");
+    assert_eq!(text, r#"echo: {"q":"hello"}"#);
 }
 
 #[tokio::test(flavor = "multi_thread")]

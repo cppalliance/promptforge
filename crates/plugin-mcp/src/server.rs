@@ -23,8 +23,9 @@ use crate::result;
 /// How long a call may take before it fails as a transport error.
 pub(crate) const CALL_DEADLINE: Duration = Duration::from_mins(5);
 
-/// Where a server is. It moves from `Starting` to `Ready` or `Failed` once
-/// and never back to `Starting`.
+/// Where a server is. It leaves `Starting` when the first attempt settles
+/// and never returns to it. A `Failed` server moves to `Ready` when a later
+/// attempt succeeds, and a `Ready` one stays `Ready`.
 #[derive(Debug)]
 pub(crate) enum State {
     Starting,

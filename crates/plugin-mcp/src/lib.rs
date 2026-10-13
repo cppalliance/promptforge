@@ -25,7 +25,10 @@
 //! background task on it, which connects, runs the handshake, and lists
 //! every page of tools within two minutes. The Plugin's `ready` waits for
 //! that task, so a run sees the tools of a server that is still starting.
-//! A server that fails to start is unavailable, with the reason. A server
+//! A server that fails to start is unavailable to each run that starts
+//! while it is down, with the reason, and the Plugin keeps trying in the
+//! background, waiting 1 second after the first failure and doubling up to
+//! a minute, so a later run offers its tools once it answers. A server
 //! that is ready stays ready, and a later failure shows as a transport
 //! error on the call.
 //!

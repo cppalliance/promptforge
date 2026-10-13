@@ -51,10 +51,17 @@ fn handshake_cause(error: &ClientInitializeError) -> String {
     }
 }
 
-/// Connects to `entry`, publishes `Ready` or `Failed` on `state` within
-/// `deadline`, and then keeps the connection open until the task is
-/// aborted or the transport ends. Neither end changes the published
-/// state.
+/// The wait before the next attempt after `failures` failed ones: one
+/// second, doubling, at most a minute.
+fn retry_delay(failures: u32) -> Duration {
+    Duration::from_secs(1 << failures.min(6)).min(Duration::from_mins(1))
+}
+
+/// Connects to `entry` and publishes `Ready` or `Failed` on `state`,
+/// giving each attempt `deadline`. After a failure it waits
+/// [`retry_delay`] and tries again, until an attempt succeeds. Then it
+/// keeps the connection open until the task is aborted or the transport
+/// ends. Neither end changes the published state.
 ///
 /// rmcp sets no handshake timeout and does not guard `list_all_tools`
 /// against a server that repeats a cursor, so `deadline` bounds both.
@@ -64,44 +71,48 @@ pub(crate) async fn run(
     deadline: Duration,
     state: watch::Sender<State>,
 ) {
-    // The headers go through the config, never a caller-built client, and
-    // never `auth_header`, which adds `Bearer` itself and would double the
-    // one an `Authorization` value already holds.
-    let transport = StreamableHttpClientTransport::from_config(
-        StreamableHttpClientTransportConfig::with_uri(entry.url).custom_headers(entry.headers),
-    );
-    let start = async {
-        let service = client_config()
-            .serve(transport)
-            .await
-            .map_err(|e| format!("the MCP handshake failed: {}", handshake_cause(&e)))?;
-        let tools = service.list_all_tools().await.map_err(|e| {
-            format!(
-                "listing the MCP server's tools failed: {}",
-                service_cause(&e)
-            )
-        })?;
-        Ok::<_, String>((service, tools))
-    };
-    match tokio::time::timeout(deadline, start).await {
-        Ok(Ok((service, tools))) => {
-            let ready = Ready {
-                peer: service.peer().clone(),
-                tools: catalog(&plugin, tools),
-            };
-            state.send_replace(State::Ready(ready));
-            // Holding the service keeps the session open; its end changes no state.
-            let _ = service.waiting().await;
-        }
-        Ok(Err(reason)) => {
-            state.send_replace(State::Failed(reason));
-        }
-        Err(_) => {
-            state.send_replace(State::Failed(format!(
+    let mut failures = 0;
+    loop {
+        // The headers go through the config, never a caller-built client, and
+        // never `auth_header`, which adds `Bearer` itself and would double the
+        // one an `Authorization` value already holds.
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(entry.url.clone())
+                .custom_headers(entry.headers.clone()),
+        );
+        let start = async {
+            let service = client_config()
+                .serve(transport)
+                .await
+                .map_err(|e| format!("the MCP handshake failed: {}", handshake_cause(&e)))?;
+            let tools = service.list_all_tools().await.map_err(|e| {
+                format!(
+                    "listing the MCP server's tools failed: {}",
+                    service_cause(&e)
+                )
+            })?;
+            Ok::<_, String>((service, tools))
+        };
+        let reason = match tokio::time::timeout(deadline, start).await {
+            Ok(Ok((service, tools))) => {
+                let ready = Ready {
+                    peer: service.peer().clone(),
+                    tools: catalog(&plugin, tools),
+                };
+                state.send_replace(State::Ready(ready));
+                // Holding the service keeps the session open; its end changes no state.
+                let _ = service.waiting().await;
+                return;
+            }
+            Ok(Err(reason)) => reason,
+            Err(_) => format!(
                 "the MCP server did not finish starting within {} seconds",
                 deadline.as_secs()
-            )));
-        }
+            ),
+        };
+        state.send_replace(State::Failed(reason));
+        tokio::time::sleep(retry_delay(failures)).await;
+        failures = failures.saturating_add(1);
     }
 }
 

@@ -5,6 +5,7 @@
 //! remote server does, and records what it receives.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -47,8 +48,8 @@ pub(crate) struct Shared {
     pub(crate) hang_started: Notify,
     /// Signalled when a `notifications/cancelled` arrives.
     pub(crate) cancel_arrived: Notify,
-    /// Answers every `POST` with `401` when set.
-    reject: bool,
+    /// Answers every `POST` with `401` while set.
+    reject: AtomicBool,
 }
 
 pub(crate) struct Fixture {
@@ -79,7 +80,7 @@ impl Fixture {
             recorded: Mutex::new(Recorded::default()),
             hang_started: Notify::new(),
             cancel_arrived: Notify::new(),
-            reject,
+            reject: AtomicBool::new(reject),
         });
         let app = Router::new()
             .route("/mcp", post(post_mcp).get(get_mcp).delete(delete_mcp))
@@ -103,6 +104,11 @@ impl Fixture {
     pub(crate) fn methods(&self) -> Vec<String> {
         let recorded = self.shared.recorded.lock().expect("lock");
         recorded.seen.iter().map(|s| s.method.clone()).collect()
+    }
+
+    /// Stops rejecting, so the next connection attempt succeeds.
+    pub(crate) fn accept(&self) {
+        self.shared.reject.store(false, Ordering::SeqCst);
     }
 }
 
@@ -151,7 +157,7 @@ fn tool(name: &str, description: &str) -> Value {
 }
 
 async fn post_mcp(State(shared): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) -> Response {
-    if shared.reject {
+    if shared.reject.load(Ordering::SeqCst) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let message: Value = serde_json::from_slice(&body).expect("a JSON-RPC message");

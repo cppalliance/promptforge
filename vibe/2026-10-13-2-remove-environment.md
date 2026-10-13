@@ -669,7 +669,7 @@ Constraints: every `.rs` file stays under 500 lines (`config.rs` goes from 367 t
 
 <step-2>
 
-### Step 2: Keep retrying an MCP server that failed to start
+### Step 2: Keep retrying an MCP server that failed to start [completed]
 
 - Component: `none`
 - Tests:

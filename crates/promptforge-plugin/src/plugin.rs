@@ -36,7 +36,7 @@ pub trait Plugin: Send + Sync {
     fn tools(&self) -> Vec<ToolDescriptor>;
 
     /// Resolves once the Plugin's tool list is complete, or with the
-    /// reason it never will be.
+    /// reason it can't serve now.
     ///
     /// The Harness awaits every Plugin's `ready` together before each run
     /// reads [`tools`](Plugin::tools). A Plugin whose `ready` fails is
@@ -47,7 +47,8 @@ pub trait Plugin: Send + Sync {
     /// # Invariants
     ///
     /// - `ready` resolves `Ok` once [`tools`](Plugin::tools) is complete,
-    ///   or `Err` with a reason a model can read when it never will be.
+    ///   or `Err` with a reason a model can read when the Plugin can't serve
+    ///   now. A Plugin that recovers answers `Ok` to a later call.
     /// - `ready` resolves within a bound the Plugin owns. The Plugin's own
     ///   task enforces that bound, and `ready` uses no runtime timer,
     ///   because it may be polled outside any particular runtime.
@@ -57,8 +58,8 @@ pub trait Plugin: Send + Sync {
     ///
     /// # Errors
     /// Returns a [`ToolError`], whose message is safe to show the model,
-    /// when the Plugin will never offer its tools, such as when the
-    /// backend it connects to refuses it.
+    /// when the Plugin can't offer its tools now, such as when the backend
+    /// it connects to refuses it or is down.
     fn ready(&self) -> PluginFuture<'_, Result<(), ToolError>> {
         Box::pin(async { Ok(()) })
     }
