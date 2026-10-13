@@ -4,7 +4,7 @@
 //! fresh VMs) can visit the same table differently. [`install_deterministic_iteration`]
 //! replaces the `pairs` and `next` globals with one deterministic walk: the
 //! array part (`1..=#t`) first in index order, then the hash part by the shared
-//! [`SortKey`](crate::collection::SortKey) order (booleans, then numbers, then
+//! [`SortKey`] order (booleans, then numbers, then
 //! strings). A `__pairs` metamethod on a table's or a userdata's metatable
 //! still wins, as in stock Lua; any other non-table value, a userdata without
 //! `__pairs` included, is refused.

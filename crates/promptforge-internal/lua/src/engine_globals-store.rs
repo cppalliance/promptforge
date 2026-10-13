@@ -158,6 +158,7 @@ fn record_store_conflict<T>(
 /// the install and yields like `store.*` afterward.
 ///
 /// [`VfsError`]: promptforge_vfs::VfsError
+/// [`VfsError::Conflict`]: promptforge_vfs::VfsError::Conflict
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the `store` table or any of its functions cannot

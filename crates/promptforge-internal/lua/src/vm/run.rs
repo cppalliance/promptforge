@@ -95,7 +95,7 @@ impl SectionVm {
     /// block, created from the block's loaded function on this persistent
     /// VM, so the VM's globals (`var` and the bare globals) roll forward
     /// across blocks as on the direct
-    /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
+    /// `run_chunk` path. Instruction hooks are
     /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
     /// installed on the fresh thread; the main-state hook from construction
     /// never fires inside a resumed coroutine.
