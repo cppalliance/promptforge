@@ -4,16 +4,16 @@ overview: Stage 1 of the late-bound Plugin offering design. Adds `plugins.offer`
 todos:
   - id: plugin-offer
     content: "Step 1: plugins.offer over a name, a Plugin object, or a list of either; ToolRuntime deriving Default and gaining plugins; current_tool_bindings expands offered Plugins each round; an absent Plugin raises; tests"
-    status: pending
+    status: completed
   - id: retire
     content: "Step 2: retire tools.always_offer, ToolSet.always, and the description override; with no writer left, the tool set becomes one read-only Arc<ToolSet>, deleting ToolView, the lock helpers, from_parts, for_test, and tool_set_snapshot, with RunState::with_tool_set for test fixtures; Engine test fixtures lose their run-wide list and their tests offer explicitly; move every other test and the Workshop chat agent onto plugins.offer, tools.offer, or a required offers section; docs; RETIRED_SEEDS; full suite"
-    status: pending
+    status: completed
   - id: roster
     content: "Step 3: the run's Plugin roster reaches Lua: Environment::plugins folds usable and unavailable Plugins into one map that Environment, RunContext, and ToolSet hold; the Harness passes it from its snapshot; a Plugin object for every usable Plugin; plugins.offer of an unavailable Plugin raises its reason; public API blessed; full suite"
-    status: pending
+    status: completed
   - id: close
     content: "Close, owned by the run and not a step: mark the vibe/ copy completed, delete vibe/ACTIVE, and commit Close plan: plugin-offering; nothing is pushed"
-    status: pending
+    status: completed
 isProject: false
 ---
 
