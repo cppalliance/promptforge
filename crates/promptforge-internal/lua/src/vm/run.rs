@@ -292,12 +292,16 @@ impl SectionVm {
     /// Maps one chunk's Lua failure to its typed outcome: a chunk the
     /// instruction hook aborted under the run's cancel flag is
     /// [`Error::Interrupted`], whatever the raw error says; everything
-    /// else maps through [`LuaProgram::map_runtime_error`].
+    /// else maps through [`LuaProgram::map_runtime_error`] of `program`
+    /// and of every library block `require` loaded into this VM.
     fn map_chunk_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Error {
         if self.instruction_budget.is_cancelled() {
             return Error::Interrupted;
         }
-        program.map_runtime_error(error)
+        match self.library_programs.lock() {
+            Ok(libraries) => program.map_runtime_error_among(error, &libraries),
+            Err(_) => Error::Lua("require's loaded library programs were poisoned".to_owned()),
+        }
     }
 }
 

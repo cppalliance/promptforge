@@ -1,11 +1,13 @@
 //! PromptForge's `require`: library blocks run in the caller's environment
 //! and coroutine, return values, caching by library identity, cycles,
 //! retries after a failed load, the key passed to the resolver, the `jump`
-//! refusal during a load, and the library-load reports.
+//! refusal during a load, library prose, library errors, and the
+//! library-load reports.
 
 use super::*;
 
-#[path = "require-reports.rs"]
+mod errors;
+mod prose;
 mod reports;
 
 /// The section every test VM's `require` reports under.
@@ -69,12 +71,21 @@ fn resolver(
     }
 }
 
-/// A shim VM with `require` installed over `entries`, reporting through
-/// `emitter`, and the log of its resolver calls.
+/// A shim VM with `require` installed over `entries`, rendering library
+/// prose verbatim and reporting through `emitter`, and the log of its
+/// resolver calls.
 fn require_vm(entries: Vec<Entry>, emitter: &Emitter) -> (SectionVm, Calls) {
+    require_vm_rendering(entries, |template, _| Ok(template.to_owned()), emitter)
+}
+
+/// [`require_vm`] with library prose rendered through `render`.
+fn require_vm_rendering<P>(entries: Vec<Entry>, render: P, emitter: &Emitter) -> (SectionVm, Calls)
+where
+    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+{
     let calls = Calls::default();
     let vm = shim_vm(None);
-    vm.install_require(resolver(entries, &calls), emitter, SECTION)
+    vm.install_require(resolver(entries, &calls), render, emitter, SECTION)
         .expect("require must install");
     (vm, calls)
 }
@@ -344,7 +355,7 @@ fn an_uncaught_library_failure_keeps_the_library_position() {
     );
     let error = failure(&vm, "require '## a'");
     assert!(
-        error.contains("[string \"library ## a\"]:2: library fault"),
+        error.contains("library ## a:2: library fault"),
         "the raise must still name the library block, got {error}"
     );
 }

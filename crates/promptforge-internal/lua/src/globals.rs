@@ -111,6 +111,19 @@ pub(crate) fn install_prose(lua: &Lua, render: Function) -> Result<()> {
     state(lua)?.raw_set("prose", render).map_err(Error::lua)
 }
 
+/// Puts `render` in the `prose` slot, nil leaving `prose` reading nil, and
+/// returns the render it replaced, nil before the first install.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the guard's slot table is missing or cannot
+/// be read or written.
+pub(crate) fn replace_prose(lua: &Lua, render: Value) -> Result<Value> {
+    let state = state(lua)?;
+    let replaced = state.raw_get("prose").map_err(Error::lua)?;
+    state.raw_set("prose", render).map_err(Error::lua)?;
+    Ok(replaced)
+}
+
 /// The guard's slot table.
 fn state(lua: &Lua) -> Result<Table> {
     lua.named_registry_value(STATE_REGISTRY).map_err(Error::lua)

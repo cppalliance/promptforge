@@ -67,6 +67,7 @@ fn an_installed_require_is_promptforges_and_loads_no_module() {
                 "no section `{heading}` within reach of require"
             )))
         },
+        |template, _| Ok(template.to_owned()),
         &null_emitter(),
         "Section",
     )

@@ -233,22 +233,43 @@ impl SectionVm {
     /// first load reports through a clone of `emitter` under `section`, and
     /// `jump` refuses while any library loads.
     ///
+    /// While a library block runs, its `prose` is its own: a lazy read of
+    /// the block's prose template, rendered at most once through `render`
+    /// with the template and the same [`ProseState`] snapshot
+    /// [`install_lazy_prose`](Self::install_lazy_prose)'s render takes, read
+    /// from the caller's environment. The caller's `prose`, memo included,
+    /// comes back when the block ends, however it ends. A failure anywhere
+    /// in library code maps to the library block's location and prompt
+    /// line.
+    ///
     /// # Errors
     /// Returns [`Error::Lua`] if the loader cannot install.
-    pub fn install_require<R, E>(&self, resolver: R, emitter: &Emitter, section: &str) -> Result<()>
+    pub fn install_require<R, E, P>(
+        &self,
+        resolver: R,
+        render: P,
+        emitter: &Emitter,
+        section: &str,
+    ) -> Result<()>
     where
         R: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, E>
             + Send
             + Sync
             + 'static,
         E: std::error::Error + Send + Sync + 'static,
+        P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
     {
         crate::require::install(
             &self.lua,
             resolver,
+            render,
             emitter,
             section,
-            &self.library_load_depth,
+            &crate::require::VmShare {
+                depth: &self.library_load_depth,
+                sys_live: &self.sys_live,
+                programs: &self.library_programs,
+            },
         )
     }
 

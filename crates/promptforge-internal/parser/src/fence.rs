@@ -317,20 +317,27 @@ pub(super) fn split_section_blocks<'a>(
     Ok(blocks)
 }
 
-/// Compile label for one Lua block, preserving classic prologue/epilog names.
+/// Compile label for one Lua block of the section named by `label`,
+/// preserving classic prologue/epilog names.
+///
+/// Every other block is named by `ordinal`, its 1-based place among the
+/// section's Lua blocks: the label is the chunk name a runtime error's
+/// prompt-line mapping matches, so no two blocks of a prompt may share
+/// one.
 pub(super) fn lua_block_location(
-    section: &str,
+    label: &str,
     index: usize,
     total: usize,
     has_prose: bool,
+    ordinal: usize,
 ) -> String {
     let is_first = index == 0;
     let is_last = index + 1 == total;
     if is_first {
-        return format!("section `{section}` prologue");
+        return format!("{label} prologue");
     }
     if is_last && has_prose {
-        return format!("section `{section}` epilog");
+        return format!("{label} epilog");
     }
-    format!("section `{section}` lua")
+    format!("{label} lua {ordinal}")
 }

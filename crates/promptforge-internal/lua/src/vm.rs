@@ -16,9 +16,9 @@ mod state;
 use super::{
     Access, Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
     DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, GuardNonce, InstructionBudget, Json, Lua, LuaOptions,
-    ModelRuntime, ModelSet, Mutex, Ordering, Result, StdLib, ToolRuntime, ToolSet, harden,
-    install_deterministic_iteration, install_instruction_budget, install_untrusted, lifecycle,
-    log_byte_budget,
+    LuaProgram, ModelRuntime, ModelSet, Mutex, Ordering, Result, StdLib, ToolRuntime, ToolSet,
+    harden, install_deterministic_iteration, install_instruction_budget, install_untrusted,
+    lifecycle, log_byte_budget,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -78,6 +78,10 @@ pub struct SectionVm {
     /// How many libraries `require` is loading on this VM; `jump` refuses
     /// while it is above zero.
     library_load_depth: Arc<AtomicU32>,
+    /// The blocks of every library `require` loaded into this VM: a block
+    /// failure maps through them as well as through the started block, so
+    /// library code reports its own location and prompt line.
+    library_programs: Arc<Mutex<Vec<LuaProgram>>>,
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
@@ -285,6 +289,7 @@ impl SectionVm {
             jump_slot: Arc::new(Mutex::new(None)),
             local_handler_depth: Arc::new(AtomicU32::new(0)),
             library_load_depth: Arc::new(AtomicU32::new(0)),
+            library_programs: Arc::new(Mutex::new(Vec::new())),
             sys_live: Arc::new(Mutex::new(None)),
             access: None,
             store_conflicts: Arc::new(Mutex::new(None)),

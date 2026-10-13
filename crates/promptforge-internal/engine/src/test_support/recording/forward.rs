@@ -216,6 +216,13 @@ fn forward_lifecycle(event: Event, observer: &dyn Observer) {
             message,
             ..
         } => observer.observe(&execution, &section, Observation::Lua(message)),
+        _ => forward_task(event, observer),
+    }
+}
+
+/// The task variants, as observations.
+fn forward_task(event: Event, observer: &dyn Observer) {
+    match event {
         Event::TaskStarted {
             execution,
             section,

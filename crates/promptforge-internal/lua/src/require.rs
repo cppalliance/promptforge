@@ -6,8 +6,10 @@
 //! suspending calls are ordinary yields of that block. The loader is Lua
 //! (`__impl_require.lua`), because a Rust function cannot call one that
 //! yields; the Rust helpers here resolve a library, load its blocks, track
-//! which library is loading, step the depth counter `jump` reads, and
-//! report each load's boundaries.
+//! which library is loading, step the depth counter `jump` reads, report
+//! each load's boundaries, swap each block's own `prose` in and the
+//! caller's back out, and keep every loaded block's program on the VM for
+//! error mapping.
 //!
 //! The standard package library stays unloaded: `require` reaches
 //! sections only, through the resolver, never files or native modules.
@@ -18,7 +20,7 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use mlua::{AnyUserData, Function, Value};
 use promptforge_types::emitter::{Emitter, LibraryLoad};
 
-use super::{Error, Library, LibraryKey, Lua, LuaProgram, Result, SharedSource};
+use super::{Error, Json, Library, LibraryKey, Lua, LuaProgram, ProseState, Result, SharedSource};
 use crate::error_value::install_error_value;
 
 /// The loader chunk's name, `@`-prefixed as the shim chunks' names are.
@@ -40,34 +42,55 @@ static REQUIRE_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> 
 /// heading, which its reports name.
 type Loading = Arc<Mutex<Vec<(LibraryKey, String)>>>;
 
-/// Installs `require` as a global over `resolver`, reporting each first
-/// load through a clone of `emitter` under `section` and stepping `depth`
-/// while a library loads.
+/// The section VM's state `require` works on.
+pub(crate) struct VmShare<'a> {
+    /// The counter `jump` reads, stepped while a library loads.
+    pub(crate) depth: &'a Arc<AtomicU32>,
+    /// The live `sys` mirror a library block's `prose` renders from.
+    pub(crate) sys_live: &'a Arc<Mutex<Option<Json>>>,
+    /// Every library block's program loaded into the VM, which a block
+    /// failure maps through.
+    pub(crate) programs: &'a Arc<Mutex<Vec<LuaProgram>>>,
+}
+
+/// Installs `require` as a global over `resolver`, rendering each library
+/// block's `prose` template through `render`, reporting each first load
+/// through a clone of `emitter` under `section`, and working on `vm`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the loader chunk or its helpers cannot be
 /// built or installed.
-pub(crate) fn install<R, E>(
+pub(crate) fn install<R, E, P>(
     lua: &Lua,
     resolver: R,
+    render: P,
     emitter: &Emitter,
     section: &str,
-    depth: &Arc<AtomicU32>,
+    vm: &VmShare<'_>,
 ) -> Result<()>
 where
     R: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, E> + Send + Sync + 'static,
     E: std::error::Error + Send + Sync + 'static,
+    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let loading = Loading::default();
     let resolve = resolve_capture(lua, resolver, &loading)?;
-    let begin_load = begin_load_capture(lua, &loading, depth, emitter, section)?;
-    let end_load = end_load_capture(lua, &loading, depth, emitter, section)?;
+    let begin_load = begin_load_capture(lua, &loading, vm, emitter, section)?;
+    let end_load = end_load_capture(lua, &loading, vm.depth, emitter, section)?;
+    let (swap_prose, restore_prose) = prose_captures(lua, render, vm.sys_live)?;
     let error_value = install_error_value(lua).map_err(Error::lua)?;
     let require: Function = REQUIRE_PROGRAM
         .as_ref()
         .map_err(Error::shared)?
         .load(lua)?
-        .call((resolve, begin_load, end_load, error_value))
+        .call((
+            resolve,
+            begin_load,
+            end_load,
+            swap_prose,
+            restore_prose,
+            error_value,
+        ))
         .map_err(Error::lua)?;
     lua.globals()
         .raw_set("require", require)
@@ -93,7 +116,9 @@ where
                 )));
             }
         };
-        let from = lock(&loading)?.last().map(|(key, _)| key.clone());
+        let from = lock(&loading, "library-load state")?
+            .last()
+            .map(|(key, _)| key.clone());
         let library = resolver(heading, from).map_err(mlua::Error::external)?;
         let identity = library.key.identity().to_owned();
         let library_heading = library.heading.clone();
@@ -103,23 +128,25 @@ where
 }
 
 /// Builds `begin_load(library)`: reports the load's start, loads the
-/// library's blocks, and marks it as the one loading, returning the blocks
-/// in order. A block that fails to load reports the load as failed and
-/// leaves nothing marked.
+/// library's blocks, keeps their programs on the VM, and marks the library
+/// as the one loading, returning the blocks and their prose templates in
+/// order. A block that fails to load reports the load as failed and leaves
+/// nothing marked.
 fn begin_load_capture(
     lua: &Lua,
     loading: &Loading,
-    depth: &Arc<AtomicU32>,
+    vm: &VmShare<'_>,
     emitter: &Emitter,
     section: &str,
 ) -> Result<Function> {
     let loading = Arc::clone(loading);
-    let depth = Arc::clone(depth);
+    let depth = Arc::clone(vm.depth);
+    let programs = Arc::clone(vm.programs);
     let emitter = emitter.clone();
     let section = section.to_owned();
     lua.create_function(move |lua, library: AnyUserData| {
         let library = library.take::<Library>()?;
-        let mut loading = lock(&loading)?;
+        let mut loading = lock(&loading, "library-load state")?;
         emitter.library_load(&section, &library.heading, LibraryLoad::Started);
         let blocks = library
             .blocks
@@ -133,11 +160,47 @@ fn begin_load_capture(
                 return Err(mlua::Error::external(error));
             }
         };
+        let mut programs = lock(&programs, "loaded library programs")?;
+        let mut templates = Vec::with_capacity(library.blocks.len());
+        for block in library.blocks {
+            templates.push(block.prose);
+            if !programs.contains(&block.program) {
+                programs.push(block.program);
+            }
+        }
         loading.push((library.key, library.heading));
         depth.fetch_add(1, Ordering::Relaxed);
-        Ok(blocks)
+        Ok((blocks, templates))
     })
     .map_err(Error::lua)
+}
+
+/// Builds `swap_prose(template)`, which installs a library block's own
+/// lazy `prose` over `template`, rendered through `render`, and returns the
+/// read it replaced, and `restore_prose(saved)`, which puts that read back.
+fn prose_captures<P>(
+    lua: &Lua,
+    render: P,
+    sys_live: &Arc<Mutex<Option<Json>>>,
+) -> Result<(Function, Function)>
+where
+    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+{
+    let render = Arc::new(render);
+    let sys_live = Arc::clone(sys_live);
+    let swap = lua
+        .create_function(move |lua, template: String| {
+            let render = Arc::clone(&render);
+            crate::prose::swap(lua, &sys_live, move |state| render(&template, state))
+                .map_err(mlua::Error::external)
+        })
+        .map_err(Error::lua)?;
+    let restore = lua
+        .create_function(|lua, saved: Value| {
+            crate::prose::restore(lua, saved).map_err(mlua::Error::external)
+        })
+        .map_err(Error::lua)?;
+    Ok((swap, restore))
 }
 
 /// Builds `end_load(finished)`: takes back the innermost load's mark and
@@ -154,7 +217,7 @@ fn end_load_capture(
     let emitter = emitter.clone();
     let section = section.to_owned();
     lua.create_function(move |_, finished: bool| {
-        let Some((_, heading)) = lock(&loading)?.pop() else {
+        let Some((_, heading)) = lock(&loading, "library-load state")?.pop() else {
             return Err(mlua::Error::external(Error::Internal(
                 "require ended a library load that never began",
             )));
@@ -171,13 +234,11 @@ fn end_load_capture(
     .map_err(Error::lua)
 }
 
-/// Locks the VM's loads, mapping a poisoned lock to a Lua error.
-fn lock(loading: &Loading) -> mlua::Result<MutexGuard<'_, Vec<(LibraryKey, String)>>> {
-    loading.lock().map_err(|_| {
-        mlua::Error::external(Error::Lua(
-            "require's library-load state was poisoned".to_owned(),
-        ))
-    })
+/// Locks one of `require`'s shared slots, `what`, mapping a poisoned lock
+/// to a Lua error.
+fn lock<'a, T>(slot: &'a Mutex<T>, what: &str) -> mlua::Result<MutexGuard<'a, T>> {
+    slot.lock()
+        .map_err(|_| mlua::Error::external(Error::Lua(format!("require's {what} was poisoned"))))
 }
 
 #[cfg(test)]

@@ -247,7 +247,7 @@ async fn an_uncaught_loop_arity_error_fails_the_run_naming_the_authors_prompt_li
                 "the runtime error keeps the shim's message: {message}"
             );
             assert!(
-                message.contains("[string \"section `Only` prologue\"]:14:"),
+                message.contains("section `Only` prologue:14: in"),
                 "the runtime error names the author's prompt line: {message}"
             );
         }

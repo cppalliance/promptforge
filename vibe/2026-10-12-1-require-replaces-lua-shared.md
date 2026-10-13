@@ -368,7 +368,7 @@ Add PromptForge's `require` to the Lua crate as an installable global driven by 
 
 <step-3>
 
-### Step 3: Library prose and error mapping
+### Step 3: Library prose and error mapping [completed]
 
 - Component: `require` runtime
 - Tests: `cargo nextest run --locked -p promptforge-lua -p promptforge-parser -p promptforge-engine --all-features`; `cargo fmt --all --check`

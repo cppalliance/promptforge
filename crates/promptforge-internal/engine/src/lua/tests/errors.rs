@@ -234,7 +234,7 @@ fn an_uncaught_lua_kind_shim_raise_keeps_the_mapped_runtime_error() {
                 "the mapped error keeps the shim's message: {message}"
             );
             assert!(
-                message.contains("[string \"section `Test` prologue\"]:41:"),
+                message.contains("section `Test` prologue:41: in"),
                 "the author frame maps to the absolute prompt line: {message}"
             );
         }
@@ -430,7 +430,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
         "the line mapper leaves the shim frame unmapped: {mapped}"
     );
     assert!(
-        mapped.contains("[string \"section `Test` prologue\"]:41:"),
+        mapped.contains("section `Test` prologue:41: in"),
         "the author frame maps to the absolute prompt line: {mapped}"
     );
 }

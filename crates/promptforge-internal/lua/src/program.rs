@@ -192,12 +192,24 @@ impl LuaProgram {
     /// the raw error reaches here.
     #[must_use]
     pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
+        self.map_runtime_error_among(error, &[])
+    }
+
+    /// [`map_runtime_error`](Self::map_runtime_error) for a chunk that ran
+    /// beside `loaded`, the programs of the libraries loaded into its VM:
+    /// each chunk's lines are rewritten by the program that owns them,
+    /// this one first when two share a location.
+    pub(crate) fn map_runtime_error_among(&self, error: &mlua::Error, loaded: &[Self]) -> Error {
         let raw = error.to_string();
         // An Engine-quota refusal is a stable typed error, not an authoring error.
         if let Some(resource) = quota_resource(&raw) {
             return Error::LuaQuota { resource };
         }
-        let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
+        let owners: Vec<(&str, NonZeroU32)> = std::iter::once(self)
+            .chain(loaded)
+            .map(|program| (program.location(), program.source_line))
+            .collect();
+        let mapped = map_chunk_line_to_absolute(&raw, &owners);
         // Retain the originating `mlua` error as the private source with the
         // mapped prompt-location message, instead of flattening it to a string.
         Error::LuaRuntime {
@@ -230,63 +242,66 @@ fn quota_resource(raw: &str) -> Option<&'static str> {
     }
 }
 
-/// Rewrites chunk-relative line numbers for one named chunk to absolute
-/// prompt-source lines.
+/// Rewrites chunk-relative line numbers for the named chunks in `owners`,
+/// each a location and the prompt-source line its chunk starts at, to
+/// absolute prompt-source lines.
 ///
-/// Only `[string "{location}"]:N:` occurrences are rewritten, so a parent
-/// prologue that surfaces a fanout child's already-mapped error does not
-/// corrupt the child's absolute line. When the pattern is absent, the message
-/// passes through unchanged except for a leading `{location}:` tag when an
-/// absolute line can still be inferred. A chunk line whose absolute mapping
-/// would overflow `u32` is left as its original digits (the finding's
+/// Only `[string "{location}"]:N:` occurrences of an owner's location are
+/// rewritten, each through the first owner whose location it names, to
+/// `{location}:{line}:`, the form Lua gives a file chunk. No later pass
+/// matches that form, so a parent VM that surfaces a called or fanout
+/// child's mapped error leaves the child's absolute lines alone, even for a
+/// library both VMs loaded. The message gains a single leading
+/// `{location}:{line}:` tag for the first occurrence rewritten; a message
+/// with none passes through unchanged. A chunk line whose absolute mapping
+/// would overflow `u32` keeps its original marker and digits (the finding's
 /// "return the original diagnostic on overflow").
-pub(crate) fn map_chunk_line_to_absolute(
-    message: &str,
-    source_line: NonZeroU32,
-    location: &str,
-) -> String {
-    if location.is_empty() {
-        return message.to_owned();
-    }
-    let marker = format!("[string \"{location}\"]:");
+pub(crate) fn map_chunk_line_to_absolute(message: &str, owners: &[(&str, NonZeroU32)]) -> String {
+    const OPENING: &str = "[string \"";
+    let markers: Vec<(String, &str, NonZeroU32)> = owners
+        .iter()
+        .filter(|(location, _)| !location.is_empty())
+        .map(|&(location, source_line)| (format!("{OPENING}{location}\"]:"), location, source_line))
+        .collect();
     let mut result = String::with_capacity(message.len() + 64);
     let mut rest = message;
-    let mut first_absolute: Option<u32> = None;
-    while let Some(start) = rest.find(&marker) {
+    let mut tag: Option<(&str, u32)> = None;
+    while let Some(start) = rest.find(OPENING) {
         result.push_str(&rest[..start]);
-        result.push_str(&marker);
-        let after = &rest[start + marker.len()..];
+        let at = &rest[start..];
+        let Some((marker, location, source_line)) = markers
+            .iter()
+            .find(|(marker, ..)| at.starts_with(marker.as_str()))
+        else {
+            result.push_str(OPENING);
+            rest = &at[OPENING.len()..];
+            continue;
+        };
+        let after = &at[marker.len()..];
         let digit_end = after
             .find(|c: char| !c.is_ascii_digit())
             .unwrap_or(after.len());
-        if digit_end == 0 {
-            rest = after;
-            continue;
-        }
-        if let Ok(chunk_line) = after[..digit_end].parse::<u32>() {
-            // absolute = source_line + chunk_line - 1, with overflow guarded so
-            // a pathological line count cannot wrap into a wrong number.
-            let absolute = source_line
-                .get()
-                .checked_add(chunk_line)
-                .and_then(|sum| sum.checked_sub(1));
-            match absolute {
-                Some(absolute) => {
-                    if first_absolute.is_none() {
-                        first_absolute = Some(absolute);
-                    }
-                    result.push_str(&absolute.to_string());
-                }
-                None => result.push_str(&after[..digit_end]),
-            }
+        // absolute = source_line + chunk_line - 1, with overflow guarded so
+        // a pathological line count cannot wrap into a wrong number.
+        let absolute = after[..digit_end]
+            .parse::<u32>()
+            .ok()
+            .and_then(|chunk_line| source_line.get().checked_add(chunk_line))
+            .and_then(|sum| sum.checked_sub(1));
+        if let Some(absolute) = absolute {
+            tag.get_or_insert((location, absolute));
+            result.push_str(location);
+            result.push(':');
+            result.push_str(&absolute.to_string());
             rest = &after[digit_end..];
         } else {
+            result.push_str(marker);
             rest = after;
         }
     }
     result.push_str(rest);
 
-    if let Some(absolute) = first_absolute {
+    if let Some((location, absolute)) = tag {
         // Leading `location:line:` tag naming the prompt file and its
         // absolute line: `briefer.md:51: ...`
         format!("{location}:{absolute}: {result}")

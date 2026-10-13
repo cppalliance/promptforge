@@ -165,10 +165,12 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading<'_>>> {
 
 /// Builds one heading's executable blocks while preserving source positions.
 /// Prose reads in place from `body`, the shared text `heading` was sliced from.
+/// `label` names the section in each Lua block's location.
 fn build_heading_blocks(
     body: &Arc<str>,
     heading: &Heading<'_>,
     name: &str,
+    label: &str,
     frontmatter_lines: u32,
     emitter: &Emitter,
 ) -> Result<Vec<Block>> {
@@ -179,6 +181,7 @@ fn build_heading_blocks(
         .any(|block| matches!(block, RawBlock::Prose(_)));
     let total = raw_blocks.len();
     let mut blocks = Vec::with_capacity(total);
+    let mut ordinal = 0;
     for (index, raw) in raw_blocks.into_iter().enumerate() {
         match raw {
             RawBlock::Prose(text) => blocks.push(Block::Prose {
@@ -188,8 +191,9 @@ fn build_heading_blocks(
                 source,
                 line_offset,
             } => {
+                ordinal += 1;
                 let abs_line = line_add(content_abs_line, line_offset)?;
-                let location = lua_block_location(name, index, total, has_prose);
+                let location = lua_block_location(label, index, total, has_prose, ordinal);
                 let program = LuaProgram::compile(
                     &source,
                     &location,
@@ -264,6 +268,23 @@ fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyT
     }
 }
 
+/// Names a section in its Lua block locations: the title alone, or the title
+/// and its heading line when another section in `headings` shares the
+/// title. Lua reports only a chunk's name, so a name two sections share
+/// would map one section's errors through the other's lines.
+fn block_label(headings: &[Heading<'_>], name: &str, heading_abs_line: u32) -> String {
+    if headings
+        .iter()
+        .filter(|other| other.title == name)
+        .nth(1)
+        .is_some()
+    {
+        format!("section `{name}` (line {heading_abs_line})")
+    } else {
+        format!("section `{name}`")
+    }
+}
+
 /// Rejects a section whose name an earlier sibling already took. Sections are
 /// addressed by name (jumps, lookups), so two siblings sharing a name would
 /// make the target ambiguous. The error names BOTH heading locations so the
@@ -321,7 +342,8 @@ pub(crate) fn build_sections(
         check_child_level(h, parent_level)?;
         let name = section_name(h, level)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
-        let blocks = build_heading_blocks(body, h, &name, frontmatter_lines, emitter)?;
+        let label = block_label(headings, &name, heading_abs_line);
+        let blocks = build_heading_blocks(body, h, &name, &label, frontmatter_lines, emitter)?;
         *pos += 1;
         let children = build_sections(body, headings, pos, level, frontmatter_lines, emitter)?;
         let items = list_items(body, &blocks, &name)?;

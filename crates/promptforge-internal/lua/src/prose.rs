@@ -16,7 +16,9 @@
 //! install, `prose` reads nil and still refuses writes. Each install
 //! replaces the previous render, so a later fence's buffer evaluates fresh
 //! while an already rendered string the author kept in a local or `var`
-//! survives untouched.
+//! survives untouched. A library block `require` runs reads its own
+//! `prose` between a [`swap`] and a [`restore`], which hands the caller's
+//! read back with its memo.
 
 use super::{Arc, Error, Json, Lua, LuaSerdeExt, Mutex, Result, Value, var_to_json};
 
@@ -66,6 +68,31 @@ where
 {
     let read = lazy_read(lua, sys_live, render)?;
     crate::globals::install_prose(lua, read)
+}
+
+/// Installs a fresh lazy `prose` over `render`, as [`install`] does, and
+/// returns the read it replaced for [`restore`].
+///
+/// The replaced read is the caller's own, memo included, so restoring it
+/// hands back text the caller already read without rendering again.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the read cannot be built or the guard cannot
+/// record it.
+pub(crate) fn swap<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<Value>
+where
+    F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+{
+    let read = lazy_read(lua, sys_live, render)?;
+    crate::globals::replace_prose(lua, Value::Function(read))
+}
+
+/// Puts back the read [`swap`] replaced.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the guard cannot record it.
+pub(crate) fn restore(lua: &Lua, saved: Value) -> Result<()> {
+    crate::globals::replace_prose(lua, saved).map(drop)
 }
 
 /// Builds one install's `prose` read: the first call renders once through

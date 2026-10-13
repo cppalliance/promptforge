@@ -132,11 +132,13 @@ fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
 fn map_chunk_line_to_absolute_rewrites_line_numbers() {
     let location = "section `Web Search` epilog";
     let msg = r#"[string "section `Web Search` epilog"]:2: assertion failed!"#;
-    let result =
-        map_chunk_line_to_absolute(msg, NonZeroU32::new(50).expect("50 is non-zero"), location);
+    let result = map_chunk_line_to_absolute(
+        msg,
+        &[(location, NonZeroU32::new(50).expect("50 is non-zero"))],
+    );
     assert_eq!(
         result,
-        r#"section `Web Search` epilog:51: [string "section `Web Search` epilog"]:51: assertion failed!"#
+        "section `Web Search` epilog:51: section `Web Search` epilog:51: assertion failed!"
     );
 }
 
@@ -147,21 +149,41 @@ stack traceback:
         [string "section `Main` prologue"]:3: in main chunk"#;
     let result = map_chunk_line_to_absolute(
         msg,
-        NonZeroU32::new(22).expect("22 is non-zero"),
-        "section `Main` prologue",
+        &[(
+            "section `Main` prologue",
+            NonZeroU32::new(22).expect("22 is non-zero"),
+        )],
     );
     assert!(
         result.contains("[string \"section `Web Search` epilog\"]:51:"),
         "child absolute line must stay intact: {result}"
     );
     assert!(
-        result.contains("[string \"section `Main` prologue\"]:24:")
-            || result.starts_with("section `Main` prologue:24:"),
+        result.starts_with("section `Main` prologue:24: ")
+            && result.contains("\n        section `Main` prologue:24: in main chunk"),
         "parent chunk line must map with parent source_line: {result}"
     );
     assert!(
-        !result.contains("[string \"section `Main` prologue\"]:3:"),
-        "parent chunk-relative line must be rewritten: {result}"
+        !result.contains("[string \"section `Main` prologue\"]"),
+        "parent chunk-relative marker must be rewritten: {result}"
+    );
+}
+
+#[test]
+fn map_chunk_line_to_absolute_leaves_an_already_mapped_marker_alone() {
+    let lib = (
+        "section `lib` prologue",
+        NonZeroU32::new(50).expect("50 is non-zero"),
+    );
+    let child = map_chunk_line_to_absolute(r#"[string "section `lib` prologue"]:2: boom"#, &[lib]);
+    assert_eq!(
+        child,
+        "section `lib` prologue:51: section `lib` prologue:51: boom"
+    );
+    let parent = map_chunk_line_to_absolute(&child, &[lib]);
+    assert_eq!(
+        parent, child,
+        "a second pass through the same owner must not rewrite line 51 again"
     );
 }
 
@@ -170,7 +192,7 @@ fn map_chunk_line_to_absolute_keeps_original_digits_on_overflow() {
     // source_line + chunk_line - 1 must not wrap; on overflow the original
     // chunk-relative digits are preserved rather than a wrong absolute line.
     let msg = r#"[string "x"]:5: boom"#;
-    let result = map_chunk_line_to_absolute(msg, NonZeroU32::MAX, "x");
+    let result = map_chunk_line_to_absolute(msg, &[("x", NonZeroU32::MAX)]);
     assert!(
         result.contains(r#"[string "x"]:5:"#),
         "overflowing mapping must keep the original line 5: {result}"
@@ -186,10 +208,31 @@ fn map_chunk_line_to_absolute_no_match_passthrough() {
     let msg = "some other error without chunk info";
     let result = map_chunk_line_to_absolute(
         msg,
-        NonZeroU32::new(10).expect("10 is non-zero"),
-        "section `Main` prologue",
+        &[(
+            "section `Main` prologue",
+            NonZeroU32::new(10).expect("10 is non-zero"),
+        )],
     );
     assert_eq!(result, msg);
+}
+
+#[test]
+fn map_chunk_line_to_absolute_maps_each_owners_markers_once_under_one_tag() {
+    let msg = r#"[string "lib"]:2: boom
+stack traceback:
+        [string "lib"]:2: in function 'boom'
+        [string "caller"]:3: in main chunk"#;
+    let owners = [
+        ("caller", NonZeroU32::new(30).expect("30 is non-zero")),
+        ("lib", NonZeroU32::new(50).expect("50 is non-zero")),
+    ];
+    assert_eq!(
+        map_chunk_line_to_absolute(msg, &owners),
+        "lib:51: lib:51: boom
+stack traceback:
+        lib:51: in function 'boom'
+        caller:32: in main chunk"
+    );
 }
 
 #[test]
