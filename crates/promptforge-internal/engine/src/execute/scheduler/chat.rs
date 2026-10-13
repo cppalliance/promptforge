@@ -144,12 +144,11 @@ impl Scheduler {
                 section: section.clone(),
             })?
         };
-        let tool_set = chain.ctx.tool_set_snapshot()?;
         // The scope is read at call time: `tools.offer` and `tools.offer_local`
         // calls since the last model operation shape this round's
         // advertised set, which is the section's effective bindings plus
         // every local Lua tool.
-        let bound = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
+        let bound = current_tool_bindings(chain.ctx.tool_set(), &vm.tool_runtime)?;
         let locals = vm.local_tool_schemas()?;
         let handles = frame.reporting_handles();
         let emitter = handles.emitter;
@@ -224,8 +223,7 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the parked chain has lost its frame
-    /// or the scope it advertised for the round, or the run's tool set
-    /// cannot be read.
+    /// or the scope it advertised for the round.
     pub(super) fn accept_chat(
         &mut self,
         id: ChainIndex,
@@ -266,10 +264,8 @@ impl Scheduler {
                     .advertised
                     .as_ref()
                     .ok_or(Error::internal("a parked chat round recorded its scope"))?;
-                let global_exists = |name: &str| -> Result<bool> {
-                    Ok(chain.ctx.tool_set_snapshot()?.wire_binding(name).is_some())
-                };
-                round.tool_calls(&served, turn, &calls, advertised, global_exists)?
+                let global_exists = |name: &str| chain.ctx.tool_set().wire_binding(name).is_some();
+                round.tool_calls(&served, turn, &calls, advertised, global_exists)
             }
             // `CompletionResult` is `#[non_exhaustive]` across the crate
             // boundary: an outcome this build does not recognize can be
@@ -372,18 +368,14 @@ impl ArrivedRound {
     /// this round, else the call fails as out of scope under a failed
     /// tool-call observation. The batch resumes unexecuted; the shim
     /// dispatches each call.
-    ///
-    /// # Errors
-    /// Returns the error `global_exists` reports when the run's tool set
-    /// cannot be read.
     fn tool_calls(
         &self,
         served: &Served,
         turn: u32,
         calls: &[ToolCall],
         advertised: &BTreeMap<String, DispatchTarget>,
-        global_exists: impl Fn(&str) -> Result<bool>,
-    ) -> Result<std::result::Result<ChatResult, Error>> {
+        global_exists: impl Fn(&str) -> bool,
+    ) -> Result<ChatResult> {
         let events: Vec<ToolCallEvent> = calls
             .iter()
             .map(|call| ToolCallEvent {
@@ -404,13 +396,13 @@ impl ArrivedRound {
         {
             self.emitter
                 .report(&self.section, lifecycle::TOOL_CALL_FAILED);
-            return Ok(Err(Error::OutOfScopeToolCall {
+            return Err(Error::OutOfScopeToolCall {
                 name: rogue.name().to_owned(),
-                global_exists: global_exists(rogue.name())?,
+                global_exists: global_exists(rogue.name()),
                 in_scope: advertised.keys().cloned().collect(),
-            }));
+            });
         }
-        Ok(Ok(ChatResult {
+        Ok(ChatResult {
             overflow: false,
             overflow_reason: None,
             reply: None,
@@ -418,6 +410,6 @@ impl ArrivedRound {
             tool_calls: Some(events),
             finish_reason: served.finish_reason.clone(),
             turn,
-        }))
+        })
     }
 }

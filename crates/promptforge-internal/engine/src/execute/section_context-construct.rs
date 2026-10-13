@@ -96,7 +96,7 @@ impl SectionContext {
             .report(section.name(), lifecycle::SECTION_STARTED);
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
-            &ctx.tool_set(),
+            ctx.tool_set(),
             &ctx.model_set(),
             ctx.emitter(),
             section.name(),
@@ -188,7 +188,7 @@ impl SectionContext {
         let sys = ctx.sys_json(section_id, &root_task, title);
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
-            &ctx.tool_set(),
+            ctx.tool_set(),
             &ctx.model_set(),
             ctx.emitter(),
             title,

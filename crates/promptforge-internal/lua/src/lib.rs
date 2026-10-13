@@ -168,7 +168,7 @@ pub use engine_globals::{run_store_op, store_error_message};
 pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
 pub use handles::{
     Library, LibraryBlock, LibraryKey, LuaBlockResult, SectionText, ToolBinding, ToolOutputKind,
-    ToolSet, ToolView,
+    ToolSet,
 };
 pub use messages::MessageList;
 pub use models::ModelRuntime;

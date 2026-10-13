@@ -167,7 +167,7 @@ fn lua_with_local_grab() -> Lua {
     crate::install_tools(
         &lua,
         &lua.globals(),
-        &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolSet::default())),
+        &std::sync::Arc::new(crate::ToolSet::default()),
         &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolRuntime::default())),
         &crate::vm::LocalTools::default(),
     )

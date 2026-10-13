@@ -238,12 +238,12 @@ fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
 
 /// Shares a fixture set the way the run shares its own: one allocation every
 /// section VM clones.
-fn shared_set(bindings: ToolSet) -> Arc<Mutex<ToolSet>> {
-    Arc::new(Mutex::new(bindings))
+fn shared_set(bindings: ToolSet) -> Arc<ToolSet> {
+    Arc::new(bindings)
 }
 
 fn section_vm_with_set(
-    tools: &Arc<Mutex<ToolSet>>,
+    tools: &Arc<ToolSet>,
     emitter: &Emitter,
     section: &str,
 ) -> Result<SectionVm> {

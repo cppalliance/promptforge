@@ -17,7 +17,7 @@
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, Library, LibraryBlock, LibraryKey, LuaBlockResult, MessageList, ModelReport,
     OverflowReason, ProseState, ScriptReport, SectionText, SectionVm, TaskAllowlist, ToolBinding,
-    ToolCallCounts, ToolSet, ToolView, UsageAnchor, current_tool_bindings, enrich_sys_model,
+    ToolCallCounts, ToolSet, UsageAnchor, current_tool_bindings, enrich_sys_model,
     install_preludes, install_section_loop_shim, install_store_shims, install_ui, output_reserve,
     precheck, prepare_dispatch, prepare_model_dispatch, project_messages, render_item,
     resolve_model_binding,

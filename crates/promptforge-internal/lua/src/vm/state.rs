@@ -97,33 +97,22 @@ impl SectionVm {
     /// increment it.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails
-    /// or the shared tool set's mutex is poisoned.
+    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
     pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
-        let tools = self
-            .bound_tools
-            .lock()
-            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?
-            .clone();
-        install_tool_call_counts_impl(&self.lua, &tools, bindings)
+        install_tool_call_counts_impl(&self.lua, &self.bound_tools, bindings)
     }
 
-    /// Returns a snapshot of the shared tool set and the live section
-    /// addition runtime.
+    /// Returns the shared tool set and the live section addition runtime.
     ///
     /// A test helper for `promptforge-engine`'s executor tests, so it exists
     /// only under `test-support`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the shared tool set's mutex is poisoned.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn tool_bag_handles(&self) -> Result<(ToolSet, Arc<Mutex<ToolRuntime>>)> {
-        let tools = self
-            .bound_tools
-            .lock()
-            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?
-            .clone();
-        Ok((tools, Arc::clone(&self.tool_runtime)))
+    #[must_use]
+    pub fn tool_bag_handles(&self) -> (Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
+        (
+            Arc::clone(&self.bound_tools),
+            Arc::clone(&self.tool_runtime),
+        )
     }
 
     /// Returns a snapshot of the shared model set and the live section

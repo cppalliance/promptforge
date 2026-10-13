@@ -48,8 +48,7 @@ fn effect_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let fixture = tools.into().install(&ctx, fixture);
-    (ctx, fixture)
+    tools.into().install(ctx, fixture)
 }
 
 /// The origin of a call made by `caller` in `section` of the test run.

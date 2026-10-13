@@ -51,7 +51,7 @@ use std::sync::atomic::Ordering;
 use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome, ToolCallRecord};
 use crate::execute::run::{Effect, ToolCallOrigin, ToolCaller};
 use crate::execute::section_context::LocalCall;
-use crate::lua::{ScriptReport, ToolCallCounts, ToolSet, current_tool_bindings};
+use crate::lua::{ScriptReport, ToolCallCounts, current_tool_bindings};
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::tools::{OutputTrust, ToolId};
@@ -203,18 +203,16 @@ impl Scheduler {
             .unwrap_or_else(|| self.chains[id.index()].ctx.turns().load(Ordering::Relaxed))
     }
 
-    /// The chain's tool set and its section's tool-call counts, which the
-    /// section's first call installs.
-    fn section_call_counts(&mut self, id: ChainIndex) -> Result<(ToolSet, ToolCallCounts)> {
+    /// The chain's section's tool-call counts, which the section's first
+    /// call installs.
+    fn section_call_counts(&mut self, id: ChainIndex) -> Result<ToolCallCounts> {
         let chain = &mut self.chains[id.index()];
-        let tool_set = chain.ctx.tool_set_snapshot()?;
         let frame = chain
             .frame
             .as_mut()
             .ok_or(Error::internal("a live chain holds its frame"))?;
-        let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-        let counts = frame.script_call_counts(&chain.ctx, &effective)?;
-        Ok((tool_set, counts))
+        let effective = current_tool_bindings(chain.ctx.tool_set(), &frame.vm()?.tool_runtime)?;
+        frame.script_call_counts(&chain.ctx, &effective)
     }
 
     /// Fills `slot` of the batch the chain is parked on with a landed
@@ -288,18 +286,20 @@ impl Scheduler {
             // reaches the arena through the `tasks` namespace, so a script
             // call stays unbound.
             ToolRoute::Builtin => {
-                let tool_set = self.chains[id.index()].ctx.tool_set_snapshot()?;
                 if let Some(call_id) = site.call_id().filter(|_| is_task_builtin(alias)) {
                     let turn = self.call_turn(id, &site);
                     return self.answer_task_builtin(id, alias, &args, call_id, turn);
                 }
-                Err(unbound_tool_call(&tool_set, alias))
+                Err(unbound_tool_call(
+                    self.chains[id.index()].ctx.tool_set(),
+                    alias,
+                ))
             }
             ToolRoute::Local => {
                 let report = ScriptReport {
                     turn: self.call_turn(id, &site),
                 };
-                let (_, counts) = self.section_call_counts(id)?;
+                let counts = self.section_call_counts(id)?;
                 // The attempt counts at dispatch, before the handler runs, so
                 // a handler that then fails still counts.
                 counts.ensure(alias)?;
@@ -351,8 +351,9 @@ impl Scheduler {
         let report = ScriptReport {
             turn: self.call_turn(id, &site),
         };
-        let (tool_set, counts) = self.section_call_counts(id)?;
+        let counts = self.section_call_counts(id)?;
         let ctx = &self.chains[id.index()].ctx;
+        let tool_set = ctx.tool_set();
         // A model reaches only the wire names a round advertised; a script
         // names a catalog tool by its canonical id, and only a script falls
         // back to a catalog tool the run could not offer.
@@ -367,7 +368,7 @@ impl Scheduler {
         }
         .cloned();
         let Some(binding) = binding else {
-            return Err(unbound_tool_call(&tool_set, alias));
+            return Err(unbound_tool_call(tool_set, alias));
         };
         // The counts seed from the section's effective scope; a tool
         // outside it must still be seeded here, because the increment

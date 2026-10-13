@@ -62,8 +62,8 @@ fn shared_models(bindings: Vec<ModelBinding>) -> Arc<Mutex<ModelSet>> {
 }
 
 /// Shares an empty tool set.
-fn shared_tools() -> Arc<Mutex<ToolSet>> {
-    Arc::new(Mutex::new(ToolSet::default()))
+fn shared_tools() -> Arc<ToolSet> {
+    Arc::new(ToolSet::default())
 }
 
 fn section_vm_with_models(

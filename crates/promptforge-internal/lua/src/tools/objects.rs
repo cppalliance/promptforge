@@ -5,11 +5,10 @@
 //! through any of them compares `==` to the same tool read through
 //! another, while each list call builds a fresh array.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mlua::{AnyUserData, Lua, Table, Value};
 
-use super::lock_tools;
 use super::userdata::LuaToolHandle;
 use crate::error::{Error, Result};
 use crate::handles::ToolSet;
@@ -59,28 +58,18 @@ pub(super) fn install_tool_objects(lua: &Lua, set: &ToolSet) -> Result<()> {
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if a function cannot be created or installed.
-pub(super) fn install_tool_lists(
-    lua: &Lua,
-    tools: &Table,
-    set: &Arc<Mutex<ToolSet>>,
-) -> Result<()> {
+pub(super) fn install_tool_lists(lua: &Lua, tools: &Table, set: &Arc<ToolSet>) -> Result<()> {
     for (name, required) in [("required", true), ("extras", false)] {
-        let shared = Arc::clone(set);
+        let set = Arc::clone(set);
         let list = lua
             .create_function(move |lua, ()| {
-                let ids: Vec<String> = {
-                    let set = lock_tools(&shared)?;
-                    set.offered()
-                        .iter()
-                        .filter(|binding| {
-                            set.declared().contains(&binding.id().plugin()) == required
-                        })
-                        .map(|binding| binding.id().to_string())
-                        .collect()
-                };
                 let objects = lua.create_table()?;
-                for id in ids {
-                    if let Some(object) = tool_object(lua, &id)? {
+                for binding in set
+                    .offered()
+                    .iter()
+                    .filter(|binding| set.declared().contains(&binding.id().plugin()) == required)
+                {
+                    if let Some(object) = tool_object(lua, &binding.id().to_string())? {
                         objects.raw_push(object)?;
                     }
                 }

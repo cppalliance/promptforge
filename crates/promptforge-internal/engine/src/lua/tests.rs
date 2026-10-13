@@ -92,7 +92,7 @@ fn scheduler_vm_with_tools(
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
-        &Arc::new(Mutex::new(tools.clone())),
+        &Arc::new(tools.clone()),
         &Arc::new(Mutex::new(models.clone())),
         &emitter,
         "Test",

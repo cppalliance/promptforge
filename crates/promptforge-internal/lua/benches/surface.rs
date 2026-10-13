@@ -40,7 +40,7 @@ fn emitter() -> Emitter {
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(1),
-        &Arc::new(Mutex::new(ToolSet::default())),
+        &Arc::new(ToolSet::default()),
         &Arc::new(Mutex::new(ModelSet::default())),
         &emitter(),
         SECTION,

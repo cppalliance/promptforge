@@ -28,9 +28,8 @@ fn offering_set() -> ToolSet {
 }
 
 /// The section's scope as wire names.
-fn scoped(set: &Arc<Mutex<ToolSet>>, runtime: &Arc<Mutex<ToolRuntime>>) -> Vec<String> {
-    let snapshot = set.lock().expect("the set mutex is not poisoned").clone();
-    crate::current_tool_bindings(&snapshot, runtime)
+fn scoped(set: &Arc<ToolSet>, runtime: &Arc<Mutex<ToolRuntime>>) -> Vec<String> {
+    crate::current_tool_bindings(set, runtime)
         .expect("the scope resolves")
         .iter()
         .map(|binding| binding.alias().to_owned())

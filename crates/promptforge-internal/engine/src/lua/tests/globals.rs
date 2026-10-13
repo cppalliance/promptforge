@@ -89,7 +89,7 @@ fn fully_bound_vm(argv_writable: bool) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x9e5),
-        &Arc::new(Mutex::new(offering())),
+        &Arc::new(offering()),
         &Arc::new(Mutex::new(roles())),
         &emitter,
         "Globals",

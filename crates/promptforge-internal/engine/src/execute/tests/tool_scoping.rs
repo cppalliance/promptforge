@@ -87,7 +87,7 @@ async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     )]);
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
-        &Arc::new(Mutex::new(tools.set().clone())),
+        &Arc::new(tools.set().clone()),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),
         "Only",
@@ -108,7 +108,7 @@ async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     .expect("the offer chunk must compile");
     vm.run_chunk(&offer, &null_emitter(), "Only")
         .expect("tools.offer must succeed");
-    let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");

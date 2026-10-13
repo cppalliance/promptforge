@@ -3,13 +3,10 @@
 //! selects the binding's output kind. The tool set finds an offered
 //! binding by wire name or by canonical id.
 
-use std::sync::Mutex;
-
-use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
-use super::{ToolBinding, ToolOutputKind, ToolSet, ToolView};
+use super::{ToolBinding, ToolOutputKind, ToolSet};
 
 /// A descriptor for `tools/fetch`.
 fn descriptor(structured: bool) -> ToolDescriptor {
@@ -67,22 +64,4 @@ fn an_offered_binding_is_found_by_its_wire_name_or_its_id_as_one_binding() {
     for miss in ["fetch", "tools/missing", "tools_missing", "Tools/Fetch"] {
         assert_eq!(set.offered_binding(miss), None, "{miss:?} names no binding");
     }
-}
-
-#[test]
-fn the_view_snapshots_the_declared_plugins_and_the_offering() {
-    let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
-    let declared = vec![PluginId::parse("tools").expect("valid Plugin")];
-    let set = Mutex::new(ToolSet {
-        declared: declared.clone(),
-        offered: vec![offered.clone()],
-    });
-    assert_eq!(
-        ToolView::declared(&set).expect("the lock is healthy"),
-        declared
-    );
-    assert_eq!(
-        ToolView::offered(&set).expect("the lock is healthy"),
-        vec![offered]
-    );
 }

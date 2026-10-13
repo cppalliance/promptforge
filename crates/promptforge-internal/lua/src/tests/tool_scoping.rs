@@ -90,7 +90,7 @@ fn section_scope_keeps_each_tool_at_its_first_offer() {
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section").expect("section offers must record");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -114,7 +114,7 @@ fn tools_offer_accepts_tool_objects_and_arrays() {
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("tools.offer must accept tool objects, ids, and arrays");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -139,7 +139,7 @@ fn empty_offer_is_a_no_op_and_failed_bulk_offer_is_atomic() {
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("caught failed offer must not poison recording");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -170,7 +170,7 @@ fn offer_rejects_a_second_argument_and_records_nothing() {
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("refused offers must not poison recording");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -261,7 +261,7 @@ fn a_section_vm_over_an_empty_offering_snapshots_to_an_empty_scope() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("Engine values must inject");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
+    let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
     assert!(scope.is_empty());
     vm.teardown(&null_emitter(), "Test");

@@ -67,13 +67,6 @@ pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
     }
 }
 
-/// Locks the run's shared tool set, mapping a poisoned lock to the Lua
-/// boundary error every Engine function uses.
-fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, ToolSet>> {
-    set.lock()
-        .map_err(|_| mlua::Error::external("tool set mutex was poisoned"))
-}
-
 /// Installs the read-only `tools.calls` counter table over `counts`;
 /// `offered`, the ids of every tool the run can offer, feeds the
 /// unknown-key diagnostic.
@@ -190,12 +183,12 @@ fn resolve_entries(call: &str, set: &ToolSet, entries: Vec<String>) -> mlua::Res
 pub(crate) fn install_tools(
     lua: &Lua,
     globals: &Table,
-    set: &Arc<Mutex<ToolSet>>,
+    set: &Arc<ToolSet>,
     runtime: &Arc<Mutex<ToolRuntime>>,
     local_tools: &LocalTools,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
-    install_tool_objects(lua, &*lock_tools(set).map_err(Error::lua)?)?;
+    install_tool_objects(lua, set)?;
     install_offer(lua, &tools, set, runtime)?;
     install_tool_lists(lua, &tools, set)?;
     install_offer_local(lua, &tools, local_tools)?;
@@ -209,7 +202,7 @@ pub(crate) fn install_tools(
 fn install_offer(
     lua: &Lua,
     tools: &Table,
-    set: &Arc<Mutex<ToolSet>>,
+    set: &Arc<ToolSet>,
     runtime: &Arc<Mutex<ToolRuntime>>,
 ) -> Result<()> {
     let frozen = Arc::clone(set);
@@ -217,7 +210,7 @@ fn install_offer(
     let offer = lua
         .create_function(move |_, args: Variadic<Value>| {
             let entries = collect_offer_entries("tools.offer", args)?;
-            let resolved = resolve_entries("tools.offer", &*lock_tools(&frozen)?, entries)?;
+            let resolved = resolve_entries("tools.offer", &frozen, entries)?;
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;

@@ -66,10 +66,9 @@ pub(super) fn loop_context_observed(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let fixture = tools
+    tools
         .into()
-        .install(&ctx, RunFixture::new().observer(observer));
-    (ctx, fixture)
+        .install(ctx, RunFixture::new().observer(observer))
 }
 
 /// [`loop_context_observed`] under the null observer.

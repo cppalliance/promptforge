@@ -72,13 +72,14 @@ impl FixtureTools {
         lines
     }
 
-    /// Installs the set on the run state and returns `fixture` carrying the
-    /// implementations the driver's tool performer resolves.
-    pub(in super::super) fn install(&self, ctx: &RunState, fixture: RunFixture) -> RunFixture {
-        *ctx.tool_set()
-            .lock()
-            .expect("the tool set mutex is not poisoned") = self.set.clone();
-        fixture.tools(self.table.clone())
+    /// Arms the run state with the set and returns it beside `fixture`
+    /// carrying the implementations the driver's tool performer resolves.
+    pub(in super::super) fn install(
+        self,
+        ctx: RunState,
+        fixture: RunFixture,
+    ) -> (RunState, RunFixture) {
+        (ctx.with_tool_set(self.set), fixture.tools(self.table))
     }
 }
 
@@ -92,13 +93,14 @@ impl From<crate::lua::ToolSet> for FixtureTools {
 }
 
 /// Arms the run state's shared tool set with `bindings`, none of them in
-/// any section's scope until the section offers it, and returns `fixture`
-/// carrying the implementations, so `TokioDriver::new` performs the calls.
+/// any section's scope until the section offers it, and returns the state
+/// beside `fixture` carrying the implementations, so `TokioDriver::new`
+/// performs the calls.
 pub(in super::super) fn arm_tools(
-    ctx: &RunState,
+    ctx: RunState,
     fixture: RunFixture,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> RunFixture {
+) -> (RunState, RunFixture) {
     FixtureTools::new(bindings).install(ctx, fixture)
 }
 

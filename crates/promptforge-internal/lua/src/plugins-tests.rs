@@ -47,10 +47,10 @@ fn plugin_set() -> ToolSet {
 /// Installs `tools` and then `plugins` over `set` on a fresh VM, the
 /// section setup order, and returns it with the runtime `tools.offer` and
 /// `plugins.offer` record into and the shared set.
-fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>) {
+fn lua_over(set: ToolSet) -> (Lua, Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
     let lua = Lua::new();
     let globals = lua.globals();
-    let set = Arc::new(Mutex::new(set));
+    let set = Arc::new(set);
     let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
     install_tools(
         &lua,
@@ -76,9 +76,8 @@ fn offered_plugins(runtime: &Mutex<ToolRuntime>) -> Vec<String> {
 }
 
 /// The wire names a round over `set` and `runtime` advertises, in order.
-fn scoped(set: &Mutex<ToolSet>, runtime: &Mutex<ToolRuntime>) -> Vec<String> {
-    let snapshot = set.lock().expect("the set mutex is not poisoned").clone();
-    crate::current_tool_bindings(&snapshot, runtime)
+fn scoped(set: &ToolSet, runtime: &Mutex<ToolRuntime>) -> Vec<String> {
+    crate::current_tool_bindings(set, runtime)
         .expect("the scope resolves")
         .iter()
         .map(|binding| binding.alias().to_owned())
@@ -169,8 +168,7 @@ fn a_plugins_tools_are_the_shared_tool_objects_in_a_fresh_array_that_offer_takes
         (2, true, true, true),
         "a Plugin's tools are its shared tool objects, in id order, in a new array per read"
     );
-    let snapshot = set.lock().expect("the set mutex is not poisoned").clone();
-    let scoped: Vec<String> = crate::current_tool_bindings(&snapshot, &runtime)
+    let scoped: Vec<String> = crate::current_tool_bindings(&set, &runtime)
         .expect("the scope resolves")
         .iter()
         .map(|binding| binding.alias().to_owned())

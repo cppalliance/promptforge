@@ -186,10 +186,10 @@ fn local_params_schema_rejects_an_unsupported_type() {
 
 /// Installs the tools namespace over `set` on a fresh VM and returns it
 /// with the shared set and the runtime the namespace records into.
-fn lua_over(set: ToolSet) -> (Lua, Arc<Mutex<ToolSet>>, Arc<Mutex<ToolRuntime>>) {
+fn lua_over(set: ToolSet) -> (Lua, Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
     let lua = Lua::new();
     let globals = lua.globals();
-    let set = Arc::new(Mutex::new(set));
+    let set = Arc::new(set);
     let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
     install_tools(
         &lua,

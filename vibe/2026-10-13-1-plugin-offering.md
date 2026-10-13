@@ -573,7 +573,7 @@ Test cases:
 
 <step-4>
 
-### Step 4: Share the run's tool set read-only
+### Step 4: Share the run's tool set read-only [completed]
 
 - Component: Run-wide offer retirement
 - Tests:

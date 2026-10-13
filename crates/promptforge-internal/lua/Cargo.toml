@@ -18,8 +18,8 @@ workspace-hack.workspace = true
 
 [features]
 # Test-only installs and helpers for companion crates' suites and this
-# crate's bench (`tools.call_as_model`, `SectionVm::run_chunk`,
-# `ToolSet::for_test`); never enabled by a production dependent.
+# crate's bench (`tools.call_as_model`, `SectionVm::run_chunk`); never
+# enabled by a production dependent.
 test-support = []
 
 [dev-dependencies]

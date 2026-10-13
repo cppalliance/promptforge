@@ -207,8 +207,6 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
 
 #[test]
 fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls_land() {
-    // A Plugin offer drops a tool the offering loses from the scope, where
-    // a `tools.offer` of it would fail the scope rebuild at c1's dispatch.
     let md = loop_prompt(
         "plugins.offer('tools')\n\
          local msgs = messages.new()\n\
@@ -217,17 +215,17 @@ fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls
          return tostring(ok) .. ':' .. err.kind .. '|' .. #msgs",
     );
     let prompt = parse(&md);
-    let tools = FixtureTools::new(vec![
-        fixture_binding("echo", "echo capability", Arc::new(EchoTool)),
-        fixture_binding("nope", "failing capability", Arc::new(FailingTool)),
-    ]);
-    let (state, _fixture) = loop_context(&prompt, tools);
-    let ctx = state.clone();
+    let (state, _fixture) = loop_context(&prompt, echo_tools());
     let mut run = Run::from_state(state);
     let (round, _) = only_effect(run.step());
-    // The round advertised `nope`; the offering then loses it, so the
-    // round's answer passes the scope gate and the call binds to nothing.
-    echo_tools().install(&ctx, RunFixture::new());
+    // The read-only tool set can't make a round advertise a name it
+    // can't bind, so the test adds `nope` to the round's recorded scope:
+    // the answer passes the scope gate and the call binds to nothing.
+    run.scheduler_for_test().advertise_for_test(
+        0,
+        "nope",
+        promptforge_types::tools::ToolId::parse("tools/nope").expect("a valid id"),
+    );
     run.resume(
         round,
         calls_reply(&[

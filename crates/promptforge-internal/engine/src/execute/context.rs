@@ -19,9 +19,8 @@ use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
 use promptforge_types::plugins::Prelude;
 
-use crate::Result;
 use crate::cancel::CancelHandle;
-use crate::lua::{ToolBinding, ToolSet, ToolView};
+use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
 use crate::untrusted::GuardNonce;
@@ -85,12 +84,11 @@ pub(crate) struct RunState {
     /// The model-turn counter this context advances: the run's, or a
     /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
-    /// The run's tool set as a read-only view: built from the prepared
-    /// catalog at construction, and written by nothing during the run.
-    tools: Arc<dyn ToolView>,
-    /// The concrete handle behind `tools`, shared with every section VM
-    /// (H1 included). Readers outside the VM layer go through the view.
-    tool_set: Arc<Mutex<ToolSet>>,
+    /// The run's tool set: built from the prepared catalog at construction
+    /// and changed by nothing during the run, so every reader, every
+    /// section VM (H1 included) among them, shares it with no lock and no
+    /// copy.
+    tool_set: Arc<ToolSet>,
     /// Every tool in the prepared catalog, bound under its full id: the
     /// fallback a script `tools.call` resolves when its id names no offered
     /// tool. Kept apart from `tool_set`, the set section VMs scope from, so
@@ -134,7 +132,7 @@ impl RunState {
     /// agree on both.
     #[must_use]
     pub(super) fn new(prompt: Arc<Prompt>, args: &str, vfs: &VfsRef, ctx: &RunContext) -> Self {
-        let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
+        let tool_set = Arc::new(bound_tool_set(&prompt, ctx));
         let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
         // The root task's counter starts at the context's `provenance_start`:
@@ -163,7 +161,6 @@ impl RunState {
             #[cfg(test)]
             tap: None,
             turns: Arc::new(AtomicU32::new(0)),
-            tools: tool_set.clone(),
             tool_set,
             catalog_bindings: Arc::new(catalog_bindings(ctx)),
             models: model_set.clone(),
@@ -193,6 +190,16 @@ impl RunState {
         let tap = Arc::new(Mutex::new(Vec::new()));
         self.tap = Some(Arc::clone(&tap));
         tap
+    }
+
+    /// Replaces the run's tool set with `set`, so a test can arm the run
+    /// with fixture bindings its catalog doesn't carry. Call it before the
+    /// run starts: every section VM shares the set it finds here.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn with_tool_set(mut self, set: ToolSet) -> Self {
+        self.tool_set = Arc::new(set);
+        self
     }
 
     /// The prompt this run executes.
@@ -268,23 +275,10 @@ impl RunState {
         &self.turns
     }
 
-    /// The concrete handle behind the tools view, shared with every
-    /// section VM the run constructs.
-    pub(super) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
-        Arc::clone(&self.tool_set)
-    }
-
-    /// An owned snapshot of the run's tool set (the declared plugins and
-    /// the offering), read through the view.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
-    /// poisoned.
-    pub(super) fn tool_set_snapshot(&self) -> Result<ToolSet> {
-        Ok(ToolSet {
-            declared: self.tools.declared()?,
-            offered: self.tools.offered()?,
-        })
+    /// The run's shared tool set, the one every section VM the run
+    /// constructs holds.
+    pub(super) fn tool_set(&self) -> &Arc<ToolSet> {
+        &self.tool_set
     }
 
     /// The binding for the catalog tool whose full id is `id`, the
@@ -423,7 +417,6 @@ impl fmt::Debug for RunState {
             .field("emitter", &self.emitter)
             .field("cancel", &self.cancel)
             .field("turns", &self.turns)
-            .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
             .field(
                 "catalog_bindings",

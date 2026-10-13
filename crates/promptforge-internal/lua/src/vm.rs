@@ -59,7 +59,7 @@ pub struct SectionVm {
     /// The run's shared tool set: the declared plugins and the offering.
     /// Shared with the run, not snapshotted; nothing writes it during a
     /// run.
-    bound_tools: Arc<Mutex<ToolSet>>,
+    bound_tools: Arc<ToolSet>,
     /// The run's shared model set: the frontmatter's filled roles plus the
     /// prompt-wide default. Shared for the same reason (`models.default`).
     bound_models: Arc<Mutex<ModelSet>>,
@@ -275,7 +275,7 @@ impl SectionVm {
             .map_err(Error::lua)?;
         let mut vm = Self {
             lua,
-            bound_tools: Arc::new(Mutex::new(ToolSet::default())),
+            bound_tools: Arc::new(ToolSet::default()),
             bound_models: Arc::new(Mutex::new(ModelSet::default())),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime::default())),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
@@ -323,7 +323,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     pub fn new_for_section(
         nonce: &GuardNonce,
-        tools: &Arc<Mutex<ToolSet>>,
+        tools: &Arc<ToolSet>,
         models: &Arc<Mutex<ModelSet>>,
         emitter: &Emitter,
         section: &str,

@@ -21,8 +21,8 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
@@ -49,8 +49,8 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
@@ -72,8 +72,8 @@ async fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
         ```lua\ntools.offer('tools/echo')\nreturn tools.call('missing', {})\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
@@ -105,8 +105,8 @@ async fn a_script_tools_call_reaches_an_offered_tool_outside_the_section_scope()
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
@@ -159,8 +159,8 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
     let started = Arc::new(AtomicUsize::new(0));
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding(
             "slow",
@@ -213,8 +213,8 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
         ```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding(
             "fetch",
@@ -257,7 +257,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let fixture = arm_tools(&ctx, fixture, vec![binding]);
+    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
     let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
@@ -282,7 +282,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let fixture = arm_tools(&ctx, fixture, vec![binding]);
+    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
     let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
@@ -319,7 +319,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let fixture = arm_tools(&ctx, fixture, vec![binding]);
+    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
     let error = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
@@ -349,8 +349,8 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
@@ -371,8 +371,8 @@ async fn a_document_prompt_without_tools_call_is_unaffected() {
         ```lua\ntools.offer('tools/echo')\nreturn 'plain'\n```\n";
     let prompt = parse(md);
     let (ctx, fixture) = scheduler_context(&prompt);
-    let fixture = arm_tools(
-        &ctx,
+    let (ctx, fixture) = arm_tools(
+        ctx,
         fixture,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );

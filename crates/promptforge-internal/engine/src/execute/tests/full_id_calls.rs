@@ -128,10 +128,7 @@ async fn a_script_reaches_a_catalog_tool_left_out_of_the_offering_by_id() {
     );
     let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(Unofferable)]);
     assert!(
-        ctx.tool_set_snapshot()
-            .expect("the tool set mutex is not poisoned")
-            .offered()
-            .is_empty(),
+        ctx.tool_set().offered().is_empty(),
         "a tool whose wire name is a task built-in's is left out of the offering"
     );
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);

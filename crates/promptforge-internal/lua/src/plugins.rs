@@ -88,20 +88,14 @@ pub(crate) fn plugin_object(lua: &Lua, name: &str) -> mlua::Result<Option<AnyUse
 pub(crate) fn install_plugins(
     lua: &Lua,
     globals: &Table,
-    set: &Arc<Mutex<ToolSet>>,
+    set: &Arc<ToolSet>,
     runtime: &Arc<Mutex<ToolRuntime>>,
 ) -> Result<()> {
-    let (plugins, declared) = {
-        let set = set
-            .lock()
-            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?;
-        (plugin_tools(&set), set.declared().to_vec())
-    };
     let objects = lua.create_table().map_err(Error::lua)?;
     let (mut required, mut extras) = (Vec::new(), Vec::new());
-    for (name, tools) in plugins {
+    for (name, tools) in plugin_tools(set) {
         let key = name.to_string();
-        if declared.contains(&name) {
+        if set.declared().contains(&name) {
             required.push(key.clone());
         } else {
             extras.push(key.clone());

@@ -3,7 +3,7 @@
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
-use super::{Error, Json, Mutex, Result, ToolId, Value};
+use super::{Json, ToolId, Value};
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
@@ -180,7 +180,8 @@ pub struct LibraryBlock {
 }
 
 /// The run's tool set: the declared plugins and every catalog tool the run
-/// can offer.
+/// can offer. Nothing changes it during a run, so the run and every
+/// section VM share one `Arc<ToolSet>`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
     /// The plugins the frontmatter declares, in declaration order.
@@ -222,44 +223,6 @@ impl ToolSet {
     #[must_use]
     pub fn wire_binding(&self, name: &str) -> Option<&ToolBinding> {
         self.offered.iter().find(|binding| binding.alias == name)
-    }
-}
-
-/// The read-only view over the run's [`ToolSet`].
-///
-/// The run context shares the set as `Arc<dyn ToolView>`; section VMs share
-/// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, and
-/// nothing writes the set during a run. Every method locks briefly and
-/// returns an owned snapshot: a mutex guard cannot outlive the call.
-pub trait ToolView: Send + Sync {
-    /// Returns an owned snapshot of the declared plugins in declaration
-    /// order.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn declared(&self) -> Result<Vec<PluginId>>;
-
-    /// Returns an owned snapshot of the offering in tool id order.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn offered(&self) -> Result<Vec<ToolBinding>>;
-}
-
-/// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
-/// in this crate.
-fn lock_tool_set(set: &Mutex<ToolSet>) -> Result<std::sync::MutexGuard<'_, ToolSet>> {
-    set.lock()
-        .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))
-}
-
-impl ToolView for Mutex<ToolSet> {
-    fn declared(&self) -> Result<Vec<PluginId>> {
-        Ok(lock_tool_set(self)?.declared.clone())
-    }
-
-    fn offered(&self) -> Result<Vec<ToolBinding>> {
-        Ok(lock_tool_set(self)?.offered.clone())
     }
 }
 

@@ -4,8 +4,10 @@
 //! test; nothing here exists in a shipped Engine.
 
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::tools::ToolId;
 
 use crate::Result;
+use crate::execute::scope::DispatchTarget;
 use crate::execute::walk_target::SlicePath;
 
 pub(crate) use super::tasks::TaskState;
@@ -23,6 +25,18 @@ impl Scheduler {
     /// queued task that no slot will ever admit.
     pub(crate) fn wedge_admission_for_test(&mut self, chain: u32) {
         self.chains[ChainIndex(chain).index()].concurrency = 0;
+    }
+
+    /// Adds `name`, bound to `tool`, to the scope the chain at arena index
+    /// `chain` advertised for its last round. Nothing changes the run's
+    /// offering, so no round advertises a name it cannot bind; this lets a
+    /// test answer the round with a call that binds to nothing.
+    pub(crate) fn advertise_for_test(&mut self, chain: u32, name: &str, tool: ToolId) {
+        self.chains[ChainIndex(chain).index()]
+            .advertised
+            .as_mut()
+            .expect("the chain advertised a round")
+            .insert(name.to_owned(), DispatchTarget::Bound(tool));
     }
 
     /// The number of leaf effects the run has issued so far, so a test

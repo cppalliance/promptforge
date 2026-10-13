@@ -62,13 +62,11 @@ pub(super) fn model_task_context_with(
         "",
         &TestStore::new().vfs(),
         &prepared,
-    );
+    )
+    .with_tool_set(ToolSet::default());
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = ToolSet::default();
     (ctx, fixture)
 }
 

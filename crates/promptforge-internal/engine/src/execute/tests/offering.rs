@@ -89,8 +89,7 @@ fn offering_prompt(frontmatter: &str, lua: &str) -> Prompt {
 
 /// The offered bindings' names and ids, in the set's order.
 fn offered(ctx: &RunState) -> Vec<(String, String)> {
-    ctx.tool_set_snapshot()
-        .expect("the tool set mutex is not poisoned")
+    ctx.tool_set()
         .offered()
         .iter()
         .map(|binding| (binding.alias().to_owned(), binding.id().to_string()))
@@ -127,9 +126,7 @@ fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
         ],
         "a declared Plugin's tools are offered beside every other Plugin's"
     );
-    let set = ctx
-        .tool_set_snapshot()
-        .expect("the tool set mutex is not poisoned");
+    let set = ctx.tool_set();
     assert_eq!(
         set.declared(),
         [PluginId::parse("tools").expect("valid Plugin")],

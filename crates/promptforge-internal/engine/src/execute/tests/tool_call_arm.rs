@@ -69,7 +69,7 @@ fn tool_context(
     tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
 ) -> (RunState, RunFixture) {
-    let mut ctx = RunState::new(
+    let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
@@ -78,9 +78,9 @@ fn tool_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let fixture = tools
+    let (mut ctx, fixture) = tools
         .into()
-        .install(&ctx, RunFixture::new().observer(observer));
+        .install(ctx, RunFixture::new().observer(observer));
     ctx.expose_raw_shims_for_test();
     (ctx, fixture)
 }
