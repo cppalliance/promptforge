@@ -1,73 +1,12 @@
-//! Tool scoping in a section VM: the prompt-wide `tools.always_offer` and
-//! the section's `tools.offer` over canonical ids and tool objects, frozen
-//! tool objects, and sections over an empty offering.
+//! Tool scoping in a section VM: the section's `tools.offer` over canonical
+//! ids and tool objects, frozen tool objects, and sections over an empty
+//! offering.
 
 use super::*;
 
 #[test]
-fn always_offer_records_prompt_wide_wire_names_on_the_shared_set() {
-    let set = shared_set(fixture_set(
-        &[("fetch", "fetch a page"), ("search", "search the web")],
-        &[],
-    ));
-    let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
-        .expect("the section VM builds over the shared set");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-    run_scalar(
-        &vm,
-        &program("tools.always_offer('fixtures/search')"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect("tools.always_offer records the prompt-wide tool");
-    vm.teardown(&null_emitter(), "Section");
-
-    let bindings = set.lock().expect("the shared set locks");
-    assert_eq!(
-        bindings
-            .offered()
-            .iter()
-            .map(|binding| (binding.alias(), binding.description(), binding.id().name()))
-            .collect::<Vec<_>>(),
-        [
-            ("fixtures_fetch", "fetch a page", "fetch"),
-            ("fixtures_search", "search the web", "search"),
-        ]
-    );
-    assert_eq!(bindings.always(), ["fixtures_search"]);
-}
-
-#[test]
-fn always_offer_records_a_model_description_override() {
-    let set = shared_set(fixture_set(
-        &[("fetch", "fetch a page"), ("search", "search the web")],
-        &[],
-    ));
-    let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
-        .expect("the section VM builds over the shared set");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-    run_scalar(
-        &vm,
-        &program("tools.always_offer('fixtures/search', 'always override')"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect("tools.always_offer records the override");
-    vm.teardown(&null_emitter(), "Section");
-
-    let bindings = set.lock().expect("the shared set locks");
-    assert_eq!(
-        bindings.offered()[1].model_description(),
-        Some("always override"),
-        "tools.always_offer's second argument updates the run's binding"
-    );
-}
-
-#[test]
 fn tool_objects_are_frozen() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
@@ -88,7 +27,7 @@ fn tool_objects_are_frozen() {
 
 #[test]
 fn a_tool_reads_through_its_object_and_never_through_a_global() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
@@ -111,7 +50,7 @@ fn a_tool_reads_through_its_object_and_never_through_a_global() {
 
 #[test]
 fn tools_bind_is_gone_from_every_section() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
@@ -140,49 +79,12 @@ fn tools_bind_is_gone_from_every_section() {
 }
 
 #[test]
-fn always_offer_refuses_an_id_the_run_does_not_offer_and_is_idempotent() {
-    let set = shared_set(fixture_set(&[("search", "search the web")], &[]));
-    let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
-        .expect("the section VM builds over the shared set");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-    let error = run_scalar(
-        &vm,
-        &program("tools.always_offer('fixtures/missing')"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect_err("offering a tool the run lacks is an error");
-    assert!(
-        error
-            .to_string()
-            .contains("tools.always_offer: \"fixtures/missing\" is not a catalog tool in this run"),
-        "the error must name the id: {error}"
+fn section_scope_keeps_each_tool_at_its_first_offer() {
+    let bindings = fixture_set(&[("fetch", "fetch a page"), ("search", "search the web")]);
+    let prologue = program(
+        "tools.offer('fixtures/search')\n\
+         tools.offer({'fixtures/fetch', 'fixtures/search'})",
     );
-    // A library every section requires re-runs in each, so offering the
-    // same tool again is a no-op, not a duplicate error.
-    run_scalar(
-        &vm,
-        &program("tools.always_offer('fixtures/search'); tools.always_offer('fixtures/search')"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect("offering the same tool again is idempotent");
-    assert_eq!(
-        set.lock().expect("the shared set locks").always(),
-        &["fixtures_search".to_owned()],
-        "the tool is recorded exactly once"
-    );
-    vm.teardown(&null_emitter(), "Section");
-}
-
-#[test]
-fn section_scope_closes_to_always_then_offered() {
-    let bindings = fixture_set(
-        &[("fetch", "fetch a page"), ("search", "search the web")],
-        &["fixtures_search"],
-    );
-    let prologue = program("tools.offer({'fixtures/fetch', 'fixtures/search'})");
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
@@ -199,10 +101,7 @@ fn section_scope_closes_to_always_then_offered() {
 
 #[test]
 fn tools_offer_accepts_tool_objects_and_arrays() {
-    let bindings = fixture_set(
-        &[("fetch", "fetch a page"), ("search", "search the web")],
-        &[],
-    );
+    let bindings = fixture_set(&[("fetch", "fetch a page"), ("search", "search the web")]);
     let prologue = program(
         "local search, fetch = tools.get('fixtures/search'), tools.get('fixtures/fetch')\n\
          tools.offer(search)\n\
@@ -227,10 +126,7 @@ fn tools_offer_accepts_tool_objects_and_arrays() {
 
 #[test]
 fn empty_offer_is_a_no_op_and_failed_bulk_offer_is_atomic() {
-    let bindings = fixture_set(
-        &[("fetch", "fetch a page"), ("search", "search the web")],
-        &[],
-    );
+    let bindings = fixture_set(&[("fetch", "fetch a page"), ("search", "search the web")]);
     let prologue = program(
         "tools.offer(); \
              local ok = pcall(tools.offer, {'fixtures/search', 'fixtures/missing'}); \
@@ -254,20 +150,17 @@ fn empty_offer_is_a_no_op_and_failed_bulk_offer_is_atomic() {
 }
 
 #[test]
-fn offer_rejects_misshapen_override_arguments() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+fn offer_rejects_a_second_argument_and_records_nothing() {
+    let bindings = fixture_set(&[("search", "search the web")]);
     let prologue = program(
-        "local ok, err = pcall(tools.offer, {'fixtures/search'}, 'bulk override'); \
-         if ok or not string.find(tostring(err), 'tools.offer array form takes no override') then \
-             error('array form with an override must fail loudly') \
+        "local extra = 'tools.offer takes one tool or a list of them, got extra string'; \
+         local ok, err = pcall(tools.offer, 'fixtures/search', 'a description'); \
+         if ok or not string.find(tostring(err), extra, 1, true) then \
+             error('a second argument to a single offer must fail loudly: ' .. tostring(err)) \
          end; \
-         local ok, err = pcall(tools.offer, 'fixtures/search', 42); \
-         if ok or not string.find(tostring(err), 'tools.offer override must be a string') then \
-             error('a non-string override must fail loudly') \
-         end; \
-         local ok, err = pcall(tools.offer, 'fixtures/search', 'override', 'extra'); \
-         if ok or not string.find(tostring(err), 'one tool plus an optional override') then \
-             error('a third argument must fail loudly') \
+         local ok, err = pcall(tools.offer, {'fixtures/search'}, 'a description'); \
+         if ok or not string.find(tostring(err), extra, 1, true) then \
+             error('a second argument to an array offer must fail loudly: ' .. tostring(err)) \
          end; \
          tools.offer('fixtures/search')",
     );
@@ -276,26 +169,21 @@ fn offer_rejects_misshapen_override_arguments() {
     vm.inject_values("", &json!({}), &fresh_access())
         .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
-        .expect("rejected override forms must not poison recording");
+        .expect("refused offers must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
         ["fixtures_search"],
-        "rejected calls record nothing and the later valid offer still lands"
-    );
-    assert_eq!(
-        scope[0].model_description(),
-        None,
-        "rejected overrides leave the model description untouched"
+        "refused calls record nothing and the later valid offer still lands"
     );
     vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
 fn an_unknown_id_fails_before_scope_closure() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("the section VM builds");
     vm.inject_values("", &json!({}), &fresh_access())
@@ -318,15 +206,14 @@ fn an_unknown_id_fails_before_scope_closure() {
 
 #[test]
 fn tool_objects_install_without_payload_reports() {
-    let bindings = ToolSet::for_test(
-        Vec::new(),
-        Vec::new(),
-        vec![ToolBinding::for_test(
+    let bindings = ToolSet {
+        offered: vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
             &fixture_tool("search"),
         )],
-    );
+        ..ToolSet::default()
+    };
     let recorder = Recorder::default();
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Section")
         .expect("the section VM builds");
@@ -365,30 +252,6 @@ fn offer_over_an_empty_offering_fails_in_a_prologue() {
             .to_string()
             .contains("is not a catalog tool in this run"),
         "the error must report the missing tool: {error}"
-    );
-    vm.teardown(&null_emitter(), "Test");
-}
-
-#[test]
-fn offer_with_an_override_argument_records_the_model_description() {
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Test")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    run_scalar(
-        &vm,
-        &program("tools.offer('fixtures/search', 'Search the web for pages matching a query.')"),
-        &null_emitter(),
-        "Test",
-    )
-    .expect("a description passed to tools.offer is the model-facing override");
-    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
-    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
-    assert_eq!(
-        scope[0].model_description(),
-        Some("Search the web for pages matching a query."),
-        "the offer override must reach the scoped binding"
     );
     vm.teardown(&null_emitter(), "Test");
 }

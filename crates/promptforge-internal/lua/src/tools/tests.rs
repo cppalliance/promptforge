@@ -92,31 +92,18 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
     let tool = lua.create_userdata(echo_handle()).expect("userdata");
     let entries = collect_offer_entries(
         "tools.offer",
-        Variadic::from_iter([
-            Value::String(lua.create_string("web/search").expect("string")),
-            Value::String(lua.create_string("an override").expect("string")),
-        ]),
+        Variadic::from_iter([Value::String(
+            lua.create_string("web/search").expect("string"),
+        )]),
     )
-    .expect("an id plus override decodes");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].name, "web/search");
-    assert_eq!(
-        entries[0].description_override.as_deref(),
-        Some("an override")
-    );
+    .expect("an id decodes");
+    assert_eq!(entries, ["web/search"]);
     let entries = collect_offer_entries(
         "tools.offer",
-        Variadic::from_iter([
-            Value::UserData(tool.clone()),
-            Value::String(lua.create_string("an override").expect("string")),
-        ]),
+        Variadic::from_iter([Value::UserData(tool.clone())]),
     )
-    .expect("a tool object plus override decodes");
-    assert_eq!(entries[0].name, "tools/echo");
-    assert_eq!(
-        entries[0].description_override.as_deref(),
-        Some("an override")
-    );
+    .expect("a tool object decodes");
+    assert_eq!(entries, ["tools/echo"]);
 
     let array = lua
         .create_sequence_from(vec![Value::UserData(tool)])
@@ -128,10 +115,9 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
         .expect("push");
     let entries = collect_offer_entries("tools.offer", Variadic::from_iter([Value::Table(array)]))
         .expect("the array form decodes");
-    let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
     assert_eq!(
-        names,
-        vec!["tools/echo", "web/fetch"],
+        entries,
+        ["tools/echo", "web/fetch"],
         "tool objects and ids mix in the array form"
     );
 }
@@ -284,23 +270,16 @@ fn the_tools_namespace_exposes_scoping_without_bind_or_call() {
     // prelude installs it - this table exposes exactly the non-suspending
     // operations. `bind` is absent too.
     let lua = lua_with_tools();
-    let (has_offer, has_offer_local, has_always_offer, call_is_nil, bind_is_nil): (
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-    ) = lua
+    let (has_offer, has_offer_local, call_is_nil, bind_is_nil): (bool, bool, bool, bool) = lua
         .load(
             "return type(tools.offer) == 'function', \
                     type(tools.offer_local) == 'function', \
-                    type(tools.always_offer) == 'function', \
                     tools.call == nil, \
                     tools.bind == nil",
         )
         .eval()
         .expect("the namespace probe evaluates");
-    assert!(has_offer && has_offer_local && has_always_offer && call_is_nil && bind_is_nil);
+    assert!(has_offer && has_offer_local && call_is_nil && bind_is_nil);
 }
 
 #[test]
@@ -326,14 +305,13 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
 #[test]
 fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
     let lua = lua_with_tools();
-    let bound = ToolSet::for_test(
-        Vec::new(),
-        Vec::new(),
-        vec![
+    let bound = ToolSet {
+        offered: vec![
             ToolBinding::from_descriptor("tools_echo", &echo_tool()),
             ToolBinding::from_descriptor("tools_other", &tool_at("tools/other")),
         ],
-    );
+        ..ToolSet::default()
+    };
     let counts =
         install_tool_call_counts(&lua, &bound, &bound.offered()[..1]).expect("the counts install");
     assert_eq!(counts.get("tools/echo").expect("read"), Some(0));

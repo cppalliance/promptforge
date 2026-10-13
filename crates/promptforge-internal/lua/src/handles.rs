@@ -37,11 +37,6 @@ pub struct ToolBinding {
     pub description: String,
     /// The selected stable live identity.
     pub id: ToolId,
-    /// Author override for the model-facing schema description.
-    ///
-    /// When set, the executor advertises this instead of the bound tool's
-    /// default description.
-    pub model_description: Option<String>,
     /// The JSON-Schema `object` the tool's arguments must match, advertised
     /// under the alias.
     pub schema: Json,
@@ -52,15 +47,14 @@ pub struct ToolBinding {
 
 impl ToolBinding {
     /// Binds `alias` to the tool `descriptor` describes: the description is
-    /// the tool's own, the output kind follows the descriptor's
-    /// structured-output flag, and no override is set.
+    /// the tool's own, and the output kind follows the descriptor's
+    /// structured-output flag.
     #[must_use]
     pub fn from_descriptor(alias: &str, descriptor: &ToolDescriptor) -> Self {
         Self {
             alias: alias.to_owned(),
             description: descriptor.description.clone(),
             id: descriptor.id.clone(),
-            model_description: None,
             schema: descriptor.parameters_schema.clone(),
             output_kind: if descriptor.structured_output {
                 ToolOutputKind::Structured
@@ -71,8 +65,7 @@ impl ToolBinding {
     }
 
     /// Builds a binding for a test double: the identity and schema come
-    /// from the descriptor, the description is `description`, with no
-    /// override.
+    /// from the descriptor, and the description is `description`.
     ///
     /// A test helper for `promptforge-engine`'s executor tests, so it exists
     /// only under `test-support`.
@@ -101,12 +94,6 @@ impl ToolBinding {
     #[must_use]
     pub fn id(&self) -> &ToolId {
         &self.id
-    }
-
-    /// Returns the author override for the model-facing description, if any.
-    #[must_use]
-    pub fn model_description(&self) -> Option<&str> {
-        self.model_description.as_deref()
     }
 
     /// Returns the JSON-Schema `object` the tool's arguments must match.
@@ -192,59 +179,22 @@ pub struct LibraryBlock {
     pub prose: String,
 }
 
-/// The run's tool set: the declared plugins, the prompt-wide offers, and
-/// every catalog tool the run can offer.
+/// The run's tool set: the declared plugins and every catalog tool the run
+/// can offer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
     /// The plugins the frontmatter declares, in declaration order.
     pub declared: Vec<PluginId>,
-    /// The wire names `tools.always_offer` recorded, in first-offer order.
-    pub always: Vec<String>,
     /// Every catalog tool the run can offer, in id order, each bound under
     /// its wire name.
     pub offered: Vec<ToolBinding>,
 }
 
 impl ToolSet {
-    /// Builds a set from owned parts, for executor test doubles.
-    ///
-    /// A test helper for `promptforge-engine`'s executor tests, so it exists
-    /// only under `test-support`.
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn for_test(
-        declared: Vec<PluginId>,
-        always: Vec<String>,
-        offered: Vec<ToolBinding>,
-    ) -> Self {
-        Self::from_parts(declared, always, offered)
-    }
-
-    /// Reassembles a set from owned snapshots of its three lists (the
-    /// [`ToolView`] reads).
-    #[must_use]
-    pub fn from_parts(
-        declared: Vec<PluginId>,
-        always: Vec<String>,
-        offered: Vec<ToolBinding>,
-    ) -> Self {
-        Self {
-            declared,
-            always,
-            offered,
-        }
-    }
-
     /// Returns the declared plugins in declaration order.
     #[must_use]
     pub fn declared(&self) -> &[PluginId] {
         &self.declared
-    }
-
-    /// Returns the prompt-wide wire names in first-offer order.
-    #[must_use]
-    pub fn always(&self) -> &[String] {
-        &self.always
     }
 
     /// Returns the offering in tool id order.
@@ -278,10 +228,9 @@ impl ToolSet {
 /// The read-only view over the run's [`ToolSet`].
 ///
 /// The run context shares the set as `Arc<dyn ToolView>`; section VMs share
-/// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, with
-/// `tools.always_offer` the only writer (a prompt-wide fact). Every method
-/// locks briefly and returns an owned snapshot: a mutex guard cannot
-/// outlive the call.
+/// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, and
+/// nothing writes the set during a run. Every method locks briefly and
+/// returns an owned snapshot: a mutex guard cannot outlive the call.
 pub trait ToolView: Send + Sync {
     /// Returns an owned snapshot of the declared plugins in declaration
     /// order.
@@ -289,13 +238,6 @@ pub trait ToolView: Send + Sync {
     /// # Errors
     /// Returns [`Error::Lua`] if the set's mutex is poisoned.
     fn declared(&self) -> Result<Vec<PluginId>>;
-
-    /// Returns an owned snapshot of the prompt-wide wire names in
-    /// first-offer order.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
-    fn always(&self) -> Result<Vec<String>>;
 
     /// Returns an owned snapshot of the offering in tool id order.
     ///
@@ -314,10 +256,6 @@ fn lock_tool_set(set: &Mutex<ToolSet>) -> Result<std::sync::MutexGuard<'_, ToolS
 impl ToolView for Mutex<ToolSet> {
     fn declared(&self) -> Result<Vec<PluginId>> {
         Ok(lock_tool_set(self)?.declared.clone())
-    }
-
-    fn always(&self) -> Result<Vec<String>> {
-        Ok(lock_tool_set(self)?.always.clone())
     }
 
     fn offered(&self) -> Result<Vec<ToolBinding>> {

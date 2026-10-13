@@ -47,7 +47,10 @@ impl FixtureTools {
             })
             .collect();
         Self {
-            set: crate::lua::ToolSet::for_test(Vec::new(), Vec::new(), bindings),
+            set: crate::lua::ToolSet {
+                offered: bindings,
+                ..crate::lua::ToolSet::default()
+            },
             table,
         }
     }

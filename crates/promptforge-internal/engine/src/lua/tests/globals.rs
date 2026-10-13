@@ -70,14 +70,13 @@ fn offering() -> ToolSet {
             ),
         )
     };
-    ToolSet::for_test(
-        vec![PluginId::parse("web").expect("valid Plugin")],
-        Vec::new(),
-        vec![
+    ToolSet {
+        declared: vec![PluginId::parse("web").expect("valid Plugin")],
+        offered: vec![
             bind("gh_search", "gh/search"),
             bind("web_search", "web/search"),
         ],
-    )
+    }
 }
 
 /// Builds a section VM through the real setup path with every conditional

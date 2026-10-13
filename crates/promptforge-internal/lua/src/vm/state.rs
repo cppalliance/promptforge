@@ -169,12 +169,10 @@ impl SectionVm {
 }
 
 /// Reads the section's effective tool bindings without mutating the tool
-/// runtime: the prompt-wide `tools.always_offer` tools, then the section's
-/// `tools.offer` tools in first-offer order, then every offered tool of
-/// each `plugins.offer` Plugin, Plugins in first-offer order and each
-/// Plugin's tools in id order. Each tool appears once, at its first place,
-/// resolved against the offering with any author description override
-/// applied.
+/// runtime: the section's `tools.offer` tools in first-offer order, then
+/// every offered tool of each `plugins.offer` Plugin, Plugins in
+/// first-offer order and each Plugin's tools in id order. Each tool
+/// appears once, at its first place, resolved against the offering.
 ///
 /// Rebuilt at each model operation so `tools.offer`, `plugins.offer`, and
 /// `tools.offer_local` calls between blocks reach the next model turn.
@@ -197,20 +195,19 @@ pub fn current_tool_bindings(
             .map(ToolBinding::alias)
     });
     let mut names: Vec<&str> = Vec::new();
-    for name in bindings
-        .always()
-        .iter()
-        .chain(&runtime.added)
-        .map(String::as_str)
-        .chain(plugin_tools)
-    {
+    for name in runtime.added.iter().map(String::as_str).chain(plugin_tools) {
         if !names.contains(&name) {
             names.push(name);
         }
     }
     names
         .into_iter()
-        .map(|name| binding_for_scope(bindings, &runtime, name))
+        .map(|name| {
+            bindings
+                .offered_binding(name)
+                .cloned()
+                .ok_or_else(|| Error::Lua(format!("tool {name:?} has no offered binding")))
+        })
         .collect()
 }
 
@@ -245,17 +242,4 @@ pub fn resolve_model_binding(
             None => Ok(None),
         },
     }
-}
-
-/// Clones the offered binding under the wire name `name` and applies any
-/// section model-description override over the prompt-wide one.
-fn binding_for_scope(bindings: &ToolSet, runtime: &ToolRuntime, name: &str) -> Result<ToolBinding> {
-    let mut binding = bindings
-        .offered_binding(name)
-        .cloned()
-        .ok_or_else(|| Error::Lua(format!("tool {name:?} has no offered binding")))?;
-    if let Some(description) = runtime.description_overrides.get(name) {
-        binding.model_description = Some(description.clone());
-    }
-    Ok(binding)
 }

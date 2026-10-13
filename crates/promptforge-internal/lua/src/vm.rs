@@ -56,10 +56,9 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 #[derive(Debug)]
 pub struct SectionVm {
     lua: Lua,
-    /// The run's shared tool set: the declared plugins, the offering, and
-    /// the prompt-wide offers. Shared with the run, not snapshotted:
-    /// `tools.always_offer` is a prompt-wide fact that later sections must
-    /// see.
+    /// The run's shared tool set: the declared plugins and the offering.
+    /// Shared with the run, not snapshotted; nothing writes it during a
+    /// run.
     bound_tools: Arc<Mutex<ToolSet>>,
     /// The run's shared model set: the frontmatter's filled roles plus the
     /// prompt-wide default. Shared for the same reason (`models.default`).
@@ -316,9 +315,9 @@ impl SectionVm {
     /// The sets are the run's own handles, not snapshots: the offering and
     /// the filled roles back the validating `tools`/`models` tables that
     /// [`inject_values_with_var`](Self::inject_values_with_var) installs,
-    /// and the prompt-wide facts a section records (`tools.always_offer`,
-    /// `models.default`) land where every later section sees them. H1 is
-    /// section 0 on this same path.
+    /// and the prompt-wide fact a section records (`models.default`) lands
+    /// where every later section sees it. Nothing writes the tool set
+    /// during a run. H1 is section 0 on this same path.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.

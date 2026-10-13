@@ -30,7 +30,6 @@ fn a_structured_descriptor_binds_with_structured_output() {
     assert_eq!(binding.id(), &descriptor.id);
     assert_eq!(binding.description(), "Fetch a page");
     assert_eq!(binding.schema(), &descriptor.parameters_schema);
-    assert!(binding.model_description().is_none());
 }
 
 #[test]
@@ -54,7 +53,10 @@ fn the_test_seam_overrides_only_the_description() {
 #[test]
 fn an_offered_binding_is_found_by_its_wire_name_or_its_id_as_one_binding() {
     let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
-    let set = ToolSet::from_parts(Vec::new(), Vec::new(), vec![offered.clone()]);
+    let set = ToolSet {
+        offered: vec![offered.clone()],
+        ..ToolSet::default()
+    };
     assert_eq!(set.offered(), std::slice::from_ref(&offered));
     assert_eq!(set.offered_binding("tools_fetch"), Some(&offered));
     assert_eq!(
@@ -71,11 +73,10 @@ fn an_offered_binding_is_found_by_its_wire_name_or_its_id_as_one_binding() {
 fn the_view_snapshots_the_declared_plugins_and_the_offering() {
     let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
     let declared = vec![PluginId::parse("tools").expect("valid Plugin")];
-    let set = Mutex::new(ToolSet::for_test(
-        declared.clone(),
-        Vec::new(),
-        vec![offered.clone()],
-    ));
+    let set = Mutex::new(ToolSet {
+        declared: declared.clone(),
+        offered: vec![offered.clone()],
+    });
     assert_eq!(
         ToolView::declared(&set).expect("the lock is healthy"),
         declared

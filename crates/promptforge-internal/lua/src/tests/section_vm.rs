@@ -136,7 +136,7 @@ fn section_vm_value_injection_bypasses_chunk_global_metatables() {
         "return tostring(captured.args) .. ',' .. tostring(captured.fixtures_search) .. ',' .. \
          args .. ',' .. type(fixtures_search) .. ',' .. tools.get('fixtures/search').id",
     );
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
         &shared_set(bindings),
@@ -370,7 +370,7 @@ fn a_chunk_sees_the_tools_table_and_no_tool_global_ever_installs() {
     // The `tools`/`models` tables install with Engine injection, before any
     // chunk runs, so top-level code may scope tools. No tool becomes a
     // global, during the chunk or after it.
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let scope = program(
         "tools.offer(tools.get('fixtures/search'))\n\
          assert(fixtures_search == nil, 'no tool installs as a global')",
@@ -414,7 +414,7 @@ fn a_chunk_sees_the_tools_table_and_no_tool_global_ever_installs() {
 fn functions_resolve_engine_globals_when_called_from_a_later_chunk() {
     // A function body resolves `tools`/`var` through the real globals at
     // call time, so a later chunk can mutate Engine state through it.
-    let bindings = fixture_set(&[("search", "search the web")], &[]);
+    let bindings = fixture_set(&[("search", "search the web")]);
     let define = program(
         "function scope_and_store(id)\n\
              tools.offer(id)\n\

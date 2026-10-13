@@ -29,20 +29,19 @@ fn tool_at(id: &str) -> ToolDescriptor {
 /// wire name.
 fn plugin_set() -> ToolSet {
     let bind = |id: &str| ToolBinding::from_descriptor(&id.replace(['/', '.'], "_"), &tool_at(id));
-    ToolSet::for_test(
-        vec![
+    ToolSet {
+        declared: vec![
             PluginId::parse("web").expect("valid Plugin"),
             PluginId::parse("mail").expect("valid Plugin"),
         ],
-        Vec::new(),
-        vec![
+        offered: vec![
             bind("alpha/zed"),
             bind("gh/issues.list"),
             bind("gh/search"),
             bind("web/fetch"),
             bind("web/search"),
         ],
-    )
+    }
 }
 
 /// Installs `tools` and then `plugins` over `set` on a fresh VM, the

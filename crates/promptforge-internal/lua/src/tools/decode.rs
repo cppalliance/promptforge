@@ -1,9 +1,9 @@
 //! Shared value decoding for the `tools.*` Engine functions.
 //!
-//! The id-or-tool-object polymorphism lives here once: `tools.offer`,
-//! `tools.always_offer`, and the `tools.call` protocol parse all accept a
-//! bare string or a tool object and resolve each to the name it stands
-//! for, a tool object standing for its canonical id. The
+//! The id-or-tool-object polymorphism lives here once: `tools.offer` and
+//! the `tools.call` protocol parse both accept a bare string or a tool
+//! object and resolve each to the name it stands for, a tool object
+//! standing for its canonical id. The
 //! `tools.offer_local` params-table-to-JSON-Schema conversion sits beside
 //! it as the namespace's other argument decode.
 
@@ -41,13 +41,6 @@ pub(crate) fn tool_name(value: &Value) -> mlua::Result<String> {
     }
 }
 
-/// One flattened `tools.offer` or `tools.always_offer` entry: the name an
-/// argument stands for plus an optional model-description override.
-pub(super) struct OfferEntry {
-    pub(super) name: String,
-    pub(super) description_override: Option<String>,
-}
-
 /// Reads one element of `call`'s arguments as a name: a string or a tool
 /// object.
 fn entry_name(call: &str, value: &Value) -> mlua::Result<String> {
@@ -59,60 +52,33 @@ fn entry_name(call: &str, value: &Value) -> mlua::Result<String> {
     })
 }
 
-/// Flattens the arguments of `call` (`tools.offer` or
-/// `tools.always_offer`) into name/override entries, naming `call` in
-/// every argument-shape error.
+/// Flattens the arguments of `call` (`tools.offer`) into the names they
+/// stand for, naming `call` in every argument-shape error.
 ///
-/// `tools.offer(tool, override?)` takes one tool id or tool object with an
-/// optional model-description override. A table is the array form,
-/// `tools.offer({"web/search", "web/fetch"})` or
-/// `tools.offer(tools.extras())`, which covers bulk and takes no
-/// per-element overrides.
+/// `tools.offer(tool)` takes one tool id or tool object. A table is the
+/// array form, `tools.offer({"web/search", "web/fetch"})` or
+/// `tools.offer(tools.extras())`, which covers bulk. Any second argument is
+/// refused.
 pub(super) fn collect_offer_entries(
     call: &str,
     args: Variadic<Value>,
-) -> mlua::Result<Vec<OfferEntry>> {
+) -> mlua::Result<Vec<String>> {
     let mut args = args.into_iter();
     let Some(target) = args.next() else {
         return Ok(Vec::new());
     };
-    let description_override = match args.next() {
-        None => None,
-        Some(Value::String(s)) => Some(s.to_string_lossy()),
-        Some(other) => {
-            return Err(mlua::Error::external(format!(
-                "{call} override must be a string, got {}",
-                other.type_name()
-            )));
-        }
-    };
     if let Some(extra) = args.next() {
         return Err(mlua::Error::external(format!(
-            "{call} takes one tool plus an optional override, got extra {}",
+            "{call} takes one tool or a list of them, got extra {}",
             extra.type_name()
         )));
     }
     match target {
-        Value::Table(table) => {
-            if description_override.is_some() {
-                return Err(mlua::Error::external(format!(
-                    "{call} array form takes no override"
-                )));
-            }
-            table
-                .sequence_values::<Value>()
-                .map(|item| {
-                    Ok(OfferEntry {
-                        name: entry_name(call, &item?)?,
-                        description_override: None,
-                    })
-                })
-                .collect()
-        }
-        single => Ok(vec![OfferEntry {
-            name: entry_name(call, &single)?,
-            description_override,
-        }]),
+        Value::Table(table) => table
+            .sequence_values::<Value>()
+            .map(|item| entry_name(call, &item?))
+            .collect(),
+        single => Ok(vec![entry_name(call, &single)?]),
     }
 }
 

@@ -71,22 +71,12 @@ pub(super) fn prepare_scoped_tools(
         {
             continue;
         }
-        // Model-facing description precedence: `tools.offer` override >
-        // `tools.always_offer` override > the tool's catalog text. The
-        // first two layers are already folded together by
-        // `binding_for_scope` (the section's override replaces the run
-        // binding's `model_description`); the catalog fallback is the
-        // description the binding copied from the tool's descriptor.
-        let description = binding
-            .model_description()
-            .unwrap_or_else(|| binding.description())
-            .to_owned();
         // Build every advertised schema through the validated constructor,
         // so an unusable wire name or a non-object JSON Schema is refused here
         // rather than sent to the model.
         let schema = tool_schema_new(
             binding.alias().to_owned(),
-            description,
+            binding.description().to_owned(),
             binding.schema().clone(),
         )
         .map_err(|error| Error::BindSchema {

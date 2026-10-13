@@ -86,9 +86,7 @@ pub(crate) struct RunState {
     /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
     /// The run's tool set as a read-only view: built from the prepared
-    /// catalog at construction. The only writer is `tools.always_offer` (a
-    /// prompt-wide fact) through the concrete handle the section VMs
-    /// share.
+    /// catalog at construction, and written by nothing during the run.
     tools: Arc<dyn ToolView>,
     /// The concrete handle behind `tools`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.
@@ -276,18 +274,17 @@ impl RunState {
         Arc::clone(&self.tool_set)
     }
 
-    /// An owned snapshot of the run's tool set (the declared plugins, the
-    /// prompt-wide offers, and the offering), read through the view.
+    /// An owned snapshot of the run's tool set (the declared plugins and
+    /// the offering), read through the view.
     ///
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
     /// poisoned.
     pub(super) fn tool_set_snapshot(&self) -> Result<ToolSet> {
-        Ok(ToolSet::from_parts(
-            self.tools.declared()?,
-            self.tools.always()?,
-            self.tools.offered()?,
-        ))
+        Ok(ToolSet {
+            declared: self.tools.declared()?,
+            offered: self.tools.offered()?,
+        })
     }
 
     /// The binding for the catalog tool whose full id is `id`, the
@@ -323,8 +320,8 @@ impl RunState {
     /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,
     /// set on a cheap clone so the context H1 saw stays untouched. The
     /// tool and model sets need no delta: they were built at construction,
-    /// and H1's prompt-wide records (`tools.always_offer`,
-    /// `models.default`) landed in the same shared sets the views read. `when` needs none either: it is the run's
+    /// nothing writes the tool set during the run, and H1's prompt-wide
+    /// `models.default` landed in the same shared model set the view reads. `when` needs none either: it is the run's
     /// `started_at`, the same for the pass and the walk.
     #[must_use]
     pub(super) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {

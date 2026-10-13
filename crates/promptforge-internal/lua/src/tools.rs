@@ -8,9 +8,8 @@
 //! by its tool object, and never by a global. `required` and `extras` list
 //! the tool objects of the declared Plugins and of every other Plugin,
 //! `get` reads one by id, `offer` scopes tools into the section,
-//! `always_offer` offers tools prompt-wide (conventionally from H1, not
-//! privileged to it), `offer_local` registers a prompt-author Lua function
-//! as a tool, `call` dispatches a catalog or local tool (installed by the
+//! `offer_local` registers a prompt-author Lua function as a tool, `call`
+//! dispatches a catalog or local tool (installed by the
 //! coroutine shim prelude, since dispatch suspends), `allow_tasks` records
 //! the section's allowlist for the model's task built-ins, and `calls` is
 //! the read-only dispatch counter surface, keyed by id for a catalog tool
@@ -38,7 +37,7 @@ pub(crate) use decode::tool_name;
 #[cfg(test)]
 pub(crate) use userdata::LuaToolHandle;
 
-use decode::{OfferEntry, collect_offer_entries, local_params_schema};
+use decode::{collect_offer_entries, local_params_schema};
 pub(crate) use objects::tool_object;
 use objects::{install_tool_lists, install_tool_objects};
 
@@ -161,24 +160,19 @@ pub(crate) fn install_tool_call_counts(
 /// checking every entry before the caller records any: an entry must parse
 /// as a tool id, so a wire name, a malformed id, or a local alias is
 /// refused as an id the run does not offer.
-fn resolve_entries(
-    call: &str,
-    set: &ToolSet,
-    entries: Vec<OfferEntry>,
-) -> mlua::Result<Vec<(String, Option<String>)>> {
+fn resolve_entries(call: &str, set: &ToolSet, entries: Vec<String>) -> mlua::Result<Vec<String>> {
     entries
         .into_iter()
-        .map(|entry| {
-            let binding = ToolId::parse(&entry.name)
+        .map(|name| {
+            let binding = ToolId::parse(&name)
                 .ok()
-                .and_then(|_| set.offered_binding(&entry.name))
+                .and_then(|_| set.offered_binding(&name))
                 .ok_or_else(|| {
                     mlua::Error::external(format!(
-                        "{call}: {:?} is not a catalog tool in this run",
-                        entry.name
+                        "{call}: {name:?} is not a catalog tool in this run"
                     ))
                 })?;
-            Ok((binding.alias().to_owned(), entry.description_override))
+            Ok(binding.alias().to_owned())
         })
         .collect()
 }
@@ -203,7 +197,6 @@ pub(crate) fn install_tools(
     let tools = lua.create_table().map_err(Error::lua)?;
     install_tool_objects(lua, &*lock_tools(set).map_err(Error::lua)?)?;
     install_offer(lua, &tools, set, runtime)?;
-    install_always_offer(lua, &tools, set)?;
     install_tool_lists(lua, &tools, set)?;
     install_offer_local(lua, &tools, local_tools)?;
     install_allow_tasks(lua, &tools, runtime)?;
@@ -211,10 +204,8 @@ pub(crate) fn install_tools(
     globals.raw_set("tools", tools).map_err(Error::lua)
 }
 
-/// Installs `tools.offer(tool, override?)` and its array form: each tool
-/// enters the section's scope once, under its wire name, in first-offer
-/// order, with any override recorded for the section. A tool already
-/// offered prompt-wide keeps its prompt-wide place.
+/// Installs `tools.offer(tool)` and its array form: each tool enters the
+/// section's scope once, under its wire name, in first-offer order.
 fn install_offer(
     lua: &Lua,
     tools: &Table,
@@ -230,16 +221,7 @@ fn install_offer(
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            let set = lock_tools(&frozen)?;
-            for (name, description) in resolved {
-                if let Some(description) = description {
-                    state
-                        .description_overrides
-                        .insert(name.clone(), description);
-                }
-                if set.always.iter().any(|existing| existing == &name) {
-                    continue;
-                }
+            for name in resolved {
                 if !state.added.iter().any(|existing| existing == &name) {
                     state.added.push(name);
                 }
@@ -248,37 +230,6 @@ fn install_offer(
         })
         .map_err(Error::lua)?;
     tools.set("offer", offer).map_err(Error::lua)
-}
-
-/// Installs `tools.always_offer(tool, override?)` and its array form: each
-/// tool is offered in every section from here on, its wire name recorded
-/// once in the run's prompt-wide list, with any override set on its
-/// binding for the whole run.
-fn install_always_offer(lua: &Lua, tools: &Table, set: &Arc<Mutex<ToolSet>>) -> Result<()> {
-    let frozen = Arc::clone(set);
-    let always_offer = lua
-        .create_function(move |_, args: Variadic<Value>| {
-            let entries = collect_offer_entries("tools.always_offer", args)?;
-            let mut set = lock_tools(&frozen)?;
-            let resolved = resolve_entries("tools.always_offer", &set, entries)?;
-            for (name, description) in resolved {
-                if let Some(description) = description
-                    && let Some(binding) =
-                        set.offered.iter_mut().find(|binding| binding.alias == name)
-                {
-                    binding.model_description = Some(description);
-                }
-                // Idempotent under `require`: every section that requires a
-                // library re-runs it, so offering the same tool again is a
-                // no-op.
-                if !set.always.iter().any(|existing| existing == &name) {
-                    set.always.push(name);
-                }
-            }
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    tools.set("always_offer", always_offer).map_err(Error::lua)
 }
 
 /// Installs `tools.offer_local(alias, description, params, handler)` over

@@ -105,8 +105,7 @@ impl TaskAllowlist {
     }
 }
 
-/// Tracks the tools and Plugins one section VM offered and the tools'
-/// description overrides.
+/// Tracks the tools and Plugins one section VM offered.
 #[derive(Debug, Default)]
 pub struct ToolRuntime {
     /// The wire names `tools.offer` put in the section's scope, in
@@ -115,9 +114,6 @@ pub struct ToolRuntime {
     /// The Plugins `plugins.offer` put in the section's scope, in
     /// first-offer order.
     pub plugins: Vec<PluginId>,
-    /// The section's author overrides for model-facing schema
-    /// descriptions, keyed by wire name.
-    pub description_overrides: BTreeMap<String, String>,
     /// The model's task allowlist, once `tools.allow_tasks` has run in the
     /// section; `None` leaves the task built-ins off the model's tool
     /// surface.

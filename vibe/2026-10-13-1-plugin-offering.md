@@ -523,7 +523,7 @@ Test cases:
 
 <step-3>
 
-### Step 3: Retire `tools.always_offer` and the offer description override
+### Step 3: Retire `tools.always_offer` and the offer description override [completed]
 
 - Component: Run-wide offer retirement
 - Tests:

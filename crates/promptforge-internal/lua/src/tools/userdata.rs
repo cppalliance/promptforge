@@ -2,13 +2,11 @@
 //!
 //! Presentation only: the userdata exposes an offered tool's `id`, its
 //! catalog `description`, and its `plugin`, the Plugin object
-//! `plugins.get` returns, and stands for its id wherever `tools.offer`,
-//! `tools.always_offer`, and `tools.call` take a tool. The object is frozen
-//! and methodless: model-facing description overrides are positional
-//! arguments to `tools.offer` / `tools.always_offer`, never assignments on
-//! this handle, so `description` stays the catalog text whatever a section
-//! overrides. Unlike a model handle, which carries `infer` and `loop`, it
-//! is invoked only through `tools.call(tool, arguments)`.
+//! `plugins.get` returns, and stands for its id wherever `tools.offer` and
+//! `tools.call` take a tool. The object is frozen and methodless, so
+//! `description` is always the catalog text. Unlike a model handle, which
+//! carries `infer` and `loop`, it is invoked only through
+//! `tools.call(tool, arguments)`.
 
 use mlua::{MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
 use promptforge_types::tools::ToolId;

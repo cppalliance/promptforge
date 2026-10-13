@@ -218,14 +218,11 @@ fn fixture_tool(name: &str) -> ToolDescriptor {
 
 /// Builds a fixture tool set directly: each `(name, description)` pair is
 /// the offered tool `fixtures/<name>` under its wire name
-/// `fixtures_<name>`, with the `always` wire names offered prompt-wide.
-/// This is the shape the run's offering arrives in; no Lua runs to produce
-/// it.
-fn fixture_set(tools: &[(&str, &str)], always: &[&str]) -> ToolSet {
-    ToolSet::for_test(
-        Vec::new(),
-        always.iter().map(|name| (*name).to_owned()).collect(),
-        tools
+/// `fixtures_<name>`. This is the shape the run's offering arrives in; no
+/// Lua runs to produce it.
+fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
+    ToolSet {
+        offered: tools
             .iter()
             .map(|(name, description)| {
                 ToolBinding::for_test(
@@ -235,7 +232,8 @@ fn fixture_set(tools: &[(&str, &str)], always: &[&str]) -> ToolSet {
                 )
             })
             .collect(),
-    )
+        ..ToolSet::default()
+    }
 }
 
 /// Shares a fixture set the way the run shares its own: one allocation every

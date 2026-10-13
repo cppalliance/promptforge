@@ -20,11 +20,10 @@ use super::super::config::RunContext;
 /// execution never consults the catalog again and never holds an
 /// implementation.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
-    ToolSet::from_parts(
-        prompt.frontmatter().plugins().to_vec(),
-        Vec::new(),
-        offered_bindings(ctx),
-    )
+    ToolSet {
+        declared: prompt.frontmatter().plugins().to_vec(),
+        offered: offered_bindings(ctx),
+    }
 }
 
 /// Binds the offering: every catalog tool, in tool id order, under its
