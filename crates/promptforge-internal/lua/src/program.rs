@@ -9,7 +9,7 @@ enum CompilerError {
 }
 
 /// Compiles a named chunk in the fixed temporary VM and keeps debug info.
-fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, CompilerError> {
+fn compile_chunk(source: &str, chunk_name: &str) -> std::result::Result<Vec<u8>, CompilerError> {
     let lua = Lua::new_with(
         StdLib::STRING | StdLib::TABLE | StdLib::MATH,
         LuaOptions::default(),
@@ -17,7 +17,7 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
     .map_err(CompilerError::Vm)?;
     let function = lua
         .load(source)
-        .set_name(location)
+        .set_name(chunk_name)
         .into_function()
         .map_err(CompilerError::Chunk)?;
     // Keep debug info so runtime errors report the chunk name and line
@@ -45,15 +45,21 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// [`source`](Self::source) as sensitive: it is a full-fidelity diagnostic
 /// accessor, not a value to log at info level, echo to untrusted sinks, or place
 /// in a model-facing message. [`location`](Self::location) and
-/// [`source_line`](Self::source_line) are safe positional metadata (a chunk name
-/// and a line number) and hold no source text. The crate itself never logs the
+/// [`source_line`](Self::source_line) are safe positional metadata (a display
+/// name and a line number) and hold no source text. The crate itself never logs the
 /// retained source; compilation observations contain only fixed strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LuaProgram {
     source: String,
     bytecode: Vec<u8>,
-    /// Parser location string used as the Lua chunk name (for example
+    /// Name the chunk was compiled under, which Lua renders in its errors as
+    /// `[string "{chunk_name}"]`: `line {source_line}` for a prompt block,
+    /// the explicit name for an internal chunk. Mapping finds a chunk's
+    /// lines by this name, so it must be unique among the programs one VM
+    /// maps through and stay under the 45 bytes Lua keeps whole.
+    chunk_name: String,
+    /// Parser location string that mapped runtime errors name (for example
     /// `section \`Web Search\` epilog`).
     location: String,
     /// 1-based line number in the prompt source where this Lua region begins.
@@ -67,9 +73,13 @@ pub struct LuaProgram {
 impl LuaProgram {
     /// Compiles `source` as Lua 5.5 bytecode without executing it.
     ///
-    /// `location` identifies the source region in diagnostics. Compilation
-    /// reports contain only fixed strings and never include `source` or
-    /// `location`; each is stamped with the emitter's coordinates.
+    /// `location` identifies the source region in diagnostics. The chunk
+    /// itself compiles under the name `line {source_line}`, which Lua
+    /// renders as `[string "line 120"]`: no two blocks of one prompt start
+    /// on the same line, and the name never reaches the length at which Lua
+    /// cuts it. Compilation reports contain only fixed strings and never
+    /// include `source` or `location`; each is stamped with the emitter's
+    /// coordinates.
     ///
     /// # Errors
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
@@ -84,7 +94,8 @@ impl LuaProgram {
     ) -> Result<Self> {
         emitter.report(section, lifecycle::LUA_COMPILATION_STARTED);
 
-        let bytecode = match compile_chunk(source, location) {
+        let chunk_name = format!("line {source_line}");
+        let bytecode = match compile_chunk(source, &chunk_name) {
             Ok(bytecode) => bytecode,
             Err(CompilerError::Vm(error)) => {
                 emitter.report(section, lifecycle::LUA_COMPILATION_FAILED);
@@ -106,6 +117,7 @@ impl LuaProgram {
         Ok(Self {
             source: source.to_owned(),
             bytecode,
+            chunk_name,
             location: location.to_owned(),
             source_line,
         })
@@ -117,8 +129,8 @@ impl LuaProgram {
     /// Internal chunks are crate source, not author prompt source, so the
     /// compilation is bookkeeping. `location` is the chunk name verbatim;
     /// an `@`-prefixed name renders as a file path in errors, which the line
-    /// mapper never rewrites (it only touches a section's own
-    /// `[string "{location}"]:` marker).
+    /// mapper never rewrites (it only touches an owner's own
+    /// `[string "{chunk name}"]:` marker).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created
@@ -130,6 +142,7 @@ impl LuaProgram {
         Ok(Self {
             source: source.to_owned(),
             bytecode,
+            chunk_name: location.to_owned(),
             location: location.to_owned(),
             source_line: NonZeroU32::MIN,
         })
@@ -178,16 +191,22 @@ impl LuaProgram {
     /// [`map_runtime_error`](Self::map_runtime_error) for a chunk that ran
     /// beside `loaded`, the programs of the libraries loaded into its VM:
     /// each chunk's lines are rewritten by the program that owns them,
-    /// this one first when two share a location.
+    /// this one first when two share a chunk name.
     pub(crate) fn map_runtime_error_among(&self, error: &mlua::Error, loaded: &[Self]) -> Error {
         let raw = error.to_string();
         // An Engine-quota refusal is a stable typed error, not an authoring error.
         if let Some(resource) = quota_resource(&raw) {
             return Error::LuaQuota { resource };
         }
-        let owners: Vec<(&str, NonZeroU32)> = std::iter::once(self)
+        let owners: Vec<(&str, &str, NonZeroU32)> = std::iter::once(self)
             .chain(loaded)
-            .map(|program| (program.location(), program.source_line))
+            .map(|program| {
+                (
+                    program.chunk_name.as_str(),
+                    program.location(),
+                    program.source_line,
+                )
+            })
             .collect();
         let mapped = map_chunk_line_to_absolute(&raw, &owners);
         // Retain the originating `mlua` error as the private source with the
@@ -198,7 +217,8 @@ impl LuaProgram {
         }
     }
 
-    /// Chunk name recorded at compile time (parser location string).
+    /// Display location recorded at compile time (parser location string),
+    /// the name mapped runtime errors give this chunk.
     #[must_use]
     pub fn location(&self) -> &str {
         &self.location
@@ -223,11 +243,11 @@ fn quota_resource(raw: &str) -> Option<&'static str> {
 }
 
 /// Rewrites chunk-relative line numbers for the named chunks in `owners`,
-/// each a location and the prompt-source line its chunk starts at, to
-/// absolute prompt-source lines.
+/// each a chunk name, the display location it maps to, and the
+/// prompt-source line its chunk starts at, to absolute prompt-source lines.
 ///
-/// Only `[string "{location}"]:N:` occurrences of an owner's location are
-/// rewritten, each through the first owner whose location it names, to
+/// Only `[string "{chunk name}"]:N:` occurrences of an owner's chunk name
+/// are rewritten, each through the first owner whose chunk name it names, to
 /// `{location}:{line}:`, the form Lua gives a file chunk. No later pass
 /// matches that form, so a parent VM that surfaces a called or fanout
 /// child's mapped error leaves the child's absolute lines alone, even for a
@@ -236,12 +256,17 @@ fn quota_resource(raw: &str) -> Option<&'static str> {
 /// with none passes through unchanged. A chunk line whose absolute mapping
 /// would overflow `u32` keeps its original marker and digits (the finding's
 /// "return the original diagnostic on overflow").
-pub(crate) fn map_chunk_line_to_absolute(message: &str, owners: &[(&str, NonZeroU32)]) -> String {
+pub(crate) fn map_chunk_line_to_absolute(
+    message: &str,
+    owners: &[(&str, &str, NonZeroU32)],
+) -> String {
     const OPENING: &str = "[string \"";
     let markers: Vec<(String, &str, NonZeroU32)> = owners
         .iter()
-        .filter(|(location, _)| !location.is_empty())
-        .map(|&(location, source_line)| (format!("{OPENING}{location}\"]:"), location, source_line))
+        .filter(|(chunk_name, location, _)| !chunk_name.is_empty() && !location.is_empty())
+        .map(|&(chunk_name, location, source_line)| {
+            (format!("{OPENING}{chunk_name}\"]:"), location, source_line)
+        })
         .collect();
     let mut result = String::with_capacity(message.len() + 64);
     let mut rest = message;

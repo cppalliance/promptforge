@@ -144,7 +144,7 @@ fn library_and_caller_markers_each_map_once_under_one_leading_tag() {
         );
     }
     assert!(
-        !error.contains("[string \"section `"),
+        !error.contains("[string \""),
         "no marker may keep its chunk line, got {error}"
     );
 }

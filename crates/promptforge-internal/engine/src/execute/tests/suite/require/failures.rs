@@ -203,6 +203,27 @@ error('load fault')\n\
 }
 
 #[tokio::test]
+async fn a_raise_while_a_long_titled_library_loads_reports_the_library_line() {
+    let md = require_prompt!(
+        "\
+## Main\n\n\
+```lua\n\
+require '## Shared Research Helper Functions'\n\
+```\n\n\
+## Shared Research Helper Functions\n\n\
+```lua\n\
+local ready = true\n\
+error('load fault')\n\
+```\n"
+    );
+    let message = lua_failure(run_offline(md).await);
+    assert!(
+        message.contains("section `Shared Research Helper Functions` prologue:19: load fault"),
+        "the raise names the library block and its prompt line 19: {message}"
+    );
+}
+
+#[tokio::test]
 async fn a_raise_from_a_library_function_called_later_reports_the_library_line() {
     let md = require_prompt!(
         "\

@@ -48,12 +48,12 @@ fn runtime_assert_failure_reports_chunk_name_and_line() {
         .expect_err("assert(false) must fail at runtime");
     let message = error.to_string();
     assert!(
-        message.contains(location),
-        "runtime error must name the chunk: {message}"
+        message.contains(r#"[string "line 1"]:2:"#),
+        "runtime error must name the chunk by its first prompt line and give the failing line: {message}"
     );
     assert!(
-        message.contains(":2:") || message.contains(":2\n"),
-        "runtime error must include the failing line number: {message}"
+        !message.contains(location),
+        "the display location must not be the chunk name: {message}"
     );
     assert!(
         !message.contains("?:"),
@@ -131,10 +131,14 @@ fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
 #[test]
 fn map_chunk_line_to_absolute_rewrites_line_numbers() {
     let location = "section `Web Search` epilog";
-    let msg = r#"[string "section `Web Search` epilog"]:2: assertion failed!"#;
+    let msg = r#"[string "line 50"]:2: assertion failed!"#;
     let result = map_chunk_line_to_absolute(
         msg,
-        &[(location, NonZeroU32::new(50).expect("50 is non-zero"))],
+        &[(
+            "line 50",
+            location,
+            NonZeroU32::new(50).expect("50 is non-zero"),
+        )],
     );
     assert_eq!(
         result,
@@ -144,18 +148,19 @@ fn map_chunk_line_to_absolute_rewrites_line_numbers() {
 
 #[test]
 fn map_chunk_line_to_absolute_only_rewrites_matching_chunk() {
-    let msg = r#"[string "section `Web Search` epilog"]:51: assertion failed!
+    let msg = r#"[string "line 50"]:51: assertion failed!
 stack traceback:
-        [string "section `Main` prologue"]:3: in main chunk"#;
+        [string "line 22"]:3: in main chunk"#;
     let result = map_chunk_line_to_absolute(
         msg,
         &[(
+            "line 22",
             "section `Main` prologue",
             NonZeroU32::new(22).expect("22 is non-zero"),
         )],
     );
     assert!(
-        result.contains("[string \"section `Web Search` epilog\"]:51:"),
+        result.contains("[string \"line 50\"]:51:"),
         "child absolute line must stay intact: {result}"
     );
     assert!(
@@ -164,7 +169,7 @@ stack traceback:
         "parent chunk line must map with parent source_line: {result}"
     );
     assert!(
-        !result.contains("[string \"section `Main` prologue\"]"),
+        !result.contains("[string \"line 22\"]"),
         "parent chunk-relative marker must be rewritten: {result}"
     );
 }
@@ -172,10 +177,11 @@ stack traceback:
 #[test]
 fn map_chunk_line_to_absolute_leaves_an_already_mapped_marker_alone() {
     let lib = (
+        "line 50",
         "section `lib` prologue",
         NonZeroU32::new(50).expect("50 is non-zero"),
     );
-    let child = map_chunk_line_to_absolute(r#"[string "section `lib` prologue"]:2: boom"#, &[lib]);
+    let child = map_chunk_line_to_absolute(r#"[string "line 50"]:2: boom"#, &[lib]);
     assert_eq!(
         child,
         "section `lib` prologue:51: section `lib` prologue:51: boom"
@@ -192,7 +198,7 @@ fn map_chunk_line_to_absolute_keeps_original_digits_on_overflow() {
     // source_line + chunk_line - 1 must not wrap; on overflow the original
     // chunk-relative digits are preserved rather than a wrong absolute line.
     let msg = r#"[string "x"]:5: boom"#;
-    let result = map_chunk_line_to_absolute(msg, &[("x", NonZeroU32::MAX)]);
+    let result = map_chunk_line_to_absolute(msg, &[("x", "section `x` prologue", NonZeroU32::MAX)]);
     assert!(
         result.contains(r#"[string "x"]:5:"#),
         "overflowing mapping must keep the original line 5: {result}"
@@ -209,6 +215,7 @@ fn map_chunk_line_to_absolute_no_match_passthrough() {
     let result = map_chunk_line_to_absolute(
         msg,
         &[(
+            "line 10",
             "section `Main` prologue",
             NonZeroU32::new(10).expect("10 is non-zero"),
         )],
@@ -218,13 +225,21 @@ fn map_chunk_line_to_absolute_no_match_passthrough() {
 
 #[test]
 fn map_chunk_line_to_absolute_maps_each_owners_markers_once_under_one_tag() {
-    let msg = r#"[string "lib"]:2: boom
+    let msg = r#"[string "line 50"]:2: boom
 stack traceback:
-        [string "lib"]:2: in function 'boom'
-        [string "caller"]:3: in main chunk"#;
+        [string "line 50"]:2: in function 'boom'
+        [string "line 30"]:3: in main chunk"#;
     let owners = [
-        ("caller", NonZeroU32::new(30).expect("30 is non-zero")),
-        ("lib", NonZeroU32::new(50).expect("50 is non-zero")),
+        (
+            "line 30",
+            "caller",
+            NonZeroU32::new(30).expect("30 is non-zero"),
+        ),
+        (
+            "line 50",
+            "lib",
+            NonZeroU32::new(50).expect("50 is non-zero"),
+        ),
     ];
     assert_eq!(
         map_chunk_line_to_absolute(msg, &owners),
@@ -268,6 +283,32 @@ fn runtime_error_maps_to_absolute_prompt_line() {
 }
 
 #[test]
+fn a_location_longer_than_lua_keeps_in_a_chunk_name_still_maps() {
+    // Lua keeps a string chunk name whole only under 45 bytes.
+    let location = "section `Shared Research Helper Functions` (line 1200) prologue";
+    assert!(location.len() >= 60, "the fixture must exceed Lua's cut");
+    let program = LuaProgram::compile(
+        "assert(false)",
+        location,
+        NonZeroU32::new(40).expect("40 is non-zero"),
+        &null_emitter(),
+        "Shared Research Helper Functions",
+    )
+    .expect("valid Lua must compile");
+    let lua = Lua::new();
+    let raw_error = program
+        .load(&lua)
+        .expect("bytecode must load")
+        .call::<()>(())
+        .expect_err("assert(false) must fail at runtime");
+    let mapped = program.map_runtime_error(&raw_error).to_string();
+    assert!(
+        mapped.contains(&format!("{location}:40:")),
+        "the long location must map to absolute line 40: {mapped}"
+    );
+}
+
+#[test]
 fn malformed_lua_reports_location_and_retains_source_diagnostic() {
     let source = "local secret =\nreturn secret";
     let location = "section Gather prologue";
@@ -290,8 +331,8 @@ fn malformed_lua_reports_location_and_retains_source_diagnostic() {
             assert_eq!(actual_location, location);
             assert_eq!(actual_source, source);
             assert!(
-                message.contains(location),
-                "the Lua diagnostic must identify its source region: {message}"
+                message.contains(r#"[string "line 1"]"#),
+                "the Lua diagnostic must name the chunk by its first prompt line: {message}"
             );
         }
         other => panic!("expected Error::LuaCompile, got {other:?}"),

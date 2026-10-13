@@ -421,7 +421,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
         "the shim frame renders bare, outside any [string \"...\"] wrapper: {raw}"
     );
     assert!(
-        raw.contains("[string \"section `Test` prologue\"]:2:"),
+        raw.contains("[string \"line 40\"]:2:"),
         "the author frame is present at chunk line 2: {raw}"
     );
     let mapped = program.map_runtime_error(&error).to_string();

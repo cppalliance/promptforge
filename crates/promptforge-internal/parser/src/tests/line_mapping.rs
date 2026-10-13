@@ -209,6 +209,92 @@ fn sections_sharing_a_title_get_locations_named_by_heading_line() {
 }
 
 #[test]
+fn every_h1_block_maps_only_its_own_errors() {
+    //  8: ```lua         <- first block (source_line = 9)
+    //  9: assert(false)
+    // 12: Plan.
+    // 14: ```lua         <- second block (source_line = 15)
+    let src =
+        prompt_src("```lua\nassert(false)\n```\n\nPlan.\n\n```lua\nx = 1\n```\n\n## S\n\np\n");
+    let prompt = parse(&src).expect("H1 blocks must parse");
+    let [Block::Lua(first), Block::Prose { .. }, Block::Lua(second)] = prompt.h1_blocks.as_slice()
+    else {
+        panic!("H1 Lua, prose, Lua expected, got {:?}", prompt.h1_blocks);
+    };
+    assert_eq!(second.source_line().get(), 15);
+    assert_runtime_error_line(first, 9);
+
+    let lua = mlua::Lua::new();
+    let raw_error = first
+        .load(&lua)
+        .expect("bytecode must load")
+        .call::<()>(())
+        .expect_err("assert(false) must fail");
+    assert_eq!(
+        second.map_runtime_error(&raw_error).to_string(),
+        raw_error.to_string(),
+        "the second H1 block must leave the first block's error unmapped"
+    );
+}
+
+#[test]
+fn a_long_unique_section_title_maps_its_prologue_line() {
+    //  8: ## Gather Background Research Notes
+    // 10: ```lua         <- prologue opens
+    // 11: assert(false)  <- source_line = 11, absolute = 11
+    let src =
+        prompt_src("## Gather Background Research Notes\n\n```lua\nassert(false)\n```\n\nGo.\n");
+    let prompt = parse(&src).expect("prompt must parse");
+    let prologue = prompt
+        .entry()
+        .expect("has sections")
+        .prologue()
+        .expect("prologue must exist");
+    assert_eq!(
+        prologue.location(),
+        "section `Gather Background Research Notes` prologue"
+    );
+    assert_runtime_error_line(prologue, 11);
+}
+
+#[test]
+fn a_shared_title_whose_heading_line_reaches_100_maps_its_prologue_line() {
+    //  10: ### Research Worker Notes  <- under `A`
+    //  13: assert(false)              <- under `A` source_line = 13
+    //  16-105: Padding.
+    // 109: ### Research Worker Notes  <- under `B`
+    // 112: local pad = 1              <- under `B` source_line = 112
+    // 113: assert(false)              <- chunk line 2, absolute = 113
+    let src = prompt_src(&format!(
+        "## A\n\n### Research Worker Notes\n\n```lua\nassert(false)\n```\n\n{}\n\
+         ## B\n\n### Research Worker Notes\n\n```lua\nlocal pad = 1\nassert(false)\n```\n",
+        "Padding.\n".repeat(90),
+    ));
+    let prompt = parse(&src).expect("cousins may share a title");
+    let prologue = |section: &Section| section.prologue().expect("prologue must exist").clone();
+    let under_a = prologue(&prompt.sections[0].children()[0]);
+    let under_b = prologue(&prompt.sections[1].children()[0]);
+    assert_eq!(
+        under_b.location(),
+        "section `Research Worker Notes` (line 109) prologue"
+    );
+    assert_eq!(under_b.source_line().get(), 112);
+    assert_runtime_error_line(&under_b, 113);
+
+    let lua = mlua::Lua::new();
+    let raw_error = under_b
+        .load(&lua)
+        .expect("bytecode must load")
+        .call::<()>(())
+        .expect_err("assert(false) must fail");
+    assert_eq!(
+        under_a.map_runtime_error(&raw_error).to_string(),
+        raw_error.to_string(),
+        "the other `Research Worker Notes` must leave this one's error unmapped"
+    );
+}
+
+#[test]
 fn removed_shared_fence_error_reports_the_fence_line() {
     // Lines:
     //  1: ---

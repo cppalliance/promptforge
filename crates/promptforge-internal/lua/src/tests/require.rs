@@ -22,7 +22,9 @@ type Entry = (&'static str, Option<&'static str>, Library);
 type Calls = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 /// A library under `identity` whose blocks are `sources`, each compiled
-/// under the chunk name `library {heading}`, with empty prose.
+/// at the location `library {heading}` from prompt line 100, with empty
+/// prose. The line keeps the chunk name `line 100` apart from the line 1
+/// of the caller `program` builds.
 fn library(identity: &str, heading: &str, sources: &[&str]) -> Library {
     Library {
         key: LibraryKey::new(identity.to_owned()),
@@ -33,7 +35,7 @@ fn library(identity: &str, heading: &str, sources: &[&str]) -> Library {
                 program: LuaProgram::compile(
                     source,
                     &format!("library {heading}"),
-                    NonZeroU32::MIN,
+                    NonZeroU32::new(100).expect("100 is non-zero"),
                     &null_emitter(),
                     SECTION,
                 )
@@ -339,7 +341,7 @@ fn a_failed_load_stays_out_of_the_cache_and_runs_again() {
     );
     assert_eq!(
         value.as_deref(),
-        Some("false|[string \"library ## a\"]:3: library fault|kept|loaded|2")
+        Some("false|[string \"line 100\"]:3: library fault|kept|loaded|2")
     );
 }
 
@@ -355,7 +357,7 @@ fn an_uncaught_library_failure_keeps_the_library_position() {
     );
     let error = failure(&vm, "require '## a'");
     assert!(
-        error.contains("library ## a:2: library fault"),
+        error.contains("library ## a:101: library fault"),
         "the raise must still name the library block, got {error}"
     );
 }

@@ -270,8 +270,9 @@ fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyT
 
 /// Names a section in its Lua block locations: the title alone, or the title
 /// and its heading line when another section in `headings` shares the
-/// title. Lua reports only a chunk's name, so a name two sections share
-/// would map one section's errors through the other's lines.
+/// title, so a reader can tell the two sections' errors apart. The
+/// locations are display names; each block's line-based chunk name, not
+/// its location, decides which program maps an error.
 fn block_label(headings: &[Heading<'_>], name: &str, heading_abs_line: u32) -> String {
     if headings
         .iter()

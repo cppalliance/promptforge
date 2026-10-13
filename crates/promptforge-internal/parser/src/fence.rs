@@ -269,9 +269,9 @@ pub(super) fn split_section_blocks<'a>(
 /// preserving classic prologue/epilog names.
 ///
 /// Every other block is named by `ordinal`, its 1-based place among the
-/// section's Lua blocks: the label is the chunk name a runtime error's
-/// prompt-line mapping matches, so no two blocks of a prompt may share
-/// one.
+/// section's Lua blocks. The label is the display name mapped runtime
+/// errors give the block; mapping itself matches the block's line-based
+/// chunk name, so the label need not be unique or short.
 pub(super) fn lua_block_location(
     label: &str,
     index: usize,
