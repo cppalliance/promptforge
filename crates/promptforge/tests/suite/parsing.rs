@@ -8,12 +8,22 @@ use promptforge::{ParseErrorKind, Prompt};
 
 use super::support::TestResult;
 
-const INVALID_FIXTURES: [(&str, ParseErrorKind, &str); 4] = [
+const INVALID_FIXTURES: [(&str, ParseErrorKind, &str); 6] = [
     ("missing-h1", ParseErrorKind::Structure, "requires an H1"),
     (
         "unrecognized-lua-label",
         ParseErrorKind::Fence,
         "unrecognized fence label",
+    ),
+    (
+        "lua-fence-opener",
+        ParseErrorKind::Fence,
+        "fence opening line must be exactly",
+    ),
+    (
+        "lua-fence-closer",
+        ParseErrorKind::Fence,
+        "fence closing line must be exactly",
     ),
     (
         "malformed-epilog",

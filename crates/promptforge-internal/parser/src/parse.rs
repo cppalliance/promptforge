@@ -9,7 +9,7 @@ use promptforge_types::event::{Event, lifecycle};
 use crate::build::{
     Frontmatter, Heading, build_sections, collect_headings, line_add, split_frontmatter,
 };
-use crate::fence::{first_unrecognized_lua_label, split_h1};
+use crate::fence::{FenceViolation, first_fence_violation, split_h1};
 use crate::{Error, ParseError, ParseErrorKind, Prompt, Result};
 
 impl Prompt {
@@ -38,10 +38,19 @@ impl Prompt {
     ///   directly under an H2), a section heading is empty, or two sibling
     ///   sections have the same name.
     /// - `Fence` when a `lua` fence is left open, or anywhere in the body a
-    ///   fence's label starts with `lua` in any letter case without being
-    ///   exactly `lua`, such as `Lua` or `lua extra`. The first such fence
-    ///   fails the parse at its opening line, before any Lua compiles. A
-    ///   fence nested inside a longer fence is prose and never fails.
+    ///   fence or line breaks the strict Lua fence rule. A `lua` fence opens
+    ///   with a line that is exactly three backticks then `lua` and closes
+    ///   with a line that is exactly three backticks. Label: a fence's label
+    ///   starts with `lua` in any letter case without being exactly `lua`,
+    ///   such as `Lua` or `lua extra`. Opener: a fence labeled `lua` opens
+    ///   with any other line, such as one that is indented, uses tildes or
+    ///   four backticks, or sits in a block quote or list item. Closer: a
+    ///   fence with an exact opening line closes with any other line.
+    ///   Lookalike: a line outside every fence looks like a `lua` opening
+    ///   line, such as one in an indented code block. The first violation in
+    ///   source order fails the parse at its line, before any Lua compiles.
+    ///   Lines inside the body of another fenced code block are never
+    ///   inspected, so a document can show a Lua fence as an example.
     /// - `List` when a section made up only of list items has an empty item.
     /// - `Lua` when a Lua block in the H1 or in a section fails to compile as
     ///   Lua.
@@ -130,12 +139,17 @@ impl Prompt {
         }
         let title = h1.title.clone();
         let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
-        if let Some((opening, label)) = first_unrecognized_lua_label(body) {
-            return Err(Error::parse_at(
-                ParseErrorKind::Fence,
-                opening,
-                format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`"),
-            ));
+        if let Some((line, violation)) = first_fence_violation(body) {
+            let message = match violation {
+                FenceViolation::Label(label) => {
+                    format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`")
+                }
+                FenceViolation::Opener => {
+                    "`lua` fence opening line must be exactly ```lua".to_owned()
+                }
+                FenceViolation::Closer => "`lua` fence closing line must be exactly ```".to_owned(),
+            };
+            return Err(Error::parse_at(ParseErrorKind::Fence, line, message));
         }
         let (h1_blocks, description_text) =
             split_h1(shared, h1.content, &title, h1_content_abs_line, emitter)?;

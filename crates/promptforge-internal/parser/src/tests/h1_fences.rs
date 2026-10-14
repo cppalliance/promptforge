@@ -92,20 +92,25 @@ fn h1_label_near_misses_fail_whatever_the_opener_shape() {
     assert_unrecognized_label(unclosed, "lua extra");
 }
 
+fn assert_opener_violation(src: &str) {
+    let Err(error) = parse(src) else {
+        panic!("a non-exact Lua opener must fail the parse: {src:?}");
+    };
+    assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
+    assert_eq!(error.to_string(), OPENER_MESSAGE, "{src:?}");
+}
+
 #[test]
-fn h1_shape_near_misses_of_an_exact_lua_label_remain_prose() {
-    for near_miss in ["````lua\nreturn 1\n````", " ```lua\nreturn 1\n ```"] {
+fn non_exact_lua_openers_fail_in_the_h1_and_the_preface() {
+    for fence in NON_EXACT_LUA_OPENERS {
         for intro in ["", "Intro.\n\n"] {
-            let src = format!(
-                "---\nname: x\ndescription: d\n---\n\n# T\n\n{intro}{near_miss}\n\n## S\n\np\n"
-            );
-            let prompt = parse(&src).expect("a shape near-miss must remain prose");
-            assert!(
-                prompt.description_text.contains(near_miss.trim()),
-                "{}",
-                prompt.description_text
-            );
+            assert_opener_violation(&format!(
+                "---\nname: x\ndescription: d\n---\n\n# T\n\n{intro}{fence}\n\n## S\n\np\n"
+            ));
         }
+        assert_opener_violation(&format!(
+            "---\nname: x\ndescription: d\n---\n\nNotes.\n\n{fence}\n\n# T\n\n## S\n\np\n"
+        ));
     }
 }
 
@@ -133,6 +138,26 @@ fn unrecognized_lua_label_fails_before_any_lua_compiles() {
     let observations = recorder.observations();
     assert_eq!(
         observations,
+        vec![
+            ("Prompt".into(), detail::PARSE_STARTED.to_string()),
+            ("Prompt".into(), detail::PARSE_FAILED.to_string()),
+        ]
+    );
+}
+
+#[test]
+fn non_exact_lua_opener_fails_before_any_lua_compiles() {
+    let source = "private_payload =";
+    let src = format!(
+        "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua\nlocal ok = 1\n```\n\n## S\n\n~~~lua\n{source}\n~~~\n"
+    );
+    let (error, events) = Prompt::parse(&src, "parse-failure");
+    let recorder = Recorder(events);
+    let error = error.expect_err("the non-exact opener must fail");
+    assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
+    assert!(!error.to_string().contains(source), "{error}");
+    assert_eq!(
+        recorder.observations(),
         vec![
             ("Prompt".into(), detail::PARSE_STARTED.to_string()),
             ("Prompt".into(), detail::PARSE_FAILED.to_string()),

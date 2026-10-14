@@ -334,7 +334,7 @@ Acceptance:
 
 <step-2>
 
-### Step 2: Make every non-conforming Lua fence a parse error
+### Step 2: Make every non-conforming Lua fence a parse error [completed]
 
 - Component: Strict Lua fences
 - Tests:

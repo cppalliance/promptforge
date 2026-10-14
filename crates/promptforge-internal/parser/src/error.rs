@@ -172,8 +172,14 @@ pub enum ParseErrorKind {
     /// The document structure was invalid, for example a missing or duplicate
     /// H1 title, or two sibling sections with the same name.
     Structure,
-    /// A reserved `lua` code fence was left open, or a fence's label started
-    /// with `lua` in any letter case without being exactly `lua`.
+    /// A reserved `lua` code fence was left open, or a fence or line broke the
+    /// strict Lua fence rule: a fence's label started with `lua` in any
+    /// letter case without being exactly `lua` (Label), a `lua` fence's
+    /// opening line was not exactly three backticks then `lua` (Opener), its
+    /// closing line was not exactly three backticks (Closer), or a line
+    /// outside every fence looked like a `lua` opening line (Lookalike).
+    /// Lines inside the body of another fenced code block are never
+    /// inspected.
     Fence,
     /// A list-only section contained prose lines or empty items.
     List,

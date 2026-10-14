@@ -16,6 +16,23 @@ fn prompt_src(body: &str) -> String {
     format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{body}")
 }
 
+/// `lua` fences whose opening line breaks the Opener rule, each closed by a
+/// line that matches its opener.
+const NON_EXACT_LUA_OPENERS: [&str; 9] = [
+    "```lua \nreturn 1\n```",
+    "```lua\t\nreturn 1\n```",
+    "``` lua\nreturn 1\n```",
+    " ```lua\nreturn 1\n ```",
+    "   ```lua\nreturn 1\n   ```",
+    "~~~lua\nreturn 1\n~~~",
+    "````lua\nreturn 1\n````",
+    "> ```lua\n> return 1\n> ```",
+    "- ```lua\n  return 1\n  ```",
+];
+
+const OPENER_MESSAGE: &str = "`lua` fence opening line must be exactly ```lua";
+const CLOSER_MESSAGE: &str = "`lua` fence closing line must be exactly ```";
+
 #[test]
 fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // A malformed-YAML frontmatter must classify as `Frontmatter` and

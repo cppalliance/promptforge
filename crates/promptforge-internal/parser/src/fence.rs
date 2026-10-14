@@ -1,11 +1,13 @@
-//! Exact `lua` fence recognition and block splitting.
+//! Strict `lua` fence checking and block splitting.
 //!
-//! H1 and section content is an alternating sequence of exact, unindented
-//! triple-backtick `lua` fences and prose. This module recognizes those fences
-//! (never near-misses or fences nested inside longer code blocks), finds the
-//! first fence whose label starts with `lua` without being exactly `lua` so
-//! the parse can reject it, and splits content into [`RawBlock`]s that the
-//! facade compiles into [`Block`]s.
+//! H1 and section content is an alternating sequence of `lua` fences and
+//! prose. A `lua` fence opens with a line that is exactly three backticks
+//! then `lua` and closes with a line that is exactly three backticks. This
+//! module finds the first fence in the body that breaks the Label, Opener, or
+//! Closer rule, or the first Lookalike line, so the parse can reject it, and
+//! splits content into [`RawBlock`]s that the facade compiles into
+//! [`Block`]s. Lines inside the body of another fenced code block are never
+//! inspected, which is how a document shows a Lua fence as an example.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -96,7 +98,7 @@ pub(crate) fn trim_leading_blank_lines(content: &str) -> &str {
 }
 
 /// Extracts source through the first exact, unindented triple-backtick closing
-/// line. Near-miss closing markers are part of the source.
+/// line.
 fn extract_exact_fence<'a>(content: &'a str, label: &str) -> Result<(String, &'a str)> {
     let mut offset = 0;
     for line in content.split_inclusive('\n') {
@@ -122,12 +124,14 @@ fn strip_exact_lua_opening(content: &str) -> Option<&str> {
         .or_else(|| (content == "```lua").then_some(""))
 }
 
-/// Yields the opening line's byte offset and the label of every top-level
-/// fence, in source order.
+/// Yields the extent and the label of every fence the Markdown parser
+/// reports, in source order. Each extent starts at the opening line's first
+/// byte and ends where the parser ends the block.
 ///
-/// Using the Markdown event stream keeps fence-looking lines inside longer
-/// fences as prose rather than accidentally reserving or rejecting them.
-fn fence_openings(content: &str) -> impl Iterator<Item = (usize, CowStr<'_>)> {
+/// That includes fences inside block quotes and list items, and never a fence
+/// inside another code block's body, so fence-looking lines in a longer fence
+/// stay prose rather than being reserved or rejected.
+fn fence_openings(content: &str) -> impl Iterator<Item = (Range<usize>, CowStr<'_>)> {
     Parser::new_ext(content, Options::empty())
         .into_offset_iter()
         .filter_map(|(event, range)| {
@@ -137,34 +141,134 @@ fn fence_openings(content: &str) -> impl Iterator<Item = (usize, CowStr<'_>)> {
             let line_start = content[..range.start]
                 .rfind('\n')
                 .map_or(0, |newline| newline + 1);
-            Some((line_start, label))
+            Some((line_start..range.end, label))
         })
 }
 
-/// Returns the byte offsets of top-level exact `lua` opening lines.
+/// Returns the byte offsets of exact `lua` opening lines.
 fn exact_lua_openings(content: &str) -> Vec<usize> {
     fence_openings(content)
-        .filter_map(|(line_start, _)| {
-            (content[line_start..].lines().next() == Some("```lua")).then_some(line_start)
+        .filter_map(|(extent, _)| {
+            (content[extent.start..].lines().next() == Some("```lua")).then_some(extent.start)
         })
         .collect()
 }
 
-/// Returns the opening line's byte range and the label of the first
-/// top-level fence whose label starts with `lua` in any letter case but is
-/// not exactly `lua`.
-pub(super) fn first_unrecognized_lua_label(content: &str) -> Option<(Range<usize>, String)> {
-    fence_openings(content).find_map(|(line_start, label)| {
-        let lua_like = label
-            .get(..3)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("lua"));
-        (lua_like && &*label != "lua").then(|| {
-            let line_end = content[line_start..]
-                .find('\n')
-                .map_or(content.len(), |end| line_start + end);
-            (line_start..line_end, label.into_string())
+/// The rule a fence or line breaks, as found by [`first_fence_violation`].
+pub(super) enum FenceViolation {
+    /// Label: the fence's label starts with `lua` in any letter case without
+    /// being exactly `lua`.
+    Label(String),
+    /// Opener: a fence labeled exactly `lua` whose opening line is not exactly
+    /// three backticks then `lua`, or a Lookalike line.
+    Opener,
+    /// Closer: a fence whose opening line is exact and whose closing line is
+    /// not exactly three backticks.
+    Closer,
+}
+
+/// Returns the line's byte range, without its terminator, and the rule
+/// broken by the first violation in `body` in source order.
+///
+/// Each fence the Markdown parser reports is checked against the Label rule,
+/// then the Opener rule, then the Closer rule. A fence the parser leaves
+/// unclosed reports nothing here; [`split_section_blocks`] reports it. Every
+/// other line is checked against the Lookalike rule: after leading spaces and
+/// tabs, three or more backticks or tildes, optional spaces or tabs, then
+/// `lua` in any letter case. Such a line sits where the parser reports no
+/// fence, such as in an indented code block or a raw HTML block, and breaks
+/// the Opener rule. Lines inside a fence's extent are never checked against
+/// the Lookalike rule, so a fence nested in another fence's body never fails.
+pub(super) fn first_fence_violation(body: &str) -> Option<(Range<usize>, FenceViolation)> {
+    let mut extents = Vec::new();
+    let mut fence = None;
+    for (extent, label) in fence_openings(body) {
+        fence = fence.or_else(|| fence_violation(body, extent.clone(), &label));
+        extents.push(extent);
+    }
+    let lookalike = body
+        .split_inclusive('\n')
+        .scan(0, |next, line| {
+            let start = *next;
+            *next += line.len();
+            Some(start)
         })
-    })
+        .filter(|start| !extents.iter().any(|extent| extent.contains(start)))
+        .map(|start| line_at(body, start))
+        .find(|line| is_lua_lookalike(&body[line.clone()]))
+        .map(|line| (line, FenceViolation::Opener));
+    [fence, lookalike]
+        .into_iter()
+        .flatten()
+        .min_by_key(|(line, _)| line.start)
+}
+
+/// Checks one reported fence against the Label, Opener, and Closer rules, in
+/// that order.
+fn fence_violation(
+    body: &str,
+    extent: Range<usize>,
+    label: &str,
+) -> Option<(Range<usize>, FenceViolation)> {
+    let opening = line_at(body, extent.start);
+    if label != "lua" {
+        return is_lua_like(label).then(|| (opening, FenceViolation::Label(label.to_owned())));
+    }
+    if &body[opening.clone()] != "```lua" {
+        return Some((opening, FenceViolation::Opener));
+    }
+    let closing = closing_line(body, extent)?;
+    (&body[closing.clone()] != "```").then_some((closing, FenceViolation::Closer))
+}
+
+/// Byte range of the line starting at `start`, without its terminator.
+fn line_at(content: &str, start: usize) -> Range<usize> {
+    let rest = &content[start..];
+    let line = rest.find('\n').map_or(rest, |end| &rest[..end]);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    start..start + line.len()
+}
+
+/// Byte range of the closing line of an exact `lua` fence whose block covers
+/// `extent`, or `None` when the block is unclosed.
+///
+/// The closing line is the block's own last line, so this always agrees
+/// with the Markdown parser on where the fence ends. A block the parser
+/// leaves unclosed ends on a body line, which never has a closing line's
+/// shape, because such a line would have closed it.
+fn closing_line(body: &str, extent: Range<usize>) -> Option<Range<usize>> {
+    let block = body[extent.clone()].trim_end_matches(['\r', '\n']);
+    let last = block.rfind('\n')? + 1;
+    let line = line_at(body, extent.start + last);
+    closes_three_backtick_fence(&body[line.clone()]).then_some(line)
+}
+
+/// Whether `line` has the shape of a line that closes a fence opened by three
+/// backticks: at most three spaces of indent, three or more backticks, then
+/// only spaces or tabs.
+fn closes_three_backtick_fence(line: &str) -> bool {
+    let unindented = line.trim_start_matches(' ');
+    let marker = unindented.trim_start_matches('`');
+    line.len() - unindented.len() <= 3
+        && unindented.len() - marker.len() >= 3
+        && marker.trim_matches([' ', '\t']).is_empty()
+}
+
+/// Whether `line` breaks the Lookalike rule.
+fn is_lua_lookalike(line: &str) -> bool {
+    let text = line.trim_start_matches([' ', '\t']);
+    let Some(marker) = text.chars().next().filter(|c| matches!(c, '`' | '~')) else {
+        return false;
+    };
+    let after_marker = text.trim_start_matches(marker);
+    text.len() - after_marker.len() >= 3
+        && is_lua_like(after_marker.trim_start_matches([' ', '\t']))
+}
+
+/// Whether `text` starts with `lua` in any letter case.
+fn is_lua_like(text: &str) -> bool {
+    text.get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("lua"))
 }
 
 /// Byte offset where leading blank lines end.
@@ -199,13 +303,17 @@ fn pending_prose<'a>(content: &'a str, segment: Range<usize>, rules: &[Range<usi
 
 /// Splits a section into alternating exact `lua` fences and prose segments.
 ///
-/// Every exact top-level `lua` fence becomes a Lua block. Text between fences
-/// becomes prose (including an empty segment between consecutive fences, so
-/// classic prologue/epilog with empty prose stays `[Lua, Prose, Lua]`). Leading
-/// blank lines before a leading fence are discarded. Near-miss fence forms stay
-/// inside prose. Each prose segment is the pending Markdown buffer for the
+/// Every exact `lua` fence the Markdown parser reports becomes a Lua block.
+/// Text between fences becomes prose (including an empty segment between
+/// consecutive fences, so classic prologue/epilog with empty prose stays
+/// `[Lua, Prose, Lua]`). Leading blank lines before a leading fence are
+/// discarded. Each prose segment is the pending Markdown buffer for the
 /// fence that follows it: a thematic break resets the buffer, so only the
 /// Markdown below the segment's last break is captured.
+///
+/// The parse runs [`first_fence_violation`] on the whole body first, so the
+/// first exact closing line after an exact opener is the line the Markdown
+/// parser closes the fence on.
 ///
 /// # Errors
 /// Returns a fence-classified parse error when an exact `lua` fence is not
@@ -226,13 +334,12 @@ pub(super) fn split_section_blocks<'a>(
     let mut pos = 0usize;
 
     for (index, &opening) in openings.iter().enumerate() {
-        if opening < pos {
-            return Err(Error::parse(
-                ParseErrorKind::Fence,
-                format!("section `{section}` `lua` fence is not closed exactly"),
-            ));
-        }
-        let Some(after_open) = strip_exact_lua_opening(&content[opening..]) else {
+        let after_open = if opening < pos {
+            None
+        } else {
+            strip_exact_lua_opening(&content[opening..])
+        };
+        let Some(after_open) = after_open else {
             return Err(Error::parse(
                 ParseErrorKind::Structure,
                 "internal section fence classification mismatch",
