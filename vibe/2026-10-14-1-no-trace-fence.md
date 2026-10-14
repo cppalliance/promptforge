@@ -4,28 +4,28 @@ overview: Replace the parser's named "removed fence form" errors with one genera
 todos:
   - id: parser-rule
     content: "One commit: lua-prefixed label scan replaces the two named checks, Fence docs rewritten, parser tests rewritten with neutral labels, facade fixture swapped"
-    status: pending
+    status: completed
   - id: retired-lints
     content: Trash the two retired_symbols files, cut the retired scan out of engine_guards.rs, its tests, and the tidy.rs doc, and delete the docs-claims RETIRED list
-    status: pending
+    status: completed
   - id: sweep
     content: Drop the always_offer absence clause; sweep crates/ and prompts/ for other removed-feature traces
-    status: pending
+    status: completed
   - id: compat-removal
     content: Remove the live compatibility code for removed features in the gateway and Workshop
-    status: pending
+    status: completed
   - id: json-module
     content: Greeter example answers a timer at once, with its answer doc updated
-    status: pending
+    status: completed
   - id: review-fixes
     content: Positive-fixture test and its directory walker copied to the engine suite, tool-offering wording
-    status: pending
+    status: completed
   - id: harness
     content: Suite harness (prompt builder, preloaded answers, Scenario -> Driver -> Trace) plus greeter.rs migration and the line-budget checkpoint
-    status: pending
+    status: completed
   - id: harness-migrate
     content: Migrate the remaining suite files in two commits; same test names; line count reported against the 1,450 target
-    status: pending
+    status: completed
 isProject: false
 ---
 
