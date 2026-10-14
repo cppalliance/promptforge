@@ -1,8 +1,9 @@
 //! The greeter, one tour at a time: it parses, its store effects are
-//! answered from the run's store, prepare fills its model role, its tool
-//! output reaches its Lua unchanged, a cancel from another thread ends it,
-//! and the complete program in `examples/greeter.rs` logs its parse events
-//! first and returns `HI THERE`.
+//! answered from the run's store, its timers fire at once, prepare fills
+//! its model role, its tool output reaches its Lua unchanged, a cancel
+//! from another thread ends it, and the complete program in
+//! `examples/greeter.rs` logs its parse events first and returns
+//! `HI THERE`.
 
 use std::error::Error;
 use std::num::NonZeroU32;
@@ -122,6 +123,14 @@ fn answering_each_store_effect_from_the_runs_store_returns_the_note() -> Result<
     let mut run = Run::new(Arc::new(parse(NOTE)?), "", ctx);
     assert!(matches!(drive(&mut run), RunResult::Ok(text) if text == "hello"));
     Ok(())
+}
+
+#[test]
+fn the_example_answers_a_timer_as_fired_at_once() {
+    assert!(matches!(
+        answer(Effect::Timer { seconds: 3_600.0 }),
+        EffectAnswer::Timer
+    ));
 }
 
 #[test]

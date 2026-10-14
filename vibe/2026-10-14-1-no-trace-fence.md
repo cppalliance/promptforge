@@ -15,7 +15,7 @@ todos:
     content: Remove the live compatibility code for removed features in the gateway and Workshop
     status: pending
   - id: json-module
-    content: promptforge::json module, serde_json as a normal dependency, re-bless public-api.txt, example JSON import and timer fix
+    content: Greeter example answers a timer at once, with its answer doc updated
     status: pending
   - id: review-fixes
     content: Positive-fixture test and its directory walker copied to the engine suite, tool-offering wording
@@ -77,7 +77,7 @@ PromptForge drops every trace of removed features. The parser stops naming remov
 
 ## Functional Specification
 
-Prompt authors see one new parse error, Rust callers gain a `promptforge::json` module, and maintainers lose the retired-name lints. Everything else changes only tests.
+Prompt authors see one new parse error, and maintainers lose the retired-name lints. Everything else changes only tests, the greeter example, and code that existed for removed features.
 
 - Actors and workflows:
   - A prompt author parses a prompt with `Prompt::parse`.
@@ -96,7 +96,6 @@ Prompt authors see one new parse error, Rust callers gain a `promptforge::json` 
 - Security and privacy behavior: None
 - Acceptance criteria:
   - Each invalid label above fails with kind `Fence` and that message; each valid case parses as it does today.
-  - `promptforge::json::Value`, and `promptforge::json::json!` when the API check admits it, are usable from the facade alone.
   - The `build-xtask` structural tests and `docs-claims.mjs` pass with the retired-name lints gone.
 
 </product-contract>
@@ -104,7 +103,7 @@ Prompt authors see one new parse error, Rust callers gain a `promptforge::json` 
 
 ## Technical Design
 
-The parser replaces two named checks with one label scan. The facade gains a JSON module and a corrected example. The retired-name lints are deleted outright. The facade suite gets a three-part harness that turns setup and driving into data, so each test keeps only its assertions.
+The parser replaces two named checks with one label scan. The facade gets a corrected example. The retired-name lints are deleted outright. The facade suite gets a three-part harness that turns setup and driving into data, so each test keeps only its assertions.
 
 - Architecture:
   - Parser:
@@ -140,11 +139,8 @@ The parser replaces two named checks with one label scan. The facade gains a JSO
   - The harness fails the test, instead of hanging, in three cases: the chat script runs out, scripted replies are left over at `Done`, or an undecided run issues nothing new while only held effects remain.
   - Every scenario defaults to `canned()`, sets `provenance_start` to the parse-event count, and always calls `prepare`, failing when prepare reports a gap.
 - File and public API changes:
-  - `promptforge::json` re-exports `serde_json::Value`, and also `serde_json::json` if `cargo xtask api` admits a macro.
-    - `serde_json` moves from `[dev-dependencies]` to `[dependencies]` in `crates/promptforge/Cargo.toml`.
-    - The facade shape check admits only single-item re-exports from declared dependencies (`crates/build-xtask/src/facade_shape.rs`), and `serde_json` is already on the API allowlist (`crates/build-xtask/src/api/items.rs`).
-    - `crates/promptforge/public-api.txt` is re-blessed with `cargo +nightly-2026-09-05 xtask api --bless` (that toolchain is installed), with the new module as its only change.
-  - The `greeter` example (`crates/promptforge/examples/greeter.rs`) imports JSON from `promptforge::json` and answers a timer with `EffectAnswer::Timer` at once, without sleeping; its `answer` doc says that a caller with a real clock waits `seconds` before answering. It otherwise stays raw API code.
+  - No public API change: `crates/promptforge/public-api.txt` stays as it is, and `serde_json` stays a dev-dependency of the facade.
+  - The `greeter` example (`crates/promptforge/examples/greeter.rs`) keeps its `serde_json::json!` call and answers a timer with `EffectAnswer::Timer` at once, without sleeping; its `answer` doc says that a caller with a real clock waits `seconds` before answering. It otherwise stays raw API code.
   - The `RunContext::tools` doc (`crates/promptforge-internal/engine/src/execute/config.rs`) and the matching comment in `crates/promptforge/tests/suite/prepare.rs` say that the catalog lists every tool a run can use, Lua calls one by id, and a section offers one to its model with `tools.offer` (`crates/promptforge-internal/lua/src/tools.rs`).
 - Data, persistence, failure, security, and privacy constraints: None
 
@@ -175,7 +171,7 @@ Parser tests pin the new rule using only neutral labels. The facade suite proves
   - Both clippy runs pass with `CARGO_BUILD_WARNINGS=deny`, together with `cargo check -p gateway --no-default-features`.
   - `cargo fmt --all --check` passes.
   - The workspace docs gate and the facade docs gate (`cargo doc -p promptforge --no-deps`) pass with `RUSTDOCFLAGS="-D warnings"`.
-  - `cargo xtask api --check` passes on the nightly named in `crates/build-xtask/src/api/toolchain.rs`, against the re-blessed `crates/promptforge/public-api.txt`.
+  - `cargo xtask api --check` passes on the nightly named in `crates/build-xtask/src/api/toolchain.rs`, against the unchanged `crates/promptforge/public-api.txt`.
   - `node --test crates/workshop/ui/test/docs-claims.mjs` passes.
   - The success-criteria search returns no hits, and the facade suite meets the line budget.
 
@@ -205,14 +201,12 @@ The user set a no-trace rule, chose a narrow fence-label error, kept the docs re
   - Erroring on every non-`lua` fence: prompts show models JSON and code examples in fences. Revisit if authors ask for strict fences.
   - Erroring on malformed `lua` shapes or on nested fences: the user did not choose these. Revisit if authors are confused by silent prose.
   - A `removed-lua-shared` parse fixture: it would preserve a trace of a removed feature.
-  - Re-exporting the whole `serde_json` crate: the facade shape check admits only single-item re-exports (`crates/build-xtask/src/facade_shape.rs`). Revisit if that check changes.
+  - A `promptforge::json` module re-exporting `serde_json::Value` and `json!`: `cargo xtask api` refuses any re-export of an item defined outside the internal crates (`Surface::resolve` in `crates/build-xtask/src/api/items.rs`); its `serde_json` allowlist covers only types named in signatures. The user chose to keep that facade rule rather than widen the checker or wrap JSON in a facade newtype, which would change `ToolDescriptor::new`'s signature. Callers keep naming `serde_json::Value` directly. Revisit if the facade rule changes.
   - Merging tests into tables across files: one failing case would fail a whole group. Revisit if the suite stops being organized as per-file tours.
   - Adding `Send` and `Sync` assertions for `Prompt`, `Step`, `Effect`, and `EffectAnswer`: `crates/promptforge/public-api.txt` already pins them. Revisit if the API listing stops recording auto traits.
 - Assumptions, risks, and notes:
-  - Risk: `cargo xtask api` may refuse a re-exported macro. If it does, `promptforge::json` re-exports `Value` alone and the final report says so.
-  - Note: the workspace has no `workspace-hack` crate and no cargo-hakari since `76ee63f3c`, so moving `serde_json` into the facade's `[dependencies]` needs no generated-crate step.
   - Assumption: the harness needs no new crates, and the line budget assumes about 300 lines of harness code.
-  - Note: tests that serialize logs keep calling `serde_json` directly, which is now a normal dependency of the crate.
+  - Note: the facade suite and its test harness take JSON from `serde_json` directly, which stays a dev-dependency of the crate.
   - Note: the docs site picks up the new `Fence` wording on the next upstream push.
 
 ### Deferred and Out of Scope
@@ -255,12 +249,12 @@ Four components, nine steps, one commit per step, in the order below. Every comm
 - Components, in dependency order:
   1. Fence label rule (Step 1). First, because the parser's named removed-form errors and their tests are most of the hits for the success-criteria search, and the sweep in Step 3 should start from a tree where they are gone.
   2. Trace removal (Steps 2 to 4). Second, because the lints are self-contained, the sweep is only meaningful once the parser and lint traces are gone, and the compatibility removal acts on the live code the sweep listed.
-  3. Facade review fixes (Steps 5 and 6). Third, because the harness imports JSON through `promptforge::json`, and the test-name snapshot taken at the start of Step 7 must come after the positive-fixture test leaves `shipped.rs`.
+  3. Facade review fixes (Steps 5 and 6). Third, because the harness's `greeter.rs` migration runs the corrected example, and the test-name snapshot taken at the start of Step 7 must come after the positive-fixture test leaves `shipped.rs`.
   4. Facade test harness (Steps 7 to 9). Last, because it builds on both facade fixes and touches only the facade suite.
 - Pieces and construction:
   - Fence label rule: the scanner and docs, the parser tests, and the facade fixture are built jointly in one step, because the old tests and the old fixture row assert the old "fence form was removed" messages and fail the moment the rule changes.
   - Trace removal: the `build-xtask` lint removal and the `docs-claims.mjs` list removal are built jointly, since both delete retired-name lists and neither has other users. The sweep follows sequentially, so its search sees only what Steps 1 and 2 left behind. The compatibility removal follows the sweep, because it starts from the live code the sweep listed and left alone.
-  - Facade review fixes: the JSON module, then the positive-fixture move with the tool-offering wording. They share no code, so they are sequential only to keep commits small.
+  - Facade review fixes: the greeter timer fix, then the positive-fixture move with the tool-offering wording. They share no code, so they are sequential only to keep commits small.
   - Facade test harness: the harness core with the `greeter.rs` migration, then two migration batches. Sequential, because each batch adds helpers on top of the earlier ones and the `greeter.rs` budget checkpoint gates the rest.
 
 <step-1>
@@ -375,26 +369,21 @@ Work, starting from the inventory the Step 3 sweep left alone. Line numbers are 
 
 <step-5>
 
-### Step 5: `promptforge::json` module and greeter example fixes
+### Step 5: Greeter example answers a timer at once [completed]
 
 - Component: Facade review fixes
 - Tests:
   - `cargo nextest run --locked -p promptforge --all-features`
   - `cargo run --locked -p promptforge --example greeter`
-  - `cargo nextest run --locked -p build-xtask --all-features`
-  - `cargo +nightly-2026-09-05 xtask api --check`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p promptforge --all-targets --all-features`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`
 - Setup: read the root `AGENTS.md` before editing. Run cargo commands one at a time in PowerShell, without `2>&1`, and judge each by its result lines and `$LASTEXITCODE`.
 
 Work:
 
-- `crates/promptforge/Cargo.toml`: move `serde_json.workspace = true` from `[dev-dependencies]` to `[dependencies]`. No generated-crate step is needed, since the workspace has had no `workspace-hack` crate or cargo-hakari since `76ee63f3c`.
-- `crates/promptforge/src/lib.rs`: add an inline `pub mod json` beside the other inline modules, documented like them, re-exporting `serde_json::Value` and, if `cargo xtask api` admits a macro, `serde_json::json`. The facade shape check (`crates/build-xtask/src/facade_shape.rs`) admits only single-item re-exports from declared dependencies, so do not re-export the whole crate. `serde_json` is already on the API allowlist (`crates/build-xtask/src/api/items.rs`). If the API tooling refuses the macro, re-export `Value` alone and say so in the step report.
-- Acceptance: `promptforge::json::Value`, and `promptforge::json::json!` when admitted, are usable from the facade alone.
-- Re-bless with `cargo +nightly-2026-09-05 xtask api --bless`, then confirm that `git diff crates/promptforge/public-api.txt` shows only the new module's lines.
+- No `promptforge::json` module, no dependency change, and no `public-api.txt` change: `cargo xtask api` refuses any re-export of an item defined outside the internal crates, `serde_json::Value` included, and the user chose to keep that facade rule (see the Decision Record). `serde_json` stays a dev-dependency of `crates/promptforge`.
 - `crates/promptforge/examples/greeter.rs`:
-  - Import JSON from `promptforge::json` instead of `serde_json`, at the `serde_json::json!` call near line 90. If only `Value` is re-exported, build the same schema through `promptforge::json::Value` with no `serde_json` path, and describe the approach in the step report.
+  - Keep its `serde_json::json!` call as it is.
   - In `answer`, a timer gets `EffectAnswer::Timer` at once, without sleeping, instead of `EffectAnswer::Dropped`. Update the `answer` doc to say that a caller with a real clock waits `seconds` before answering. Leave the `f64` duration type alone, since a separate rulebook-audit plan owns it.
   - Everything else stays raw API code, because the example is the user-facing run loop. The facade suite includes this file as a module and runs `greet`, so its items stay `pub`.
 
@@ -444,7 +433,7 @@ Work:
 
 - Build the test harness in `crates/promptforge/tests/suite/support.rs` and a new `crates/promptforge/tests/suite/support/scenario.rs`, wired from `support.rs` with `mod scenario;`. The flat-directory rule exempts top-level `tests/` trees, so the one-file subdirectory is allowed. It follows the Technical Design: the prompt builder (`prompt`, `greeter`), the preloaded answers (`text`, `calls`, `fail`, `shout()`, `Tool::untrusted`, `canned()`, `TestResult`), `Scenario`, `Driver`, and `Trace`, the driving rules, the three cases where it fails instead of hanging, and the scenario defaults.
 - Land only the helpers `greeter.rs` uses. Clippy denies unused code, so each remaining helper lands in the step that first uses it. Keep the existing `context(name)` helper while `prepare.rs` still uses it.
-- Use `promptforge::` paths only, take JSON from `promptforge::json`, and add no new crates. Keep `scenario.rs` under the per-file line ceiling that `build_ceiling::check` enforces (`crates/promptforge/build.rs`).
+- Use `promptforge::` paths for every PromptForge item, take JSON from `serde_json` (a dev-dependency), and add no new crates. Keep `scenario.rs` under the per-file line ceiling that `build_ceiling::check` enforces (`crates/promptforge/build.rs`).
 - Harness choices already decided: every scenario defaults to the canned model, because it does nothing without declared roles and can be overridden; the builder is named `Scenario`, because "Harness" names a product component in this repository; tests stay separate with sentence names, so one failure names one test, and are never merged into tables.
 - Migrate `crates/promptforge/tests/suite/greeter.rs` onto the harness, keeping every test's name and assertions. It still includes `crates/promptforge/examples/greeter.rs` as a module and runs `greet`.
 - Budget checkpoint: `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` stay untouched and hold about 213 lines. With about 300 lines of harness, the 13 migrated files must shrink from about 2,125 lines to about 940, a 56% cut, which puts `greeter.rs` (194 lines at baseline) near 85 lines. If `greeter.rs` shrinks well short of that, ending above about 110 lines, stop and report before Step 8.
@@ -467,7 +456,7 @@ Work:
 
 - Move `crates/promptforge/tests/suite/effect.rs` (200 lines at baseline), `event.rs` (219), `ids.rs` (244), and `cancel.rs` (122) onto the test harness in `crates/promptforge/tests/suite/support.rs` and `support/scenario.rs`, as the Technical Design specifies it. Add each remaining helper, such as `Driver` with `pump`, `pump_until_held`, and `finish` for tests that act mid-run, in this commit only if one of these files uses it.
 - Keep every test's name and assertions. Tests stay separate with sentence names, so one failure names one test, and are never merged into tables.
-- Use `promptforge::` paths only, take JSON from `promptforge::json`, and keep every file under the per-file line ceiling.
+- Use `promptforge::` paths for every PromptForge item, take JSON from `serde_json` (a dev-dependency), and keep every file under the per-file line ceiling.
 - Budget: together these four files should land near 345 lines, the 56% cut that keeps the suite on track for about 1,450 lines.
 
 </step-8>
@@ -498,7 +487,7 @@ Work:
 Work:
 
 - Move `crates/promptforge/tests/suite/model.rs` (126 lines at baseline), `plugins.rs` (105), `replay.rs` (73), `timestamp.rs` (56), `vfs.rs` (120), `prompt.rs` (202), `prepare.rs` (304), and `shipped.rs` (160 at baseline, less after the positive-fixture test left) onto the test harness in `crates/promptforge/tests/suite/support.rs` and `support/scenario.rs`, as the Technical Design specifies it, adding each remaining helper as its first user arrives.
-- Keep every test's name and assertions. Tests stay separate with sentence names and are never merged into tables. Tests that serialize logs keep calling `serde_json` directly, which is a normal dependency of the crate since Step 5.
+- Keep every test's name and assertions. Tests stay separate with sentence names and are never merged into tables. Tests that serialize logs keep calling `serde_json` directly, which stays a dev-dependency of the crate.
 - `prepare.rs` keeps its tool-offering comment: the catalog lists every tool a run can use, Lua calls one by id, and a section offers one to its model with `tools.offer`. `shipped.rs` keeps `collect_markdown`, `every_prompt_under_parses`, `every_shipped_prompt_parses_offline`, and the shipped research prompt's end-to-end run over its web tools.
 - Remove the old `support::context` helper once nothing uses it.
 - Leave `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` as they are. Add no auto-trait checks, because `crates/promptforge/public-api.txt` already pins every facade type's auto traits and `cargo xtask api --check` fails on any change.
