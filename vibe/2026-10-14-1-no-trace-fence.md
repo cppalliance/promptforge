@@ -391,7 +391,7 @@ Work:
 
 <step-6>
 
-### Step 6: Move the positive-fixture test into the Engine suite and fix the tool-offering wording
+### Step 6: Move the positive-fixture test into the Engine suite and fix the tool-offering wording [completed]
 
 - Component: Facade review fixes
 - Tests:

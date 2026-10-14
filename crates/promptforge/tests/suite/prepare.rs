@@ -251,8 +251,9 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 
 // The catalog: a prepared context keeps the caller-supplied catalog
 // verbatim, descriptors and never implementations, and prepare reports
-// nothing about tools. The run offers every catalog tool to the prompt's Lua by
-// id, and whether a declared Plugin is installed is the Harness's report.
+// nothing about tools. The catalog lists every tool a run can use: Lua calls
+// one by id, and a section offers one to its model with `tools.offer`.
+// Whether a declared Plugin is installed is the Harness's report.
 
 /// A prompt declaring `web`.
 const DECLARES_WEB: &str = concat!(

@@ -251,8 +251,10 @@ impl RunContext {
 
     /// Sets the run's tool catalog: the descriptors of every tool of every
     /// Plugin the caller can serve this run, declared by the prompt or not.
-    /// The run offers every tool in it, and the caller performs every call.
-    /// Read it back with [`catalog`](RunContext::catalog).
+    /// The catalog lists every tool the run can use: Lua calls one by id,
+    /// and a section offers one to its model with `tools.offer`. The caller
+    /// performs every call. Read it back with
+    /// [`catalog`](RunContext::catalog).
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> RunContext {
         self.tools = tools;

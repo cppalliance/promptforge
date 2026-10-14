@@ -1,6 +1,5 @@
-//! Every shipped prompt under the workspace `prompts/` tree parses offline,
-//! and so does every fixture the Engine keeps as a positive example; the
-//! shipped research prompt runs end to end over its web tools.
+//! Every shipped prompt under the workspace `prompts/` tree parses offline;
+//! the shipped research prompt runs end to end over its web tools.
 
 use std::error::Error;
 use std::fs;
@@ -52,17 +51,6 @@ fn every_prompt_under_parses(directory: &Path) {
 #[test]
 fn every_shipped_prompt_parses_offline() {
     every_prompt_under_parses(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts"));
-}
-
-/// The `valid/` and `execution/` fixture directories are positive examples,
-/// so a fixture no test happens to load still has to track the language
-/// (`invalid/` is excluded by construction: those are meant to fail).
-#[test]
-fn every_positive_fixture_parses_offline() {
-    let fixtures =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../promptforge-internal/engine/tests/prompts");
-    every_prompt_under_parses(&fixtures.join("valid"));
-    every_prompt_under_parses(&fixtures.join("execution"));
 }
 
 /// A web tool descriptor under `id`, taking one string `query`.

@@ -1,8 +1,11 @@
 //! Public-parser contracts: valid fixtures expose the structure their author
-//! wrote, down to the Lua programs and tool-iteration limit behind it. The
-//! invalid fixtures' error contracts sit in the facade's suite.
+//! wrote, down to the Lua programs and tool-iteration limit behind it, and
+//! every positive fixture parses offline. The invalid fixtures' error
+//! contracts sit in the facade's suite.
 
+use std::fs;
 use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
 
 use promptforge_lua::LuaProgram;
 use promptforge_parser::detail;
@@ -138,4 +141,45 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     assert_eq!(fallback.prose(), "This section has prose only.");
     assert!(fallback.prologue().is_none());
     assert!(fallback.epilog().is_none());
+}
+
+const POSITIVE_PARSE: &str = "fixture-positive-prompts";
+
+fn collect_markdown(directory: &Path, files: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory).expect("read repository prompt directory") {
+        let path = entry.expect("read repository prompt entry").path();
+        if path.is_dir() {
+            collect_markdown(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            files.push(path);
+        }
+    }
+}
+
+fn every_prompt_under_parses(directory: &Path) {
+    let mut files = Vec::new();
+    collect_markdown(directory, &mut files);
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "{} holds no prompts to check",
+        directory.display()
+    );
+
+    for path in files {
+        let source = fs::read_to_string(&path).expect("read prompt fixture");
+        Prompt::parse(&source, POSITIVE_PARSE)
+            .0
+            .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
+    }
+}
+
+/// The `valid/` and `execution/` fixture directories are positive examples,
+/// so a fixture no test happens to load still has to track the language
+/// (`invalid/` is excluded by construction: those are meant to fail).
+#[test]
+fn every_positive_fixture_parses_offline() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/prompts");
+    every_prompt_under_parses(&fixtures.join("valid"));
+    every_prompt_under_parses(&fixtures.join("execution"));
 }
