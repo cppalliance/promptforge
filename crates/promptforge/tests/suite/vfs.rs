@@ -1,6 +1,4 @@
-//! Guarding and watching a run's files: a mode policy lets Agent mode
-//! write and refuses a write in Ask mode, and an operation watcher sees
-//! every store call the run makes, in order, under one origin.
+//! Guarding and watching a run's files.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +9,6 @@ use promptforge::vfs::{
 
 use super::support::{Scenario, TestResult, note};
 
-/// Runs the note over `vfs`, answering each store effect against it.
 fn run_note(vfs: VfsRef) -> TestResult<String> {
     let scenario = Scenario::default().context(move |ctx| ctx.vfs(vfs.clone()));
     Ok(scenario.run(&note("'hello'"))?.text()?.to_owned())

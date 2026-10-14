@@ -1,6 +1,4 @@
-//! Stamping a run's start: the prompt reads the context's start time as
-//! `sys.when` in RFC 3339 form, and a stamp's millisecond count
-//! round-trips.
+//! Stamping a run's start, and reading it back as `sys.when`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

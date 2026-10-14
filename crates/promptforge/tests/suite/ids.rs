@@ -1,5 +1,4 @@
-//! Grouping a log by task: provenance groups every effect and event under
-//! its task the same way on every run, and task ids compare as values.
+//! Grouping a log by task, and comparing task ids.
 
 use std::collections::BTreeMap;
 
@@ -8,7 +7,6 @@ use promptforge::ids::{Provenance, TaskId};
 
 use super::support::{Scenario, TestResult, prompt, text};
 
-/// Starts two tasks on `## Reply`, waits for both, and joins their replies.
 const GREET: &str = "
     local first = tasks.spawn('## Reply', { input = 'hello' })
     local second = tasks.spawn('## Reply', { input = 'bye' })
@@ -16,18 +14,14 @@ const GREET: &str = "
     return results[1].result .. ' ' .. results[2].result
 ";
 
-/// Replies to its input with the `writer` role.
 const REPLY: &str = "
     models.use('writer')
     return models.infer(args)
 ";
 
-/// Every effect and event of one run, grouped by task, each group in
-/// provenance order.
 type Groups = BTreeMap<TaskId, Vec<Provenance>>;
 
-/// Runs the two-task greeter, answering every model round with `hi there`,
-/// and returns the started tasks beside the run's groups.
+/// Returns the started tasks beside the run's groups.
 fn run_greeter() -> TestResult<(Vec<TaskId>, Groups)> {
     let source = prompt(
         "models: { writer: {} }",

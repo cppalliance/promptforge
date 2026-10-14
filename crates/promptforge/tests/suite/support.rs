@@ -1,6 +1,5 @@
-//! Shared test support for the facade suite: a prompt builder, preloaded
-//! answers for the effects a run issues, and [`Scenario`], which holds a
-//! test's setup as data and drives its run.
+//! Shared test support for the facade suite: a prompt builder, scripted
+//! replies and tools, and the [`Scenario`] that drives a run.
 
 use std::error::Error;
 use std::num::NonZeroU32;
@@ -16,13 +15,11 @@ mod scenario;
 
 pub(super) use scenario::{Prepared, Scenario};
 
-/// What every facade test returns.
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-/// Answers a tool call from the call's arguments.
 type Handler = Box<dyn Fn(&Value) -> Result<ToolOutput, ToolError>>;
 
-/// A tool a scenario registers: its full id, and its handler.
+/// A tool a scenario registers under its full id, not its wire name.
 pub(super) struct Tool {
     pub(super) id: &'static str,
     pub(super) handler: Handler,
@@ -59,13 +56,10 @@ pub(super) fn prompt(front: &str, sections: &[(&str, &str)]) -> String {
     source
 }
 
-/// [`prompt`] with no extra frontmatter and the one section `## Greet`.
 pub(super) fn greeter(lua: &str) -> String {
     prompt("", &[("Greet", lua)])
 }
 
-/// [`greeter`], writing the Lua expression `value` to `note.md` and
-/// returning what it reads back.
 pub(super) fn note(value: &str) -> String {
     greeter(&format!(
         "store.write('note.md', {value})\nreturn store.read('note.md')"
@@ -79,32 +73,25 @@ fn push_trimmed(source: &mut String, text: &str) {
     }
 }
 
-/// How the model answers one chat effect: with a completion, or as a
-/// failed round.
 pub(super) enum Reply {
     Completion(CompletionResult),
     Failure(CompletionError),
 }
 
-/// A scripted model reply of plain text.
 pub(super) fn text(reply: &str) -> Reply {
     Reply::Completion(CompletionResult::Text(reply.to_owned()))
 }
 
-/// A scripted model reply that calls the tool `name` once, by its wire
-/// name, with `args`.
+/// A scripted reply that calls the tool whose wire name is `name`.
 pub(super) fn calls(name: &str, args: Value) -> TestResult<Reply> {
     let call = ToolCall::from_parts("call_1", name, args)?;
     Ok(Reply::Completion(CompletionResult::ToolCalls(vec![call])))
 }
 
-/// A scripted model reply that fails the round as `kind`.
 pub(super) fn fail(kind: CompletionErrorKind) -> Reply {
     Reply::Failure(CompletionError::new(kind, kind.phrase()))
 }
 
-/// `example/text/shout`: answers with its `text` argument in capital
-/// letters, as trusted output.
 pub(super) fn shout() -> Tool {
     Tool {
         id: "example/text/shout",
@@ -117,14 +104,13 @@ pub(super) fn shout() -> Tool {
     }
 }
 
-/// `gateway/canned`, the model every scenario sets before prepare unless
-/// it names its own. It fills only roles a prompt declares, so a prompt
-/// without roles ignores it.
+/// The model every scenario sets before prepare unless it names its own.
+/// It fills only roles a prompt declares, so a prompt without roles
+/// ignores it.
 pub(super) fn canned() -> TestResult<ModelDescriptor> {
     model("canned", 8_192, ThinkingMode::Never)
 }
 
-/// `gateway/<name>`, with a `window`-token context and `thinking`.
 pub(super) fn model(
     name: &str,
     window: u32,
@@ -138,7 +124,6 @@ pub(super) fn model(
     ))
 }
 
-/// The tool `id`, taking arguments that match `schema`.
 pub(super) fn descriptor(id: &str, schema: Value) -> TestResult<ToolDescriptor> {
     Ok(ToolDescriptor::new(
         ToolId::parse(id)?,

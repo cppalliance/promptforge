@@ -1,6 +1,4 @@
-//! Reading what a prompt declares before it runs: its frontmatter lists
-//! every declaration with arguments sorted by name, and a role check by
-//! hand agrees with prepare.
+//! Reading what a prompt declares before it runs.
 
 use promptforge::model::ThinkingMode;
 use promptforge::prompt::ModelKeyword;
@@ -8,8 +6,6 @@ use promptforge::{ParseErrorKind, Prompt, RequirementCheck};
 
 use super::support::{Prepared, Scenario, TestResult, model, prompt};
 
-/// Declares two files, one Plugin, `times` then `name`, and one model
-/// role.
 const CONTRACT: &str = "
     input: { path: names.md, description: The names to greet }
     output: { path: note.md, description: The note the greeter leaves }

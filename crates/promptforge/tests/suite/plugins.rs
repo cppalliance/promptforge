@@ -1,4 +1,4 @@
-//! Handing Plugins to a run: each run's Lua sees its own context's roster.
+//! Handing Plugins to a run.
 
 use promptforge::UnavailablePlugin;
 use promptforge::plugins::PluginId;

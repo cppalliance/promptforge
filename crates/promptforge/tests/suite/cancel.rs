@@ -1,6 +1,5 @@
-//! Stopping runs from any thread: one parent cancel ends every run whose
-//! context holds one of its children, and a handle's `Cancelled` future
-//! wakes when another thread cancels.
+//! Stopping runs from any thread, by a parent cancel or a handle's
+//! `Cancelled` future.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -14,7 +13,7 @@ use promptforge::effect::Effect;
 
 use super::support::{Scenario, TestResult, note};
 
-/// A std-only executor's waker: waking unparks the waiting thread.
+/// A std-only executor's waker.
 struct Unpark(Thread);
 
 impl Wake for Unpark {
@@ -23,8 +22,6 @@ impl Wake for Unpark {
     }
 }
 
-/// Polls `future` on this thread, parking between polls, until it is
-/// ready.
 fn block_on<F: Future + Unpin>(mut future: F) -> F::Output {
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut cx = Context::from_waker(&waker);

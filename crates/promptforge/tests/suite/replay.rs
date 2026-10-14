@@ -1,5 +1,4 @@
-//! Keeping a run's behavior flags: they store as one number and rebuild
-//! into equal flags for the next run.
+//! Keeping a run's behavior flags for the next run.
 
 use promptforge::replay::Flags;
 

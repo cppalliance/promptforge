@@ -1,9 +1,5 @@
-//! The greeter, one tour at a time: it parses, its store effects are
-//! answered from the run's store, its timers fire at once, prepare fills
-//! its model role, its tool output reaches its Lua unchanged, a cancel
-//! from another thread ends it, and the complete program in
-//! `examples/greeter.rs` logs its parse events first and returns
-//! `HI THERE`.
+//! The greeter, one tour at a time, up to the complete program in
+//! `examples/greeter.rs`.
 
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::{Prompt, RunResult};
@@ -20,7 +16,6 @@ mod example;
 
 use example::{GREETER, answer};
 
-/// Writes a note and returns the `writer` role's reply to it.
 const REPLY: &str = "
     store.write('note.md', 'hello')
     models.use('writer')

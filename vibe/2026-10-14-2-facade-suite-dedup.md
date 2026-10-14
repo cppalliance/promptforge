@@ -374,7 +374,7 @@ Work:
 
 <step-5>
 
-### Step 5: Trim restating prose and confirm the exit criteria
+### Step 5: Trim restating prose and confirm the exit criteria [completed]
 
 - Component: Prose trim
 - Tests:

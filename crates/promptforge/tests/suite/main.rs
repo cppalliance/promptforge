@@ -1,9 +1,4 @@
-//! The facade's integration suite, written against `promptforge` paths
-//! only: the offline prompt-fixture cases that need only the public API -
-//! parse-error contracts, the shipped research prompt's run, and the
-//! prepare pass - over shared test support in [`support`]. The fixture
-//! cases that reach items outside the facade run in `promptforge-engine`'s
-//! own suite.
+//! The facade's integration suite, written against `promptforge` paths only.
 
 mod cancel;
 mod effect;

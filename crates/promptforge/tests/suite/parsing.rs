@@ -1,6 +1,5 @@
 //! Public-parser contracts: invalid fixtures report their exact
-//! [`ParseErrorKind`] and message. The fixtures sit beside this suite
-//! under `tests/prompts/invalid/`.
+//! [`ParseErrorKind`] and message.
 
 use std::fs;
 use std::path::Path;
@@ -9,8 +8,6 @@ use promptforge::{ParseErrorKind, Prompt};
 
 use super::support::TestResult;
 
-/// Each invalid fixture's file stem, the kind it reports, and a fragment
-/// of its message.
 const INVALID_FIXTURES: [(&str, ParseErrorKind, &str); 4] = [
     ("missing-h1", ParseErrorKind::Structure, "requires an H1"),
     (

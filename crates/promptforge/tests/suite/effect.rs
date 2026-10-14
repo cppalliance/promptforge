@@ -1,14 +1,10 @@
-//! Answering every kind of effect: the order a caller answers one batch
-//! in does not change the result, and every effect and answer record
-//! logs as a JSON line that parses back into its record type.
+//! Answering every kind of effect, and logging each with its answer.
 
 use promptforge::effect::{AnswerRecord, EffectRecord, ToolCallOrigin, ToolCaller};
 use serde_json::{Value, json};
 
 use super::support::{Scenario, TestResult, prompt, shout, text};
 
-/// Asks a model and a tool at once from two tasks, writes a note while
-/// they are out, and waits on a third task with a short timeout.
 const GREET: &str = "
     local ask = tasks.spawn('## Ask')
     local shout = tasks.spawn('## Shout')
@@ -18,7 +14,6 @@ const GREET: &str = "
     return results[1].result .. ' / ' .. results[2].result
 ";
 
-/// The greeter's four sections, with the model role they ask.
 fn greeter() -> String {
     let ask = "models.use('writer')\nreturn models.infer('hello')";
     let shout = "return tools.call('example/text/shout', { text = 'hi there' })";
@@ -31,8 +26,6 @@ fn greeter() -> String {
     prompt("models: { writer: {} }", &sections)
 }
 
-/// The greeter's scenario: the model replies `hi there`, and the shout
-/// tool is registered.
 fn scenario() -> Scenario {
     Scenario::tool(shout(), [text("hi there")])
 }

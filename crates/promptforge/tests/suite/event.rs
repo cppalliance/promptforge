@@ -1,6 +1,4 @@
-//! Logging a run's events: every event round-trips through one JSON line
-//! with a unique provenance, content events pair into a transcript, and
-//! debug mode alone adds the raw model request and response.
+//! Logging a run's events as JSON lines, a transcript, and debug captures.
 
 use std::collections::HashSet;
 
@@ -9,14 +7,12 @@ use serde_json::Value;
 
 use super::support::{Scenario, TestResult, note, prompt, shout, text};
 
-/// Asks the `writer` role to reply to the note, and shouts the reply.
 const SHOUT: &str = "
     store.write('note.md', 'hello ' .. args)
     models.use('writer')
     return tools.call('example/text/shout', { text = models.infer(store.read('note.md')) })
 ";
 
-/// The shouting greeter, and its scenario: the model replies `hi there`.
 fn shouting() -> (String, Scenario) {
     let source = prompt("models: { writer: {} }", &[("Greet", SHOUT)]);
     (

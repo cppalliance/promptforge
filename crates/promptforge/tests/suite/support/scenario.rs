@@ -27,8 +27,6 @@ use serde_json::json;
 
 use super::{Reply, TestResult, Tool, canned, descriptor};
 
-/// Edits the context a scenario builds, after the scenario's own settings
-/// and before prepare.
 type Edit = Box<dyn Fn(RunContext) -> RunContext>;
 
 /// One test's setup. Every scenario sets [`canned`] unless it names a
@@ -36,21 +34,13 @@ type Edit = Box<dyn Fn(RunContext) -> RunContext>;
 /// when prepare reports a gap.
 #[derive(Default)]
 pub(crate) struct Scenario {
-    /// The run's argument text.
     args: String,
-    /// When the run starts, as `sys.when` reads it.
     started_at: Timestamp,
-    /// The run's current model, in place of [`canned`].
     model: Option<ModelDescriptor>,
-    /// The one tool the catalog lists.
     tool: Option<Tool>,
-    /// The chat script, served in order.
     replies: Vec<Reply>,
-    /// Picks the effects that wait unanswered.
     hold: Option<fn(&Effect) -> bool>,
-    /// Answers each batch of effects in reverse issue order.
     reverse: bool,
-    /// Edits the prepared context.
     context: Option<Edit>,
 }
 
@@ -86,7 +76,7 @@ impl Scenario {
         self
     }
 
-    /// Starts the run at `started_at`.
+    /// Starts the run at `started_at`, which the prompt reads as `sys.when`.
     pub(crate) fn started_at(mut self, started_at: Timestamp) -> Self {
         self.started_at = started_at;
         self
@@ -165,17 +155,14 @@ impl Scenario {
         })
     }
 
-    /// Runs `source` to its end.
     pub(crate) fn run(self, source: &str) -> TestResult<Trace> {
         self.start(source)?.finish()
     }
 }
 
-/// A parsed prompt and its prepared context.
 pub(crate) struct Prepared {
     pub(crate) prompt: Prompt,
     pub(crate) ctx: RunContext,
-    /// What prepare reported.
     pub(crate) requirements: Requirements,
     /// The parse events.
     pub(crate) events: Vec<Event>,
@@ -194,8 +181,6 @@ pub(crate) struct Driver {
     result: Option<RunResult>,
 }
 
-/// An effect the run issued and has not had answered: its id, and what the
-/// log records of it.
 struct Issued {
     id: EffectId,
     provenance: Provenance,
@@ -261,7 +246,6 @@ impl Driver {
         Ok(issued)
     }
 
-    /// Logs `answer` beside its effect, and resumes the run with it.
     fn respond(&mut self, issued: Issued, answer: EffectAnswer) {
         self.effects.push(Logged {
             provenance: issued.provenance,
@@ -271,7 +255,6 @@ impl Driver {
         self.run.resume(issued.id, answer);
     }
 
-    /// Pumps until the run holds at least one effect.
     pub(crate) fn pump_until_held(&mut self) -> TestResult {
         while self.held.is_empty() {
             self.advance()?;
@@ -282,7 +265,6 @@ impl Driver {
         Ok(())
     }
 
-    /// Pumps until the run is done, and returns its trace.
     pub(crate) fn finish(mut self) -> TestResult<Trace> {
         loop {
             if let Some(result) = self.result.take() {
@@ -341,9 +323,7 @@ impl Driver {
     }
 }
 
-/// What a finished run leaves.
 pub(crate) struct Trace {
-    /// The run's result.
     pub(crate) result: RunResult,
     /// The parse events, then the run's events, in report order.
     pub(crate) events: Vec<Event>,
@@ -361,7 +341,6 @@ impl Trace {
     }
 }
 
-/// One effect with its answer and provenance, as a run log records them.
 pub(crate) struct Logged {
     pub(crate) provenance: Provenance,
     pub(crate) effect: EffectRecord,

@@ -1,6 +1,4 @@
-//! Describing models and answering their rounds: a catalog looks a model
-//! up by id and refuses a repeated id as a whole, and a failed chat round
-//! fails the run as a completion failure.
+//! Describing models and answering their rounds.
 
 use promptforge::model::{
     CompletionErrorKind, ModelCatalog, ModelCatalogError, ModelId, ThinkingMode,
@@ -9,8 +7,6 @@ use promptforge::{RunErrorKind, RunResult};
 
 use super::support::{Reply, Scenario, TestResult, fail, model, prompt};
 
-/// Declares `writer` and `checker`, and asks `writer` once for a reply to
-/// its note.
 fn asking() -> String {
     let lua = "
         store.write('note.md', 'hello')
@@ -20,8 +16,6 @@ fn asking() -> String {
     prompt("models: { writer: {}, checker: {} }", &[("Greet", lua)])
 }
 
-/// Runs [`asking`] with `gateway/fast` as the current model, answering its
-/// one chat round with `reply` under the bound model's name.
 fn run_asking(reply: Reply) -> TestResult<RunResult> {
     let scenario = Scenario::replies([reply]).model(model("fast", 32_000, ThinkingMode::Never)?);
     Ok(scenario.run(&asking())?.result)
