@@ -297,7 +297,7 @@ Work:
 
 <step-2>
 
-### Step 2: Remove the retired-name lints
+### Step 2: Remove the retired-name lints [completed]
 
 - Component: Trace removal
 - Tests:

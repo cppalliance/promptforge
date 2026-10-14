@@ -47,7 +47,6 @@ const TERM_ALLOWED = /speech engine|database engine|test harness/gi;
 const PLUGIN_ALLOWED = /Tauri plugin|ProseMirror plugin|esbuild plugin|NSIS plugin/gi;
 // Senses of "capability" other than the Plugin.
 const CAPABILITY_ALLOWED = /access capability|Tauri capability|model capabilities/gi;
-const RETIRED = ["production host", "engine's host", "hosts the engine", "harness that hosts", "host globals", "host-support"];
 
 async function* walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -102,11 +101,6 @@ test("rulebooks use Engine, Harness, Host, and Plugin as the root AGENTS.md defi
   const offenders = [];
   for (const { file, number, text } of await rulebookLines()) {
     const where = `${file}:${number}: ${text.trim()}`;
-    for (const phrase of RETIRED) {
-      if (text.toLowerCase().includes(phrase)) {
-        offenders.push(`${where} (retired phrase "${phrase}")`);
-      }
-    }
     if (/\bhost(s|ed|ing)?\b|\bhost-/.test(text.replace(HOST_ALLOWED, " "))) {
       offenders.push(`${where} (lowercase "host": required "Host" for the application, another word for any other sense)`);
     }

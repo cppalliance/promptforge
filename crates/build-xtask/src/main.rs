@@ -19,7 +19,6 @@ mod manifest;
 mod new_crate;
 mod no_doctests;
 mod product;
-mod retired_symbols;
 mod site;
 mod test_support_leak;
 mod tidy;

@@ -1,6 +1,5 @@
 //! The live Engine guards over this workspace, plus fixture tests that a
-//! reintroduced retired symbol or a forbidden dependency in an Engine
-//! crate fails the guard.
+//! forbidden dependency in an Engine crate fails the guard.
 
 use std::path::{Path, PathBuf};
 
@@ -50,16 +49,6 @@ fn engine_crates_declare_no_forbidden_dependencies() {
     assert!(
         violations.is_empty(),
         "engine manifest violations:\n{}",
-        violations.join("\n")
-    );
-}
-
-#[test]
-fn engine_sources_name_no_retired_symbols() {
-    let violations = retired_symbol_violations(&workspace_root());
-    assert!(
-        violations.is_empty(),
-        "retired symbols in live engine source:\n{}",
         violations.join("\n")
     );
 }
@@ -148,65 +137,6 @@ fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_gua
     assert!(
         violations.is_empty(),
         "the facade is an engine crate, so forwarding its own test-support is gated: {violations:?}"
-    );
-}
-
-#[test]
-fn a_retired_symbol_reintroduced_in_an_engine_crate_fails_the_guard() {
-    let root = clean_engine_root();
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "",
-        "pub struct Vm;\n\npub fn install_agent_chat_shim() {}\n",
-    );
-    let violations = engine_guard_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].contains("install_agent_chat_shim")
-            && violations[0].contains("lib.rs")
-            && violations[0].contains(":3"),
-        "the reintroduced seed is reported with its file and line: {violations:?}"
-    );
-}
-
-#[test]
-fn every_seed_is_caught_and_a_seed_confined_to_test_code_passes() {
-    let root = clean_engine_root();
-    let live = RETIRED_SEEDS
-        .iter()
-        .map(|seed| format!("pub struct {seed};\n"))
-        .collect::<Vec<_>>()
-        .concat();
-    write_crate(root.path(), "promptforge-internal/live", "", &live);
-    let test_items = RETIRED_SEEDS
-        .iter()
-        .map(|seed| format!("    struct {seed};\n"))
-        .collect::<Vec<_>>()
-        .concat();
-    let test_only = format!(
-        "pub struct Live;\n// {}\n#[cfg(test)]\nmod tests {{\n{test_items}}}\n",
-        RETIRED_SEEDS.join(" "),
-    );
-    write_crate(root.path(), "promptforge-internal/quiet", "", &test_only);
-    let violations = retired_symbol_violations(root.path());
-    let mut symbols: Vec<&str> = violations
-        .iter()
-        .map(|v| {
-            RETIRED_SEEDS
-                .iter()
-                .copied()
-                .find(|seed| v.contains(&format!("retired symbol {seed} ")))
-                .expect("a violation names a seed")
-        })
-        .collect();
-    symbols.sort_unstable();
-    let mut expected = RETIRED_SEEDS.to_vec();
-    expected.sort_unstable();
-    assert_eq!(symbols, expected, "{violations:?}");
-    assert!(
-        violations.iter().all(|v| !v.contains("quiet")),
-        "the crate whose seeds sit in a comment and a cfg(test) module is clean: {violations:?}"
     );
 }
 

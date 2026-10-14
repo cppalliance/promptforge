@@ -1,12 +1,11 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
-//! the Harness family, the sans-I/O Engine (manifest guard,
-//! retired-symbol scan, and `test-support` leak guard, run from
-//! `engine_guards`), the `promptforge` and `harness` facades' source
-//! shape (run from `facade_shape`), the `doc(hidden)` ban over both
-//! facades and their containers (run from `doc_hidden`), the doctest ban
-//! over every workspace crate (run from `no_doctests`), the unsafe
-//! allowlist (run from `unsafe_allowlist`), and the ceiling wiring (run
-//! from `wiring`).
+//! the Harness family, the sans-I/O Engine (manifest guard and
+//! `test-support` leak guard, run from `engine_guards`), the
+//! `promptforge` and `harness` facades' source shape (run from
+//! `facade_shape`), the `doc(hidden)` ban over both facades and their
+//! containers (run from `doc_hidden`), the doctest ban over every
+//! workspace crate (run from `no_doctests`), the unsafe allowlist (run
+//! from `unsafe_allowlist`), and the ceiling wiring (run from `wiring`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`

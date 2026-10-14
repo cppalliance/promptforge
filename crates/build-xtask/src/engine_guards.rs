@@ -1,7 +1,6 @@
-//! Engine guards, live: the manifest guard and the retired-symbol scan run
-//! over the Engine crates, and the `test-support` leak guard runs over the
-//! whole workspace, as part of `cargo test -p build-xtask` and
-//! `cargo xtask tidy`.
+//! Engine guards, live: the manifest guard runs over the Engine crates,
+//! and the `test-support` leak guard runs over the whole workspace, as
+//! part of `cargo test -p build-xtask` and `cargo xtask tidy`.
 //!
 //! The Engine is the `promptforge` facade, the `promptforge-plugin`
 //! contract, and every crate under the `crates/promptforge-internal/`
@@ -17,44 +16,6 @@ const ENGINE_ROOT_CRATES: [&str; 2] = ["promptforge", "promptforge-plugin"];
 
 /// The private container whose every member is an Engine crate.
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
-
-/// The seed list for the retired-symbol scan. Live Engine source (outside
-/// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
-/// identifier on it.
-const RETIRED_SEEDS: [&str; 32] = [
-    "install_agent_chat_shim",
-    "EventsSnapshot",
-    "install_runtime_events",
-    "GatewaySource",
-    "run_models_loop",
-    "LuaFanoutResult",
-    "Observer",
-    "DebugCapture",
-    "HostBackend",
-    "HostAccess",
-    "HostRoot",
-    "identity_to_host",
-    "inject_host",
-    "inject_host_with_var",
-    "install_host_apis",
-    "host_injected",
-    "HostGlobal",
-    "replay_shared",
-    "section_vm_with_shared",
-    "LuaSharedLoadStarted",
-    "LuaSharedLoadSucceeded",
-    "LuaSharedLoadFailed",
-    "LUA_SHARED_LOAD_STARTED",
-    "LUA_SHARED_LOAD_SUCCEEDED",
-    "LUA_SHARED_LOAD_FAILED",
-    "install_always_offer",
-    "description_overrides",
-    "model_description",
-    "ToolView",
-    "lock_tool_set",
-    "tool_set_snapshot",
-    "Environment",
-];
 
 /// Every Engine crate directory: the named root crates first, whether or
 /// not they exist, then every crate under the container in directory
@@ -100,24 +61,11 @@ fn engine_manifest_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Runs the retired-symbol scan over every Engine crate's live source. The
-/// scan takes the whole crate directory, so `build.rs`, `benches/`, and
-/// `examples/` are covered too; it skips `tests/` and test support itself.
-#[must_use]
-fn retired_symbol_violations(root: &Path) -> Vec<String> {
-    engine_crates(root)
-        .iter()
-        .flat_map(|dir| crate::retired_symbols::retired_symbols(dir, &RETIRED_SEEDS))
-        .map(|hit| hit.to_string())
-        .collect()
-}
-
-/// Every Engine guard, in one list: the manifest guard, the retired-symbol
-/// scan, and the workspace-wide `test-support` leak guard.
+/// Every Engine guard, in one list: the manifest guard and the
+/// workspace-wide `test-support` leak guard.
 #[must_use]
 pub(crate) fn engine_guard_violations(root: &Path) -> Vec<String> {
     let mut violations = engine_manifest_violations(root);
-    violations.extend(retired_symbol_violations(root));
     violations.extend(crate::test_support_leak::test_support_leak_violations(root));
     violations
 }
