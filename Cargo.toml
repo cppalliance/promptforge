@@ -84,7 +84,8 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # the gateway's normal closure. Root certificates come from the OS trust
 # store through the platform verifier (the `rustls` feature's default), not
 # from a bundled Mozilla list. `query` became opt-in in 0.13.
-reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream"] }
+# `system-proxy` keeps the gateway honoring Windows registry and macOS proxies.
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream", "system-proxy"] }
 fastrand = "2"
 rand = "0.9"
 readabilityrs = "0.1"

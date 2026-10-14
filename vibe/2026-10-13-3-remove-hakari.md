@@ -55,7 +55,7 @@ The promptforge repository uses cargo-hakari's `workspace-hack` crate to give ev
   - Adding a standing CI check that compiles each crate alone.
 - Success criteria:
   - `rg -n --hidden "hakari|workspace-hack|workspace_hack" --glob '!vibe/**' --glob '!.git/**'` from the repository root returns nothing, `Cargo.lock` included. Without `--hidden`, rg skips `.github/` and `.config/`.
-  - `cargo tree --locked -p promptforge-types -e normal -i tokio` prints nothing.
+  - The normal closure of `promptforge-types` (`cargo tree --locked -p promptforge-types -e normal --prefix none`) has no `tokio` line. `cargo tree -i tokio` can't express this: it exits with an error when tokio isn't in the crate's graph at all.
   - In the gateway's `cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none` output, the tokio line has no `test-util`.
   - The Windows `check-workshop` job has exactly one test step, and that step still runs the five race tests on Windows.
   - `ci.yml` is green on the branch. A dispatched `release-workshop.yml` run builds all five targets.
@@ -213,7 +213,7 @@ Beyond the usual gates, three checks show the change is correct. Every crate com
   - **Cross-platform build.** Dispatch `.github/workflows/release-workshop.yml` on the branch. A dispatched run builds the gateway and the Workshop for all five targets. It uploads only temporary Actions artifacts and never reaches the publish job, which is gated to pushes of `workshop-v*` tags (`.github/workflows/release-workshop.yml:16-20`, `:71-87`, `:146-192`, `:483-485`).
 - Regression, security, and performance:
   - `cargo tree --locked -p gateway -e normal -i ring` prints nothing, and so does the same command with `-p workshop`.
-  - `cargo tree --locked -p <crate> -e normal -i tokio` prints nothing for `promptforge-types`, `promptforge-model-client`, `promptforge-parser`, `promptforge-lua`, `promptforge-engine`, and `promptforge`.
+  - The normal closure (`cargo tree --locked -p <crate> -e normal --prefix none`) has no `tokio` line for `promptforge-types`, `promptforge-model-client`, `promptforge-parser`, `promptforge-lua`, `promptforge-engine`, and `promptforge`.
   - `cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}"` lists `system-proxy`.
 - Exit criteria: all of the following pass.
   - `cargo fmt --all --check`
@@ -492,7 +492,7 @@ Behavior:
 
 <step-4>
 
-### Step 4: Restore the gateway's system proxy support and review the shipped feature diff
+### Step 4: Restore the gateway's system proxy support and review the shipped feature diff [completed]
 
 - Component: Hakari removal
 - Tests:
@@ -501,7 +501,7 @@ Behavior:
   - `$out = cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}" --depth 0; if (-not ($out -match 'system-proxy')) { throw "the gateway's reqwest lacks system-proxy: $out" }`
   - `$out = cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none | Select-String '^tokio v'; if ($out -match 'test-util') { throw 'the gateway still compiles tokio test-util' }`
   - `foreach ($p in 'gateway', 'workshop') { $out = cargo tree --locked -p $p -e normal -i ring; if ($LASTEXITCODE) { throw "cargo tree -p $p failed" }; if ($out) { throw "$p links ring: $out" } }`
-  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal -i tokio; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out) { throw "$c still reaches tokio" } }`
+  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
 - Commit: one commit with the summary `Keep the gateway's system proxy support without hakari`, a body that lists every restored feature and every accepted loss with its reason, `Design:` lines, and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
 - Contract items: Technical Design, the root `Cargo.toml` reqwest-pin entry of "File and public API changes", and the "Proxy behavior", "Gateway clients", and "Test-only features" constraints.
 - Before editing: read the root `AGENTS.md` and `crates/gateway/app/AGENTS.md`.
@@ -608,7 +608,7 @@ Behavior:
   - `$out = cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}" --depth 0; if (-not ($out -match 'system-proxy')) { throw "the gateway's reqwest lacks system-proxy: $out" }`
   - `$out = cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none | Select-String '^tokio v'; if ($out -match 'test-util') { throw 'the gateway still compiles tokio test-util' }`
   - `foreach ($p in 'gateway', 'workshop') { $out = cargo tree --locked -p $p -e normal -i ring; if ($LASTEXITCODE) { throw "cargo tree -p $p failed" }; if ($out) { throw "$p links ring: $out" } }`
-  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal -i tokio; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out) { throw "$c still reaches tokio" } }`
+  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
   - `if (rg -n --hidden 'hakari|workspace-hack|workspace_hack' --glob '!vibe/**' --glob '!.git/**') { throw 'hakari references remain' }`
 - Commit: one commit holding the fixes that CI or the release build show are needed, plus the step's completion marker in the run's copy of this plan, with a body, `Design:` lines when code changes, and a `Plan: vibe/<file>` trailer naming that copy. When both runs pass with no change, the commit holds only the completion marker, and the step says so in its return.
 - Contract items: Technical Design, the "Test-only features" constraint and the manifests the sweep fixes. The Testing Plan's exit criteria are copied below.
