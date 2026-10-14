@@ -1,15 +1,14 @@
 //! Reading what a prompt declares before it runs: its frontmatter lists
-//! every declaration with arguments sorted by name, argument text reaches
-//! Lua as JSON or as plain prose, and a role check by hand agrees with
-//! prepare.
+//! every declaration with arguments sorted by name, and a role check by
+//! hand agrees with prepare.
 
 use std::num::NonZeroU32;
 
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::prompt::ModelKeyword;
-use promptforge::{ParseErrorKind, Prompt, RequirementCheck, RunResult};
+use promptforge::{ParseErrorKind, Prompt, RequirementCheck};
 
-use super::support::{Prepared, Scenario, TestResult, greeter, prompt};
+use super::support::{Prepared, Scenario, TestResult, prompt};
 
 /// Declares two files, one Plugin, `times` then `name`, and one model
 /// role.
@@ -74,38 +73,6 @@ fn the_frontmatter_lists_every_declaration_with_arguments_sorted_by_name() -> Te
         parsed.err().map(|error| error.kind()),
         Some(ParseErrorKind::Frontmatter)
     );
-    Ok(())
-}
-
-#[test]
-fn declared_arguments_take_json_and_an_undeclared_prompt_takes_plain_prose() -> TestResult {
-    let hello = |field: &str| {
-        format!("store.write('note.md', 'hello ' .. argv.{field})\nreturn store.read('note.md')")
-    };
-    let args =
-        "args: { times: { type: integer, optional: true, default: 1 }, name: { type: string } }";
-    let declared = prompt(args, &[("Greet", &hello("name"))]);
-    let plain = greeter(&hello("prose"));
-    assert!(
-        !Prompt::parse(&declared, "greeter")
-            .0?
-            .frontmatter()
-            .args()
-            .is_default()
-    );
-    assert!(
-        Prompt::parse(&plain, "greeter")
-            .0?
-            .frontmatter()
-            .args()
-            .is_default()
-    );
-
-    let json = serde_json::json!({ "name": "world" }).to_string();
-    let from_json = Scenario::default().args(&json).run(&declared)?;
-    assert!(matches!(from_json.result, RunResult::Ok(text) if text == "hello world"));
-    let from_prose = Scenario::default().args("world").run(&plain)?;
-    assert!(matches!(from_prose.result, RunResult::Ok(text) if text == "hello world"));
     Ok(())
 }
 

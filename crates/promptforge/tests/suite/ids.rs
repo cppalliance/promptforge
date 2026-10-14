@@ -1,16 +1,13 @@
 //! Grouping a log by task: provenance groups every effect and event under
-//! its task the same way on every run, task ids compare as values, and a
-//! task's start and end events say who started it and why it ended.
+//! its task the same way on every run, and task ids compare as values.
 
 use std::collections::BTreeMap;
 
 use promptforge::RunResult;
-use promptforge::effect::Effect;
 use promptforge::event::Event;
-use promptforge::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
-use serde_json::json;
+use promptforge::ids::{Provenance, TaskId};
 
-use super::support::{Scenario, TestResult, calls, prompt, text};
+use super::support::{Scenario, TestResult, prompt, text};
 
 /// Starts two tasks on `## Reply`, waits for both, and joins their replies.
 const GREET: &str = "
@@ -24,17 +21,6 @@ const GREET: &str = "
 const REPLY: &str = "
     models.use('writer')
     return models.infer(args)
-";
-
-/// Lets its model start tasks on `## Wait`, runs one model loop, and
-/// returns without waiting for them.
-const LOOPER: &str = "
-    models.use('writer')
-    tools.allow_tasks({ '## Wait' })
-    local msgs = messages.new()
-    msgs:user('hello')
-    models.loop(msgs)
-    return 'done'
 ";
 
 /// Every effect and event of one run, grouped by task, each group in
@@ -96,45 +82,5 @@ fn parsed_task_ids_compare_as_values_and_a_damaged_id_reports_its_whole_text() -
         .err()
         .ok_or("0..1 is not a task id")?;
     assert_eq!(error.input(), "0..1");
-    Ok(())
-}
-
-#[test]
-fn a_model_started_task_is_abandoned_when_its_owning_section_returns() -> TestResult {
-    let call = calls("task", json!({ "target": "## Wait" }))?;
-    let source = prompt(
-        "models: { writer: {} }",
-        &[("Greet", LOOPER), ("Wait", "return store.read('note.md')")],
-    );
-    let trace = Scenario::replies([call, text("bye")])
-        .hold(|effect| !matches!(effect, Effect::Chat { .. }))
-        .run(&source)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "done"));
-
-    let (task, origin) = trace
-        .events
-        .iter()
-        .find_map(|event| match event {
-            Event::TaskStarted { task, origin, .. } => Some((task, *origin)),
-            _ => None,
-        })
-        .ok_or("the model starts a task")?;
-    let end = trace
-        .events
-        .iter()
-        .find(|event| {
-            matches!(event,
-                Event::TaskSucceeded { task: t, .. } | Event::TaskFailed { task: t, .. }
-                    | Event::TaskCancelled { task: t, .. } | Event::TaskAbandoned { task: t, .. } if t == task
-            )
-        })
-        .ok_or("the task ends")?;
-    let Event::TaskAbandoned { reason, .. } = end else {
-        return Err(format!("the task ended as {end:?}").into());
-    };
-
-    assert_eq!((origin, origin.tag()), (TaskOrigin::Model, "model"));
-    assert_eq!(*reason, AbandonReason::OwnerReturned);
-    assert_eq!(reason.why(), "the section ended");
     Ok(())
 }

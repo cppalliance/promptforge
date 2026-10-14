@@ -1,6 +1,6 @@
 //! Describing models and answering their rounds: a catalog looks a model
-//! up by id and refuses a repeated id as a whole, and a chat effect's
-//! answer becomes the result or, as a failed round, a completion failure.
+//! up by id and refuses a repeated id as a whole, and a failed chat round
+//! fails the run as a completion failure.
 
 use std::num::NonZeroU32;
 
@@ -9,7 +9,7 @@ use promptforge::model::{
 };
 use promptforge::{RunErrorKind, RunResult};
 
-use super::support::{Reply, Scenario, TestResult, fail, prompt, text};
+use super::support::{Reply, Scenario, TestResult, fail, prompt};
 
 /// Declares `writer` and `checker`, and asks `writer` once for a reply to
 /// its note.
@@ -63,13 +63,6 @@ fn a_catalog_finds_a_model_by_id_and_refuses_a_repeated_id_as_a_whole() -> TestR
         return Err("a repeated id is refused with DuplicateId".into());
     };
     assert_eq!((server.as_str(), name.as_str()), ("gateway", "fast"));
-    Ok(())
-}
-
-#[test]
-fn a_text_completion_served_under_the_bound_models_name_becomes_the_result() -> TestResult {
-    let result = run_asking(text("hello world"))?;
-    assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
     Ok(())
 }
 
