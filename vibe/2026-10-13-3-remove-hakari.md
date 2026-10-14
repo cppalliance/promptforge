@@ -444,7 +444,7 @@ Behavior:
 
 <step-3>
 
-### Step 3: Remove hakari and declare the features it supplied
+### Step 3: Remove hakari and declare the features it supplied [completed]
 
 - Component: Hakari removal
 - Tests:

@@ -11,7 +11,6 @@ gateway-stt-engine.workspace = true
 gateway-whisper-ffi.workspace = true
 gateway-progress.workspace = true
 tracing.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 gateway-stt-engine = { workspace = true, features = ["test-fixtures"] }

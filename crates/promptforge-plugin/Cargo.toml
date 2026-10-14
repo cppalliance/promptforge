@@ -13,7 +13,6 @@ promptforge-types.workspace = true
 promptforge-vfs.workspace = true
 # The JSON a Plugin's configuration and every tool call's arguments arrive as.
 serde_json.workspace = true
-workspace-hack.workspace = true
 
 [features]
 # `testing::TestCall`, which lends a `ToolContext` to a Plugin crate's own

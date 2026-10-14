@@ -14,7 +14,6 @@ publish = false
 harness-runner.workspace = true
 promptforge.workspace = true
 promptforge-plugin.workspace = true
-workspace-hack.workspace = true
 
 # The suite and the `run-prompt` example run a Host on tokio, as a real
 # Host does; the facade's own items name no tokio type. The suite's

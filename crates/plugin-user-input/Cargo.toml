@@ -14,7 +14,6 @@ async-trait.workspace = true
 # call is lent, and the tool and service vocabulary.
 promptforge-plugin.workspace = true
 serde_json.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 # `testing::TestCall`, which lends the ask tool a context without a Harness.

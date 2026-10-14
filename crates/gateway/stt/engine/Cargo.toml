@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 thiserror.workspace = true
 tokio.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

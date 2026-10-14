@@ -13,7 +13,6 @@ promptforge-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-workspace-hack.workspace = true
 
 [build-dependencies]
 build-ceiling.workspace = true

@@ -20,7 +20,6 @@ thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true

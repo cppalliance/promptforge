@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 serde.workspace = true
 time = { workspace = true, features = ["parsing", "serde-human-readable"] }
-workspace-hack.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

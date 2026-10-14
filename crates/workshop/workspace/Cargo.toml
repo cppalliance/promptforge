@@ -28,7 +28,6 @@ turso.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
 workshop-support.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 # The save-timeout integration test drives `routes_with_deadline` and the

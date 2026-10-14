@@ -25,7 +25,6 @@ thiserror.workspace = true
 tracing.workspace = true
 # The Host's runtime handle every fetch is spawned onto.
 tokio = { workspace = true }
-workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

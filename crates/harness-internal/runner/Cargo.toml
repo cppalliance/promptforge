@@ -27,7 +27,6 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 # The scripted Plugins' tools and input brokers are `async_trait`
@@ -35,7 +34,7 @@ workspace-hack.workspace = true
 async-trait.workspace = true
 # The suites drive runs on tokio's test runtime, pace performers with its
 # clock, and gate them with its semaphore and channels.
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "test-util", "time"] }
 
 [lints]
 workspace = true

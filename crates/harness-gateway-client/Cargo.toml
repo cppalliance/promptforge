@@ -35,7 +35,6 @@ thiserror.workspace = true
 # `time` for the per-receive timeout. Non-test code spawns no task.
 tokio = { workspace = true, features = ["time"] }
 url.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 # The mock gateways the client tests send real rounds to.

@@ -27,7 +27,6 @@ gateway-api-types.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["parsing"] }
 tokio.workspace = true
-workspace-hack.workspace = true
 
 [build-dependencies]
 build-ceiling.workspace = true

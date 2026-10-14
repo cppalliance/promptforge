@@ -11,7 +11,6 @@ serde.workspace = true
 serde_json.workspace = true
 shared-error-source = { workspace = true, features = ["json"] }
 thiserror.workspace = true
-workspace-hack.workspace = true
 
 # Process-image lookup for stale detection (src/sys/macos.rs): proc_pidpath.
 [target.'cfg(target_os = "macos")'.dependencies]

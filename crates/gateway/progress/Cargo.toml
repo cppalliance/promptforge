@@ -10,7 +10,6 @@ publish = false
 gateway-api-types.workspace = true
 # `sync` supplies the hub's watch channel; nothing else of tokio is used.
 tokio = { workspace = true, features = ["sync"] }
-workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

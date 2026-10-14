@@ -22,7 +22,6 @@ tracing.workspace = true
 # The one runtime the Engine names, and only for the tokio test driver
 # behind `test-support`; the Engine proper performs no I/O.
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }
-workspace-hack.workspace = true
 
 [features]
 # The Engine's own test drivers, for `benches/models_loop.rs` alone, which

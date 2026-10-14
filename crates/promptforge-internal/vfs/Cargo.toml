@@ -7,9 +7,7 @@ repository.workspace = true
 publish = false
 
 # Zero-dependency rule: std only. No dependencies, workspace or external.
-# The manifest test enforces this; never weaken it. workspace-hack is
-# excluded: this crate has no third-party dependencies, so feature
-# unification has nothing to unify here.
+# The manifest test enforces this; never weaken it.
 [dependencies]
 
 [lints]

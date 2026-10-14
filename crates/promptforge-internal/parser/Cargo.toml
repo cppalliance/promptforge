@@ -13,7 +13,6 @@ pulldown-cmark.workspace = true
 serde.workspace = true
 serde_yaml_ng.workspace = true
 thiserror.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 mlua.workspace = true

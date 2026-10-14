@@ -15,7 +15,6 @@ shared-error-source = { workspace = true, features = ["database", "json"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "sync"] }
 turso.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 # The fidelity suite round-trips the Engine's events through the log.

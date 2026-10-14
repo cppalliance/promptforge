@@ -14,7 +14,6 @@ test-fixtures = ["workshop-server/test-fixtures"]
 
 [dependencies]
 workshop-server.workspace = true
-workspace-hack.workspace = true
 
 [dev-dependencies]
 workshop-server-api = { path = ".", features = ["test-fixtures"] }

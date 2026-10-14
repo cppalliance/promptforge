@@ -6,10 +6,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-# No dependencies of any kind, not even workspace-hack: the six crates that
-# may not name a build-* crate include src/lib.rs with #[path] from their
-# build scripts, so it must compile on std alone. .config/hakari.toml
-# excludes this crate from workspace-hack.
+# No dependencies of any kind: the six crates that may not name a build-*
+# crate include src/lib.rs with #[path] from their build scripts, so it must
+# compile on std alone.
 [dependencies]
 
 [lints]
