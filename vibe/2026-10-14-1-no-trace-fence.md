@@ -24,7 +24,7 @@ todos:
     content: Suite harness (prompt builder, preloaded answers, Scenario -> Driver -> Trace) plus greeter.rs migration and the line-budget checkpoint
     status: pending
   - id: harness-migrate
-    content: Migrate the remaining suite files in two commits; same test names; line budget met
+    content: Migrate the remaining suite files in two commits; same test names; line count reported against the 1,450 target
     status: pending
 isProject: false
 ---
@@ -58,7 +58,7 @@ PromptForge drops every trace of removed features. The parser stops naming remov
   - One general fence-label error that knows nothing about any removed form.
   - No removed-feature names in code, comments, tests, or lints under `crates/` and `prompts/`.
   - The appropriate review fixes for the facade crate, listed under Technical Design.
-  - A facade suite of about 1,450 lines or fewer, harness included, with every test kept. The measure is the raw line count of `crates/promptforge/tests/suite/**/*.rs`, which is 2,349 at the baseline.
+  - A facade suite that aims for about 1,450 lines, harness included, with every test kept and readable. The measure is the raw line count of `crates/promptforge/tests/suite/**/*.rs`, which is 2,349 at the baseline. The 1,450 figure is a target, not a gate: landing above it is reported, not forced.
 - Non-goals:
   - Rewriting the language guide in the separate `promptforge-docs` repository.
   - Editing the dated plan logs under `vibe/`.
@@ -66,7 +66,7 @@ PromptForge drops every trace of removed features. The parser stops naming remov
 - Success criteria:
   - `rg -n -g '!target' -g '!vibe/**' "lua shared|lua prompt|RETIRED|retired.symbol|always_offer" crates prompts` returns no hits. Today it hits 15 files, all named in the work items. The `.` matters: it also catches the hyphenated "retired-symbol".
   - Every suite and check in the exit criteria passes, and the facade suite keeps its test names.
-  - The facade suite meets the line budget.
+  - The facade suite's final line count is reported against the 1,450 target.
 - Constraints:
   - No backward compatibility and no trace of removed features, in code, tests, lints, or comments.
   - A file leaves the repository by moving to the workspace's `cabinet/_trash/` (`../cabinet/_trash/` from the repository root), never by deletion.
@@ -173,7 +173,7 @@ Parser tests pin the new rule using only neutral labels. The facade suite proves
   - The workspace docs gate and the facade docs gate (`cargo doc -p promptforge --no-deps`) pass with `RUSTDOCFLAGS="-D warnings"`.
   - `cargo xtask api --check` passes on the nightly named in `crates/build-xtask/src/api/toolchain.rs`, against the unchanged `crates/promptforge/public-api.txt`.
   - `node --test crates/workshop/ui/test/docs-claims.mjs` passes.
-  - The success-criteria search returns no hits, and the facade suite meets the line budget.
+  - The success-criteria search returns no hits, and the facade suite's line count is reported against the 1,450 target.
 
 </verification-contract>
 <decision-record>
@@ -205,7 +205,8 @@ The user set a no-trace rule, chose a narrow fence-label error, kept the docs re
   - Merging tests into tables across files: one failing case would fail a whole group. Revisit if the suite stops being organized as per-file tours.
   - Adding `Send` and `Sync` assertions for `Prompt`, `Step`, `Effect`, and `EffectAnswer`: `crates/promptforge/public-api.txt` already pins them. Revisit if the API listing stops recording auto traits.
 - Assumptions, risks, and notes:
-  - Assumption: the harness needs no new crates, and the line budget assumes about 300 lines of harness code.
+  - Assumption: the harness needs no new crates.
+  - Note: after Step 7's first pass, `greeter.rs` fell from 203 to 105 lines (48%) while the harness already reached about 300 lines, projecting about 1,700 lines for the suite. The user chose to tighten the harness API reasonably well in Step 7 and to aim for 1,450 without treating a miss as a failure.
   - Note: the facade suite and its test harness take JSON from `serde_json` directly, which stays a dev-dependency of the crate.
   - Note: the docs site picks up the new `Fence` wording on the next upstream push.
 
@@ -414,7 +415,7 @@ Work:
 
 <step-7>
 
-### Step 7: Facade test harness, proven on `greeter.rs`
+### Step 7: Facade test harness, proven on `greeter.rs` [completed]
 
 - Component: Facade test harness
 - Tests:
@@ -437,6 +438,7 @@ Work:
 - Harness choices already decided: every scenario defaults to the canned model, because it does nothing without declared roles and can be overridden; the builder is named `Scenario`, because "Harness" names a product component in this repository; tests stay separate with sentence names, so one failure names one test, and are never merged into tables.
 - Migrate `crates/promptforge/tests/suite/greeter.rs` onto the harness, keeping every test's name and assertions. It still includes `crates/promptforge/examples/greeter.rs` as a module and runs `greet`.
 - Budget checkpoint: `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` stay untouched and hold about 213 lines. With about 300 lines of harness, the 13 migrated files must shrink from about 2,125 lines to about 940, a 56% cut, which puts `greeter.rs` (194 lines at baseline) near 85 lines. If `greeter.rs` shrinks well short of that, ending above about 110 lines, stop and report before Step 8.
+- Compact API (operator change after the first pass left `greeter.rs` at 105 lines because rustfmt puts each field of a multi-line `Scenario { .. }` literal on its own line): reshape the harness so a typical test's setup and run fit on one or two formatted lines, for example short constructor functions or a few positional arguments with defaults, instead of multi-line struct literals. Move `greeter.rs` onto the tighter API. Every test keeps its name and assertions and stays readable to someone who has not seen the harness. Aim for `greeter.rs` near 85 lines and the harness near 300, but do not trade readability for lines.
 
 </step-7>
 
@@ -457,7 +459,7 @@ Work:
 - Move `crates/promptforge/tests/suite/effect.rs` (200 lines at baseline), `event.rs` (219), `ids.rs` (244), and `cancel.rs` (122) onto the test harness in `crates/promptforge/tests/suite/support.rs` and `support/scenario.rs`, as the Technical Design specifies it. Add each remaining helper, such as `Driver` with `pump`, `pump_until_held`, and `finish` for tests that act mid-run, in this commit only if one of these files uses it.
 - Keep every test's name and assertions. Tests stay separate with sentence names, so one failure names one test, and are never merged into tables.
 - Use `promptforge::` paths for every PromptForge item, take JSON from `serde_json` (a dev-dependency), and keep every file under the per-file line ceiling.
-- Budget: together these four files should land near 345 lines, the 56% cut that keeps the suite on track for about 1,450 lines.
+- Budget: aim for these four files near 345 lines, the 56% cut that keeps the suite on track for about 1,450 lines. This is a target, not a gate: report the result and keep tests readable.
 
 </step-8>
 
@@ -468,7 +470,7 @@ Work:
 - Component: Facade test harness
 - Tests:
   - `cargo nextest list --locked -p promptforge --all-features | Out-File -Encoding utf8 ../cabinet/_scratch/vibe-coder-no-trace-fence/tests-after.txt; Compare-Object (Get-Content ../cabinet/_scratch/vibe-coder-no-trace-fence/tests-before.txt) (Get-Content ../cabinet/_scratch/vibe-coder-no-trace-fence/tests-after.txt)` (must print nothing)
-  - `(Get-ChildItem crates/promptforge/tests/suite -Recurse -Filter *.rs | ForEach-Object { (Get-Content $_.FullName).Count } | Measure-Object -Sum).Sum` (must be about 1,450 or less; 2,349 at baseline)
+  - `(Get-ChildItem crates/promptforge/tests/suite -Recurse -Filter *.rs | ForEach-Object { (Get-Content $_.FullName).Count } | Measure-Object -Sum).Sum` (report the total against the 1,450 target; 2,349 at baseline; a total above the target does not fail the step)
   - `rg -n -g '!target' -g '!vibe/**' "lua shared|lua prompt|RETIRED|retired.symbol|always_offer" crates prompts` (must print nothing)
   - `npm ci --prefix crates/workshop`
   - `npm ci --prefix crates/gateway/config-ui/ui`
@@ -492,7 +494,7 @@ Work:
 - Remove the old `support::context` helper once nothing uses it.
 - Leave `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` as they are. Add no auto-trait checks, because `crates/promptforge/public-api.txt` already pins every facade type's auto traits and `cargo xtask api --check` fails on any change.
 - Use `promptforge::` paths only and keep every file under the per-file line ceiling.
-- The line budget is the raw line count of `crates/promptforge/tests/suite/**/*.rs`, harness included: about 1,450 or fewer, down from 2,349 at baseline.
+- The line target is the raw line count of `crates/promptforge/tests/suite/**/*.rs`, harness included: aim for about 1,450, down from 2,349 at baseline. It is a target, not a gate: report the total and keep tests readable.
 
 </step-9>
 
