@@ -230,6 +230,81 @@ fn artifact_store_downloads_appear_in_the_cache_listing() {
 }
 
 #[test]
+fn artifact_store_publishes_no_blob_whose_sidecar_write_failed() {
+    let body = b"artifact-store-sidecar-fault";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let url = server.url("faulted.gguf");
+    let store = crate::artifacts::ArtifactStore::new(temp.path()).expect("artifact store");
+    let destination = BlobCache::new(temp.path())
+        .expect("blob cache")
+        .destination(&url)
+        .expect("destination");
+    // A directory at the sidecar path makes the sidecar's `File::create` fail.
+    fs::create_dir_all(meta_path(&destination)).expect("plant sidecar fault");
+
+    let error = store
+        .ensure_model(&url, None)
+        .expect_err("sidecar write fails");
+    assert!(
+        matches!(&error, LocalError::Io { path, .. } if *path == meta_path(&destination)),
+        "the sidecar write is what failed: {error:?}"
+    );
+    assert!(
+        !destination.exists(),
+        "no blob publishes without its sidecar"
+    );
+
+    fs::remove_dir(meta_path(&destination)).expect("clear sidecar fault");
+    store.ensure_model(&url, None).expect("retry provisions");
+    assert_eq!(server.requests(), 2, "the retry downloads again");
+    assert_eq!(
+        BlobCache::new(temp.path())
+            .expect("blob cache")
+            .list()
+            .expect("list cache"),
+        vec![CacheEntry {
+            source: url,
+            path: destination,
+            sha256: hex_sha256(body),
+            size_bytes: body.len() as u64,
+        }]
+    );
+}
+
+#[test]
+fn download_to_cache_publishes_no_blob_whose_sidecar_write_failed() {
+    let body = b"blob-cache-sidecar-fault";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let cache = BlobCache::new(temp.path()).expect("cache");
+    let url = server.url("faulted.gguf");
+    let destination = cache.destination(&url).expect("destination");
+    // A directory at the sidecar path makes the sidecar's `File::create` fail.
+    fs::create_dir_all(meta_path(&destination)).expect("plant sidecar fault");
+
+    let error = cache
+        .download_to_cache(&url, None, &RecordingProgress::new())
+        .expect_err("sidecar write fails");
+    assert!(
+        matches!(&error, LocalError::Io { path, .. } if *path == meta_path(&destination)),
+        "the sidecar write is what failed: {error:?}"
+    );
+    assert!(
+        !destination.exists(),
+        "no blob publishes without its sidecar"
+    );
+
+    fs::remove_dir(meta_path(&destination)).expect("clear sidecar fault");
+    let blob = cache
+        .download_to_cache(&url, None, &RecordingProgress::new())
+        .expect("retry publishes");
+    let meta_text = fs::read_to_string(meta_path(&blob.path)).expect("read sidecar");
+    serde_json::from_str::<BlobMeta>(&meta_text).expect("parse sidecar");
+    assert_eq!(server.requests(), 2, "the retry downloads again");
+}
+
+#[test]
 fn sidecar_less_blob_is_not_a_hit_and_is_replaced() {
     // Amendment E: a blob without a sidecar (a pre-existing local model
     // file) is not a cache entry, so the source is re-downloaded and the

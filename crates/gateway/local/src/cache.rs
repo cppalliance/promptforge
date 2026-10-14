@@ -49,17 +49,24 @@ struct BlobMeta {
     size_bytes: u64,
 }
 
-/// Writes the cache-list metadata for a blob provisioned by ArtifactStore.
+/// Writes the `<blob>.meta.json` sidecar for `blob`, recording the size of
+/// `measured`, and returns that size.
+///
+/// Both writers into a `models/<key>/<filename>` slot - [`BlobCache`] and
+/// `ArtifactStore` - publish through this function. A fresh download passes
+/// its staged `.part` as `measured` and writes the sidecar before renaming
+/// the staged file into place, so a published blob always has its sidecar.
 pub(crate) fn write_blob_meta(
     root: &Path,
     blob: &Path,
+    measured: &Path,
     source: &str,
     sha256: &str,
-) -> Result<(), LocalError> {
-    let size_bytes = fs::metadata(blob)
+) -> Result<u64, LocalError> {
+    let size_bytes = fs::metadata(measured)
         .map_err(|source_err| LocalError::Io {
-            operation: "stat cached blob",
-            path: blob.to_owned(),
+            operation: "stat blob for cache sidecar",
+            path: measured.to_owned(),
             source: source_err,
         })?
         .len();
@@ -75,7 +82,8 @@ pub(crate) fn write_blob_meta(
         source: io::Error::other(source_err),
     })?;
     validate_cache_path(root, &metadata)?;
-    write_synced(&metadata, &encoded)
+    write_synced(&metadata, &encoded)?;
+    Ok(size_bytes)
 }
 
 /// One entry of the cache listing: a blob plus the source it was fetched from.
@@ -258,29 +266,14 @@ impl BlobCache {
                 actual,
             });
         }
-        // A stale or sidecar-less blob at the destination is replaced only
+        // A stale or sidecar-less blob at the destination is removed only
         // after the new content is verified (Windows rename refuses an
-        // existing target).
+        // existing target). The removal precedes the sidecar write, and the
+        // sidecar precedes the rename, so a crash at any point never leaves
+        // a published blob beside a sidecar that describes other content.
         remove_cache_entry(&self.root, &destination)?;
+        let size_bytes = write_blob_meta(&self.root, &destination, &staging, source, &actual)?;
         rename_confined(&self.root, &staging, &destination)?;
-        let size_bytes = fs::metadata(&destination)
-            .map_err(|source_err| LocalError::Io {
-                operation: "stat cached blob",
-                path: destination.clone(),
-                source: source_err,
-            })?
-            .len();
-        let meta = BlobMeta {
-            source: source.to_owned(),
-            sha256: actual.clone(),
-            size_bytes,
-        };
-        let meta_json = serde_json::to_vec(&meta).map_err(|source_err| LocalError::Io {
-            operation: "encode cache sidecar",
-            path: meta_path(&destination),
-            source: io::Error::other(source_err),
-        })?;
-        write_synced(&meta_path(&destination), &meta_json)?;
         Ok(CachedBlob {
             path: destination,
             sha256: actual,

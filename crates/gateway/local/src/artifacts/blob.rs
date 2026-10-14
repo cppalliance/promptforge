@@ -48,7 +48,13 @@ impl ArtifactStore {
             match verify_blob_with_progress(&self.cache, destination, expected, &marker, activity) {
                 Ok(_) => {
                     // A verified cache hit has no download to run.
-                    crate::cache::write_blob_meta(&self.cache, destination, asset.url, expected)?;
+                    crate::cache::write_blob_meta(
+                        &self.cache,
+                        destination,
+                        destination,
+                        asset.url,
+                        expected,
+                    )?;
                     return Ok(());
                 }
                 // A pin mismatch on a cached blob is repaired by
@@ -93,6 +99,15 @@ impl ArtifactStore {
                 actual,
             });
         }
+        // The sidecar is written before the rename publishes the blob, so a
+        // published blob always has its sidecar.
+        crate::cache::write_blob_meta(
+            &self.cache,
+            destination,
+            &staging,
+            asset.url,
+            expected_digest.as_deref().unwrap_or(&actual),
+        )?;
         rename_confined(&self.cache, &staging, destination)?;
         if let Some(expected) = expected_digest.as_deref() {
             let marker = blob_marker_path(destination);
@@ -100,12 +115,6 @@ impl ArtifactStore {
             validate_cache_path(&self.cache, &marker)?;
             write_marker_best_effort(&marker, destination, expected);
         }
-        crate::cache::write_blob_meta(
-            &self.cache,
-            destination,
-            asset.url,
-            expected_digest.as_deref().unwrap_or(&actual),
-        )?;
         Ok(())
     }
 
