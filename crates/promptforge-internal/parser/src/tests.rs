@@ -75,16 +75,11 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
 }
 
 #[test]
-fn orphan_empty_heading_and_removed_shared_fence_errors_report_a_line() {
+fn orphan_and_empty_heading_errors_report_a_line() {
     // `prompt_src` puts `# T` on line 6 and the body from line 8.
     for (body, line, kind) in [
         ("## A\n\na\n\n#### D\n\nd\n", 12, ParseErrorKind::Structure),
         ("## \n\na\n", 8, ParseErrorKind::Structure),
-        (
-            "## S\n\n```lua shared\nlocal a = 1\n```\n",
-            10,
-            ParseErrorKind::Fence,
-        ),
     ] {
         let error = parse(&prompt_src(body)).expect_err("the body must fail to parse");
         assert_eq!(error.kind(), kind, "{error}");

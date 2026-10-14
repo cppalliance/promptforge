@@ -3,13 +3,14 @@
 //! H1 and section content is an alternating sequence of exact, unindented
 //! triple-backtick `lua` fences and prose. This module recognizes those fences
 //! (never near-misses or fences nested inside longer code blocks), finds the
-//! removed `lua shared` form so the parse can reject it, and splits content
-//! into [`RawBlock`]s that the facade compiles into [`Block`]s.
+//! first fence whose label starts with `lua` without being exactly `lua` so
+//! the parse can reject it, and splits content into [`RawBlock`]s that the
+//! facade compiles into [`Block`]s.
 
 use std::ops::Range;
 use std::sync::Arc;
 
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag};
 
 use promptforge_types::emitter::Emitter;
 
@@ -33,8 +34,8 @@ pub(super) enum RawBlock<'a> {
 /// 1-based line number in the full input where `content` begins.
 ///
 /// # Errors
-/// Returns a fence-classified parse error for a leading `lua prompt` fence or
-/// an unclosed fence, and a Lua compilation error for invalid Lua.
+/// Returns a fence-classified parse error for an unclosed fence, and a Lua
+/// compilation error for invalid Lua.
 pub(super) fn split_h1(
     body: &Arc<str>,
     content: &str,
@@ -42,14 +43,6 @@ pub(super) fn split_h1(
     content_abs_line: u32,
     emitter: &Emitter,
 ) -> Result<(Vec<Block>, String)> {
-    let leading = trim_leading_blank_lines(content);
-    if leading.lines().next() == Some("```lua prompt") {
-        return Err(Error::parse(
-            ParseErrorKind::Fence,
-            "the `lua prompt` fence form was removed; use `lua` for a live H1 block and `require` for shared code",
-        ));
-    }
-
     let raw_blocks = split_section_blocks(content, title)?;
     let mut blocks = Vec::with_capacity(raw_blocks.len());
     for raw in raw_blocks {
@@ -129,37 +122,49 @@ fn strip_exact_lua_opening(content: &str) -> Option<&str> {
         .or_else(|| (content == "```lua").then_some(""))
 }
 
-/// Returns byte offsets of top-level fences whose opening line is `marker`.
-fn exact_fence_openings(content: &str, marker: &str) -> Vec<usize> {
+/// Yields the opening line's byte offset and the label of every top-level
+/// fence, in source order.
+///
+/// Using the Markdown event stream keeps fence-looking lines inside longer
+/// fences as prose rather than accidentally reserving or rejecting them.
+fn fence_openings(content: &str) -> impl Iterator<Item = (usize, CowStr<'_>)> {
     Parser::new_ext(content, Options::empty())
         .into_offset_iter()
         .filter_map(|(event, range)| {
-            if !matches!(
-                event,
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
-            ) {
+            let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(label))) = event else {
                 return None;
-            }
+            };
             let line_start = content[..range.start]
                 .rfind('\n')
                 .map_or(0, |newline| newline + 1);
-            (content[line_start..].lines().next() == Some(marker)).then_some(line_start)
+            Some((line_start, label))
+        })
+}
+
+/// Returns the byte offsets of top-level exact `lua` opening lines.
+fn exact_lua_openings(content: &str) -> Vec<usize> {
+    fence_openings(content)
+        .filter_map(|(line_start, _)| {
+            (content[line_start..].lines().next() == Some("```lua")).then_some(line_start)
         })
         .collect()
 }
 
-/// Returns the byte offsets of top-level exact `lua` opening lines.
-///
-/// Using the Markdown event stream keeps marker-looking lines inside longer
-/// fences as prose rather than accidentally reserving them.
-fn exact_lua_openings(content: &str) -> Vec<usize> {
-    exact_fence_openings(content, "```lua")
-}
-
-/// Returns the byte offsets of top-level exact `lua shared` opening lines,
-/// the removed fence form the parse rejects.
-pub(super) fn exact_shared_openings(content: &str) -> Vec<usize> {
-    exact_fence_openings(content, "```lua shared")
+/// Returns the opening line's byte range and the label of the first
+/// top-level fence whose label starts with `lua` in any letter case but is
+/// not exactly `lua`.
+pub(super) fn first_unrecognized_lua_label(content: &str) -> Option<(Range<usize>, String)> {
+    fence_openings(content).find_map(|(line_start, label)| {
+        let lua_like = label
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("lua"));
+        (lua_like && &*label != "lua").then(|| {
+            let line_end = content[line_start..]
+                .find('\n')
+                .map_or(content.len(), |end| line_start + end);
+            (line_start..line_end, label.into_string())
+        })
+    })
 }
 
 /// Byte offset where leading blank lines end.

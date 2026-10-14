@@ -95,18 +95,44 @@ fn one_exact_fence_is_the_prologue_and_two_can_surround_empty_prose() {
 
 #[test]
 fn section_fence_markers_must_be_exact() {
-    for near_miss in [
-        "````lua\nreturn 1\n````",
-        " ```lua\nreturn 1\n ```",
-        "```Lua\nreturn 1\n```",
-        "```lua extra\nreturn 1\n```",
-    ] {
+    for near_miss in ["````lua\nreturn 1\n````", " ```lua\nreturn 1\n ```"] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{near_miss}\n");
         let prompt = parse(&src).expect("near-miss fence must remain prose");
         let entry = prompt.entry().expect("has sections");
         assert!(entry.prologue().is_none());
         assert!(entry.epilog().is_none());
         assert_eq!(entry.prose(), near_miss.trim());
+    }
+}
+
+#[test]
+fn section_fence_label_near_misses_are_parse_errors() {
+    for label in ["Lua", "lua extra", "LUA", "luau"] {
+        let src = format!(
+            "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```{label}\nreturn 1\n```\n"
+        );
+        let error = parse(&src).expect_err("a label near-miss must fail the parse");
+        assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
+        assert_eq!(
+            error.to_string(),
+            format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`")
+        );
+    }
+}
+
+#[test]
+fn fence_labels_not_starting_with_lua_stay_in_prose() {
+    for fence in [
+        "```\nreturn 1\n```",
+        "```json\n{}\n```",
+        "```text lua\nreturn 1\n```",
+        "```moonlua\nreturn 1\n```",
+    ] {
+        let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{fence}\n");
+        let prompt = parse(&src).expect("a non-Lua label must remain prose");
+        let entry = prompt.entry().expect("has sections");
+        assert!(entry.prologue().is_none());
+        assert_eq!(entry.prose(), fence);
     }
 }
 

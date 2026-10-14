@@ -9,7 +9,7 @@ use promptforge_types::event::{Event, lifecycle};
 use crate::build::{
     Frontmatter, Heading, build_sections, collect_headings, line_add, split_frontmatter,
 };
-use crate::fence::{exact_shared_openings, split_h1};
+use crate::fence::{first_unrecognized_lua_label, split_h1};
 use crate::{Error, ParseError, ParseErrorKind, Prompt, Result};
 
 impl Prompt {
@@ -37,9 +37,11 @@ impl Prompt {
     ///   title is empty, a section heading skips a level (such as an H4
     ///   directly under an H2), a section heading is empty, or two sibling
     ///   sections have the same name.
-    /// - `Fence` when the H1 opens with a `lua prompt` fence, a `lua` fence
-    ///   is left open, or the prompt has a `lua shared` fence, a removed form
-    ///   whose code belongs in a section loaded with `require`.
+    /// - `Fence` when a `lua` fence is left open, or anywhere in the body a
+    ///   fence's label starts with `lua` in any letter case without being
+    ///   exactly `lua`, such as `Lua` or `lua extra`. The first such fence
+    ///   fails the parse at its opening line, before any Lua compiles. A
+    ///   fence nested inside a longer fence is prose and never fails.
     /// - `List` when a section made up only of list items has an empty item.
     /// - `Lua` when a Lua block in the H1 or in a section fails to compile as
     ///   Lua.
@@ -128,11 +130,11 @@ impl Prompt {
         }
         let title = h1.title.clone();
         let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
-        if let Some(&start) = exact_shared_openings(body).first() {
+        if let Some((opening, label)) = first_unrecognized_lua_label(body) {
             return Err(Error::parse_at(
                 ParseErrorKind::Fence,
-                start..start + "```lua shared".len(),
-                "the `lua shared` fence form was removed; put shared code in a section and load it with `require '## heading'`",
+                opening,
+                format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`"),
             ));
         }
         let (h1_blocks, description_text) =

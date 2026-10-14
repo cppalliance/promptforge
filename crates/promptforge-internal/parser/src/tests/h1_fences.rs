@@ -1,18 +1,40 @@
-//! H1 fence tests: live H1 blocks and the removed `lua shared` fence form.
+//! H1 fence tests: live H1 blocks and the fence label rule.
 
 use super::*;
 
-#[test]
-fn lua_shared_fence_in_h1_is_a_parse_error_pointing_to_require() {
-    let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua shared\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
-    let error = parse(src).expect_err("the removed shared fence must fail in the H1");
+const LABEL_NEAR_MISSES: [&str; 4] = ["lua extra", "Lua", "LUA", "luau"];
+
+fn assert_unrecognized_label(src: &str, label: &str) {
+    let error = parse(src).expect_err("a label near-miss must fail the parse");
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
-    let message = error.to_string();
-    assert!(
-        message.contains("`lua shared` fence form was removed"),
-        "{message}"
+    assert_eq!(
+        error.to_string(),
+        format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`")
     );
-    assert!(message.contains("require '## heading'"), "{message}");
+}
+
+#[test]
+fn unrecognized_lua_label_in_the_h1_fails_the_parse() {
+    let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua extra\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
+    assert_unrecognized_label(src, "lua extra");
+}
+
+#[test]
+fn unrecognized_lua_label_in_a_section_fails_the_parse() {
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua extra\nlocal a = 1\n```\n";
+    assert_unrecognized_label(src, "lua extra");
+}
+
+#[test]
+fn unrecognized_lua_label_before_the_h1_fails_the_parse() {
+    let src = "---\nname: x\ndescription: d\n---\n\nNotes.\n\n```lua extra\nlocal a = 1\n```\n\n# T\n\n## S\n\np\n";
+    assert_unrecognized_label(src, "lua extra");
+}
+
+#[test]
+fn the_first_unrecognized_label_is_the_one_reported() {
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```Lua\nlocal a = 1\n```\n\n```lua extra\nlocal b = 2\n```\n\n## S\n\np\n";
+    assert_unrecognized_label(src, "Lua");
 }
 
 #[test]
@@ -47,120 +69,65 @@ fn lone_plain_h1_lua_is_a_live_block() {
 }
 
 #[test]
-fn removed_shared_fence_error_points_at_the_first_fence() {
-    // `# T` is on line 6, the first fence on line 8, the second on line 12.
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nlocal a = 1\n```\n\n```lua shared\nlocal b = 2\n```\n\n## S\n\np\n";
-    let error = parse(src).expect_err("every shared fence is rejected");
-    assert!(error.to_string().contains("require"), "{error}");
-    assert_eq!(error.line(), Some(8), "{error}");
-}
-
-#[test]
-fn lua_shared_fence_in_h2_is_a_parse_error_pointing_to_require() {
-    let src =
-        "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua shared\nlocal a = 1\n```\n";
-    let error = parse(src).expect_err("the removed shared fence must fail in an H2");
-    assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
-    let message = error.to_string();
-    assert!(
-        message.contains("`lua shared` fence form was removed"),
-        "{message}"
-    );
-    assert!(message.contains("require '## heading'"), "{message}");
-    assert!(!message.contains("allowed only in H1"), "{message}");
-}
-
-#[test]
-fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n## S\n\np\n";
-    let error = parse(src).expect_err("the removed leading form must be rejected by name");
-    let message = error.to_string();
-    assert!(message.contains("`lua prompt` fence form was removed"));
-    assert!(
-        message.contains("use `lua` for a live H1 block and `require` for shared code"),
-        "{message}"
-    );
-    assert!(!message.contains("lua shared"), "{message}");
-}
-
-#[test]
-fn lua_prompt_form_after_prose_is_ordinary_prose() {
-    let in_h1 = "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n```lua prompt\nnot compiled =\n```\n\n## S\n\np\n";
-    let prompt = parse(in_h1).expect("the removed form after prose is ordinary Markdown");
-    assert!(prompt.description_text.contains("```lua prompt"));
-
-    let in_section =
-        "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
-    let prompt = parse(in_section).expect("the removed form in a section is ordinary Markdown");
-    let entry = prompt.entry().expect("has sections");
-    assert!(entry.prologue().is_none());
-    assert!(entry.prose().contains("```lua prompt"));
-}
-
-#[test]
-fn shared_fence_markers_must_be_exact() {
-    // Only the exact ```lua shared opener is rejected, so each near-miss
-    // remains H1 prose.
-    // The ```lua prompt form is excluded because leading it is a
-    // targeted error, pinned by
-    // `removed_lua_prompt_form_is_a_targeted_error_when_leading`.
-    for near_miss in [
-        "````lua shared\nreturn 1\n````",
-        " ```lua shared\nreturn 1\n ```",
-        "```Lua shared\nreturn 1\n```",
-        "```lua  shared\nreturn 1\n```",
-        "```lua shared extra\nreturn 1\n```",
-    ] {
-        let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{near_miss}\n\n## S\n\np\n");
-        let prompt = parse(&src).expect("leading near-miss shared markers must remain prose");
-        assert!(prompt.description_text.contains(near_miss.trim()));
-    }
-
-    // Placement does not change exact-marker recognition.
-    for near_miss in [
-        "````lua shared\nreturn 1\n````",
-        " ```lua shared\nreturn 1\n ```",
-        "```Lua shared\nreturn 1\n```",
-        "```lua shared extra\nreturn 1\n```",
-        "```lua prompt\nreturn 1\n```",
-    ] {
-        let src = format!(
-            "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n{near_miss}\n\n## S\n\np\n"
-        );
-        let prompt = parse(&src).expect("near-miss shared markers must remain prose");
-        assert!(prompt.description_text.contains(near_miss));
+fn h1_label_near_misses_fail_whatever_the_opener_shape() {
+    // Each opener shape here is one pulldown-cmark reports as a fence, so
+    // the label alone decides, leading or after prose.
+    for label in LABEL_NEAR_MISSES {
+        for opener in [
+            format!("```{label}\nreturn 1\n```"),
+            format!("````{label}\nreturn 1\n````"),
+            format!(" ```{label}\nreturn 1\n ```"),
+        ] {
+            for intro in ["", "Intro.\n\n"] {
+                let src = format!(
+                    "---\nname: x\ndescription: d\n---\n\n# T\n\n{intro}{opener}\n\n## S\n\np\n"
+                );
+                assert_unrecognized_label(&src, label);
+            }
+        }
     }
 
     let unclosed =
-        "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nreturn 1\n````\n\n## S\n\np\n";
-    let error = parse(unclosed).expect_err("an exact opener is rejected however it closes");
-    assert!(
-        error
-            .to_string()
-            .contains("`lua shared` fence form was removed"),
-        "{error}"
-    );
+        "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua extra\nreturn 1\n````\n\n## S\n\np\n";
+    assert_unrecognized_label(unclosed, "lua extra");
 }
 
 #[test]
-fn shared_markers_inside_longer_fences_remain_prose() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua shared\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua shared\nreturn 2\n```\n````\n";
-    let prompt = parse(src).expect("nested shared markers must remain prose");
+fn h1_shape_near_misses_of_an_exact_lua_label_remain_prose() {
+    for near_miss in ["````lua\nreturn 1\n````", " ```lua\nreturn 1\n ```"] {
+        for intro in ["", "Intro.\n\n"] {
+            let src = format!(
+                "---\nname: x\ndescription: d\n---\n\n# T\n\n{intro}{near_miss}\n\n## S\n\np\n"
+            );
+            let prompt = parse(&src).expect("a shape near-miss must remain prose");
+            assert!(
+                prompt.description_text.contains(near_miss.trim()),
+                "{}",
+                prompt.description_text
+            );
+        }
+    }
+}
 
-    assert!(prompt.description_text.contains("```lua shared"));
+#[test]
+fn label_near_misses_inside_longer_fences_remain_prose() {
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua extra\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua extra\nreturn 2\n```\n````\n";
+    let prompt = parse(src).expect("nested label near-misses must remain prose");
+
+    assert!(prompt.description_text.contains("```lua extra"));
     assert!(prompt.sections[0].prologue().is_none());
-    assert!(prompt.sections[0].prose().contains("```lua shared"));
+    assert!(prompt.sections[0].prose().contains("```lua extra"));
 }
 
 #[test]
-fn removed_shared_fence_fails_before_its_lua_compiles() {
+fn unrecognized_lua_label_fails_before_any_lua_compiles() {
     let source = "private_payload =";
     let src = format!(
-        "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua shared\n{source}\n```\n\n## S\n\np\n"
+        "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua\nlocal ok = 1\n```\n\n## S\n\n```lua extra\n{source}\n```\n"
     );
     let (error, events) = Prompt::parse(&src, "parse-failure");
     let recorder = Recorder(events);
-    let error = error.expect_err("the removed shared fence must fail");
+    let error = error.expect_err("the label near-miss must fail");
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
     assert!(!error.to_string().contains(source), "{error}");
     let observations = recorder.observations();

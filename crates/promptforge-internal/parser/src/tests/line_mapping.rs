@@ -295,22 +295,22 @@ fn a_shared_title_whose_heading_line_reaches_100_maps_its_prologue_line() {
 }
 
 #[test]
-fn removed_shared_fence_error_reports_the_fence_line() {
+fn unrecognized_lua_label_error_reports_the_fence_opening_line() {
     // Lines:
-    //  1: ---
-    //  2: name: x
-    //  3: description: d
-    //  4: ---
-    //  5: (empty)
     //  6: # T
-    //  7: (empty)
-    //  8: ```lua shared <- the error points here
-    //  9: function f()
-    // 10: end
-    // 11: ```
-    let src = prompt_src("```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n");
-    let error = parse(&src).expect_err("the removed shared fence must fail");
-    assert_eq!(error.line(), Some(8), "{error}");
+    //  8: ## S
+    // 10: Prose.
+    // 12: ```lua extra <- the error points here
+    // 13: function f()
+    // 14: end
+    // 15: ```
+    // 17: ```Lua       <- a later offender, not reported
+    let src = prompt_src(
+        "## S\n\nProse.\n\n```lua extra\nfunction f()\nend\n```\n\n```Lua\nreturn 1\n```\n",
+    );
+    let error = parse(&src).expect_err("the label near-miss must fail");
+    assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
+    assert_eq!(error.line(), Some(12), "{error}");
     assert_eq!(error.column(), Some(1), "{error}");
     assert!(error.span().is_some(), "{error}");
 }
