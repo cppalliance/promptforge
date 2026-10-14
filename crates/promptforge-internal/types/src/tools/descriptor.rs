@@ -14,11 +14,11 @@ use super::ids::ToolId;
 ///
 /// The caller collects the descriptors of every Plugin it can serve into a
 /// [`ToolCatalog`](super::ToolCatalog). The implementations stay with the
-/// caller, keyed by [`ToolId`]. The Engine offers every descriptor to the
-/// prompt's Lua by id, and advertises to the model whatever the prompt's
-/// Lua scopes in. It
-/// issues each tool call as an effect that names the tool's id. The caller
-/// resolves that id to the implementation.
+/// caller, keyed by [`ToolId`]. Every catalog tool is available to the
+/// prompt's Lua, which calls one by id, and a section offers one to its
+/// model with `tools.offer`. The Engine issues each tool call as an effect
+/// that names the tool's id. The caller resolves that id to the
+/// implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {

@@ -144,7 +144,7 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
 
 // The helper takes no resolver: live tool binding resolves elsewhere, so a
 // resolver argument would imply a resolution path the helper does not
-// exercise. The run offers every tool the fixture Plugin contributes.
+// exercise. The fixture Plugin's tools are in the run's catalog.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let source = ensure_model_h1(md);
     TestPrompt {

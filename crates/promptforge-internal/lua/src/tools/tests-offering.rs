@@ -1,6 +1,6 @@
 //! Tests for the id-keyed `tools` namespace: tool objects, `tools.offer`
 //! over ids and tool objects, the `required` and `extras` lists,
-//! `tools.get`, `tools.offer_local`, and the removed slot-era functions.
+//! `tools.get`, and `tools.offer_local`.
 
 use std::sync::{Arc, Mutex};
 
@@ -226,27 +226,20 @@ fn offer_local_registers_a_local_tool_and_names_itself_in_its_errors() {
 }
 
 #[test]
-fn the_slot_era_functions_are_not_installed() {
+fn the_tools_namespace_installs_its_six_functions() {
     let (lua, _, _) = lua_over(offering_set());
-    let result: (bool, bool, bool, bool, String) = lua
+    let kinds: String = lua
         .load(
             "local kinds = {}\n\
              for _, name in ipairs({ 'offer', 'offer_local', 'required', \
                'extras', 'get', 'allow_tasks' }) do kinds[#kinds + 1] = type(tools[name]) end\n\
-             return tools.add == nil, tools.always == nil, tools.offered == nil, \
-               tools.add_local == nil, table.concat(kinds, ',')",
+             return table.concat(kinds, ',')",
         )
         .eval()
         .expect("the namespace probe evaluates");
     assert_eq!(
-        result,
-        (
-            true,
-            true,
-            true,
-            true,
-            "function,function,function,function,function,function".to_owned(),
-        )
+        kinds,
+        "function,function,function,function,function,function"
     );
 }
 

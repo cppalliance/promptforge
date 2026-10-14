@@ -439,7 +439,7 @@ Acceptance:
 
 <step-3>
 
-### Step 3: Remove the slot-era test traces and the stale tool-offering comments
+### Step 3: Remove the slot-era test traces and the stale tool-offering comments [completed]
 
 - Component: Leftover traces
 - Tests:

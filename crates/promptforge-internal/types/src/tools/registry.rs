@@ -10,8 +10,9 @@ use super::ids::ToolId;
 ///
 /// The caller builds the catalog from every Plugin it can serve, declared
 /// by the prompt or not, and keeps the tool implementations itself. The
-/// Engine offers every tool in it to the prompt's Lua, which names each by
-/// its [`ToolId`].
+/// catalog lists every tool the run can use: the prompt's Lua calls one by
+/// its [`ToolId`], and a section offers one to its model with
+/// `tools.offer`.
 ///
 /// Every tool in a catalog has a unique [`ToolId`]. Construction checks it,
 /// and the [`get`](Self::get) lookup relies on that check.
