@@ -141,30 +141,6 @@ async fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
     );
 }
 
-#[tokio::test]
-async fn models_bind_is_gone_from_the_lua_surface() {
-    // `models.bind` does not exist: binding is the frontmatter's. A
-    // `models.bind` call is a nil call, and the failed H1 gate classifies as
-    // RequirementsUnmet.
-    let md = flow_prompt!(
-        "# Test prompt\n\n\
-        ```lua\nmodels.bind('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\n```lua\nreturn 'unreachable'\n```\n"
-    );
-    let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
-    let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
-    let RunResult::Failure(error) =
-        run_with_fixture(&prompt, "", context(EXECUTION), RunFixture::new()).await
-    else {
-        panic!("a models.bind call must fail");
-    };
-    assert_eq!(
-        error.kind(),
-        RunErrorKind::RequirementsUnmet,
-        "the removed models.bind fails the H1 gate as RequirementsUnmet: {error:?}"
-    );
-}
-
 /// The fixture Plugin's `echo` tool, present so the Plugin of a prompt's
 /// `tools/search` offer is in the catalog while the tool is not. The
 /// implementation is never called by the missing-tool case.

@@ -276,7 +276,7 @@ async function press(key, { activeEditor, textFocus = false, shift = false, ctrl
       KeybindingsRegistry.lookupKeybinding("editor.action.selectHighlights")?.getLabel() === "Ctrl+Shift+L",
   );
   check(
-    "the Go menu's Add Symbol rows no longer carry the chords the chat took",
+    "the Go menu's Add Symbol rows carry none of the chords the chat holds",
     KeybindingsRegistry.lookupKeybinding("workbench.action.addSymbolToCurrentChat") === undefined &&
       KeybindingsRegistry.lookupKeybinding("workbench.action.addSymbolToNewChat") === undefined,
   );

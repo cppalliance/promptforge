@@ -27,10 +27,10 @@ test("the tab bar uses the required order and routes Local and Remote details", 
   }
 });
 
-test("unknown, Downloads, and legacy Models routes normalize to Local", async () => {
+test("unknown routes normalize to Local", async () => {
   const stub = gatewayStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  for (const hash of ["#/unknown", "#/downloads", "#/models", "#/local/%"]) {
+  for (const hash of ["#/unknown", "#/local/%"]) {
     navigate(dom, hash);
     await settle();
     assert.equal(dom.window.location.hash, "#/local");

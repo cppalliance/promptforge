@@ -1019,18 +1019,6 @@ await assertNoLeaks(lifecycle, async () => {
   service.onState((value) => states.push(value));
   service.onEvent((value) => events.push(value));
   service.onError((value) => errors.push(value));
-  for (const legacyCallback of [
-    "onCommitted",
-    "onSnapshot",
-    "onCompleted",
-    "onFailed",
-  ]) {
-    assert.equal(
-      legacyCallback in service,
-      false,
-      `${legacyCallback} cannot retain callback-owned take state`,
-    );
-  }
 
   assert.equal(sockets.length, 1);
   assert.match(sockets[0].url, /\/v1\/realtime$/);

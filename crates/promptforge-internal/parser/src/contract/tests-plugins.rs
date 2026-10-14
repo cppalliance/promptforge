@@ -1,5 +1,4 @@
-//! Tests for the `plugins` key and the retired `tools` key: Plugin names,
-//! and the refusal of a leftover tool slot map.
+//! Tests for the `plugins` key: Plugin ids, entry forms, and duplicates.
 
 use super::*;
 
@@ -67,27 +66,6 @@ fn the_map_form_of_a_plugin_entry_is_refused_naming_the_plain_name_form() {
 }
 
 #[test]
-fn a_leftover_tools_key_is_refused_at_parse() {
-    // Tools are named by canonical id from Lua, so a slot map is an
-    // unknown frontmatter key, whatever its entries hold.
-    for entries in ["  search: web/search\n", "  open: true\n", "  {}\n"] {
-        let error = parse(&format!(
-            "name: x\ndescription: d\nplugins:\n  - web\ntools:\n{entries}"
-        ))
-        .expect_err("a leftover `tools:` key must be refused");
-        assert_eq!(
-            error.kind(),
-            ParseErrorKind::Frontmatter,
-            "{entries}: {error}"
-        );
-        assert!(
-            error.to_string().contains("unknown field `tools`"),
-            "the refusal names the key: {error}"
-        );
-    }
-}
-
-#[test]
 fn a_plugin_declared_twice_is_refused() {
     for entries in ["  - web\n  - mcp\n  - web\n", "  - web\n  - web\n"] {
         let error = parse(&format!("name: x\ndescription: d\nplugins:\n{entries}"))
@@ -120,7 +98,7 @@ fn a_list_of_distinct_plugins_still_parses() {
 }
 
 #[test]
-fn the_plugins_key_takes_plain_names_and_the_old_key_is_refused() {
+fn the_plugins_key_takes_plain_names() {
     let prompt = parse(concat!(
         "name: x\ndescription: d\n",
         "plugins:\n",
@@ -132,12 +110,4 @@ fn the_plugins_key_takes_plain_names_and_the_old_key_is_refused() {
     assert_eq!(plugins.len(), 2);
     assert_eq!(plugins[0].to_string(), "web");
     assert_eq!(plugins[1].to_string(), "mcp");
-
-    let error = parse("name: x\ndescription: d\ncapabilities:\n  - web\n")
-        .expect_err("the retired `capabilities` key must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
-    assert!(
-        error.to_string().contains("plugins"),
-        "the refusal names the `plugins` key: {error}"
-    );
 }

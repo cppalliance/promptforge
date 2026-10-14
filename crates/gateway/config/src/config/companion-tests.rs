@@ -270,8 +270,8 @@ sha256 = "{DIGEST}"
     .unwrap();
     assert!(replaced.local_models()[0].speculative().is_some());
     // An entry without companion tables parses with both companions absent.
-    let legacy = parse("").unwrap();
-    let model = &legacy.local_models()[0];
+    let bare = parse("").unwrap();
+    let model = &bare.local_models()[0];
     assert!(model.speculative().is_none());
     assert!(model.multimodal_projector().is_none());
 }

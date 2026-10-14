@@ -77,15 +77,6 @@ fn the_root_invocation_serves_with_discovery() {
 }
 
 #[test]
-fn the_serve_verb_is_rejected() {
-    let error = parse_args(args(&["serve"])).unwrap_err();
-    assert!(
-        matches!(error, ParseError::Usage(_)),
-        "the removed subcommand is a usage error, never an alias: {error:?}"
-    );
-}
-
-#[test]
 fn a_positional_config_path_is_rejected() {
     let error = parse_args(args(&["gateway.toml"])).unwrap_err();
     assert!(

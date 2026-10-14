@@ -72,7 +72,7 @@ fn tool_name_rejects_tables_other_types_and_other_userdata() {
     let table = tool_name(&Value::Table(record)).expect_err("a record is not a tool");
     assert!(
         table.to_string().contains("got table"),
-        "a plain record no longer stands for a tool: {table}"
+        "a plain record is not a tool: {table}"
     );
     // A userdata that is not a tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.

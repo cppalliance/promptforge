@@ -1,8 +1,7 @@
 //! One finite pipeline end to end through the unified prompt model: explicit
 //! lazy `prose`, `models.infer`, the Rust-backed `models.loop` with tool
-//! dispatch, `messages.new()` builders, `reply` reading nil, and
-//! synchronous `call`, driven through the public `run` against a scripted
-//! gateway at `promptforge: 0`.
+//! dispatch, `messages.new()` builders, and synchronous `call`, driven
+//! through the public `run` against a scripted gateway at `promptforge: 0`.
 
 use super::*;
 
@@ -22,7 +21,6 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         ## Draft\n\n\
         Summarize in one word: {{ args }}\n\n\
         ```lua\n\
-        assert(reply == nil, 'the removed reply register names no global')\n\
         var.draft = models.infer(prose)\n\
         ```\n\n\
         ## Refine\n\n\
@@ -37,7 +35,6 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         ```\n\n\
         ## Deliver\n\n\
         ```lua\n\
-        assert(reply == nil, 'a call hands off args, never a reply register')\n\
         return 'delivered: ' .. args\n\
         ```\n";
     let test = bound_with_tools(source);

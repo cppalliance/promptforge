@@ -1,8 +1,7 @@
 //! Plugin-family fixtures: a `plugin-*` crate depends only on
 //! `promptforge-plugin`, `shared-*` crates, and outside libraries; Engine,
 //! Gateway, and Harness crates may not depend on a Plugin crate, except
-//! `harness-gateway-client`; and the web Plugin is no longer a public
-//! Harness crate.
+//! `harness-gateway-client`.
 
 use super::product_boundary_violations;
 use super::test_support::write_crate;
@@ -100,24 +99,4 @@ fn the_harness_gateway_client_and_workshop_crates_may_name_a_plugin_crate() {
         let violations = naming_plugin_web(dir, package, "dependencies");
         assert!(violations.is_empty(), "{package}: {violations:?}");
     }
-}
-
-#[test]
-fn harness_web_is_no_longer_a_public_harness_crate() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "workshop/server",
-        "workshop-server",
-        "[dependencies]\nharness-web = { path = \"../../harness-web\" }\n",
-    );
-    write_crate(root.path(), "harness-web", "harness-web", "");
-    let violations = product_boundary_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].ends_with(
-            "outside crates may depend on the harness family only through harness or harness-gateway-client"
-        ),
-        "{violations:?}"
-    );
 }

@@ -335,11 +335,6 @@ test("Download stages a pending model without touching the cache", async () => {
     false,
     "staging touches no artifact endpoint",
   );
-  assert.equal(
-    root.querySelector(".global-progress"),
-    null,
-    "the removed client download strip cannot get stuck",
-  );
   assert.match(root.querySelector(".apply-button")?.textContent ?? "", /Apply \(1\)/);
   assert.equal(root.querySelector(".quant-download").textContent, "Added");
 });

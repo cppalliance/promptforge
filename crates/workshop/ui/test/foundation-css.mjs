@@ -1,6 +1,6 @@
 // Source-text contract for the Cursor IDE foundation in the Workshop UI's own
 // stylesheets (jsdom applies no stylesheets, so the values are read from the
-// files): the global reset no longer strips focus outlines, so the shared
+// files): the global reset does not strip focus outlines, so the shared
 // look rules draw Cursor's; the global scrollbars are the view bars (the
 // look token's width, square, shown while the scroller is hovered), and a
 // menu marked `.scrollbar-menu` keeps look's 7px bar through those unlayered

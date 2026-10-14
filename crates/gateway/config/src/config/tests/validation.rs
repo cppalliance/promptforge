@@ -4,43 +4,6 @@ use super::super::*;
 use super::SAMPLE;
 
 #[test]
-fn rejects_legacy_stt_section() {
-    let toml = r#"
-config-version = 0
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[workshop.stt]
-window_seconds = 8
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Parse { .. })
-    ));
-}
-
-#[test]
-fn rejects_canonical_and_legacy_stt_sections_together() {
-    let toml = r#"
-config-version = 0
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[stt]
-window_seconds = 8
-
-[workshop.stt]
-interval_ms = 250
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Parse { .. })
-    ));
-}
-
-#[test]
 fn rejects_zero_stt_pipeline_bounds() {
     for field in ["window_seconds = 0", "interval_ms = 0"] {
         let toml = format!(
@@ -66,8 +29,8 @@ fn secret_redacts() {
 }
 
 #[test]
-fn rejects_legacy_queue_section() {
-    // `deny_unknown_fields` on the root DTO rejects a `[queue]` section at
+fn rejects_an_unknown_root_section() {
+    // `deny_unknown_fields` on the root DTO rejects an unknown section at
     // parse time.
     let toml = r#"
 config-version = 0
@@ -75,8 +38,8 @@ config-version = 0
 bind = "127.0.0.1:8081"
 api_key = "t"
 
-[queue]
-max_depth = 50
+[unknown]
+key = 50
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
@@ -85,49 +48,24 @@ max_depth = 50
 }
 
 #[test]
-fn rejects_legacy_device_section() {
-    let toml = r#"
-config-version = 0
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "gpu"
-type = "remote"
-concurrency = 4
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Parse { .. })
-    ));
-}
-
-#[test]
-fn rejects_legacy_endpoint_concurrency_and_device() {
-    // `endpoint.concurrency` and `endpoint.device` are unknown keys, so they
-    // fail `deny_unknown_fields` at parse time.
-    for legacy_key in ["concurrency = 4", "device = \"runpod\""] {
-        let toml = config_with_endpoint(&format!(
-            r#"[[endpoint]]
+fn rejects_an_unknown_endpoint_key() {
+    let toml = config_with_endpoint(
+        r#"[[endpoint]]
 id = "e"
 protocol = "openai"
 base_url = "http://a"
 api_key = ""
-{legacy_key}"#
-        ));
-        assert!(
-            matches!(Config::parse_toml(&toml), Err(ConfigError::Parse { .. })),
-            "expected legacy endpoint key {legacy_key:?} to be rejected"
-        );
-    }
+unknown = 4"#,
+    );
+    assert!(matches!(
+        Config::parse_toml(&toml),
+        Err(ConfigError::Parse { .. })
+    ));
 }
 
 #[test]
-fn rejects_legacy_local_model_device_and_lane() {
-    for legacy_key in ["device = \"gpu0\"", "lane = \"generative\""] {
-        let toml = format!(
-            r#"
+fn rejects_an_unknown_local_model_key() {
+    let toml = r#"
 config-version = 0
 [server]
 bind = "127.0.0.1:8081"
@@ -138,14 +76,12 @@ name = "q"
 description = "prose"
 source = "/models/q.gguf"
 context = 4096
-{legacy_key}
-"#
-        );
-        assert!(
-            matches!(Config::parse_toml(&toml), Err(ConfigError::Parse { .. })),
-            "expected legacy local_model key {legacy_key:?} to be rejected"
-        );
-    }
+unknown = "x"
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Parse { .. })
+    ));
 }
 
 /// A config whose only variable part is one `[[endpoint]]` block. Table-driven

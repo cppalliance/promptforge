@@ -49,36 +49,6 @@ fn a_tool_reads_through_its_object_and_never_through_a_global() {
 }
 
 #[test]
-fn tools_bind_is_gone_from_every_section() {
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-
-    let gone = run_scalar(
-        &vm,
-        &program("return tostring(tools.bind)"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect("the probe runs");
-    assert_eq!(gone.as_deref(), Some("nil"), "tools.bind is removed");
-    let error = run_scalar(
-        &vm,
-        &program("tools.bind('other', 'fetch a page')"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect_err("calling the removed tools.bind fails");
-    assert!(
-        error.to_string().contains("nil"),
-        "a removed function fails as a nil call: {error}"
-    );
-    vm.teardown(&null_emitter(), "Section");
-}
-
-#[test]
 fn section_scope_keeps_each_tool_at_its_first_offer() {
     let bindings = fixture_set(&[("fetch", "fetch a page"), ("search", "search the web")]);
     let prologue = program(

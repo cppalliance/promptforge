@@ -374,7 +374,7 @@ test("a successful Apply raises no client-side speech toast; the gateway's outco
     [...root.querySelectorAll(".toast")].filter((toast) => /speech-to-text/.test(toast.textContent))
       .length,
     0,
-    "the browser no longer guesses at speech restarts",
+    "only the gateway's outcome raises a speech restart toast",
   );
   assert.equal(root.querySelector(".banner-restart").hidden, true, "no restart was reported");
 });

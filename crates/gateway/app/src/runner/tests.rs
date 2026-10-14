@@ -158,10 +158,6 @@ fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
         warning.contains("[workshop]"),
         "the warning names the section: {warning}"
     );
-    assert!(
-        !warning.contains("[workshop.stt]"),
-        "the warning must not advertise the legacy STT section: {warning}"
-    );
 }
 
 #[test]

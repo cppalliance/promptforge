@@ -89,24 +89,3 @@ fn models_use_rejects_an_unbound_label() {
     );
     vm.teardown(&null_emitter(), "Section");
 }
-
-#[test]
-fn models_bind_is_gone() {
-    let models = shared_models(vec![]);
-    let mut vm =
-        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
-    let gone = vm
-        .run_chunk(
-            &chunk("return tostring(models.bind)"),
-            &null_emitter(),
-            "Section",
-        )
-        .expect("the probe runs");
-    assert_eq!(
-        gone,
-        crate::lua::LuaBlockResult::Returned(Some("nil".to_owned())),
-        "models.bind is removed"
-    );
-    vm.teardown(&null_emitter(), "Section");
-}

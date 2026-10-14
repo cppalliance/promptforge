@@ -18,10 +18,8 @@ import type { DockviewApi, SerializedDockview } from "dockview";
 import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
-// v5: every panel's tab is the generic "panel-tab". A v4 snapshot names
-// the per-type tab components that no longer exist ("permanent",
-// "agent-tab", "run-tab"), so v4 falls back to the default layout like
-// every version before it.
+// v5: every panel's tab is the generic "panel-tab". A snapshot of any
+// other version falls back to the default layout.
 export const LAYOUT_SCHEMA_VERSION = 5;
 
 const SAVE_DEBOUNCE_MS = 250;

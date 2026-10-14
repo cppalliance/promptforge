@@ -246,8 +246,7 @@ export async function bootWorkbench(name, run, options = {}) {
   // buckets the composition root preloads (scripted per `options.uiState`)
   // and the Workshop tree's roots listing (answered empty: no grants yet).
   // Store writes PUT to the state routes and are answered saved. Any other
-  // fetch, including the retired /v1/models and /profiles boot fetches,
-  // rejects the test. Every call is recorded in order, with a timestamp
+  // fetch rejects the test. Every call is recorded in order, with a timestamp
   // and the parsed PUT body, so a test can assert what the app fetched and
   // when relative to the rest of boot; the service observer installed
   // below interleaves getService resolutions into the same log.

@@ -30,18 +30,18 @@ api_key = "k"
 }
 
 #[test]
-fn removed_voice_section_is_rejected() {
+fn an_unknown_section_is_rejected() {
     let raw = r#"
 [gateway]
 base_url = "http://127.0.0.1:8081"
 api_key = "k"
 
-[voice]
-interim_model = "old.bin"
+[unknown]
+key = "x"
 "#;
     assert!(
         matches!(Config::from_toml_str(raw), Err(ConfigError::Parse { .. })),
-        "workshop voice ownership was removed instead of silently ignored"
+        "an unknown section is rejected instead of silently ignored"
     );
 }
 

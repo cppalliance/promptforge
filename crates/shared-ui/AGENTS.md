@@ -1,6 +1,6 @@
 # shared-ui
 
-The Workshop no longer consumes this package; it uses its fork, `@workshop/look` in `crates/workshop/look`.
+The Workshop does not consume this package; it uses its fork, `@workshop/look` in `crates/workshop/look`.
 
 - This package is a base-layer dependency and never imports from either product UI.
 - Product-specific controls and integrations stay with their products.

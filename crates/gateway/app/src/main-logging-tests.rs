@@ -96,10 +96,6 @@ fn mounted_no_alignment_is_drained_through_production_logging() {
     ] {
         assert!(log.contains(expected), "missing {expected}: {log}");
     }
-    assert!(
-        !log.contains("forced_final_overlap_unaligned"),
-        "estimated reconciliation must not record the retired failure: {log}"
-    );
     let audio = audio_payload();
     for protected in [
         TRANSCRIPT_SENTINEL,

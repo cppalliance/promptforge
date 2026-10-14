@@ -207,7 +207,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const command = Commands.lookup("workbench.action.openWorkspace");
   check("Open Workspace keeps the stub row's command id", command !== undefined);
   check("Open Workspace keeps the stub row's label", command?.title === "Open Workspace from File...");
-  check("Open Workspace is no longer always disabled", command?.precondition !== "false");
+  check("Open Workspace is not disabled outright", command?.precondition !== "false");
   const row = Menus.getMenuItems("menubar/file").find((r) => r.command === "workbench.action.openWorkspace");
   check("Open Workspace sits in File > 2_open at the stub's position", row?.group === "2_open" && row?.order === 3);
   check(
@@ -223,14 +223,14 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const saveAs = Commands.lookup("workbench.action.saveWorkspaceAs");
   check("Save Workspace As keeps the stub row's command id", saveAs !== undefined);
   check("Save Workspace As keeps the stub row's label", saveAs?.title === "Save Workspace As...");
-  check("Save Workspace As is no longer always disabled", saveAs?.precondition !== "false");
+  check("Save Workspace As is not disabled outright", saveAs?.precondition !== "false");
   const saveAsRow = fileRows.find((r) => r.command === "workbench.action.saveWorkspaceAs");
   check("Save Workspace As sits in File > 3_workspace at the stub's position", saveAsRow?.group === "3_workspace" && saveAsRow?.order === 2);
 
   const duplicate = Commands.lookup("workbench.action.duplicateWorkspace");
   check("Duplicate Workspace keeps the stub row's command id", duplicate !== undefined);
   check("Duplicate Workspace goes without an ellipsis, as Cursor labels it", duplicate?.title === "Duplicate Workspace");
-  check("Duplicate Workspace is no longer always disabled", duplicate?.precondition !== "false");
+  check("Duplicate Workspace is not disabled outright", duplicate?.precondition !== "false");
   const duplicateRow = fileRows.find((r) => r.command === "workbench.action.duplicateWorkspace");
   check("Duplicate Workspace sits in File > 3_workspace at the stub's position", duplicateRow?.group === "3_workspace" && duplicateRow?.order === 3);
 

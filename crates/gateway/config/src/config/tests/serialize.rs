@@ -163,10 +163,6 @@ fn serialized_shape_uses_the_toml_key_names() {
     ] {
         assert!(top.contains_key(key), "missing top-level key `{key}`");
     }
-    assert!(
-        json["workshop"].get("stt").is_none(),
-        "serialization must never emit the legacy workshop.stt shape"
-    );
     assert_eq!(json["local_model"][0]["speculative"]["type"], "draft-mtp");
 }
 

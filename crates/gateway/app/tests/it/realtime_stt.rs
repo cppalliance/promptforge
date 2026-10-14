@@ -453,18 +453,6 @@ async fn assert_final_speech_route_surface(http: &reqwest::Client, address: Sock
         reqwest::StatusCode::NOT_FOUND,
         "POST /v1/audio/transcriptions remains mounted"
     );
-    for path in ["/stt", "/stt/capability"] {
-        let response = send_within(
-            http.get(format!("http://{address}{path}"))
-                .bearer_auth("test-token"),
-        )
-        .await;
-        assert_eq!(
-            response.status(),
-            reqwest::StatusCode::NOT_FOUND,
-            "GET {path} is retired"
-        );
-    }
 }
 
 include!("realtime_stt/authentication.rs");

@@ -168,7 +168,7 @@ test("a saved new api_key leaves the DOM and the masked readout returns", async 
   );
 });
 
-test("Workshop exposes canonical STT tuning without legacy model paths", async () => {
+test("Workshop exposes canonical STT tuning", async () => {
   const stub = fixtureStub({
     applyOutcome: {
       applied: ["gateway.toml"],
@@ -201,8 +201,6 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
     "the STT capture defaults mirror the config crate",
   );
   assert.ok(root.querySelector(".field-row[data-key='vocabulary'] .chip-input, .field-row[data-key='vocabulary'] input"));
-  assert.equal(root.querySelector("[data-key='stt.interim_model']"), null);
-  assert.equal(root.querySelector("[data-key='stt.final_source']"), null);
   assert.equal(
     root.querySelector(".restart-note"),
     null,
@@ -219,7 +217,6 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
     "a fresh section omits the inert listener bind",
   );
   assert.equal(bodies[0].stt.window_seconds, 15);
-  assert.equal(bodies[0].workshop?.stt, undefined, "the UI never writes legacy workshop.stt");
   assert.equal(
     bodies[0].server.bind,
     "127.0.0.1:8081",

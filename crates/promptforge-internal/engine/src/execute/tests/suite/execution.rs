@@ -13,7 +13,6 @@ use super::support::{Record, Recorder, RunOptions, parse_execution_fixture, run,
 const LOG_EXECUTION: &str = "fixture-log-checkpoints";
 const PROLOGUE_EXECUTION: &str = "fixture-prologue-return";
 const STORE_EXECUTION: &str = "fixture-store-fallthrough";
-const REPLY_NIL_EXECUTION: &str = "fixture-reply-nil";
 const STORE_TRIAD_EXECUTION: &str = "fixture-store-triad";
 const REPLY_SUBST_NIL_EXECUTION: &str = "fixture-reply-subst-nil";
 const ITEM_OUTSIDE_EXECUTION: &str = "fixture-item-outside";
@@ -24,8 +23,6 @@ const PROLOGUE_RETURN: &str =
     include_str!("../../../../tests/prompts/execution/prologue-return.md");
 const STORE_FALLTHROUGH: &str =
     include_str!("../../../../tests/prompts/execution/store-fallthrough.md");
-const REPLY_NIL_SECTION_ONE: &str =
-    include_str!("../../../../tests/prompts/execution/reply-nil-section-one.md");
 const STORE_TRIAD: &str = include_str!("../../../../tests/prompts/execution/store-triad.md");
 const REPLY_SUBSTITUTION_NIL: &str =
     include_str!("../../../../tests/prompts/invalid/reply-substitution-nil.md");
@@ -249,23 +246,6 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             "{execution} must retain its own terminal run record"
         );
     }
-}
-
-#[tokio::test]
-async fn reply_nil_in_section_one() {
-    let run = run_fixture(
-        REPLY_NIL_SECTION_ONE,
-        "execution/reply-nil-section-one.md",
-        REPLY_NIL_EXECUTION,
-        "",
-        None,
-    )
-    .await;
-    assert_eq!(
-        run.result
-            .expect("the reply nil fixture must execute offline"),
-        "section one done"
-    );
 }
 
 #[tokio::test]

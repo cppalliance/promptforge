@@ -11,6 +11,9 @@ todos:
   - id: sweep
     content: Drop the always_offer absence clause; sweep crates/ and prompts/ for other removed-feature traces
     status: pending
+  - id: compat-removal
+    content: Remove the live compatibility code for removed features in the gateway and Workshop
+    status: pending
   - id: json-module
     content: promptforge::json module, serde_json as a normal dependency, re-bless public-api.txt, example JSON import and timer fix
     status: pending
@@ -185,6 +188,7 @@ The user set a no-trace rule, chose a narrow fence-label error, kept the docs re
 
 - Decisions:
   - No trace of removed features in code, tests, lints, or comments, and no compatibility handling. The user said: "I do not want ANY backward compatibility and I want NO TRACE of removed features. Not in tests. Not in lints. Not in comments. Not in compatibility."
+  - Live compatibility code for removed features goes too, across the gateway and Workshop, not only comments and tests: named rejections of removed config layouts, deprecation warnings, migrations, cleanup of files from older builds, tolerated old keys, CSS aliases, and readers of old stored settings. Old inputs fail or are ignored through the generic paths, and stale files or settings left by older builds are accepted. The user chose this after the sweep listed the compatibility code it had left alone.
   - An unrecognized fence label is a parse error, so removed forms need no handling of their own. The user said: "unrecognized label fence should be an error".
   - The error covers only `lua`-prefixed labels, and nested fences stay prose. The user picked both options when offered the choices.
   - Apply every appropriate review fix. The user said: "I want all the fixes from the code review which are appropriate".
@@ -246,16 +250,16 @@ The user set a no-trace rule, chose a narrow fence-label error, kept the docs re
 
 ## Execution Instructions
 
-Four components, eight steps, one commit per step, in the order below. Every commit compiles, passes the suites it touches, and leaves no dead code, since clippy runs with `-D warnings`. Steps 2, 4, and 5 depend on nothing earlier and could land in any order; the order here is the commit order. Paths are relative to the repository root.
+Four components, nine steps, one commit per step, in the order below. Every commit compiles, passes the suites it touches, and leaves no dead code, since clippy runs with `-D warnings`. Steps 2, 5, and 6 depend on nothing earlier and could land in any order; the order here is the commit order. Paths are relative to the repository root.
 
 - Components, in dependency order:
   1. Fence label rule (Step 1). First, because the parser's named removed-form errors and their tests are most of the hits for the success-criteria search, and the sweep in Step 3 should start from a tree where they are gone.
-  2. Trace removal (Steps 2 and 3). Second, because the lints are self-contained and the sweep is only meaningful once the parser and lint traces are gone.
-  3. Facade review fixes (Steps 4 and 5). Third, because the harness imports JSON through `promptforge::json`, and the test-name snapshot taken at the start of Step 6 must come after the positive-fixture test leaves `shipped.rs`.
-  4. Facade test harness (Steps 6 to 8). Last, because it builds on both facade fixes and touches only the facade suite.
+  2. Trace removal (Steps 2 to 4). Second, because the lints are self-contained, the sweep is only meaningful once the parser and lint traces are gone, and the compatibility removal acts on the live code the sweep listed.
+  3. Facade review fixes (Steps 5 and 6). Third, because the harness imports JSON through `promptforge::json`, and the test-name snapshot taken at the start of Step 7 must come after the positive-fixture test leaves `shipped.rs`.
+  4. Facade test harness (Steps 7 to 9). Last, because it builds on both facade fixes and touches only the facade suite.
 - Pieces and construction:
   - Fence label rule: the scanner and docs, the parser tests, and the facade fixture are built jointly in one step, because the old tests and the old fixture row assert the old "fence form was removed" messages and fail the moment the rule changes.
-  - Trace removal: the `build-xtask` lint removal and the `docs-claims.mjs` list removal are built jointly, since both delete retired-name lists and neither has other users. The sweep follows sequentially, so its search sees only what Steps 1 and 2 left behind.
+  - Trace removal: the `build-xtask` lint removal and the `docs-claims.mjs` list removal are built jointly, since both delete retired-name lists and neither has other users. The sweep follows sequentially, so its search sees only what Steps 1 and 2 left behind. The compatibility removal follows the sweep, because it starts from the live code the sweep listed and left alone.
   - Facade review fixes: the JSON module, then the positive-fixture move with the tool-offering wording. They share no code, so they are sequential only to keep commits small.
   - Facade test harness: the harness core with the `greeter.rs` migration, then two migration batches. Sequential, because each batch adds helpers on top of the earlier ones and the `greeter.rs` budget checkpoint gates the rest.
 
@@ -319,7 +323,7 @@ Work:
 
 <step-3>
 
-### Step 3: Sweep the remaining removed-feature traces
+### Step 3: Sweep the remaining removed-feature traces [completed]
 
 - Component: Trace removal
 - Tests:
@@ -339,7 +343,39 @@ Work:
 
 <step-4>
 
-### Step 4: `promptforge::json` module and greeter example fixes
+### Step 4: Remove the live compatibility code for removed features
+
+- Component: Trace removal
+- Tests:
+  - `cargo nextest run --locked -p <package> --all-features` for every package the step edits, dropping `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`
+  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p <package> --all-targets --all-features` for every Rust package the step edits, again without `--all-features` for those three Workshop packages
+  - `npm test --workspace ui` from `crates/workshop` when a Workshop UI file changes, and `npm test` from `crates/gateway/config-ui/ui` when a config UI file changes
+  - `node --test crates/workshop/ui/test/docs-claims.mjs`
+- Setup: read the root `AGENTS.md`, plus the `AGENTS.md` of every crate the step touches where one exists. Run cargo commands one at a time in PowerShell, without `2>&1`, and judge each by its result lines and `$LASTEXITCODE`. A file leaves the repository by `Move-Item` to `../cabinet/_trash/`, never by deletion.
+
+The rule:
+
+- No live code path exists only to accept, migrate, clean up after, warn about, or name a removed format, key, section, layout, file name, stored setting, or alias.
+- Old inputs then fail, or are ignored, through the generic paths that already exist, such as the gateway config's unknown-key and unknown-section rejection. Add no new named errors, warnings, or fallbacks.
+- Stale files and settings that an older build left on a user's disk are accepted; the Decision Record says why.
+
+Work, starting from the inventory the Step 3 sweep left alone. Line numbers are as of Step 3's commit; search by name if they moved.
+
+- `crates/build-user-guide`: the guide check for the removed `[workshop.stt]` section (`src/main.rs` near lines 79 and 90, `src/stage.rs` near lines 14 and 31, `src/stage-tests.rs` near lines 249 and 257).
+- `crates/gateway/config`: the named rejection of removed config layouts (`src/lib.rs` near line 15, `src/api_error.rs` near line 33, `src/error.rs` near lines 48 to 59, `src/config/imp.rs` near lines 37, 199, and 235 to 266, and `src/config/tests/schema.rs` near lines 131 to 262). Old layouts must then fail through the existing unknown-key or unknown-section rejection; keep one test per level proving that an unknown key still fails, with neutral key names.
+- `crates/gateway/app`: the `[workshop]` deprecation warning (`src/runner.rs` near lines 361 to 370, `src/runner/tests.rs` near lines 134 to 168).
+- `crates/gateway/local`: the model cache migration, its tests (`src/sidecar-tests.rs` near line 74, `src/cache/tests.rs` near lines 234 to 279), and the migration code they exercise.
+- `crates/gateway/logging`: the handling of old-format log segments (`src/worker/rotation.rs` near lines 91 to 134, `src/worker/tests-segments.rs` near lines 141 to 171).
+- Workshop support and desktop: the cleanup of old temp files (`crates/workshop/support/src/atomic.rs` near lines 23, 103, and 198 to 209), and the tolerated old `open_browser` key (`crates/workshop/support/tests/it/config.rs` near lines 114 to 125, `crates/workshop/desktop/src/config.rs` near line 193).
+- CSS aliases in `crates/shared-ui/tokens.css` near line 173 and `crates/workshop/look/tokens.css` near line 184: point every user of an alias at the current token, then remove the alias.
+- Workshop UI: the reading of an old stored setting format (`crates/workshop/ui/test/editor-settings.mjs` near lines 193 to 206, `crates/workshop/ui/test/boot-ui-storage.mjs` near line 104, and the source code they exercise).
+- Then run `rg -n -i -g '!target' -g '!vibe/**' -g '!**/node_modules/**' "compat|legacy|deprecat|migrat|old format|alias" crates prompts` and remove any other live compatibility path of the same kinds for a removed feature of this repository. Leave third-party deprecations, provider model retirement, and runtime file or item removal alone, and list every hit left alone, with path and line, in the step report.
+
+</step-4>
+
+<step-5>
+
+### Step 5: `promptforge::json` module and greeter example fixes
 
 - Component: Facade review fixes
 - Tests:
@@ -362,11 +398,11 @@ Work:
   - In `answer`, a timer gets `EffectAnswer::Timer` at once, without sleeping, instead of `EffectAnswer::Dropped`. Update the `answer` doc to say that a caller with a real clock waits `seconds` before answering. Leave the `f64` duration type alone, since a separate rulebook-audit plan owns it.
   - Everything else stays raw API code, because the example is the user-facing run loop. The facade suite includes this file as a module and runs `greet`, so its items stay `pub`.
 
-</step-4>
+</step-5>
 
-<step-5>
+<step-6>
 
-### Step 5: Move the positive-fixture test into the Engine suite and fix the tool-offering wording
+### Step 6: Move the positive-fixture test into the Engine suite and fix the tool-offering wording
 
 - Component: Facade review fixes
 - Tests:
@@ -385,11 +421,11 @@ Work:
   - Every source file stays under the per-file line ceiling that `build_ceiling::check` enforces.
 - Tool-offering wording: the `RunContext::tools` doc in `crates/promptforge-internal/engine/src/execute/config.rs` and the matching comment in `crates/promptforge/tests/suite/prepare.rs` say that the catalog lists every tool a run can use, Lua calls one by id, and a section offers one to its model with `tools.offer` (defined in `crates/promptforge-internal/lua/src/tools.rs`).
 
-</step-5>
+</step-6>
 
-<step-6>
+<step-7>
 
-### Step 6: Facade test harness, proven on `greeter.rs`
+### Step 7: Facade test harness, proven on `greeter.rs`
 
 - Component: Facade test harness
 - Tests:
@@ -399,7 +435,7 @@ Work:
   - `(Get-Content crates/promptforge/tests/suite/greeter.rs).Count` (report the number against the checkpoint below)
 - Setup: read the root `AGENTS.md` before editing. Run cargo commands one at a time in PowerShell, without `2>&1`, and judge each by its result lines and `$LASTEXITCODE`.
 
-Before any edit, snapshot the facade test names for the comparison in Step 8. Step 5 has already moved the positive-fixture test out, so the snapshot reflects the final set:
+Before any edit, snapshot the facade test names for the comparison in Step 9. Step 6 has already moved the positive-fixture test out, so the snapshot reflects the final set:
 
 - `New-Item -ItemType Directory -Force ../cabinet/_scratch/vibe-coder-no-trace-fence | Out-Null`
 - `cargo nextest list --locked -p promptforge --all-features | Out-File -Encoding utf8 ../cabinet/_scratch/vibe-coder-no-trace-fence/tests-before.txt`
@@ -411,13 +447,13 @@ Work:
 - Use `promptforge::` paths only, take JSON from `promptforge::json`, and add no new crates. Keep `scenario.rs` under the per-file line ceiling that `build_ceiling::check` enforces (`crates/promptforge/build.rs`).
 - Harness choices already decided: every scenario defaults to the canned model, because it does nothing without declared roles and can be overridden; the builder is named `Scenario`, because "Harness" names a product component in this repository; tests stay separate with sentence names, so one failure names one test, and are never merged into tables.
 - Migrate `crates/promptforge/tests/suite/greeter.rs` onto the harness, keeping every test's name and assertions. It still includes `crates/promptforge/examples/greeter.rs` as a module and runs `greet`.
-- Budget checkpoint: `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` stay untouched and hold about 213 lines. With about 300 lines of harness, the 13 migrated files must shrink from about 2,125 lines to about 940, a 56% cut, which puts `greeter.rs` (194 lines at baseline) near 85 lines. If `greeter.rs` shrinks well short of that, ending above about 110 lines, stop and report before Step 7.
+- Budget checkpoint: `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` stay untouched and hold about 213 lines. With about 300 lines of harness, the 13 migrated files must shrink from about 2,125 lines to about 940, a 56% cut, which puts `greeter.rs` (194 lines at baseline) near 85 lines. If `greeter.rs` shrinks well short of that, ending above about 110 lines, stop and report before Step 8.
 
-</step-6>
+</step-7>
 
-<step-7>
+<step-8>
 
-### Step 7: Migrate the `effect`, `event`, `ids`, and `cancel` suites
+### Step 8: Migrate the `effect`, `event`, `ids`, and `cancel` suites
 
 - Component: Facade test harness
 - Tests:
@@ -434,11 +470,11 @@ Work:
 - Use `promptforge::` paths only, take JSON from `promptforge::json`, and keep every file under the per-file line ceiling.
 - Budget: together these four files should land near 345 lines, the 56% cut that keeps the suite on track for about 1,450 lines.
 
-</step-7>
+</step-8>
 
-<step-8>
+<step-9>
 
-### Step 8: Migrate the remaining suites and confirm the exit criteria
+### Step 9: Migrate the remaining suites and confirm the exit criteria
 
 - Component: Facade test harness
 - Tests:
@@ -462,13 +498,13 @@ Work:
 Work:
 
 - Move `crates/promptforge/tests/suite/model.rs` (126 lines at baseline), `plugins.rs` (105), `replay.rs` (73), `timestamp.rs` (56), `vfs.rs` (120), `prompt.rs` (202), `prepare.rs` (304), and `shipped.rs` (160 at baseline, less after the positive-fixture test left) onto the test harness in `crates/promptforge/tests/suite/support.rs` and `support/scenario.rs`, as the Technical Design specifies it, adding each remaining helper as its first user arrives.
-- Keep every test's name and assertions. Tests stay separate with sentence names and are never merged into tables. Tests that serialize logs keep calling `serde_json` directly, which is a normal dependency of the crate since Step 4.
+- Keep every test's name and assertions. Tests stay separate with sentence names and are never merged into tables. Tests that serialize logs keep calling `serde_json` directly, which is a normal dependency of the crate since Step 5.
 - `prepare.rs` keeps its tool-offering comment: the catalog lists every tool a run can use, Lua calls one by id, and a section offers one to its model with `tools.offer`. `shipped.rs` keeps `collect_markdown`, `every_prompt_under_parses`, `every_shipped_prompt_parses_offline`, and the shipped research prompt's end-to-end run over its web tools.
 - Remove the old `support::context` helper once nothing uses it.
 - Leave `parsing.rs`, `tools.rs`, `metrics.rs`, `auto_traits.rs`, and `main.rs` as they are. Add no auto-trait checks, because `crates/promptforge/public-api.txt` already pins every facade type's auto traits and `cargo xtask api --check` fails on any change.
 - Use `promptforge::` paths only and keep every file under the per-file line ceiling.
 - The line budget is the raw line count of `crates/promptforge/tests/suite/**/*.rs`, harness included: about 1,450 or fewer, down from 2,349 at baseline.
 
-</step-8>
+</step-9>
 
 </execution-plan>

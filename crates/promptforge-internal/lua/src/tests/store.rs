@@ -80,34 +80,6 @@ fn store_delete_then_read_raises() {
 }
 
 #[test]
-fn store_inject_is_absent() {
-    let out = run("return tostring(store.inject)", "").unwrap();
-    assert_eq!(
-        out.returned.as_deref(),
-        Some("nil"),
-        "store.inject was removed; indexing it must yield nil"
-    );
-    assert!(
-        run("store.inject('a.txt')", "").is_err(),
-        "calling the removed store.inject must raise"
-    );
-}
-
-#[test]
-fn store_read_lines_is_absent() {
-    let out = run("return tostring(store.read_lines)", "").unwrap();
-    assert_eq!(
-        out.returned.as_deref(),
-        Some("nil"),
-        "store.read_lines was removed; indexing it must yield nil"
-    );
-    assert!(
-        run("store.read_lines('a.txt')", "").is_err(),
-        "calling the removed store.read_lines must raise"
-    );
-}
-
-#[test]
 fn store_read_with_start_only_reads_to_eof() {
     let out = run(
         "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 2)",

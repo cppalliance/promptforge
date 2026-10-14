@@ -228,20 +228,19 @@ fn offer_local_registers_a_local_tool_and_names_itself_in_its_errors() {
 #[test]
 fn the_slot_era_functions_are_not_installed() {
     let (lua, _, _) = lua_over(offering_set());
-    let result: (bool, bool, bool, bool, bool, String) = lua
+    let result: (bool, bool, bool, bool, String) = lua
         .load(
             "local kinds = {}\n\
              for _, name in ipairs({ 'offer', 'offer_local', 'required', \
                'extras', 'get', 'allow_tasks' }) do kinds[#kinds + 1] = type(tools[name]) end\n\
              return tools.add == nil, tools.always == nil, tools.offered == nil, \
-               tools.add_local == nil, tools.always_offer == nil, table.concat(kinds, ',')",
+               tools.add_local == nil, table.concat(kinds, ',')",
         )
         .eval()
         .expect("the namespace probe evaluates");
     assert_eq!(
         result,
         (
-            true,
             true,
             true,
             true,
