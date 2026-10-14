@@ -159,7 +159,7 @@
   line-height: var(--ws-control-height-compact);
   padding-block: 0;
   padding-inline-start: var(--ws-size-4);
-  padding-inline-end: var(--space-md);
+  padding-inline-end: var(--space-2);
   border: none;
   background: none;
   color: var(--text-muted);
@@ -216,7 +216,7 @@
 
 .ws-workshop-tree__missing {
   flex: none;
-  margin-inline-start: var(--space-sm);
+  margin-inline-start: var(--space-1-5);
   font-size: var(--font-size-xs);
   color: var(--danger-text);
 }
@@ -226,8 +226,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-lg);
-  padding: var(--space-lg) var(--space-xl);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   font-size: var(--font-size-base);
   color: var(--text-muted);
 }
@@ -242,7 +242,7 @@
 }
 
 .ws-workshop-tree__error {
-  margin: var(--space-md);
+  margin: var(--space-2);
   list-style: none;
   font-size: var(--font-size-sm);
   color: var(--danger-text);

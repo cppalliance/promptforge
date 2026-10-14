@@ -73,7 +73,6 @@ async fn verbose_round_trip_accepts_literal_timestamp_granularities_field() {
         "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          [local]\ncache_dir = {cache:?}\n\
-         [workshop]\n\
          [stt]\nwhisper_backend = {whisper_backend:?}\n\
          [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\n\
          vram_gb = 1.0\n\

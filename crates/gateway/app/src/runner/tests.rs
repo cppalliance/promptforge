@@ -130,44 +130,6 @@ fn unknown_override_lists_the_loaded_catalog_profiles() {
     assert!(text.contains("alpha") && text.contains("beta"), "{text}");
 }
 
-#[test]
-fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
-    // A config that includes `[workshop]` must parse, with the warning
-    // discharging the no-silent-ignore rule for the section's inert
-    // serving fields.
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let path = temp.path().join("gateway.toml");
-    std::fs::write(
-        &path,
-        format!("{CATALOG}\n[workshop]\nbind = \"127.0.0.1:7910\"\nopen_browser = true\n"),
-    )
-    .expect("write config");
-    std::fs::write(
-        gateway_config::profile_state_path(&path),
-        "active_profile = \"alpha\"\n",
-    )
-    .expect("write state");
-    let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
-
-    let (config, _) = load_startup_with_environment(&path, &options, None)
-        .expect("a config that includes [workshop] still loads");
-
-    let warning = workshop_section_deprecation(&config)
-        .expect("a [workshop] section earns the deprecation warning");
-    assert!(
-        warning.contains("[workshop]"),
-        "the warning names the section: {warning}"
-    );
-}
-
-#[test]
-fn no_workshop_section_earns_no_deprecation_warning() {
-    let (_temp, path) = fixture("alpha");
-    let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
-    let (config, _) = load_startup_with_environment(&path, &options, None).expect("startup loads");
-    assert!(workshop_section_deprecation(&config).is_none());
-}
-
 /// A selected profile produces no notice; a stale state file produces
 /// the warning naming the missing and the defined profiles; no
 /// selection at all produces the plain no-profile line.

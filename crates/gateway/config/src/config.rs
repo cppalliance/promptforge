@@ -13,13 +13,11 @@ mod secret;
 mod stt;
 mod validate;
 mod vocab;
-mod workshop;
 
 pub use companion::{
     DraftTokenMax, DraftTokenMaxError, MultimodalProjectorConfig, SpeculationType,
     SpeculativeConfig,
 };
-pub(crate) use imp::reject_profiles_directory;
 pub use interpolate::VarLookupFn;
 use interpolate::interpolate_value;
 // The canonical home of the model-metadata types is `gateway-api-types`.
@@ -33,7 +31,6 @@ pub use stt::{
     SttModelConfig, SttPipelineConfig, SttRole, WhisperBackend,
 };
 pub use vocab::{DominionKind, LlamaBackend, Protocol, QueuePolicy, SearchProvider, ToolDialect};
-pub use workshop::WorkshopConfig;
 
 use crate::error::ConfigError;
 
@@ -111,8 +108,6 @@ pub struct Config {
     tools: Option<ToolsConfig>,
     /// Optional canonical speech pipeline tuning.
     stt: Option<SttPipelineConfig>,
-    /// Optional `[workshop]` section, parsed but without effect.
-    workshop: Option<WorkshopConfig>,
 }
 
 /// Private DTO for [`Config`]. Holds the raw TOML shape before validation and
@@ -143,8 +138,6 @@ struct RawConfig {
     tools: Option<ToolsConfig>,
     #[serde(default)]
     stt: Option<RawSttPipelineConfig>,
-    #[serde(default)]
-    workshop: Option<WorkshopConfig>,
 }
 
 impl TryFrom<RawConfig> for Config {
@@ -174,7 +167,6 @@ impl TryFrom<RawConfig> for Config {
             stale_state_selection: None,
             tools: raw.tools,
             stt,
-            workshop: raw.workshop,
         })
     }
 }

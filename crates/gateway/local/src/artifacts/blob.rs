@@ -8,7 +8,6 @@ use tokio_util::sync::CancellationToken;
 #[cfg(test)]
 use super::DownloadProgress;
 use super::assets::FileAsset;
-use super::digest::file_digest_with_progress;
 use super::download;
 use super::verified::{blob_marker_path, verify_blob_with_progress, write_marker_best_effort};
 use super::{
@@ -43,10 +42,6 @@ impl ArtifactStore {
 
         if destination.is_file() {
             let Some(expected) = expected_digest.as_deref() else {
-                if !crate::cache::blob_meta_matches(destination, asset.url)? {
-                    let actual = file_digest_with_progress(destination, activity)?;
-                    crate::cache::write_blob_meta(&self.cache, destination, asset.url, &actual)?;
-                }
                 return Ok(());
             };
             let marker = blob_marker_path(destination);

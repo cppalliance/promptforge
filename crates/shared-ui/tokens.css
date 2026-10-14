@@ -170,12 +170,6 @@
   --space-18: 72px;
   --space-19: 76px;
   --space-20: 80px;
-  /* Legacy aliases: existing component CSS keeps working unchanged */
-  --space-xs: var(--space-1, 4px); /* 4px */
-  --space-sm: var(--space-1-5, 6px); /* 6px */
-  --space-md: var(--space-2, 8px); /* 8px */
-  --space-lg: var(--space-3, 12px); /* 12px */
-  --space-xl: var(--space-4, 16px); /* 16px */
 
   /* Radius */
   --radius-xs: 2px;

@@ -305,9 +305,6 @@ fn load_startup_with_environment(
         environment,
     );
     let config = Config::load(config_path, &selection).map_err(StartupError::config)?;
-    if let Some(warning) = workshop_section_deprecation(&config) {
-        tracing::warn!("{warning}");
-    }
     let active = config
         .active_profile()
         .map(|profile| ProfileName::parse(profile.name()))
@@ -356,21 +353,6 @@ fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
     Some(BootSelectionNotice::Stale(format!(
         "state file selects profile \"{stale}\", which is not defined (defined profiles: {defined}); booting with no profile"
     )))
-}
-
-/// The deprecation warning for a boot config with a `[workshop]`
-/// section, or `None` when the section is absent. The gateway runs no
-/// workshop listener - the desktop shell embeds the workshop server
-/// itself - so the section's `bind` and `open_browser` settings do
-/// nothing. The section parses so a config that includes it does not
-/// break startup; the warning keeps those inert fields from being silently
-/// ignored.
-fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
-    config.workshop().is_some().then_some(
-        "the [workshop] section is deprecated: the gateway runs no workshop listener \
-         (the desktop shell embeds the workshop server itself); its bind and open_browser \
-         settings are ignored",
-    )
 }
 
 /// Loads an env file into the process environment, skipping missing files.

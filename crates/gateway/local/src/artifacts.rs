@@ -155,8 +155,7 @@ impl ArtifactStore {
 
     /// [`Self::ensure_model`] variant that writes the download and verify
     /// stages into `activity`'s text, when given. A path source has no
-    /// download to report. An unpinned URL hashes once when an older cache
-    /// hit lacks listing metadata, then reuses that metadata.
+    /// download to report.
     ///
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.

@@ -11,8 +11,8 @@
 //! swaps the live routing, config, and web-search state in one write. A
 //! failed or cancelled apply promotes nothing and leaves every shadow staged
 //! for a retry. Sections the process reads once at boot (`[server]`,
-//! `[workshop]`, `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, `[stt]`)
-//! and env shadows promote the same way but report `restart_required`: the
+//! `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, `[stt]`) and env
+//! shadows promote the same way but report `restart_required`: the
 //! local runtime is fixed for the process lifetime. Revert cancels any apply
 //! in flight, then deletes every shadow and touches nothing else. Saves, the
 //! capture step, the commit, and revert serialize on one mutex, so apply only
@@ -82,7 +82,7 @@ struct RevertReply {
 /// `applied` names the promoted real files relative to the config root,
 /// sorted. `reloaded` is true when a config shadow applied successfully.
 /// `restart_required` is true for an env shadow or a change to a section
-/// the process reads once at boot: `[server]`, `[workshop]`, `[[profile]]`,
+/// the process reads once at boot: `[server]`, `[[profile]]`,
 /// `[[local_model]]`, `[[stt_model]]`, or `[stt]`. With no shadows on disk
 /// the reply is the clean no-op
 /// `{"applied": [], "reloaded": false, "restart_required": false}`.

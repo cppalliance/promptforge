@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use super::{
     Config, DominionConfig, DominionKind, EndpointConfig, LlamaBackend, LocalConfig,
     LocalModelConfig, ModelConfig, ProfileConfig, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, SttModelConfig, SttPipelineConfig, ToolsConfig, WebSearchConfig, WorkshopConfig,
+    ServerConfig, SttModelConfig, SttPipelineConfig, ToolsConfig, WebSearchConfig,
 };
 
 #[path = "accessors-models.rs"]
@@ -125,13 +125,6 @@ impl Config {
     #[must_use]
     pub fn stt(&self) -> Option<&SttPipelineConfig> {
         self.stt.as_ref()
-    }
-
-    /// Returns the `[workshop]` configuration, or `None` when the section is
-    /// absent.
-    #[must_use]
-    pub fn workshop(&self) -> Option<&WorkshopConfig> {
-        self.workshop.as_ref()
     }
 }
 

@@ -30,8 +30,6 @@ pub enum ConfigErrorKind {
     UnresolvedVar,
     /// The configuration parsed but failed a semantic check.
     Validation,
-    /// A removed configuration layout feature was found.
-    HardBreak,
     /// A shadow file could not be written.
     Write,
 }
@@ -46,7 +44,6 @@ impl ConfigError {
             ConfigErrorRepr::Interpolation(_) => ConfigErrorKind::Interpolation,
             ConfigErrorRepr::UnresolvedVar(..) => ConfigErrorKind::UnresolvedVar,
             ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
-            ConfigErrorRepr::HardBreak { .. } => ConfigErrorKind::HardBreak,
             ConfigErrorRepr::Write { .. } => ConfigErrorKind::Write,
         }
     }
@@ -125,15 +122,6 @@ mod tests {
             (
                 ConfigErrorRepr::Validation("bad".to_owned()),
                 ConfigErrorKind::Validation,
-            ),
-            (
-                ConfigErrorRepr::HardBreak {
-                    path: PathBuf::from("a.toml"),
-                    line: 4,
-                    key: "include",
-                    replacement: "use one gateway.toml with [[profile]] entries",
-                },
-                ConfigErrorKind::HardBreak,
             ),
             (
                 ConfigErrorRepr::Write {

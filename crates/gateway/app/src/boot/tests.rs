@@ -185,10 +185,6 @@ fn the_generated_config_binds_loopback_on_an_os_assigned_port() {
         "127.0.0.1:0",
         "the sidecar bind is loopback with an OS-assigned port"
     );
-    assert!(
-        config.workshop().is_none(),
-        "the generated config omits the [workshop] section"
-    );
     let key = config.server().api_key().expose();
     assert_eq!(key.len(), API_KEY_LENGTH);
     assert!(key.chars().all(|c| c.is_ascii_hexdigit()));

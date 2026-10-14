@@ -45,23 +45,6 @@ pub(crate) enum ConfigError {
     #[error("invalid config: {0}")]
     Validation(String),
 
-    /// A removed layout feature was found with an actionable source location.
-    #[non_exhaustive]
-    #[error(
-        "{}:{line}: removed config key `{key}`; {replacement}",
-        path.display()
-    )]
-    HardBreak {
-        /// The file containing the removed layout.
-        path: std::path::PathBuf,
-        /// One-based source line.
-        line: usize,
-        /// Removed key or layout feature.
-        key: &'static str,
-        /// One-sentence replacement.
-        replacement: &'static str,
-    },
-
     /// A shadow file could not be written.
     #[non_exhaustive]
     #[error("write shadow {}", path.display())]

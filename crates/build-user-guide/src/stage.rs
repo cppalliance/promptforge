@@ -11,15 +11,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    AssembleError, BOOKS, DOCS_VAR, check_links, check_removed_workshop_stt_claims, read_chapters,
-    render_export, render_index, render_summary, write_file,
+    AssembleError, BOOKS, DOCS_VAR, check_links, read_chapters, render_export, render_index,
+    render_summary, write_file,
 };
 
 /// Stages every book in `BOOKS` into `out`, which must be absolute, from
 /// the chapters under `src/` in `docs`, the `promptforge-docs` root, and
-/// the book configs and chrome in `guide`. The `[workshop.stt]` check runs
-/// before anything is written; the SUMMARY link check runs on each staged
-/// book. Files already in `out` are overwritten, never removed.
+/// the book configs and chrome in `guide`. The SUMMARY link check runs on
+/// each staged book. Files already in `out` are overwritten, never removed.
 pub(crate) fn stage(guide: &Path, docs: Option<&Path>, out: &Path) -> Result<(), AssembleError> {
     if !out.is_absolute() {
         return Err(AssembleError(format!(
@@ -28,7 +27,6 @@ pub(crate) fn stage(guide: &Path, docs: Option<&Path>, out: &Path) -> Result<(),
         )));
     }
     let src = docs_src(docs)?;
-    check_removed_workshop_stt_claims(&src)?;
 
     for (book, part_title) in BOOKS {
         let book_out = out.join(book);

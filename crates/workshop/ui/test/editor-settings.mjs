@@ -190,20 +190,18 @@ function serviceOver(initial, contextKeys = null) {
   check("an array initial value reads as the defaults", fromArray.settings.wordWrap === false);
   const { service: fromWrongTypes } = serviceOver({ wordWrap: "yes", columnSelection: 1, renderWhitespace: true });
   check(
-    "non-boolean fields drop to defaults while real booleans survive (a legacy true reads as all)",
+    "mistyped fields drop to defaults",
     fromWrongTypes.settings.wordWrap === false &&
       fromWrongTypes.settings.columnSelection === false &&
-      fromWrongTypes.settings.renderWhitespace === "all",
+      fromWrongTypes.settings.renderWhitespace === "selection",
   );
-  // The three render-whitespace modes, and the legacy boolean a stored
-  // value may still hold: true was "on" (all), false was "off", which now
-  // reads as the default (selection).
+  // The three render-whitespace modes; any other stored value reads as the
+  // default (selection).
   const modeOf = (stored) => serviceOver({ renderWhitespace: stored }).service.settings.renderWhitespace;
   check("a stored none reads as none", modeOf("none") === "none");
   check("a stored selection reads as selection", modeOf("selection") === "selection");
   check("a stored all reads as all", modeOf("all") === "all");
-  check("a legacy stored true reads as all", modeOf(true) === "all");
-  check("a legacy stored false reads as selection", modeOf(false) === "selection");
+  check("a stored boolean reads as the default", modeOf(true) === "selection" && modeOf(false) === "selection");
   check("an unknown stored string reads as the default", modeOf("sometimes") === "selection");
   check("a stored number reads as the default", modeOf(1) === "selection");
   check("a missing key reads as the default", serviceOver({}).service.settings.renderWhitespace === "selection");

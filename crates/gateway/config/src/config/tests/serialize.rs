@@ -102,10 +102,6 @@ default_freshness = "pw"
 default_safesearch = "strict"
 strip_tracking = false
 
-[workshop]
-bind = "127.0.0.1:7999"
-open_browser = true
-
 [stt]
 window_seconds = 8
 interval_ms = 250
@@ -158,7 +154,6 @@ fn serialized_shape_uses_the_toml_key_names() {
         "stt_model",
         "profile",
         "tools",
-        "workshop",
         "stt",
     ] {
         assert!(top.contains_key(key), "missing top-level key `{key}`");
@@ -180,7 +175,6 @@ fn canonical_stt_input_round_trips_as_canonical_stt() {
         json["stt"].get("whisper_backend").is_none(),
         "the default `auto` backend is omitted: {json}"
     );
-    assert!(json["workshop"].is_null());
 
     let cuda = Config::from_toml_str(
         "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\

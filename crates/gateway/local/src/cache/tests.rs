@@ -230,53 +230,19 @@ fn artifact_store_downloads_appear_in_the_cache_listing() {
 }
 
 #[test]
-fn artifact_store_migrates_an_unpinned_cache_hit_into_the_listing() {
-    let body = b"legacy-unpinned-artifact";
-    let digest = hex_sha256(body);
-    let server = FakeServer::new(body);
-    let temp = TempDir::new().expect("tempdir");
-    let url = server.url("legacy-unpinned.gguf");
-    let store = crate::artifacts::ArtifactStore::new(temp.path()).expect("artifact store");
-
-    let path = store.ensure_model(&url, None).expect("initial provision");
-    fs::remove_file(meta_path(&path)).expect("remove new sidecar to model an old cache");
-    let reused = store.ensure_model(&url, None).expect("migrate cache hit");
-
-    assert_eq!(reused, path);
-    assert_eq!(
-        server.requests(),
-        1,
-        "the existing blob is not downloaded again"
-    );
-    assert_eq!(
-        BlobCache::new(temp.path())
-            .expect("blob cache")
-            .list()
-            .expect("list cache"),
-        vec![CacheEntry {
-            source: url,
-            path,
-            sha256: digest,
-            size_bytes: body.len() as u64,
-        }],
-        "the migrated hit feeds the Local Models file status"
-    );
-}
-
-#[test]
 fn sidecar_less_blob_is_not_a_hit_and_is_replaced() {
     // Amendment E: a blob without a sidecar (a pre-existing local model
     // file) is not a cache entry, so the source is re-downloaded and the
     // verified replacement is published with a sidecar.
-    let body = b"fresh-download-over-legacy-blob";
+    let body = b"fresh-download-over-bare-blob";
     let digest = hex_sha256(body);
     let server = FakeServer::new(body);
     let temp = TempDir::new().expect("tempdir");
     let cache = BlobCache::new(temp.path()).expect("cache");
-    let url = server.url("legacy.gguf");
+    let url = server.url("bare.gguf");
     let destination = cache.destination(&url).expect("destination");
     fs::create_dir_all(destination.parent().expect("parent")).expect("mkdir");
-    fs::write(&destination, b"legacy-untracked-bytes").expect("seed bare blob");
+    fs::write(&destination, b"untracked-bytes").expect("seed bare blob");
 
     assert!(
         cache.lookup(&url, None).expect("lookup").is_none(),

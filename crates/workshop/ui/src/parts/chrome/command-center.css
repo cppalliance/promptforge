@@ -13,7 +13,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-xs);
+  gap: var(--space-1);
   block-size: 100%;
   min-inline-size: 0;
 }

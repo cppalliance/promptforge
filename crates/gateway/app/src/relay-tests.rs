@@ -6,11 +6,11 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::build_router;
-use crate::test_support::workshop_state;
+use crate::test_support::loopback_state;
 
 #[tokio::test]
 async fn malformed_json_answers_with_the_openai_error_envelope() {
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -35,7 +35,7 @@ async fn malformed_json_answers_with_the_openai_error_envelope() {
 async fn auth_runs_before_the_body_is_parsed() {
     // No credential and no recorded peer: refused during parts extraction,
     // before the malformed body is read.
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")

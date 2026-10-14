@@ -74,30 +74,6 @@ fn main() {
     }
 }
 
-/// Rejects guide text that names the `[workshop.stt]` section on a line that
-/// does not describe it as rejected.
-fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
-    for (set, _) in BOOKS {
-        let set_dir = src.join(set);
-        for chapter in read_chapters(&set_dir)? {
-            let path = set_dir.join(chapter.file_name);
-            let content = fs::read_to_string(&path)
-                .map_err(|e| AssembleError(format!("cannot read {}: {e}", path.display())))?;
-            for (index, line) in content.lines().enumerate() {
-                if line.contains("[workshop.stt]") && !line.to_ascii_lowercase().contains("reject")
-                {
-                    return Err(AssembleError(format!(
-                        "removed [workshop.stt] section is not described as rejected in {}:{}",
-                        path.display(),
-                        index + 1
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Lists a set directory's chapter files in reading order, reading each
 /// chapter's title from its first H1 heading.
 fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {

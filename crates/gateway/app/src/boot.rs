@@ -340,8 +340,7 @@ vram_gb = 2.0
 /// bearer key baked in.
 ///
 /// The gateway binds loopback on an OS-assigned port; the gateway
-/// discovery file written after the bind records the real port. There is
-/// no `[workshop]` section: the shell serves the workshop UI itself.
+/// discovery file written after the bind records the real port.
 fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
     let (stt_models, profile_models) = match stt {
         InstallerStt::Included => (

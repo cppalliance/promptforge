@@ -58,14 +58,10 @@ const BOOLEAN_SETTING_NAMES: readonly BooleanSettingName[] = ["wordWrap", "rende
 export type EditorSettingsWriter = (value: unknown) => void;
 
 /**
- * Reads a stored Render Whitespace value: a mode string, or the boolean
- * earlier builds wrote (true was on, now all; false was off, now the
- * default selection). Anything else is the default.
+ * Reads a stored Render Whitespace value: a mode string. Anything else is
+ * the default.
  */
 function readRenderWhitespace(value: unknown): RenderWhitespace {
-  if (value === true) {
-    return "all";
-  }
   return RENDER_WHITESPACE_MODES.find((mode) => mode === value) ?? DEFAULT_EDITOR_SETTINGS.renderWhitespace;
 }
 

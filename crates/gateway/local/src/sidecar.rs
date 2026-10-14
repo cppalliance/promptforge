@@ -21,8 +21,7 @@ use std::path::{Path, PathBuf};
 /// v2 stores the template and card as a single-line JSON object in a fenced
 /// block, so a `chat_template` that itself contains ``` fences or `##` headings
 /// round-trips losslessly (serde escapes newlines, so the fence close is
-/// unambiguous). v1 (delimiter-sensitive markdown) is also parsed; unknown
-/// versions are rejected rather than mis-parsed.
+/// unambiguous). Other versions are rejected rather than mis-parsed.
 const SIDECAR_VERSION: u32 = 2;
 /// Byte ceiling for a local sidecar read (SIDECAR-003).
 const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
@@ -205,10 +204,10 @@ fn render_sidecar(meta: &SidecarMeta) -> String {
 
 /// Parses a sidecar markdown string into [`SidecarMeta`].
 ///
-/// Version-aware: v2 reads the single-line JSON body; v1 reads the
-/// delimiter-based markdown; any other (unknown or missing) version is
-/// rejected - only the frontmatter `source`/`fetched` are kept and no
-/// template/card is trusted, rather than mis-parsing an unknown layout.
+/// Version-aware: v2 reads the single-line JSON body; any other (unknown or
+/// missing) version is rejected - only the frontmatter `source`/`fetched`
+/// are kept and no template/card is trusted, rather than mis-parsing an
+/// unknown layout.
 fn parse_sidecar(text: &str) -> SidecarMeta {
     let mut meta = SidecarMeta::default();
 
@@ -232,57 +231,26 @@ fn parse_sidecar(text: &str) -> SidecarMeta {
         }
     }
 
-    match version {
-        Some(2) => {
-            if let Some(json) = extract_fenced_block(body, "", "json")
-                && let Ok(parsed) = serde_json::from_str::<SidecarBody>(json.trim())
-            {
-                meta.chat_template = parsed.chat_template;
-                meta.card = parsed.card;
-            }
-        }
-        Some(1) => {
-            meta.chat_template = extract_fenced_block(body, "## chat_template", "jinja");
-            meta.card = extract_section_text(body, "## card");
-        }
-        _ => {
-            // Unknown/missing version: reject the body, keep only frontmatter.
-        }
+    if version == Some(SIDECAR_VERSION)
+        && let Some(json) = extract_fenced_block(body, "json")
+        && let Ok(parsed) = serde_json::from_str::<SidecarBody>(json.trim())
+    {
+        meta.chat_template = parsed.chat_template;
+        meta.card = parsed.card;
     }
 
     meta
 }
 
-/// Extracts the content of a fenced code block following a heading.
-fn extract_fenced_block(body: &str, heading: &str, lang: &str) -> Option<String> {
-    let heading_pos = body.find(heading)?;
-    let after_heading = &body[heading_pos + heading.len()..];
+/// Extracts the content of the first fenced code block tagged `lang`.
+fn extract_fenced_block(body: &str, lang: &str) -> Option<String> {
     let fence_open = format!("```{lang}\n");
-    let fence_start = after_heading.find(&fence_open)?;
+    let fence_start = body.find(&fence_open)?;
     let content_start = fence_start + fence_open.len();
-    let remaining = &after_heading[content_start..];
+    let remaining = &body[content_start..];
     let fence_end = remaining.find("\n```")?;
     let content = &remaining[..fence_end];
     Some(content.to_owned())
-}
-
-/// Extracts plain text following a heading, up to the next heading or EOF.
-fn extract_section_text(body: &str, heading: &str) -> Option<String> {
-    let heading_pos = body.find(heading)?;
-    let after_heading = &body[heading_pos + heading.len()..];
-    // Skip the heading line's trailing newline(s)
-    let trimmed = after_heading.trim_start_matches('\n');
-    if trimmed.is_empty() {
-        return None;
-    }
-    // Take until the next heading or EOF
-    let end = trimmed.find("\n## ").unwrap_or(trimmed.len());
-    let text = trimmed[..end].trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text.to_owned())
-    }
 }
 
 /// Fetches HF tokenizer config for `chat_template` from a HF URL.

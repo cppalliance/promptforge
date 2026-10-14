@@ -18,10 +18,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// orphans by it.
 const TEMP_SUFFIX: &str = ".pf-tmp";
 
-/// Fixed temp name beside the workshop state file that the sweep also
-/// removes as an orphan.
-const LEGACY_TEMP_NAME: &str = "workshop-state.json.tmp";
-
 /// Process-wide counter making each temp name unique, so two concurrent
 /// writes to the same target never interleave inside one temp file: each
 /// writer fills its own temp completely and the last rename wins whole.
@@ -100,7 +96,7 @@ pub fn sweep_orphaned_temps(dir: &Path) {
         };
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !name.ends_with(TEMP_SUFFIX) && name != LEGACY_TEMP_NAME {
+        if !name.ends_with(TEMP_SUFFIX) {
             continue;
         }
         match fs::remove_file(entry.path()) {
@@ -191,22 +187,6 @@ mod tests {
             dir_names(dir.path()),
             ["state.json"],
             "the sweep removes the orphan and spares the real file"
-        );
-    }
-
-    #[test]
-    fn the_sweep_removes_a_legacy_menu_temp_orphan() {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let target = dir.path().join("workshop-state.json");
-        fs::write(&target, b"good").expect("the seed write succeeds");
-        // The fixed-name temp orphan beside an intact state file.
-        let orphan = dir.path().join(LEGACY_TEMP_NAME);
-        fs::write(&orphan, b"partial").expect("the simulated legacy residue writes");
-        sweep_orphaned_temps(dir.path());
-        assert_eq!(
-            dir_names(dir.path()),
-            ["workshop-state.json"],
-            "the sweep removes the legacy orphan and spares the real file"
         );
     }
 

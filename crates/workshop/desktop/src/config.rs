@@ -186,11 +186,10 @@ mod tests {
         std::fs::write(
             &path,
             "[gateway]\nbase_url = \"http://gateway.lan:9999\"\napi_key = \"k\"\n\n\
-             [server]\nbind = \"127.0.0.1:7910\"\nopen_browser = true\n",
+             [server]\nbind = \"127.0.0.1:7910\"\n",
         )
         .expect("write fixture");
-        let config = load_in(&exe, &cwd, Some(&home))
-            .expect("an old config with the retired browser key still loads");
+        let config = load_in(&exe, &cwd, Some(&home)).expect("the discovered file loads");
         assert_eq!(config.gateway.base_url, "http://gateway.lan:9999");
         assert_eq!(
             config.server.bind, DESKTOP_BIND,

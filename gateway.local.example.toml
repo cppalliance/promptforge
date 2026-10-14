@@ -1,4 +1,4 @@
-# PromptForge gateway configuration, schema version 2.
+# PromptForge gateway configuration, schema version 0.
 # The Config UI writes this file. The ordering below is canonical so equivalent
 # edits do not create avoidable merge noise.
 config-version = 0
@@ -14,12 +14,6 @@ api_key = "change-me-to-a-secret"
 # upstream API keys from the admin config surface - set trust_loopback = false
 # to require the bearer key from every caller.
 trust_loopback = true
-
-# Deprecated Workshop serving settings. They still parse so older files load,
-# but the gateway ignores them and logs a warning.
-[workshop]
-bind = "127.0.0.1:7910"
-open_browser = false
 
 # Optional speech pipeline tuning. STT model files and roles belong in
 # [[stt_model]], not this table.

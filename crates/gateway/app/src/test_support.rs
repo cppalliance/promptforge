@@ -324,18 +324,6 @@ pub(crate) async fn fake_chat_backend() -> SocketAddr {
     addr
 }
 
-/// A state whose key is `test-token` over a config with an empty
-/// `[workshop]` section, as the speech-route auth tests serve.
-pub(crate) fn workshop_state() -> AppState {
-    let config = Config::from_toml_str(
-        "config-version = 0\n\
-         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-         [workshop]\n",
-    )
-    .expect("config parses");
-    app_state(config, None)
-}
-
 /// A state whose key is `test-token`, with `trust_loopback` set as
 /// given (absent means the default).
 pub(crate) fn loopback_state(trust_loopback: Option<bool>) -> AppState {

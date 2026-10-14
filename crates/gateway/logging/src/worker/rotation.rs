@@ -88,10 +88,6 @@ pub(super) fn rotation_prepared_path(current: &Path, old_mask: u8) -> PathBuf {
     artifact_path(current, &format!(".rotation-prepared-{old_mask:02x}"))
 }
 
-fn legacy_rotation_prepared_path(current: &Path) -> PathBuf {
-    artifact_path(current, ".rotation-prepared")
-}
-
 pub(super) fn rotation_targets(current: &Path, retained: &[PathBuf]) -> Vec<PathBuf> {
     std::iter::once(current.to_path_buf())
         .chain(retained.iter().cloned())
@@ -111,29 +107,11 @@ fn rotation_old_mask(targets: &[PathBuf]) -> io::Result<u8> {
         })
 }
 
-fn read_legacy_rotation_mask(path: &Path) -> io::Result<u8> {
-    let bytes = std::fs::read(path)?;
-    if bytes.len() != 1 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid log rotation recovery marker",
-        ));
-    }
-    Ok(bytes[0])
-}
-
-pub(super) fn find_rotation_prepared(current: &Path) -> io::Result<Option<(PathBuf, u8)>> {
-    for old_mask in 0..64 {
+pub(super) fn find_rotation_prepared(current: &Path) -> Option<(PathBuf, u8)> {
+    (0..64).find_map(|old_mask| {
         let path = rotation_prepared_path(current, old_mask);
-        if path.exists() {
-            return Ok(Some((path, old_mask)));
-        }
-    }
-    let legacy = legacy_rotation_prepared_path(current);
-    if legacy.exists() {
-        return read_legacy_rotation_mask(&legacy).map(|old_mask| Some((legacy, old_mask)));
-    }
-    Ok(None)
+        path.exists().then_some((path, old_mask))
+    })
 }
 
 fn remove_rotation_file(
@@ -173,7 +151,7 @@ pub(super) fn cleanup_rotation_with(
         fault,
     )?;
     sync_parent(current, fault)?;
-    while let Some((prepared, _)) = find_rotation_prepared(current)? {
+    while let Some((prepared, _)) = find_rotation_prepared(current) {
         remove_rotation_file(&prepared, "cleanup prepared rotation marker", fault)?;
     }
     sync_parent(current, fault)?;
@@ -242,15 +220,9 @@ pub(super) fn recover_rotation(current: &Path, retained: &[PathBuf]) -> io::Resu
     if rotation_committed_path(current).exists() {
         return cleanup_rotation(current, retained);
     }
-    let Some((prepared, old_mask)) = find_rotation_prepared(current)? else {
+    let Some((prepared, old_mask)) = find_rotation_prepared(current) else {
         return cleanup_rotation(current, retained);
     };
-    if old_mask >= 64 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid log rotation recovery mask",
-        ));
-    }
     rollback_rotation(current, retained, &prepared, old_mask)
 }
 

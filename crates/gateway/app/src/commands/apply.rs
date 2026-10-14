@@ -27,14 +27,7 @@ use crate::routing::Routing;
 /// Top-level sections the process reads once at boot. A change to one of
 /// them promotes to disk but takes effect at the next start, so the apply
 /// reports `restart_required`.
-const RESTART_SECTIONS: [&str; 6] = [
-    "server",
-    "workshop",
-    "profile",
-    "local_model",
-    "stt_model",
-    "stt",
-];
+const RESTART_SECTIONS: [&str; 5] = ["server", "profile", "local_model", "stt_model", "stt"];
 
 /// One shadow as the Apply route captured it, ready to land in its real
 /// file at the command's commit.

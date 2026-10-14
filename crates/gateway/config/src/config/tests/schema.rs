@@ -1,4 +1,4 @@
-//! Tests for the config schema version, hard-break detection, and profile selection.
+//! Tests for the config schema version, unknown-key rejection, and profile selection.
 
 use std::fs;
 
@@ -105,167 +105,76 @@ fn canonical_stt_section_parses_into_the_runtime_shape() {
     assert_eq!(stt.whisper_backend(), WhisperBackend::Auto);
 }
 
-#[test]
-fn hard_breaks_name_file_key_line_and_replacement() {
-    for (raw, key, line, replacement) in [
-        (
-            "config-version = 0\ninclude = [\"base.toml\"]\n",
-            "include",
-            ":2:",
-            "[[profile]]",
-        ),
-        (
-            "config-version = 0\nmodels = [\"a\"]\n",
-            "models",
-            ":2:",
-            "[[profile]]",
-        ),
-        (
-            "config-version = 0\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n\
-             [workshop.voice]\ninterim_model='tiny.bin'\n",
-            "workshop.voice.interim_model",
-            ":6:",
-            "[[stt_model]]",
-        ),
-    ] {
-        let error = Config::from_toml_str(raw).expect_err("legacy layout must fail");
-        let message = error.to_string();
-        assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
-        assert!(message.contains("<memory>"), "file named: {message}");
-        assert!(message.contains(key), "key named: {message}");
-        assert!(message.contains(line), "line named: {message}");
-        assert!(
-            message.contains(replacement),
-            "replacement named: {message}"
-        );
+/// The error's message followed by every source in its chain, so a test can
+/// read the deserializer's detail behind the opaque wrapper.
+fn error_chain(error: &crate::ConfigError) -> String {
+    let mut chain = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        chain.push_str(": ");
+        chain.push_str(&inner.to_string());
+        source = inner.source();
     }
+    chain
+}
+
+/// A minimal valid `[server]` section.
+const SERVER: &str = "[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n";
+
+#[test]
+fn an_unknown_root_key_fails_to_parse_naming_the_key() {
+    let error = Config::from_toml_str(&format!("config-version = 0\nextra = 1\n{SERVER}"))
+        .expect_err("an unknown root key must fail");
+
+    assert_eq!(error.kind(), ConfigErrorKind::Parse);
+    let chain = error_chain(&error);
+    assert!(chain.contains("extra"), "key named: {chain}");
 }
 
 #[test]
-fn hard_break_detection_uses_toml_keys_not_string_contents() {
-    let valid = r#"
-config-version = 0
-[server]
-bind = "127.0.0.1:8081"
-api_key = """
-include = ["not-a-config-key.toml"]
-"""
-"#;
-    Config::from_toml_str(valid).expect("legacy spelling inside a value is data");
+fn an_unknown_section_key_fails_to_parse_naming_the_key() {
+    let error = Config::from_toml_str(&format!("config-version = 0\n{SERVER}extra = 1\n"))
+        .expect_err("an unknown section key must fail");
 
-    for (raw, key, line) in [
-        (
-            "\"config-version\" = 2\n\"include\" = [\"base.toml\"]\n",
-            "include",
-            ":2:",
-        ),
-        (
-            "config-version = 0\nworkshop.voice.final_model = \"small.bin\"\n",
-            "workshop.voice.final_model",
-            ":2:",
-        ),
-        (
-            "config-version = 0\n[\"workshop\".\"voice\"]\nwindow_seconds = 8\n",
-            "workshop.voice",
-            ":2:",
-        ),
-    ] {
-        let error = Config::from_toml_str(raw).expect_err("legacy key must hard-break");
-        let message = error.to_string();
-        assert_eq!(
-            error.kind(),
-            ConfigErrorKind::HardBreak,
-            "expected hard break for {key}: {message}"
-        );
-        assert!(message.contains(key), "key named: {message}");
-        assert!(message.contains(line), "line named: {message}");
-    }
-}
-
-/// A `config-version` value the loader rejects with a hard break. Spelled as
-/// a number so the repository-wide check that no `config-version` header uses
-/// this value keeps passing while the tests still exercise a document written
-/// at it.
-const PREVIOUS_VERSION: u32 = 2;
-
-#[test]
-fn missing_or_wrong_config_version_is_a_located_hard_break() {
-    for raw in [
-        "[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
-        "config-version = 1\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
-        format!("config-version = {PREVIOUS_VERSION}\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n"),
-    ] {
-        let error = Config::from_toml_str(&raw).expect_err("version must be explicit");
-        let message = error.to_string();
-        assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
-        assert!(message.contains(":1:"), "line named: {message}");
-        assert!(
-            message.contains("config-version = 0"),
-            "replacement names the required value: {message}"
-        );
-    }
+    assert_eq!(error.kind(), ConfigErrorKind::Parse);
+    let chain = error_chain(&error);
+    assert!(chain.contains("extra"), "key named: {chain}");
 }
 
 #[test]
-fn the_previous_format_version_fails_with_a_message_naming_zero() {
-    let previous_header = format!("config-version = {PREVIOUS_VERSION}");
-    let previous = CATALOG.replacen("config-version = 0", &previous_header, 1);
-    assert_ne!(
-        previous, CATALOG,
-        "the fixture declares the current version"
-    );
+fn an_unknown_nested_table_key_fails_to_parse_naming_the_key() {
+    let error = Config::from_toml_str(&format!(
+        "config-version = 0\n{SERVER}\
+         [tools.web_search]\nprovider = \"brave\"\napi_key = \"s\"\nextra = 1\n"
+    ))
+    .expect_err("an unknown nested table key must fail");
 
-    let error = Config::from_toml_str(&previous)
-        .expect_err("the previous format version is no longer accepted");
-    let message = error.to_string();
+    assert_eq!(error.kind(), ConfigErrorKind::Parse);
+    let chain = error_chain(&error);
+    assert!(chain.contains("extra"), "key named: {chain}");
+}
 
-    assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
+#[test]
+fn a_missing_config_version_fails_to_parse_naming_the_key() {
+    let error = Config::from_toml_str(SERVER).expect_err("the version is required");
+
+    assert_eq!(error.kind(), ConfigErrorKind::Parse);
+    let chain = error_chain(&error);
+    assert!(chain.contains("config-version"), "key named: {chain}");
+}
+
+#[test]
+fn a_config_version_other_than_zero_fails_validation_naming_required_and_actual() {
+    let error = Config::from_toml_str(&format!("config-version = 1\n{SERVER}"))
+        .expect_err("only version 0 is accepted");
+
+    assert_eq!(error.kind(), ConfigErrorKind::Validation);
     assert!(
-        message.contains("config-version = 0"),
-        "the message names the required value: {message}"
+        error
+            .to_string()
+            .contains("config-version must be 0, got 1"),
+        "required and actual named: {error}"
     );
-    assert!(
-        !message.contains(&previous_header),
-        "the message does not name the rejected value as the fix: {message}"
-    );
-}
-
-#[test]
-fn sibling_profiles_directory_is_a_hard_break() {
-    let (temp, path) = file_fixture();
-    fs::create_dir(temp.path().join("profiles")).expect("create legacy directory");
-
-    let error = Config::load(&path, &ProfileSelection::new(Some("work"), None))
-        .expect_err("profiles directory must fail");
-
-    assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
-    let message = error.to_string();
-    assert!(
-        message.contains("gateway.toml:1"),
-        "file and line: {message}"
-    );
-    assert!(message.contains("profiles/"), "feature named: {message}");
-    assert!(
-        message.contains("[[profile]]"),
-        "replacement named: {message}"
-    );
-}
-
-#[test]
-fn file_hard_break_names_the_loaded_path_and_source_line() {
-    let temp = TempDir::new().expect("temp dir");
-    let path = temp.path().join("gateway.toml");
-    fs::write(&path, "config-version = 0\ninclude = [\"base.toml\"]\n")
-        .expect("write legacy config");
-
-    let error = Config::load(&path, &ProfileSelection::default())
-        .expect_err("legacy config must hard-break before selection");
-    let message = error.to_string();
-
-    assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
-    assert!(message.contains(&path.display().to_string()));
-    assert!(message.contains(":2:"));
-    assert!(message.contains("include"));
 }
 
 #[test]

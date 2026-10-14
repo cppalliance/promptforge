@@ -138,7 +138,7 @@ fn byte_boundaries_rotate_a_full_numbered_chain_without_splitting_utf8() {
 }
 
 #[test]
-fn restart_caps_legacy_segments_and_prunes_oldest_before_admission() {
+fn restart_caps_oversized_segments_and_prunes_oldest_before_admission() {
     let temp = TempStateDir::new("segment-restart");
     let logs = temp.0.join("logs");
     std::fs::create_dir_all(&logs).expect("logs dir");
@@ -165,10 +165,10 @@ fn restart_caps_legacy_segments_and_prunes_oldest_before_admission() {
         .expect("write after first restart");
     first.flush().expect("flush first restart");
     let normalized =
-        std::fs::read_to_string(logs.join("gateway.log.1")).expect("normalized legacy segment");
+        std::fs::read_to_string(logs.join("gateway.log.1")).expect("normalized oversized segment");
     assert!(
         normalized.starts_with(SEGMENT_TRUNCATION_MARKER),
-        "an oversized legacy segment records the omitted prefix"
+        "an oversized segment records the omitted prefix"
     );
     assert!(
         normalized.ends_with(terminal),

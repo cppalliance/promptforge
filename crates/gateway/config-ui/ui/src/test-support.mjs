@@ -819,11 +819,9 @@ export function gatewayStub({
             422,
           );
         }
-        // Boot-owned sections the body omits survive in the pending view.
-        for (const section of ["server", "workshop"]) {
-          if (!(section in body) && section in state.pending) {
-            body[section] = structuredClone(state.pending[section]);
-          }
+        // The boot-owned [server] section survives in the pending view when the body omits it.
+        if (!("server" in body) && "server" in state.pending) {
+          body.server = structuredClone(state.pending.server);
         }
         state.pending = body;
         redactSecrets(state.pending);

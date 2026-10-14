@@ -183,17 +183,6 @@ test("Workshop exposes canonical STT tuning", async () => {
   root.querySelector(".workshop-enable").click();
   await settle();
 
-  assert.equal(
-    root.querySelector(".field-row[data-key='bind']"),
-    null,
-    "the inert listener bind stays out of the editor: the gateway runs no workshop listener",
-  );
-  assert.equal(
-    root.querySelector(".field-row[data-key='open_browser']"),
-    null,
-    "the inert open_browser flag stays out of the editor",
-  );
-
   assert.match(root.querySelector(".workshop-stt").textContent, /STT capture tuning/);
   assert.equal(
     root.querySelector(".field-row[data-key='window_seconds'] input").value,
@@ -211,11 +200,6 @@ test("Workshop exposes canonical STT tuning", async () => {
   await settle();
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
-  assert.equal(
-    bodies[0].workshop?.bind,
-    undefined,
-    "a fresh section omits the inert listener bind",
-  );
   assert.equal(bodies[0].stt.window_seconds, 15);
   assert.equal(
     bodies[0].server.bind,
@@ -262,7 +246,6 @@ test("a canonical STT payload round-trips through the Workshop editor", async ()
 
   const body = putBodies(stub, "/admin/config")[0];
   assert.equal(body.stt.window_seconds, 9);
-  assert.equal(body.workshop, undefined);
 });
 
 test("a local dominion shows vram_gb, and switching kind to remote hides it", async () => {

@@ -89,7 +89,7 @@ function checkRootsFetch(fetchLog, failures) {
 
 // The user bucket (ui-state.json), every key set off its default.
 const USER_DOC = {
-  editor_settings: { wordWrap: true, renderWhitespace: true, renderControlCharacters: false, columnSelection: true },
+  editor_settings: { wordWrap: true, renderWhitespace: "all", renderControlCharacters: false, columnSelection: true },
   // Level 2 of the 1.2-per-level zoom: a stored factor restores to its nearest level.
   zoom: 1.44,
   recent_files: ["C:\\seed\\a.md", "C:\\seed\\b.md"],
@@ -101,9 +101,7 @@ const DEFAULT_EDITOR_SETTINGS = {
   renderControlCharacters: true,
   columnSelection: false,
 };
-// The seeded document keeps the legacy boolean form of Render Whitespace
-// (true was "on"); the service reads it as the all mode.
-const SEEDED_EDITOR_SETTINGS = { ...USER_DOC.editor_settings, renderWhitespace: "all" };
+const SEEDED_EDITOR_SETTINGS = USER_DOC.editor_settings;
 
 // The workspace bucket (.pfwork kv rows): a v5 layout envelope as
 // buildLayoutEnvelope writes it (tree left, agent right) whose group ids

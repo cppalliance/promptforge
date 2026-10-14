@@ -20,6 +20,34 @@ fn the_server_section_reports_its_bind_address_and_bearer_key() {
 }
 
 #[test]
+fn the_server_client_url_swaps_an_unspecified_bind_for_loopback() {
+    let url = |bind: &str| {
+        Config::from_toml_str(&format!(
+            "config-version = 0\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+        ))
+        .expect("fixture parses")
+        .server()
+        .client_url()
+    };
+    assert_eq!(url("0.0.0.0:8081"), "http://127.0.0.1:8081");
+    assert_eq!(url("[::]:8081"), "http://[::1]:8081");
+}
+
+#[test]
+fn the_server_client_url_keeps_a_reachable_bind() {
+    let url = |bind: &str| {
+        Config::from_toml_str(&format!(
+            "config-version = 0\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+        ))
+        .expect("fixture parses")
+        .server()
+        .client_url()
+    };
+    assert_eq!(url("127.0.0.1:8081"), "http://127.0.0.1:8081");
+    assert_eq!(url("192.168.1.5:9000"), "http://192.168.1.5:9000");
+}
+
+#[test]
 fn an_endpoint_reports_its_id_protocol_base_url_and_key() {
     let config = parse(
         r#"

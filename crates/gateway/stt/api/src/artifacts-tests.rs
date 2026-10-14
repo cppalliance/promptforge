@@ -20,7 +20,6 @@ pub(super) fn selected(source: &str, sha256: Option<&str>, sections: &str) -> Co
     let catalog = Config::from_toml_str(&format!(
         "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
-         [workshop]\n\
          {sections}\
          [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\n\
          {pin}vram_gb = 1.0\n\

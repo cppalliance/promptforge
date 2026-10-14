@@ -6,10 +6,7 @@
 
 use std::fs;
 use std::net::SocketAddr;
-use std::ops::Range;
 use std::path::Path;
-
-use serde::Deserialize;
 
 use super::{
     Config, RawConfig, RawSttPipelineConfig, Secret, VarLookupFn, WebSearchConfig,
@@ -34,9 +31,9 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) when the file or state
-    /// cannot be read, the TOML or interpolation is invalid, a removed layout
-    /// feature is present, a selected name is malformed, an ephemeral
-    /// selection names an undefined profile, or semantic validation fails.
+    /// cannot be read, the TOML or interpolation is invalid, a selected name
+    /// is malformed, an ephemeral selection names an undefined profile, or
+    /// semantic validation fails.
     pub fn load(
         path: &Path,
         inputs: &ProfileSelection,
@@ -45,7 +42,6 @@ impl Config {
     }
 
     fn load_repr(path: &Path, inputs: &ProfileSelection) -> Result<Config, ConfigError> {
-        reject_profiles_directory(path)?;
         let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.to_owned(),
             source,
@@ -118,7 +114,6 @@ impl Config {
             profiles: self.profiles.clone(),
             tools: self.tools.clone(),
             stt: self.stt.as_ref().map(RawSttPipelineConfig::from),
-            workshop: self.workshop.clone(),
         }
     }
 
@@ -196,7 +191,6 @@ impl Config {
             path: path.map(Path::to_path_buf),
             source: Box::new(source),
         })?;
-        reject_removed_layout(raw, path)?;
         Self::from_value(document, lookup)
     }
 
@@ -213,155 +207,4 @@ impl Config {
         config.validate()?;
         Ok(config)
     }
-}
-
-pub(crate) fn reject_profiles_directory(path: &Path) -> Result<(), ConfigError> {
-    let profiles = path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("profiles");
-    if profiles.is_dir() {
-        return Err(ConfigError::HardBreak {
-            path: path.to_owned(),
-            line: 1,
-            key: "profiles/",
-            replacement: "move every profile into this file as a [[profile]] checklist",
-        });
-    }
-    Ok(())
-}
-
-#[derive(Deserialize, Default)]
-struct RemovedLayoutProbe {
-    #[serde(rename = "config-version", default)]
-    config_version: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    include: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    models: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    workshop: Option<RemovedWorkshopProbe>,
-}
-
-#[derive(Deserialize, Default)]
-struct RemovedWorkshopProbe {
-    #[serde(default)]
-    voice: Option<RemovedVoiceProbe>,
-}
-
-#[derive(Deserialize, Default)]
-struct RemovedVoiceProbe {
-    #[serde(default)]
-    interim_model: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    final_model: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    interim_source: Option<toml::Spanned<toml::Value>>,
-    #[serde(default)]
-    final_source: Option<toml::Spanned<toml::Value>>,
-}
-
-fn reject_removed_layout(raw: &str, path: Option<&Path>) -> Result<(), ConfigError> {
-    let path = path.map_or_else(|| std::path::PathBuf::from("<memory>"), Path::to_path_buf);
-    let probe: RemovedLayoutProbe = toml::from_str(raw).map_err(|source| ConfigError::Parse {
-        path: Some(path.clone()),
-        source: Box::new(source),
-    })?;
-
-    if let Some(value) = probe.include {
-        return Err(hard_break(
-            path,
-            line_for_span(raw, value.span()),
-            "include",
-            "use one gateway.toml with [[profile]] checklist entries",
-        ));
-    }
-    if let Some(value) = probe.models {
-        return Err(hard_break(
-            path,
-            line_for_span(raw, value.span()),
-            "models",
-            "move this checklist into a [[profile]] models key",
-        ));
-    }
-    if let Some(voice) = probe.workshop.and_then(|workshop| workshop.voice) {
-        for (value, key) in [
-            (voice.interim_model.as_ref(), "workshop.voice.interim_model"),
-            (voice.final_model.as_ref(), "workshop.voice.final_model"),
-            (
-                voice.interim_source.as_ref(),
-                "workshop.voice.interim_source",
-            ),
-            (voice.final_source.as_ref(), "workshop.voice.final_source"),
-        ] {
-            if let Some(value) = value {
-                return Err(hard_break(
-                    path,
-                    line_for_span(raw, value.span()),
-                    key,
-                    "use [stt] tuning and a global [[stt_model]] entry",
-                ));
-            }
-        }
-        return Err(hard_break(
-            path,
-            find_voice_header_line(raw).unwrap_or(1),
-            "workshop.voice",
-            "move capture tuning to [stt] and define models as [[stt_model]]",
-        ));
-    }
-
-    match probe.config_version {
-        Some(version) if version.get_ref().as_integer() == Some(0) => Ok(()),
-        Some(version) => Err(hard_break(
-            path,
-            line_for_span(raw, version.span()),
-            "config-version",
-            "set config-version = 0 and use the single-file profile layout",
-        )),
-        None => Err(hard_break(
-            path,
-            1,
-            "config-version",
-            "add config-version = 0 before the first table",
-        )),
-    }
-}
-
-fn hard_break(
-    path: std::path::PathBuf,
-    line: usize,
-    key: &'static str,
-    replacement: &'static str,
-) -> ConfigError {
-    ConfigError::HardBreak {
-        path,
-        line,
-        key,
-        replacement,
-    }
-}
-
-fn line_for_span(raw: &str, span: Range<usize>) -> usize {
-    raw[..span.start.min(raw.len())].split('\n').count()
-}
-
-fn find_voice_header_line(raw: &str) -> Option<usize> {
-    raw.lines().enumerate().find_map(|(index, line)| {
-        let trimmed = line.trim();
-        let header = trimmed
-            .strip_prefix("[[")
-            .and_then(|rest| rest.strip_suffix("]]"))
-            .or_else(|| {
-                trimmed
-                    .strip_prefix('[')
-                    .and_then(|rest| rest.strip_suffix(']'))
-            })?;
-        let normalized = header
-            .split('.')
-            .map(|segment| segment.trim().trim_matches(['"', '\'']))
-            .collect::<Vec<_>>()
-            .join(".");
-        (normalized == "workshop.voice").then_some(index + 1)
-    })
 }

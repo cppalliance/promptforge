@@ -131,23 +131,6 @@ fn read_meta(blob: &Path) -> Result<Option<BlobMeta>, LocalError> {
     }
 }
 
-/// Whether a blob already has usable listing metadata for `source`.
-pub(crate) fn blob_meta_matches(blob: &Path, source: &str) -> Result<bool, LocalError> {
-    let Some(meta) = read_meta(blob)? else {
-        return Ok(false);
-    };
-    let size_bytes = fs::metadata(blob)
-        .map_err(|source_err| LocalError::Io {
-            operation: "stat cached blob",
-            path: blob.to_owned(),
-            source: source_err,
-        })?
-        .len();
-    Ok(meta.source == source
-        && meta.size_bytes == size_bytes
-        && parse_expected_digest(&meta.sha256).is_ok())
-}
-
 /// The cache-hit test: blob and sidecar present, and the sidecar's digest
 /// matching `expected` when a pin is named (Amendment E). The blob's bytes are
 /// never re-hashed; the sidecar written at download completion is the record

@@ -5,7 +5,7 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::build_router;
-use crate::test_support::workshop_state;
+use crate::test_support::loopback_state;
 
 #[cfg(feature = "stt")]
 #[test]
@@ -25,7 +25,7 @@ fn speech_snapshot_serializes_only_generic_facade_facts() {
 #[cfg(feature = "stt")]
 #[tokio::test]
 async fn transcription_checks_bearer_auth_before_multipart_extraction() {
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -46,7 +46,7 @@ async fn transcription_checks_bearer_auth_before_multipart_extraction() {
 #[cfg(feature = "stt")]
 #[tokio::test]
 async fn authenticated_multipart_rejection_uses_the_openai_error_envelope() {
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -84,7 +84,7 @@ async fn batch_validation_preserves_the_gateway_error_message_contract() {
                 Content-Type: audio/wav\r\n\r\n\
                 bytes\r\n\
                 --empty--\r\n";
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -131,7 +131,7 @@ async fn unloaded_transcription_model_returns_openai_model_not_found() {
     .into_bytes();
     body.append(&mut wav);
     body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -160,7 +160,7 @@ async fn unloaded_transcription_model_returns_openai_model_not_found() {
 
 #[tokio::test]
 async fn speech_checks_bearer_auth_before_json_extraction() {
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -180,7 +180,7 @@ async fn speech_checks_bearer_auth_before_json_extraction() {
 
 #[tokio::test]
 async fn authenticated_malformed_json_uses_the_openai_error_envelope() {
-    let response = build_router(workshop_state(), None)
+    let response = build_router(loopback_state(None), None)
         .oneshot(
             Request::builder()
                 .method("POST")

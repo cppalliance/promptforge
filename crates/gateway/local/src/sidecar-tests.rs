@@ -71,15 +71,6 @@ fn unknown_version_is_rejected_not_misparsed() {
 }
 
 #[test]
-fn v1_legacy_sidecar_still_parses() {
-    // A v1 markdown sidecar round-trips its template.
-    let v1 = "---\nversion: 1\nsource: https://hf/x\n---\n\n## chat_template\n\n```jinja\n{{ bos }}\n```\n";
-    let meta = parse_sidecar(v1);
-    assert_eq!(meta.source.as_deref(), Some("https://hf/x"));
-    assert_eq!(meta.chat_template.as_deref(), Some("{{ bos }}"));
-}
-
-#[test]
 fn v2_round_trips_template_with_embedded_fences_and_headings() {
     // SIDECAR-005: the v2 JSON body round-trips a template that itself
     // contains ``` fences or `##` headings losslessly.

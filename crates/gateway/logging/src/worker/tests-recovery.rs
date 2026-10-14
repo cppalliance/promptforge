@@ -29,9 +29,7 @@ fn interrupted_final_commit_cleanup(current: &Path, fault: &FaultInjector) -> bo
     fault.failed_operation == Some("sync parent directory")
         && fault.commit_marker_written
         && !rotation_committed_path(current).exists()
-        && find_rotation_prepared(current)
-            .expect("inspect prepared rotation marker")
-            .is_none()
+        && find_rotation_prepared(current).is_none()
 }
 
 #[test]

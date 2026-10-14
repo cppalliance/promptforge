@@ -1,9 +1,9 @@
 //! Tests for stage mode: chapters come from the docs root it is given,
 //! which must be set and name a directory; one flat tree per book with its
 //! config, back-link script, chapters, rendered overview, and SUMMARY, and
-//! each book's single-file export beside the trees; a relative output path,
-//! a broken SUMMARY link, and a `[workshop.stt]` claim are rejected;
-//! output is deterministic and the guide and docs trees are only read.
+//! each book's single-file export beside the trees; a relative output path
+//! and a broken SUMMARY link are rejected; output is deterministic and the
+//! guide and docs trees are only read.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -238,27 +238,6 @@ fn stage_rejects_a_summary_link_that_does_not_resolve() {
     let message = error.to_string();
     assert!(message.contains("02-proxy (draft"), "{message}");
     assert!(message.contains("gateway book"), "{message}");
-}
-
-#[test]
-fn stage_rejects_a_stale_workshop_stt_claim_in_any_set_before_writing() {
-    for (set, _) in BOOKS {
-        let fake = fake_guide();
-        fs::write(
-            fake.docs.join("src").join(set).join("09-stale.md"),
-            "# Stale\n\nLegacy `[workshop.stt]` input is accepted.\n",
-        )
-        .expect("stale chapter");
-        let out = tempfile::tempdir().expect("tempdir");
-        let error = stage_fake(&fake, out.path()).expect_err(set);
-        let message = error.to_string();
-        assert!(message.contains("09-stale.md"), "{set}: {message}");
-        assert!(
-            message.contains("removed [workshop.stt] section is not described as rejected"),
-            "{set}: {message}"
-        );
-        assert!(snapshot(out.path()).is_empty(), "{set}");
-    }
 }
 
 #[test]

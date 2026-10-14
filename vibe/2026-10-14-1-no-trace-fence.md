@@ -343,7 +343,7 @@ Work:
 
 <step-4>
 
-### Step 4: Remove the live compatibility code for removed features
+### Step 4: Remove the live compatibility code for removed features [completed]
 
 - Component: Trace removal
 - Tests:

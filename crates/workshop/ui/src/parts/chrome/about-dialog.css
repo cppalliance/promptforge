@@ -16,10 +16,10 @@
 .ws-about-dialog {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-2);
   box-sizing: border-box;
-  inline-size: min(var(--ws-about-width), calc(100vw - 2 * var(--space-xl)));
-  padding: var(--space-xl);
+  inline-size: min(var(--ws-about-width), calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-4);
   color: var(--cursor-text-primary);
   background: var(--bg-elevated);
   border: var(--ws-border-width) solid var(--cursor-stroke-secondary);
@@ -52,7 +52,7 @@
 .ws-about-dialog__row {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
+  gap: var(--space-2);
   min-block-size: var(--height-sm);
 }
 
@@ -97,7 +97,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-1);
-  margin-block-start: var(--space-md);
+  margin-block-start: var(--space-2);
 }
 
 .ws-about-dialog__check:disabled {

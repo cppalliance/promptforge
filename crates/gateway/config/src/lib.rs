@@ -12,10 +12,8 @@
 //! Start at [`Config`]: [`Config::load`] reads the single file and resolves
 //! command-line, environment, or sibling-state selection, while
 //! [`Config::from_toml_str`] validates an unselected in-memory catalog.
-//! Removed include chains, profile directories, top-level allowlists, and
-//! `[workshop.voice]` fields produce hard-break diagnostics with file, key,
-//! and line. Failures are reported as the opaque
-//! [`ConfigError`]; classify them with [`ConfigError::kind`].
+//! Failures are reported as the opaque [`ConfigError`]; classify them with
+//! [`ConfigError::kind`].
 //!
 //! Pending edits stage as a shadow file beside the real one
 //! (`gateway.toml` gains `gateway.toml.next`):
@@ -45,7 +43,7 @@ pub use crate::config::{
     MultimodalProjectorConfig, ProfileConfig, Protocol, QueuePolicy, RECOMMENDED_STT_MODELS,
     RecommendedSttModel, SILERO_VAD_MODEL, SearchProvider, Secret, ServerConfig, SpeculationType,
     SpeculativeConfig, SpeechArtifactPin, SttModelConfig, SttPipelineConfig, SttRole, ThinkingMode,
-    ToolDialect, ToolsConfig, VarLookupFn, WebSearchConfig, WhisperBackend, WorkshopConfig,
+    ToolDialect, ToolsConfig, VarLookupFn, WebSearchConfig, WhisperBackend,
 };
 pub use crate::profile::{
     ProfileName, ProfileNameError, ProfileSelection, ProfileState, profile_state_path,

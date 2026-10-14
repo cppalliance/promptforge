@@ -1,10 +1,10 @@
 .ws-update-banner {
   position: fixed;
-  right: var(--space-lg);
-  bottom: calc(var(--ws-update-banner-offset) + var(--space-lg));
+  right: var(--space-3);
+  bottom: calc(var(--ws-update-banner-offset) + var(--space-3));
   z-index: 190;
-  width: min(var(--ws-update-banner-width), calc(100vw - 2 * var(--space-lg)));
-  padding: var(--space-lg);
+  width: min(var(--ws-update-banner-width), calc(100vw - 2 * var(--space-3)));
+  padding: var(--space-3);
   color: var(--text);
   background: var(--bg-raised);
   border: var(--ws-border-width) solid var(--border);
@@ -18,14 +18,14 @@
 }
 
 .ws-update-banner p {
-  margin: var(--space-sm) 0 var(--space-lg);
+  margin: var(--space-1-5) 0 var(--space-3);
   color: var(--text-muted);
 }
 
 .ws-update-banner__actions {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-sm);
+  gap: var(--space-1-5);
 }
 
 /* The banner's and overlay's buttons wear the shared look controls
@@ -41,8 +41,8 @@
 }
 
 .ws-update-screen__panel {
-  width: min(var(--ws-update-screen-width), calc(100vw - 2 * var(--space-xl)));
-  padding: var(--space-xl);
+  width: min(var(--ws-update-screen-width), calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-4);
   color: var(--text);
   background: var(--bg-raised);
   border: var(--ws-border-width) solid var(--border);
@@ -50,17 +50,17 @@
 }
 
 .ws-update-screen__panel h2 {
-  margin: 0 0 var(--space-md);
+  margin: 0 0 var(--space-2);
   font-size: var(--ws-title-font-size);
   font-weight: 500;
 }
 
 .ws-update-screen__panel .progress {
-  margin: var(--space-md) 0;
+  margin: var(--space-2) 0;
 }
 
 .ws-update-screen__panel details {
-  margin: var(--space-md) 0;
+  margin: var(--space-2) 0;
   color: var(--text-muted);
 }
 
