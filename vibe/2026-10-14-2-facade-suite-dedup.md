@@ -4,19 +4,19 @@ overview: Shrink the facade suite's source by deleting tests and helpers that du
 todos:
   - id: delete-duplicates
     content: Delete auto_traits.rs, tools.rs, metrics.rs, and the six in-file duplicate tests; update module docs and main.rs
-    status: pending
+    status: completed
   - id: move-shipped
     content: Move every_shipped_prompt_parses_offline into the Engine suite and delete the facade's walker copy
-    status: pending
+    status: completed
   - id: tempfile
     content: Add tempfile as a dev-dependency of the facade, engine, and vfs crates and replace the three TempDir copies
-    status: pending
+    status: completed
   - id: shared-helpers
     content: Add model, descriptor, note, and Trace::text to the harness and apply them; parsing.rs fixtures as tuples
-    status: pending
+    status: completed
   - id: trim-prose
     content: Trim harness and test prose that restates the code; report the token and line counts
-    status: pending
+    status: completed
 isProject: false
 ---
 
