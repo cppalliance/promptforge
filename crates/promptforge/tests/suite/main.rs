@@ -1,8 +1,9 @@
 //! The facade's integration suite, written against `promptforge` paths
 //! only: the offline prompt-fixture cases that need only the public API -
-//! parse-error contracts, shipped-prompt policy, and the prepare pass -
-//! over shared test support in [`support`]. The fixture cases that reach
-//! items outside the facade run in `promptforge-engine`'s own suite.
+//! parse-error contracts, the shipped research prompt's run, and the
+//! prepare pass - over shared test support in [`support`]. The fixture
+//! cases that reach items outside the facade run in `promptforge-engine`'s
+//! own suite.
 #![expect(
     clippy::expect_used,
     reason = "test helpers panic on setup failure, which is the desired behavior"

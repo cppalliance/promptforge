@@ -269,7 +269,7 @@ Work:
 
 <step-2>
 
-### Step 2: Move the shipped-prompt parse test into the Engine suite
+### Step 2: Move the shipped-prompt parse test into the Engine suite [completed]
 
 - Component: Duplicate removal
 - Tests:

@@ -1,51 +1,14 @@
-//! Every shipped prompt under the workspace `prompts/` tree parses offline;
-//! the shipped research prompt runs end to end over its web tools.
+//! The shipped research prompt runs end to end over its web tools.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use promptforge::RunResult;
 use promptforge::effect::{EffectRecord, ToolCaller};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::{Prompt, RunResult};
 use serde_json::json;
 
 use super::support::{Scenario, TestResult, Tool, calls, text};
-
-const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
-
-fn collect_markdown(directory: &Path, files: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(directory).expect("read repository prompt directory") {
-        let path = entry.expect("read repository prompt entry").path();
-        if path.is_dir() {
-            collect_markdown(&path, files);
-        } else if path.extension().is_some_and(|extension| extension == "md") {
-            files.push(path);
-        }
-    }
-}
-
-fn every_prompt_under_parses(directory: &Path) {
-    let mut files = Vec::new();
-    collect_markdown(directory, &mut files);
-    files.sort();
-    assert!(
-        !files.is_empty(),
-        "{} holds no prompts to check",
-        directory.display()
-    );
-
-    for path in files {
-        let source = fs::read_to_string(&path).expect("read prompt fixture");
-        Prompt::parse(&source, SHIPPED_PARSE)
-            .0
-            .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
-    }
-}
-
-#[test]
-fn every_shipped_prompt_parses_offline() {
-    every_prompt_under_parses(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts"));
-}
 
 /// A web tool descriptor under `id`, taking one string `query`.
 fn web_tool(id: &str) -> TestResult<ToolDescriptor> {

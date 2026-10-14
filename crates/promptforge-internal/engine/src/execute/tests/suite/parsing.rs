@@ -1,7 +1,7 @@
 //! Public-parser contracts: valid fixtures expose the structure their author
 //! wrote, down to the Lua programs and tool-iteration limit behind it, and
-//! every positive fixture parses offline. The invalid fixtures' error
-//! contracts sit in the facade's suite.
+//! every positive fixture parses offline, as does every shipped prompt. The
+//! invalid fixtures' error contracts sit in the facade's suite.
 
 use std::fs;
 use std::num::NonZeroU32;
@@ -182,4 +182,9 @@ fn every_positive_fixture_parses_offline() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/prompts");
     every_prompt_under_parses(&fixtures.join("valid"));
     every_prompt_under_parses(&fixtures.join("execution"));
+}
+
+#[test]
+fn every_shipped_prompt_parses_offline() {
+    every_prompt_under_parses(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../prompts"));
 }
