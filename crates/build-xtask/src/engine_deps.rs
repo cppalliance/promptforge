@@ -19,8 +19,7 @@
 //! `test_support_leak` guard fails the build when any non-dev table in the
 //! workspace enables it.
 //!
-//! The check reads declared dependencies, not the resolved graph, so
-//! `workspace-hack` unification is irrelevant to it.
+//! The check reads declared dependencies, not the resolved graph.
 
 use std::collections::BTreeSet;
 use std::fmt;

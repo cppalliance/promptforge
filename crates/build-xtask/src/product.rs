@@ -14,13 +14,12 @@
 //!   `gateway-api-discovery`).
 //! - `harness`/`harness-*` crates must not depend on gateway, shared, or
 //!   workshop crates; outside their own family they may name only
-//!   `promptforge`, `promptforge-plugin`, and `workspace-hack`, which
-//!   rules out `build-*` and other unaffiliated crates.
+//!   `promptforge` and `promptforge-plugin`, which rules out `build-*`
+//!   and other unaffiliated crates.
 //! - `plugin-*` crates may depend only on `promptforge-plugin`, `shared-*`
-//!   crates, `workspace-hack`, and outside libraries. `promptforge`,
-//!   gateway, and Harness crates must not depend on `plugin-*` crates,
-//!   except `harness-gateway-client`, which implements web's
-//!   `SearchProvider`.
+//!   crates, and outside libraries. `promptforge`, gateway, and Harness
+//!   crates must not depend on `plugin-*` crates, except
+//!   `harness-gateway-client`, which implements web's `SearchProvider`.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through its two public crates, `promptforge` and
@@ -156,9 +155,6 @@ const GATEWAY_CLIENT: &str = "harness-gateway-client";
 const PUBLIC_HARNESS: [&str; 2] = [HARNESS_FACADE, GATEWAY_CLIENT];
 /// The Plugin contract: the one promptforge crate Plugin crates may name.
 const PLUGIN_CONTRACT: &str = "promptforge-plugin";
-/// The hakari feature-unification crate: the one unaffiliated crate Harness
-/// and Plugin crates may name.
-const WORKSPACE_HACK: &str = "workspace-hack";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -229,10 +225,10 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             Some("harness crates must not depend on shared crates")
         }
         (Family::Harness, Family::Build) => Some(
-            "harness crates must not depend on build-* crates; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack",
+            "harness crates must not depend on build-* crates; outside their family they may name only promptforge and promptforge-plugin",
         ),
-        (Family::Harness, Family::Unaffiliated) if dep.package != WORKSPACE_HACK => Some(
-            "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack",
+        (Family::Harness, Family::Unaffiliated) => Some(
+            "harness crates must not depend on unaffiliated crates; outside their family they may name only promptforge and promptforge-plugin",
         ),
         (
             Family::Shared,
@@ -273,14 +269,11 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
 /// gateway client names a Plugin crate.
 fn plugin_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<&'static str> {
     let (from, to) = (family(&package.package), family(&dep.package));
-    // `workspace-hack` is unaffiliated, so the allow-list names it, as the
-    // Harness rule does.
     let allowed = to == Family::Shared
-        || [PLUGIN_CONTRACT, WORKSPACE_HACK, package.package.as_str()]
-            .contains(&dep.package.as_str());
+        || [PLUGIN_CONTRACT, package.package.as_str()].contains(&dep.package.as_str());
     match (from, to) {
         (Family::Plugin, _) if !allowed => Some(
-            "plugin crates may depend only on promptforge-plugin, shared-* crates, workspace-hack, and outside libraries",
+            "plugin crates may depend only on promptforge-plugin, shared-* crates, and outside libraries",
         ),
         (Family::Promptforge | Family::Gateway | Family::Harness, Family::Plugin)
             if package.package != GATEWAY_CLIENT =>

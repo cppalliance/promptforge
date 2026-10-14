@@ -537,7 +537,7 @@ Behavior:
 
 <step-5>
 
-### Step 5: Drop the workspace-hack allowances from build-xtask and the crate docs
+### Step 5: Drop the workspace-hack allowances from build-xtask and the crate docs [completed]
 
 - Component: Hakari removal
 - Tests:

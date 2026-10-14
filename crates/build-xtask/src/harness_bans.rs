@@ -8,9 +8,9 @@
 //! forms. `[dev-dependencies]` are outside the ban: the suites and doc
 //! examples drive runs on tokio, as a real Host does.
 //!
-//! The check reads declared dependencies, not the resolved graph, so
-//! `workspace-hack` unification is irrelevant to it. It binds the facade
-//! and both crates in the container, the set its workspace test pins.
+//! The check reads declared dependencies, not the resolved graph. It binds
+//! the facade and both crates in the container, the set its workspace test
+//! pins.
 
 use std::fs;
 use std::path::{Path, PathBuf};

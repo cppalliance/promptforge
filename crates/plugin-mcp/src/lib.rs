@@ -54,9 +54,9 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates,
-//!   `workspace-hack`, and outside libraries. `cargo test -p build-xtask`
-//!   enforces the Plugin family's allow-list. Only [`PACKAGE`] is public.
+//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
+//!   allow-list. Only [`PACKAGE`] is public.
 //! - Every output is untrusted.
 //! - No reason, log line, `Debug` output, or error names an `env` or
 //!   `headers` value. They may name keys.

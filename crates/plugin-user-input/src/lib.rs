@@ -65,9 +65,9 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates,
-//!   `workspace-hack`, and outside libraries. `cargo test -p build-xtask`
-//!   enforces the Plugin family's allow-list.
+//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
+//!   allow-list.
 //! - The crate names no async runtime. The Harness polls the ask call
 //!   inside the run's own future, so an [`InputBroker`] must not block
 //!   while polled.

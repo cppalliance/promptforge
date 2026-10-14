@@ -10,21 +10,16 @@ use std::path::{Component, Path, PathBuf};
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use syn::{Expr, ExprLit, Lit, Meta};
 
-/// The hakari crate: generated, with no build script, so this check holds
-/// its files to the limit instead.
-const WORKSPACE_HACK: &str = "workspace-hack";
-/// The limit `build_ceiling::check()` enforces in every other crate.
-const LINE_LIMIT: usize = 500;
 /// The ceiling's source, from the workspace root: the file the `#[path]`
 /// form includes.
 const CEILING_SOURCE: [&str; 4] = ["crates", "build-ceiling", "src", "lib.rs"];
 
 /// Checks that every workspace crate's package-root `build.rs` calls
 /// `build_ceiling::check()` and reaches it through a `build-ceiling`
-/// build-dependency or a `#[path]` include of the ceiling's source, and
-/// that no `workspace-hack` file is over the limit. A crate whose manifest
-/// could not be read is held to the `#[path]` form, the one its build
-/// script alone can show, and a walk that found no crate fails.
+/// build-dependency or a `#[path]` include of the ceiling's source. A
+/// crate whose manifest could not be read is held to the `#[path]` form,
+/// the one its build script alone can show, and a walk that found no
+/// crate fails.
 pub(super) fn ceiling_wiring_violations(root: &Path) -> Vec<String> {
     let walk = crate::product::workspace_crates(root);
     if walk.crates.is_empty() && walk.unread.is_empty() {
@@ -37,14 +32,10 @@ pub(super) fn ceiling_wiring_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
     for krate in &walk.crates {
         let dir = root.join(&krate.dir);
-        if krate.package == WORKSPACE_HACK {
-            violations.extend(workspace_hack_violations(&dir));
-        } else {
-            let manifest = fs::read_to_string(dir.join("Cargo.toml"))
-                .ok()
-                .and_then(|text| toml::from_str::<toml::Value>(&text).ok());
-            violations.extend(crate_violation(root, &dir, manifest.as_ref()));
-        }
+        let manifest = fs::read_to_string(dir.join("Cargo.toml"))
+            .ok()
+            .and_then(|text| toml::from_str::<toml::Value>(&text).ok());
+        violations.extend(crate_violation(root, &dir, manifest.as_ref()));
     }
     for dir in &walk.unread {
         violations.extend(crate_violation(root, &root.join(dir), None));
@@ -190,28 +181,6 @@ fn lexical(path: &Path) -> PathBuf {
     resolved
 }
 
-/// The `workspace-hack` files over the limit, and the ones that could not
-/// be read.
-fn workspace_hack_violations(dir: &Path) -> Vec<String> {
-    super::rust_files(dir)
-        .into_iter()
-        .filter_map(|file| match fs::read_to_string(&file) {
-            Ok(text) => {
-                let lines = text.lines().count();
-                (lines > LINE_LIMIT).then(|| {
-                    format!(
-                        "{} has {lines} lines, over the limit of {LINE_LIMIT}: workspace-hack \
-                         has no build script, so this check holds it to the limit \
-                         `build_ceiling::check()` enforces in every other crate",
-                        file.display()
-                    )
-                })
-            }
-            Err(error) => Some(format!("{}: unreadable source: {error}", file.display())),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,8 +213,7 @@ mod tests {
         dir
     }
 
-    /// A wired workspace: a crate in each form, the ceiling's own crate,
-    /// and a `workspace-hack` with no build script.
+    /// A wired workspace: a crate in each form and the ceiling's own crate.
     fn write_wired(root: &Path) {
         let local = Some(CALLS_CHECK);
         write_built(
@@ -262,8 +230,6 @@ mod tests {
         write_built(root, dir, "harness-runner", "", Some(&runner));
         let own = includes("src/lib.rs");
         write_built(root, "build-ceiling", "build-ceiling", "", Some(&own));
-        let hack = write_built(root, "workspace-hack", "workspace-hack", "", None);
-        std::fs::write(hack.join("src").join("lib.rs"), "// hakari\n").expect("lib.rs writes");
     }
 
     /// The wiring violations of a wired workspace plus one crate.
@@ -332,17 +298,6 @@ mod tests {
         let violations = ceiling_wiring_violations(root.path());
         assert_eq!(violations.len(), 1, "{violations:?}");
         assert!(violations[0].contains("broken"));
-    }
-
-    #[test]
-    fn a_workspace_hack_file_over_the_limit_fails() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_wired(root.path());
-        let lib = root.path().join("crates/workspace-hack/src/lib.rs");
-        std::fs::write(lib, "// line\n".repeat(501)).expect("lib.rs writes");
-        let violations = ceiling_wiring_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(violations[0].contains("workspace-hack") && violations[0].contains("501 lines"));
     }
 
     #[test]

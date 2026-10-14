@@ -31,10 +31,10 @@
 //! is gated by a feature this guard already confines to dev tables.
 //! Forwarding into the other family is reported.
 //!
-//! The check reads declared dependencies, not the resolved graph, so
-//! `workspace-hack` unification is irrelevant to it. Manifests that cannot
-//! be read or parsed are skipped here; the product-boundary check and the
-//! Engine manifest guard already report them.
+//! The check reads declared dependencies, not the resolved graph.
+//! Manifests that cannot be read or parsed are skipped here; the
+//! product-boundary check and the Engine manifest guard already report
+//! them.
 
 use std::fs;
 use std::path::{Path, PathBuf};

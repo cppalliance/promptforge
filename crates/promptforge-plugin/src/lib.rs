@@ -19,11 +19,11 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-types`, `promptforge-vfs`, and
-//!   `workspace-hack` among workspace crates. As an Engine crate it
-//!   declares no async runtime, no `async-trait`, and no HTTP client.
-//!   `cargo test -p build-xtask` enforces the Engine manifest guard and
-//!   the product and container boundaries.
+//! - May depend on: `promptforge-types` and `promptforge-vfs` among
+//!   workspace crates. As an Engine crate it declares no async runtime, no
+//!   `async-trait`, and no HTTP client. `cargo test -p build-xtask`
+//!   enforces the Engine manifest guard and the product and container
+//!   boundaries.
 //! - Only `[dev-dependencies]` enable `test-support`, which the
 //!   `test-support` leak guard enforces.
 //! - A Host builds each Plugin object once, through

@@ -1,8 +1,8 @@
 //! Plugin-family fixtures: a `plugin-*` crate depends only on
-//! `promptforge-plugin`, `shared-*` crates, `workspace-hack`, and outside
-//! libraries; Engine, Gateway, and Harness crates may not depend on a
-//! Plugin crate, except `harness-gateway-client`; and the web Plugin is no
-//! longer a public Harness crate.
+//! `promptforge-plugin`, `shared-*` crates, and outside libraries; Engine,
+//! Gateway, and Harness crates may not depend on a Plugin crate, except
+//! `harness-gateway-client`; and the web Plugin is no longer a public
+//! Harness crate.
 
 use super::product_boundary_violations;
 use super::test_support::write_crate;
@@ -16,7 +16,6 @@ fn plugin_web_naming(deps: &str) -> Vec<String> {
         ("promptforge-plugin", "promptforge-plugin"),
         ("promptforge", "promptforge"),
         ("shared-loopback", "shared-loopback"),
-        ("workspace-hack", "workspace-hack"),
         ("harness", "harness"),
         ("plugin-user-input", "plugin-user-input"),
         ("build-ui", "build-ui"),
@@ -26,14 +25,14 @@ fn plugin_web_naming(deps: &str) -> Vec<String> {
     product_boundary_violations(root.path())
 }
 
-const PLUGIN_RULE: &str = "plugin crates may depend only on promptforge-plugin, shared-* crates, workspace-hack, and outside libraries";
+const PLUGIN_RULE: &str =
+    "plugin crates may depend only on promptforge-plugin, shared-* crates, and outside libraries";
 
 #[test]
-fn a_plugin_crate_naming_the_contract_a_shared_crate_and_workspace_hack_passes() {
+fn a_plugin_crate_naming_the_contract_and_a_shared_crate_passes() {
     let violations = plugin_web_naming(
         "[dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\" }\n\
          shared-loopback = { path = \"../shared-loopback\" }\n\
-         workspace-hack = { path = \"../workspace-hack\" }\n\
          [dev-dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\", features = [\"test-support\"] }\n",
     );
     assert!(violations.is_empty(), "{violations:?}");

@@ -1,7 +1,6 @@
 //! Harness-family fixtures: outside their family, Harness crates depend on
-//! `promptforge`, `promptforge-plugin`, and `workspace-hack` only, and
-//! outside crates reach the family only through `harness` and
-//! `harness-gateway-client`.
+//! `promptforge` and `promptforge-plugin` only, and outside crates reach
+//! the family only through `harness` and `harness-gateway-client`.
 
 use super::product_boundary_violations;
 use super::test_support::write_crate;
@@ -50,23 +49,6 @@ fn a_harness_crate_depending_on_a_shared_crate_is_reported() {
 }
 
 #[test]
-fn a_harness_crate_depending_on_workspace_hack_passes() {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "harness-internal/runner",
-        "harness-runner",
-        "[dependencies]\nworkspace-hack = { path = \"../../workspace-hack\" }\n",
-    );
-    write_crate(root.path(), "workspace-hack", "workspace-hack", "");
-    let violations = product_boundary_violations(root.path());
-    assert!(
-        violations.is_empty(),
-        "workspace-hack belongs to no family, so harness crates may name it: {violations:?}"
-    );
-}
-
-#[test]
 fn a_harness_crate_depending_on_the_plugin_contract_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
@@ -98,7 +80,7 @@ fn a_harness_crate_build_depending_on_a_build_crate_is_reported() {
     assert!(
         violations[0].starts_with("harness-runner depends on build-ui:")
             && violations[0].contains(
-                "harness crates must not depend on build-* crates; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack"
+                "harness crates must not depend on build-* crates; outside their family they may name only promptforge and promptforge-plugin"
             ),
         "build-* crates are closed to harness crates in every dependency table: {violations:?}"
     );
@@ -119,9 +101,9 @@ fn a_harness_crate_depending_on_an_unaffiliated_crate_is_reported() {
     assert!(
         violations[0].starts_with("harness-plugins depends on some-tool:")
             && violations[0].contains(
-                "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge, promptforge-plugin, and workspace-hack"
+                "harness crates must not depend on unaffiliated crates; outside their family they may name only promptforge and promptforge-plugin"
             ),
-        "workspace-hack is the one unaffiliated crate harness crates may name: {violations:?}"
+        "unaffiliated crates are closed to harness crates: {violations:?}"
     );
 }
 

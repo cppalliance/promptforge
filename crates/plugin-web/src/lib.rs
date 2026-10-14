@@ -45,9 +45,9 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates,
-//!   `workspace-hack`, and outside libraries. `cargo test -p build-xtask`
-//!   enforces the Plugin family's allow-list.
+//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
+//!   allow-list.
 //! - Every URL selected by the model or a tool, and every resolved
 //!   address, is validated again on each redirect hop. A non-global
 //!   address is denied unless the fetch policy grants an exact
