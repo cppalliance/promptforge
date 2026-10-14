@@ -583,7 +583,7 @@ Behavior:
 
 <step-6>
 
-### Step 6: Pass every exit criterion on Windows, Linux, and macOS
+### Step 6: Pass every exit criterion on Windows, Linux, and macOS [completed]
 
 - Component: Hakari removal
 - Tests:
