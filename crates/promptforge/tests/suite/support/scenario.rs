@@ -15,7 +15,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use promptforge::effect::{Effect, EffectAnswer, EffectId};
+use promptforge::effect::{AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord};
+use promptforge::event::Event;
+use promptforge::ids::Provenance;
 use promptforge::model::{Completion, CompletionResult};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
@@ -24,16 +26,26 @@ use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 use super::{TestResult, Tool, canned};
 
+/// Edits the context a scenario builds, after the scenario's own settings
+/// and before prepare.
+type Edit = Box<dyn Fn(RunContext) -> RunContext>;
+
 /// One test's setup. Every scenario sets [`canned`], numbers run events on
 /// from the parse events, and fails when prepare reports a gap.
 #[derive(Default)]
 pub(crate) struct Scenario {
+    /// The run's argument text.
+    args: String,
     /// The one tool the catalog lists.
     tool: Option<Tool>,
     /// The chat script, served in order.
     replies: Vec<CompletionResult>,
     /// Picks the effects that wait unanswered.
     hold: Option<fn(&Effect) -> bool>,
+    /// Answers each batch of effects in reverse issue order.
+    reverse: bool,
+    /// Edits the prepared context.
+    context: Option<Edit>,
 }
 
 impl Scenario {
@@ -62,8 +74,28 @@ impl Scenario {
         self
     }
 
-    /// Parses `source` as the run `greeter` and prepares its context.
-    pub(crate) fn prepare(&self, source: &str) -> TestResult<(Prompt, RunContext)> {
+    /// Runs the prompt with `args` as its argument text.
+    pub(crate) fn args(mut self, args: &str) -> Self {
+        args.clone_into(&mut self.args);
+        self
+    }
+
+    /// Answers each batch of effects in reverse issue order.
+    pub(crate) fn reverse(mut self) -> Self {
+        self.reverse = true;
+        self
+    }
+
+    /// Edits the run's context after the scenario sets its own, so an edit
+    /// can also undo one of them.
+    pub(crate) fn context(mut self, edit: impl Fn(RunContext) -> RunContext + 'static) -> Self {
+        self.context = Some(Box::new(edit));
+        self
+    }
+
+    /// Parses `source` as the run `greeter` and prepares its context. The
+    /// parse events come back beside them.
+    pub(crate) fn prepare(&self, source: &str) -> TestResult<(Prompt, RunContext, Vec<Event>)> {
         let (parsed, events) = Prompt::parse(source, "greeter");
         let prompt = parsed?;
         let mut ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
@@ -75,22 +107,28 @@ impl Scenario {
                 ToolDescriptor::new(ToolId::parse(tool.id)?, "A scenario tool.", schema);
             ctx = ctx.tools(ToolCatalog::new(&[descriptor])?);
         }
+        if let Some(edit) = &self.context {
+            ctx = edit(ctx);
+        }
         let (ctx, requirements) = ctx.prepare(&prompt);
         match requirements.refusal() {
             Some(refusal) => Err(refusal.into()),
-            None => Ok((prompt, ctx)),
+            None => Ok((prompt, ctx, events)),
         }
     }
 
     /// Prepares `source` and creates its run, not yet stepped.
     pub(crate) fn start(self, source: &str) -> TestResult<Driver> {
-        let (prompt, ctx) = self.prepare(source)?;
+        let (prompt, ctx, events) = self.prepare(source)?;
         Ok(Driver {
-            run: Run::new(Arc::new(prompt), "", ctx),
+            run: Run::new(Arc::new(prompt), &self.args, ctx),
             replies: self.replies.into(),
             tool: self.tool,
             hold: self.hold,
+            reverse: self.reverse,
             held: Vec::new(),
+            events,
+            effects: Vec::new(),
             result: None,
         })
     }
@@ -107,8 +145,19 @@ pub(crate) struct Driver {
     replies: VecDeque<CompletionResult>,
     tool: Option<Tool>,
     hold: Option<fn(&Effect) -> bool>,
-    held: Vec<EffectId>,
+    reverse: bool,
+    held: Vec<Issued>,
+    events: Vec<Event>,
+    effects: Vec<Logged>,
     result: Option<RunResult>,
+}
+
+/// An effect the run issued and has not had answered: its id, and what the
+/// log records of it.
+struct Issued {
+    id: EffectId,
+    provenance: Provenance,
+    effect: EffectRecord,
 }
 
 impl Driver {
@@ -118,11 +167,17 @@ impl Driver {
         if self.result.is_some() {
             return Err("the run is done, so there is nothing left to step".into());
         }
-        let (effects, withdrawn) = match self.run.step() {
+        let (mut effects, withdrawn) = match self.run.step() {
             Step::Pending {
-                effects, withdrawn, ..
-            } => (effects, withdrawn),
-            Step::Done { result, .. } => {
+                effects,
+                events,
+                withdrawn,
+            } => {
+                self.events.extend(events);
+                (effects, withdrawn)
+            }
+            Step::Done { result, events } => {
+                self.events.extend(events);
                 let held = self.held.len();
                 if held > 0 {
                     return Err(format!("the run ended with {held} held effects unanswered").into());
@@ -135,24 +190,43 @@ impl Driver {
                 return Ok(0);
             }
         };
+        if self.reverse {
+            effects.reverse();
+        }
         let issued = effects.len();
-        for (id, _provenance, effect) in effects {
+        for (id, provenance, effect) in effects {
+            let effect_record = effect.record();
+            let held = Issued {
+                id,
+                provenance,
+                effect: effect_record,
+            };
             if self.hold.is_some_and(|hold| hold(&effect)) {
-                self.held.push(id);
+                self.held.push(held);
             } else {
                 let answer = self.answer(effect)?;
-                self.run.resume(id, answer);
+                self.respond(held, answer);
             }
         }
         let decided = self.run.decided();
         let (dropped, held): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held)
             .into_iter()
-            .partition(|id| decided || withdrawn.contains(id));
+            .partition(|issued| decided || withdrawn.contains(&issued.id));
         self.held = held;
-        for id in dropped {
-            self.run.resume(id, EffectAnswer::Dropped);
+        for issued in dropped {
+            self.respond(issued, EffectAnswer::Dropped);
         }
         Ok(issued)
+    }
+
+    /// Logs `answer` beside its effect, and resumes the run with it.
+    fn respond(&mut self, issued: Issued, answer: EffectAnswer) {
+        self.effects.push(Logged {
+            provenance: issued.provenance,
+            effect: issued.effect,
+            answer: answer.record(),
+        });
+        self.run.resume(issued.id, answer);
     }
 
     /// Pumps until the run holds at least one effect.
@@ -170,7 +244,11 @@ impl Driver {
     pub(crate) fn finish(mut self) -> TestResult<Trace> {
         loop {
             if let Some(result) = self.result.take() {
-                return Ok(Trace { result });
+                return Ok(Trace {
+                    result,
+                    events: self.events,
+                    effects: self.effects,
+                });
             }
             self.advance()?;
         }
@@ -221,4 +299,15 @@ impl Driver {
 pub(crate) struct Trace {
     /// The run's result.
     pub(crate) result: RunResult,
+    /// The parse events, then the run's events, in report order.
+    pub(crate) events: Vec<Event>,
+    /// Every effect the run issued, in the order the driver answered them.
+    pub(crate) effects: Vec<Logged>,
+}
+
+/// One effect with its answer and provenance, as a run log records them.
+pub(crate) struct Logged {
+    pub(crate) provenance: Provenance,
+    pub(crate) effect: EffectRecord,
+    pub(crate) answer: AnswerRecord,
 }

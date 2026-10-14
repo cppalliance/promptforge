@@ -3,138 +3,66 @@
 //! debug mode alone adds the raw model request and response.
 
 use std::collections::HashSet;
-use std::error::Error;
-use std::sync::Arc;
 
-use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::RunResult;
 use promptforge::event::{DebugMode, Event};
-use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-use promptforge::vfs::perform_vfs_op;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use serde_json::Value;
+
+use super::support::{Scenario, TestResult, greeter, prompt, shout, text};
 
 /// Writes `hello` and the run's argument to a note and reads it back.
-const NOTE: &str = concat!(
-    "---\n",
-    "name: greeter\n",
-    "description: Writes a note to the store and reads it back.\n",
-    "promptforge: 0\n",
-    "---\n\n",
-    "# Greeter\n\n",
-    "## Greet\n\n",
-    "```lua\n",
-    "store.write('note.md', 'hello ' .. args)\n",
-    "return store.read('note.md')\n",
-    "```\n",
-);
+const NOTE: &str = "
+    store.write('note.md', 'hello ' .. args)
+    return store.read('note.md')
+";
 
 /// Asks the `writer` role to reply to the note, and shouts the reply.
-const SHOUT: &str = concat!(
-    "---\nname: greeter\ndescription: Replies to a note and shouts the reply.\npromptforge: 0\n",
-    "models:\n  writer: {}\n---\n\n# Greeter\n\n## Greet\n\n",
-    "```lua\nstore.write('note.md', 'hello ' .. args)\nmodels.use('writer')\n",
-    "return tools.call('example/text/shout', { text = models.infer(store.read('note.md')) })\n```\n",
-);
+const SHOUT: &str = "
+    store.write('note.md', 'hello ' .. args)
+    models.use('writer')
+    return tools.call('example/text/shout', { text = models.infer(store.read('note.md')) })
+";
 
-/// Answers the store from the run's store, the model with `hi there`, and
-/// the shout tool with `HI THERE`; no greeter here waits on a timer.
-fn answer(effect: Effect) -> EffectAnswer {
-    match effect {
-        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
-        Effect::Chat { .. } => EffectAnswer::Chat(
-            Completion::from_result(CompletionResult::Text("hi there".to_owned()), "canned")
-                .map(Box::new),
-        ),
-        Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("HI THERE"))),
-        Effect::Timer { .. } => EffectAnswer::Dropped,
-    }
-}
-
-/// Drives `run` to its result, handing each step's events to `record`.
-fn drive(mut run: Run, mut record: impl FnMut(Vec<Event>)) -> RunResult {
-    loop {
-        match run.step() {
-            Step::Pending {
-                effects, events, ..
-            } => {
-                record(events);
-                for (id, _provenance, effect) in effects {
-                    run.resume(id, answer(effect));
-                }
-            }
-            Step::Done { result, events } => {
-                record(events);
-                return result;
-            }
-        }
-    }
-}
-
-/// The canned model and a catalog that offers the shout tool.
-fn shout_offer() -> Result<(ModelDescriptor, ToolCatalog), Box<dyn Error>> {
-    let model = ModelDescriptor::new(
-        ModelId::gateway("canned")?,
-        "Replies hi there",
-        8_192u32.try_into()?,
-        ThinkingMode::Never,
-    );
-    let schema = serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}});
-    let shout = ToolDescriptor::new(
-        ToolId::parse("example/text/shout")?,
-        "Shouts the text.",
-        schema,
-    );
-    Ok((model, ToolCatalog::new(&[shout])?))
+/// The shouting greeter, and its scenario: the model replies `hi there`.
+fn shouting() -> (String, Scenario) {
+    let source = prompt("models: { writer: {} }", &[("Greet", SHOUT)]);
+    (
+        source,
+        Scenario::tool(shout(), [text("hi there")]).args("world"),
+    )
 }
 
 #[test]
-fn every_event_round_trips_as_a_json_line_and_no_two_share_a_provenance()
--> Result<(), Box<dyn Error>> {
-    let (parsed, parse_events) = Prompt::parse(NOTE, "greeter");
-    let mut log: Vec<Event> = parse_events;
-    let prompt = Arc::new(parsed?);
+fn every_event_round_trips_as_a_json_line_and_no_two_share_a_provenance() -> TestResult {
+    let source = greeter(NOTE);
+    let trace = Scenario::default().args("world").run(&source)?;
+    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hello world"));
 
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
-        .provenance_start(u32::try_from(log.len())?);
-    let result = drive(Run::new(Arc::clone(&prompt), "world", ctx), |events| {
-        log.extend(events);
-    });
-    assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
-
-    for event in &log {
+    for event in &trace.events {
         let line = serde_json::to_string(event)?;
         assert_eq!(&serde_json::from_str::<Event>(&line)?, event);
-        let record: serde_json::Value = serde_json::from_str(&line)?;
+        let record: Value = serde_json::from_str(&line)?;
         assert!(record["kind"].is_string(), "{line} names its kind");
     }
 
-    let keys: HashSet<_> = log.iter().map(Event::provenance).collect();
-    assert_eq!(keys.len(), log.len());
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH);
-    let quiet = drive(Run::new(prompt, "world", ctx), drop);
-    assert!(matches!(quiet, RunResult::Ok(text) if text == "hello world"));
+    let keys: HashSet<_> = trace.events.iter().map(Event::provenance).collect();
+    assert_eq!(keys.len(), trace.events.len());
+    let quiet = Scenario::default()
+        .args("world")
+        .context(|ctx| ctx.provenance_start(0))
+        .run(&source)?;
+    assert!(matches!(quiet.result, RunResult::Ok(text) if text == "hello world"));
     Ok(())
 }
 
 #[test]
-fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
--> Result<(), Box<dyn Error>> {
-    let (parsed, _parse_events) = Prompt::parse(SHOUT, "greeter");
-    let prompt = parsed?;
-    let (model, catalog) = shout_offer()?;
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
-    assert!(requirements.refusal().is_none());
-
-    let mut log = Vec::new();
-    let result = drive(Run::new(Arc::new(prompt), "world", ctx), |events| {
-        log.extend(events);
-    });
-    assert!(matches!(result, RunResult::Ok(text) if text == "HI THERE"));
+fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript() -> TestResult {
+    let (source, scenario) = shouting();
+    let trace = scenario.run(&source)?;
+    assert!(matches!(trace.result, RunResult::Ok(text) if text == "HI THERE"));
 
     let (mut asked, mut transcript) = (HashSet::new(), Vec::new());
-    for event in &log {
+    for event in &trace.events {
         match event {
             Event::AssistantToolCalls { turn, calls, .. } => {
                 asked.extend(calls.iter().map(|call| (*turn, call.id.clone())));
@@ -175,23 +103,14 @@ fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript()
 }
 
 #[test]
-fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> Result<(), Box<dyn Error>>
-{
-    let (parsed, _parse_events) = Prompt::parse(SHOUT, "greeter");
-    let prompt = Arc::new(parsed?);
-    let (model, catalog) = shout_offer()?;
-
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
-        .model(model.clone())
-        .report_debug(DebugMode::On);
-    let (ctx, _requirements) = ctx.tools(catalog.clone()).prepare(&prompt);
-    let mut log = Vec::new();
-    let captured = drive(Run::new(Arc::clone(&prompt), "world", ctx), |events| {
-        log.extend(events);
-    });
+fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> TestResult {
+    let (source, scenario) = shouting();
+    let captured = scenario
+        .context(|ctx| ctx.report_debug(DebugMode::On))
+        .run(&source)?;
 
     let (mut requests, mut responses) = (Vec::new(), Vec::new());
-    for event in &log {
+    for event in &captured.events {
         match event {
             Event::Request { turn, .. } => requests.push(*turn),
             Event::Response { turn, .. } => responses.push(*turn),
@@ -201,19 +120,15 @@ fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> Resul
     assert_eq!(requests.len(), 1);
     assert_eq!(requests, responses);
 
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
-    let (ctx, _requirements) = ctx.tools(catalog).prepare(&prompt);
-    let mut quiet_log = Vec::new();
-    let quiet = drive(Run::new(prompt, "world", ctx), |events| {
-        quiet_log.extend(events);
-    });
+    let quiet = shouting().1.run(&source)?;
     assert!(
-        !quiet_log
+        !quiet
+            .events
             .iter()
             .any(|event| matches!(event, Event::Request { .. } | Event::Response { .. }))
     );
     assert!(
-        matches!((captured, quiet), (RunResult::Ok(on), RunResult::Ok(off)) if on == off && on == "HI THERE")
+        matches!((captured.result, quiet.result), (RunResult::Ok(on), RunResult::Ok(off)) if on == off && on == "HI THERE")
     );
     Ok(())
 }

@@ -3,159 +3,58 @@
 //! task's start and end events say who started it and why it ended.
 
 use std::collections::BTreeMap;
-use std::error::Error;
-use std::num::NonZeroU32;
-use std::sync::Arc;
 
-use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::RunResult;
+use promptforge::effect::Effect;
 use promptforge::event::Event;
 use promptforge::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
-use promptforge::model::{
-    Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode, ToolCall,
-};
-use promptforge::timestamp::Timestamp;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use promptforge::model::{CompletionResult, ToolCall};
+use serde_json::json;
+
+use super::support::{Scenario, TestResult, prompt, text};
 
 /// Starts two tasks on `## Reply`, waits for both, and joins their replies.
-const GREETER: &str = concat!(
-    "---\n",
-    "name: greeter\n",
-    "description: Greets through tasks.\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  writer: {}\n",
-    "---\n\n",
-    "# Greeter\n\n",
-    "## Greet\n\n",
-    "```lua\n",
-    "local first = tasks.spawn('## Reply', { input = 'hello' })\n",
-    "local second = tasks.spawn('## Reply', { input = 'bye' })\n",
-    "local results = tasks.join({ first, second })\n",
-    "return results[1].result .. ' ' .. results[2].result\n",
-    "```\n\n",
-    "## Reply\n\n",
-    "```lua\n",
-    "models.use('writer')\n",
-    "return models.infer(args)\n",
-    "```\n",
-);
+const GREET: &str = "
+    local first = tasks.spawn('## Reply', { input = 'hello' })
+    local second = tasks.spawn('## Reply', { input = 'bye' })
+    local results = tasks.join({ first, second })
+    return results[1].result .. ' ' .. results[2].result
+";
+
+/// Replies to its input with the `writer` role.
+const REPLY: &str = "
+    models.use('writer')
+    return models.infer(args)
+";
 
 /// Lets its model start tasks on `## Wait`, runs one model loop, and
 /// returns without waiting for them.
-const LOOPER: &str = concat!(
-    "---\n",
-    "name: greeter\n",
-    "description: Greets through tasks.\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  writer: {}\n",
-    "---\n\n",
-    "# Greeter\n\n",
-    "## Greet\n\n",
-    "```lua\n",
-    "models.use('writer')\n",
-    "tools.allow_tasks({ '## Wait' })\n",
-    "local msgs = messages.new()\n",
-    "msgs:user('hello')\n",
-    "models.loop(msgs)\n",
-    "return 'done'\n",
-    "```\n\n",
-    "## Wait\n\n",
-    "```lua\n",
-    "return store.read('note.md')\n",
-    "```\n",
-);
-
-/// Parses `source` and prepares a run of it whose events number on from
-/// its parse events, returned beside it.
-fn start(source: &str) -> Result<(Run, Vec<Event>), Box<dyn Error>> {
-    let (parsed, parse_events) = Prompt::parse(source, "greeter");
-    let prompt = parsed?;
-    let window = NonZeroU32::new(8_192).ok_or("a context window is never zero")?;
-    let model = ModelDescriptor::new(
-        ModelId::gateway("canned")?,
-        "Always replies hi there",
-        window,
-        ThinkingMode::Never,
-    );
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
-        .provenance_start(u32::try_from(parse_events.len())?)
-        .model(model);
-    let (ctx, requirements) = ctx.prepare(&prompt);
-    if let Some(refusal) = requirements.refusal() {
-        return Err(refusal.into());
-    }
-    Ok((Run::new(Arc::new(prompt), "", ctx), parse_events))
-}
-
-/// Drives `run` to its result, holding each effect `answer` returns `None`
-/// for until the run has decided, and returns the result, the run's
-/// events, and every effect's provenance.
-fn drive(
-    mut run: Run,
-    mut answer: impl FnMut(Effect) -> Option<EffectAnswer>,
-) -> (RunResult, Vec<Event>, Vec<Provenance>) {
-    let (mut events, mut effects, mut held) = (Vec::new(), Vec::new(), Vec::new());
-    loop {
-        match run.step() {
-            Step::Pending {
-                effects: batch,
-                events: reported,
-                ..
-            } => {
-                assert!(
-                    !batch.is_empty() || run.decided(),
-                    "the run waits on an effect this test driver holds"
-                );
-                events.extend(reported);
-                for (id, provenance, effect) in batch {
-                    effects.push(provenance);
-                    match answer(effect) {
-                        Some(reply) => run.resume(id, reply),
-                        None => held.push(id),
-                    }
-                }
-                if run.decided() {
-                    for id in held.drain(..) {
-                        run.resume(id, EffectAnswer::Dropped);
-                    }
-                }
-            }
-            Step::Done {
-                result,
-                events: reported,
-            } => {
-                events.extend(reported);
-                return (result, events, effects);
-            }
-        }
-    }
-}
-
-fn reply(result: CompletionResult) -> EffectAnswer {
-    EffectAnswer::Chat(Completion::from_result(result, "canned").map(Box::new))
-}
+const LOOPER: &str = "
+    models.use('writer')
+    tools.allow_tasks({ '## Wait' })
+    local msgs = messages.new()
+    msgs:user('hello')
+    models.loop(msgs)
+    return 'done'
+";
 
 /// Every effect and event of one run, grouped by task, each group in
 /// provenance order.
 type Groups = BTreeMap<TaskId, Vec<Provenance>>;
 
-/// Runs [`GREETER`], answering every model round with `hi there` and
-/// dropping everything else, and returns the started tasks beside the
-/// run's groups.
-fn run_greeter() -> Result<(Vec<TaskId>, Groups), Box<dyn Error>> {
-    let (run, parse_events) = start(GREETER)?;
-    let (result, run_events, effects) = drive(run, |effect| {
-        Some(match effect {
-            Effect::Chat { .. } => reply(CompletionResult::Text("hi there".to_owned())),
-            _ => EffectAnswer::Dropped,
-        })
-    });
-    assert!(matches!(result, RunResult::Ok(text) if text == "hi there hi there"));
-    let events: Vec<Event> = parse_events.into_iter().chain(run_events).collect();
+/// Runs the two-task greeter, answering every model round with `hi there`,
+/// and returns the started tasks beside the run's groups.
+fn run_greeter() -> TestResult<(Vec<TaskId>, Groups)> {
+    let source = prompt(
+        "models: { writer: {} }",
+        &[("Greet", GREET), ("Reply", REPLY)],
+    );
+    let trace = Scenario::replies([text("hi there"), text("hi there")]).run(&source)?;
+    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hi there hi there"));
     let mut groups = Groups::new();
-    let provenances = events.iter().map(|event| event.provenance().clone());
-    for provenance in effects.into_iter().chain(provenances) {
+    let effects = trace.effects.iter().map(|logged| logged.provenance.clone());
+    let events = trace.events.iter().map(|event| event.provenance().clone());
+    for provenance in effects.chain(events) {
         groups
             .entry(provenance.task.clone())
             .or_default()
@@ -164,7 +63,8 @@ fn run_greeter() -> Result<(Vec<TaskId>, Groups), Box<dyn Error>> {
     for records in groups.values_mut() {
         records.sort();
     }
-    let started = events
+    let started = trace
+        .events
         .iter()
         .filter_map(|event| match event {
             Event::TaskStarted { task, .. } => Some(task.clone()),
@@ -175,8 +75,7 @@ fn run_greeter() -> Result<(Vec<TaskId>, Groups), Box<dyn Error>> {
 }
 
 #[test]
-fn provenance_groups_a_log_by_task_in_start_order_and_the_same_on_every_run()
--> Result<(), Box<dyn Error>> {
+fn provenance_groups_a_log_by_task_in_start_order_and_the_same_on_every_run() -> TestResult {
     let (started, groups) = run_greeter()?;
     assert_eq!(groups.len(), 3);
     let mut sorted = started.clone();
@@ -191,8 +90,7 @@ fn provenance_groups_a_log_by_task_in_start_order_and_the_same_on_every_run()
 }
 
 #[test]
-fn parsed_task_ids_compare_as_values_and_a_damaged_id_reports_its_whole_text()
--> Result<(), Box<dyn Error>> {
+fn parsed_task_ids_compare_as_values_and_a_damaged_id_reports_its_whole_text() -> TestResult {
     assert_eq!("0.01".parse::<TaskId>()?, "0.1".parse::<TaskId>()?);
     let error = "0..1"
         .parse::<TaskId>()
@@ -203,28 +101,27 @@ fn parsed_task_ids_compare_as_values_and_a_damaged_id_reports_its_whole_text()
 }
 
 #[test]
-fn a_model_started_task_is_abandoned_when_its_owning_section_returns() -> Result<(), Box<dyn Error>>
-{
-    let call = ToolCall::from_parts("call_1", "task", serde_json::json!({ "target": "## Wait" }))?;
-    let mut replies = vec![
-        CompletionResult::Text("bye".to_owned()),
-        CompletionResult::ToolCalls(vec![call]),
-    ];
-    let (run, _parse_events) = start(LOOPER)?;
-    let (result, events, _effects) = drive(run, |effect| match effect {
-        Effect::Chat { .. } => replies.pop().map(reply),
-        _ => None,
-    });
-    assert!(matches!(result, RunResult::Ok(text) if text == "done"));
+fn a_model_started_task_is_abandoned_when_its_owning_section_returns() -> TestResult {
+    let call = ToolCall::from_parts("call_1", "task", json!({ "target": "## Wait" }))?;
+    let source = prompt(
+        "models: { writer: {} }",
+        &[("Greet", LOOPER), ("Wait", "return store.read('note.md')")],
+    );
+    let trace = Scenario::replies([CompletionResult::ToolCalls(vec![call]), text("bye")])
+        .hold(|effect| !matches!(effect, Effect::Chat { .. }))
+        .run(&source)?;
+    assert!(matches!(trace.result, RunResult::Ok(text) if text == "done"));
 
-    let (task, origin) = events
+    let (task, origin) = trace
+        .events
         .iter()
         .find_map(|event| match event {
             Event::TaskStarted { task, origin, .. } => Some((task, *origin)),
             _ => None,
         })
         .ok_or("the model starts a task")?;
-    let end = events
+    let end = trace
+        .events
         .iter()
         .find(|event| {
             matches!(event,

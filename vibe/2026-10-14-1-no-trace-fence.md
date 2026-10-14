@@ -444,7 +444,7 @@ Work:
 
 <step-8>
 
-### Step 8: Migrate the `effect`, `event`, `ids`, and `cancel` suites
+### Step 8: Migrate the `effect`, `event`, `ids`, and `cancel` suites [completed]
 
 - Component: Facade test harness
 - Tests:
