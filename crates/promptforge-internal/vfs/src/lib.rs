@@ -10,14 +10,15 @@
 //! view's strict logical-path rules are the store's caller contract, not
 //! promptforge policy.
 //!
-//! This crate is the permanent bottom of the dependency stack: std only,
-//! no workspace or external crates.
+//! This crate is the permanent bottom of the dependency stack: the library
+//! is std only, with no normal or build dependencies.
 //!
 //! ## Invariants
 //!
-//! - May depend on: nothing. Std only, with no workspace or external
-//!   crate, which the manifest test enforces. `cargo test -p build-xtask`
-//!   enforces the product and container boundaries.
+//! - May depend on: nothing. The library is std only, with no normal or
+//!   build dependency, which the manifest test enforces.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
 
 pub mod detail;
 mod error;
@@ -189,14 +190,14 @@ mod tests {
     use super::{Mode, ModePolicy};
     use crate::{Origin, VfsError, VfsRef};
 
-    /// A manifest section is a dependency table when it is exactly one of
-    /// the three dependency tables, a sub-table of one
+    /// A manifest section is a dependency table when it is exactly
+    /// `dependencies` or `build-dependencies`, a sub-table of one
     /// (`[dependencies.foo]` declares a dependency the same way), or either
     /// of those under a `target.<cfg>` qualifier. A cfg string may itself
     /// hold dots (`"sse4.1"`), so a target section is matched on any
     /// dot-separated key rather than on a fixed position.
     fn is_dependency_table(section: &str) -> bool {
-        const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+        const TABLES: [&str; 2] = ["dependencies", "build-dependencies"];
         let mut keys = section.split('.');
         match keys.next() {
             Some("target") => keys.any(|key| TABLES.contains(&key)),
@@ -225,12 +226,13 @@ mod tests {
         declared
     }
 
-    /// The zero-dependency rule is load-bearing: this crate compiles alone
+    /// The zero-dependency rule is load-bearing: the library compiles alone
     /// and never rebuilds for a dependency rev, so the manifest must never
-    /// declare a dependency. This test reads the crate's own Cargo.toml and
-    /// fails if any dependency table has an entry.
+    /// declare a normal or build dependency. Dev-dependencies serve only the
+    /// tests. This test reads the crate's own Cargo.toml and fails if a
+    /// normal or build dependency table has an entry.
     #[test]
-    fn the_manifest_declares_no_dependencies() -> Result<(), std::io::Error> {
+    fn the_manifest_declares_no_normal_or_build_dependencies() -> Result<(), std::io::Error> {
         let manifest = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
         )?;
@@ -244,23 +246,30 @@ mod tests {
 
     #[test]
     fn a_manifest_with_a_target_qualified_dependency_table_is_refused() {
+        let manifest = |table: &str, entry: &str| {
+            format!(
+                "[package]\nname = \"fixture\"\n\n[target.'cfg(windows)']\n\n[{table}]\n{entry}\n"
+            )
+        };
         for (table, entry) in [
-            ("target.'cfg(windows)'.dev-dependencies", "foo = \"1\""),
             (
                 "target.'cfg(target_feature = \"sse4.1\")'.build-dependencies",
                 "foo = \"1\"",
             ),
             ("target.'cfg(windows)'.dependencies.foo", "version = \"1\""),
         ] {
-            let manifest = format!(
-                "[package]\nname = \"fixture\"\n\n[target.'cfg(windows)']\n\n[{table}]\n{entry}\n"
-            );
             assert_eq!(
-                dependency_declarations(&manifest),
+                dependency_declarations(&manifest(table, entry)),
                 [format!("[{table}] declares `{entry}`")],
                 "[{table}] must be refused"
             );
         }
+        let table = "target.'cfg(windows)'.dev-dependencies";
+        assert_eq!(
+            dependency_declarations(&manifest(table, "foo = \"1\"")),
+            Vec::<String>::new(),
+            "[{table}] must pass"
+        );
     }
 
     #[test]
@@ -270,8 +279,6 @@ mod tests {
         for section in [
             "dependencies",
             "dependencies.foo",
-            "dev-dependencies",
-            "dev-dependencies.foo",
             "build-dependencies",
             "build-dependencies.foo",
             "target.'cfg(windows)'.dependencies",
@@ -283,6 +290,8 @@ mod tests {
             "lints",
             "features",
             "dependenciesfoo",
+            "dev-dependencies",
+            "dev-dependencies.foo",
             "target.'cfg(windows)'",
         ] {
             assert!(!is_dependency_table(section), "[{section}] must pass");

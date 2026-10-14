@@ -3,8 +3,9 @@
 //! topic module uses them.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
+
+use tempfile::TempDir;
 
 use super::files::atomic_write;
 use super::resolve::identity_to_virtual;
@@ -31,30 +32,8 @@ fn context() -> AcquireContext {
     AcquireContext::new(ExecId::vend(), Scope::start())
 }
 
-/// A unique temporary directory that removes itself on drop.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Result<TempDir, VfsError> {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "promptforge-vfs-real-test-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).map_err(|err| map_io("the temporary directory", &err))?;
-        Ok(TempDir(dir))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+fn temp_dir() -> Result<TempDir, VfsError> {
+    tempfile::tempdir().map_err(|err| map_io("the temporary directory", &err))
 }
 
 /// Acquires a session on a rooted backend over `dir`.
@@ -65,7 +44,7 @@ fn rooted_access(dir: &Path) -> Result<Box<dyn VfsAccess>, VfsError> {
 
 #[test]
 fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     // Writes materialize ancestor directories, as the memory
     // backend does: no mkdir is needed first.
@@ -113,7 +92,7 @@ fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> 
 
 #[test]
 fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     fs::write(temp.path().join("keep.txt"), b"keep")
         .map_err(|err| map_io("seeding the kept file", &err))?;
     let mut backend = RealBackend::rooted(temp.path())?.with_read_only(true);
@@ -143,7 +122,7 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
 
 #[test]
 fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let real_file = temp.path().join("identity.txt");
     let virtual_spelling = identity_to_virtual(&real_file);
     let mut backend = RealBackend::identity();
@@ -160,7 +139,7 @@ fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(),
 
 #[test]
 fn a_literal_glob_pattern_matches_the_file_itself() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/d/a.txt")?, b"x")?;
     // A wildcard-free pattern matches the literal path itself, at
@@ -175,7 +154,7 @@ fn a_literal_glob_pattern_matches_the_file_itself() -> Result<(), VfsError> {
 #[test]
 #[cfg(unix)]
 fn exists_surfaces_backend_failures_as_errors() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/f.txt")?, b"x")?;
     // A lookup through a file ancestor fails with ENOTDIR, not
@@ -190,7 +169,7 @@ fn exists_surfaces_backend_failures_as_errors() -> Result<(), VfsError> {
 
 #[test]
 fn the_rooted_constructor_requires_an_existing_directory() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     fs::write(temp.path().join("f.txt"), b"x").map_err(|err| map_io("seeding the file", &err))?;
     assert!(matches!(
         RealBackend::rooted(temp.path().join("f.txt")),

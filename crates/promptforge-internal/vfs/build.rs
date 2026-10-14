@@ -1,5 +1,5 @@
 //! Includes the file-size check's source instead of depending on
-//! `build-ceiling`, because this crate declares no dependencies of any kind.
+//! `build-ceiling`, because this crate declares no build dependencies.
 
 #[expect(
     unreachable_pub,

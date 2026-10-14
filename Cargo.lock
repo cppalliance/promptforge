@@ -4781,6 +4781,7 @@ dependencies = [
  "promptforge-types",
  "promptforge-vfs",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -4798,6 +4799,7 @@ dependencies = [
  "promptforge-vfs",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -4869,6 +4871,9 @@ dependencies = [
 [[package]]
 name = "promptforge-vfs"
 version = "0.3.0"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "prost"

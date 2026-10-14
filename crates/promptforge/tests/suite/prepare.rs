@@ -20,31 +20,6 @@ use promptforge::{RequirementCheck, Requirements, UnmetRequirement};
 
 use super::support::{Prepared, Scenario, TestResult, greeter, prompt};
 
-/// A unique temporary directory that removes itself on drop. The suite has
-/// no tempfile dependency; this mirrors promptforge-vfs's own test helper.
-struct TempDir(std::path::PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> TempDir {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after the epoch")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "promptforge-prepare-{}-{unique}-{name}",
-            std::process::id(),
-        ));
-        std::fs::create_dir_all(&dir).expect("the temp dir creates");
-        TempDir(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// A prompt with the frontmatter line `front` and one section that
 /// returns at once.
 fn declaring(front: &str) -> String {
@@ -82,11 +57,11 @@ fn only_unmet(requirements: &Requirements) -> TestResult<&UnmetRequirement> {
 
 #[test]
 fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() -> TestResult {
-    let temp = TempDir::new("shared-base");
+    let temp = tempfile::tempdir()?;
     // The caller's handle: a real base at `/` beside a declared store at
     // `/my/store`, shared by every run.
     let vfs = VfsRef::builder()
-        .mount("/", RealBackend::rooted(&temp.0)?)
+        .mount("/", RealBackend::rooted(temp.path())?)
         .store("/my/store", MemoryBackend::new())
         .build();
     let scenario = Scenario::default().context(move |ctx| ctx.vfs(vfs.clone()));
@@ -104,7 +79,7 @@ fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() -> Tes
         "a determinism violation, not a backend error: {error}"
     );
     // The conflicting write never partially applied.
-    assert_eq!(std::fs::read(temp.0.join("shared.txt"))?, b"from a");
+    assert_eq!(std::fs::read(temp.path().join("shared.txt"))?, b"from a");
     Ok(())
 }
 

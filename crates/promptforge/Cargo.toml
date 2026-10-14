@@ -21,6 +21,8 @@ promptforge-vfs.workspace = true
 # parameter schemas, and the suite reads its effect and event logs back
 # as JSON.
 serde_json.workspace = true
+# The suite roots a real backend in a temporary directory.
+tempfile.workspace = true
 
 [build-dependencies]
 build-ceiling.workspace = true

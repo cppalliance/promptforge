@@ -4,10 +4,6 @@
 //! prepare pass - over shared test support in [`support`]. The fixture
 //! cases that reach items outside the facade run in `promptforge-engine`'s
 //! own suite.
-#![expect(
-    clippy::expect_used,
-    reason = "test helpers panic on setup failure, which is the desired behavior"
-)]
 
 mod cancel;
 mod effect;

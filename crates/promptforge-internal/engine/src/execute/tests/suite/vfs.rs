@@ -214,31 +214,6 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     );
 }
 
-/// A unique temporary directory that removes itself on drop. The suite has
-/// no tempfile dependency; this mirrors promptforge-vfs's own test helper.
-struct TempDir(std::path::PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> TempDir {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after the epoch")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "promptforge-engine-vfs-{}-{unique}-{name}",
-            std::process::id(),
-        ));
-        std::fs::create_dir_all(&dir).expect("the temp dir creates");
-        TempDir(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // The consistency rule: every store operation takes the leaf-yield path
@@ -264,11 +239,11 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
         .result
         .expect("the memory-backed fanout must execute offline");
 
-    let temp = TempDir::new("real-backend");
+    let temp = tempfile::tempdir().expect("the temp dir creates");
     let real_vfs = VfsRef::builder()
         .store(
             "/",
-            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
+            RealBackend::rooted(temp.path()).expect("the temp dir roots the real backend"),
         )
         .build();
     let real = run_fixture(
@@ -297,7 +272,7 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // The `RealBackend` really served the mount: the arm's write landed on
     // the real filesystem under the root.
     assert!(
-        temp.0.join("arm-1.md").is_file(),
+        temp.path().join("arm-1.md").is_file(),
         "the real backend must persist the arm's write under its root"
     );
 }

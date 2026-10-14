@@ -20,7 +20,7 @@ fn assert_no_temp_files_left(dir: &Path) -> Result<(), VfsError> {
 #[test]
 fn a_failed_write_leaves_the_destination_unchanged_and_no_temp_file_behind() -> Result<(), VfsError>
 {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     // A write over an existing directory fails before the temp
     // file is created; the directory survives.
@@ -40,7 +40,7 @@ fn a_failed_write_leaves_the_destination_unchanged_and_no_temp_file_behind() -> 
 
 #[test]
 fn a_failed_copy_leaves_source_and_destination_unchanged() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/dst.txt")?, b"old")?;
     assert!(matches!(
@@ -54,7 +54,7 @@ fn a_failed_copy_leaves_source_and_destination_unchanged() -> Result<(), VfsErro
 
 #[test]
 fn a_failed_rename_leaves_source_and_destination_unchanged() -> Result<(), VfsError> {
-    let temp = TempDir::new()?;
+    let temp = temp_dir()?;
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/dst.txt")?, b"old")?;
     assert!(matches!(

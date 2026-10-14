@@ -6,9 +6,13 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-# Zero-dependency rule: std only. No dependencies, workspace or external.
-# The manifest test enforces this; never weaken it.
+# Zero-dependency rule: the library is std only, with no normal or build
+# dependencies, workspace or external. The manifest test enforces this.
 [dependencies]
+
+[dev-dependencies]
+# The real-backend tests use temporary directories.
+tempfile.workspace = true
 
 [lints]
 workspace = true

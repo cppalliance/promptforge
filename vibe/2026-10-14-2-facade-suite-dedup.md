@@ -294,7 +294,7 @@ Work:
 
 <step-3>
 
-### Step 3: Replace the three `TempDir` copies with `tempfile`
+### Step 3: Replace the three `TempDir` copies with `tempfile` [completed]
 
 - Component: Shared helpers
 - Tests:
