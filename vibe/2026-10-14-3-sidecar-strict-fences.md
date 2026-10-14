@@ -4,13 +4,13 @@ overview: "Remove the debt the upstream/master..HEAD work added, plus the cheap 
 todos:
   - id: cache-sidecar
     content: "D1-1: publish the cache sidecar before the blob in both writers, with the two sidecar-fault regression tests"
-    status: pending
+    status: completed
   - id: strict-fences
     content: "D1-14, D1-13: whole-body strict Lua fence check, flipped and new parser tests, two facade fixtures, and the fence docs"
-    status: pending
+    status: completed
   - id: leftover-traces
     content: "D1-3, D1-26: drop the slot-era nil checks and rewrite the four stale 'offers every' comments"
-    status: pending
+    status: completed
 isProject: false
 ---
 
