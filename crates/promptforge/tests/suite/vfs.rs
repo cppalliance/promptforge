@@ -2,58 +2,24 @@
 //! write and refuses a write in Ask mode, and an operation watcher sees
 //! every store call the run makes, in order, under one origin.
 
-use std::error::Error;
 use std::sync::{Arc, Mutex};
 
-use promptforge::effect::{Effect, EffectAnswer};
-use promptforge::timestamp::Timestamp;
+use promptforge::RunResult;
 use promptforge::vfs::{
     MemoryBackend, Mode, ModePolicy, Op, OpEvent, Origin, VfsError, VfsOp, VfsOutcome, VfsRef,
     perform_vfs_op,
 };
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
-/// Writes a note to the store and reads it back.
-const NOTE: &str = concat!(
-    "---\n",
-    "name: greeter\n",
-    "description: Writes a note to the store and reads it back.\n",
-    "promptforge: 0\n",
-    "---\n\n",
-    "# Greeter\n\n",
-    "## Greet\n\n",
-    "```lua\n",
-    "store.write('note.md', 'hello')\n",
-    "return store.read('note.md')\n",
-    "```\n",
-);
+use super::support::{NOTE, Scenario, TestResult, greeter};
 
-/// Runs [`NOTE`] over `vfs`, answering each store effect against it.
-fn run_note(vfs: VfsRef) -> Result<RunResult, Box<dyn Error>> {
-    let (parsed, _parse_events) = Prompt::parse(NOTE, "greeter");
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).vfs(vfs);
-    let mut run = Run::new(Arc::new(parsed?), "", ctx);
-    loop {
-        match run.step() {
-            Step::Pending { effects, .. } => {
-                for (id, _provenance, effect) in effects {
-                    let answer = match effect {
-                        Effect::Vfs { access, op } => {
-                            EffectAnswer::Vfs(perform_vfs_op(&access, op))
-                        }
-                        _ => EffectAnswer::Dropped,
-                    };
-                    run.resume(id, answer);
-                }
-            }
-            Step::Done { result, .. } => return Ok(result),
-        }
-    }
+/// Runs the note over `vfs`, answering each store effect against it.
+fn run_note(vfs: VfsRef) -> TestResult<RunResult> {
+    let scenario = Scenario::default().context(move |ctx| ctx.vfs(vfs.clone()));
+    Ok(scenario.run(&greeter(NOTE))?.result)
 }
 
 #[test]
-fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> Result<(), Box<dyn Error>>
-{
+fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> TestResult {
     let policy = ModePolicy::new(Mode::Agent);
     let mode = policy.handle();
     let vfs = VfsRef::builder()
@@ -88,8 +54,7 @@ fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> Result<
 }
 
 #[test]
-fn an_operation_watcher_sees_the_notes_write_then_read_under_one_origin()
--> Result<(), Box<dyn Error>> {
+fn an_operation_watcher_sees_the_notes_write_then_read_under_one_origin() -> TestResult {
     let log = Arc::new(Mutex::new(Vec::new()));
     let sink_log = Arc::clone(&log);
     let vfs = VfsRef::builder()

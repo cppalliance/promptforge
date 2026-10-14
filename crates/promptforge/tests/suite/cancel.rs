@@ -12,13 +12,7 @@ use promptforge::RunResult;
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::Effect;
 
-use super::support::{Scenario, TestResult, greeter};
-
-/// Writes a note to the store and reads it back.
-const NOTE: &str = "
-    store.write('note.md', 'hello')
-    return store.read('note.md')
-";
+use super::support::{NOTE, Scenario, TestResult, greeter};
 
 /// A std-only executor's waker: waking unparks the waiting thread.
 struct Unpark(Thread);

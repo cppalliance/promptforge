@@ -1,66 +1,26 @@
 //! Keeping a run's behavior flags: they store as one number, rebuild into
 //! equal flags for the next run, and keep bits this version does not name.
 
-use std::error::Error;
-use std::sync::Arc;
-
-use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::RunResult;
 use promptforge::replay::Flags;
-use promptforge::timestamp::Timestamp;
-use promptforge::vfs::perform_vfs_op;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
-/// Steps `run` to its result, answering each store effect from its store.
-fn run_to_end(mut run: Run) -> RunResult {
-    loop {
-        match run.step() {
-            Step::Pending { effects, .. } => {
-                for (id, _provenance, effect) in effects {
-                    let answer = match effect {
-                        Effect::Vfs { access, op } => {
-                            EffectAnswer::Vfs(perform_vfs_op(&access, op))
-                        }
-                        _ => EffectAnswer::Dropped,
-                    };
-                    run.resume(id, answer);
-                }
-            }
-            Step::Done { result, .. } => return result,
-        }
-    }
-}
+use super::support::{NOTE, Scenario, TestResult, greeter};
 
 #[test]
-fn stored_flags_rebuild_into_equal_flags_for_the_next_run() -> Result<(), Box<dyn Error>> {
-    let source = concat!(
-        "---\n",
-        "name: greeter\n",
-        "description: Writes a note to the store and reads it back.\n",
-        "promptforge: 0\n",
-        "---\n\n",
-        "# Greeter\n\n",
-        "## Greet\n\n",
-        "```lua\n",
-        "store.write('note.md', 'hello')\n",
-        "return store.read('note.md')\n",
-        "```\n",
-    );
-    let (parsed, _parse_events) = Prompt::parse(source, "greeter");
-    let prompt = Arc::new(parsed?);
-
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH);
-    let original = ctx.run_flags();
+fn stored_flags_rebuild_into_equal_flags_for_the_next_run() -> TestResult {
+    let source = greeter(NOTE);
+    let original = Scenario::default().prepare(&source)?.ctx.run_flags();
     let stored: u32 = original.bits();
-    let first = run_to_end(Run::new(Arc::clone(&prompt), "", ctx));
-    assert!(matches!(first, RunResult::Ok(text) if text == "hello"));
+    let first = Scenario::default().run(&source)?;
+    assert!(matches!(first.result, RunResult::Ok(text) if text == "hello"));
     assert_eq!(stored, 0);
 
     let restored = Flags::from_bits(stored);
     assert_eq!(restored, original);
-    let next = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).flags(restored);
-    assert_eq!(next.run_flags(), original);
-    let second = run_to_end(Run::new(prompt, "", next));
-    assert!(matches!(second, RunResult::Ok(text) if text == "hello"));
+    let next = Scenario::default().context(move |ctx| ctx.flags(restored));
+    assert_eq!(next.prepare(&source)?.ctx.run_flags(), original);
+    let second = next.run(&source)?;
+    assert!(matches!(second.result, RunResult::Ok(text) if text == "hello"));
     Ok(())
 }
 

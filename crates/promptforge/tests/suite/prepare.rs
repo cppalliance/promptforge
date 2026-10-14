@@ -15,29 +15,10 @@ use std::num::NonZeroU32;
 
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
-use promptforge::{Prompt, RequirementCheck};
+use promptforge::vfs::{MemoryBackend, Origin, RealBackend, VfsError, VfsRef};
+use promptforge::{RequirementCheck, Requirements, UnmetRequirement};
 
-use super::support::context;
-
-/// A prompt declaring no Plugins at all.
-const DECLARES_NOTHING: &str = concat!(
-    "---\n",
-    "name: declares-nothing\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// Parses a fixture prompt.
-fn parse(source: &str, execution: &str) -> Prompt {
-    Prompt::parse(source, execution)
-        .0
-        .expect("the fixture prompt parses")
-}
+use super::support::{Prepared, Scenario, TestResult, greeter, prompt};
 
 /// A unique temporary directory that removes itself on drop. The suite has
 /// no tempfile dependency; this mirrors promptforge-vfs's own test helper.
@@ -64,32 +45,56 @@ impl Drop for TempDir {
     }
 }
 
+/// A prompt with the frontmatter line `front` and one section that
+/// returns at once.
+fn declaring(front: &str) -> String {
+    prompt(front, &[("Only", "return 'done'")])
+}
+
+/// Builds the context's one current model with the given context window
+/// and thinking capability.
+fn current_model(context: u32, thinking: ThinkingMode) -> TestResult<ModelDescriptor> {
+    Ok(ModelDescriptor::new(
+        ModelId::gateway("current")?,
+        "The current model",
+        NonZeroU32::new(context).ok_or("a context window is never zero")?,
+        thinking,
+    ))
+}
+
+/// What prepare reports for a prompt declaring `front`, under a current
+/// model with the given context window and thinking capability.
+fn report(front: &str, context: u32, thinking: ThinkingMode) -> TestResult<Requirements> {
+    let model = current_model(context, thinking)?;
+    let prepared = Scenario::default()
+        .model(model)
+        .prepare(&declaring(front))?;
+    Ok(prepared.requirements)
+}
+
+/// The one requirement `requirements` reports as unmet.
+fn only_unmet(requirements: &Requirements) -> TestResult<&UnmetRequirement> {
+    match requirements.unmet_requirements.as_slice() {
+        [unmet] => Ok(unmet),
+        unmet => Err(format!("exactly one requirement is unmet: {unmet:?}").into()),
+    }
+}
+
 #[test]
-fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
+fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() -> TestResult {
     let temp = TempDir::new("shared-base");
     // The caller's handle: a real base at `/` beside a declared store at
     // `/my/store`, shared by every run.
     let vfs = VfsRef::builder()
-        .mount(
-            "/",
-            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
-        )
-        .store("/my/store", promptforge::vfs::MemoryBackend::new())
+        .mount("/", RealBackend::rooted(&temp.0)?)
+        .store("/my/store", MemoryBackend::new())
         .build();
-    let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let (ctx_a, _) = context("run-a").vfs(vfs.clone()).prepare(&prompt);
-    let (ctx_b, _) = context("run-b").vfs(vfs).prepare(&prompt);
-    let access_a = ctx_a
-        .vfs_handle()
-        .acquire(Origin::new("run-a"))
-        .expect("run a acquires");
-    access_a
-        .write("/shared.txt", b"from a")
-        .expect("run a writes the real file");
-    let access_b = ctx_b
-        .vfs_handle()
-        .acquire(Origin::new("run-b"))
-        .expect("run b acquires");
+    let scenario = Scenario::default().context(move |ctx| ctx.vfs(vfs.clone()));
+    let source = greeter("return 'done'");
+    let (run_a, run_b) = (scenario.prepare(&source)?, scenario.prepare(&source)?);
+    let access_a = run_a.ctx.vfs_handle().acquire(Origin::new("run-a"))?;
+    access_a.write("/shared.txt", b"from a")?;
+    let access_b = run_b.ctx.vfs_handle().acquire(Origin::new("run-b"))?;
     // The shared base's claims table sees two live identities on one path.
     let error = access_b
         .write("/shared.txt", b"from b")
@@ -99,85 +104,24 @@ fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
         "a determinism violation, not a backend error: {error}"
     );
     // The conflicting write never partially applied.
-    assert_eq!(
-        std::fs::read(temp.0.join("shared.txt")).expect("run a's write landed on disk"),
-        b"from a"
-    );
+    assert_eq!(std::fs::read(temp.0.join("shared.txt"))?, b"from a");
+    Ok(())
 }
 
-/// A prompt declaring one model role with a hard keyword and a context
-/// minimum.
-const DECLARES_ANALYST: &str = concat!(
-    "---\n",
-    "name: declares-analyst\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  analyst:\n",
-    "    keywords: [frontier, thinking]\n",
-    "    min_context: 200000\n",
-    "    description: Deep analysis\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "```lua\n",
-    "return 'done'\n",
-    "```\n",
-);
-
-/// A prompt declaring one role per soft keyword: documentation of author
-/// intent, never a check.
-const DECLARES_SOFT_ROLES: &str = concat!(
-    "---\n",
-    "name: declares-soft-roles\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  scout:\n",
-    "    keywords: [frontier, fast]\n",
-    "  sprinter:\n",
-    "    keywords: [small, creative, chat]\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "```lua\n",
-    "return 'done'\n",
-    "```\n",
-);
-
-/// A prompt declaring one role with the `no-thinking` hard keyword.
-const DECLARES_NO_THINKING: &str = concat!(
-    "---\n",
-    "name: declares-no-thinking\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  triage:\n",
-    "    keywords: [no-thinking]\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "```lua\n",
-    "return 'done'\n",
-    "```\n",
-);
-
-/// Builds the context's one current model with the given context window
-/// and thinking capability.
-fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
-    ModelDescriptor::new(
-        ModelId::gateway("current").expect("the id is valid"),
-        "The current model",
-        NonZeroU32::new(context).expect("the context window is non-zero"),
-        thinking,
-    )
-}
+/// One model role with a hard keyword and a context minimum.
+const ANALYST: &str = "models: { analyst: { keywords: [frontier, thinking], min_context: 200000, description: Deep analysis } }";
 
 #[test]
-fn every_declared_role_resolves_to_the_current_model() {
-    let prompt = parse(DECLARES_SOFT_ROLES, "declares-soft-roles");
-    let model = current_model(32_000, ThinkingMode::Never);
-    let (ctx, requirements) = context("fill").model(model.clone()).prepare(&prompt);
+fn every_declared_role_resolves_to_the_current_model() -> TestResult {
+    // One role per soft keyword: documentation of author intent, never a
+    // check.
+    let source = declaring(
+        "models: { scout: { keywords: [frontier, fast] }, sprinter: { keywords: [small, creative, chat] } }",
+    );
+    let model = current_model(32_000, ThinkingMode::Never)?;
+    let Prepared {
+        ctx, requirements, ..
+    } = Scenario::default().model(model.clone()).prepare(&source)?;
     // Soft keywords document intent and the roles declare no minimum:
     // nothing is reported.
     assert!(requirements.is_satisfied());
@@ -190,63 +134,43 @@ fn every_declared_role_resolves_to_the_current_model() {
     assert_eq!(bindings.resolve("sprinter"), Some(&model));
     assert_eq!(bindings.model(model.id()), Some(&model));
     assert!(bindings.resolve("undeclared").is_none());
+    Ok(())
 }
 
 #[test]
-fn a_context_minimum_above_the_current_models_is_reported() {
-    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+fn a_context_minimum_above_the_current_models_is_reported() -> TestResult {
     // min_context 200000 against the model's 32000.
-    let (_ctx, requirements) = context("fill")
-        .model(current_model(32_000, ThinkingMode::Always))
-        .prepare(&prompt);
+    let requirements = report(ANALYST, 32_000, ThinkingMode::Always)?;
     assert!(!requirements.is_satisfied());
     assert_eq!(requirements.missing_required, []);
-    let [unmet] = requirements.unmet_requirements.as_slice() else {
-        panic!(
-            "exactly one requirement is unmet: {:?}",
-            requirements.unmet_requirements
-        );
-    };
+    let unmet = only_unmet(&requirements)?;
     assert_eq!(unmet.role, "analyst");
     assert_eq!(unmet.check, RequirementCheck::ContextMinimum);
     assert_eq!(unmet.required, "200000");
     assert_eq!(unmet.actual, "32000");
+    Ok(())
 }
 
 #[test]
-fn a_hard_keyword_the_current_model_fails_is_reported() {
-    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+fn a_hard_keyword_the_current_model_fails_is_reported() -> TestResult {
     // `thinking` against a Never model, with the context minimum met so
     // only the keyword check fires.
-    let (_ctx, requirements) = context("fill")
-        .model(current_model(200_000, ThinkingMode::Never))
-        .prepare(&prompt);
-    let [unmet] = requirements.unmet_requirements.as_slice() else {
-        panic!(
-            "exactly one requirement is unmet: {:?}",
-            requirements.unmet_requirements
-        );
-    };
+    let requirements = report(ANALYST, 200_000, ThinkingMode::Never)?;
+    let unmet = only_unmet(&requirements)?;
     assert_eq!(unmet.role, "analyst");
     assert_eq!(unmet.check, RequirementCheck::HardKeyword);
     assert_eq!(unmet.required, "thinking");
     assert_eq!(unmet.actual, "Never");
 
-    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
     // `no-thinking` against an Always model.
-    let (_ctx, requirements) = context("fill")
-        .model(current_model(32_000, ThinkingMode::Always))
-        .prepare(&prompt);
-    let [unmet] = requirements.unmet_requirements.as_slice() else {
-        panic!(
-            "exactly one requirement is unmet: {:?}",
-            requirements.unmet_requirements
-        );
-    };
+    let triage = "models: { triage: { keywords: [no-thinking] } }";
+    let requirements = report(triage, 32_000, ThinkingMode::Always)?;
+    let unmet = only_unmet(&requirements)?;
     assert_eq!(unmet.role, "triage");
     assert_eq!(unmet.check, RequirementCheck::HardKeyword);
     assert_eq!(unmet.required, "no-thinking");
     assert_eq!(unmet.actual, "Always");
+    Ok(())
 }
 
 // The catalog: a prepared context keeps the caller-supplied catalog
@@ -255,51 +179,47 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 // one by id, and a section offers one to its model with `tools.offer`.
 // Whether a declared Plugin is installed is the Harness's report.
 
-/// A prompt declaring `web`.
-const DECLARES_WEB: &str = concat!(
-    "---\n",
-    "name: declares-web\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "plugins:\n",
-    "  - web\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
+/// Prepares a prompt declaring `web` over a catalog of `descriptor` alone.
+fn prepared_over(descriptor: &ToolDescriptor) -> TestResult<Prepared> {
+    let catalog = ToolCatalog::new(std::slice::from_ref(descriptor))?;
+    Scenario::default()
+        .context(move |ctx| ctx.tools(catalog.clone()))
+        .prepare(&declaring("plugins: [web]"))
+}
 
 #[test]
-fn a_prepared_context_keeps_the_caller_supplied_catalog() {
-    let prompt = parse(DECLARES_WEB, "declares-web");
+fn a_prepared_context_keeps_the_caller_supplied_catalog() -> TestResult {
     let descriptor = ToolDescriptor::new(
-        ToolId::parse("web/fetch").expect("the id is valid"),
+        ToolId::parse("web/fetch")?,
         "Fetch a web page over HTTP",
         serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
     )
     .structured(true);
-    let catalog = ToolCatalog::new(std::slice::from_ref(&descriptor)).expect("the catalog builds");
-    let (ctx, requirements) = context("catalog").tools(catalog).prepare(&prompt);
+    let Prepared {
+        ctx, requirements, ..
+    } = prepared_over(&descriptor)?;
     assert!(
         requirements.is_satisfied(),
         "a catalog reports nothing: {requirements:?}"
     );
     assert_eq!(ctx.catalog().tools(), [descriptor]);
+    Ok(())
 }
 
 #[test]
-fn prepare_reports_nothing_for_a_declared_plugin_the_catalog_lacks() {
-    let prompt = parse(DECLARES_WEB, "declares-web");
+fn prepare_reports_nothing_for_a_declared_plugin_the_catalog_lacks() -> TestResult {
     let other = ToolDescriptor::new(
-        ToolId::parse("other/search").expect("the id is valid"),
+        ToolId::parse("other/search")?,
         "Search somewhere else",
         serde_json::json!({"type": "object", "properties": {}}),
     );
-    let catalog = ToolCatalog::new(std::slice::from_ref(&other)).expect("the catalog builds");
-    let (ctx, requirements) = context("no-web").tools(catalog).prepare(&prompt);
+    let Prepared {
+        ctx, requirements, ..
+    } = prepared_over(&other)?;
     assert!(
         requirements.is_satisfied(),
         "the Engine's prepare checks model roles only: {requirements:?}"
     );
     assert_eq!(ctx.catalog().tools(), [other]);
+    Ok(())
 }

@@ -18,28 +18,33 @@ use std::sync::Arc;
 use promptforge::effect::{AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord};
 use promptforge::event::Event;
 use promptforge::ids::Provenance;
-use promptforge::model::{Completion, CompletionResult};
+use promptforge::model::{Completion, ModelDescriptor};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Requirements, Run, RunContext, RunResult, Step};
 
-use super::{TestResult, Tool, canned};
+use super::{Reply, TestResult, Tool, canned};
 
 /// Edits the context a scenario builds, after the scenario's own settings
 /// and before prepare.
 type Edit = Box<dyn Fn(RunContext) -> RunContext>;
 
-/// One test's setup. Every scenario sets [`canned`], numbers run events on
-/// from the parse events, and fails when prepare reports a gap.
+/// One test's setup. Every scenario sets [`canned`] unless it names a
+/// model, numbers run events on from the parse events, and fails to start
+/// when prepare reports a gap.
 #[derive(Default)]
 pub(crate) struct Scenario {
     /// The run's argument text.
     args: String,
+    /// When the run starts, as `sys.when` reads it.
+    started_at: Timestamp,
+    /// The run's current model, in place of [`canned`].
+    model: Option<ModelDescriptor>,
     /// The one tool the catalog lists.
     tool: Option<Tool>,
     /// The chat script, served in order.
-    replies: Vec<CompletionResult>,
+    replies: Vec<Reply>,
     /// Picks the effects that wait unanswered.
     hold: Option<fn(&Effect) -> bool>,
     /// Answers each batch of effects in reverse issue order.
@@ -51,7 +56,7 @@ pub(crate) struct Scenario {
 impl Scenario {
     /// A scenario that serves `replies` to the run's chat effects, in
     /// order, and registers no tool.
-    pub(crate) fn replies(replies: impl IntoIterator<Item = CompletionResult>) -> Self {
+    pub(crate) fn replies(replies: impl IntoIterator<Item = Reply>) -> Self {
         Self {
             replies: replies.into_iter().collect(),
             ..Self::default()
@@ -60,7 +65,7 @@ impl Scenario {
 
     /// A scenario whose catalog lists `tool` alone, and that serves
     /// `replies` to the run's chat effects, in order.
-    pub(crate) fn tool(tool: Tool, replies: impl IntoIterator<Item = CompletionResult>) -> Self {
+    pub(crate) fn tool(tool: Tool, replies: impl IntoIterator<Item = Reply>) -> Self {
         Self {
             tool: Some(tool),
             ..Self::replies(replies)
@@ -80,6 +85,18 @@ impl Scenario {
         self
     }
 
+    /// Starts the run at `started_at`.
+    pub(crate) fn started_at(mut self, started_at: Timestamp) -> Self {
+        self.started_at = started_at;
+        self
+    }
+
+    /// Sets `model` as the run's current model, in place of [`canned`].
+    pub(crate) fn model(mut self, model: ModelDescriptor) -> Self {
+        self.model = Some(model);
+        self
+    }
+
     /// Answers each batch of effects in reverse issue order.
     pub(crate) fn reverse(mut self) -> Self {
         self.reverse = true;
@@ -93,14 +110,19 @@ impl Scenario {
         self
     }
 
-    /// Parses `source` as the run `greeter` and prepares its context. The
-    /// parse events come back beside them.
-    pub(crate) fn prepare(&self, source: &str) -> TestResult<(Prompt, RunContext, Vec<Event>)> {
+    /// Parses `source` as the run `greeter` and prepares its context,
+    /// whatever prepare reports. [`start`](Self::start) is what fails on
+    /// a gap.
+    pub(crate) fn prepare(&self, source: &str) -> TestResult<Prepared> {
         let (parsed, events) = Prompt::parse(source, "greeter");
         let prompt = parsed?;
-        let mut ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
+        let model = match &self.model {
+            Some(model) => model.clone(),
+            None => canned()?,
+        };
+        let mut ctx = RunContext::new("greeter", 7, self.started_at)
             .provenance_start(u32::try_from(events.len())?)
-            .model(canned()?);
+            .model(model);
         if let Some(tool) = &self.tool {
             let schema = serde_json::json!({ "type": "object" });
             let descriptor =
@@ -111,15 +133,26 @@ impl Scenario {
             ctx = edit(ctx);
         }
         let (ctx, requirements) = ctx.prepare(&prompt);
-        match requirements.refusal() {
-            Some(refusal) => Err(refusal.into()),
-            None => Ok((prompt, ctx, events)),
-        }
+        Ok(Prepared {
+            prompt,
+            ctx,
+            requirements,
+            events,
+        })
     }
 
-    /// Prepares `source` and creates its run, not yet stepped.
+    /// Prepares `source` and creates its run, not yet stepped. Fails when
+    /// prepare reports a gap.
     pub(crate) fn start(self, source: &str) -> TestResult<Driver> {
-        let (prompt, ctx, events) = self.prepare(source)?;
+        let Prepared {
+            prompt,
+            ctx,
+            requirements,
+            events,
+        } = self.prepare(source)?;
+        if let Some(refusal) = requirements.refusal() {
+            return Err(refusal.into());
+        }
         Ok(Driver {
             run: Run::new(Arc::new(prompt), &self.args, ctx),
             replies: self.replies.into(),
@@ -139,10 +172,20 @@ impl Scenario {
     }
 }
 
+/// A parsed prompt and its prepared context.
+pub(crate) struct Prepared {
+    pub(crate) prompt: Prompt,
+    pub(crate) ctx: RunContext,
+    /// What prepare reported.
+    pub(crate) requirements: Requirements,
+    /// The parse events.
+    pub(crate) events: Vec<Event>,
+}
+
 /// A started run, stepped by hand for a test that acts mid-run.
 pub(crate) struct Driver {
     pub(crate) run: Run,
-    replies: VecDeque<CompletionResult>,
+    replies: VecDeque<Reply>,
     tool: Option<Tool>,
     hold: Option<fn(&Effect) -> bool>,
     reverse: bool,
@@ -278,7 +321,11 @@ impl Driver {
                     .pop_front()
                     .ok_or("the run asked for a model reply after the chat script ran out")?;
                 let served = binding.id().name();
-                EffectAnswer::Chat(Completion::from_result(reply, served).map(Box::new))
+                let completion = match reply {
+                    Reply::Completion(result) => Completion::from_result(result, served),
+                    Reply::Failure(error) => Err(error),
+                };
+                EffectAnswer::Chat(completion.map(Box::new))
             }
             Effect::ToolCall { tool, args, .. } => match &self.tool {
                 Some(registered) if tool.to_string() == registered.id => {

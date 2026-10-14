@@ -465,7 +465,7 @@ Work:
 
 <step-9>
 
-### Step 9: Migrate the remaining suites and confirm the exit criteria
+### Step 9: Migrate the remaining suites and confirm the exit criteria [completed]
 
 - Component: Facade test harness
 - Tests:

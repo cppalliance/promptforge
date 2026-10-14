@@ -5,31 +5,45 @@
 use std::error::Error;
 use std::num::NonZeroU32;
 
-use promptforge::RunContext;
-use promptforge::model::{CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::timestamp::Timestamp;
+use promptforge::model::{
+    CompletionError, CompletionErrorKind, CompletionResult, ModelDescriptor, ModelId, ThinkingMode,
+    ToolCall,
+};
 use promptforge::tools::{ToolError, ToolOutput};
 use serde_json::Value;
 
 mod scenario;
 
-pub(super) use scenario::Scenario;
+pub(super) use scenario::{Prepared, Scenario};
 
 /// What every facade test returns.
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-/// A tool a scenario registers: its full id, and the handler that answers
-/// each call from the call's arguments.
+/// Writes a note to the store and reads it back.
+pub(super) const NOTE: &str = "
+    store.write('note.md', 'hello')
+    return store.read('note.md')
+";
+
+/// Answers a tool call from the call's arguments.
+type Handler = Box<dyn Fn(&Value) -> Result<ToolOutput, ToolError>>;
+
+/// A tool a scenario registers: its full id, and its handler.
 pub(super) struct Tool {
     pub(super) id: &'static str,
-    pub(super) handler: fn(&Value) -> Result<ToolOutput, ToolError>,
+    pub(super) handler: Handler,
 }
 
-/// A [`RunContext`] for the run `name` under the fixed seed and clock
-/// every fixture shares: the Engine takes both from its caller, and no
-/// fixture here asserts on the nonce or `sys.when`.
-pub(super) fn context(name: impl Into<String>) -> RunContext {
-    RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
+impl Tool {
+    /// The tool `id`, which answers every call with `text` as untrusted
+    /// output.
+    pub(super) fn untrusted(id: &'static str, text: &str) -> Self {
+        let text = text.to_owned();
+        Self {
+            id,
+            handler: Box::new(move |_| Ok(ToolOutput::untrusted(text.clone()))),
+        }
+    }
 }
 
 /// The prompt `greeter`: fixed frontmatter, then the `front` lines, then
@@ -63,9 +77,28 @@ fn push_trimmed(source: &mut String, text: &str) {
     }
 }
 
+/// How the model answers one chat effect: with a completion, or as a
+/// failed round.
+pub(super) enum Reply {
+    Completion(CompletionResult),
+    Failure(CompletionError),
+}
+
 /// A scripted model reply of plain text.
-pub(super) fn text(reply: &str) -> CompletionResult {
-    CompletionResult::Text(reply.to_owned())
+pub(super) fn text(reply: &str) -> Reply {
+    Reply::Completion(CompletionResult::Text(reply.to_owned()))
+}
+
+/// A scripted model reply that calls the tool `name` once, by its wire
+/// name, with `args`.
+pub(super) fn calls(name: &str, args: Value) -> TestResult<Reply> {
+    let call = ToolCall::from_parts("call_1", name, args)?;
+    Ok(Reply::Completion(CompletionResult::ToolCalls(vec![call])))
+}
+
+/// A scripted model reply that fails the round as `kind`.
+pub(super) fn fail(kind: CompletionErrorKind) -> Reply {
+    Reply::Failure(CompletionError::new(kind, kind.phrase()))
 }
 
 /// `example/text/shout`: answers with its `text` argument in capital
@@ -73,18 +106,18 @@ pub(super) fn text(reply: &str) -> CompletionResult {
 pub(super) fn shout() -> Tool {
     Tool {
         id: "example/text/shout",
-        handler: |args| match args.get("text").and_then(Value::as_str) {
+        handler: Box::new(|args| match args.get("text").and_then(Value::as_str) {
             Some(text) => Ok(ToolOutput::trusted(text.to_uppercase())),
             None => Err(ToolError::message(format!(
                 "shout needs a string `text` argument; got {args}"
             ))),
-        },
+        }),
     }
 }
 
-/// `gateway/canned`, the model every scenario sets before prepare. It
-/// fills only roles a prompt declares, so a prompt without roles ignores
-/// it.
+/// `gateway/canned`, the model every scenario sets before prepare unless
+/// it names its own. It fills only roles a prompt declares, so a prompt
+/// without roles ignores it.
 pub(super) fn canned() -> TestResult<ModelDescriptor> {
     let window = NonZeroU32::new(8_192).ok_or("a context window is never zero")?;
     Ok(ModelDescriptor::new(

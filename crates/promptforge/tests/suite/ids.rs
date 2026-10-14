@@ -8,10 +8,9 @@ use promptforge::RunResult;
 use promptforge::effect::Effect;
 use promptforge::event::Event;
 use promptforge::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
-use promptforge::model::{CompletionResult, ToolCall};
 use serde_json::json;
 
-use super::support::{Scenario, TestResult, prompt, text};
+use super::support::{Scenario, TestResult, calls, prompt, text};
 
 /// Starts two tasks on `## Reply`, waits for both, and joins their replies.
 const GREET: &str = "
@@ -102,12 +101,12 @@ fn parsed_task_ids_compare_as_values_and_a_damaged_id_reports_its_whole_text() -
 
 #[test]
 fn a_model_started_task_is_abandoned_when_its_owning_section_returns() -> TestResult {
-    let call = ToolCall::from_parts("call_1", "task", json!({ "target": "## Wait" }))?;
+    let call = calls("task", json!({ "target": "## Wait" }))?;
     let source = prompt(
         "models: { writer: {} }",
         &[("Greet", LOOPER), ("Wait", "return store.read('note.md')")],
     );
-    let trace = Scenario::replies([CompletionResult::ToolCalls(vec![call]), text("bye")])
+    let trace = Scenario::replies([call, text("bye")])
         .hold(|effect| !matches!(effect, Effect::Chat { .. }))
         .run(&source)?;
     assert!(matches!(trace.result, RunResult::Ok(text) if text == "done"));

@@ -8,7 +8,7 @@
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::{Prompt, RunResult};
 
-use super::support::{Scenario, TestResult, greeter, prompt, shout, text};
+use super::support::{NOTE, Scenario, TestResult, greeter, prompt, shout, text};
 
 #[path = "../../examples/greeter.rs"]
 #[expect(
@@ -19,12 +19,6 @@ use super::support::{Scenario, TestResult, greeter, prompt, shout, text};
 mod example;
 
 use example::{GREETER, answer};
-
-/// Writes a note to the store and reads it back.
-const NOTE: &str = "
-    store.write('note.md', 'hello')
-    return store.read('note.md')
-";
 
 /// Writes a note and returns the `writer` role's reply to it.
 const REPLY: &str = "
