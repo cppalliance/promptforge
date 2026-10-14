@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use promptforge::RunResult;
 use promptforge::event::Event;
 use promptforge::ids::{Provenance, TaskId};
 
@@ -35,7 +34,7 @@ fn run_greeter() -> TestResult<(Vec<TaskId>, Groups)> {
         &[("Greet", GREET), ("Reply", REPLY)],
     );
     let trace = Scenario::replies([text("hi there"), text("hi there")]).run(&source)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hi there hi there"));
+    assert_eq!(trace.text()?, "hi there hi there");
     let mut groups = Groups::new();
     let effects = trace.effects.iter().map(|logged| logged.provenance.clone());
     let events = trace.events.iter().map(|event| event.provenance().clone());

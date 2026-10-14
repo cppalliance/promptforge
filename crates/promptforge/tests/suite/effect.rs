@@ -2,7 +2,6 @@
 //! in does not change the result, and every effect and answer record
 //! logs as a JSON line that parses back into its record type.
 
-use promptforge::RunResult;
 use promptforge::effect::{AnswerRecord, EffectRecord, ToolCallOrigin, ToolCaller};
 use serde_json::{Value, json};
 
@@ -56,12 +55,8 @@ fn answering_a_batch_in_reverse_gives_the_same_result_as_issue_order() -> TestRe
         answered_reversed, answered_in_order,
         "reversing a batch must change the order its effects are answered in"
     );
-    let (RunResult::Ok(reversed), RunResult::Ok(in_order)) = (reversed.result, in_order.result)
-    else {
-        return Err("the greeter did not succeed".into());
-    };
-    assert_eq!(reversed, in_order);
-    assert_eq!(reversed, "hi there / HI THERE");
+    assert_eq!(reversed.text()?, in_order.text()?);
+    assert_eq!(reversed.text()?, "hi there / HI THERE");
     Ok(())
 }
 
@@ -88,7 +83,7 @@ fn a_tool_calls_origin_is_named_at_promptforge_effect() -> TestResult {
 #[test]
 fn each_effect_and_its_answer_log_as_one_json_line_that_parses_back() -> TestResult {
     let trace = scenario().run(&greeter())?;
-    assert!(matches!(trace.result, RunResult::Ok(_)));
+    trace.text()?;
 
     let log: Vec<String> = trace
         .effects

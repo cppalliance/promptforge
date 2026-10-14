@@ -3,26 +3,20 @@
 use std::fs;
 use std::path::Path;
 
-use promptforge::RunResult;
 use promptforge::effect::{EffectRecord, ToolCaller};
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
+use promptforge::tools::ToolCatalog;
 use serde_json::json;
 
-use super::support::{Scenario, TestResult, Tool, calls, text};
-
-/// A web tool descriptor under `id`, taking one string `query`.
-fn web_tool(id: &str) -> TestResult<ToolDescriptor> {
-    Ok(ToolDescriptor::new(
-        ToolId::parse(id)?,
-        "A web tool.",
-        json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
-    ))
-}
+use super::support::{Scenario, TestResult, Tool, calls, descriptor, text};
 
 #[test]
 fn the_shipped_research_prompt_offers_its_web_tools_by_id_and_runs_end_to_end() -> TestResult {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/research-person.md");
-    let catalog = ToolCatalog::new(&[web_tool("web/fetch")?, web_tool("web/search")?])?;
+    let query = json!({ "type": "object", "properties": { "query": { "type": "string" } } });
+    let catalog = ToolCatalog::new(&[
+        descriptor("web/fetch", query.clone())?,
+        descriptor("web/search", query)?,
+    ])?;
     let search = calls("web_search", json!({ "query": "Ada Lovelace" }))?;
     let trace = Scenario::tool(
         Tool::untrusted("web/search", "search results"),
@@ -31,10 +25,7 @@ fn the_shipped_research_prompt_offers_its_web_tools_by_id_and_runs_end_to_end() 
     .args("Ada Lovelace")
     .context(move |ctx| ctx.tools(catalog.clone()))
     .run(&fs::read_to_string(path)?)?;
-    let RunResult::Ok(summary) = trace.result else {
-        return Err(format!("the research prompt did not finish: {:?}", trace.result).into());
-    };
-    assert_eq!(summary, "a factual summary");
+    assert_eq!(trace.text()?, "a factual summary");
 
     let (mut advertised, mut tool_calls) = (Vec::new(), Vec::new());
     for logged in &trace.effects {

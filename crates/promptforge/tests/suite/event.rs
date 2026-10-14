@@ -4,17 +4,10 @@
 
 use std::collections::HashSet;
 
-use promptforge::RunResult;
 use promptforge::event::{DebugMode, Event};
 use serde_json::Value;
 
-use super::support::{Scenario, TestResult, greeter, prompt, shout, text};
-
-/// Writes `hello` and the run's argument to a note and reads it back.
-const NOTE: &str = "
-    store.write('note.md', 'hello ' .. args)
-    return store.read('note.md')
-";
+use super::support::{Scenario, TestResult, note, prompt, shout, text};
 
 /// Asks the `writer` role to reply to the note, and shouts the reply.
 const SHOUT: &str = "
@@ -34,9 +27,9 @@ fn shouting() -> (String, Scenario) {
 
 #[test]
 fn every_event_round_trips_as_a_json_line_and_no_two_share_a_provenance() -> TestResult {
-    let source = greeter(NOTE);
+    let source = note("'hello ' .. args");
     let trace = Scenario::default().args("world").run(&source)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hello world"));
+    assert_eq!(trace.text()?, "hello world");
 
     for event in &trace.events {
         let line = serde_json::to_string(event)?;
@@ -51,7 +44,7 @@ fn every_event_round_trips_as_a_json_line_and_no_two_share_a_provenance() -> Tes
         .args("world")
         .context(|ctx| ctx.provenance_start(0))
         .run(&source)?;
-    assert!(matches!(quiet.result, RunResult::Ok(text) if text == "hello world"));
+    assert_eq!(quiet.text()?, "hello world");
     Ok(())
 }
 
@@ -59,7 +52,7 @@ fn every_event_round_trips_as_a_json_line_and_no_two_share_a_provenance() -> Tes
 fn content_events_pair_each_tool_result_with_its_caller_into_a_transcript() -> TestResult {
     let (source, scenario) = shouting();
     let trace = scenario.run(&source)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "HI THERE"));
+    assert_eq!(trace.text()?, "HI THERE");
 
     let (mut asked, mut transcript) = (HashSet::new(), Vec::new());
     for event in &trace.events {
@@ -127,8 +120,7 @@ fn debug_mode_alone_adds_one_request_and_one_response_per_model_round() -> TestR
             .iter()
             .any(|event| matches!(event, Event::Request { .. } | Event::Response { .. }))
     );
-    assert!(
-        matches!((captured.result, quiet.result), (RunResult::Ok(on), RunResult::Ok(off)) if on == off && on == "HI THERE")
-    );
+    assert_eq!(captured.text()?, "HI THERE");
+    assert_eq!(quiet.text()?, "HI THERE");
     Ok(())
 }

@@ -11,14 +11,12 @@
 //! the Harness's job, not the Engine's; the Engine's prepare only ever
 //! sees the catalog its caller hands it.
 
-use std::num::NonZeroU32;
-
-use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
+use promptforge::model::ThinkingMode;
+use promptforge::tools::{ToolCatalog, ToolDescriptor};
 use promptforge::vfs::{MemoryBackend, Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{RequirementCheck, Requirements, UnmetRequirement};
 
-use super::support::{Prepared, Scenario, TestResult, greeter, prompt};
+use super::support::{Prepared, Scenario, TestResult, descriptor, greeter, model, prompt};
 
 /// A prompt with the frontmatter line `front` and one section that
 /// returns at once.
@@ -26,23 +24,11 @@ fn declaring(front: &str) -> String {
     prompt(front, &[("Only", "return 'done'")])
 }
 
-/// Builds the context's one current model with the given context window
-/// and thinking capability.
-fn current_model(context: u32, thinking: ThinkingMode) -> TestResult<ModelDescriptor> {
-    Ok(ModelDescriptor::new(
-        ModelId::gateway("current")?,
-        "The current model",
-        NonZeroU32::new(context).ok_or("a context window is never zero")?,
-        thinking,
-    ))
-}
-
 /// What prepare reports for a prompt declaring `front`, under a current
 /// model with the given context window and thinking capability.
 fn report(front: &str, context: u32, thinking: ThinkingMode) -> TestResult<Requirements> {
-    let model = current_model(context, thinking)?;
     let prepared = Scenario::default()
-        .model(model)
+        .model(model("current", context, thinking)?)
         .prepare(&declaring(front))?;
     Ok(prepared.requirements)
 }
@@ -93,7 +79,7 @@ fn every_declared_role_resolves_to_the_current_model() -> TestResult {
     let source = declaring(
         "models: { scout: { keywords: [frontier, fast] }, sprinter: { keywords: [small, creative, chat] } }",
     );
-    let model = current_model(32_000, ThinkingMode::Never)?;
+    let model = model("current", 32_000, ThinkingMode::Never)?;
     let Prepared {
         ctx, requirements, ..
     } = Scenario::default().model(model.clone()).prepare(&source)?;
@@ -164,11 +150,10 @@ fn prepared_over(descriptor: &ToolDescriptor) -> TestResult<Prepared> {
 
 #[test]
 fn a_prepared_context_keeps_the_caller_supplied_catalog() -> TestResult {
-    let descriptor = ToolDescriptor::new(
-        ToolId::parse("web/fetch")?,
-        "Fetch a web page over HTTP",
+    let descriptor = descriptor(
+        "web/fetch",
         serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
-    )
+    )?
     .structured(true);
     let Prepared {
         ctx, requirements, ..
@@ -183,11 +168,10 @@ fn a_prepared_context_keeps_the_caller_supplied_catalog() -> TestResult {
 
 #[test]
 fn prepare_reports_nothing_for_a_declared_plugin_the_catalog_lacks() -> TestResult {
-    let other = ToolDescriptor::new(
-        ToolId::parse("other/search")?,
-        "Search somewhere else",
+    let other = descriptor(
+        "other/search",
         serde_json::json!({"type": "object", "properties": {}}),
-    );
+    )?;
     let Prepared {
         ctx, requirements, ..
     } = prepared_over(&other)?;

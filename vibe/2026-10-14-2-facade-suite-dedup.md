@@ -325,7 +325,7 @@ Work:
 
 <step-4>
 
-### Step 4: Share the model, descriptor, note, and run-text helpers
+### Step 4: Share the model, descriptor, note, and run-text helpers [completed]
 
 - Component: Shared helpers
 - Tests:

@@ -9,7 +9,7 @@ use promptforge::model::{
     CompletionError, CompletionErrorKind, CompletionResult, ModelDescriptor, ModelId, ThinkingMode,
     ToolCall,
 };
-use promptforge::tools::{ToolError, ToolOutput};
+use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
 use serde_json::Value;
 
 mod scenario;
@@ -18,12 +18,6 @@ pub(super) use scenario::{Prepared, Scenario};
 
 /// What every facade test returns.
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
-
-/// Writes a note to the store and reads it back.
-pub(super) const NOTE: &str = "
-    store.write('note.md', 'hello')
-    return store.read('note.md')
-";
 
 /// Answers a tool call from the call's arguments.
 type Handler = Box<dyn Fn(&Value) -> Result<ToolOutput, ToolError>>;
@@ -68,6 +62,14 @@ pub(super) fn prompt(front: &str, sections: &[(&str, &str)]) -> String {
 /// [`prompt`] with no extra frontmatter and the one section `## Greet`.
 pub(super) fn greeter(lua: &str) -> String {
     prompt("", &[("Greet", lua)])
+}
+
+/// [`greeter`], writing the Lua expression `value` to `note.md` and
+/// returning what it reads back.
+pub(super) fn note(value: &str) -> String {
+    greeter(&format!(
+        "store.write('note.md', {value})\nreturn store.read('note.md')"
+    ))
 }
 
 fn push_trimmed(source: &mut String, text: &str) {
@@ -119,11 +121,28 @@ pub(super) fn shout() -> Tool {
 /// it names its own. It fills only roles a prompt declares, so a prompt
 /// without roles ignores it.
 pub(super) fn canned() -> TestResult<ModelDescriptor> {
-    let window = NonZeroU32::new(8_192).ok_or("a context window is never zero")?;
+    model("canned", 8_192, ThinkingMode::Never)
+}
+
+/// `gateway/<name>`, with a `window`-token context and `thinking`.
+pub(super) fn model(
+    name: &str,
+    window: u32,
+    thinking: ThinkingMode,
+) -> TestResult<ModelDescriptor> {
     Ok(ModelDescriptor::new(
-        ModelId::gateway("canned")?,
-        "Replies from the scenario's script",
-        window,
-        ThinkingMode::Never,
+        ModelId::gateway(name)?,
+        "A model the facade suite describes.",
+        NonZeroU32::new(window).ok_or("a context window is never zero")?,
+        thinking,
+    ))
+}
+
+/// The tool `id`, taking arguments that match `schema`.
+pub(super) fn descriptor(id: &str, schema: Value) -> TestResult<ToolDescriptor> {
+    Ok(ToolDescriptor::new(
+        ToolId::parse(id)?,
+        "A tool the facade suite describes.",
+        schema,
     ))
 }

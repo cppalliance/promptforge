@@ -2,13 +2,11 @@
 //! every declaration with arguments sorted by name, and a role check by
 //! hand agrees with prepare.
 
-use std::num::NonZeroU32;
-
-use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::model::ThinkingMode;
 use promptforge::prompt::ModelKeyword;
 use promptforge::{ParseErrorKind, Prompt, RequirementCheck};
 
-use super::support::{Prepared, Scenario, TestResult, prompt};
+use super::support::{Prepared, Scenario, TestResult, model, prompt};
 
 /// Declares two files, one Plugin, `times` then `name`, and one model
 /// role.
@@ -82,9 +80,7 @@ fn a_role_check_by_hand_finds_the_same_shortfall_prepare_reports() -> TestResult
         "models: { writer: { keywords: [fast] }, checker: { keywords: [no-thinking], min_context: 100000 } }",
         &[("Greet", "return 'done'")],
     );
-    let window = NonZeroU32::new(200_000).ok_or("a context window is never zero")?;
-    let id = ModelId::gateway("canned")?;
-    let model = ModelDescriptor::new(id, "Thinks on every call", window, ThinkingMode::Always);
+    let model = model("canned", 200_000, ThinkingMode::Always)?;
     let Prepared {
         prompt,
         requirements,

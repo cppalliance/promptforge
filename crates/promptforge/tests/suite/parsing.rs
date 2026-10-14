@@ -2,59 +2,52 @@
 //! [`ParseErrorKind`] and message. The fixtures sit beside this suite
 //! under `tests/prompts/invalid/`.
 
+use std::fs;
+use std::path::Path;
+
 use promptforge::{ParseErrorKind, Prompt};
 
-struct InvalidFixture {
-    name: &'static str,
-    source: &'static str,
-    kind: ParseErrorKind,
-    message_fragment: &'static str,
-}
+use super::support::TestResult;
 
-const INVALID_FIXTURES: &[InvalidFixture] = &[
-    InvalidFixture {
-        name: "invalid/missing-h1.md",
-        source: include_str!("../prompts/invalid/missing-h1.md"),
-        kind: ParseErrorKind::Structure,
-        message_fragment: "requires an H1",
-    },
-    InvalidFixture {
-        name: "invalid/unrecognized-lua-label.md",
-        source: include_str!("../prompts/invalid/unrecognized-lua-label.md"),
-        kind: ParseErrorKind::Fence,
-        message_fragment: "unrecognized fence label",
-    },
-    InvalidFixture {
-        name: "invalid/malformed-epilog.md",
-        source: include_str!("../prompts/invalid/malformed-epilog.md"),
-        kind: ParseErrorKind::Lua,
-        message_fragment: "section `Transform` epilog",
-    },
-    InvalidFixture {
-        name: "invalid/list-h3-non-list-content.md",
-        source: include_str!("../prompts/invalid/list-h3-non-list-content.md"),
-        kind: ParseErrorKind::List,
-        message_fragment: "empty bullet item",
-    },
+/// Each invalid fixture's file stem, the kind it reports, and a fragment
+/// of its message.
+const INVALID_FIXTURES: [(&str, ParseErrorKind, &str); 4] = [
+    ("missing-h1", ParseErrorKind::Structure, "requires an H1"),
+    (
+        "unrecognized-lua-label",
+        ParseErrorKind::Fence,
+        "unrecognized fence label",
+    ),
+    (
+        "malformed-epilog",
+        ParseErrorKind::Lua,
+        "section `Transform` epilog",
+    ),
+    (
+        "list-h3-non-list-content",
+        ParseErrorKind::List,
+        "empty bullet item",
+    ),
 ];
 
 #[test]
-fn invalid_prompt_files_report_public_error_contracts() {
-    for fixture in INVALID_FIXTURES {
-        let Err(error) = Prompt::parse(fixture.source, fixture.name).0 else {
-            panic!("fixture {} unexpectedly parsed", fixture.name);
+fn invalid_prompt_files_report_public_error_contracts() -> TestResult {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/prompts/invalid");
+    for (stem, kind, message_fragment) in INVALID_FIXTURES {
+        let name = format!("invalid/{stem}.md");
+        let source = fs::read_to_string(dir.join(format!("{stem}.md")))?;
+        let Err(error) = Prompt::parse(&source, &name).0 else {
+            return Err(format!("fixture {name} unexpectedly parsed").into());
         };
         assert_eq!(
             error.kind(),
-            fixture.kind,
-            "fixture {} returned the wrong error kind: {error:?}",
-            fixture.name
+            kind,
+            "fixture {name} returned the wrong error kind: {error:?}"
         );
         assert!(
-            error.to_string().contains(fixture.message_fragment),
-            "fixture {} error did not contain {:?}: {error}",
-            fixture.name,
-            fixture.message_fragment
+            error.to_string().contains(message_fragment),
+            "fixture {name} error did not contain {message_fragment:?}: {error}"
         );
     }
+    Ok(())
 }

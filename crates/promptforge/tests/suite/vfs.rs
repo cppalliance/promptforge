@@ -4,18 +4,17 @@
 
 use std::sync::{Arc, Mutex};
 
-use promptforge::RunResult;
 use promptforge::vfs::{
     MemoryBackend, Mode, ModePolicy, Op, OpEvent, Origin, VfsError, VfsOp, VfsOutcome, VfsRef,
     perform_vfs_op,
 };
 
-use super::support::{NOTE, Scenario, TestResult, greeter};
+use super::support::{Scenario, TestResult, note};
 
 /// Runs the note over `vfs`, answering each store effect against it.
-fn run_note(vfs: VfsRef) -> TestResult<RunResult> {
+fn run_note(vfs: VfsRef) -> TestResult<String> {
     let scenario = Scenario::default().context(move |ctx| ctx.vfs(vfs.clone()));
-    Ok(scenario.run(&greeter(NOTE))?.result)
+    Ok(scenario.run(&note("'hello'"))?.text()?.to_owned())
 }
 
 #[test]
@@ -27,8 +26,7 @@ fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> TestRes
         .policy(policy)
         .build();
 
-    let result = run_note(vfs.clone())?;
-    assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
+    assert_eq!(run_note(vfs.clone())?, "hello");
 
     mode.set(Mode::Ask);
     let store = vfs.acquire_store(Origin::new("caller"))?;
@@ -70,8 +68,7 @@ fn an_operation_watcher_sees_the_notes_write_then_read_under_one_origin() -> Tes
         })
         .build();
 
-    let result = run_note(vfs)?;
-    assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
+    assert_eq!(run_note(vfs)?, "hello");
 
     let entries = log.lock().map_err(|_| "the watcher panicked")?;
     let note: Vec<_> = entries

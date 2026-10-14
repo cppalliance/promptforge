@@ -12,7 +12,7 @@ use promptforge::RunResult;
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::Effect;
 
-use super::support::{NOTE, Scenario, TestResult, greeter};
+use super::support::{Scenario, TestResult, note};
 
 /// A std-only executor's waker: waking unparks the waiting thread.
 struct Unpark(Thread);
@@ -38,7 +38,7 @@ fn block_on<F: Future + Unpin>(mut future: F) -> F::Output {
 
 #[test]
 fn one_parent_cancel_ends_every_run_holding_one_of_its_children() -> TestResult {
-    let source = greeter(NOTE);
+    let source = note("'hello'");
     let parent = CancelHandle::new();
     let mut drivers = Vec::new();
     for _ in 0..2 {
@@ -68,7 +68,7 @@ fn one_parent_cancel_ends_every_run_holding_one_of_its_children() -> TestResult 
 
 #[test]
 fn a_cancelled_future_wakes_when_another_thread_cancels_the_run() -> TestResult {
-    let driver = Scenario::default().start(&greeter(NOTE))?;
+    let driver = Scenario::default().start(&note("'hello'"))?;
     let handle = driver.run.cancel_handle();
     let waiting = handle.cancelled();
 

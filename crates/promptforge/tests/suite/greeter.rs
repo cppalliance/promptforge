@@ -8,7 +8,7 @@
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::{Prompt, RunResult};
 
-use super::support::{NOTE, Scenario, TestResult, greeter, prompt, shout, text};
+use super::support::{Scenario, TestResult, note, prompt, shout, text};
 
 #[path = "../../examples/greeter.rs"]
 #[expect(
@@ -29,14 +29,14 @@ const REPLY: &str = "
 
 #[test]
 fn the_smallest_greeter_parses_and_its_title_is_the_h1_text() {
-    let (parsed, _events) = Prompt::parse(&greeter(NOTE), "greeter");
+    let (parsed, _events) = Prompt::parse(&note("'hello'"), "greeter");
     assert!(parsed.is_ok_and(|prompt| prompt.title() == "Greeter"));
 }
 
 #[test]
 fn answering_each_store_effect_from_the_runs_store_returns_the_note() -> TestResult {
-    let trace = Scenario::default().run(&greeter(NOTE))?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hello"));
+    let trace = Scenario::default().run(&note("'hello'"))?;
+    assert_eq!(trace.text()?, "hello");
     Ok(())
 }
 
@@ -52,14 +52,14 @@ fn the_example_answers_a_timer_as_fired_at_once() {
 fn prepare_fills_the_writer_role_and_the_canned_reply_becomes_the_result() -> TestResult {
     let source = prompt("models: { writer: {} }", &[("Greet", REPLY)]);
     let trace = Scenario::replies([text("hi there")]).run(&source)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "hi there"));
+    assert_eq!(trace.text()?, "hi there");
     Ok(())
 }
 
 #[test]
 fn trusted_tool_output_reaches_the_calling_lua_unchanged() -> TestResult {
     let trace = Scenario::tool(shout(), [text("hi there")]).run(GREETER)?;
-    assert!(matches!(trace.result, RunResult::Ok(text) if text == "HI THERE"));
+    assert_eq!(trace.text()?, "HI THERE");
     Ok(())
 }
 

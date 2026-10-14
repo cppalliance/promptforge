@@ -20,11 +20,12 @@ use promptforge::event::Event;
 use promptforge::ids::Provenance;
 use promptforge::model::{Completion, ModelDescriptor};
 use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
+use promptforge::tools::ToolCatalog;
 use promptforge::vfs::perform_vfs_op;
 use promptforge::{Prompt, Requirements, Run, RunContext, RunResult, Step};
+use serde_json::json;
 
-use super::{Reply, TestResult, Tool, canned};
+use super::{Reply, TestResult, Tool, canned, descriptor};
 
 /// Edits the context a scenario builds, after the scenario's own settings
 /// and before prepare.
@@ -124,9 +125,7 @@ impl Scenario {
             .provenance_start(u32::try_from(events.len())?)
             .model(model);
         if let Some(tool) = &self.tool {
-            let schema = serde_json::json!({ "type": "object" });
-            let descriptor =
-                ToolDescriptor::new(ToolId::parse(tool.id)?, "A scenario tool.", schema);
+            let descriptor = descriptor(tool.id, json!({ "type": "object" }))?;
             ctx = ctx.tools(ToolCatalog::new(&[descriptor])?);
         }
         if let Some(edit) = &self.context {
@@ -350,6 +349,16 @@ pub(crate) struct Trace {
     pub(crate) events: Vec<Event>,
     /// Every effect the run issued, in the order the driver answered them.
     pub(crate) effects: Vec<Logged>,
+}
+
+impl Trace {
+    /// The text of a `RunResult::Ok`. Fails on any other result.
+    pub(crate) fn text(&self) -> TestResult<&str> {
+        match &self.result {
+            RunResult::Ok(text) => Ok(text),
+            result => Err(format!("expected RunResult::Ok, got {result:?}").into()),
+        }
+    }
 }
 
 /// One effect with its answer and provenance, as a run log records them.
