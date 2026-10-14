@@ -4,28 +4,28 @@ overview: Remove the workspace-hack crate and cargo-hakari from promptforge, del
 todos:
   - id: baseline
     content: Capture baseline cargo tree feature lists for gateway and workshop on the five targets (scratch)
-    status: pending
+    status: completed
   - id: headless
     content: Delete workshop-server's headless feature, NoopAssets, the one-impl AssetServer trait, and the headless tests
-    status: pending
+    status: completed
   - id: hakari-out
     content: Remove workspace-hack crate, hakari.toml, 49 manifest lines, root workspace dep, CI hakari steps, hakari comments; refresh Cargo.lock
-    status: pending
+    status: completed
   - id: xtask-docs
     content: Drop workspace-hack allowances from build-xtask product and tidy-wiring rules and tests; update Invariants docs and guard comments
-    status: pending
+    status: completed
   - id: sweep
     content: Per-package cargo check sweep (default and all-targets/all-features); add missing features crate by crate; commit with hakari removal
-    status: pending
+    status: completed
   - id: feature-diff
     content: Diff shipped closures against baseline; restore runtime features (reqwest system-proxy); confirm ring and Engine tokio checks
-    status: pending
+    status: completed
   - id: ci-merge
     content: Replace the four Windows test steps with one nextest command; delete the Linux duplicate race-test step
-    status: pending
+    status: completed
   - id: verify
     content: Run the Testing Plan exit criteria and the merged Windows command locally; CI green; dispatch release-workshop.yml on the branch
-    status: pending
+    status: completed
 isProject: false
 ---
 
