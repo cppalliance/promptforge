@@ -12,6 +12,7 @@ use crate::api_error::{ServeError, StartupError};
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
+use crate::shutdown::ShutdownReason;
 use crate::{AppState, build_router};
 
 impl Gateway {
@@ -68,6 +69,14 @@ impl Gateway {
             hub,
         );
         Ok(Gateway { state })
+    }
+
+    /// Run the gateway under a restarting supervisor, from
+    /// [`ServeOptions::supervised`](super::ServeOptions::supervised).
+    pub(super) fn with_supervised(mut self, supervised: bool) -> Gateway {
+        self.state.supervised = supervised;
+
+        self
     }
 
     /// Enqueues the boot load for `profile`, or nothing when no profile is
@@ -300,7 +309,7 @@ impl Gateway {
             // The caller-owned future may have fired without the route
             // signal; firing it here ends every stream that selects on it,
             // so the drain below is not held open by a progress subscriber.
-            route_shutdown.fire();
+            route_shutdown.fire(ShutdownReason::Stop);
             // Close the queue before the drain: the active command's token
             // fires so a quit during provisioning stops the download, and no
             // pending command starts under a server that is going away.

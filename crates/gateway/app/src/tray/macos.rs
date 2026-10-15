@@ -45,6 +45,7 @@ use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuId, MenuItem};
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+use crate::ShutdownReason;
 use crate::api_error::StartupError;
 use crate::runner::{GatewayHandle, ServeOptions, run_headless, spawn};
 use crate::tray::logic::{self, TrayPhase};
@@ -96,7 +97,7 @@ enum TraySlot {
 /// thread until Quit. A tray that cannot start degrades to the headless
 /// Ctrl-C loop: the gateway is already serving and the tray is its face,
 /// not its life support.
-pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
+pub(super) fn run(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     let Some(mtm) = MainThreadMarker::new() else {
         // `run_with_tray` is called from `main`; a non-main-thread caller
         // gets the headless loop rather than a panic.
@@ -155,7 +156,7 @@ pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
             // gateway thread's gateway-discovery-file guard is lost with the
             // process, which stale-file detection covers on next launch.
             tracing::error!("the run loop exited before the tray was built");
-            Ok(())
+            Ok(ShutdownReason::Stop)
         }
     }
 }
@@ -304,14 +305,14 @@ impl Tray {
     /// (a surviving reference leaks a ghost status item), then the
     /// gateway's graceful shutdown - never `process::exit` ahead of
     /// destructors, so the gateway-discovery-file guard still runs.
-    fn teardown(mut self) -> Result<(), StartupError> {
+    fn teardown(mut self) -> Result<ShutdownReason, StartupError> {
         self.tick_timer.invalidate();
         drop(self.icon.take());
         let handle = self.handle.take();
         drop(self);
         match handle {
             Some(handle) => handle.shutdown(),
-            None => Ok(()),
+            None => Ok(ShutdownReason::Stop),
         }
     }
 }

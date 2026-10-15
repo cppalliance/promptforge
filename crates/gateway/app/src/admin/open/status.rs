@@ -41,6 +41,9 @@ struct StatusReply {
     /// The process-lifetime identifier the config UI uses to detect a
     /// restart.
     config_generation: String,
+    /// Whether a supervisor runs this gateway, so `POST /admin/restart` is
+    /// available and the config UI offers Restart to Apply.
+    supervised: bool,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
     /// Running local children; zero in a headless build.
@@ -154,6 +157,7 @@ async fn admin_status(
         models,
         loading_models: live.loading.iter().cloned().collect(),
         config_generation: state.config_generation.to_string(),
+        supervised: state.supervised,
         model_allowlist: live.model_allowlist.clone(),
         local_children,
         vram_gb,

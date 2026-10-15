@@ -126,3 +126,41 @@ async fn pending_view_reports_the_state_files_name_even_when_stale() {
         "the raw persisted name is reported even when the config no longer defines it"
     );
 }
+
+#[test]
+fn an_env_shadow_requires_a_restart() {
+    let temp = tempfile::TempDir::new().expect("creating a temp dir should succeed");
+    let config = temp.path().join("gateway.toml");
+    std::fs::write(
+        &config,
+        "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n",
+    )
+    .expect("writing config file should succeed");
+    write_shadow(&config.with_extension("env"), "PF_TEST_KEY=value\n")
+        .expect("staging env shadow should succeed");
+
+    let reply = dirty_reply(&config).expect("generating a dirty reply should succeed");
+
+    assert!(reply.restart_required);
+}
+
+#[test]
+fn a_live_reloadable_change_needs_no_restart() {
+    let temp = tempfile::TempDir::new().expect("creating a temp dir should succeed");
+    let config = temp.path().join("gateway.toml");
+    let base = "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n";
+    std::fs::write(&config, base).expect("write config");
+    write_shadow(
+        &config,
+        &format!(
+            "{base}\n[[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\n\
+             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n"
+        ),
+    )
+    .expect("writing a shadow file should not fail");
+
+    let reply = dirty_reply(&config).expect("generating a dirty reply should succeed");
+
+    assert!(reply.dirty);
+    assert!(!reply.restart_required);
+}

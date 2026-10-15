@@ -9,7 +9,7 @@ use gateway_api_types::Progress;
 use gateway_progress::ProgressHub;
 
 use super::{PROGRESS_HEARTBEAT, progress_sse_response};
-use crate::shutdown::ShutdownSignal;
+use crate::shutdown::{ShutdownReason, ShutdownSignal};
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -54,7 +54,7 @@ async fn a_fresh_subscriber_first_receives_the_current_snapshot() {
 
     // The subscriber connects after the work began: the stream must open
     // with the current state rather than wait for the next change.
-    let response = progress_sse_response(&hub, ShutdownSignal::default());
+    let response = progress_sse_response(&hub, Arc::new(ShutdownSignal::default()));
     let mut frames = response.into_body().into_data_stream();
     let snapshots = read_snapshots(&mut frames, 1).await;
     assert_eq!(snapshots[0], snapshot(true, "Downloading qwen 45%"));
@@ -64,7 +64,7 @@ async fn a_fresh_subscriber_first_receives_the_current_snapshot() {
 #[tokio::test]
 async fn an_idle_hub_opens_the_stream_with_the_idle_snapshot() {
     let hub = Arc::new(ProgressHub::new());
-    let response = progress_sse_response(&hub, ShutdownSignal::default());
+    let response = progress_sse_response(&hub, Arc::new(ShutdownSignal::default()));
     let mut frames = response.into_body().into_data_stream();
     let snapshots = read_snapshots(&mut frames, 1).await;
     assert_eq!(
@@ -77,7 +77,7 @@ async fn an_idle_hub_opens_the_stream_with_the_idle_snapshot() {
 #[tokio::test]
 async fn the_stream_sends_one_line_per_change_in_order() {
     let hub = Arc::new(ProgressHub::new());
-    let response = progress_sse_response(&hub, ShutdownSignal::default());
+    let response = progress_sse_response(&hub, Arc::new(ShutdownSignal::default()));
     let mut frames = response.into_body().into_data_stream();
     // Consume the opening idle snapshot.
     let opening = read_snapshots(&mut frames, 1).await;
@@ -103,7 +103,7 @@ async fn the_stream_sends_one_line_per_change_in_order() {
 #[tokio::test(start_paused = true)]
 async fn an_idle_hub_emits_heartbeat_comments_on_cadence() {
     let hub = Arc::new(ProgressHub::new());
-    let response = progress_sse_response(&hub, ShutdownSignal::default());
+    let response = progress_sse_response(&hub, Arc::new(ShutdownSignal::default()));
     let mut frames = response.into_body().into_data_stream();
     let opening = read_snapshots(&mut frames, 1).await;
     assert_eq!(opening[0], Progress::default());
@@ -126,7 +126,7 @@ async fn an_idle_hub_emits_heartbeat_comments_on_cadence() {
 #[tokio::test(start_paused = true)]
 async fn an_activity_drop_reports_idle_then_the_stream_goes_quiet() {
     let hub = Arc::new(ProgressHub::new());
-    let response = progress_sse_response(&hub, ShutdownSignal::default());
+    let response = progress_sse_response(&hub, Arc::new(ShutdownSignal::default()));
     let mut frames = response.into_body().into_data_stream();
     let opening = read_snapshots(&mut frames, 1).await;
     assert_eq!(opening[0], Progress::default());
@@ -153,7 +153,7 @@ async fn an_activity_drop_reports_idle_then_the_stream_goes_quiet() {
 #[tokio::test]
 async fn the_stream_ends_when_the_shutdown_signal_fires() {
     let hub = Arc::new(ProgressHub::new());
-    let shutdown = ShutdownSignal::default();
+    let shutdown = Arc::new(ShutdownSignal::default());
     let response = progress_sse_response(&hub, shutdown.clone());
     let mut frames = response.into_body().into_data_stream();
 
@@ -163,7 +163,7 @@ async fn the_stream_ends_when_the_shutdown_signal_fires() {
     let snapshots = read_snapshots(&mut frames, 1).await;
     assert_eq!(snapshots[0], snapshot(true, "Downloading qwen"));
 
-    shutdown.fire();
+    shutdown.fire(ShutdownReason::Stop);
     let end = tokio::time::timeout(FRAME_TIMEOUT, frames.next())
         .await
         .expect("the stream reacts to the signal within the frame timeout");

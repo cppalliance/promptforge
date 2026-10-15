@@ -293,3 +293,18 @@ async fn the_cancel_routes_fire_the_token_and_drop_pending_entries() {
     queue.shutdown();
     worker.await.expect("the worker exits on shutdown");
 }
+
+#[tokio::test]
+async fn the_status_response_reports_whether_a_supervisor_runs_the_gateway() {
+    let unsupervised = get_status(state()).await;
+    assert_eq!(unsupervised["supervised"], false);
+
+    let supervised_state = {
+        let mut state = state();
+        state.supervised = true;
+        state
+    };
+
+    let supervised = get_status(supervised_state).await;
+    assert_eq!(supervised["supervised"], true);
+}

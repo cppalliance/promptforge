@@ -130,6 +130,7 @@ pub use crate::relaunch::{GatewayStartup, GatewayStartupError, settle_gateway_st
 pub use crate::runner::{
     Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, run_printing_url, spawn,
 };
+pub use crate::shutdown::{RESTART_REQUESTED, ShutdownReason};
 pub use crate::tray::run_with_tray;
 pub use gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
@@ -271,7 +272,11 @@ struct AppState {
     reveal: Arc<dyn reveal::RevealLauncher>,
     /// The process-shutdown signal fired by `POST /shutdown`; the serve
     /// loop selects on it alongside the caller-owned shutdown future.
-    shutdown: shutdown::ShutdownSignal,
+    shutdown: Arc<shutdown::ShutdownSignal>,
+    /// This gateway runs under a supervisor that relaunches it if it exits with
+    /// [`RESTART_REQUESTED`](crate::RESTART_REQUESTED).
+    /// Makes `POST /admin/restart`available.
+    supervised: bool,
     /// Process-lifetime random salt for the `/auth` handoff's session
     /// proof; a restart or key rotation invalidates every minted cookie.
     handoff_salt: [u8; 32],
@@ -349,7 +354,8 @@ impl AppState {
             hf: Arc::new(hf::HfProxy::from_env()),
             cloud_models: cloud_models::CloudModels::default(),
             reveal: Arc::new(reveal::SpawnLauncher),
-            shutdown: shutdown::ShutdownSignal::default(),
+            shutdown: Arc::new(shutdown::ShutdownSignal::default()),
+            supervised: false,
             handoff_salt: {
                 // The OS-seeded CSPRNG, as for the generated bearer key:
                 // the salt keeps a harvested handoff cookie from ever

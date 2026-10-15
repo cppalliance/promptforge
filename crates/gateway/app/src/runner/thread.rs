@@ -14,8 +14,8 @@ use super::{
     BootSelectionNotice, Gateway, GatewayHandle, RUNTIME_SHUTDOWN_TIMEOUT, ServeOptions,
     boot_selection_notice, load_startup, shutdown_on_send,
 };
-use crate::AppState;
 use crate::api_error::StartupError;
+use crate::{AppState, ShutdownReason};
 
 impl GatewayHandle {
     /// Returns the base URL of the bound gateway address, for example
@@ -52,10 +52,12 @@ impl GatewayHandle {
     /// The active queue command's token fires first, so a quit during
     /// provisioning cancels the download and the join returns promptly.
     ///
+    /// Returns the reason for the shutdown, as recorded by the shutdown signal.
+    ///
     /// # Errors
     /// Returns [`StartupError`] when serving failed or the gateway thread
     /// panicked.
-    pub fn shutdown(mut self) -> Result<(), StartupError> {
+    pub fn shutdown(mut self) -> Result<ShutdownReason, StartupError> {
         self.state.commands.cancel_active();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
@@ -66,23 +68,31 @@ impl GatewayHandle {
     /// Waits for the gateway thread to finish on its own, without signaling
     /// shutdown.
     ///
+    /// Returns the reason for the shutdown, as recorded by the Shutdown signal.
+    ///
     /// # Errors
     /// Returns [`StartupError`] when serving failed or the gateway thread
     /// panicked.
-    pub fn join(mut self) -> Result<(), StartupError> {
+    pub fn join(mut self) -> Result<ShutdownReason, StartupError> {
         self.join_inner()
     }
 
-    fn join_inner(&mut self) -> Result<(), StartupError> {
+    fn join_inner(&mut self) -> Result<ShutdownReason, StartupError> {
         let Some(thread) = self.thread.take() else {
-            return Ok(());
+            return Ok(self.shutdown_reason());
         };
         match thread.join() {
-            Ok(result) => result,
+            Ok(result) => result.map(|()| self.shutdown_reason()),
             Err(_) => Err(StartupError::serve(crate::api_error::ServeError::io(
                 std::io::Error::other("gateway thread panicked"),
             ))),
         }
+    }
+
+    /// Why serving ended: the reason the shutdown signal recorded, or a
+    /// stop when serving ended without one.
+    fn shutdown_reason(&self) -> ShutdownReason {
+        self.state.shutdown.reason().unwrap_or(ShutdownReason::Stop)
     }
 }
 
@@ -251,17 +261,26 @@ fn serve_thread(
     // publication precede any local work). Local provisioning is the boot
     // command's work, not startup's.
     let boot_profile = profiles.active.clone();
+    let rollback_config_path = profiles.config_path.clone();
     let gateway = match Gateway::new_with_hub(&config, profiles, hub) {
-        Ok(gateway) => gateway,
+        Ok(gateway) => gateway.with_supervised(options.supervised),
         Err(error) => {
             let _ = ready.send(Err(error));
             return Ok(());
         }
     };
+    if options.supervised {
+        crate::shutdown::stdin_watchdog(Arc::clone(&gateway.state.shutdown));
+    }
     // The gateway discovery file lands before the readiness signal so a spawned
     // gateway is discoverable the moment `spawn` returns; the guard removes
     // it on every exit path below, graceful shutdown included.
     let _gateway_discovery_file = gateway_discovery_file_guard(&config, options, address);
+    // Publication counts as a successful gateway start, so from
+    // here the rollback config files become stale and should be removed.
+    if let Some(config_path) = &rollback_config_path {
+        crate::config_shadow::remove_rollback_config(config_path);
+    }
     tracing::info!("gateway serving on {address}");
     let _ = ready.send(Ok(Ready {
         url: format!("http://{address}"),

@@ -6,8 +6,8 @@ todos:
     content: "Resolve ${VAR} at save and capture against the pending env file, then the process env, so a key staged on the Secrets tab validates the endpoint that references it"
     status: completed
   - id: restart-contract
-    content: "Child side: --supervised flag, stdin-EOF watchdog, `RESTART_REQUESTED` exit code, POST /admin/restart (promote with .prev, then shut down), restart_required on GET /admin/config-dirty"
-    status: pending
+    content: "Child side: --supervised flag, stdin-EOF watchdog, `RESTART_REQUESTED` exit code, Apply keeps .prev (first since boot wins), startup removes .prev, POST /admin/restart (restart only), restart_required on GET /admin/config-dirty"
+    status: completed
   - id: bind-hint
     content: "--port-hint for a config that binds port 0; bind through TcpSocket with SO_REUSEADDR on Unix"
     status: pending
@@ -50,7 +50,7 @@ To make that possible, starting the gateway will start two processes instead of 
 The changes, in the order they will be made:
 
 1. **Check new settings against new secrets.** Today, adding a model from the Cloud Models page fails if its provider's API key was entered on the Secrets tab after the gateway started, even once that key has been applied. Config edits will be checked against the keys on file, so the model can be added straight after its key.
-2. **Teach the gateway to ask for a restart.** A new admin request applies the pending changes, keeps a copy of the files it replaced, and restarts the gateway.
+2. **Teach the gateway to ask for a restart.** A new admin request restarts the gateway and does nothing else. Apply now keeps a copy of the files it replaces, the first time it replaces them since the gateway last started, and the gateway removes those copies once it has started successfully; the supervisor uses them to roll back a restart that fails.
 3. **Add a way to choose the port at startup.** A new command line option asks the gateway to use a given port when its config lets the system choose one. Nothing uses it yet; the supervisor in the next change uses it to bring each restarted gateway back on the previous port, so the address stays the same.
 4. **Add the supervisor.** It starts the gateway and restarts it when asked. If a restarted gateway fails to start, the supervisor puts the previous config back, returns the rejected edit to the pending list, and starts the gateway again on the old config, which then reports what went wrong. The supervisor relaunches only for restart requests. A gateway that fails on its first start, or crashes while running, ends the supervisor exactly as the gateway ends today, so systemd and the Workshop desktop app recover from crashes as they do now.
 5. **Replace Apply with Restart to Apply in the config UI.** When pending changes need a restart, the Apply button becomes Restart to Apply and does both in one step. The UI waits for the gateway to return, and if the restart was rolled back it shows why, with the edit still pending.
@@ -77,14 +77,17 @@ sequenceDiagram
     participant C1 as child (old)
     participant S as supervisor
     participant C2 as child (new)
+    UI->>C1: POST /admin/config-apply
+    C1->>C1: validate pending, keep .prev (first since boot), promote shadows
+    C1-->>UI: 200
     UI->>C1: POST /admin/restart
-    C1->>C1: validate pending, promote shadows, keep .prev
     C1-->>UI: 202
     C1->>C1: graceful shutdown, exit RESTART_REQUESTED
     S->>S: hold launch lock
     S->>C2: spawn --supervised --port-hint P
     alt C2 publishes a validated discovery file in time
-        S->>S: delete .prev, release launch lock
+        C2->>C2: remove .prev after publishing
+        S->>S: release launch lock
         UI->>C2: GET /admin/status (new config_generation)
     else C2 fails to boot
         S->>S: real -> .next, .prev -> real, write failure record
@@ -101,7 +104,8 @@ sequenceDiagram
 - **The child keeps the instance lease; the supervisor uses the launch election.** The discovery file and the lease identify the serving process by pid and image (`runner.rs:1071`, `gateway-api-discovery/src/validated.rs:16-19`), so they stay with the child and `settle_gateway_startup` is untouched. The supervisor settles its own start with `launch_or_attach` (`gateway-api-discovery/src/lock.rs:106`): `Attach` is today's second-launch handoff (open Settings unless `--login`), `Launch(lock)` spawns the first child. Across a restart the supervisor takes `gateway.json.lock` before the old child exits and holds it until the new child publishes. The desktop supervisor, which sees the gap as `Missing` on its 5 s probe (`workshop/desktop/src/gateway/supervisor.rs:88-108`), then waits in its own `launch_or_attach` and attaches to the new child instead of launching a competitor. This reuses the election exactly as the lock's doc describes it ("a Workshop parent may hold the launch election while the spawned Gateway acquires this lease", `lock.rs:35-37`).
 - **Orphan safety through a stdin pipe.** The supervisor gives the child a piped stdin; a supervised child watches it on a thread and fires `ShutdownSignal` on EOF. Killing the supervisor closes the pipe on every OS, so the child shuts down gracefully and its `llama-server` children drop through `ServerGuard::drop` (`gateway/local/src/server.rs:586-594`). No Job Object, `PR_SET_PDEATHSIG`, or new unsafe code. Orphaned `llama-server` children after a hard kill of the serving process itself are a pre-existing gap and out of scope.
 - **Retries belong to restarts only.** The supervisor relaunches only after a child exits with `RESTART_REQUESTED`. A first boot that fails, or a running child that exits with any other code, ends the supervisor with that child's exit code, exactly as the gateway process ends today; the desktop supervisor and systemd keep owning crash recovery. Within a restart, failed launches retry with backoff from 250 ms doubling, at most 5 launches in all; a restart that exhausts them ends the supervisor with the last child's code.
-- **Rollback is file state, not IPC.** `POST /admin/restart` writes `<file>.prev` for every real file it promotes. The supervisor reads the presence of `.prev` files as "this restart carries a change". On success it deletes them; on failure it moves each real file back to `<file>.next` (the rejected edit becomes pending again, visible and fixable in the UI) and each `.prev` back to the real path, then relaunches. A child that also fails on the restored config is retried within the restart's cap.
+- **Restart only restarts; Apply keeps the rollback copies.** `POST /admin/restart` fires the restart and does nothing else; Restart to Apply in the UI is `POST /admin/config-apply` followed by `POST /admin/restart`, a gap of one round trip inside one click. Apply copies each real file it is about to replace to `<file>.prev`, supervised or not, unless that `.prev` already exists: the first copy since the last start is the config that booted, and a second Apply before the restart must not overwrite it. Every gateway removes its `.prev` files right after it publishes its discovery file, the moment the supervisor counts as a successful start, so neither Apply nor the supervisor branches on supervision and an unsupervised gateway's copies last only until its next start. A `.prev` that cannot be removed only warns; a later failed restart would restore it.
+- **Rollback is file state, not IPC.** The supervisor reads the presence of `.prev` files after a failed boot as "this restart carries a change": it moves each real file back to `<file>.next` (the rejected edit becomes pending again, visible and fixable in the UI) and each `.prev` back to the real path, then relaunches. A child that also fails on the restored config is retried within the restart's cap.
 - **The failure record is a run-directory file.** On rollback the supervisor writes `restart-failure.json` beside the discovery file; the next child reads it, deletes it, and reports it once. A file carries the stderr tail without command-line length limits and needs no new channel.
 - **Health is publication.** A new child counts as booted when it publishes a discovery file that `ValidatedConnection` accepts, within 30 s (the desktop's `RECOVERY_TIMEOUT`, `workshop/desktop/src/gateway/supervisor/launch.rs:14`). The boot load of local models runs after publication (`boot_load.rs`) and does not fail the boot, so it is not part of the criterion.
 - **The tray stays with the serving gateway.** The supervisor is windowless and the tray code is untouched: it keeps reading in-process state through `GatewayHandle` and `AppState`. Quit stops the child, which exits 0, and the supervisor exits on 0. During a restart the icon disappears and returns once the new child starts, before its bind. When a restart exhausts its retries the supervisor exits and nothing is on screen, which matches today, where a boot failure ends the process. Moving the tray into the supervisor (a persistent icon, a Restarting phase, an Error state while no child runs) would replace every in-process tray coupling with HTTP, and is left for a follow-up if the icon gap proves a problem.
@@ -109,7 +113,7 @@ sequenceDiagram
 
 ## Repo conventions that bind this plan
 
-- `crates/gateway/app` has no `## Invariants` marker, so the 500-line ceiling does not bind it; split large new modules anyway. A new `supervisor` area with three or more files goes in `src/supervisor/` beside `src/supervisor.rs`; one or two files are `supervisor-<label>.rs` siblings with `#[path]`.
+- `crates/gateway/app` has the `## Invariants` marker (`lib.rs:72`), so every Rust file in it stays under 500 lines, enforced by `cargo test -p build-xtask`; `lib.rs` sits near the limit, so new code goes in other files. A new `supervisor` area with three or more files goes in `src/supervisor/` beside `src/supervisor.rs`; one or two files are `supervisor-<label>.rs` siblings with `#[path]`.
 - Unit tests live in `<parent>-tests.rs` siblings. Integration tests join `tests/it/main.rs` as a new `supervisor` module; `support.rs`'s `GatewayProcess` (`tests/it/support.rs:46-199`) is the spawning helper and gains a graceful-stop method.
 - Error and status messages are written for model consumption: name what is missing or unmet, required versus actual.
 - No structural checks are added. Gateway crates still depend on no workshop crate; the desktop is not modified by this plan.
@@ -123,7 +127,7 @@ Fixes the reproduced Secrets-then-Cloud-Models failure in Problem: validation of
 - `gateway-config` interpolation takes a lookup (`VarLookupFn`, `config/src/config/interpolate.rs`) instead of calling `std::env::var` directly. `Config::parse_toml_at` passes the process environment, so the boot path does not change; `Config::parse_toml_with_lookup` takes the caller's lookup. `save_config_shadow` and `load_pending_config` gain a `lookup` parameter and resolve through it.
 - The env file is read in the gateway app, not the config crate, which keeps its rule of loading no env files (`vibe/2026-08/2026-08-23-1-dominion-refactor.md:284`). `PendingEnv` in `app/src/config_shadow.rs` reads the pending env file into a map without touching the process environment: `gateway.env.next` when staged, else `gateway.env`. `read_env_file` there replaces `env_file.rs`'s `parse_env`, so `GET /admin/env` and `PendingEnv` share one reader. The three app callers (`admin/walled/config.rs`, `admin/walled/config_pending.rs`, `commands/apply.rs`) pass `PendingEnv::resolve_var`; the save builds it inside `blocking`.
 - Precedence is file first, then the process environment, so a key edited in the UI validates with its new value even when the boot loaded an older one from `gateway.env`. Two cases differ from the next boot, documented on `resolve_var` and accepted because a user who sets a key in the launching shell does not also edit it in the UI: a variable the launching process exports resolves to the file's value, while the boot keeps the export; and a variable deleted from the pending file still resolves from the process environment, which loaded it at boot (Step 4's rollback catches a boot that then fails). Telling external variables from file-loaded ones would need `load_env_file` to record the names it set; not done.
-- Consequence for live reload: `capture_apply` loads the pending config through `load_pending_config`, so a live-reload Apply now builds the remote routing table with a key the file holds and the process does not. The endpoint works at once instead of after a restart. This is the right outcome; Step 2's census still marks every env shadow `restart_required`, because `HF_TOKEN` and the other direct readers of the process environment only change at boot.
+- Consequence for live reload: `capture_apply` loads the pending config through `load_pending_config`, so an Apply that reloads (one with a config shadow) now builds the remote routing table with a key the file holds and the process does not; an env-only Apply does not reload (see Follow-up plans). The endpoint works at once instead of after a restart. This is the right outcome; Step 2's census still marks every env shadow `restart_required`, because `HF_TOKEN` and the other direct readers of the process environment only change at boot.
 - Tests:
   - Route (`admin/walled/config-tests.rs`): the reproduction above, a key only in `gateway.env.next`, stages; a variable in neither file is refused with 422 naming it and stages nothing. A route test for a key applied to `gateway.env` was dropped as redundant with the unit test that reads the real file.
   - Unit (`app/src/config_shadow-tests.rs`): `.next` wins over the real file; no env file is empty and an unset variable is `NotPresent`; the file wins over the process environment (`PATH=from-file`); a variable only in the process resolves from it; a malformed env file is an error.
@@ -131,16 +135,18 @@ Fixes the reproduced Secrets-then-Cloud-Models failure in Problem: validation of
 
 ## Step 2: The child's restart contract
 
-- `--supervised` in `parse_args` (`main.rs:339`): runs the tray loop (`run_with_tray`) or, with `--no-tray`, the headless loop (`run_headless`, `runner.rs:1140`); starts the stdin watchdog; never opens a browser, and on a lease handoff exits 0 silently. It is mutually exclusive with `--print-url` and `--browser`.
-- Exit status: `run` and friends return an outcome that distinguishes a restart request from a plain stop; `main` maps it to `ExitCode::from(RESTART_REQUESTED)`; the constant sits beside the supervisor module's other exit handling and is the only place the value appears. `ShutdownSignal` (`src/shutdown.rs:20`) gains the restart intent so `POST /shutdown` keeps meaning stop.
+- `--supervised` in `parse_args` (`cli.rs`, split out of `main.rs` for the line limit) sets `ServeOptions::supervised`, which `serve_thread` copies into `AppState`. It runs the tray loop (`run_with_tray`) or, with `--no-tray`, the headless loop; starts the stdin watchdog (`shutdown::stdin_watchdog`); and on a lease handoff exits 0 silently instead of opening the running gateway's Settings page. It is mutually exclusive with `--print-url`, and accepts `--browser`, which the supervisor forwards to the first child only.
+- Exit status: `ShutdownSignal` (`shutdown.rs`) records the first fire's `ShutdownReason` (`Stop` or `Restart`) and is shared as `Arc<ShutdownSignal>` from `AppState`. `GatewayHandle::join`/`shutdown`, `run`, `run_printing_url`, `run_headless`, and `run_with_tray` return `Result<ShutdownReason, StartupError>`, a stop when nothing recorded a reason; `ShutdownReason::exit_code` maps `Restart` to `RESTART_REQUESTED` (75), defined beside it in `shutdown.rs`. `POST /shutdown` fires `Stop`.
 - `POST /admin/restart` (walled, `admin/walled/restart.rs`, registered in `walled.rs` and the registry):
   - Refuses with 409 when the process is not supervised: `restart unavailable: the gateway was started without --supervised; restart it by hand`.
-  - Takes the apply lock, runs `capture_apply`, validates the pending config with Step 1's lookup, promotes through `promote_captures` after copying each real file to `<file>.prev`, fires the restart intent, and answers 202 before the drain (same ordering as `/shutdown`, `admin/walled/shutdown.rs`).
-  - With nothing pending it is a plain restart.
-- `GET /admin/config-dirty` gains `restart_required: bool` from the shadow census (`config_shadow.rs:28`), factored out of `capture_apply` so both read one function.
-- `/admin/status` gains `supervised: bool` so the UI knows which button to show.
-- Tests: route refuses unsupervised; promotes with `.prev` and sets the intent; validation failure promotes nothing and writes no `.prev`; dirty reply flags env shadows and boot-read sections only; registry sweep covers the new route; `main` maps the intent to `RESTART_REQUESTED`.
-- Commit: `Add the supervised restart contract`
+  - Otherwise cancels the active queue command, fires `ShutdownReason::Restart`, and answers 202 before the drain (same ordering as `/shutdown`, `admin/walled/shutdown.rs`). It applies nothing.
+- `POST /admin/config-apply` keeps rollback copies: `keep_previous` (`commands/apply.rs`) copies each capture's real file to `<file>.prev` (`config_shadow::rollback_path`) unless one exists, on the inline path inside the promoting `blocking` call and on the reload path before the command is enqueued (`ApplySnapshot::captures`). The inline, env-only path now validates the pending config too (`pending_config`, pulled out of `capture_apply`), so an env change that breaks a `${VAR}` is refused with 422 instead of failing the next boot.
+- `config_shadow::remove_rollback_config` runs in `serve_thread` right after the discovery file is written and removes `gateway.toml.prev` and `gateway.env.prev`.
+- In `capture_apply`, `needs_reload` is renamed `routing_rebuild_required`, so it reads apart from `restart_required`.
+- `GET /admin/config-dirty` gains `restart_required: bool`. The rule moved out of `capture_apply` onto the census: `ShadowCensus::new` records whether the env file is shadowed, `ShadowCensus::restart_required` checks that and the changed sections against `RESTART_SECTIONS` (now in `config_shadow.rs`), and both `dirty_reply` and `capture_apply` call it.
+- `GET /admin/status` gains `supervised: bool`, from `AppState::supervised`, so the UI knows which button to show.
+- Tests: the route refuses unsupervised with 409 and fires `Restart` when supervised; Apply writes `.prev` and a second Apply keeps the first copy; an env-only Apply that breaks a `${VAR}` is refused and writes nothing; a started gateway has no `.prev` left; the dirty reply flags env shadows and boot-read sections only; the registry sweep covers the new route; a `--supervised` binary exits with 75 after `POST /admin/restart`.
+- Commit: `Add supervised restart support to Gateway backend`
 
 ## Step 3: A port option
 
@@ -155,10 +161,11 @@ This step only adds the option; nothing passes it yet. Step 4's supervisor is it
 
 - New `src/supervisor.rs` + `src/supervisor/` (spawn, loop, rollback): entered for a bare launch, `--login`, and `--no-tray`. The supervisor has no tray and no window in any mode.
 - Start: `launch_or_attach` in the run directory. `Attach` hands off as `relaunch.rs` does today. `Launch(lock)` spawns the child and holds the lock until the child publishes.
-- Child spawn: `current_exe()` with `--supervised`; `--no-tray`, `--config`, and `--profile` passed through when the supervisor received them; and `--port-hint` after the first boot (read from the discovery file). Stdin piped, stdout null, stderr piped and retained (last 64 lines) for the failure record. Windows adds `CREATE_NO_WINDOW` like `production_command` (`gateway/local/src/server-support.rs:102-106`).
+- `--print-url` launches stay single-process and unsupervised: a terminal-driven mode with no tray, where Restart to Apply falls back to today's Apply and banner.
+- Child spawn: `current_exe()` with `--supervised`; `--no-tray`, `--config`, and `--profile` passed through when the supervisor received them; `--browser` passed to the first child only, so the installer's first run still opens Settings and restarts never do; and `--port-hint` after the first boot (read from the discovery file). Stdin piped, stdout null, stderr piped and retained (last 64 lines) for the failure record. Windows adds `CREATE_NO_WINDOW` like `production_command` (`gateway/local/src/server-support.rs:102-106`).
 - Loop on child exit:
   - 0: the supervisor exits 0.
-  - `RESTART_REQUESTED`: take the launch lock and relaunch. A launch fails when the child exits or does not publish within 30 s. The first failure with `.prev` files present rolls back as in Decisions; every failure relaunches after a backoff from 250 ms doubling, at most 5 launches per restart. Success commits (deletes `.prev`), releases the lock, and resets the count.
+  - `RESTART_REQUESTED`: take the launch lock and relaunch. A launch fails when the child exits or does not publish within 30 s. The first failure with `.prev` files present rolls back as in Decisions; every failure relaunches after a backoff from 250 ms doubling, at most 5 launches per restart. Success (the child, having published, has already removed `.prev`) releases the lock and resets the count.
   - Anything else, or no publication within 30 s on the first boot: no relaunch. The supervisor exits with the child's code (1 when the child died by a signal, or published nothing and was stopped), having logged the child's last stderr lines and printed them on its own stderr.
 - Failure record: on rollback the supervisor writes `restart-failure.json` in the run directory (`{"at", "exit", "stderr_tail"}`); the next child reads and deletes it at boot and reports it once in `/admin/status` as `restart_failure`.
 - Ctrl-C in headless mode stops the child through `request_shutdown` (`gateway-api-discovery/src/shutdown.rs`) and waits, then exits.
@@ -177,7 +184,7 @@ This step only adds the option; nothing passes it yet. Step 4's supervisor is it
 
 - `services/gateway-api.ts`: `DirtyReport.restart_required`, `StatusReply.supervised` and `restart_failure`, `restart()` for `POST /admin/restart`.
 - `main.ts`:
-  - The tab-bar Apply button reads **Restart to Apply** when the dirty report says `restart_required` and the gateway is supervised. Clicking it opens the apply overlay with "Restarting gateway", calls `restart()`, and waits on `config_generation` (`watchForRestart`, `main.ts:243-272`) with a 60 s bound before failing the overlay.
+  - The tab-bar Apply button reads **Restart to Apply** when the dirty report says `restart_required` and the gateway is supervised. Clicking it opens the apply overlay with "Restarting gateway", calls `apply()` then `restart()`, and waits on `config_generation` (`watchForRestart`, `main.ts:243-272`) with a 60 s bound before failing the overlay.
   - The restart banner gains a **Restart now** button for the profile switch path (`profile-switcher.ts:170`, `profiles-page.ts:198-229`), the only remaining source of a restart that is not a pending file.
   - When `restart_failure` is present, show an error banner: "Restart failed; your changes were restored as pending" with the stderr tail in a disclosure.
   - Unsupervised gateways keep today's Apply plus banner text.
@@ -196,6 +203,7 @@ This step only adds the option; nothing passes it yet. Step 4's supervisor is it
 
 - **Workshop profile switch.** `workshop_socket-menu.rs:228-248` restarts a sidecar with `request_shutdown`. With this plan that stops the whole supervisor, and the desktop's 5 s probe relaunches it, so it keeps working. A follow-up switches it to `POST /admin/restart`, which is faster and keeps the supervisor up; it touches workshop crates, so it is not part of this plan.
 - **Tray in the supervisor.** Only if the brief icon gap during a restart proves a problem (see the tray decision).
+- **Env-only Apply reloads the routing table.** Step 1 made a reload resolve `${VAR}` from the pending env file, but `capture_apply` reloads only when a `gateway.toml.next` exists: an Apply that changes `gateway.env` alone takes the inline path, so a new key for a remote endpoint waits for a restart, while the same key applied together with a config change works at once. Treating an env shadow as a reason to reload makes both cases live immediately for remote endpoints; `restart_required` stays true for an env shadow, because `HF_TOKEN` and the other direct readers of the process environment change only at boot. Matters only for unsupervised gateways and the moment between Apply and the restart in Restart to Apply.
 - **`PendingEnv` in `gateway-config`.** Moving the pending-env reader into the config crate would let `save_config_shadow` and `load_pending_config` build it themselves and drop the public `lookup` parameter and `VarLookupFn`, at the cost of a `dotenvy` dependency and reversing the dominion refactor's no-env-file rule for the config crate.
 
 ## Constraints

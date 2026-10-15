@@ -13,6 +13,7 @@
 //! [`run_with_tray`] is the binary's default main loop; `--no-tray` keeps
 //! the headless Ctrl-C loop ([`crate::run`]) for servers and CI.
 
+use crate::ShutdownReason;
 use crate::api_error::StartupError;
 use crate::runner::ServeOptions;
 
@@ -54,27 +55,27 @@ mod windows;
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// serving fails; classify with [`StartupError::kind`].
-pub fn run_with_tray(options: &ServeOptions) -> Result<(), StartupError> {
+pub fn run_with_tray(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     run_inner(options)
 }
 
 #[cfg(target_os = "windows")]
-fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+fn run_inner(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     windows::run(options)
 }
 
 #[cfg(target_os = "macos")]
-fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+fn run_inner(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     macos::run(options)
 }
 
 #[cfg(target_os = "linux")]
-fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+fn run_inner(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     linux::run(options)
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+fn run_inner(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     tracing::warn!("the system tray has no backend on this platform; running headless");
     crate::run(options)
 }

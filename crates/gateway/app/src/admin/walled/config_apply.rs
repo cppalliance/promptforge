@@ -34,8 +34,8 @@ use tokio_util::sync::CancellationToken;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::commands::Command;
-use crate::commands::apply::{ApplyPlan, capture_apply, promote_captures};
-use crate::config_shadow::{config_root, relative_name, shadow_census};
+use crate::commands::apply::{ApplyPlan, capture_apply, promote_captures, write_rollback_files};
+use crate::config_shadow::{ShadowCensus, config_root, relative_name};
 use crate::error::error_chain;
 use crate::error::{GatewayError, blocking};
 use crate::registry::RouteInfo;
@@ -110,14 +110,22 @@ async fn admin_config_apply(
                 files,
                 restart_required,
             } => {
-                let applied = blocking(move || promote_captures(&files)).await??;
+                let applied = blocking(move || {
+                    write_rollback_files(&files)?;
+                    promote_captures(&files)
+                })
+                .await??;
                 return Ok(Json(ApplyReply {
                     applied,
                     reloaded: false,
                     restart_required,
                 }));
             }
-            ApplyPlan::Reload(snapshot) => snapshot,
+            ApplyPlan::Reload(snapshot) => {
+                let captures = snapshot.captures().to_vec();
+                blocking(move || write_rollback_files(&captures)).await??;
+                snapshot
+            }
         };
         let applied = snapshot.applied_names();
         let restart_required = snapshot.restart_required;
@@ -174,10 +182,10 @@ async fn admin_config_revert(
 /// Deletes every shadow the census finds, returning the deleted shadow
 /// files relative to the config root, sorted.
 fn delete_all_shadows(config_path: &Path) -> Result<Vec<String>, GatewayError> {
-    let census = shadow_census(config_path)?;
+    let census = ShadowCensus::new(config_path)?;
     let root = config_root(config_path);
-    let mut reverted: Vec<String> = Vec::with_capacity(census.files.len());
-    for file in &census.files {
+    let mut reverted: Vec<String> = Vec::with_capacity(census.files().len());
+    for file in census.files() {
         let shadow: PathBuf = shadow_path(file);
         std::fs::remove_file(&shadow)
             .map_err(|source| GatewayError::ConfigWriteIo(Box::new(source)))?;

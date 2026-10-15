@@ -18,6 +18,7 @@ use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::GatewayError;
 use crate::registry::RouteInfo;
+use crate::shutdown::ShutdownReason;
 
 const SHUTDOWN: RouteInfo = RouteInfo::walled("/shutdown", &[Method::POST]);
 
@@ -42,7 +43,7 @@ async fn admin_shutdown(
     // stops the download, so the serve loop's drain and the process exit
     // stay prompt.
     state.commands.cancel_active();
-    state.shutdown.fire();
+    state.shutdown.fire(ShutdownReason::Stop);
     Ok(StatusCode::ACCEPTED)
 }
 

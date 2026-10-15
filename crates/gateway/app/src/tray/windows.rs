@@ -25,6 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowLongPtrW, TranslateMessage, WM_APP, WM_TIMER, WNDCLASSW,
 };
 
+use crate::ShutdownReason;
 use crate::api_error::StartupError;
 use crate::runner::{GatewayHandle, ServeOptions, run_headless, spawn};
 use crate::tray::logic::{self, TrayPhase};
@@ -72,7 +73,7 @@ thread_local! {
 /// Spawns the gateway, then runs the tray on the main thread until Quit.
 /// A tray that cannot start degrades to the headless Ctrl-C loop: the
 /// gateway is already serving, and the tray is only its user interface.
-pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
+pub(super) fn run(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     let handle = spawn(options)?;
     let tray = match Tray::build(&handle) {
         Ok(tray) => tray,
@@ -304,7 +305,7 @@ impl Armed {
     /// then the window, then the gateway's graceful shutdown - never
     /// `process::exit` ahead of destructors, so the gateway-discovery-file guard
     /// still runs.
-    fn run(self) -> Result<(), StartupError> {
+    fn run(self) -> Result<ShutdownReason, StartupError> {
         message_loop(self.hwnd);
         // SAFETY: `hwnd` is our window; its timer is ours.
         unsafe {
@@ -320,7 +321,7 @@ impl Armed {
         drop(tray);
         match handle {
             Some(handle) => handle.shutdown(),
-            None => Ok(()),
+            None => Ok(ShutdownReason::Stop),
         }
     }
 }

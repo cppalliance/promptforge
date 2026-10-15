@@ -17,29 +17,66 @@ use gateway_config::{pending_report, shadow_path};
 
 use crate::error::{GatewayError, pending_read_error};
 
+/// Top-level sections the process reads once at boot. A change to one of
+/// them promotes to disk but takes effect at the next start, so the apply
+/// reports `restart_required`.
+pub(crate) const RESTART_SECTIONS: [&str; 5] =
+    ["server", "profile", "local_model", "stt_model", "stt"];
+
 /// Every shadow on disk for one gateway and the sections they change.
+#[non_exhaustive]
 pub(crate) struct ShadowCensus {
     /// Real files whose shadows exist, in canonical form, without
     /// duplicates.
-    pub(crate) files: Vec<PathBuf>,
+    files: Vec<PathBuf>,
     /// Top-level sections whose merged value the shadows change, sorted
     /// and deduplicated.
-    pub(crate) sections: Vec<String>,
+    sections: Vec<String>,
+    /// Whether applying these shadows takes effect only at the next start:
+    /// the env file changed, or a section the process reads once at boot changed.
+    restart_required: bool,
 }
 
-/// Collects the config shadow and one env shadow.
-pub(crate) fn shadow_census(config_path: &Path) -> Result<ShadowCensus, GatewayError> {
-    let profile = pending_report(config_path).map_err(|error| pending_read_error(&error))?;
-    let mut files: Vec<PathBuf> = Vec::new();
-    for file in &profile.shadowed_files {
-        push_unique(&mut files, file);
+impl ShadowCensus {
+    /// Collects the config shadow and one env shadow.
+    pub(crate) fn new(config_path: &Path) -> Result<Self, GatewayError> {
+        let profile = pending_report(config_path).map_err(|error| pending_read_error(&error))?;
+        let mut files: Vec<PathBuf> = Vec::new();
+
+        for file in &profile.shadowed_files {
+            push_unique(&mut files, file);
+        }
+
+        let sections = profile.changed_sections;
+        let env = config_path.with_extension("env");
+
+        if shadow_path(&env).is_file() {
+            push_unique(&mut files, &env);
+        }
+
+        let restart_required = shadow_path(&env).is_file()
+            || sections
+                .iter()
+                .any(|section| RESTART_SECTIONS.contains(&section.as_str()));
+
+        Ok(Self {
+            files,
+            sections,
+            restart_required,
+        })
     }
-    let sections = profile.changed_sections;
-    let env = config_path.with_extension("env");
-    if shadow_path(&env).is_file() {
-        push_unique(&mut files, &env);
+
+    pub(crate) fn files(&self) -> &Vec<PathBuf> {
+        &self.files
     }
-    Ok(ShadowCensus { files, sections })
+
+    pub(crate) fn restart_required(&self) -> bool {
+        self.restart_required
+    }
+
+    pub(crate) fn into_sections(self) -> Vec<String> {
+        self.sections
+    }
 }
 
 /// The directory config files render relative to.
@@ -148,6 +185,40 @@ pub(crate) fn read_env_file(path: &Path) -> Result<BTreeMap<String, String>, Gat
     }
 
     Ok(vars)
+}
+
+/// Path where 'Apply' keeps a copy of config files it replaces, in case of
+/// rollbacks:
+/// `gateway.toml` -> `gateway.toml.prev`. The supervisor restores it if
+/// the next boot fails.
+pub(crate) fn rollback_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".prev");
+
+    path.with_file_name(name)
+}
+
+/// Removes the `.prev` files 'Apply' kept. Should only be called after the
+/// gateway has successfully started on the current config:
+/// what they protected has booted, so there is nothing left to roll back to.
+///
+/// If a file cannot be removed a warning is logged; a file that has not been
+/// removed would be restored by a later failed restart.
+pub(crate) fn remove_rollback_config(config_path: &Path) {
+    for real in [config_path.to_path_buf(), config_path.with_extension("env")] {
+        let previous = rollback_path(&real);
+
+        match std::fs::remove_file(&previous) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                tracing::warn!(
+                    "Could not remove stale rollback config file `{}`. While this file exists any future boot failure will roll the config back to the contents of this file. It is recommended to restart the gateway or manually remove this file: {error}",
+                    previous.display()
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

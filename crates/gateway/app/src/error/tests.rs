@@ -143,6 +143,10 @@ fn only_a_loading_model_sets_retry_after() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Most of the lines are static test data"
+)]
 fn shadow_route_errors_classify_is_table_driven() {
     let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
         (
@@ -199,6 +203,14 @@ fn shadow_route_errors_classify_is_table_driven() {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "apply_cancelled",
+            ),
+        ),
+        (
+            GatewayError::RestartUnavailable,
+            (
+                StatusCode::CONFLICT,
+                "invalid_request_error",
+                "restart_unavailable",
             ),
         ),
         (

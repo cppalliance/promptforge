@@ -30,6 +30,7 @@ pub(crate) mod hf;
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
+pub(crate) mod restart;
 pub(crate) mod reveal;
 pub(crate) mod shutdown;
 pub(crate) mod system;
@@ -46,6 +47,7 @@ use crate::registry::RouteInfo;
 pub(crate) fn routes() -> Router<AppState> {
     let router = Router::new()
         .merge(shutdown::routes())
+        .merge(restart::routes())
         .merge(system::routes())
         .merge(config::routes())
         .merge(config_pending::routes())
@@ -79,6 +81,7 @@ pub(crate) fn registry() -> Vec<RouteInfo> {
     )]
     let mut routes = [
         shutdown::ROUTES,
+        restart::ROUTES,
         system::ROUTES,
         config::ROUTES,
         config_pending::ROUTES,

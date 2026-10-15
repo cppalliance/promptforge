@@ -185,6 +185,14 @@ pub(crate) enum GatewayError {
     #[error("apply cancelled; the pending changes are still staged, retry Apply")]
     ApplyCancelled,
 
+    /// `POST /admin/restart` reached a gateway that no supervisor runs, so
+    /// exiting would stop it instead of restarting it.
+    #[error(
+        "restart unavailable: this gateway was started without a supervisor; \
+         apply the changes, then restart it by hand"
+    )]
+    RestartUnavailable,
+
     /// A pending-state read could not resolve the shadow-overlaid
     /// configuration: a chain file or shadow is unreadable, unparsable, or
     /// the merged pending result fails validation. Saves validate before

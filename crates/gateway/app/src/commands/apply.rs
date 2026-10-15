@@ -20,14 +20,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::{APPLY_CONFIG_LABEL, Outcome};
 use crate::AppState;
-use crate::config_shadow::{PendingEnv, canonical_form, config_root, relative_name, shadow_census};
+use crate::config_shadow::{
+    PendingEnv, ShadowCensus, canonical_form, config_root, relative_name, rollback_path,
+};
 use crate::error::{GatewayError, blocking, config_write_error};
 use crate::routing::Routing;
-
-/// Top-level sections the process reads once at boot. A change to one of
-/// them promotes to disk but takes effect at the next start, so the apply
-/// reports `restart_required`.
-const RESTART_SECTIONS: [&str; 5] = ["server", "profile", "local_model", "stt_model", "stt"];
 
 /// One shadow as the Apply route captured it, ready to land in its real
 /// file at the command's commit.
@@ -69,6 +66,11 @@ impl ApplySnapshot {
         names.sort_unstable();
         names
     }
+
+    /// The captures this apply promotes at its commit.
+    pub(crate) fn captures(&self) -> &[ShadowCapture] {
+        &self.files
+    }
 }
 
 /// What the census decided: promote inline, or reload through the queue.
@@ -89,20 +91,14 @@ pub(crate) enum ApplyPlan {
 /// Takes the census, parses the pending config when a reload is needed, and
 /// reads every shadow's contents. Touches no real file.
 pub(crate) fn capture_apply(config_path: &Path) -> Result<ApplyPlan, GatewayError> {
-    let census = shadow_census(config_path)?;
+    let census = ShadowCensus::new(config_path)?;
     let root = config_root(config_path);
     let config_canonical = canonical_form(config_path);
-    let env_canonical = canonical_form(&config_path.with_extension("env"));
-    let needs_reload = census.files.iter().any(|file| file == &config_canonical);
-    let mut restart_required = census
-        .sections
-        .iter()
-        .any(|section| RESTART_SECTIONS.contains(&section.as_str()));
-    let mut files = Vec::with_capacity(census.files.len());
-    for file in &census.files {
-        if file == &env_canonical {
-            restart_required = true;
-        }
+    let routing_rebuild_required = census.files().iter().any(|file| file == &config_canonical);
+
+    let mut files = Vec::with_capacity(census.files().len());
+
+    for file in census.files() {
         let shadow = shadow_path(file);
         let contents = std::fs::read_to_string(&shadow)
             .map_err(|source| GatewayError::ConfigWriteIo(Box::new(source)))?;
@@ -112,30 +108,43 @@ pub(crate) fn capture_apply(config_path: &Path) -> Result<ApplyPlan, GatewayErro
             contents,
         });
     }
-    if !needs_reload {
+
+    // Validates that every `${VAR}` the config references resolves successfully,
+    // otherwise the next boot will fail.
+    let pending = pending_config(config_path)?;
+
+    let restart_required = census.restart_required();
+
+    if !routing_rebuild_required {
         return Ok(ApplyPlan::Inline {
             files,
             restart_required,
         });
     }
-    // The selection is irrelevant to what the apply swaps (the remote
-    // catalog is the same for every profile). The pending loader resolves
-    // the state file the way the next boot would, which admits a stale or
-    // absent one, and the selection it resolved is then dropped: a
-    // persisted name can differ from the running profile (a switch that
-    // persisted a new name and is waiting on a restart) and must not be
-    // published as the live document's selection.
-    let pending_env = PendingEnv::new(config_path)?;
-    let config = load_pending_config(config_path, &ProfileSelection::default(), &|name: &str| {
-        pending_env.resolve_var(name)
-    })
-    .and_then(|config| config.select_profile(None))
-    .map_err(config_write_error)?;
+
     Ok(ApplyPlan::Reload(ApplySnapshot {
-        config: Box::new(config),
+        config: Box::new(pending),
         files,
         restart_required,
     }))
+}
+
+/// The pending config as the next boot will resolve it, with no profile
+/// selected.
+pub(crate) fn pending_config(config_path: &Path) -> Result<Config, GatewayError> {
+    let pending_env = PendingEnv::new(config_path)?;
+
+    // The profile selection is irrelevant to what the apply swaps (the remote
+    // catalog is the same for every profile). The pending loader resolves
+    // the state file the way the next boot would, which admits a stale or
+    // absent profile, and the selection it resolved is then dropped: a
+    // persisted name can differ from the running profile (a switch that
+    // persisted a new name and is waiting on a restart)
+    load_pending_config(config_path, &ProfileSelection::default(), &|name: &str| {
+        pending_env.resolve_var(name)
+    })
+    .and_then(|config| config.select_profile(None))
+    .map_err(config_write_error)
 }
 
 /// Lands every capture in its real file and retires the shadows it came
@@ -170,6 +179,32 @@ pub(crate) fn promote_captures(captures: &[ShadowCapture]) -> Result<Vec<String>
     }
     applied.sort_unstable();
     Ok(applied)
+}
+
+/// Copies each capture's real file to `<file>.prev` before Apply
+/// promotes over it, so the supervisor can restore it if the next boot
+/// fails. If a `.prev` already exists is kept: it is the copy from the first
+/// Apply since the last boot, which is what booted. A real file that does not
+/// exist yet - an env file this change creates - is kept as an empty copy,
+/// which loads the same as none.
+pub(crate) fn write_rollback_files(captures: &[ShadowCapture]) -> Result<(), GatewayError> {
+    for capture in captures {
+        let previous_path = rollback_path(&capture.real_path);
+
+        if previous_path.exists() {
+            continue;
+        }
+
+        let previous_contents = match std::fs::read_to_string(&capture.real_path) {
+            Ok(contents) => contents,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(source) => return Err(GatewayError::ConfigWriteIo(Box::new(source))),
+        };
+
+        write_atomic(&previous_path, &previous_contents).map_err(config_write_error)?;
+    }
+
+    Ok(())
 }
 
 /// The `ApplyConfig` command body: under the `"Applying configuration"`

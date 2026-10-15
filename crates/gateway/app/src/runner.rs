@@ -18,8 +18,8 @@ use std::thread::JoinHandle;
 
 use gateway_config::{Config, ProfileName, Secret};
 
-use crate::AppState;
 use crate::api_error::StartupError;
+use crate::{AppState, ShutdownReason};
 
 mod gateway;
 mod thread;
@@ -75,6 +75,9 @@ pub struct ServeOptions {
     /// listener is bound - the binary's `--browser`, used by the
     /// installer's first run. Embedders leave this `false`.
     pub browser: bool,
+    /// Run the gateway as the child of a supervisor that handles restarting logic.
+    /// `POST /admin/restart` is available.
+    pub supervised: bool,
 }
 
 impl ServeOptions {
@@ -89,6 +92,7 @@ impl ServeOptions {
             profile: profile.into(),
             run_dir: None,
             browser: false,
+            supervised: false,
         }
     }
 
@@ -104,6 +108,14 @@ impl ServeOptions {
     #[must_use]
     pub fn with_browser(mut self, browser: bool) -> ServeOptions {
         self.browser = browser;
+        self
+    }
+
+    /// Sets whether this gateway runs with a supervisor which can relaunch it
+    /// on a restart request.
+    #[must_use]
+    pub fn with_supervised(mut self, supervised: bool) -> ServeOptions {
+        self.supervised = supervised;
         self
     }
 }
@@ -175,10 +187,12 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
 /// Ctrl-C handler signals its graceful shutdown, and this call blocks until
 /// serving ends. The binary stays a thin arg-parsing shell.
 ///
+/// Returns the reason for ending the run, as recorded by the shutdown signal.
+///
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// serving fails; classify with [`StartupError::kind`].
-pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
+pub fn run(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     run_headless(spawn(options)?)
 }
 
@@ -188,10 +202,12 @@ pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
 /// lands on the terminal can be pasted into a browser without leaving the
 /// bearer key in its history.
 ///
+/// Returns the reason for ending the run, as recorded by the shutdown signal.
+///
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// serving fails; classify with [`StartupError::kind`].
-pub fn run_printing_url(options: &ServeOptions) -> Result<(), StartupError> {
+pub fn run_printing_url(options: &ServeOptions) -> Result<ShutdownReason, StartupError> {
     let handle = spawn(options)?;
     // The URL is the machine-readable output of the `--print-url`
     // affordance, so it goes to stdout itself, not through the log.
@@ -206,10 +222,12 @@ pub fn run_printing_url(options: &ServeOptions) -> Result<(), StartupError> {
 /// and this call blocks until serving ends. Shared by [`run`] and the
 /// tray's fallback when the system tray cannot start.
 ///
+/// Returns the reason for ending the run, as recorded by the shutdown signal.
+///
 /// # Errors
 /// Returns [`StartupError`] when serving fails or the gateway thread
 /// panicked.
-pub(crate) fn run_headless(mut handle: GatewayHandle) -> Result<(), StartupError> {
+pub(crate) fn run_headless(mut handle: GatewayHandle) -> Result<ShutdownReason, StartupError> {
     if let Some(shutdown) = handle.shutdown.take() {
         install_ctrl_c_handler(shutdown);
     }

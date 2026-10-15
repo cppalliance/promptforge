@@ -12,8 +12,8 @@ impl GatewayError {
     #[must_use]
     pub(crate) fn upstream_protocol(
         source: impl std::error::Error + Send + Sync + 'static,
-    ) -> GatewayError {
-        GatewayError::Protocol(ProtocolError::upstream_protocol(source))
+    ) -> Self {
+        Self::Protocol(ProtocolError::upstream_protocol(source))
     }
 
     /// Wraps a command failure (the boot load, an apply, an unload) at
@@ -22,8 +22,8 @@ impl GatewayError {
     pub(crate) fn switch_failed(
         stage: &'static str,
         source: impl std::error::Error + Send + Sync + 'static,
-    ) -> GatewayError {
-        GatewayError::SwitchFailed {
+    ) -> Self {
+        Self::SwitchFailed {
             stage,
             source: Box::new(source),
         }
@@ -32,17 +32,15 @@ impl GatewayError {
     /// Wraps a cache-operation failure, preserving the cause.
     #[cfg(feature = "local")]
     #[must_use]
-    pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> GatewayError {
-        GatewayError::Cache(Box::new(source))
+    pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Cache(Box::new(source))
     }
 
     /// Wraps a model-info read or parse failure, preserving the cause.
     #[cfg(feature = "local")]
     #[must_use]
-    pub(crate) fn model_info(
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> GatewayError {
-        GatewayError::ModelInfo(Box::new(source))
+    pub(crate) fn model_info(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::ModelInfo(Box::new(source))
     }
 
     /// The `(status, type, code)` triple for the OpenAI error envelope.
@@ -52,171 +50,176 @@ impl GatewayError {
     )]
     pub(super) fn classify(&self) -> (StatusCode, &'static str, &'static str) {
         match self {
-            GatewayError::Unauthorized => (
+            Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "authentication_error",
                 "unauthorized",
             ),
-            GatewayError::UnknownModel(_) => (
+            Self::UnknownModel(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "model_not_found",
             ),
-            GatewayError::KindMismatch { .. } => (
+            Self::KindMismatch { .. } => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "kind_mismatch",
             ),
             #[cfg(feature = "web-search")]
-            GatewayError::ToolNotConfigured(_) => {
+            Self::ToolNotConfigured(_) => {
                 (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
             }
-            GatewayError::MalformedRequest(_) => (
+            Self::MalformedRequest(_) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "malformed_request",
             ),
-            GatewayError::InvalidVoice { .. } => (
+            Self::InvalidVoice { .. } => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "invalid_voice",
             ),
-            GatewayError::Protocol(error) => error.classify(),
-            GatewayError::QueueFull => (
+            Self::Protocol(error) => error.classify(),
+            Self::QueueFull => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "queue_full",
             ),
-            GatewayError::QueueRejected => (
+            Self::QueueRejected => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limit_error",
                 "queue_rejected",
             ),
-            GatewayError::UpstreamRateLimited => (
+            Self::UpstreamRateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limit_error",
                 "upstream_rate_limited",
             ),
-            GatewayError::UpstreamUnavailable => (
+            Self::UpstreamUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "upstream_unavailable",
             ),
-            GatewayError::ModelProvisioning(_) => (
+            Self::ModelProvisioning(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "model_provisioning",
             ),
-            GatewayError::ModelLoading(_) => (
+            Self::ModelLoading(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "model_loading",
             ),
-            GatewayError::CommandCancelled(_) => (
+            Self::CommandCancelled(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "command_cancelled",
             ),
-            GatewayError::ProfileNotFound(_) => (
+            Self::ProfileNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "profile_not_found",
             ),
-            GatewayError::SwitchFailed { .. } => (
+            Self::SwitchFailed { .. } => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "switch_failed",
             ),
             #[cfg(feature = "local")]
-            GatewayError::PartialStart { .. } => (
+            Self::PartialStart { .. } => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "partial_start",
             ),
-            GatewayError::BlockingTask(_) => (
+            Self::BlockingTask(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "blocking_task_failed",
             ),
-            GatewayError::ConfigPathUnavailable => (
+            Self::ConfigPathUnavailable => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "config_path_unavailable",
             ),
-            GatewayError::ConfigWriteRejected(_) => (
+            Self::ConfigWriteRejected(_) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_request_error",
                 "config_write_rejected",
             ),
-            GatewayError::ConfigWriteIo(_) => (
+            Self::ConfigWriteIo(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "config_write_error",
             ),
-            GatewayError::ApplyReloadFailed(_) => (
+            Self::ApplyReloadFailed(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "apply_reload_failed",
             ),
-            GatewayError::ApplyCancelled => (
+            Self::ApplyCancelled => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "apply_cancelled",
             ),
-            GatewayError::PendingConfig(_) => (
+            Self::RestartUnavailable => (
+                StatusCode::CONFLICT,
+                "invalid_request_error",
+                "restart_unavailable",
+            ),
+            Self::PendingConfig(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "pending_config_error",
             ),
-            GatewayError::EnvFile(_) => (
+            Self::EnvFile(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "env_file_error",
             ),
-            GatewayError::RevealPathNotFound(_) => (
+            Self::RevealPathNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "reveal_path_not_found",
             ),
-            GatewayError::RevealFailed(_) => (
+            Self::RevealFailed(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "reveal_error",
             ),
             #[cfg(feature = "local")]
-            GatewayError::Cache(_) => (
+            Self::Cache(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "cache_error",
             ),
             #[cfg(feature = "local")]
-            GatewayError::CacheEntryNotFound(_) => (
+            Self::CacheEntryNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "cache_entry_not_found",
             ),
             #[cfg(feature = "local")]
-            GatewayError::ModelInfo(_) => (
+            Self::ModelInfo(_) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_request_error",
                 "model_info_error",
             ),
-            GatewayError::CloudModelsLoading => (
+            Self::CloudModelsLoading => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "cloud_models_loading",
             ),
-            GatewayError::CloudModelsBodyTooLarge { .. } => (
+            Self::CloudModelsBodyTooLarge { .. } => (
                 StatusCode::BAD_GATEWAY,
                 "server_error",
                 "cloud_models_body_too_large",
             ),
-            GatewayError::CloudModelsSchemaVersion { .. } => (
+            Self::CloudModelsSchemaVersion { .. } => (
                 StatusCode::BAD_GATEWAY,
                 "server_error",
                 "cloud_models_schema_version",
             ),
-            GatewayError::CloudModelsUnavailable(_) => (
+            Self::CloudModelsUnavailable(_) => (
                 StatusCode::BAD_GATEWAY,
                 "server_error",
                 "cloud_models_unavailable",

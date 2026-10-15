@@ -232,3 +232,90 @@ fn a_selected_profile_enqueues_one_boot_load() {
         .collect();
     assert_eq!(pending, ["load-profile: alpha"]);
 }
+
+#[test]
+fn a_restart_fire_ends_serving_with_the_restart_reason() {
+    let (temp, config_path) = fixture("alpha");
+
+    let spawn_options =
+        ServeOptions::new(Some(config_path), None).with_run_dir(temp.path().join("run"));
+
+    let handle = spawn(&spawn_options).expect("the should gateway boot");
+
+    handle.state.shutdown.fire(ShutdownReason::Restart);
+
+    let actual = handle.join().expect("serving should end cleanly");
+    let expected = ShutdownReason::Restart;
+
+    assert_eq!(
+        actual, expected,
+        "Got `{actual:?}` but expected `{expected:?}`",
+    );
+}
+
+#[test]
+fn a_stop_fire_ends_serving_with_the_stop_reason() {
+    let (temp, config_path) = fixture("alpha");
+
+    let spawn_options =
+        ServeOptions::new(Some(config_path), None).with_run_dir(temp.path().join("run"));
+
+    let handle = spawn(&spawn_options).expect("the should gateway boot");
+
+    handle.state.shutdown.fire(ShutdownReason::Stop);
+
+    let actual = handle.join().expect("serving should end cleanly");
+    let expected = ShutdownReason::Stop;
+
+    assert_eq!(
+        actual, expected,
+        "Got `{actual:?}` but expected `{expected:?}`",
+    );
+}
+
+#[test]
+fn a_handle_shutdown_ends_serving_with_the_stop_reason() {
+    let (temp, config_path) = fixture("alpha");
+
+    let spawn_options =
+        ServeOptions::new(Some(config_path), None).with_run_dir(temp.path().join("run"));
+
+    let handle = spawn(&spawn_options).expect("the should gateway boot");
+
+    let actual = handle.shutdown().expect("serving should end cleanly");
+    let expected = ShutdownReason::Stop;
+
+    assert_eq!(
+        actual, expected,
+        "Got `{actual:?}` but expected `{expected:?}`",
+    );
+}
+
+#[test]
+fn a_supervised_spawn_marks_the_state_supervised() {
+    let (temp, config_path) = fixture("alpha");
+
+    let spawn_options = ServeOptions::new(Some(config_path), None)
+        .with_run_dir(temp.path().join("run"))
+        .with_supervised(true);
+
+    let handle = spawn(&spawn_options).expect("the gateway should boot");
+
+    assert!(handle.state.supervised);
+
+    handle.shutdown().expect("serving should end cleanly");
+}
+
+#[test]
+fn a_default_spawn_is_not_supervised() {
+    let (temp, config_path) = fixture("alpha");
+
+    let spawn_options =
+        ServeOptions::new(Some(config_path), None).with_run_dir(temp.path().join("run"));
+
+    let handle = spawn(&spawn_options).expect("the gateway should boot");
+
+    assert!(!handle.state.supervised);
+
+    handle.shutdown().expect("serving should end cleanly");
+}

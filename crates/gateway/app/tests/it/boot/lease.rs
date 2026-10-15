@@ -243,3 +243,104 @@ fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
     );
     replacement.stop(Duration::from_secs(5));
 }
+
+/// A supervised launch that finds a gateway already running exits quietly:
+/// no URL on stdout, and no browser, whose launch failure would otherwise
+/// land on stderr. Its supervisor decides what the user sees.
+#[test]
+fn a_supervised_second_instance_hands_off_silently() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    let connection = temp
+        .path()
+        .join(".promptforge")
+        .join("run")
+        .join("gateway.json");
+
+    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--profile")
+        .arg("main")
+        .arg("--no-tray")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the first gateway should spawn");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !connection.is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first gateway bound and wrote {}",
+            connection.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // stdin is a held-open pipe, as a real supervisor gives it. With a
+    // closed stdin, a regression that boots instead of handing off would
+    // be stopped at once by its watchdog and exit 0, passing this test.
+    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--profile")
+        .arg("main")
+        .arg("--no-tray")
+        .arg("--supervised")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the second gateway should spawn");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = second
+            .try_wait()
+            .expect("polling the second instance should not fail")
+        {
+            break status;
+        }
+
+        if std::time::Instant::now() >= deadline {
+            let _ = second.kill();
+            panic!("the supervised second instance booted instead of handing off");
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let output = second
+        .wait_with_output()
+        .expect("collecting the second instance's output should not fail");
+
+    assert!(
+        status.success(),
+        "the handoff did not exit successfully, exited with status `{status}`"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a supervised handoff should print nothing, it printed: `{}`",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "a supervised handoff should not start a browser: `{}`",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = first.kill();
+    let _ = first.wait();
+}

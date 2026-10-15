@@ -10,6 +10,7 @@ mod cli;
 mod in_process;
 mod lease;
 mod ownership;
+mod restart;
 
 /// Writes the config and returns its path; the profile selects every model
 /// the body declares.

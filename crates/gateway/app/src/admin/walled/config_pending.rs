@@ -24,7 +24,7 @@ use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::config_shadow::{PendingEnv, config_root, relative_name, shadow_census};
+use crate::config_shadow::{PendingEnv, ShadowCensus, config_root, relative_name};
 use crate::error::{GatewayError, blocking, pending_read_error};
 use crate::registry::RouteInfo;
 
@@ -48,6 +48,9 @@ struct DirtyReply {
     pending_files: Vec<String>,
     /// The top-level sections the config shadow changes.
     changed_sections: Vec<String>,
+    /// Whether applying the pending changes takes effect only at the next
+    /// start, so the UI can offer Restart to Apply.
+    restart_required: bool,
 }
 
 const PENDING: RouteInfo = RouteInfo::walled("/admin/config-pending", &[Method::GET]);
@@ -138,10 +141,19 @@ fn persisted_selection(config_path: &Path) -> Result<Option<String>, GatewayErro
 /// The `GET /admin/config-dirty` route: bearer-authed, reports the
 /// pending state from shadow existence and comparison.
 ///
-/// The reply is `{"dirty", "pending_files", "changed_sections"}`. `dirty`
-/// is true when any shadow exists. `pending_files` names the real files
-/// whose shadows are present - the global config and the env sibling -
-/// rendered relative to the config directory with forward slashes, sorted.
+/// The reply is `{"dirty", "pending_files", "changed_sections", "restart_required"}`.
+///
+/// `dirty` is true when any shadow exists.
+///
+/// `pending_files` names the real files whose shadows are present - the global
+/// config and the env sibling - rendered relative to the config directory with
+/// forward slashes, sorted.
+///
+/// `changed_sections` lists the config sections affected by this change.
+///
+/// `restart_required` indicates weather applying the pending changes takes
+/// effect only after a restart.
+///
 /// `.env` shadows count toward `dirty` and `pending_files` only. Profile
 /// selection is never pending, so neither list ever names the state file
 /// or `active_profile`.
@@ -158,18 +170,26 @@ async fn admin_config_dirty(
 /// Assembles the `GET /admin/config-dirty` body: the shadowed config file
 /// plus the `.env` sibling, and the config shadow's section diff.
 fn dirty_reply(config_path: &Path) -> Result<DirtyReply, GatewayError> {
-    let census = shadow_census(config_path)?;
+    let census = ShadowCensus::new(config_path)?;
     let root = config_root(config_path);
-    let mut pending_files: Vec<String> = census
-        .files
-        .iter()
-        .map(|file| relative_name(file, root))
-        .collect();
-    pending_files.sort_unstable();
+
+    let pending_files = {
+        let mut pending_files: Vec<String> = census
+            .files()
+            .iter()
+            .map(|file| relative_name(file, root))
+            .collect();
+        pending_files.sort_unstable();
+        pending_files
+    };
+
+    let restart_required = census.restart_required();
+
     Ok(DirtyReply {
         dirty: !pending_files.is_empty(),
         pending_files,
-        changed_sections: census.sections,
+        changed_sections: census.into_sections(),
+        restart_required,
     })
 }
 

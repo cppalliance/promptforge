@@ -10,6 +10,9 @@ use crate::test_support::{AdminPaths, app_state, serve_state};
 #[path = "config_apply-tests-in-flight.rs"]
 mod in_flight;
 
+#[path = "config_apply-tests-rollback.rs"]
+mod rollback;
+
 const CONFIG: &str = r#"
 config-version = 0
 

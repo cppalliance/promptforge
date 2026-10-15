@@ -1,6 +1,8 @@
 //! The `GET /admin/progress` route: the process activity hub as an SSE
 //! stream of [`Progress`] snapshots with heartbeats.
 
+use std::sync::Arc;
+
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
@@ -55,7 +57,7 @@ async fn admin_progress(
 /// Builds the progress SSE response over `hub`: the current snapshot first,
 /// then one line per change, heartbeats in the gaps, until `shutdown`
 /// fires.
-fn progress_sse_response(hub: &ProgressHub, shutdown: shutdown::ShutdownSignal) -> Response {
+fn progress_sse_response(hub: &ProgressHub, shutdown: Arc<shutdown::ShutdownSignal>) -> Response {
     // The receiver starts holding the current snapshot as unseen, so the
     // first `changed()` resolves at once with the opening line and nothing
     // between subscribe and first poll is lost.
