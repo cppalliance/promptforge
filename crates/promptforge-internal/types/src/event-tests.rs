@@ -7,6 +7,7 @@ use super::ReplyOrigin;
 use super::lifecycle::{self, Lifecycle};
 use crate::ids::{AbandonReason, Provenance, RoundId, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
+use crate::test_support::{assert_send_sync, assert_wire, round_trip};
 use crate::tools::ToolId;
 
 #[path = "event-tests-library.rs"]
@@ -49,8 +50,7 @@ fn round_trips(event: &Event) {
         !line.contains('\n'),
         "one event must serialize to one line: {line}"
     );
-    let back: Event = serde_json::from_str(&line).expect("an event's own output deserializes");
-    assert_eq!(&back, event, "{line}");
+    assert_eq!(&round_trip(event), event, "{line}");
 }
 
 /// The lifecycle constant that builds `event`, or `None` for a variant
@@ -387,10 +387,7 @@ fn a_tool_result_without_a_bound_tool_keeps_its_logged_shape() {
     let line = r#"{"kind":"tool_result","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":5},"turn":2,"tool_call_id":"","alias":"ask","content":"hi","trusted":true}"#;
     let event: Event = serde_json::from_str(line).expect("an older tool result parses");
     assert!(matches!(&event, Event::ToolResult { tool: None, .. }));
-    assert_eq!(
-        serde_json::to_string(&event).expect("an event serializes"),
-        line
-    );
+    assert_wire(&event, line);
 }
 
 #[test]
@@ -404,9 +401,9 @@ fn a_serialized_event_is_tagged_by_kind_with_its_coordinates_beside_the_payload(
         section: "Gather".to_owned(),
         provenance: provenance("0.2", 9),
     };
-    assert_eq!(
-        serde_json::to_string(&event).expect("an event serializes"),
-        r#"{"kind":"vfs_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}"#
+    assert_wire(
+        &event,
+        r#"{"kind":"vfs_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}"#,
     );
     let notice = Event::TaskNotice {
         execution: "run-1".to_owned(),
@@ -416,9 +413,9 @@ fn a_serialized_event_is_tagged_by_kind_with_its_coordinates_beside_the_payload(
         task: task("0.1"),
         text: "Task id=0.1 (## Worker) completed: done".to_owned(),
     };
-    assert_eq!(
-        serde_json::to_string(&notice).expect("an event serializes"),
-        r#"{"kind":"task_notice","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":10},"turn":3,"task":"0.1","text":"Task id=0.1 (## Worker) completed: done"}"#
+    assert_wire(
+        &notice,
+        r#"{"kind":"task_notice","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":10},"turn":3,"task":"0.1","text":"Task id=0.1 (## Worker) completed: done"}"#,
     );
 }
 
@@ -431,9 +428,9 @@ fn a_degraded_metadata_report_serializes_its_turn_and_message_under_its_kind() {
         turn: 1,
         message: "completion response named no string `model`; recorded as empty".to_owned(),
     };
-    assert_eq!(
-        serde_json::to_string(&event).expect("an event serializes"),
-        r#"{"kind":"model_metadata_degraded","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":3},"turn":1,"message":"completion response named no string `model`; recorded as empty"}"#
+    assert_wire(
+        &event,
+        r#"{"kind":"model_metadata_degraded","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":3},"turn":1,"message":"completion response named no string `model`; recorded as empty"}"#,
     );
 }
 
@@ -477,6 +474,5 @@ fn every_event_exposes_its_coordinates() {
 
 #[test]
 fn an_event_is_send_and_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Event>();
 }

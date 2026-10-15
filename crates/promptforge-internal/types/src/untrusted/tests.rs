@@ -2,11 +2,15 @@
 //! delimiter escaping and neutralization pass.
 
 use super::*;
+use crate::test_support::Seeded;
 
-/// A nonce over a fresh random seed, as a caller's CSPRNG-drawn run seed
-/// would give.
+/// The seed every draw in these tests starts from; a failure names it.
+const SEED: u64 = 0x5EED;
+
+/// A nonce over a seed drawn from `SEED`, standing in for a caller's
+/// CSPRNG-drawn run seed.
 fn fresh() -> GuardNonce {
-    GuardNonce::from_seed(rand::random())
+    GuardNonce::from_seed(Seeded::new(SEED).next_u64())
 }
 
 /// Every live `<untrusted_input_...>` open-or-close delimiter in `text`.
@@ -154,7 +158,9 @@ fn guard_nonce_equality_and_hash() {
     let mut set = std::collections::HashSet::new();
     set.insert(nonce);
     assert!(set.contains(&clone), "equal nonces hash equally");
-    assert_ne!(fresh(), fresh(), "two fresh nonces differ");
+    let mut rng = Seeded::new(SEED);
+    let mut draw = || GuardNonce::from_seed(rng.next_u64());
+    assert_ne!(draw(), draw(), "nonces over two drawn seeds differ");
 }
 
 #[test]
@@ -227,24 +233,19 @@ fn property_no_content_supplied_delimiter_survives() {
         '\n',
     ];
     let nonce = fresh();
+    let mut rng = Seeded::new(SEED);
     for _ in 0..2000u32 {
-        let len = usize::from(rand::random::<u8>() % 40);
-        let content: String = (0..len)
-            .map(|_| {
-                let pick = usize::from(rand::random::<u8>()) % alphabet.len();
-                alphabet[pick]
-            })
-            .collect();
+        let content: String = (0..rng.below(40)).map(|_| *rng.pick(&alphabet)).collect();
         let out = nonce.wrap(&content);
         let (_, body) = parts(&out);
-        assert!(
+        rng.check(
             !body.contains('<'),
-            "content {content:?} left a live '<' in body:\n{body}"
+            format_args!("content {content:?} left a live '<' in body:\n{body}"),
         );
-        assert_eq!(
-            live_tag_count(&out),
-            2,
-            "content {content:?} broke the two-delimiter invariant:\n{out}"
+        rng.check_eq(
+            &live_tag_count(&out),
+            &2,
+            format_args!("content {content:?} broke the two-delimiter invariant:\n{out}"),
         );
     }
 }
@@ -387,26 +388,21 @@ fn property_no_bracket_delimiter_survives() {
         'M', 'D', 'U', 'X', 'g', 'Y', 'K',
     ];
     let nonce = fresh();
+    let mut rng = Seeded::new(SEED);
     for _ in 0..2000u32 {
-        let len = usize::from(rand::random::<u8>() % 40);
-        let content: String = (0..len)
-            .map(|_| {
-                let pick = usize::from(rand::random::<u8>()) % alphabet.len();
-                alphabet[pick]
-            })
-            .collect();
+        let content: String = (0..rng.below(40)).map(|_| *rng.pick(&alphabet)).collect();
         let out = nonce.wrap(&content);
         let (_, body) = parts(&out);
         for b in &brackets {
-            assert!(
+            rng.check(
                 !body.contains(b),
-                "content {content:?} left delimiter {b:?} live:\n{body}"
+                format_args!("content {content:?} left delimiter {b:?} live:\n{body}"),
             );
         }
-        assert_eq!(
-            live_tag_count(&out),
-            2,
-            "content {content:?} broke the two-delimiter invariant:\n{out}"
+        rng.check_eq(
+            &live_tag_count(&out),
+            &2,
+            format_args!("content {content:?} broke the two-delimiter invariant:\n{out}"),
         );
     }
 }

@@ -1,6 +1,7 @@
 //! Tests for replay `Flags` and `ReplayError` rendering.
 
 use super::{Flags, ReplayError};
+use crate::test_support::assert_wire;
 
 #[test]
 fn flags_start_empty_and_round_trip_their_bits() {
@@ -21,19 +22,8 @@ fn flags_start_empty_and_round_trip_their_bits() {
 
 #[test]
 fn flags_serialize_as_one_integer() {
-    let recorded = Flags::from_bits(6);
-    assert_eq!(
-        serde_json::to_string(&recorded).expect("flags serialize"),
-        "6"
-    );
-    assert_eq!(
-        serde_json::from_str::<Flags>("6").expect("flags deserialize"),
-        recorded
-    );
-    assert_eq!(
-        serde_json::to_string(&Flags::EMPTY).expect("flags serialize"),
-        "0"
-    );
+    assert_wire(&Flags::from_bits(6), "6");
+    assert_wire(&Flags::EMPTY, "0");
 }
 
 #[test]

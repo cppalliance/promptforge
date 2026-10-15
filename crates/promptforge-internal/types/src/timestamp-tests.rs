@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::Timestamp;
+use crate::test_support::assert_wire;
 
 /// The `time` crate's rendering of the same instant: the reference the
 /// std-only formatter must agree with byte for byte.
@@ -68,14 +69,7 @@ fn to_rfc3339_agrees_with_the_time_crate_across_a_sweep() {
 fn a_timestamp_is_its_millisecond_count_on_the_wire() {
     let stamp = Timestamp::from_unix_millis(1_709_210_096_789);
     assert_eq!(stamp.unix_millis(), 1_709_210_096_789);
-    assert_eq!(
-        serde_json::to_string(&stamp).expect("a timestamp serializes"),
-        "1709210096789"
-    );
-    assert_eq!(
-        serde_json::from_str::<Timestamp>("1709210096789").expect("a timestamp deserializes"),
-        stamp
-    );
+    assert_wire(&stamp, "1709210096789");
     assert_eq!(stamp.to_string(), stamp.to_rfc3339());
     assert!(Timestamp::UNIX_EPOCH < stamp);
 }

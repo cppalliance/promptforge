@@ -14,9 +14,6 @@ sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# The property tests' adversarial content and random run seeds;
-# the Engine itself reads no RNG.
-rand.workspace = true
 # The reference the std-only `Timestamp::to_rfc3339` formatter is checked
 # against; the Engine itself never depends on `time`.
 time.workspace = true

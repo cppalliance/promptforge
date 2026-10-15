@@ -1,6 +1,7 @@
 //! Tests for `ChainId`, `TaskId`, `TaskOrigin`, and `Provenance` rendering, parsing, and ordering.
 
 use super::{ChainId, Provenance, TaskId, TaskOrigin};
+use crate::test_support::assert_wire;
 
 #[test]
 fn the_root_chain_is_zero_and_children_extend_it_by_index() {
@@ -53,10 +54,7 @@ fn malformed_paths_are_rejected() {
 #[test]
 fn ids_serialize_as_their_path_text() {
     let chain = ChainId::root().child(2);
-    assert_eq!(
-        serde_json::to_string(&chain).expect("a chain id serializes"),
-        "\"0.2\""
-    );
+    assert_wire(&chain, "\"0.2\"");
     let task: TaskId = serde_json::from_str("\"0.2\"").expect("a task id deserializes");
     assert_eq!(task, TaskId::from(chain));
     assert!(
@@ -77,10 +75,7 @@ fn a_task_origin_round_trips_through_its_tag() {
         None,
         "the tag vocabulary is exact, never case-folded"
     );
-    assert_eq!(
-        serde_json::to_string(&TaskOrigin::Model).expect("an origin serializes"),
-        "\"model\""
-    );
+    assert_wire(&TaskOrigin::Model, "\"model\"");
 }
 
 #[test]
@@ -100,13 +95,5 @@ fn provenance_orders_by_task_then_sequence_and_round_trips() {
         later < other_task,
         "the task path orders before the sequence"
     );
-    assert_eq!(
-        serde_json::to_string(&later).expect("provenance serializes"),
-        r#"{"task":"0.2","seq":7}"#
-    );
-    assert_eq!(
-        serde_json::from_str::<Provenance>(r#"{"task":"0.2","seq":7}"#)
-            .expect("provenance deserializes"),
-        later
-    );
+    assert_wire(&later, r#"{"task":"0.2","seq":7}"#);
 }

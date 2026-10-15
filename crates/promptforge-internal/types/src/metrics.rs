@@ -132,10 +132,10 @@ pub struct ClientTiming {
 
 #[cfg(test)]
 mod tests {
-    use serde::de::DeserializeOwned;
     use serde_json::json;
 
     use super::*;
+    use crate::test_support::{assert_wire, round_trip};
 
     fn full_metrics() -> CallMetrics {
         CallMetrics {
@@ -171,35 +171,34 @@ mod tests {
         }
     }
 
-    fn round_trips<T>(value: &T)
-    where
-        T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug,
-    {
-        let line = serde_json::to_string(value).expect("every vocabulary type must serialize");
-        let back: T = serde_json::from_str(&line).expect("its own output must deserialize");
-        assert_eq!(&back, value);
-    }
-
     #[test]
     fn every_vocabulary_type_round_trips_through_serde() {
         let metrics = full_metrics();
-        round_trips(metrics.usage.as_ref().expect("usage is populated"));
-        round_trips(metrics.llama.as_ref().expect("llama is populated"));
-        round_trips(metrics.vllm.as_ref().expect("vllm is populated"));
-        round_trips(metrics.client.as_ref().expect("client is populated"));
-        round_trips(&metrics);
-        round_trips(&ToolCallEvent {
-            id: "call_1".to_owned(),
-            name: "read_file".to_owned(),
-            arguments: json!({ "path": "notes.txt", "lines": 3 }),
-            tool: None,
-        });
-        round_trips(&ToolCallEvent {
-            id: "call_1".to_owned(),
-            name: "fetch".to_owned(),
-            arguments: json!({}),
-            tool: Some(ToolId::parse("web/fetch").expect("a valid tool id")),
-        });
+        let usage = metrics.usage.as_ref().expect("usage is populated");
+        assert_eq!(&round_trip(usage), usage);
+        let llama = metrics.llama.as_ref().expect("llama is populated");
+        assert_eq!(&round_trip(llama), llama);
+        let vllm = metrics.vllm.as_ref().expect("vllm is populated");
+        assert_eq!(&round_trip(vllm), vllm);
+        let client = metrics.client.as_ref().expect("client is populated");
+        assert_eq!(&round_trip(client), client);
+        assert_eq!(round_trip(&metrics), metrics);
+        for call in [
+            ToolCallEvent {
+                id: "call_1".to_owned(),
+                name: "read_file".to_owned(),
+                arguments: json!({ "path": "notes.txt", "lines": 3 }),
+                tool: None,
+            },
+            ToolCallEvent {
+                id: "call_1".to_owned(),
+                name: "fetch".to_owned(),
+                arguments: json!({}),
+                tool: Some(ToolId::parse("web/fetch").expect("a valid tool id")),
+            },
+        ] {
+            assert_eq!(round_trip(&call), call);
+        }
     }
 
     #[test]
@@ -209,10 +208,7 @@ mod tests {
         let line = r#"{"id":"call_1","name":"fetch","arguments":{}}"#;
         let call: ToolCallEvent = serde_json::from_str(line).expect("an older call deserializes");
         assert_eq!(call.tool, None);
-        assert_eq!(
-            serde_json::to_string(&call).expect("the call serializes"),
-            line
-        );
+        assert_wire(&call, line);
     }
 
     #[test]
@@ -230,21 +226,15 @@ mod tests {
             r#""queue_time_ms":1.5,"mean_itl_ms":7.5,"tokens_per_second":133.5},"#,
             r#""client":{"ttft_ms":9.5,"mean_itl_ms":8.25,"e2e_ms":41.5}}"#,
         );
-        assert_eq!(
-            serde_json::to_string(&full_metrics()).expect("metrics must serialize"),
-            line
-        );
+        assert_wire(&full_metrics(), line);
         let empty = CallMetrics {
             usage: None,
             llama: None,
             vllm: None,
             client: None,
         };
-        assert_eq!(
-            serde_json::to_string(&empty).expect("metrics must serialize"),
-            "{}",
-            "absent sections are omitted from the line"
-        );
+        // Absent sections are omitted from the line.
+        assert_wire(&empty, "{}");
     }
 
     /// A non-finite `f64` has no JSON number form, so `serde_json` writes it
@@ -283,11 +273,7 @@ mod tests {
     /// leak into the log line and two equal payloads could print differently.
     #[test]
     fn object_keys_serialize_in_canonical_order() {
-        let value = json!({ "z": 1, "a": 2, "m": 3 });
-        assert_eq!(
-            serde_json::to_string(&value).expect("a value must serialize"),
-            r#"{"a":2,"m":3,"z":1}"#,
-            "object keys must be sorted, not held in insertion order"
-        );
+        // Object keys must be sorted, not held in insertion order.
+        assert_wire(&json!({ "z": 1, "a": 2, "m": 3 }), r#"{"a":2,"m":3,"z":1}"#);
     }
 }

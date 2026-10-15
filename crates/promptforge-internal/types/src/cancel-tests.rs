@@ -8,6 +8,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
 use super::CancelHandle;
+use crate::test_support::assert_send_sync;
 
 /// How many wakers wait on `handle`'s own node.
 fn registered(handle: &CancelHandle) -> usize {
@@ -34,10 +35,7 @@ impl Counter {
 /// Compile-time proof that a handle can cross thread boundaries and live for
 /// the whole program: a caller may move clones onto other threads, and the
 /// Engine keeps one in `RunContext` while `Run` itself is `Send`.
-const fn _assert_auto_traits() {
-    const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
-    assert_send_sync_static::<CancelHandle>();
-}
+const _: () = assert_send_sync::<CancelHandle>();
 
 #[test]
 fn a_fresh_handle_is_not_cancelled_and_its_clones_share_one_flag() {
@@ -146,7 +144,7 @@ fn a_cancel_on_one_thread_is_observed_on_another() {
     assert!(!parent.is_cancelled());
     parent.cancel();
     done_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
+        .recv()
         .expect("the polling thread observes the cancel");
     poller.join().expect("poller exits cleanly");
 }

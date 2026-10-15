@@ -4860,7 +4860,6 @@ name = "promptforge-types"
 version = "0.3.0"
 dependencies = [
  "build-ceiling",
- "rand 0.9.5",
  "serde",
  "serde_json",
  "sha2 0.11.0",

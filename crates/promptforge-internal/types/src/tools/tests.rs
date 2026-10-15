@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::{ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolId};
 use crate::plugins::PluginId;
+use crate::test_support::{assert_send_sync, assert_wire, round_trip};
 
 fn inspect_id() -> ToolId {
     ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
@@ -45,14 +46,12 @@ fn tool_catalog_is_send_and_sync() {
     // The public catalog must stay `Send + Sync` so downstream callers can
     // share it across tasks; a representation change that dropped either
     // auto trait would fail to compile here.
-    fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<ToolCatalog>();
 }
 
 #[test]
 fn tool_error_classifies_and_hides_source() {
     use super::{ToolError, ToolErrorKind};
-    fn assert_send_sync<T: Send + Sync + 'static>() {}
     assert_send_sync::<ToolError>();
 
     let plain = ToolError::message("model-safe");
@@ -101,9 +100,7 @@ fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
         !descriptor.structured_output,
         "a descriptor that does not declare structured output stays plain text"
     );
-    let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
-    let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
-    assert_eq!(back, descriptor);
+    assert_eq!(round_trip(&descriptor), descriptor);
 }
 
 #[test]
@@ -126,9 +123,7 @@ fn survives_stop_sets_the_flag_and_round_trips_through_serde() {
     );
     let descriptor = inspect_descriptor().survives_stop(true);
     assert!(descriptor.survives_stop);
-    let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
-    let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
-    assert_eq!(back, descriptor);
+    assert_eq!(round_trip(&descriptor), descriptor);
 }
 
 #[test]
@@ -140,12 +135,7 @@ fn a_tool_call_origin_keeps_its_logged_shape() {
         caller: ToolCaller::Model,
     };
     let line = r#"{"execution":"run-1","section":"Chat","caller":"model"}"#;
-    assert_eq!(
-        serde_json::to_string(&origin).expect("the origin serializes"),
-        line
-    );
-    let back: ToolCallOrigin = serde_json::from_str(line).expect("the origin deserializes");
-    assert_eq!(back, origin);
+    assert_wire(&origin, line);
 }
 
 #[test]
@@ -285,12 +275,7 @@ fn the_migrated_built_in_ids_parse() {
 #[test]
 fn a_tool_id_serializes_as_its_global_name_string() {
     let id = ToolId::parse("web/fetch").expect("a valid tool id");
-    assert_eq!(
-        serde_json::to_string(&id).expect("serialize"),
-        "\"web/fetch\""
-    );
-    let parsed: ToolId = serde_json::from_str("\"web/fetch\"").expect("deserialize");
-    assert_eq!(parsed, id);
+    assert_wire(&id, "\"web/fetch\"");
 }
 
 #[test]

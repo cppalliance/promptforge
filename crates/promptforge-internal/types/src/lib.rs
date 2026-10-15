@@ -44,6 +44,8 @@ pub mod models;
 pub mod names;
 pub mod plugins;
 pub mod replay;
+#[cfg(test)]
+mod test_support;
 pub mod timestamp;
 pub mod tools;
 pub mod untrusted;

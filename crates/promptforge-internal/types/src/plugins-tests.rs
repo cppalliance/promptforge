@@ -1,6 +1,7 @@
 //! Tests for the Plugin identity vocabulary.
 
 use super::{PluginId, PluginIdErrorKind};
+use crate::test_support::assert_wire;
 use crate::tools::ToolId;
 
 #[test]
@@ -53,10 +54,7 @@ fn plugin_id_contains_exactly_the_tools_whose_first_segment_it_is() {
 #[test]
 fn plugin_id_serializes_as_its_string_form() {
     let id = PluginId::parse("user-input").expect("a static valid id");
-    let json = serde_json::to_string(&id).expect("serializes");
-    assert_eq!(json, "\"user-input\"");
-    let back: PluginId = serde_json::from_str(&json).expect("deserializes");
-    assert_eq!(back, id);
+    assert_wire(&id, "\"user-input\"");
     assert!(
         serde_json::from_str::<PluginId>("\"promptforge/user-input\"").is_err(),
         "a 2-segment string is never a Plugin id"

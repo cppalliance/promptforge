@@ -129,7 +129,7 @@ About 54,000 lines of tests in `crates/promptforge-internal/` repeat their setup
   - `cargo tree -p <crate> --all-features -e normal,build,dev` reaches no `getrandom` or `fastrand` from any Engine crate, and no Engine crate's manifest names `tempfile`.
   - `RunContext::new` takes a 256-bit `RunSeed`, `RunContext::uid` returns the run's 256-bit `RunUid`, and the Harness draws 32 bytes from the OS for each live run.
   - `cargo nextest list -p <crate>` shows the same test function names before and after for every package the plan touches, apart from the new tests named above. A test whose module path changes, because its file split or it moved between the Run and scheduler levels, counts as unchanged when its package and function name stay the same; the step lists each move in its commit message.
-  - Each crate's test line count drops. Rough targets: engine 15 to 25 percent, lua 10 to 15 percent, the smaller crates where their shape allows. Decomposition may reset them after its count. The one exception is the parser, whose count may rise by the cross-crate source builder it hosts in `src/test_support.rs`, as long as the parser and the engine together drop.
+  - Each crate's test line count drops. Rough targets: engine 15 to 25 percent, lua 10 to 15 percent, the smaller crates where their shape allows. Decomposition may reset them after its count. The engine and lua must drop. The four smaller crates (parser, types, vfs, model-client) drop where their shape allows: their rewritten test files get shorter, and any rise in a total comes only from the utilities this plan requires that crate to host (the parser's cross-crate source builder, `Seeded`, `TempRoot`, the shared helpers) and their self-tests. The parser and the engine together must drop.
 - Constraints:
   - Every source file stays under the per-file line ceiling that `build_ceiling::check` enforces. Splitting a file is acceptable.
   - Engine test support stays out of normal builds: it is `#[cfg(test)]`, or behind the `test-support` feature that only the engine's own bench enables. No crate outside the engine enables it.
@@ -357,7 +357,7 @@ The user asked for this as its own plan, kept to broad strokes because other pla
   - Seeded randomness is deterministic and allowed. Only OS and clock entropy is banned, and a failure prints its seed. The user chose this refinement: "I want refinement 2."
   - Same names as the facade harness (`Scenario`, `Trace`, reply constructors), so tests read alike across the workspace.
   - Utilities live in each crate's own test support, since dependencies run one way (types and vfs, then lua, then parser, then engine) and the facade can't see test support.
-  - The parser's test line count may rise by the cross-crate source builder in its `src/test_support.rs`, because that builder serves the engine's tests too; the parser and the engine together must still drop. Set during Step 1, when the parser's own one-line sources saved 115 lines against the builder's 170.
+  - Line counts for the four smaller crates follow the Product Requirements' "where their shape allows": their rewritten test files must get shorter, but a total may rise by the utilities the plan requires the crate to host and their self-tests. The engine and lua must drop, and the parser and engine together must drop, because the parser's builder serves the engine. Set during the run: in Step 1 the parser's one-line sources saved 115 lines against the builder's 170, and in Step 2 the types serde rewrites saved 56 lines against about 60 for `Seeded` and its self-test, which replace the `rand` dependency rather than test code.
   - Cross-plan conflicts are resolved inside this plan. The user said: "do not touch any other plan except internal-crate_test-harnessses". The user later asked for the rulebook-fix plan to be edited too, only to record the plan order and the handoff.
   - The `greeter` example was the no-trace plan's to fix. The user said: "greeter will be fixed by the time this plan runs, dont worry. I instructed the other vibe coder to fix greeter." That plan's Step 4 made it answer timers at once, without sleeping (`3cc16b932`).
   - This plan runs before the rulebook-fix plan, which starts after this plan's close commit. That plan's Steps 8 to 10 would otherwise harden and convert tokio test code this plan deletes, and deduplicate the same helpers in a different shape. Its production Steps 1 to 7 also get cheaper afterward, because their type changes reach a few shared utilities instead of about 70 test files. The user accepted this order: "Okay, update these two plans to reflect that they will follow your advice".
@@ -495,7 +495,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-2>
 
-### Step 2: Types and model-client serde helpers, Seeded, and no rand
+### Step 2: Types and model-client serde helpers, Seeded, and no rand [completed]
 
 - Component: types and model-client
 - Tests:
@@ -517,7 +517,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 - The round-trip and JSON-shape checks in `src/event-tests.rs` (its `round_trips`), `ids-tests.rs`, `plugins-tests.rs`, `replay-tests.rs`, `timestamp-tests.rs`, `emitter-tests.rs`, `tools/tests.rs`, and the inline tests in `src/metrics.rs` (its `round_trips`) use the shared helpers.
 - model-client: add `#[cfg(test)] mod test_support;` and `src/test_support.rs` with its own `round_trip` and `assert_json` and one wire decode helper for the decode-and-check sequence `src/client/tests.rs` repeats; `src/normalize-tests.rs` and the `src/model/*tests.rs` files use them where they round-trip or check JSON shape.
 - New test, in types' test support: `seeded_failure_messages_name_the_seed`, which catches a failing `Seeded` assertion's panic and checks that its message contains the seed.
-- Acceptance: both crates pass with the same names plus the new test; the `rg` prints nothing; both test line counts drop. The leaf comparison prints nothing marked `<=`, and `=>` only `seeded_failure_messages_name_the_seed` under `promptforge-types`. Full-line differences that are not leaf differences are moves, each listed in the commit message.
+- Acceptance: both crates pass with the same names plus the new test; the `rg` prints nothing; the rewritten test files in both crates get shorter, and any rise in a crate's total comes only from its new `test_support.rs` (`Seeded`, the shared helpers, and the self-test). The leaf comparison prints nothing marked `<=`, and `=>` only `seeded_failure_messages_name_the_seed` under `promptforge-types`. Full-line differences that are not leaf differences are moves, each listed in the commit message.
 
 </step-2>
 
@@ -924,7 +924,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 - Acceptance:
   - Every exit-criteria command passes, and the two `rg` checks, the `tempfile` `rg`, and the duplicate-helper search print nothing; the graph loop prints an empty list for all eight Engine crates.
   - The leaf comparison prints nothing marked `<=` except, under `build-xtask`, `a_forbidden_crate_in_dev_dependencies_only_passes`, `an_optional_entry_enabled_only_by_test_support_passes`, and `a_dep_gated_entry_with_only_a_weak_feature_path_passes`. It prints `=>` only for: under `promptforge-types`, `seeded_failure_messages_name_the_seed`, `derive_matches_its_known_answer`, `the_nonce_and_run_id_differ_from_each_other_and_the_seed_and_repeat`, `a_run_seed_round_trips_through_serde_as_64_hex_characters`, and `a_run_seeds_debug_shows_no_seed_bytes`; under `promptforge-engine`, `temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder`, `seeded_failure_messages_name_the_seed`, and `a_run_contexts_debug_shows_the_run_id_and_not_the_seed`; under `promptforge-vfs` and `promptforge`, `temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder`; under `workshop-run-log`, `a_32_byte_seed_survives_a_run_log_round_trip`; under `build-xtask`, the three renamed tests, Step 17's five new tests, and this step's five.
-  - Each crate's test line count is lower than in `lines-before.txt`, except the parser's, which may rise by the cross-crate builder in `src/test_support.rs` as long as the parser and engine counts together are lower, against rough targets of 15 to 25 percent for the engine and 10 to 15 percent for lua. Report all six counts beside the baseline in the commit message.
+  - The engine's and lua's test line counts are lower than in `lines-before.txt`, against rough targets of 15 to 25 percent for the engine and 10 to 15 percent for lua, and the parser and engine together are lower. The four smaller crates may rise only by the utilities they host and those utilities' self-tests, as the Product Requirements allow. Report all six counts beside the baseline in the commit message.
 
 </step-18>
 

@@ -33,6 +33,8 @@ pub mod client;
 pub mod detail;
 pub mod model;
 mod normalize;
+#[cfg(test)]
+mod test_support;
 
 /// Crate-internal result alias over the failure a model round reports.
 type Result<T> = std::result::Result<T, model::CompletionError>;
