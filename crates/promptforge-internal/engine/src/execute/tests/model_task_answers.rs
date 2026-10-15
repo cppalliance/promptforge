@@ -7,7 +7,9 @@
 //! `tools.allow_tasks` the built-ins are not advertised, so the round's
 //! scope gate refuses the call before the arm sees it.
 
-use super::model_tasks::{model_task_scenario, owner_prompt};
+use promptforge_parser::test_support::prompt;
+
+use super::model_tasks::model_task_scenario;
 use super::tasks::TaskRecorder;
 use super::*;
 
@@ -58,15 +60,12 @@ fn task_status_reports_a_failed_task_as_done_failed() {
         calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks({ '## Child' })\n\
+    let owner = "tools.allow_tasks({ '## Child' })\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
-         return msgs[5].content",
-        "error('boom')",
-    );
+         return msgs[5].content";
+    let md = prompt("", &[("Only", owner), ("Child", "error('boom')")]);
     let trace = model_task_scenario(md).chat(&gateway).run();
     assert_eq!(
         trace.text(),
@@ -96,17 +95,14 @@ fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
         calls(&[("call_6", "task_status", "{\"id\":\"nope\"}")]),
         text("done"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks({ '## Child' })\n\
+    let owner = "tools.allow_tasks({ '## Child' })\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
          local answers = {}\n\
          for i = 3, 13, 2 do answers[#answers + 1] = msgs[i].content end\n\
-         return table.concat(answers, '\\n')",
-        "return 'child result'",
-    );
+         return table.concat(answers, '\\n')";
+    let md = prompt("", &[("Only", owner), ("Child", "return 'child result'")]);
     let trace = model_task_scenario(md).chat(&gateway).run();
     let target = "task: `target` must be a string naming a section heading, such as `## Research`";
     assert_eq!(

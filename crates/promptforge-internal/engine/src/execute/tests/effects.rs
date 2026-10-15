@@ -5,10 +5,11 @@
 //! and a nested infer round the `Infer` origin. The run's answer rules (a
 //! drop, an orphan, a wrong kind) are pinned beside `Run` itself.
 
+use promptforge_parser::test_support::one_section;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::RoundId;
 
-use super::models_loop::{loop_prompt, loop_scenario};
+use super::models_loop::loop_scenario;
 use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::protocol::VfsOp;
@@ -36,7 +37,7 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
 #[test]
 fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     let gateway = ScriptedChat::new(vec![text("answer")]);
-    let source = loop_prompt("return models.infer('ask')");
+    let source = one_section("return models.infer('ask')");
     let rig = Rig::run(loop_scenario(source).chat(&gateway));
     assert_eq!(rig.trace().text(), "answer");
 
@@ -64,7 +65,7 @@ fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per_call(
         calls(&[("call_1", "echo", r#"{"value":"hi"}"#)]),
         text("done"),
     ]);
-    let source = loop_prompt(
+    let source = one_section(
         "tools.offer('tools/echo')\n\
          local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -126,7 +127,7 @@ fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per_call(
 
 #[test]
 fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
-    let source = loop_prompt(
+    let source = one_section(
         "tools.offer('tools/echo')\n\
          return tools.call('tools/echo', { value = 'hi' })",
     );
@@ -174,7 +175,7 @@ fn a_script_tool_call_records_the_section_that_made_it() {
 
 #[test]
 fn a_store_operation_issues_exactly_one_store_effect() {
-    let source = loop_prompt(
+    let source = one_section(
         "store.write('notes.md', 'kept')\n\
          return store.read('notes.md')",
     );
@@ -229,7 +230,7 @@ fn a_timed_wait_issues_exactly_one_timer_effect() {
 #[test]
 fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
     let gateway = ScriptedChat::new(vec![text("answer")]);
-    let source = loop_prompt(
+    let source = one_section(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
          models.loop(msgs)\n\
@@ -250,7 +251,7 @@ fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
 #[test]
 fn a_nested_infer_round_is_the_runs_first_with_the_infer_origin() {
     let gateway = ScriptedChat::new(vec![text("answer")]);
-    let source = loop_prompt("return models.infer('ask')");
+    let source = one_section("return models.infer('ask')");
     let rig = Rig::run(loop_scenario(source).chat(&gateway));
     assert_eq!(rig.trace().text(), "answer");
     assert_eq!(

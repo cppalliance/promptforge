@@ -171,29 +171,31 @@ fn loop_to_count_and_text() -> String {
     LOOP_TO_TEXT.replacen("return ", "return #msgs .. '|' .. ", 1)
 }
 
-/// Drives [`loop_to_count_and_text`] against `replies`, with `offered`, when
-/// given, in scope under the wire name `echo`, and returns the run's trace
-/// beside the loop's observation sequence.
-#[track_caller]
-fn drive_loop(replies: Vec<ScriptedReply>, offered: Option<FnTool>) -> (Trace, Vec<String>) {
-    let gateway = ScriptedChat::new(replies);
+/// A run of [`loop_to_count_and_text`] against `replies`, with `offered`,
+/// when given, in scope under the wire name `echo`.
+fn exit_scenario(replies: Vec<ScriptedReply>, offered: Option<FnTool>) -> Scenario {
     let offer = offered.as_ref().map_or_else(String::new, |tool| {
         format!("tools.offer('{}')\n", tool.id())
     });
-    let mut scenario = loop_scenario(one_section(&format!("{offer}{}", loop_to_count_and_text())));
-    if let Some(tool) = offered {
-        scenario = scenario.offer("echo", tool);
+    let scenario = loop_scenario(one_section(&format!("{offer}{}", loop_to_count_and_text())))
+        .chat(&ScriptedChat::new(replies));
+    match offered {
+        Some(tool) => scenario.offer("echo", tool),
+        None => scenario,
     }
-    let trace = scenario.chat(&gateway).run();
+}
+
+/// The loop's observation sequence in `trace`.
+fn exit_events(trace: &Trace) -> Vec<String> {
     let recorder = Recorder::default();
     trace.replay(&recorder);
-    let events = loop_events(&recorder);
-    (trace, events)
+    loop_events(&recorder)
 }
 
 #[test]
 fn a_text_reply_is_the_loops_terminal_record() {
-    let (trace, events) = drive_loop(vec![text_finish("all done", "stop")], None);
+    let trace = exit_scenario(vec![text_finish("all done", "stop")], None).run();
+    let events = exit_events(&trace);
     assert_eq!(trace.text(), "2|all done");
     assert_eq!(trace.turns(), 1);
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
@@ -201,7 +203,8 @@ fn a_text_reply_is_the_loops_terminal_record() {
 
 #[test]
 fn length_finish_reason_reports_model_turn_truncated() {
-    let (trace, events) = drive_loop(vec![text_finish("partial answer", "length")], None);
+    let trace = exit_scenario(vec![text_finish("partial answer", "length")], None).run();
+    let events = exit_events(&trace);
     assert_eq!(
         trace.text(),
         "2|partial answer",
@@ -222,13 +225,15 @@ fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
     // The model stopped deliberately after doing its work through a tool
     // call: the loop accepts the empty turn and appends an empty assistant
     // record as the terminal text.
-    let (trace, events) = drive_loop(
+    let trace = exit_scenario(
         vec![
             calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
             text_finish("", "stop"),
         ],
         Some(echo_tool()),
-    );
+    )
+    .run();
+    let events = exit_events(&trace);
     assert_eq!(
         trace.text(),
         "4|",
@@ -256,7 +261,8 @@ fn empty_stop_turn_without_tool_calls_fails() {
     // completed - the scheduler counts and reports it - and the shim's exit
     // rule raises against its finish reason.
     for offered in [None, Some(echo_tool())] {
-        let (trace, events) = drive_loop(vec![text_finish("", "stop")], offered);
+        let trace = exit_scenario(vec![text_finish("", "stop")], offered).run();
+        let events = exit_events(&trace);
         match trace.error().inner() {
             Error::Completion(error) => {
                 assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
@@ -279,7 +285,8 @@ fn empty_truncated_final_text_fails_without_truncation_detail() {
     // `finish_reason: "length"` is never a clean exit, even with empty text,
     // and an empty round reports no truncation: there is no reply to have
     // truncated.
-    let (trace, events) = drive_loop(vec![text_finish("", "length")], None);
+    let trace = exit_scenario(vec![text_finish("", "length")], None).run();
+    let events = exit_events(&trace);
     match trace.error().inner() {
         Error::Completion(error) => {
             assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
@@ -294,10 +301,12 @@ fn empty_truncated_final_text_fails_without_truncation_detail() {
 fn empty_turn_without_finish_reason_after_tool_call_fails() {
     // Fail closed: a missing finish reason is not "stop", so the empty turn
     // is an error even after a successful dispatch.
-    let (trace, events) = drive_loop(
+    let trace = exit_scenario(
         vec![calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]), text("")],
         Some(echo_tool()),
-    );
+    )
+    .run();
+    let events = exit_events(&trace);
     match trace.error().inner() {
         Error::Completion(error) => {
             assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);

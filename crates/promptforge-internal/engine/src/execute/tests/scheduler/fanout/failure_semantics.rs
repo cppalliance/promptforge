@@ -6,13 +6,6 @@
 use super::super::models_loop::loop_scenario;
 use super::*;
 
-/// The run's events replayed onto a fresh recorder.
-fn recorded(trace: &Trace) -> Recorder {
-    let recorder = Recorder::default();
-    trace.replay(&recorder);
-    recorder
-}
-
 #[test]
 fn fanout_empty_collection_errors_before_any_scheduling() {
     // Pin of the pre-scheduling guard: the fanout errors before any arm is

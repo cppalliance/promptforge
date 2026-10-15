@@ -24,16 +24,8 @@
 //! suspended tears down promptly. Running Lua observes the run's own flag
 //! from its instruction hook.
 //!
-//! Under a test shuffle seed (the test-only `set_shuffle_for_test`) the
-//! loop instead holds each wave of answers until every outstanding effect
-//! has posted one, then delivers the wave in the seed's permutation: one
-//! seed is one deterministic completion interleaving, which the
-//! determinism suites sweep across seeds. The performers all post
-//! independently of the run, so the hold cannot deadlock.
-//!
-//! This driver is the caller in tests: the Engine's own suites
-//! drive runs through it, and a companion crate's suite enables the
-//! `test-support` feature for it. In production the Harness steps the run.
+//! This driver is the caller in the bench: it enables the `test-support`
+//! feature for it. In production the Harness steps the run.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -44,32 +36,20 @@ use tokio::task::JoinHandle;
 
 use crate::cancel::CancelHandle;
 use crate::lua::run_store_op;
-#[cfg(test)]
-use crate::test_support::scripted_chat::ScriptedChat;
 use crate::{Error, Result};
 
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
-#[cfg(test)]
-use crate::test_support::RunFixture;
-
-#[cfg(test)]
-use crate::execute::context::RunState;
 
 #[path = "tokio_driver-performers.rs"]
 mod performers;
-#[cfg(test)]
-#[path = "tokio_driver-test-hooks.rs"]
-mod test_hooks;
 
 #[cfg(test)]
 pub(crate) use performers::refuse_chat;
 pub(crate) use performers::refuse_tool_call;
 pub use performers::{BoxFuture, Performer, Performers};
-#[cfg(test)]
-use test_hooks::shuffle_batch;
 
 /// The sink every drained event is handed to, in step order.
-pub(super) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
+type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 
 /// Drives `run` to its end on the current tokio runtime, performing its
 /// `Chat` and `ToolCall` effects through `performers`,
@@ -116,39 +96,9 @@ pub(crate) struct TokioDriver<'a> {
     /// The caller's cancel flag, awaited while the loop waits on answers;
     /// when it fires the run is cancelled.
     cancel: CancelHandle,
-    /// Test-only: the seed for the completion-order shuffle; `None`
-    /// delivers answers in arrival order.
-    #[cfg(test)]
-    shuffle: Option<u64>,
 }
 
 impl<'a> TokioDriver<'a> {
-    /// Builds the driver for one run over `state`, performing its effects
-    /// and replaying its events through the `fixture` the suite assembled
-    /// itself. The bundle supplies the observer, chat client, tools, and
-    /// debug capture; `client` is the run's scripted model when
-    /// the suite supplies one, overriding any in the bundle.
-    #[cfg(test)]
-    pub(crate) fn new(
-        state: &RunState,
-        fixture: RunFixture,
-        client: Option<ScriptedChat>,
-    ) -> TokioDriver<'static> {
-        let mut fixture = fixture;
-        if let Some(client) = client {
-            fixture = fixture.client(client);
-        }
-        let run = Run::from_state(state.clone());
-        let cancel = run.cancel_handle();
-        let limits = state.limits();
-        TokioDriver::over(
-            run,
-            fixture.performers(limits),
-            fixture.boxed_sink(),
-            cancel,
-        )
-    }
-
     /// Builds the driver over an assembled run.
     fn over(run: Run, performers: Performers, sink: EventSink<'a>, cancel: CancelHandle) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -160,8 +110,6 @@ impl<'a> TokioDriver<'a> {
             rx,
             outstanding: HashMap::new(),
             cancel,
-            #[cfg(test)]
-            shuffle: None,
         }
     }
 
@@ -228,11 +176,6 @@ impl<'a> TokioDriver<'a> {
     /// the cancel, so a fully suspended run costs no wakeups while it
     /// waits.
     async fn await_answer(&mut self) {
-        #[cfg(test)]
-        if self.shuffle.is_some() {
-            self.await_shuffled_batch().await;
-            return;
-        }
         tokio::select! {
             biased;
             arrival = self.rx.recv() => {
@@ -254,14 +197,8 @@ impl<'a> TokioDriver<'a> {
         }
     }
 
-    /// Delivers one wave of answers in arrival order, or - under a test
-    /// shuffle seed - in the seed's permutation of the wave.
+    /// Delivers one wave of answers in arrival order.
     fn deliver_batch(&mut self, batch: Vec<(EffectId, EffectAnswer)>) {
-        #[cfg(test)]
-        let batch = match &mut self.shuffle {
-            Some(seed) => shuffle_batch(batch, seed),
-            None => batch,
-        };
         for (id, answer) in batch {
             self.deliver(id, answer);
         }

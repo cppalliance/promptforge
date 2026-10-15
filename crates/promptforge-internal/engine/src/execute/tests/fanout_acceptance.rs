@@ -8,101 +8,35 @@
 //! `models.loop` hold three model rounds in flight at once. The exhausted
 //! stub, empty collection, list-section worker, claims violation across
 //! arms, and the fanout-inside-a-`call`-child id nesting are pinned in
-//! `scheduler`.
+//! `scheduler`. An arm parks on a model round the rig holds until the
+//! test releases it.
 
 use std::collections::BTreeMap;
-use std::num::NonZeroUsize;
-use std::time::Duration;
 
 use promptforge_types::ids::TaskId;
 
-use super::models_loop::{echo_tools, loop_context_observed};
-use super::scheduler::{request_prompts, scheduler_context_from, scheduler_context_on};
+use super::model_task_acceptance::{task_lifecycle, terminals_per_started_task};
+use super::models_loop::loop_scenario;
+use super::scheduler::{asks, ceiling, issued_prompts, request_prompts, scheduler_scenario};
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
+use crate::test_support::rig::Rig;
+use crate::test_support::scenario::{chat_answer, infer_prompt};
 
-/// The gateway delay that keeps one arm parked while its siblings finish.
-/// The arms it orders against complete in milliseconds on the loopback
-/// gateway, so the margin is wide; the test's wall time is this delay.
-const PARKED: Duration = Duration::from_secs(1);
-
-/// Every task observation the recorder saw, as `(label, task id)` pairs in
-/// order, so a test can pair each started arm with its terminals.
-fn task_lifecycle(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
-    recorder
-        .records()
-        .into_iter()
-        .filter_map(|(_, observation)| match observation {
-            Observation::TaskStarted { task, .. } => Some(("started", task)),
-            Observation::TaskSucceeded { task } => Some(("succeeded", task)),
-            Observation::TaskFailed { task } => Some(("failed", task)),
-            Observation::TaskCancelled { task } => Some(("cancelled", task)),
-            Observation::TaskAbandoned { task, .. } => Some(("abandoned", task)),
-            _ => None,
-        })
-        .collect()
+/// A model that answers each `models.infer` round with its prompt in
+/// capitals, colons dropped: `a:1` gets `A1`, whatever order the rounds
+/// are answered in.
+fn capitals(effect: &Effect) -> EffectAnswer {
+    chat_answer(&text(&infer_prompt(effect).to_uppercase().replace(':', "")))
 }
 
-/// The terminal labels recorded per started task, in order. Every started
-/// task appears (with an empty list when it has no terminal); a terminal
-/// for a task that never started fails the test.
-fn terminals_per_started_task(recorder: &TaskRecorder) -> BTreeMap<TaskId, Vec<&'static str>> {
-    let events = task_lifecycle(recorder);
-    let mut terminals: BTreeMap<TaskId, Vec<&'static str>> = BTreeMap::new();
-    for (label, task) in &events {
-        if *label == "started" {
-            assert!(
-                terminals.insert(task.clone(), Vec::new()).is_none(),
-                "task {task} started twice: {events:?}"
-            );
-        }
-    }
-    for (label, task) in &events {
-        if *label != "started" {
-            terminals
-                .get_mut(task)
-                .unwrap_or_else(|| {
-                    panic!("task {task} reported `{label}` without starting: {events:?}")
-                })
-                .push(label);
-        }
-    }
-    terminals
-}
-
-/// A scheduler context and its observing fixture with the run's concurrency
-/// ceiling narrowed to `ceiling` admitted tasks.
-fn ceiling_context(
-    prompt: &Prompt,
-    ceiling: usize,
-    observer: Arc<dyn Observer>,
-) -> (RunState, RunFixture) {
-    scheduler_context_from(
-        prompt,
-        &TestStore::new(),
-        &test_context(EXECUTION).limits(
-            RunLimits::new()
-                .max_concurrency(NonZeroUsize::new(ceiling).expect("the ceiling is non-zero")),
-        ),
-        RunFixture::new().observer(observer),
-    )
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
+#[test]
+fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
     // Ceiling 2 over three arms, all spawned up front. Arm `a` parks on a
-    // delayed first answer while arm `b` completes immediately; the
-    // scheduler admits `c` when `b`'s end frees its slot, so `c:1`
-    // reaches the gateway before `a`'s second infer. Admission keyed to
-    // the lowest-index arm's end would hold `c` until `a` finished:
-    // `[a:1, b:1, a:2, c:1]`.
-    let gateway = ScriptedChat::new(vec![
-        delayed(PARKED, text("A1")),
-        text("B"),
-        text("C"),
-        text("A2"),
-    ]);
+    // held first round while arm `b` completes immediately; the scheduler
+    // admits `c` when `b`'s end frees its slot, so `c:1` is issued before
+    // `a`'s second infer. Admission keyed to the lowest-index arm's end
+    // would hold `c` until `a` finished: `[a:1, b:1, a:2, c:1]`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -116,23 +50,29 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
         if item == 'a' then return first .. models.infer('a:2') end\n\
         return first\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the ceilinged fanout completes");
+    let mut rig = Rig::start(
+        scheduler_scenario(md)
+            .limits(ceiling(2))
+            .chat_with(capitals)
+            .hold(asks("a:1")),
+    );
+    rig.settle();
+    rig.release(asks("a:1"));
+    let rig = rig.finish();
 
-    assert_eq!(out, "A1A2|B|C", "results land by collection index");
     assert_eq!(
-        request_prompts(&gateway),
+        rig.trace().text(),
+        "A1A2|B1|C1",
+        "results land by collection index"
+    );
+    assert_eq!(
+        issued_prompts(&rig),
         vec!["a:1", "b:1", "c:1", "a:2"],
         "arm c starts on b's completion while a is still parked"
     );
-    let terminals = terminals_per_started_task(&recorder);
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert_eq!(
-        terminals,
+        terminals_per_started_task(&records),
         BTreeMap::from([
             (task("0.0"), vec!["succeeded"]),
             (task("0.1"), vec!["succeeded"]),
@@ -142,19 +82,15 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
+#[test]
+fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
     // Fail-fast under a ceiling of 2 over three arms: `boom` fails after
-    // its infer while `slow` is parked on a 30-second answer and `queued`
-    // has not been admitted. The shim cancels the live sibling and
-    // re-raises,
+    // its infer while `slow` is parked on a held round and `queued` has
+    // not been admitted. The shim cancels the live sibling and re-raises,
     // so the started arms report exactly one terminal each (`failed`,
     // `cancelled`), the queued arm never starts and reports nothing, and
-    // the driver never waits on the aborted answer.
-    let gateway = ScriptedChat::new(vec![
-        text("boom-answer"),
-        delayed(Duration::from_secs(30), text("slow-answer")),
-    ]);
+    // the run never waits on the held round.
+    let gateway = ScriptedChat::new(vec![text("boom-answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -165,40 +101,37 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
         if item == 'boom' then error('fatal arm error') end\n\
         return a\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway))).drive(),
-    )
-    .await
-    .expect("the aborted sibling must not stall the driver");
-    let error = result.expect_err("a fatal arm fails the fanout");
+    let rig = Rig::run(
+        scheduler_scenario(md)
+            .limits(ceiling(2))
+            .chat(&gateway)
+            .hold(asks("slow:1")),
+    );
+    let error = rig.trace().error();
 
     assert!(
         error.to_string().contains("fatal arm error"),
         "the arm's own error surfaces: {error}"
     );
     assert_eq!(
-        request_prompts(&gateway),
+        issued_prompts(&rig),
         vec!["boom:1", "slow:1"],
         "the queued arm never reached the gateway"
     );
-    let terminals = terminals_per_started_task(&recorder);
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert_eq!(
-        terminals,
+        terminals_per_started_task(&records),
         BTreeMap::from([
             (task("0.0"), vec!["failed"]),
             (task("0.1"), vec!["cancelled"]),
         ]),
         "each started arm has exactly one terminal and the queued arm never started: {:?}",
-        task_lifecycle(&recorder)
+        task_lifecycle(&records)
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
+#[test]
+fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
     // Each outer arm (`0.K`, worker entry `0.K.0`) runs its own fanout, so
     // the inner arms are the outer arm chain's children (`0.K.J`, entry
     // `0.K.J.0`) with their own 1-based `sys.index`; results place by
@@ -220,25 +153,16 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
         ```lua\n\
         return sys.id .. ':' .. item .. sys.index\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the nested fanout completes");
+    let rig = Rig::run(scheduler_scenario(md));
 
     assert_eq!(
-        out, "0.0.0(0.0.0.0:x1,0.0.1.0:y2)|0.1.0(0.1.0.0:x1,0.1.1.0:y2)",
+        rig.trace().text(),
+        "0.0.0(0.0.0.0:x1,0.0.1.0:y2)|0.1.0(0.1.0.0:x1,0.1.1.0:y2)",
         "inner arms nest under their outer arm's chain id with a per-fanout index"
     );
-    let terminals = terminals_per_started_task(&recorder);
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert_eq!(
-        terminals,
+        terminals_per_started_task(&records),
         BTreeMap::from([
             (task("0.0"), vec!["succeeded"]),
             (task("0.0.0"), vec!["succeeded"]),
@@ -248,72 +172,59 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
             (task("0.1.1"), vec!["succeeded"]),
         ]),
         "two outer and four inner arms each start and succeed once: {:?}",
-        task_lifecycle(&recorder)
+        task_lifecycle(&records)
     );
 }
 
-/// Drives the identity prompt against a scripted gateway and returns the
-/// run's output, the gateway's request order, and the order in which the
-/// arms reported success.
-async fn identity_run(script: Vec<ScriptedReply>) -> (String, Vec<String>, Vec<TaskId>) {
-    let gateway = ScriptedChat::new(script);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # Identity\n\n\
-        ## Main\n\n\
-        ```lua\n\
-        local r = tasks.fanout('## Worker', {'a', 'b'})\n\
-        local sub = call('## Sub')\n\
-        return r[1].text .. '|' .. r[2].text .. '|' .. sub .. '|' .. sys.id\n\
-        ```\n\n\
-        ## Worker\n\n\
-        ```lua\n\
-        local first = models.infer(item .. ':1')\n\
-        local second = models.infer(item .. ':2')\n\
-        return sys.id .. '=' .. first .. second\n\
-        ```\n\n\
-        ## Sub\n\n\
-        ```lua\nreturn sys.id\n```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the identity prompt completes");
-    let succeeded = task_lifecycle(&recorder)
-        .into_iter()
-        .filter(|(label, _)| *label == "succeeded")
-        .map(|(_, task)| task)
-        .collect();
-    (out, request_prompts(&gateway), succeeded)
-}
+/// Two arms that each infer twice, a `call` child after the fanout, and
+/// the caller's own id: every id the identity test compares.
+const IDENTITY: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    # Identity\n\n\
+    ## Main\n\n\
+    ```lua\n\
+    local r = tasks.fanout('## Worker', {'a', 'b'})\n\
+    local sub = call('## Sub')\n\
+    return r[1].text .. '|' .. r[2].text .. '|' .. sub .. '|' .. sys.id\n\
+    ```\n\n\
+    ## Worker\n\n\
+    ```lua\n\
+    local first = models.infer(item .. ':1')\n\
+    local second = models.infer(item .. ':2')\n\
+    return sys.id .. '=' .. first .. second\n\
+    ```\n\n\
+    ## Sub\n\n\
+    ```lua\nreturn sys.id\n```\n";
 
-#[tokio::test(flavor = "current_thread")]
-async fn ids_are_identical_across_runs_whose_arms_finish_in_different_orders() {
-    // Run one parks arm `a`'s first answer so `b` finishes first; run two
-    // parks `b`'s so `a` finishes first. The request orders and the
+#[test]
+fn ids_are_identical_across_runs_whose_arms_finish_in_different_orders() {
+    // Run one holds arm `a`'s first round so `b` finishes first; run two
+    // holds `b`'s so `a` finishes first. The request orders and the
     // success orders prove the finish orders differ; the arm ids, the
     // post-fanout `call` child's id, and the caller's entry id are
     // byte-identical because every id is allocated from chain-local
     // counters at spawn, never from completion order.
-    let (first_out, first_requests, first_succeeded) = identity_run(vec![
-        delayed(PARKED, text("A1")),
-        text("B1"),
-        text("B2"),
-        text("A2"),
-    ])
-    .await;
-    let (second_out, second_requests, second_succeeded) = identity_run(vec![
-        text("A1"),
-        delayed(PARKED, text("B1")),
-        text("A2"),
-        text("B2"),
-    ])
-    .await;
+    let parked_on = |round: &str| {
+        let mut rig = Rig::start(
+            scheduler_scenario(IDENTITY)
+                .chat_with(capitals)
+                .hold(asks(round)),
+        );
+        rig.settle();
+        rig.release(asks(round));
+        let rig = rig.finish();
+        let succeeded: Vec<TaskId> = task_lifecycle(&TaskRecorder::replayed(rig.trace()).records())
+            .into_iter()
+            .filter(|(label, _)| *label == "succeeded")
+            .map(|(_, task)| task)
+            .collect();
+        (
+            rig.trace().text().to_owned(),
+            issued_prompts(&rig),
+            succeeded,
+        )
+    };
+    let (first_out, first_requests, first_succeeded) = parked_on("a:1");
+    let (second_out, second_requests, second_succeeded) = parked_on("b:1");
 
     assert_eq!(
         first_requests,
@@ -344,8 +255,8 @@ async fn ids_are_identical_across_runs_whose_arms_finish_in_different_orders() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_once() {
+#[test]
+fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_once() {
     // Each arm's loop runs two rounds: a tool call the loop dispatches,
     // then the terminal reply. All three first-round requests reach the
     // gateway before any arm's second round does, so three model rounds
@@ -377,19 +288,9 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         assert(#msgs == 4, 'user, the tool call, its result, and the terminal reply')\n\
         return msgs[#msgs].content\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("three looping arms complete");
+    let rig = Rig::run(loop_scenario(md).offer("echo", echo_tool()).chat(&gateway));
 
-    assert_eq!(out, "final|final|final");
+    assert_eq!(rig.trace().text(), "final|final|final");
     let bodies = gateway.requests();
     let message_counts: Vec<usize> = bodies.iter().map(|body| body.messages.len()).collect();
     assert_eq!(
@@ -417,15 +318,15 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
             "round two replays the round-one exchange"
         );
     }
-    let terminals = terminals_per_started_task(&recorder);
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert_eq!(
-        terminals,
+        terminals_per_started_task(&records),
         BTreeMap::from([
             (task("0.0"), vec!["succeeded"]),
             (task("0.1"), vec!["succeeded"]),
             (task("0.2"), vec!["succeeded"]),
         ]),
         "three arms each succeed once: {:?}",
-        task_lifecycle(&recorder)
+        task_lifecycle(&records)
     );
 }

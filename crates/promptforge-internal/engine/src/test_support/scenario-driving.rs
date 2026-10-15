@@ -43,12 +43,26 @@ pub(super) struct Answers {
 
 impl Answers {
     /// Answers `effect` at once, or `None` when the scenario holds it,
-    /// waking the canceller either way when `effect` is its signal. A call
-    /// to a tool the scenario lacks is refused, and so is a model round
-    /// when the scenario has no model.
+    /// waking the canceller either way when `effect` is its signal.
     fn answer(&self, effect: &Effect) -> Option<EffectAnswer> {
         let held = self.hold.as_ref().is_some_and(|held| held(effect));
-        let answer = (!held).then(|| match effect {
+        let answer = (!held).then(|| self.perform(effect));
+        if let Some((signal, wake)) = &self.signal
+            && signal(effect)
+        {
+            // Only the first signal wakes the canceller; a later send
+            // finds it gone.
+            let _ = wake.send(());
+            self.signalled.set(true);
+        }
+        answer
+    }
+
+    /// The answer `effect` gets when the scenario does not hold it. A call
+    /// to a tool the scenario lacks is refused, and so is a model round
+    /// when the scenario has no model.
+    fn perform(&self, effect: &Effect) -> EffectAnswer {
+        match effect {
             Effect::Chat {
                 messages,
                 tools,
@@ -68,16 +82,7 @@ impl Answers {
             },
             Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
             Effect::Timer { .. } => EffectAnswer::Timer,
-        });
-        if let Some((signal, wake)) = &self.signal
-            && signal(effect)
-        {
-            // Only the first signal wakes the canceller; a later send
-            // finds it gone.
-            let _ = wake.send(());
-            self.signalled.set(true);
         }
-        answer
     }
 }
 
@@ -111,17 +116,25 @@ impl Driving {
 
     /// [`step`](Driving::step), handing each effect the step issues to
     /// `issued` in issue order, before it is answered or held.
-    pub(crate) fn step_with(&mut self, mut issued: impl FnMut(&Effect)) -> bool {
+    pub(crate) fn step_with(&mut self, issued: impl FnMut(&Effect)) -> bool {
+        self.step_ordered(issued, |_| {})
+    }
+
+    /// [`step_with`](Driving::step_with), answering the effects the step
+    /// issues in the order `order` leaves them in, in place of issue order.
+    pub(crate) fn step_ordered(
+        &mut self,
+        mut issued: impl FnMut(&Effect),
+        order: impl FnOnce(&mut [(EffectId, Effect)]),
+    ) -> bool {
         if self.result.is_some() {
             return false;
         }
         let Some(run) = self.run.as_mut() else {
             return false;
         };
-        let answers = &self.answers;
         let effects = &mut self.effects;
         let mut moved = false;
-        let mut perform = |_: EffectId, effect: &Effect| answers.answer(effect);
         let mut answered = |effect: &Effect, answer: &EffectAnswer| {
             moved = true;
             effects.push((effect.record(), answer.record()));
@@ -130,16 +143,55 @@ impl Driving {
         let stepped = drive_step(
             run,
             &mut issued,
-            &mut perform,
+            &mut |_, _| None,
             &mut answered,
             &mut self.held,
             &mut self.events,
         );
-        let Some(result) = stepped else {
-            return moved || self.held.len() > holding || self.await_cancel();
+        if let Some(result) = stepped {
+            self.result = Some(result);
+            return false;
+        }
+        // A deciding step answered every effect, held ones included, so
+        // only an undecided step leaves a wave to answer.
+        let mut wave = self.held.split_off(holding.min(self.held.len()));
+        order(&mut wave);
+        for (id, effect) in wave {
+            match self.answers.answer(&effect) {
+                Some(answer) => {
+                    moved = true;
+                    self.effects.push((effect.record(), answer.record()));
+                    run.resume(id, answer);
+                }
+                None => self.held.push((id, effect)),
+            }
+        }
+        moved || self.held.len() > holding || self.await_cancel()
+    }
+
+    /// Answers the first held effect `which` matches, in issue order, as
+    /// the scenario answers an effect it does not hold.
+    ///
+    /// # Panics
+    /// When no held effect matches.
+    #[track_caller]
+    pub(crate) fn release(&mut self, which: impl Fn(&Effect) -> bool) {
+        let Some(at) = self.held.iter().position(|(_, effect)| which(effect)) else {
+            panic!("none of the {} held effects matches", self.held.len());
         };
-        self.result = Some(result);
-        false
+        let (id, effect) = self.held.remove(at);
+        let answer = self.answers.perform(&effect);
+        self.effects.push((effect.record(), answer.record()));
+        self.run
+            .as_mut()
+            .expect("a run holding an effect has started")
+            .resume(id, answer);
+    }
+
+    /// The parse events, then every event the run reported so far, in
+    /// order.
+    pub(crate) fn events(&self) -> &[Event] {
+        &self.events
     }
 
     /// The run, done or not, or `None` when the prepare refused it.

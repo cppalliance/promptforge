@@ -5,7 +5,7 @@
 //! `sys.taskid`), and spawn shares `call`'s target resolution and depth cap.
 //! The chain-end rules sit in `chain_end`.
 
-use promptforge_types::ids::TaskOrigin;
+use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use super::scheduler::scheduler_scenario;
 use super::*;
@@ -50,6 +50,34 @@ impl TaskRecorder {
             .iter()
             .position(|(seen_section, seen)| seen_section == section && seen == event)
             .unwrap_or_else(|| panic!("no record ({section}, {event:?}) in {records:?}"))
+    }
+
+    /// The `log` messages recorded under `section`, in order.
+    pub(super) fn logs(&self, section: &str) -> Vec<String> {
+        self.records()
+            .into_iter()
+            .filter(|(seen, _)| seen == section)
+            .filter_map(|(_, event)| match event {
+                Observation::Lua(message) => Some(message),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every task observation naming `task`, in order.
+    pub(super) fn observations_of(&self, task: &TaskId) -> Vec<Observation> {
+        self.records()
+            .into_iter()
+            .map(|(_, event)| event)
+            .filter(|event| match event {
+                Observation::TaskStarted { task: seen, .. }
+                | Observation::TaskSucceeded { task: seen }
+                | Observation::TaskFailed { task: seen }
+                | Observation::TaskCancelled { task: seen }
+                | Observation::TaskAbandoned { task: seen, .. } => seen == task,
+                _ => false,
+            })
+            .collect()
     }
 }
 

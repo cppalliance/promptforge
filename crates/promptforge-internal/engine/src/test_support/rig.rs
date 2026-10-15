@@ -4,12 +4,17 @@
 //! run-level test never reads: each issued effect's record and each model
 //! round, in issue order, and the run itself, so a test reaches the
 //! scheduler between steps and reads its task slots once the run is done.
+//! Between steps a test releases the held effects it chooses, in the order
+//! it chooses, or cancels the run; a shuffled rig answers each step's
+//! effects in a seeded permutation instead of issue order.
 //! The scenario fills in the run's model set and tool set and chooses its
 //! store and limits; a test that observes the run replays the trace.
 
+use promptforge_types::event::Event;
 use promptforge_types::ids::TaskId;
 
 use super::scenario::{Driving, Scenario, Trace};
+use super::seeded::Seeded;
 use crate::execute::scheduler::Scheduler;
 use crate::execute::scheduler::test_hooks::TaskState;
 use crate::execute::{Effect, EffectRecord, Round, Run};
@@ -36,6 +41,8 @@ impl Tap {
 pub(crate) struct Rig {
     driving: Driving,
     tap: Tap,
+    /// The permutation each step's answers go in, when the rig shuffles.
+    shuffle: Option<Seeded>,
 }
 
 impl Rig {
@@ -49,6 +56,7 @@ impl Rig {
         Rig {
             driving: scenario.start(),
             tap: Tap::default(),
+            shuffle: None,
         }
     }
 
@@ -63,11 +71,72 @@ impl Rig {
         Rig::start(scenario).finish()
     }
 
+    /// [`run`](Rig::run), answering the effects each step issues in
+    /// [`Seeded`]'s permutation under `seed` instead of issue order, so
+    /// one seed is one completion interleaving.
+    ///
+    /// # Panics
+    /// As [`run`](Rig::run) does.
+    #[track_caller]
+    pub(crate) fn shuffled(scenario: Scenario, seed: u64) -> RigTrace {
+        let mut rig = Rig::start(scenario);
+        rig.shuffle = Some(Seeded::new(seed));
+        rig.finish()
+    }
+
     /// Steps the run once, as the scenario steps it, tapping each effect
     /// the step issues, and returns whether stepping again can move it.
     pub(crate) fn step(&mut self) -> bool {
         let tap = &mut self.tap;
-        self.driving.step_with(|effect| tap.record(effect))
+        let shuffle = &mut self.shuffle;
+        self.driving.step_ordered(
+            |effect| tap.record(effect),
+            |wave| {
+                if let Some(seeded) = shuffle {
+                    seeded.shuffle(wave);
+                }
+            },
+        )
+    }
+
+    /// Steps the run until stepping cannot move it: it is done, or it
+    /// waits only on held effects.
+    #[track_caller]
+    pub(crate) fn settle(&mut self) {
+        while self.step() {}
+    }
+
+    /// Answers the first held effect `which` matches, in issue order, as
+    /// the scenario answers an effect it does not hold. The run sees the
+    /// answer at its next step.
+    ///
+    /// # Panics
+    /// When no held effect matches.
+    #[track_caller]
+    pub(crate) fn release(&mut self, which: impl Fn(&Effect) -> bool) {
+        self.driving.release(which);
+    }
+
+    /// The parse events, then every event the run reported so far, for a
+    /// test that steps until an event appears.
+    pub(crate) fn events(&self) -> &[Event] {
+        self.driving.events()
+    }
+
+    /// Sets the run's cancel flag between steps.
+    pub(crate) fn cancel(&mut self) {
+        self.driving.cancel();
+    }
+
+    /// The run itself, for a test that hands it an answer by hand.
+    ///
+    /// # Panics
+    /// When the prepare refused the run.
+    #[track_caller]
+    pub(crate) fn run_for_test(&mut self) -> &mut Run {
+        self.driving
+            .run_mut()
+            .expect("the prepare accepted the run")
     }
 
     /// The scheduler behind the run, for a test that reaches below the run
@@ -77,10 +146,7 @@ impl Rig {
     /// When the prepare refused the run, which then has no scheduler.
     #[track_caller]
     pub(crate) fn scheduler_for_test(&mut self) -> &mut Scheduler {
-        self.driving
-            .run_mut()
-            .expect("the prepare accepted the run")
-            .scheduler_for_test()
+        self.run_for_test().scheduler_for_test()
     }
 
     /// Steps the run to its end and returns what it left.
@@ -90,7 +156,7 @@ impl Rig {
     /// until the run decides.
     #[track_caller]
     pub(crate) fn finish(mut self) -> RigTrace {
-        while self.step() {}
+        self.settle();
         let (trace, run) = self.driving.end();
         RigTrace {
             trace,

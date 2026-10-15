@@ -38,6 +38,14 @@ impl Seeded {
         &items[self.below(items.len())]
     }
 
+    /// Permutes `items` in place, Fisher-Yates over [`below`](Seeded::below).
+    #[track_caller]
+    pub(crate) fn shuffle<T>(&mut self, items: &mut [T]) {
+        for last in (1..items.len()).rev() {
+            items.swap(last, self.below(last + 1));
+        }
+    }
+
     #[track_caller]
     pub(crate) fn check(&self, condition: bool, message: impl Display) {
         assert!(condition, "{message} (seed {})", self.seed);
@@ -65,6 +73,17 @@ fn seeded_failure_messages_name_the_seed() {
     let items = ["a", "b", "c"];
     let picked = rng.pick(&items);
     rng.check(items.contains(picked), "a pick is one of the items");
+    let mut shuffled = [1, 2, 3, 4];
+    Seeded::new(rng.seed()).shuffle(&mut shuffled);
+    let mut replayed = [1, 2, 3, 4];
+    Seeded::new(rng.seed()).shuffle(&mut replayed);
+    rng.check_eq(&shuffled, &replayed, "one seed replays its shuffle");
+    rng.check(
+        shuffled != [1, 2, 3, 4],
+        "this seed's shuffle moves an item",
+    );
+    shuffled.sort_unstable();
+    rng.check_eq(&shuffled, &[1, 2, 3, 4], "a shuffle is a permutation");
     let seed = format!("seed {}", rng.seed());
     let failures = [
         std::panic::catch_unwind(|| rng.check(false, "a property failed")),

@@ -8,15 +8,16 @@
 //! timer effect is answered however the closure sees fit, so a test's
 //! timeouts are instant. In this crate's own tests, `scenario` builds a
 //! whole run from its setup as data and drives it on the serial driver,
-//! and `rig` drives a scenario's run with its effects tapped and its
-//! scheduler in reach.
+//! and `rig` drives a scenario's run with its effects tapped, its held
+//! effects released in the order a test chooses or its answers shuffled
+//! under a seed, and its scheduler in reach.
 //!
 //! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
 //! `ToolCall` effects through the caller's [`Performers`]
 //! (a struct of boxed async closures, one per kind) on the current tokio
 //! runtime, runs store operations on the blocking pool, sleeps timers on
 //! the timer wheel, and hands every event to the caller's sink. It steps
-//! the runs in the Engine's own suites.
+//! the bench's runs.
 //!
 //! [`RunFixture`] bundles a suite's resources for one run - an observer, a
 //! client, a fixture tool table - and [`run_with_fixture`] is

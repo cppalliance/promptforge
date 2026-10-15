@@ -8,71 +8,29 @@
 //! tells the model's tasks from the author's. A scripted mock gateway plays
 //! the model.
 
-use promptforge_parser::test_support::PromptSource;
+use promptforge_parser::test_support::prompt;
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
 
 use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
-use crate::lua::ToolSet;
 use crate::test_support::rig::Rig;
 
 /// A child body that parks on a call to the never-completing tool, by its
 /// full id, so the task stays live until something ends it.
 pub(super) const CHILD_PARKED_ON_SLOW_TOOL: &str = "tools.call('test/tools/slow')\nreturn 'never'";
 
-/// The run context and fixture for a model-task test: the parsed prompt,
-/// the shared model set pre-filled, no bound tools, `observer` watching,
-/// and `park`, the tool a child parks on, as the run's whole catalog, so
-/// a section calls it by its full id without binding an alias.
-pub(super) fn model_task_context_with(
-    prompt: &Prompt,
-    observer: Arc<dyn Observer>,
-    park: Arc<dyn TestTool>,
-) -> (RunState, RunFixture) {
-    let (catalog, table) = fixture_tools(&[park]);
-    let (prepared, requirements) = test_context(EXECUTION).tools(catalog).prepare(prompt);
-    assert!(
-        requirements.is_satisfied(),
-        "the model-task prompt declares nothing the environment must supply: {requirements:?}"
-    );
-    let fixture = RunFixture::new().observer(observer).tools(table);
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        &prepared,
-    )
-    .with_tool_set(ToolSet::default());
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = loop_models();
-    (ctx, fixture)
-}
-
-/// [`model_task_context_with`] as a scenario over the slow tool: the loop
-/// models filled in, nothing offered, and the slow tool as the whole
-/// catalog, its calls held so a parked child stays parked until the run
-/// decides.
+/// A prepared run of `source` for a model-task test: the loop models
+/// filled in, nothing offered, and the slow tool as the whole catalog, so
+/// a section calls it by its full id without binding an alias. Its calls
+/// are held, so a parked child stays parked until the run decides.
 pub(super) fn model_task_scenario(source: impl Into<String>) -> Scenario {
     Scenario::new(source)
         .models(loop_models())
         .offering(Vec::new())
         .tool(slow_tool())
         .hold(calls_slow_tool)
-}
-
-/// A two-section prompt: `Only` runs the model loop under `frontmatter`
-/// extras, `Child` is the task target.
-pub(super) fn owner_prompt(frontmatter: &str, owner_body: &str, child_body: &str) -> String {
-    PromptSource::new()
-        .name("mt")
-        .title("ModelTasks")
-        .front(frontmatter)
-        .section("Only", owner_body)
-        .section("Child", child_body)
-        .build()
 }
 
 /// The names the gateway saw advertised on `body`.
@@ -87,17 +45,14 @@ fn a_scripted_model_starts_a_task_and_reads_its_status() {
         calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
         text("done"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks({ '## Child' })\n\
+    let owner = "tools.allow_tasks({ '## Child' })\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
          assert(msgs[3].content == 'Task id=0.0 started', 'the start text: ' .. msgs[3].content)\n\
          assert(msgs[3].tool_call_id == 'call_1', 'the start correlates its call')\n\
-         return msgs[5].content",
-        "return 'child result'",
-    );
+         return msgs[5].content";
+    let md = prompt("", &[("Only", owner), ("Child", "return 'child result'")]);
     let rig = Rig::run(model_task_scenario(md).chat(&gateway));
     let out = rig.trace().text();
     assert!(
@@ -133,15 +88,12 @@ fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() {
         calls(&[("call_1", "task", "{\"target\":\"## Only\"}")]),
         text("done"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks({ '## Child' })\n\
+    let owner = "tools.allow_tasks({ '## Child' })\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
-         return msgs[3].content",
-        "return 'child result'",
-    );
+         return msgs[3].content";
+    let md = prompt("", &[("Only", owner), ("Child", "return 'child result'")]);
     let rig = Rig::run(model_task_scenario(md).chat(&gateway));
     let out = rig.trace().text();
     assert!(
@@ -164,9 +116,7 @@ fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks()\n\
+    let owner = "tools.allow_tasks()\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
@@ -174,9 +124,8 @@ fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
          local models = tasks.pending({ origin = 'model' })\n\
          assert(#mine == 0, 'the author started nothing')\n\
          assert(#models == 1 and models[1].task == '0.0', 'the model task is pending')\n\
-         return 'ok'",
-        CHILD_PARKED_ON_SLOW_TOOL,
-    );
+         return 'ok'";
+    let md = prompt("", &[("Only", owner), ("Child", CHILD_PARKED_ON_SLOW_TOOL)]);
     let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
     assert_eq!(
         rig.trace().text(),
@@ -219,16 +168,13 @@ fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks()\n\
+    let owner = "tools.allow_tasks()\n\
          tasks.spawn('## Child')\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
-         return 'ok'",
-        CHILD_PARKED_ON_SLOW_TOOL,
-    );
+         return 'ok'";
+    let md = prompt("", &[("Only", owner), ("Child", CHILD_PARKED_ON_SLOW_TOOL)]);
     let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
 
     match rig.trace().error().inner() {
@@ -287,14 +233,14 @@ fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
         "task",
         "{\"target\":\"## Child\"}",
     )])]);
-    let md = owner_prompt(
-        "max_tool_iterations: 1\n",
-        "tools.allow_tasks()\n\
+    let owner = "tools.allow_tasks()\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
-         return 'unreached'",
-        CHILD_PARKED_ON_SLOW_TOOL,
+         return 'unreached'";
+    let md = prompt(
+        "max_tool_iterations: 1",
+        &[("Only", owner), ("Child", CHILD_PARKED_ON_SLOW_TOOL)],
     );
     let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
     let error = rig.trace().error().inner();
@@ -331,16 +277,13 @@ fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
         calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks()\n\
+    let owner = "tools.allow_tasks()\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
          assert(#tasks.pending() == 0, 'nothing is live after the cancel')\n\
-         return msgs[5].content",
-        CHILD_PARKED_ON_SLOW_TOOL,
-    );
+         return msgs[5].content";
+    let md = prompt("", &[("Only", owner), ("Child", CHILD_PARKED_ON_SLOW_TOOL)]);
     let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
     assert_eq!(
         rig.trace().text(),
@@ -373,17 +316,14 @@ fn the_model_sees_only_its_own_tasks() {
         calls(&[("call_1", "task_status", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt(
-        "",
-        "tools.allow_tasks()\n\
+    let owner = "tools.allow_tasks()\n\
          local t = tasks.spawn('## Child')\n\
          local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
          tasks.cancel(t)\n\
-         return msgs[3].content",
-        CHILD_PARKED_ON_SLOW_TOOL,
-    );
+         return msgs[3].content";
+    let md = prompt("", &[("Only", owner), ("Child", CHILD_PARKED_ON_SLOW_TOOL)]);
     let rig = Rig::run(model_task_scenario(md).chat(&gateway));
     let out = rig.trace().text();
     assert!(
@@ -396,14 +336,11 @@ fn the_model_sees_only_its_own_tasks() {
 #[test]
 fn without_allow_tasks_the_built_ins_are_not_advertised() {
     let gateway = ScriptedChat::new(vec![text("bye")]);
-    let md = owner_prompt(
-        "",
-        "local msgs = messages.new()\n\
+    let owner = "local msgs = messages.new()\n\
          msgs:user('go')\n\
          models.loop(msgs)\n\
-         return 'ok'",
-        "return 'x'",
-    );
+         return 'ok'";
+    let md = prompt("", &[("Only", owner), ("Child", "return 'x'")]);
     let rig = Rig::run(model_task_scenario(md).chat(&gateway));
     assert_eq!(rig.trace().text(), "ok", "a tool-free round completes");
     let bodies = gateway.requests();

@@ -4,6 +4,20 @@ use promptforge_parser::test_support::one_section;
 
 use super::models_loop::{LOOP_TO_TEXT, loop_scenario};
 use super::*;
+use crate::lua::{ToolBinding, ToolSet};
+
+/// The tool set offering `tool` under the wire name `alias`, described as
+/// `description`, for a test that reads the offering without a run.
+fn offering_of(alias: &str, description: &str, tool: &FnTool) -> ToolSet {
+    ToolSet {
+        offered: vec![ToolBinding::for_test(
+            alias,
+            description,
+            &tool.descriptor(),
+        )],
+        ..ToolSet::default()
+    }
+}
 
 /// An offered tool stays out of the model-visible scope until
 /// `tools.offer` names it: the scope snapshot over an untouched runtime is
@@ -12,13 +26,9 @@ use super::*;
 #[test]
 fn offered_tools_are_not_injected_without_an_offer() {
     let (tool, _) = scoped_tool("concrete", "Concrete description.");
-    let tools = FixtureTools::new(vec![fixture_binding(
-        "tools_concrete",
-        "capability",
-        Arc::new(tool),
-    )]);
+    let tools = offering_of("tools_concrete", "capability", &tool);
     let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
-    let effective = current_tool_bindings(tools.set(), &runtime).expect("the scope must snapshot");
+    let effective = current_tool_bindings(&tools, &runtime).expect("the scope must snapshot");
     assert!(
         effective.is_empty(),
         "an offering must not expose a tool without an explicit offer"
@@ -32,17 +42,12 @@ fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispat
         text("aliased final"),
     ]);
     let (tool, called) = scoped_tool("concrete", "Concrete description.");
-    let tools = FixtureTools::new(vec![fixture_binding(
-        "tools_concrete",
-        "Concrete description.",
-        Arc::new(tool.clone()),
-    )]);
+    let tools = offering_of("tools_concrete", "Concrete description.", &tool);
     let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: vec!["tools_concrete".to_owned()],
         ..promptforge_lua::ToolRuntime::default()
     });
-    let effective =
-        current_tool_bindings(tools.set(), &runtime).expect("the offered scope snapshots");
+    let effective = current_tool_bindings(&tools, &runtime).expect("the offered scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(tool_schema_name(&schemas[0]), "tools_concrete");
@@ -80,14 +85,10 @@ fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
         text("aliased final"),
     ]);
     let (tool, called) = scoped_tool("section", "Section concrete.");
-    let tools = FixtureTools::new(vec![fixture_binding(
-        "tools_section",
-        "capability",
-        Arc::new(tool.clone()),
-    )]);
+    let tools = offering_of("tools_section", "capability", &tool);
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
-        &Arc::new(tools.set().clone()),
+        &Arc::new(tools),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),
         "Only",

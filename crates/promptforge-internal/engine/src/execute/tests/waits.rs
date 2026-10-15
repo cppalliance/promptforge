@@ -7,65 +7,14 @@
 //! second wait raises `task_consumed`; cancel is idempotent and reports
 //! `TaskCancelled` exactly once.
 
-use std::time::Duration;
+use promptforge_types::event::Event;
 
-use promptforge_types::ids::TaskId;
-
-use super::scheduler::{GateObserver, StoreGate, gated_store, scheduler_context_on};
+use super::scheduler::{asks, scheduler_scenario};
+use super::tasks::TaskRecorder;
 use super::*;
+use crate::execute::protocol::VfsOp;
 use crate::execute::scheduler::test_hooks::TaskState;
-
-/// A recorder that keeps the typed observation, so a variant with a
-/// payload can be matched whole. Shared with the timeout suite, which
-/// exercises the same wait shims under `opts.timeout`.
-#[derive(Default)]
-pub(super) struct WaitRecorder(Mutex<Vec<(String, Observation)>>);
-
-impl Observer for WaitRecorder {
-    fn observe(&self, _execution: &str, section: &str, event: Observation) {
-        self.0
-            .lock()
-            .expect("the recorder mutex must not be poisoned")
-            .push((section.to_owned(), event));
-    }
-}
-
-impl WaitRecorder {
-    pub(super) fn records(&self) -> Vec<(String, Observation)> {
-        self.0
-            .lock()
-            .expect("the recorder mutex must not be poisoned")
-            .clone()
-    }
-
-    /// The `log` messages recorded under `section`, in order.
-    pub(super) fn logs(&self, section: &str) -> Vec<String> {
-        self.records()
-            .into_iter()
-            .filter(|(seen, _)| seen == section)
-            .filter_map(|(_, event)| match event {
-                Observation::Lua(message) => Some(message),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Every task observation naming `task`, in order.
-    pub(super) fn observations_of(&self, task: &TaskId) -> Vec<Observation> {
-        self.records()
-            .into_iter()
-            .map(|(_, event)| event)
-            .filter(|event| match event {
-                Observation::TaskStarted { task: seen, .. }
-                | Observation::TaskSucceeded { task: seen }
-                | Observation::TaskFailed { task: seen }
-                | Observation::TaskCancelled { task: seen }
-                | Observation::TaskAbandoned { task: seen, .. } => seen == task,
-                _ => false,
-            })
-            .collect()
-    }
-}
+use crate::test_support::rig::Rig;
 
 /// A prompt whose first section drives the tasks it spawns over the
 /// remaining sections.
@@ -86,21 +35,8 @@ pub(super) fn tasks_prompt(main: &str, sections: &[(&str, &str)]) -> String {
     md
 }
 
-/// Drives `md` offline and returns the run's result with the recorder.
-async fn drive(md: &str) -> (Result<String>, Arc<WaitRecorder>) {
-    let prompt = parse(md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None).drive().await;
-    (out, recorder)
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn join_reports_a_failed_member_without_raising() {
+#[test]
+fn join_reports_a_failed_member_without_raising() {
     // One member returns, one raises: `join` returns both outcomes in
     // input order and the caller decides; the failed member's result is
     // the error table, and nothing leaks at chain end.
@@ -122,12 +58,12 @@ async fn join_reports_a_failed_member_without_raising() {
             ("Beta", "error('beta boom')"),
         ],
     );
-    let (out, _) = drive(&md).await;
-    assert_eq!(out.expect("join never raises for a member"), "done");
+    let trace = scheduler_scenario(md).run();
+    assert_eq!(trace.text(), "done", "join never raises for a member");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn join_fills_every_position_of_a_member_named_twice() {
+#[test]
+fn join_fills_every_position_of_a_member_named_twice() {
     // A set naming one task twice: the task is waited on once and its
     // outcome lands at both positions, so the result sequence has no hole
     // and `#results` is the input's length; the second wait would have
@@ -148,12 +84,16 @@ async fn join_fills_every_position_of_a_member_named_twice() {
          return 'done'",
         &[("Alpha", "return 'alpha'"), ("Beta", "return 'beta'")],
     );
-    let (out, _) = drive(&md).await;
-    assert_eq!(out.expect("a duplicated member is waited on once"), "done");
+    let trace = scheduler_scenario(md).run();
+    assert_eq!(
+        trace.text(),
+        "done",
+        "a duplicated member is waited on once"
+    );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn join_any_returns_the_first_finished_member_and_the_rest_keep_running() {
+#[test]
+fn join_any_returns_the_first_finished_member_and_the_rest_keep_running() {
     // Alpha finishes at once; Beta parks on a store write. `join_any` over
     // both delivers Alpha and leaves Beta live, so the caller must still
     // wait on Beta before it ends - which it does.
@@ -172,22 +112,20 @@ async fn join_any_returns_the_first_finished_member_and_the_rest_keep_running() 
             ("Beta", "store.write('park', 'x')\nreturn 'beta'"),
         ],
     );
-    let (out, _) = drive(&md).await;
-    assert_eq!(out.expect("both members are delivered"), "done");
+    let trace = scheduler_scenario(md).run();
+    assert_eq!(trace.text(), "done", "both members are delivered");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn status_reports_a_parked_task_and_then_a_finished_one() {
-    // The child parks on a slow model round; the spawner reads its status
+#[test]
+fn status_reports_a_parked_task_and_then_a_finished_one() {
+    // The child parks on a held model round; the spawner reads its status
     // at once - the child is still queued for admission, so it reads
-    // `blocked = 'queued'` with no section - then resumes from a fast
-    // store write, reads the mid-flight status (running, blocked on
-    // `chat`, inside its section, with its note), waits on it, and reads
-    // the terminal status (done, ok).
-    let gateway = ScriptedChat::new(vec![delayed(
-        Duration::from_millis(400),
-        text("slow answer"),
-    )]);
+    // `blocked = 'queued'` with no section - then resumes from a store
+    // write answered at once, reads the mid-flight status (running,
+    // blocked on `chat`, inside its section, with its note), and waits on
+    // it; the round is released, and the spawner reads the terminal
+    // status (done, ok).
+    let gateway = ScriptedChat::new(vec![text("slow answer")]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local fresh = tasks.status(t)\n\
@@ -210,20 +148,17 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
             "tasks.note('working')\nreturn models.infer('slow please')",
         )],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let mut rig = Rig::start(
+        scheduler_scenario(md)
+            .chat(&gateway)
+            .hold(asks("slow please")),
     );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the run completes");
-    assert_eq!(out, "done");
+    rig.settle();
+    rig.release(asks("slow please"));
+    let rig = rig.finish();
+    assert_eq!(rig.trace().text(), "done");
 
-    let logs = recorder.logs("Main");
+    let logs = TaskRecorder::replayed(rig.trace()).logs("Main");
     assert_eq!(
         logs,
         vec![
@@ -237,8 +172,8 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_non_owner_is_refused_with_task_not_owned() {
+#[test]
+fn a_non_owner_is_refused_with_task_not_owned() {
     // The child may read and annotate its own task (the self exception),
     // but waiting on or cancelling it is the owner's alone, and a task id
     // the caller never spawned is refused the same way.
@@ -263,8 +198,8 @@ async fn a_non_owner_is_refused_with_task_not_owned() {
              return 'refused:' .. tostring(err) .. '|' .. tostring(err2)",
         )],
     );
-    let (out, _) = drive(&md).await;
-    let out = out.expect("the caught refusals end the run normally");
+    let trace = scheduler_scenario(md).run();
+    let out = trace.text();
     assert!(
         out.starts_with("refused:"),
         "the child's refusals are the run's result: {out}"
@@ -275,8 +210,8 @@ async fn a_non_owner_is_refused_with_task_not_owned() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn waiting_on_a_delivered_task_raises_task_consumed() {
+#[test]
+fn waiting_on_a_delivered_task_raises_task_consumed() {
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local _, ok, result = tasks.join_any({ t })\n\
@@ -287,9 +222,8 @@ async fn waiting_on_a_delivered_task_raises_task_consumed() {
          return err.kind .. '|' .. err.task .. '|' .. tostring(err)",
         &[("Child", "return 'once'")],
     );
-    let (out, _) = drive(&md).await;
-    let out = out.expect("the caught error ends the run normally");
-    let (kind, rest) = out.split_once('|').expect("kind|task|message");
+    let trace = scheduler_scenario(md).run();
+    let (kind, rest) = trace.text().split_once('|').expect("kind|task|message");
     let (task_field, message) = rest.split_once('|').expect("task|message");
     assert_eq!(kind, "task_consumed");
     assert_eq!(task_field, "0.0");
@@ -299,25 +233,25 @@ async fn waiting_on_a_delivered_task_raises_task_consumed() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once() {
+#[test]
+fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once() {
     // The child parks on a store write; the owner cancels it twice (the
     // second is a no-op), reads the terminal state, and ends with no live
     // task - so no `tasks_live`. A wait on the cancelled slot delivers
     // `ok = false` with a `cancelled` error value.
     //
-    // Whether the child's write completes before the cancel lands is the
-    // blocking pool's choice, so the store gate parks the first write the
-    // backend serves until the child's `TaskCancelled` is observed. The
-    // owner's own yield before the cancel must therefore not be a write
-    // or append: `exists` lets the child run without taking the gate.
-    let gate = Arc::new(StoreGate::default());
-    let store = gated_store(&gate);
+    // The rig holds the child's write until the child's `TaskCancelled` is
+    // reported, then releases it, so the write's answer lands on the
+    // cancelled task while the run is still live. The owner's own yields
+    // are `exists`: the one before the cancel lets the child run, and the
+    // one after it keeps the run undecided past the step that cancels.
+    let child_write = |effect: &Effect| matches!(effect, Effect::Vfs { op: VfsOp::Write { path, .. }, .. } if path == "child-park");
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          store.exists('park')\n\
          tasks.cancel(t)\n\
          tasks.cancel(t)\n\
+         store.exists('park')\n\
          local s = tasks.status(t)\n\
          log('state=' .. s.state .. ' ok=' .. tostring(s.ok))\n\
          assert(tasks.ready(t), 'a cancelled task is ready')\n\
@@ -329,23 +263,34 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
          return 'done'",
         &[("Child", "store.write('child-park', 'x')\nreturn 'never'")],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &store,
-        GateObserver::new(&gate, Arc::clone(&recorder) as Arc<dyn Observer>),
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a cancelled task is not a leaked one");
-    assert_eq!(out, "done");
+    let mut rig = Rig::start(scheduler_scenario(md).hold(child_write));
+    while !rig
+        .events()
+        .iter()
+        .any(|event| matches!(event, Event::TaskCancelled { .. }))
+    {
+        assert!(rig.step(), "the run stopped before the child's cancel");
+    }
+    rig.release(child_write);
+    let mut rig = rig.finish();
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.trace().text(),
+        "done",
+        "a cancelled task is not a leaked one"
+    );
+    let effects = rig.trace().effects();
+    assert!(
+        effects.iter().any(|(effect, answer)| matches!(
+            effect,
+            EffectRecord::Vfs { op: VfsOp::Write { path, .. } } if path == "child-park"
+        ) && *answer != AnswerRecord::Dropped),
+        "the released write reaches the cancelled task with a real answer: {effects:?}"
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Cancelled)
     );
+    let recorder = TaskRecorder::replayed(rig.trace());
     assert_eq!(
         recorder.logs("Main"),
         vec!["state=cancelled ok=false".to_owned()]
@@ -372,8 +317,8 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn pending_lists_the_callers_live_tasks_in_spawn_order() {
+#[test]
+fn pending_lists_the_callers_live_tasks_in_spawn_order() {
     // Two live children and one finished: `pending` names the live two in
     // spawn order as handles every `tasks.*` accepts, and the origin filter
     // narrows to the author's own.
@@ -397,12 +342,12 @@ async fn pending_lists_the_callers_live_tasks_in_spawn_order() {
             ("Quick", "return 'quick'"),
         ],
     );
-    let (out, _) = drive(&md).await;
-    assert_eq!(out.expect("the cancelled tasks do not leak"), "done");
+    let trace = scheduler_scenario(md).run();
+    assert_eq!(trace.text(), "done", "the cancelled tasks do not leak");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_waits_old_names_are_not_defined() {
+#[test]
+fn the_waits_old_names_are_not_defined() {
     // The waits are `join_any` and `join`: a prompt calling
     // `tasks.when_any` or `tasks.when_all` reaches a nil field, so the
     // call fails as a plain string error, never a shim's structured one.
@@ -418,15 +363,16 @@ async fn the_waits_old_names_are_not_defined() {
          return tostring(ok1) .. '|' .. tostring(ok2) .. '|' .. type(e1) .. '|' .. type(e2)",
         &[("Child", "return 'child'")],
     );
-    let (out, _) = drive(&md).await;
+    let trace = scheduler_scenario(md).run();
     assert_eq!(
-        out.expect("the caught nil calls end the run normally"),
-        "false|false|string|string"
+        trace.text(),
+        "false|false|string|string",
+        "the caught nil calls end the run normally"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_wait_shims_validate_their_arguments_at_the_call_site() {
+#[test]
+fn the_wait_shims_validate_their_arguments_at_the_call_site() {
     let md = tasks_prompt(
         "local ok1, e1 = pcall(tasks.join_any, {})\n\
          assert(not ok1 and e1.kind == 'lua', tostring(e1))\n\
@@ -444,8 +390,8 @@ async fn the_wait_shims_validate_their_arguments_at_the_call_site() {
            .. '|' .. tostring(e5) .. '|' .. tostring(e6)",
         &[],
     );
-    let (out, _) = drive(&md).await;
-    let out = out.expect("every argument error is caught at the call site");
+    let trace = scheduler_scenario(md).run();
+    let out = trace.text();
     let parts: Vec<&str> = out.split('|').collect();
     assert_eq!(parts.len(), 6, "{out}");
     assert!(parts[0].contains("at least one task"), "{out}");

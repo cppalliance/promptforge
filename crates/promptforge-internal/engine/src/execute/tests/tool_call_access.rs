@@ -109,11 +109,15 @@ fn assert_refused_as_ended<T: std::fmt::Debug>(result: std::result::Result<T, Vf
     }
 }
 
-/// Drives `md` with the files tool as the run's catalog, answering each
-/// files call `reply`'s way after performing it.
-fn drive_files(md: &str, reply: Reply) -> (RunResult, Identities) {
-    let mut seen = Identities::default();
-    let (result, _events) = drive(files_run(md), |_, effect| match effect {
+/// The serial driver's performer for a files run: each files call is
+/// performed through its own access and answered `reply`'s way, each
+/// store effect runs on its view, and `seen` notes the identity each
+/// carried.
+fn files_answers(
+    reply: Reply,
+    seen: &mut Identities,
+) -> impl FnMut(EffectId, &Effect) -> EffectAnswer + '_ {
+    move |_, effect| match effect {
         Effect::ToolCall { access, args, .. } => {
             seen.tools.push(access_id(access));
             let output = use_access(access, args);
@@ -128,8 +132,7 @@ fn drive_files(md: &str, reply: Reply) -> (RunResult, Identities) {
             }
             perform_store(other)
         }
-    });
-    (result, seen)
+    }
 }
 
 #[test]
@@ -141,7 +144,8 @@ fn a_tool_reads_a_file_the_chain_wrote_just_before_the_call() {
         store.write('before.txt', 'chain wrote this')\n\
         return tools.call('test/tools/files', { read = 'before.txt' })\n\
         ```\n";
-    let (result, seen) = drive_files(md, Reply::Output);
+    let mut seen = Identities::default();
+    let (result, _) = drive(files_run(md), files_answers(Reply::Output, &mut seen));
     assert_eq!(text_of(result), "chain wrote this");
     assert_eq!(seen.tools.len(), 1, "one call was issued");
     assert!(
@@ -159,7 +163,10 @@ fn the_chain_reads_a_file_the_tool_wrote() {
         tools.call('test/tools/files', { write = 'after.txt', text = 'tool wrote this' })\n\
         return store.read('after.txt')\n\
         ```\n";
-    let (result, _) = drive_files(md, Reply::Output);
+    let (result, _) = drive(
+        files_run(md),
+        files_answers(Reply::Output, &mut Identities::default()),
+    );
     assert_eq!(text_of(result), "tool wrote this");
 }
 
@@ -183,7 +190,8 @@ fn a_tool_in_a_spawned_task_forks_from_the_task_and_the_owner_reads_its_write_af
         tools.call('test/tools/files', { write = 'out.txt', text = 'tool saw: ' .. seen })\n\
         return 'done'\n\
         ```\n";
-    let (result, seen) = drive_files(md, Reply::Output);
+    let mut seen = Identities::default();
+    let (result, _) = drive(files_run(md), files_answers(Reply::Output, &mut seen));
     assert_eq!(text_of(result), "tool saw: task wrote this");
     assert_eq!(seen.tools.len(), 2, "the task issued two calls");
     assert!(
@@ -201,7 +209,10 @@ fn a_tool_that_writes_and_is_answered_dropped_is_still_joined() {
         local ok, err = pcall(tools.call, 'test/tools/files', { write = 'dropped.txt', text = 'tool wrote this' })\n\
         return tostring(ok) .. ':' .. err.kind .. '|' .. store.read('dropped.txt')\n\
         ```\n";
-    let (result, _) = drive_files(md, Reply::Dropped);
+    let (result, _) = drive(
+        files_run(md),
+        files_answers(Reply::Dropped, &mut Identities::default()),
+    );
     assert_eq!(text_of(result), "false:cancelled|tool wrote this");
 }
 

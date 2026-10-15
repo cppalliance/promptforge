@@ -18,8 +18,6 @@ use std::sync::Arc;
 use promptforge_types::event::Event;
 
 use super::recording::{self, NullObserver, Observer};
-#[cfg(test)]
-use super::tokio_driver::EventSink;
 use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
 use super::tools::TestToolTable;
 use crate::execute::RunLimits;
@@ -144,12 +142,6 @@ impl RunFixture {
     pub fn sink(&self) -> impl FnMut(Event) + Send + use<> {
         let observer = Arc::clone(&self.observer);
         move |event| recording::forward_one(event, observer.as_ref(), None)
-    }
-
-    /// The sink, boxed for the driver.
-    #[cfg(test)]
-    pub(super) fn boxed_sink(&self) -> EventSink<'static> {
-        Box::new(self.sink())
     }
 }
 

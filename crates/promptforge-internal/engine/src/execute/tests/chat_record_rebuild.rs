@@ -8,9 +8,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use promptforge_parser::test_support::one_section;
 use promptforge_types::ids::RoundId;
 
-use super::models_loop::{loop_prompt, loop_scenario};
+use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord};
 use crate::model::{CompletionError, CompletionErrorKind};
@@ -39,16 +40,17 @@ impl Sent {
     }
 }
 
-/// Drives `lua` as a loop section with `echo` bound and offered, answering
-/// the model rounds from `replies` in order and every tool call with the
-/// echo tool, and returns the section's result beside each round as it was
-/// sent, in issue order.
-#[track_caller]
-fn drive_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (String, Vec<Sent>) {
+/// Each round a scenario's model was sent, as it was sent, in issue order.
+type SentLog = Rc<RefCell<Vec<Sent>>>;
+
+/// A loop section running `lua` with `echo` bound and offered, its model
+/// rounds answered from `replies` in order and every tool call by the echo
+/// tool, beside the log its model keeps of each round it is sent.
+fn echo_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (Scenario, SentLog) {
     let replies = RefCell::new(replies.into_iter());
-    let sent = Rc::new(RefCell::new(Vec::new()));
+    let sent = SentLog::default();
     let rounds = Rc::clone(&sent);
-    let trace = loop_scenario(loop_prompt(&format!("tools.offer('tools/echo')\n{lua}")))
+    let scenario = loop_scenario(one_section(&format!("tools.offer('tools/echo')\n{lua}")))
         .offer("echo", echo_tool())
         .chat_with(move |effect| {
             let Effect::Chat { messages, .. } = effect else {
@@ -65,8 +67,16 @@ fn drive_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (String, Vec<Sent>) {
                 .borrow_mut()
                 .next()
                 .expect("the script covers every round")
-        })
-        .run();
+        });
+    (scenario, sent)
+}
+
+/// Asserts `trace` issued only model rounds and tool calls, then rebuilds
+/// every request from the records alone and asserts each equals the wire
+/// messages its live effect sent. Every `after` must name a round recorded
+/// earlier in the log.
+#[track_caller]
+fn assert_rebuilds(trace: &Trace, sent: &[Sent]) {
     assert!(
         trace.effects().iter().all(|(effect, _)| matches!(
             effect,
@@ -75,13 +85,6 @@ fn drive_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (String, Vec<Sent>) {
         "only model rounds and tool calls are issued: {:?}",
         trace.effects()
     );
-    (trace.text().to_owned(), sent.take())
-}
-
-/// Rebuilds every request from the records alone and asserts each equals
-/// the wire messages its live effect sent. Every `after` must name a round
-/// recorded earlier in the log.
-fn assert_rebuilds(sent: &[Sent]) {
     let mut requests: BTreeMap<RoundId, Vec<Value>> = BTreeMap::new();
     for one in sent {
         let EffectRecord::Chat { round, .. } = &one.record else {
@@ -121,7 +124,7 @@ fn assistant(content: &str) -> Value {
 
 #[test]
 fn a_tool_round_logs_only_the_call_and_its_result() {
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
          models.loop(msgs)\n\
@@ -131,8 +134,10 @@ fn a_tool_round_logs_only_the_call_and_its_result() {
             chat_answer(&text("done")),
         ],
     );
-    assert_eq!(out, "done");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "done");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(sent.len(), 2, "two rounds");
     assert_eq!(sent[0].shape(), (None, 0, &[user("hello")][..]));
     let (after, keep, messages) = sent[1].shape();
@@ -143,7 +148,7 @@ fn a_tool_round_logs_only_the_call_and_its_result() {
 
 #[test]
 fn a_compaction_keeps_only_the_messages_before_the_first_change() {
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:system('be brief')\n\
          msgs:user('one')\n\
@@ -160,8 +165,10 @@ fn a_compaction_keeps_only_the_messages_before_the_first_change() {
             chat_answer(&text("a3")),
         ],
     );
-    assert_eq!(out, "a3");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "a3");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(sent.len(), 3, "three sends");
     assert_eq!(
         sent[1].shape(),
@@ -184,7 +191,7 @@ fn a_compaction_keeps_only_the_messages_before_the_first_change() {
 
 #[test]
 fn an_add_then_a_remove_between_two_sends_adds_nothing_to_the_log() {
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:user('one')\n\
          models.loop(msgs)\n\
@@ -195,8 +202,10 @@ fn an_add_then_a_remove_between_two_sends_adds_nothing_to_the_log() {
          return msgs[#msgs].content",
         vec![chat_answer(&text("a1")), chat_answer(&text("a2"))],
     );
-    assert_eq!(out, "a2");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "a2");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(
         sent[1].shape(),
         (
@@ -211,7 +220,7 @@ fn an_add_then_a_remove_between_two_sends_adds_nothing_to_the_log() {
 #[test]
 fn a_resend_with_no_changes_logs_no_messages_and_keeps_the_whole_request() {
     let failure = CompletionError::new(CompletionErrorKind::MalformedResponse, "garbled reply");
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:user('one')\n\
          assert(not pcall(models.loop, msgs), 'the first round fails')\n\
@@ -220,15 +229,17 @@ fn a_resend_with_no_changes_logs_no_messages_and_keeps_the_whole_request() {
          return msgs[#msgs].content",
         vec![EffectAnswer::Chat(Err(failure)), chat_answer(&text("a1"))],
     );
-    assert_eq!(out, "a1");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "a1");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(sent.len(), 2, "the failed send and its resend");
     assert_eq!(sent[1].shape(), (Some(RoundId::new(0)), 1, &[][..]));
 }
 
 #[test]
 fn re_inserting_an_identical_record_adds_nothing_to_the_log() {
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:user('one')\n\
          models.loop(msgs)\n\
@@ -246,8 +257,10 @@ fn re_inserting_an_identical_record_adds_nothing_to_the_log() {
             chat_answer(&text("a3")),
         ],
     );
-    assert_eq!(out, "a3");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "a3");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(
         sent[2].shape(),
         (
@@ -261,7 +274,7 @@ fn re_inserting_an_identical_record_adds_nothing_to_the_log() {
 
 #[test]
 fn removing_the_terminal_reply_and_resending_repeats_the_request_it_answered() {
-    let (out, sent) = drive_rounds(
+    let (scenario, log) = echo_rounds(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
          models.loop(msgs)\n\
@@ -274,8 +287,10 @@ fn removing_the_terminal_reply_and_resending_repeats_the_request_it_answered() {
             chat_answer(&text("second")),
         ],
     );
-    assert_eq!(out, "second");
-    assert_rebuilds(&sent);
+    let trace = scenario.run();
+    let sent = log.take();
+    assert_eq!(trace.text(), "second");
+    assert_rebuilds(&trace, &sent);
     assert_eq!(sent.len(), 3, "the tool round, its answer, and the resend");
     assert_eq!(
         sent[2].shape(),

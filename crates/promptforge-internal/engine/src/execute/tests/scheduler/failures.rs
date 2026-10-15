@@ -1,21 +1,18 @@
 //! Fanout failure, cancel, and script tool-arm cases for the scheduler. The
 //! script `tools.call` dispatch cases sit in `script_tools`.
 
-use std::num::NonZeroUsize;
-
 use super::*;
 use crate::execute::run::{EffectAnswer, EffectId};
 use crate::execute::scheduler::test_hooks::TaskState;
-use crate::test_support::tokio_driver::TokioDriver;
+use crate::test_support::rig::Rig;
 
-#[tokio::test(flavor = "current_thread")]
-async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
+#[test]
+fn two_arms_appending_one_path_boom_without_any_other_suspension() {
     // The arms append unordered: neither joins the other before the
     // fanout's own rounds, so the second append's claim check meets the
-    // first's standing write claim no matter how the blocking pool orders
-    // the two ops - claims are never released during a run, so the
-    // conflict cannot depend on timing.
-    let store = TestStore::new();
+    // first's standing write claim no matter how the answers are ordered -
+    // claims are never released during a run, so the conflict cannot
+    // depend on timing.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -28,14 +25,9 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         store.append('log.txt', item .. ';')\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("concurrent appends to one path must boom");
+    let trace = scheduler_scenario(md).run();
 
-    match &error {
+    match trace.error().inner() {
         Error::Determinism(detail) => {
             assert!(detail.contains("log.txt"), "error was: {detail}");
         }
@@ -43,18 +35,17 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
     }
     // The losing arm's append never reached the backend: exactly one arm's
     // append landed.
-    let log = store.read("log.txt").expect("one arm appended");
+    let log = trace.read("log.txt").expect("one arm appended");
     assert!(
         log == "alpha;" || log == "beta;",
         "exactly one arm's append may land: {log:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_arm_rewriting_its_own_path_succeeds() {
+#[test]
+fn an_arm_rewriting_its_own_path_succeeds() {
     // The registry records (fanout token, arm index), so the same arm
     // writing the same path again is a rewrite, not a race.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -68,22 +59,16 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         store.write('own.txt', 'second')\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("an arm rewriting its own path must succeed");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "only");
-    assert_eq!(store.read("own.txt").expect("the arm wrote"), "second");
+    assert_eq!(trace.text(), "only");
+    assert_eq!(trace.read("own.txt").expect("the arm wrote"), "second");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn sequential_fanouts_may_write_one_path() {
+#[test]
+fn sequential_fanouts_may_write_one_path() {
     // A later fanout takes a fresh write token, so its write overwrites the
     // earlier fanout's registry record instead of racing against it.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -97,26 +82,19 @@ async fn sequential_fanouts_may_write_one_path() {
         store.write('seq.txt', item)\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a sequential fanout may write the same path");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "two");
-    assert_eq!(store.read("seq.txt").expect("both fanouts wrote"), "two");
+    assert_eq!(trace.text(), "two");
+    assert_eq!(trace.read("seq.txt").expect("both fanouts wrote"), "two");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fatal_arm_aborts_queued_siblings() {
+#[test]
+fn fatal_arm_aborts_queued_siblings() {
     // With the ceiling at 1 the siblings stay queued, and once the first
     // arm fails fatally they are cancelled before admission - proven by
     // the store side-channel only the fatal arm ever wrote to, and by the
     // terminal observations: one FAILED, nothing else. The start event
     // fires at admission, so the queued siblings never report one.
-    let store = TestStore::new();
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -127,25 +105,16 @@ async fn fatal_arm_aborts_queued_siblings() {
         if item == 'boom' then error('fatal arm error') end\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_from(
-        &prompt,
-        &store,
-        &test_context(EXECUTION)
-            .limits(RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero"))),
-        RunFixture::new().observer(recorder.clone()),
-    );
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a fatal arm must fail the whole fanout");
+    let trace = scheduler_scenario(md).limits(ceiling(1)).run();
 
+    let error = trace.error().inner();
     assert!(
         !matches!(error, Error::Interrupted),
         "expected a fatal arm error, got {error}"
     );
-    let log = store.read("log.txt").expect("the fatal arm wrote its item");
+    let log = trace.read("log.txt").expect("the fatal arm wrote its item");
     assert_eq!(log, "boom\n", "blocked siblings must never run: {log:?}");
+    let recorder = recorded(&trace);
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         1,
@@ -166,21 +135,17 @@ async fn fatal_arm_aborts_queued_siblings() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fatal_arm_aborts_an_in_flight_sibling() {
+#[test]
+fn fatal_arm_aborts_an_in_flight_sibling() {
     // The sibling-abort port: the failing arm and a sibling parked on a
-    // slow infer are both live when the failure lands. The fanout shim
+    // held infer are both live when the failure lands. The fanout shim
     // cancels the live sibling before it re-raises, so the cancel removes
-    // the sibling from the pending table, aborts its I/O task, and fires
-    // the sibling's TaskCancelled BEFORE the parent's chunk failure - a
-    // shim that raised first would leak the sibling into `tasks_live`.
-    // The 30-second sibling answer and the timeout guard prove the driver
-    // never waits on the aborted arm.
-    let gateway = ScriptedChat::new(vec![
-        text("boom-answer"),
-        delayed(std::time::Duration::from_secs(30), text("slow-answer")),
-    ]);
-    let recorder = Arc::new(Recorder::default());
+    // the sibling from the pending table, drops its round, and fires the
+    // sibling's TaskCancelled BEFORE the parent's chunk failure - a shim
+    // that raised first would leak the sibling into `tasks_live`. The
+    // sibling's round is never answered, so the run cannot have waited
+    // on it.
+    let gateway = ScriptedChat::new(vec![text("boom-answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -191,15 +156,8 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         if item == 'boom' then error('fatal arm error') end\n\
         return a\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway))).drive(),
-    )
-    .await
-    .expect("the aborted sibling must not stall the driver");
-    let error = result.expect_err("a fatal arm must fail the whole fanout");
+    let rig = Rig::run(scheduler_scenario(md).chat(&gateway).hold(asks("slow:1")));
+    let error = rig.trace().error().inner();
 
     assert!(
         !matches!(error, Error::Interrupted),
@@ -209,6 +167,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         error.to_string().contains("fatal arm error"),
         "the arm's own error surfaces: {error}"
     );
+    let recorder = recorded(rig.trace());
     assert_eq!(
         terminal_count(&recorder, TASK_FAILED),
         1,
@@ -244,12 +203,12 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_caught_fanout_failure_lets_the_caller_continue() {
+#[test]
+fn a_caught_fanout_failure_lets_the_caller_continue() {
     // The fanout error is the call's answer resumed through the envelope,
     // so an author `pcall` catches it; the run then continues - including
-    // past a stale answer the aborted sibling's already-completed I/O task
-    // may have posted, which the driver must discard rather than fail on.
+    // past the answer the aborted sibling's round was already given in the
+    // same wave, which the run must discard rather than fail on.
     let gateway = ScriptedChat::new(vec![
         text("boom-answer"),
         text("slow-answer"),
@@ -270,14 +229,9 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         if item == 'boom' then error('fatal arm error') end\n\
         return a\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the caught fanout failure lets the caller continue");
+    let trace = scheduler_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "caught:after-answer");
+    assert_eq!(trace.text(), "caught:after-answer");
     assert_eq!(
         request_prompts(&gateway),
         vec!["boom:1", "slow:1", "after"],
@@ -285,20 +239,14 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
-    // Cancellation while suspended in an arm: both arms are parked on slow
-    // infers when the cancel lands, so the driver aborts the in-flight I/O
-    // tasks and fails the run with Error::Interrupted. The arms are task
-    // chains stranded by the run's end: they started, and the run's end
-    // settles each with one `abandoned` terminal naming the run's end -
-    // not a cancel or a failure of the arm's own. The 30-second answers
-    // and the timeout guard prove the aborted I/O is never awaited.
-    let gateway = ScriptedChat::new(vec![delayed(
-        std::time::Duration::from_secs(30),
-        text("too late"),
-    )]);
-    let recorder = Arc::new(Recorder::default());
+#[test]
+fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
+    // Cancellation while suspended in an arm: both arms are parked on held
+    // infers when the cancel lands between steps, so the run drops their
+    // rounds and ends cancelled. The arms are task chains stranded by the
+    // run's end: they started, and the run's end settles each with one
+    // `abandoned` terminal naming the run's end - not a cancel or a
+    // failure of the arm's own.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -308,34 +256,23 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ```\n\n\
         ### Worker\n\n\
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let canceller = driver.cancel_handle();
-    let calls = Arc::clone(&gateway.calls);
-    tokio::spawn(async move {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while calls.load(Ordering::SeqCst) < 2 {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await;
-        canceller.cancel();
-    });
-
-    let result = tokio::time::timeout(std::time::Duration::from_secs(10), driver.drive())
-        .await
-        .expect("cancellation must not wait on the aborted in-flight I/O");
+    let mut rig =
+        Rig::start(scheduler_scenario(md).hold(|effect| matches!(effect, Effect::Chat { .. })));
+    rig.settle();
+    rig.cancel();
+    let rig = rig.finish();
 
     assert!(
-        matches!(result, Err(Error::Interrupted)),
-        "cancelling suspended arms must interrupt the run, got {result:?}"
+        matches!(rig.trace().result(), RunResult::Cancelled),
+        "cancelling suspended arms must interrupt the run, got {:?}",
+        rig.trace().result()
     );
     assert_eq!(
-        gateway.call_count(),
-        2,
+        issued_prompts(&rig),
+        vec!["hang one", "hang two"],
         "both arms were suspended on their infers when the cancel landed"
     );
+    let recorder = recorded(rig.trace());
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         2,
@@ -362,8 +299,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
+#[test]
+fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     // With the chain-count bound shrunk so the second arm's spawn fails
     // while the shim spawns its arms up front, the shim must cancel the
     // arm it already started before it re-raises: the parent catches the
@@ -374,7 +311,6 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     // that never ran reports no start and no terminal, though its slot
     // still reaches Cancelled.
     let gateway = ScriptedChat::new(vec![text("after-answer")]);
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -385,28 +321,24 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         ```\n\n\
         ### Worker\n\n\
         ```lua\nreturn 'worked:' .. item\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
+    let mut rig = Rig::start(scheduler_scenario(md).chat(&gateway));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
-    scheduler.set_max_chains_for_test(2);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("the caught spawn failure lets the caller continue");
+    rig.scheduler_for_test().set_max_chains_for_test(2);
+    let mut rig = rig.finish();
 
-    assert_eq!(out, "caught:after-answer");
+    assert_eq!(rig.trace().text(), "caught:after-answer");
     assert_eq!(
         request_prompts(&gateway),
         vec!["after"],
         "no arm ran an infer; only the caller's own request fired"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&"0.0".parse().expect("a task id parses")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Cancelled),
         "the shim cancelled the spawned arm before it re-raised"
     );
+    let recorder = recorded(rig.trace());
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         0,
@@ -435,8 +367,8 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_answer_for_an_unknown_request_id_fails_loudly() {
+#[test]
+fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // An answer arriving for an id the run never issued (and that is not an
     // orphan) means the caller lost track of its effects: the run must fail
     // with Error::Internal rather than silently discard the answer. Only an
@@ -448,22 +380,17 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         # Infer\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    // Handed to the run before the drive: the phantom answer lands ahead
-    // of the real infer's, on a run that has issued nothing.
-    scheduler
-        .run_for_test()
+    let mut rig = Rig::start(scheduler_scenario(md).chat(&gateway));
+    // Handed to the run before its first step: the phantom answer lands
+    // ahead of the real infer's, on a run that has issued nothing.
+    rig.run_for_test()
         .resume(EffectId(u64::MAX), EffectAnswer::Timer);
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("an answer for an unissued effect must fail the run");
+    let rig = rig.finish();
 
     assert!(
-        matches!(error, Error::Internal { message, .. } if message.contains("did not issue")),
-        "the unknown answer is a loud invariant failure: {error}"
+        matches!(rig.trace().error().inner(), Error::Internal { message, .. } if message.contains("did not issue")),
+        "the unknown answer is a loud invariant failure: {:?}",
+        rig.trace().error()
     );
 }
 

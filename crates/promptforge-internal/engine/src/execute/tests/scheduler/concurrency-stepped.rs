@@ -1,7 +1,6 @@
-//! Admission cases that step the run on the calling thread instead of
-//! through the tokio driver: two tasks' `call` children finishing in any
-//! order under every answer batching, and a queue that can never be
-//! admitted reported as a stall.
+//! Admission cases that pace the run's answers by hand: two tasks' `call`
+//! children finishing in any order under every answer batching, and a
+//! queue that can never be admitted reported as a stall.
 
 use super::*;
 use crate::execute::RunResult;

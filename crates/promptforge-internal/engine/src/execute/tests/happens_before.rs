@@ -1,8 +1,8 @@
 //! The happens-before trace tests: the plan's determinism traces become
 //! tests, each driven under the serial driver (three answer batchings)
-//! and the multi-threaded tokio driver with a seeded effect-completion
-//! shuffle (one interleaving per seed), asserting that the store
-//! verdicts and contents never change with the interleaving.
+//! and on the rig with a seeded effect-completion shuffle (one
+//! interleaving per seed), asserting that the store verdicts and contents
+//! never change with the interleaving.
 //!
 //! Traces 3, 4, 8, and 9 live at the VFS level in `promptforge-vfs`'s
 //! handle tests. Traces 1, 2, 5, 7, 10, and 11 - plus the freeform and
@@ -17,17 +17,14 @@
 //! tests below pin the invariant around them.
 //! The two concurrency traces sit in `concurrency`.
 
-use std::sync::Arc;
-
 use crate::RunErrorKind;
 use crate::execute::RunResult;
-use crate::execute::run::Run;
-use crate::test_support::tokio_driver::TokioDriver;
-
-use super::scheduler::scheduler_context_from;
-use super::scheduler::scheduler_context_on;
-use super::*;
+use crate::test_support::rig::{Rig, RigTrace};
 use crate::test_support::scenario::{Batching, drive_batched};
+use crate::test_support::seeded::Seeded;
+
+use super::scheduler::{asks, scheduler_scenario};
+use super::*;
 
 /// The first canonical pattern: a fanout of seven into one file. The arms
 /// write their own partitions, and the caller merges by index after the
@@ -243,28 +240,48 @@ const BATCHINGS: [Batching; 3] = [
     Batching::Reversed,
 ];
 
-/// Runs `prompt` under the serial driver with every batching, on a fresh
-/// scope each time, returning the results in batching order.
-fn serial_results(prompt: &Prompt, store: &TestStore) -> Vec<RunResult> {
-    BATCHINGS
-        .into_iter()
-        .map(|batching| {
-            let (state, _fixture) =
-                scheduler_context_from(prompt, store, &test_context(EXECUTION), RunFixture::new());
-            drive_batched(Run::from_state(state), batching).result
-        })
-        .collect()
+/// A run of the trace `source` on a fresh scope over `store`, so every
+/// run of one trace shares the files the test reads afterward.
+fn trace_scenario(source: &str, store: &TestStore) -> Scenario {
+    scheduler_scenario(source).vfs(store.vfs())
 }
 
-/// The text of a successful serial result.
-fn ok_text(result: &RunResult) -> String {
+/// Runs `scenario()` under the serial driver with every batching,
+/// returning each batching beside its result.
+#[track_caller]
+fn serial_results(scenario: impl Fn() -> Scenario) -> Vec<(Batching, RunResult)> {
+    let mut results = Vec::new();
+    for batching in BATCHINGS {
+        let run = scenario().into_run();
+        results.push((batching, drive_batched(run, batching).result));
+    }
+    results
+}
+
+/// The shuffle seeds: each trace runs once per seed on the rig, which
+/// delivers every step's answers in the seed's permutation.
+const SEEDS: [u64; 3] = [1, 2, 3];
+
+/// Runs `scenario()` on the shuffled rig once per seed, returning each
+/// seed's checker beside what the run left.
+#[track_caller]
+fn shuffled_results(scenario: impl Fn() -> Scenario) -> Vec<(Seeded, RigTrace)> {
+    let mut results = Vec::new();
+    for seed in SEEDS {
+        results.push((Seeded::new(seed), Rig::shuffled(scenario(), seed)));
+    }
+    results
+}
+
+/// The text of a successful result, or `None`.
+fn ok_text(result: &RunResult) -> Option<&str> {
     match result {
-        RunResult::Ok(text) => text.clone(),
-        other => panic!("the run succeeds: {other:?}"),
+        RunResult::Ok(text) => Some(text),
+        _ => None,
     }
 }
 
-/// Whether a serial result is the fatal determinism violation.
+/// Whether a result is the fatal determinism violation.
 fn is_determinism(result: &RunResult) -> bool {
     matches!(
         result,
@@ -272,204 +289,144 @@ fn is_determinism(result: &RunResult) -> bool {
     )
 }
 
-/// The tokio completion-order seeds: the tokio driver offers no
-/// batching modes, so each trace runs once per seed, and the driver's
-/// seeded shuffle permutes every wave of concurrently completed
-/// effects.
-const TOKIO_SEEDS: [u64; 3] = [1, 2, 3];
-
-/// Drives `prompt` on the tokio driver once per seed, on a fresh scope
-/// with a fresh `client` each time, returning the results in seed
-/// order.
-async fn tokio_results(
-    prompt: &Prompt,
-    store: &TestStore,
-    client: impl Fn() -> Option<ScriptedChat>,
-) -> Vec<Result<String>> {
-    let mut results = Vec::new();
-    for seed in TOKIO_SEEDS {
-        let (ctx, fixture) = scheduler_context_on(prompt, store, Arc::new(NullObserver::default()));
-        let mut driver = TokioDriver::new(&ctx, fixture, client());
-        driver.set_shuffle_for_test(seed);
-        results.push(driver.drive().await);
+/// Asserts every serial batching and every seeded interleaving of
+/// `scenario()` succeeds with `expected`.
+#[track_caller]
+fn assert_every_interleaving_reads(scenario: impl Fn() -> Scenario, expected: &str) {
+    for (batching, result) in serial_results(&scenario) {
+        assert_eq!(
+            ok_text(&result),
+            Some(expected),
+            "under {batching:?}: {result:?}"
+        );
     }
-    results
-}
-
-/// The text of a successful tokio result.
-fn ok_tokio_text(result: &Result<String>) -> String {
-    match result {
-        Ok(text) => text.clone(),
-        Err(error) => panic!("the tokio run succeeds: {error}"),
+    for (seeded, rig) in shuffled_results(&scenario) {
+        let result = rig.trace().result();
+        seeded.check_eq(&ok_text(result), &Some(expected), format!("{result:?}"));
     }
 }
 
-/// Whether a tokio result is the fatal determinism violation.
-fn is_tokio_determinism(result: &Result<String>) -> bool {
-    matches!(result, Err(Error::Determinism(_)))
+/// Asserts every serial batching and every seeded interleaving of
+/// `scenario()` ends as the fatal determinism violation.
+#[track_caller]
+fn assert_every_interleaving_conflicts(scenario: impl Fn() -> Scenario) {
+    for (batching, result) in serial_results(&scenario) {
+        assert!(
+            is_determinism(&result),
+            "under {batching:?}, expected determinism, got {result:?}"
+        );
+    }
+    for (seeded, rig) in shuffled_results(&scenario) {
+        let result = rig.trace().result();
+        seeded.check(
+            is_determinism(result),
+            format!("expected determinism, got {result:?}"),
+        );
+    }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_seven_arm_fanout_merges_its_partitions_in_every_interleaving() {
-    let prompt = parse(SEVEN_ARM_FANOUT);
+#[test]
+fn a_seven_arm_fanout_merges_its_partitions_in_every_interleaving() {
     let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), SEVEN_PARTS);
-    }
-    for result in &tokio_results(&prompt, &store, || None).await {
-        assert_eq!(ok_tokio_text(result), SEVEN_PARTS);
-    }
+    let fanout = || trace_scenario(SEVEN_ARM_FANOUT, &store);
+    assert_every_interleaving_reads(fanout, SEVEN_PARTS);
+    assert_eq!(
+        store.read("research.md").expect("the merge lands"),
+        SEVEN_PARTS
+    );
+    assert!(
+        shuffled_results(fanout).iter().any(|(_, rig)| {
+            rig.trace()
+                .effects()
+                .iter()
+                .map(|(effect, _)| effect)
+                .ne(rig.issued())
+        }),
+        "no seed in {SEEDS:?} answered the arms' effects out of issue order"
+    );
+}
+
+#[test]
+fn the_freeform_pattern_merges_by_index_in_every_interleaving() {
+    let store = TestStore::new();
+    assert_every_interleaving_reads(|| trace_scenario(FREE_FORM, &store), SEVEN_PARTS);
     assert_eq!(
         store.read("research.md").expect("the merge lands"),
         SEVEN_PARTS
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_freeform_pattern_merges_by_index_in_every_interleaving() {
-    let prompt = parse(FREE_FORM);
+#[test]
+fn the_pipeline_pattern_orders_the_summary_after_the_gather_in_every_interleaving() {
     let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), SEVEN_PARTS);
-    }
-    for result in &tokio_results(&prompt, &store, || None).await {
-        assert_eq!(ok_tokio_text(result), SEVEN_PARTS);
-    }
-    assert_eq!(
-        store.read("research.md").expect("the merge lands"),
-        SEVEN_PARTS
+    assert_every_interleaving_reads(
+        || trace_scenario(PIPELINE, &store),
+        "summary of: gathered content",
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_pipeline_pattern_orders_the_summary_after_the_gather_in_every_interleaving() {
-    let prompt = parse(PIPELINE);
-    let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), "summary of: gathered content");
-    }
-    for result in &tokio_results(&prompt, &store, || None).await {
-        assert_eq!(ok_tokio_text(result), "summary of: gathered content");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn join_any_joins_the_task_it_returns_and_only_that_task() {
+#[test]
+fn join_any_joins_the_task_it_returns_and_only_that_task() {
     // The pass half: reading the returned task's file passes, and the
     // text is exactly that arm's. Which arm the wait returns is the
     // recorded nondeterminism, so each interleaving is one of the two
     // legal texts.
-    let prompt = parse(TRACE_5_PASS);
     let store = TestStore::new();
-    let serials = serial_results(&prompt, &store);
-    for (index, result) in serials.iter().enumerate() {
-        let text = ok_text(result);
+    let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
+    let pass = || trace_scenario(TRACE_5_PASS, &store).chat(&gateway);
+    let legal =
+        |result: &RunResult| matches!(ok_text(result), Some("written by a" | "written by b"));
+    for (batching, result) in serial_results(pass) {
         assert!(
-            text == "written by a" || text == "written by b",
-            "batching {index} produced an illegal verdict: {text}"
+            legal(&result),
+            "under {batching:?}, an illegal verdict: {result:?}"
         );
     }
-    let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
-    for (index, result) in tokio_results(&prompt, &store, || Some(gateway_client(&gateway)))
-        .await
-        .iter()
-        .enumerate()
-    {
-        let text = ok_tokio_text(result);
-        assert!(
-            text == "written by a" || text == "written by b",
-            "seed {index} produced an illegal verdict: {text}"
-        );
+    for (seeded, rig) in shuffled_results(pass) {
+        let result = rig.trace().result();
+        seeded.check(legal(result), format!("an illegal verdict: {result:?}"));
     }
 
     // The fail half: reading the file of the task the wait did NOT
     // return always ends the run as the fatal determinism violation.
-    let fail = parse(TRACE_5_FAIL);
-    for result in &serial_results(&fail, &store) {
-        assert!(
-            is_determinism(result),
-            "expected determinism, got {result:?}"
-        );
-    }
-    let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
-    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
-        .await
-        .iter()
-        .enumerate()
-    {
-        assert!(
-            is_tokio_determinism(result),
-            "seed {index} must conflict, got {result:?}"
-        );
-    }
+    assert_every_interleaving_conflicts(|| trace_scenario(TRACE_5_FAIL, &store).chat(&gateway));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn one_root_identity_spans_the_h1_pass_and_the_walk() {
-    let prompt = parse(TRACE_7);
+#[test]
+fn one_root_identity_spans_the_h1_pass_and_the_walk() {
     let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), "configured/task wrote");
-    }
-    for result in &tokio_results(&prompt, &store, || None).await {
-        assert_eq!(ok_tokio_text(result), "configured/task wrote");
-    }
+    assert_every_interleaving_reads(|| trace_scenario(TRACE_7, &store), "configured/task wrote");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() {
+#[test]
+fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() {
     // The delivered half: whichever join delivers the slow arm (the
     // timed join, or the later join), its write is readable, and the
     // quick arm's ordinary-join delivery is joined the same way.
-    let prompt = parse(TRACE_10_PASS);
     let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), "quick arm|slow arm");
-    }
-    for result in &tokio_results(&prompt, &store, || None).await {
-        assert_eq!(ok_tokio_text(result), "quick arm|slow arm");
-    }
+    assert_every_interleaving_reads(
+        || trace_scenario(TRACE_10_PASS, &store),
+        "quick arm|slow arm",
+    );
 
     // The late-member half: before a later join delivers the late arm,
     // reading its file always fails - the timeout provably wins, because
-    // the arm parks on a model round past it.
-    let fail = parse(TRACE_10_FAIL);
-    for result in &serial_results(&fail, &store) {
-        assert!(
-            is_determinism(result),
-            "expected determinism, got {result:?}"
-        );
-    }
-    let gateway = ScriptedChat::new(vec![delayed(
-        std::time::Duration::from_millis(500),
-        text("slow answer"),
-    )]);
-    for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
-        .await
-        .iter()
-        .enumerate()
-    {
-        assert!(
-            is_tokio_determinism(result),
-            "seed {index} must conflict, got {result:?}"
-        );
-    }
+    // the shuffled rig holds the arm's model round while it answers the
+    // timer.
+    assert_every_interleaving_conflicts(|| {
+        trace_scenario(TRACE_10_FAIL, &store).hold(asks("slow"))
+    });
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cancelled_tasks_partial_write_is_readable_after_the_join() {
-    let prompt = parse(TRACE_11);
+#[test]
+fn a_cancelled_tasks_partial_write_is_readable_after_the_join() {
+    // The shuffled rig holds the task's model round, so the cancel lands
+    // while the round is out.
     let store = TestStore::new();
-    for result in &serial_results(&prompt, &store) {
-        assert_eq!(ok_text(result), "partial");
-    }
-    let gateway = ScriptedChat::new(vec![delayed(
-        std::time::Duration::from_millis(500),
-        text("slow answer"),
-    )]);
-    for result in &tokio_results(&prompt, &store, || Some(gateway_client(&gateway))).await {
-        assert_eq!(ok_tokio_text(result), "partial");
-    }
+    assert_every_interleaving_reads(
+        || trace_scenario(TRACE_11, &store).hold(asks("slow")),
+        "partial",
+    );
 }
 
 #[path = "happens_before-concurrency.rs"]

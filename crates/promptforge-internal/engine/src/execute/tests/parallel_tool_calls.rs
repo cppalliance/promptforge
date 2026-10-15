@@ -9,9 +9,10 @@
 //! test steps a `Run` by hand, so it sees exactly what each step issued
 //! and withdrew.
 
+use promptforge_parser::test_support::one_section;
 use promptforge_types::event::{Event, ReplyOrigin};
 
-use super::models_loop::{loop_prompt, loop_scenario};
+use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Step};
 use crate::model::{Completion, CompletionResult, ToolCall};
@@ -74,7 +75,7 @@ fn tool_messages(effect: &Effect) -> Vec<String> {
 
 #[test]
 fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
-    let md = loop_prompt(
+    let md = one_section(
         "tools.offer('tools/echo')\n\
          local msgs = messages.new()\n\
          msgs:user('echo twice')\n\
@@ -143,7 +144,7 @@ fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
 
 #[test]
 fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
-    let md = loop_prompt(
+    let md = one_section(
         "tools.offer('tools/echo')\n\
          tools.allow_tasks()\n\
          tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
@@ -196,7 +197,7 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
 
 #[test]
 fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls_land() {
-    let md = loop_prompt(
+    let md = one_section(
         "plugins.offer('tools')\n\
          local msgs = messages.new()\n\
          msgs:user('asked')\n\

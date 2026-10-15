@@ -6,15 +6,19 @@
 //! timer (its slot is `Cancelled`, not `Running`, `Done`, or `Abandoned`)
 //! and no late firing follows. A scripted mock gateway plays the model.
 
-use std::time::Duration;
+use promptforge_parser::test_support::prompt;
 
-use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
-use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_context_with, owner_prompt};
+use super::model_task_notices::{
+    NoticeRecorder, calls_delayed_tool, delayed_call_from, delayed_task_scenario, loop_owner,
+};
+use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
+use super::scheduler::is_timer;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
+use crate::test_support::rig::Rig;
 
-#[tokio::test(flavor = "current_thread")]
-async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
+#[test]
+fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     // Round 1 starts `Parked`, which never ends. Round 2 starts `Quick`,
     // which ends after round 3's dispatch took the notice queue, so its
     // notice is queued when round 3's `await_tasks` arrives with `Parked`
@@ -28,40 +32,27 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
         calls(&[("call_3", "await_tasks", "{\"timeout\":30}")]),
         text("bye"),
     ]);
-    let md = format!(
-        "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
-         # ModelTasks\n\n\
-         ## Only\n\n\
-         ```lua\n{}\n```\n\n\
-         ## Parked\n\n\
-         ```lua\n{CHILD_PARKED_ON_SLOW_TOOL}\n```\n\n\
-         ## Quick\n\n\
-         ```lua\nreturn 'quick result'\n```\n",
-        loop_owner("return msgs[7].content")
+    let md = prompt(
+        "",
+        &[
+            ("Only", &loop_owner("return msgs[7].content")),
+            ("Parked", CHILD_PARKED_ON_SLOW_TOOL),
+            ("Quick", "return 'quick result'"),
+        ],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, fixture) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(SlowTool),
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
-        .await
-        .expect("a pending notice answers the call without a wait")
-        .expect("the owner's end abandons the parked model task quietly");
+    let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    let out = rig.trace().text();
     assert!(
         out.starts_with("Task id=0.1 (## Quick) completed: ") && out.contains("quick result"),
         "the queued notice is the call's answer: {out}"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.2")),
+        rig.task_state_for_test(&task("0.2")),
         None,
         "a call answered from the queue allocates no timer"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned),
         "the live sibling was never waited on; the owner's end abandoned it"
     );
@@ -72,54 +63,69 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
-    // The child ends at 300ms under a 1s timeout, and the model's reply
-    // round is held for 1.2s, so an uncancelled timer would fire inside
-    // the run. The wake cancels it: its slot (the owner's second child,
-    // 0.1) is `Cancelled` when the run ends, never `Done` (fired late) or
-    // `Abandoned` (still running at the owner's end), and the transcript
-    // shows one wake.
+#[test]
+fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
+    // The child parks on a held delayed-tool call under a 1s timeout,
+    // whose timer the rig holds too, as it holds the model's reply round.
+    // Releasing the child's call ends it first; then the timer is released
+    // while the reply is still held, so an uncancelled timer would fire
+    // inside the run. The wake cancelled it: its slot (the owner's second
+    // child, 0.1) is `Cancelled` when the run ends, never `Done` (fired
+    // late) or `Abandoned` (still running at the owner's end), and the
+    // transcript shows one wake.
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         calls(&[("call_2", "await_tasks", "{\"timeout\":1}")]),
-        delayed(Duration::from_millis(1200), text("bye")),
+        text("bye"),
     ]);
-    let md = owner_prompt(
+    let md = prompt(
         "",
-        &loop_owner("return msgs[5].content .. '|' .. #msgs"),
-        "tools.call('tools/delayed')\nreturn 'child result'",
+        &[
+            (
+                "Only",
+                &loop_owner("return msgs[5].content .. '|' .. #msgs"),
+            ),
+            (
+                "Child",
+                "tools.call('tools/delayed', { from = 'Child' })\nreturn 'child result'",
+            ),
+        ],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, fixture) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedTool::new(&[Duration::from_millis(300)]),
+    // The reply round is the one that sends the start, the wait, and both
+    // answers after the user turn.
+    let is_reply =
+        |effect: &Effect| matches!(effect, Effect::Chat { messages, .. } if messages.len() == 5);
+    let mut rig = Rig::start(
+        delayed_task_scenario(md)
+            .chat(&gateway)
+            .hold(move |effect| calls_delayed_tool(effect) || is_timer(effect) || is_reply(effect)),
     );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
-        .await
-        .expect("the run does not wait out the cancelled timer")
-        .expect("a cancelled timer is not a leaked task");
+    rig.settle();
+    rig.release(delayed_call_from("Child"));
+    rig.settle();
+    rig.release(is_timer);
+    rig.settle();
+    rig.release(is_reply);
+    let mut rig = rig.finish();
+    let out = rig.trace().text();
     assert!(
         out.starts_with("Task id=0.0 (## Child) completed: ") && out.ends_with("|6"),
         "the member's end answers the wait once and the reply follows: {out}"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.1")),
+        rig.task_state_for_test(&task("0.1")),
         Some(TaskState::Cancelled),
         "the member's win cancelled the unfired timer"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Done),
         "the member's own slot holds its outcome; the notice delivered it"
     );
+    let notices = NoticeRecorder::replayed(rig.trace()).notices();
     assert_eq!(
-        recorder.notices().len(),
+        notices.len(),
         1,
-        "one notice was queued and read: {:?}",
-        recorder.notices()
+        "one notice was queued and read: {notices:?}"
     );
 }

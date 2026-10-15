@@ -6,26 +6,24 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use super::context::RunState;
 use super::scope::prepare_scoped_tools;
 use super::support::advance_turn;
 use super::*;
+use crate::Error;
 use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelSet};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
+use crate::test_support::recording::{Observation, Observer, detail, null_emitter};
 use crate::test_support::scenario::{Scenario, Trace};
 use crate::test_support::scripted_chat::{
     MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
 };
-use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{FnTool, RunFixture, TestTool, TestToolTable, fresh_access};
+use crate::test_support::{FnTool, TestTool, fresh_access};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
-use crate::{Error, Result};
 use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
-use promptforge_vfs::{Access, VfsError, VfsRef};
+use promptforge_vfs::{Access, VfsError};
 
 mod context;
 mod fixtures;
@@ -37,36 +35,10 @@ use self::context::*;
 use self::fixtures::*;
 use self::gateway::*;
 
-/// A tool whose call never completes, so the test can prove the tool-call
-/// loop honors cancellation mid-call rather than waiting the call out, and
-/// a task parked on it stays live until its owner ends or cancels it.
-struct SlowTool;
-
-#[async_trait::async_trait]
-impl TestTool for SlowTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("test/tools/slow").expect("valid slow tool id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "a deliberately slow tool"
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        std::future::pending().await
-    }
-}
-
-/// [`SlowTool`] as a scenario's tool: the scenario holds its calls, so the
-/// closure never runs.
+/// A tool whose calls the scenario holds, so the test can prove the
+/// tool-call loop honors cancellation mid-call rather than waiting the call
+/// out, and a task parked on it stays live until its owner ends or cancels
+/// it. The closure never runs.
 #[track_caller]
 fn slow_tool() -> FnTool {
     FnTool::new("test/tools/slow", json!({ "type": "object" }), |_| {

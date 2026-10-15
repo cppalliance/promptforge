@@ -1,13 +1,17 @@
 //! Scheduler-side tests, split by seam into the `walk`, `live_h1`, `fanout`,
-//! `concurrency`, `store_gate`, and `failures` submodules. The context builders `writer_models`,
-//! `scheduler_context`, `scheduler_context_on`, and `scheduler_context_from`, their
-//! scenario `scheduler_scenario`, the
-//! gateway-request helper `request_prompts`, and the task-lifecycle counter
-//! `terminal_count` with its labels live here because more than one submodule uses
-//! them.
+//! `concurrency`, and `failures` submodules. The model set `writer_models`,
+//! its scenario `scheduler_scenario`, the concurrency ceiling `ceiling`,
+//! the round and timer matchers `asks` and `is_timer`, the prompt readers
+//! `request_prompts` and `issued_prompts`, the replaying `recorded`, and
+//! the task-lifecycle counter `terminal_count` with its labels live here
+//! because more than one submodule uses them.
+
+use std::num::NonZeroUsize;
 
 use super::*;
-use crate::test_support::scenario::test_binding;
+use crate::execute::EffectRecord;
+use crate::test_support::rig::RigTrace;
+use crate::test_support::scenario::{infer_prompt, test_binding};
 
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
@@ -24,49 +28,28 @@ fn writer_models() -> ModelSet {
 }
 
 /// A run of `source` over the [`writer_models`], unprepared, so the run
-/// starts with the set the scheduler context builders fill and no catalog.
+/// starts with that set and no catalog.
 pub(super) fn scheduler_scenario(source: impl Into<String>) -> Scenario {
     Scenario::new(source).unprepared().models(writer_models())
 }
 
-/// Builds the run context and its silent fixture for a scheduler test: the
-/// parsed prompt and the model set pre-filled.
-fn scheduler_context(prompt: &Prompt) -> (RunState, RunFixture) {
-    scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
+/// The run's concurrency ceiling narrowed to `n` admitted tasks.
+#[track_caller]
+pub(super) fn ceiling(n: usize) -> RunLimits {
+    RunLimits::new().max_concurrency(NonZeroUsize::new(n).expect("the ceiling is non-zero"))
 }
 
-/// Builds the run context and its observing fixture on the given store and
-/// observer, so a walk test can inspect the store's contents and the
-/// observation stream afterward.
-pub(super) fn scheduler_context_on(
-    prompt: &Prompt,
-    store: &TestStore,
-    observer: Arc<dyn Observer>,
-) -> (RunState, RunFixture) {
-    scheduler_context_from(
-        prompt,
-        store,
-        &test_context(EXECUTION),
-        RunFixture::new().observer(observer),
-    )
+/// Whether an effect is the model round a `models.infer(prompt)` sends,
+/// for a scenario to hold and a test to release.
+pub(super) fn asks(prompt: &str) -> impl Fn(&Effect) -> bool + 'static {
+    let prompt = prompt.to_owned();
+    move |effect| matches!(effect, Effect::Chat { .. }) && infer_prompt(effect) == prompt
 }
 
-/// Builds the run context from a finished `RunContext` and its `RunFixture` on
-/// the given store: the parsed prompt and the model set pre-filled. Every
-/// scheduler-side context builder routes through
-/// here so a test that needs an observer, limits, or both composes the
-/// `RunContext` and the `RunFixture` itself.
-pub(super) fn scheduler_context_from(
-    prompt: &Prompt,
-    store: &TestStore,
-    run_context: &RunContext,
-    fixture: RunFixture,
-) -> (RunState, RunFixture) {
-    let ctx = RunState::new(Arc::new(prompt.clone()), "", &store.vfs(), run_context);
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = writer_models();
-    (ctx, fixture)
+/// Whether an effect is a timer, for a scenario to hold when the member
+/// it races must win, and a test to release.
+pub(super) fn is_timer(effect: &Effect) -> bool {
+    matches!(effect, Effect::Timer { .. })
 }
 
 /// The prompt in each gateway request, in arrival order.
@@ -78,6 +61,20 @@ pub(super) fn request_prompts(gateway: &ScriptedChat) -> Vec<String> {
         .collect()
 }
 
+/// The prompt of each model round the run issued, in issue order, held
+/// rounds included.
+pub(super) fn issued_prompts(rig: &RigTrace) -> Vec<String> {
+    rig.issued()
+        .iter()
+        .filter_map(|record| match record {
+            EffectRecord::Chat { messages, .. } => {
+                messages[0]["content"].as_str().map(str::to_owned)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The stable labels of the task lifecycle observations a fanout's arms
 /// report, as the recorder renders them.
 const TASK_STARTED: &str = "Task started";
@@ -85,6 +82,13 @@ const TASK_SUCCEEDED: &str = "Task succeeded";
 const TASK_FAILED: &str = "Task failed";
 const TASK_CANCELLED: &str = "Task cancelled";
 const TASK_ABANDONED_BY_RUN_END: &str = "Task abandoned: the run ended";
+
+/// The run's events replayed onto a fresh recorder.
+fn recorded(trace: &Trace) -> Recorder {
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
+    recorder
+}
 
 /// Counts one observation label in the recorder's event stream.
 fn terminal_count(recorder: &Recorder, label: &str) -> usize {
@@ -99,7 +103,4 @@ mod concurrency;
 mod failures;
 mod fanout;
 mod live_h1;
-mod store_gate;
 mod walk;
-
-pub(super) use store_gate::{GateObserver, StoreGate, gated_store};

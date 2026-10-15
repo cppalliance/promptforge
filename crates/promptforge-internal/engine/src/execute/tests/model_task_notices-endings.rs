@@ -9,7 +9,6 @@ use std::cell::Cell;
 use promptforge_types::event::Event;
 use promptforge_types::ids::AbandonReason;
 
-use super::super::model_tasks::model_task_scenario;
 use super::*;
 use crate::execute::RunResult;
 use crate::test_support::scenario::{chat_answer, infer_prompt};
@@ -22,16 +21,17 @@ fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, Strin
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt("", &loop_owner(owner_tail), child_body);
+    let md = prompt(
+        "",
+        &[("Only", &loop_owner(owner_tail)), ("Child", child_body)],
+    );
     let trace = model_task_scenario(md).chat(&gateway).run();
     assert!(
         matches!(trace.result(), RunResult::Ok(_)),
         "the owner ends clean: {:?}",
         trace.result()
     );
-    let recorder = NoticeRecorder::default();
-    trace.replay(&recorder);
-    recorder.notices()
+    NoticeRecorder::replayed(&trace).notices()
 }
 
 #[test]
@@ -96,8 +96,7 @@ fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_that_s
         "a model task the walk's end strands is abandoned, never leaked: {:?}",
         trace.result()
     );
-    let recorder = NoticeRecorder::default();
-    trace.replay(&recorder);
+    let recorder = NoticeRecorder::replayed(&trace);
     let events = recorder.events();
     assert!(
         events.iter().any(|(section, event)| section == "Child"
@@ -196,15 +195,20 @@ fn a_model_issued_cancel_queues_no_notice() {
         calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt("", &loop_owner("return 'ok'"), CHILD_PARKED_ON_SLOW_TOOL);
+    let md = prompt(
+        "",
+        &[
+            ("Only", &loop_owner("return 'ok'")),
+            ("Child", CHILD_PARKED_ON_SLOW_TOOL),
+        ],
+    );
     let trace = model_task_scenario(md).chat(&gateway).run();
     assert!(
         matches!(trace.result(), RunResult::Ok(_)),
         "the cancel leaves nothing live: {:?}",
         trace.result()
     );
-    let recorder = NoticeRecorder::default();
-    trace.replay(&recorder);
+    let recorder = NoticeRecorder::replayed(&trace);
     assert!(
         recorder.notices().is_empty(),
         "the model already read `Task id=0.0 cancelled`; no notice repeats it: {:?}",

@@ -5,24 +5,24 @@
 //! shim cancels the timer and its leaf work is dropped. The timer is an
 //! effect-backed slot the author never sees: `tasks.pending` and a status
 //! table's `tasks` list omit it, and it reports no task observations.
+//!
+//! A slow member parks on a model round the rig holds while it answers the
+//! timer, then releases; a timer that must not win is held instead.
 
-use std::time::Duration;
-
-use super::scheduler::scheduler_context_on;
-use super::waits::{WaitRecorder, tasks_prompt};
+use super::scheduler::{asks, is_timer, scheduler_scenario};
+use super::tasks::TaskRecorder;
+use super::waits::tasks_prompt;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
+use crate::test_support::rig::Rig;
 
-/// The gateway reply a slow child parks on: long enough that a short
-/// timeout wins, short enough that the test then waits it out.
-const SLOW: Duration = Duration::from_millis(400);
-
-#[tokio::test(flavor = "current_thread")]
-async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running() {
-    // The child parks on a slow model round; a 50ms wait times out and
+#[test]
+fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running() {
+    // The child parks on a held model round; a 50ms wait times out and
     // returns nil, the child is still running, and a second untimed wait
-    // delivers it - so nothing leaks at chain end.
-    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
+    // delivers it once the round is released - so nothing leaks at chain
+    // end.
+    let gateway = ScriptedChat::new(vec![text("slow answer")]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local first, ok, result = tasks.join_any({ t }, { timeout = 0.05 })\n\
@@ -35,19 +35,16 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
          return 'done'",
         &[("Child", "return models.infer('slow please')")],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let mut rig = Rig::start(
+        scheduler_scenario(md)
+            .chat(&gateway)
+            .hold(asks("slow please")),
     );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a timed-out wait leaks nothing");
-    assert_eq!(out, "done");
+    rig.settle();
+    rig.release(asks("slow please"));
+    let mut rig = rig.finish();
+    assert_eq!(rig.trace().text(), "done", "a timed-out wait leaks nothing");
+    let recorder = TaskRecorder::replayed(rig.trace());
     assert_eq!(
         recorder.logs("Main"),
         vec![
@@ -59,7 +56,7 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
     // The timer took the owner's next child index after the child, and
     // its firing was delivered to the wait.
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.1")),
+        rig.task_state_for_test(&task("0.1")),
         Some(TaskState::Delivered),
         "the fired timer's slot was delivered to the wait"
     );
@@ -70,11 +67,11 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn join_any_cancels_the_timer_when_a_member_wins() {
-    // The child returns at once; the wait's 30s timer never fires: the
-    // shim cancels it, its slot is `Cancelled`, and the run ends without
-    // waiting on it or leaking it.
+#[test]
+fn join_any_cancels_the_timer_when_a_member_wins() {
+    // The child returns at once; the wait's 30s timer is held and never
+    // fires: the shim cancels it, its slot is `Cancelled`, and the run
+    // ends without waiting on it or leaking it.
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local first, ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
@@ -83,24 +80,18 @@ async fn join_any_cancels_the_timer_when_a_member_wins() {
          return 'done'",
         &[("Child", "return 'quick'")],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
-        .await
-        .expect("the run does not wait out the cancelled timer")
-        .expect("a cancelled timer is not a leaked task");
-    assert_eq!(out, "done");
+    let mut rig = Rig::run(scheduler_scenario(md).hold(is_timer));
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.1")),
+        rig.trace().text(),
+        "done",
+        "a cancelled timer is not a leaked task"
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.1")),
         Some(TaskState::Cancelled),
         "the member's win cancelled the timer"
     );
+    let recorder = TaskRecorder::replayed(rig.trace());
     assert!(
         recorder.observations_of(&task("0.1")).is_empty(),
         "the internal timer reports no task observations: {:?}",
@@ -108,13 +99,14 @@ async fn join_any_cancels_the_timer_when_a_member_wins() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn join_returns_timed_out_with_the_unfinished_members_absent() {
-    // Quick returns at once; Slow parks on a slow model round. A 50ms
+#[test]
+fn join_returns_timed_out_with_the_unfinished_members_absent() {
+    // Quick returns at once; Slow parks on a held model round. A 50ms
     // `join` returns Quick's entry, no entry for Slow, and
-    // `timed_out = true`; Slow keeps running and a second untimed
-    // `join` delivers it with `timed_out = false`.
-    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
+    // `timed_out = true`; Slow keeps running and, once its round is
+    // released, a second untimed `join` delivers it with
+    // `timed_out = false`.
+    let gateway = ScriptedChat::new(vec![text("slow answer")]);
     let md = tasks_prompt(
         "local q = tasks.spawn('## Quick')\n\
          local s = tasks.spawn('## Slow')\n\
@@ -131,20 +123,17 @@ async fn join_returns_timed_out_with_the_unfinished_members_absent() {
             ("Slow", "return models.infer('slow please')"),
         ],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let mut rig = Rig::start(
+        scheduler_scenario(md)
+            .chat(&gateway)
+            .hold(asks("slow please")),
     );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a timed-out join leaks nothing");
-    assert_eq!(out, "done");
+    rig.settle();
+    rig.release(asks("slow please"));
+    let rig = rig.finish();
+    assert_eq!(rig.trace().text(), "done", "a timed-out join leaks nothing");
     assert_eq!(
-        recorder.logs("Main"),
+        TaskRecorder::replayed(rig.trace()).logs("Main"),
         vec![
             "timed_out=true n=1 quick=quick slow=nil".to_owned(),
             "rest timed_out=false slow=slow answer".to_owned(),
@@ -152,9 +141,9 @@ async fn join_returns_timed_out_with_the_unfinished_members_absent() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn join_cancels_the_timer_when_every_member_finishes() {
-    // Both members return at once under a 30s timeout: every entry is
+#[test]
+fn join_cancels_the_timer_when_every_member_finishes() {
+    // Both members return at once under a held 30s timer: every entry is
     // present, `timed_out` is false, and the timer (the owner's third
     // child) is cancelled rather than waited out or leaked.
     let md = tasks_prompt(
@@ -167,31 +156,27 @@ async fn join_cancels_the_timer_when_every_member_finishes() {
          return 'done'",
         &[("Alpha", "return 'alpha'"), ("Beta", "return 'beta'")],
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
-        .await
-        .expect("the run does not wait out the cancelled timer")
-        .expect("a cancelled timer is not a leaked task");
-    assert_eq!(out, "done");
+    let mut rig = Rig::run(scheduler_scenario(md).hold(is_timer));
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.2")),
+        rig.trace().text(),
+        "done",
+        "a cancelled timer is not a leaked task"
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.2")),
         Some(TaskState::Cancelled)
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
-    // The child waits on its grandchild with a timeout: the parent reads
-    // the child's status mid-wait and sees one owned task (the grandchild),
-    // never the timer; the child's own `pending` mid-wait cannot be read,
-    // so the parent's view is the proof.
-    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
+#[test]
+fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
+    // The child waits on its grandchild under a held 30s timer while the
+    // grandchild's model round is held too: the parent reads the child's
+    // status mid-wait and sees one owned task (the grandchild), never the
+    // timer; the child's own `pending` mid-wait cannot be read, so the
+    // parent's view is the proof. Releasing the round lets the grandchild
+    // win.
+    let gateway = ScriptedChat::new(vec![text("slow answer")]);
     let md = tasks_prompt(
         "local c = tasks.spawn('## Child')\n\
          store.write('park', 'x')\n\
@@ -211,27 +196,25 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
             ("Grandchild", "return models.infer('slow please')"),
         ],
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(WaitRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let slow = asks("slow please");
+    let mut rig = Rig::start(
+        scheduler_scenario(md)
+            .chat(&gateway)
+            .hold(move |effect| is_timer(effect) || slow(effect)),
     );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the run completes");
-    assert_eq!(out, "child done");
+    rig.settle();
+    rig.release(asks("slow please"));
+    let rig = rig.finish();
+    assert_eq!(rig.trace().text(), "child done");
     assert_eq!(
-        recorder.logs("Main"),
+        TaskRecorder::replayed(rig.trace()).logs("Main"),
         vec!["child blocked=tasks tasks=1 first=0.0.0".to_owned()],
         "the child's status lists the grandchild alone, not its timer"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_timeout_option_is_validated_at_the_call_site() {
+#[test]
+fn the_timeout_option_is_validated_at_the_call_site() {
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local ok1, e1 = pcall(tasks.join_any, { t }, { timeout = 'soon' })\n\
@@ -247,17 +230,8 @@ async fn the_timeout_option_is_validated_at_the_call_site() {
          return tostring(e1) .. '|' .. tostring(e2) .. '|' .. tostring(e3) .. '|' .. tostring(e4)",
         &[("Child", "return 'quick'")],
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("every option error is caught at the call site");
+    let mut rig = Rig::run(scheduler_scenario(md));
+    let out = rig.trace().text();
     let parts: Vec<&str> = out.split('|').collect();
     assert_eq!(parts.len(), 4, "{out}");
     assert!(parts[0].contains("timeout must be a number"), "{out}");
@@ -265,5 +239,5 @@ async fn the_timeout_option_is_validated_at_the_call_site() {
     assert!(parts[2].contains("opts must be a table"), "{out}");
     assert!(parts[3].contains("timeout"), "{out}");
     // A rejected option starts no timer: the child is the run's only task.
-    assert_eq!(scheduler.task_state_for_test(&task("0.1")), None);
+    assert_eq!(rig.task_state_for_test(&task("0.1")), None);
 }

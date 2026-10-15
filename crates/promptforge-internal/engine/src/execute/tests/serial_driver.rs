@@ -11,8 +11,8 @@
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, TaskId};
 
-use super::model_tasks::model_task_context_with;
-use super::scheduler::scheduler_context_from;
+use super::model_tasks::model_task_scenario;
+use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::run::{Effect, Run, Step};
 use crate::test_support::drive;
@@ -23,14 +23,7 @@ use crate::test_support::scenario::{
 /// A run over `md` with the `writer` model pre-bound, as the scheduler
 /// suites build one.
 fn model_run(md: &str) -> Run {
-    let prompt = parse(md);
-    let (state, _fixture) = scheduler_context_from(
-        &prompt,
-        &TestStore::new(),
-        &test_context(EXECUTION),
-        RunFixture::new(),
-    );
-    Run::from_state(state)
+    scheduler_scenario(md).into_run()
 }
 
 /// The three-arm fanout every property here runs: the parent names its
@@ -174,10 +167,18 @@ fn answers_one_per_step_all_at_once_and_reversed_produce_the_same_per_task_recor
     let one = drive_batched(model_run(FANOUT), Batching::OnePerStep);
     let all = drive_batched(model_run(FANOUT), Batching::AllAtOnce);
     let reversed = drive_batched(model_run(FANOUT), Batching::Reversed);
-    for other in [&all, &reversed] {
-        assert_eq!(one.text(), other.text());
-        assert_eq!(one.events_by_task(), other.events_by_task());
-        assert_eq!(one.effects_by_provenance(), other.effects_by_provenance());
+    for (batching, other) in [(Batching::AllAtOnce, &all), (Batching::Reversed, &reversed)] {
+        assert_eq!(one.text(), other.text(), "under {batching:?}");
+        assert_eq!(
+            one.events_by_task(),
+            other.events_by_task(),
+            "under {batching:?}"
+        );
+        assert_eq!(
+            one.effects_by_provenance(),
+            other.effects_by_provenance(),
+            "under {batching:?}"
+        );
     }
     assert_ne!(
         succeeded(&all.events),
@@ -207,14 +208,8 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
         ```lua\n\
         return models.infer('child work')\n\
         ```\n";
-    let prompt = parse(md);
-    let (state, _fixture) = model_task_context_with(
-        &prompt,
-        Arc::new(NullObserver::default()),
-        Arc::new(SlowTool),
-    );
     let mut rounds = 0;
-    let (result, events) = drive(Run::from_state(state), |_, effect| {
+    let (result, events) = drive(model_task_scenario(md).into_run(), |_, effect| {
         perform_locally(effect, &mut |effect| {
             if infer_prompt(effect) == "child work" {
                 return chat_answer(&text("child result"));

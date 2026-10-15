@@ -4,7 +4,7 @@
 
 use promptforge_types::ids::RoundId;
 
-use super::super::models_loop::{loop_prompt, loop_scenario};
+use super::super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::EffectRecord;
 use crate::test_support::rig::Rig;
@@ -26,7 +26,7 @@ fn a_refused_send_writes_no_record_and_the_resend_extends_the_last_issued_round(
          models.loop(msgs)\n\
          return msgs[#msgs].content";
     let gateway = ScriptedChat::new(vec![reply_with_usage("ok", 3400, 100, None), text("done")]);
-    let rig = Rig::run(loop_scenario(loop_prompt(section)).chat(&gateway));
+    let rig = Rig::run(loop_scenario(one_section(section)).chat(&gateway));
     assert_eq!(
         rig.trace().text(),
         "done",

@@ -1,16 +1,11 @@
 //! Shared context builders, prompt sources, parsers, stores, task ids, and
-//! recorders for the execution suites. The fixture tool-set helpers sit in
-//! `tools` and are re-exported here.
+//! recorders for the execution suites.
 
 use promptforge_parser::test_support::PromptSource;
 use promptforge_types::ids::TaskId;
 
 use super::*;
 
-#[path = "context-tools.rs"]
-mod tools;
-
-pub(super) use self::tools::*;
 pub(super) use crate::test_support::scenario::{
     EXECUTION, TEST_MODEL, TEST_SEED, TEST_STARTED_AT, TestStore, test_model,
 };
@@ -108,12 +103,6 @@ pub(super) fn parse(md: &str) -> Prompt {
         md.replacen("---\n\n", "---\n\n# Test prompt\n\n", 1)
     };
     Prompt::parse(&source, EXECUTION).0.unwrap()
-}
-
-/// A client answering from the given scripted model, sharing its script,
-/// count, and record.
-pub(super) fn gateway_client(chat: &ScriptedChat) -> ScriptedChat {
-    chat.clone()
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test

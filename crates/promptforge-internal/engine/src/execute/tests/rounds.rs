@@ -3,10 +3,11 @@
 //! every content event a round's answer reports - its thinking, its reply,
 //! its tool-call batch - holds the id its `Chat` effect held.
 
+use promptforge_parser::test_support::one_section;
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::ids::RoundId;
 
-use super::models_loop::{loop_prompt, loop_scenario};
+use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, Round};
 use crate::model::{Completion, CompletionResult, ToolCall};
@@ -47,7 +48,7 @@ fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_rounds() {
         text("b"),
         text("c"),
     ]);
-    let source = loop_prompt(&format!(
+    let source = one_section(&format!(
         "{INFER_THEN_LOOP} .. '|' .. models.infer('third')"
     ));
     let rig = Rig::run(
@@ -70,7 +71,7 @@ fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_rounds() {
 
 #[test]
 fn a_rounds_thinking_reply_and_tool_call_events_hold_the_id_its_chat_effect_held() {
-    let run = loop_scenario(loop_prompt(INFER_THEN_LOOP))
+    let run = loop_scenario(one_section(INFER_THEN_LOOP))
         .offer("echo", echo_tool())
         .into_run();
     let call = ToolCall::from_parts("call_1", "echo", json!({ "value": "hi" }))

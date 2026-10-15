@@ -8,10 +8,10 @@ use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::TaskId;
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
-use super::super::models_loop::{echo_tools, loop_context, loop_events};
+use super::super::models_loop::loop_events;
 use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
-use crate::execute::run::{Effect, EffectAnswer, Run, Step};
+use crate::execute::run::{Effect, EffectAnswer, Step};
 use crate::test_support::scenario::{chat_answer, only_effect, text_of};
 
 /// Records every observation and every content report as one line, in
@@ -225,15 +225,14 @@ fn a_handler_raising_mid_batch_leaves_the_list_untouched_and_raises_its_own_tabl
 
 #[test]
 fn a_dropped_model_issued_call_raises_cancelled_at_the_loop_call_site() {
-    let prompt = parse(&one_section(
+    let source = one_section(
         "tools.offer('tools/echo')
          local msgs = messages.new()
          msgs:user('asked')
          local ok, err = pcall(models.loop, msgs)
          return tostring(ok) .. ':' .. err.kind .. '|' .. #msgs .. '|' .. msgs[1].role",
-    ));
-    let (ctx, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(ctx);
+    );
+    let mut run = loop_scenario(source).offer("echo", echo_tool()).into_run();
     let (round, effect) = only_effect(run.step());
     assert!(
         matches!(effect, Effect::Chat { .. }),

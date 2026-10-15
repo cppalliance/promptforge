@@ -7,34 +7,10 @@
 //! reported as a stall. The cases that step the run by hand sit in
 //! `stepped`.
 
-use std::num::NonZeroUsize;
-use std::time::Duration;
-
 use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
 
-/// Builds the run context and its observing fixture under the given limits.
-fn limited_context(
-    prompt: &Prompt,
-    store: &TestStore,
-    limits: RunLimits,
-    observer: Arc<dyn Observer>,
-) -> (RunState, RunFixture) {
-    scheduler_context_from(
-        prompt,
-        store,
-        &test_context(EXECUTION).limits(limits),
-        RunFixture::new().observer(observer),
-    )
-}
-
-/// The run's concurrency ceiling narrowed to `n` admitted tasks.
-fn ceiling(n: usize) -> RunLimits {
-    RunLimits::new().max_concurrency(NonZeroUsize::new(n).expect("the ceiling is non-zero"))
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tasks_concurrency_clamps_to_the_callers_ceiling_and_reads_the_effective_limit_back() {
+#[test]
+fn tasks_concurrency_clamps_to_the_callers_ceiling_and_reads_the_effective_limit_back() {
     // The main walk's parent is the caller's ceiling of 4: asking for 16
     // clamps to 4, a later 2 lowers it, the no-argument form reads the
     // current limit back, and a later 4 climbs back to the parent's
@@ -49,23 +25,13 @@ async fn tasks_concurrency_clamps_to_the_callers_ceiling_and_reads_the_effective
         local d = tasks.concurrency(4)\n\
         return a .. '|' .. b .. '|' .. c .. '|' .. d\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(4),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the run completes");
+    let trace = scheduler_scenario(md).limits(ceiling(4)).run();
 
-    assert_eq!(out, "4|2|2|4");
+    assert_eq!(trace.text(), "4|2|2|4");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tasks_concurrency_rejects_an_argument_that_is_not_a_positive_whole_number() {
+#[test]
+fn tasks_concurrency_rejects_an_argument_that_is_not_a_positive_whole_number() {
     // The shim checks the argument at the call site, so every refused
     // shape raises the same `lua` error value an author `pcall` catches:
     // zero, a negative, a fraction, a string, a table, and a whole-number
@@ -92,23 +58,13 @@ async fn tasks_concurrency_rejects_an_argument_that_is_not_a_positive_whole_numb
         assert(a == b and b == c and c == d and d == e and e == f, a .. ' / ' .. b .. ' / ' .. c)\n\
         return a\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(4),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the caught refusals end the run normally");
+    let trace = scheduler_scenario(md).limits(ceiling(4)).run();
 
-    assert_eq!(out, "refused");
+    assert_eq!(trace.text(), "refused");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tasks_concurrency_accepts_a_whole_number_float_as_a_limit() {
+#[test]
+fn tasks_concurrency_accepts_a_whole_number_float_as_a_limit() {
     // `2.0` is a positive whole number: the shim's check accepts it and
     // the parser converts the float, so the call sets the limit and
     // reads the effective value back exactly like an integer argument.
@@ -122,31 +78,18 @@ async fn tasks_concurrency_accepts_a_whole_number_float_as_a_limit() {
         assert(read == 2, 'the effective limit reads back 2, got ' .. read)\n\
         return 'ok'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(4),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the run completes");
+    let trace = scheduler_scenario(md).limits(ceiling(4)).run();
 
-    assert_eq!(out, "ok");
+    assert_eq!(trace.text(), "ok");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admission() {
-    // Ceiling 1: the first child is admitted and parks on a slow model
+#[test]
+fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admission() {
+    // Ceiling 1: the first child is admitted and parks on its model
     // round; the second stays queued - `tasks.status` reads `running`
     // with `blocked == 'queued'` and no section - and its start event
     // fires only once the first child ends and frees the slot.
-    let gateway = ScriptedChat::new(vec![
-        delayed(Duration::from_millis(200), text("slow")),
-        text("fast"),
-    ]);
+    let gateway = ScriptedChat::new(vec![text("slow"), text("fast")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\
         ## Main\n\n\
@@ -167,21 +110,13 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
         ```lua\n\
         return models.infer('slow please')\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the run completes");
+    let trace = scheduler_scenario(md)
+        .limits(ceiling(1))
+        .chat(&gateway)
+        .run();
 
-    assert_eq!(out, "done");
-    let events = recorder.events();
+    assert_eq!(trace.text(), "done");
+    let events = sequence(&trace);
     assert_eq!(
         events
             .iter()
@@ -205,15 +140,14 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_start_event_reports_the_spawning_section_not_the_admission_time_one() {
+#[test]
+fn a_start_event_reports_the_spawning_section_not_the_admission_time_one() {
     // Ceiling 1: the walk spawns its child and jumps to the next section
     // while the child is still queued; the child is admitted only when
     // the walk parks on its join, by which time the walk's current
     // section is Next. The start event must still report the spawning
     // section, Main - the spawn-time capture, not an admission-time read
     // of the spawner's position.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sections\n\n\
         ## Main\n\n\
@@ -229,20 +163,10 @@ async fn a_start_event_reports_the_spawning_section_not_the_admission_time_one()
         assert(ok)\n\
         return 'done'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the run completes");
+    let trace = scheduler_scenario(md).limits(ceiling(1)).run();
 
-    assert_eq!(out, "done");
-    let events = recorder.events();
+    assert_eq!(trace.text(), "done");
+    let events = sequence(&trace);
     let started = events
         .iter()
         .filter(|(_, detail)| *detail == "Task started")
@@ -254,8 +178,8 @@ async fn a_start_event_reports_the_spawning_section_not_the_admission_time_one()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
+#[test]
+fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
     // Ceiling 1. The walker task spawns three sub-tasks and joins them
     // one at a time, inferring between rounds; each sub-task infers once.
     // When a sub-task ends it wakes the walker, and the walker's
@@ -293,19 +217,12 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
         ```lua\n\
         return models.infer('S' .. sys.index)\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the run completes");
+    let trace = scheduler_scenario(md)
+        .limits(ceiling(1))
+        .chat(&gateway)
+        .run();
 
-    assert_eq!(out, "done");
+    assert_eq!(trace.text(), "done");
     assert_eq!(
         request_prompts(&gateway),
         vec!["S1", "W1", "S2", "W2", "S3", "W3"],
@@ -313,8 +230,8 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
+#[test]
+fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
     // The arm calls `tasks.concurrency(2)` and fans out over four
     // sub-tasks, each making two model rounds. Under a deterministic
     // driver the request order proves the limit: the first two arms
@@ -353,19 +270,12 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         local b = models.infer(item .. ':b')\n\
         return a .. b\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(8),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the limited fanout completes");
+    let trace = scheduler_scenario(md)
+        .limits(ceiling(8))
+        .chat(&gateway)
+        .run();
 
-    assert_eq!(out, "done");
+    assert_eq!(trace.text(), "done");
     assert_eq!(
         request_prompts(&gateway),
         vec!["x:a", "y:a", "x:b", "y:b", "z:a", "w:a", "z:b", "w:b"],
@@ -373,8 +283,8 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
+#[test]
+fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
     // Ceiling 1 over a three-arm fanout whose every arm runs its own
     // three-arm fanout: each arm is admitted one at a time, and while an
     // arm is parked on its inner join it gives its slot back so its
@@ -399,24 +309,9 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         ```lua\n\
         return item .. sys.index\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::new(NullObserver::default()),
-    );
-    let out = tokio::time::timeout(
-        Duration::from_secs(10),
-        TokioDriver::new(&ctx, fixture, None).drive(),
-    )
-    .await
-    .expect("the nested fanout must not deadlock");
+    let trace = scheduler_scenario(md).limits(ceiling(1)).run();
 
-    assert_eq!(
-        out.expect("the nested fanout completes"),
-        "a:x1+y2+z3,b:x1+y2+z3,c:x1+y2+z3"
-    );
+    assert_eq!(trace.text(), "a:x1+y2+z3,b:x1+y2+z3,c:x1+y2+z3");
 }
 
 #[path = "concurrency-stepped.rs"]

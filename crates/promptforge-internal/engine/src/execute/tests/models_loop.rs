@@ -5,8 +5,7 @@
 //! tools, call-time tool scope, explicit-handle calls on a frozen binding,
 //! and the atomic append of a tool-call batch. The shared loop fixtures
 //! (`loop_models`, `loop_scenario`, `catalog_scenario`, `LOOP_TO_TEXT`,
-//! and the `loop_events` filter, beside the tokio driver's `loop_context`,
-//! `loop_prompt`, and tool sets) sit here for every loop-driven sibling.
+//! and the `loop_events` filter) sit here for every loop-driven sibling.
 //! The compactor argument's tests sit in `models_loop_compactors`; the
 //! loop's exit rules in `exit_rules`; its cap, scope gate, and
 //! result-record trust in `tool_loop`.
@@ -36,8 +35,7 @@ pub(super) fn loop_models() -> ModelSet {
 }
 
 /// A run of `source` over the loop models, unprepared, so the run starts
-/// with what the live H1 pass would leave and no catalog: the state
-/// [`loop_context`] builds for the tokio driver.
+/// with what the live H1 pass would leave and no catalog.
 pub(super) fn loop_scenario(source: impl Into<String>) -> Scenario {
     Scenario::new(source).unprepared().models(loop_models())
 }
@@ -55,48 +53,6 @@ pub(super) const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      msgs:user('ask the model')\n\
      models.loop(msgs)\n\
      return msgs[#msgs].content";
-
-/// Builds the run context and its observing fixture for a loop test: the
-/// parsed prompt and the shared model and tool sets pre-filled (the
-/// scheduler tests bypass the live H1 pass that would fill them).
-pub(super) fn loop_context_observed(
-    prompt: &Prompt,
-    tools: impl Into<FixtureTools>,
-    observer: Arc<dyn Observer>,
-) -> (RunState, RunFixture) {
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        &test_context(EXECUTION),
-    );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = loop_models();
-    tools
-        .into()
-        .install(ctx, RunFixture::new().observer(observer))
-}
-
-/// [`loop_context_observed`] under the null observer.
-pub(super) fn loop_context(
-    prompt: &Prompt,
-    tools: impl Into<FixtureTools>,
-) -> (RunState, RunFixture) {
-    loop_context_observed(prompt, tools, Arc::new(NullObserver::default()))
-}
-
-/// The tool set with `tool` bound as `alias`, beside its implementation;
-/// a section puts it in scope by offering its id.
-pub(super) fn bound_tool(alias: &str, tool: Arc<dyn TestTool>) -> FixtureTools {
-    FixtureTools::new(vec![fixture_binding(alias, "fixture capability", tool)])
-}
-
-/// The tool set with the `echo` fixture bound; a section puts it in scope
-/// with `tools.offer('tools/echo')`.
-pub(super) fn echo_tools() -> FixtureTools {
-    bound_tool("echo", Arc::new(echo_tool()))
-}
 
 /// The model-turn and tool-call observations `recorder` saw, in order,
 /// with every other boundary event (chunk, section, run) dropped, so a
@@ -116,13 +72,6 @@ pub(super) fn loop_events(recorder: &Recorder) -> Vec<String> {
         .map(|(_, detail)| detail)
         .filter(|detail| loop_details.contains(detail))
         .collect()
-}
-
-/// The one-section prompt shell the tokio-driven loop tests drive.
-pub(super) fn loop_prompt(lua: &str) -> String {
-    format!(
-        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
-    )
 }
 
 #[test]
