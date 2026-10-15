@@ -85,9 +85,8 @@ fn nested_tasks_join_transitively_and_do_not_deadlock_at_a_ceiling_of_one() {
     // parked arm keep its slot would deadlock here. The ceiling of 1
     // admits one task at a time, so the nested tasks only run because the
     // parked arm gives its slot back.
-    let store = TestStore::new();
     assert_every_interleaving_reads(
-        || trace_scenario(TRACE_6, &store).limits(ceiling(1)),
+        |store| trace_scenario(TRACE_6, store).limits(ceiling(1)),
         "sub one/sub two",
     );
 }
@@ -102,15 +101,14 @@ fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
     // caller's ceiling of 8, which the whole run must never exceed). The
     // exact two-at-a-time request order is pinned separately, under a
     // deterministic driver, in the concurrency suite.
-    let store = TestStore::new();
     let expected = (1..=10)
         .map(|i| i.to_string())
         .collect::<Vec<_>>()
         .join("|");
     let gateway = ScriptedChat::new((1..=10).map(|i| text(&format!("r{i}"))).collect::<Vec<_>>());
     assert_every_interleaving_reads(
-        || {
-            trace_scenario(TRACE_12, &store)
+        |store| {
+            trace_scenario(TRACE_12, store)
                 .limits(ceiling(8))
                 .chat(&gateway)
         },
@@ -128,9 +126,8 @@ fn tasks_concurrency_clamps_to_the_callers_ceiling() {
     // Trace 12's clamp: under the caller's ceiling of 4, asking for 16
     // yields the effective limit 4, so a prompt stays portable wherever it
     // runs, including where the ceiling is tighter.
-    let store = TestStore::new();
     assert_every_interleaving_reads(
-        || trace_scenario(TRACE_12_CLAMP, &store).limits(ceiling(4)),
+        |store| trace_scenario(TRACE_12_CLAMP, store).limits(ceiling(4)),
         "clamped:4",
     );
 }

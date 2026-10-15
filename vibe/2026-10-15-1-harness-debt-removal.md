@@ -420,7 +420,7 @@ Fixes D1-2 and D1-3, which share one cause: test-support surface sized for an in
 
 <step-4>
 
-### Step 4: Give every happens-before run its own store
+### Step 4: Give every happens-before run its own store [completed]
 
 - Component: Engine test harness
 - Tests:

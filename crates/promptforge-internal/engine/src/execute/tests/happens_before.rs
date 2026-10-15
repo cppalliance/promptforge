@@ -231,6 +231,18 @@ const TRACE_11: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
     return models.infer('slow')\n\
     ```\n";
 
+/// The store probe: whether the file the run writes was already there
+/// when it started, which only an earlier run could have left.
+const STORE_PROBE: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    # Probe\n\n\
+    ## Main\n\n\
+    ```lua\n\
+    local seen = store.exists('probe.txt')\n\
+    store.write('probe.txt', 'x')\n\
+    if seen then return 'present' end\n\
+    return 'absent'\n\
+    ```\n";
+
 /// The three serial-driver batchings: one answer per step, all at once,
 /// and reversed - the effect-completion shuffles the serial driver
 /// offers.
@@ -240,20 +252,25 @@ const BATCHINGS: [Batching; 3] = [
     Batching::Reversed,
 ];
 
-/// A run of the trace `source` on a fresh scope over `store`, so every
-/// run of one trace shares the files the test reads afterward.
+/// A run of the trace `source` on a fresh scope over `store`. The sweep
+/// helpers hand each run its own empty store, so no run reads a file an
+/// earlier run of the same trace wrote.
 fn trace_scenario(source: &str, store: &TestStore) -> Scenario {
     scheduler_scenario(source).vfs(store.vfs())
 }
 
-/// Runs `scenario()` under the serial driver with every batching,
-/// returning each batching beside its result.
+/// Runs `scenario` under the serial driver with every batching, each
+/// over its own empty store, returning each batching beside its result
+/// and the store the run left.
 #[track_caller]
-fn serial_results(scenario: impl Fn() -> Scenario) -> Vec<(Batching, RunResult)> {
+fn serial_results(
+    scenario: impl Fn(&TestStore) -> Scenario,
+) -> Vec<(Batching, RunResult, TestStore)> {
     let mut results = Vec::new();
     for batching in BATCHINGS {
-        let run = scenario().into_run();
-        results.push((batching, drive_batched(run, batching).result));
+        let store = TestStore::new();
+        let run = scenario(&store).into_run();
+        results.push((batching, drive_batched(run, batching).result, store));
     }
     results
 }
@@ -262,13 +279,14 @@ fn serial_results(scenario: impl Fn() -> Scenario) -> Vec<(Batching, RunResult)>
 /// delivers every step's answers in the seed's permutation.
 const SEEDS: [u64; 3] = [1, 2, 3];
 
-/// Runs `scenario()` on the shuffled rig once per seed, returning each
-/// seed's checker beside what the run left.
+/// Runs `scenario` on the shuffled rig once per seed, each over its own
+/// empty store, returning each seed's checker beside what the run left.
 #[track_caller]
-fn shuffled_results(scenario: impl Fn() -> Scenario) -> Vec<(Seeded, RigTrace)> {
+fn shuffled_results(scenario: impl Fn(&TestStore) -> Scenario) -> Vec<(Seeded, RigTrace)> {
     let mut results = Vec::new();
     for seed in SEEDS {
-        results.push((Seeded::new(seed), Rig::shuffled(scenario(), seed)));
+        let store = TestStore::new();
+        results.push((Seeded::new(seed), Rig::shuffled(scenario(&store), seed)));
     }
     results
 }
@@ -290,27 +308,54 @@ fn is_determinism(result: &RunResult) -> bool {
 }
 
 /// Asserts every serial batching and every seeded interleaving of
-/// `scenario()` succeeds with `expected`.
+/// `scenario` succeeds with `expected`.
 #[track_caller]
-fn assert_every_interleaving_reads(scenario: impl Fn() -> Scenario, expected: &str) {
-    for (batching, result) in serial_results(&scenario) {
+fn assert_every_interleaving_reads(scenario: impl Fn(&TestStore) -> Scenario, expected: &str) {
+    assert_every_interleaving_leaves(scenario, expected, None);
+}
+
+/// [`assert_every_interleaving_reads`], and, given `file`, that each run
+/// left that `(path, contents)` in its own store.
+#[track_caller]
+fn assert_every_interleaving_leaves(
+    scenario: impl Fn(&TestStore) -> Scenario,
+    expected: &str,
+    file: Option<(&str, &str)>,
+) {
+    for (batching, result, store) in serial_results(&scenario) {
         assert_eq!(
             ok_text(&result),
             Some(expected),
             "under {batching:?}: {result:?}"
         );
+        if let Some((path, contents)) = file {
+            let left = store.read(path);
+            assert_eq!(
+                left.as_deref().ok(),
+                Some(contents),
+                "{path} under {batching:?}: {left:?}"
+            );
+        }
     }
     for (seeded, rig) in shuffled_results(&scenario) {
         let result = rig.trace().result();
         seeded.check_eq(&ok_text(result), &Some(expected), format!("{result:?}"));
+        if let Some((path, contents)) = file {
+            let left = rig.trace().read(path);
+            seeded.check_eq(
+                &left.as_deref().ok(),
+                &Some(contents),
+                format!("{path}: {left:?}"),
+            );
+        }
     }
 }
 
 /// Asserts every serial batching and every seeded interleaving of
-/// `scenario()` ends as the fatal determinism violation.
+/// `scenario` ends as the fatal determinism violation.
 #[track_caller]
-fn assert_every_interleaving_conflicts(scenario: impl Fn() -> Scenario) {
-    for (batching, result) in serial_results(&scenario) {
+fn assert_every_interleaving_conflicts(scenario: impl Fn(&TestStore) -> Scenario) {
+    for (batching, result, _) in serial_results(&scenario) {
         assert!(
             is_determinism(&result),
             "under {batching:?}, expected determinism, got {result:?}"
@@ -327,13 +372,8 @@ fn assert_every_interleaving_conflicts(scenario: impl Fn() -> Scenario) {
 
 #[test]
 fn a_seven_arm_fanout_merges_its_partitions_in_every_interleaving() {
-    let store = TestStore::new();
-    let fanout = || trace_scenario(SEVEN_ARM_FANOUT, &store);
-    assert_every_interleaving_reads(fanout, SEVEN_PARTS);
-    assert_eq!(
-        store.read("research.md").expect("the merge lands"),
-        SEVEN_PARTS
-    );
+    let fanout = |store: &TestStore| trace_scenario(SEVEN_ARM_FANOUT, store);
+    assert_every_interleaving_leaves(fanout, SEVEN_PARTS, Some(("research.md", SEVEN_PARTS)));
     assert!(
         shuffled_results(fanout).iter().any(|(_, rig)| {
             rig.trace()
@@ -348,19 +388,17 @@ fn a_seven_arm_fanout_merges_its_partitions_in_every_interleaving() {
 
 #[test]
 fn the_freeform_pattern_merges_by_index_in_every_interleaving() {
-    let store = TestStore::new();
-    assert_every_interleaving_reads(|| trace_scenario(FREE_FORM, &store), SEVEN_PARTS);
-    assert_eq!(
-        store.read("research.md").expect("the merge lands"),
-        SEVEN_PARTS
+    assert_every_interleaving_leaves(
+        |store| trace_scenario(FREE_FORM, store),
+        SEVEN_PARTS,
+        Some(("research.md", SEVEN_PARTS)),
     );
 }
 
 #[test]
 fn the_pipeline_pattern_orders_the_summary_after_the_gather_in_every_interleaving() {
-    let store = TestStore::new();
     assert_every_interleaving_reads(
-        || trace_scenario(PIPELINE, &store),
+        |store| trace_scenario(PIPELINE, store),
         "summary of: gathered content",
     );
 }
@@ -371,12 +409,11 @@ fn join_any_joins_the_task_it_returns_and_only_that_task() {
     // text is exactly that arm's. Which arm the wait returns is the
     // recorded nondeterminism, so each interleaving is one of the two
     // legal texts.
-    let store = TestStore::new();
     let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
-    let pass = || trace_scenario(TRACE_5_PASS, &store).chat(&gateway);
+    let pass = |store: &TestStore| trace_scenario(TRACE_5_PASS, store).chat(&gateway);
     let legal =
         |result: &RunResult| matches!(ok_text(result), Some("written by a" | "written by b"));
-    for (batching, result) in serial_results(pass) {
+    for (batching, result, _) in serial_results(pass) {
         assert!(
             legal(&result),
             "under {batching:?}, an illegal verdict: {result:?}"
@@ -389,13 +426,15 @@ fn join_any_joins_the_task_it_returns_and_only_that_task() {
 
     // The fail half: reading the file of the task the wait did NOT
     // return always ends the run as the fatal determinism violation.
-    assert_every_interleaving_conflicts(|| trace_scenario(TRACE_5_FAIL, &store).chat(&gateway));
+    assert_every_interleaving_conflicts(|store| trace_scenario(TRACE_5_FAIL, store).chat(&gateway));
 }
 
 #[test]
 fn one_root_identity_spans_the_h1_pass_and_the_walk() {
-    let store = TestStore::new();
-    assert_every_interleaving_reads(|| trace_scenario(TRACE_7, &store), "configured/task wrote");
+    assert_every_interleaving_reads(
+        |store| trace_scenario(TRACE_7, store),
+        "configured/task wrote",
+    );
 }
 
 #[test]
@@ -403,9 +442,8 @@ fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() {
     // The delivered half: whichever join delivers the slow arm (the
     // timed join, or the later join), its write is readable, and the
     // quick arm's ordinary-join delivery is joined the same way.
-    let store = TestStore::new();
     assert_every_interleaving_reads(
-        || trace_scenario(TRACE_10_PASS, &store),
+        |store| trace_scenario(TRACE_10_PASS, store),
         "quick arm|slow arm",
     );
 
@@ -413,8 +451,8 @@ fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() {
     // reading its file always fails - the timeout provably wins, because
     // the shuffled rig holds the arm's model round while it answers the
     // timer.
-    assert_every_interleaving_conflicts(|| {
-        trace_scenario(TRACE_10_FAIL, &store).hold(asks("slow"))
+    assert_every_interleaving_conflicts(|store| {
+        trace_scenario(TRACE_10_FAIL, store).hold(asks("slow"))
     });
 }
 
@@ -422,11 +460,15 @@ fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() {
 fn a_cancelled_tasks_partial_write_is_readable_after_the_join() {
     // The shuffled rig holds the task's model round, so the cancel lands
     // while the round is out.
-    let store = TestStore::new();
     assert_every_interleaving_reads(
-        || trace_scenario(TRACE_11, &store).hold(asks("slow")),
+        |store| trace_scenario(TRACE_11, store).hold(asks("slow")),
         "partial",
     );
+}
+
+#[test]
+fn every_interleaving_starts_from_an_empty_store() {
+    assert_every_interleaving_reads(|store| trace_scenario(STORE_PROBE, store), "absent");
 }
 
 #[path = "happens_before-concurrency.rs"]
