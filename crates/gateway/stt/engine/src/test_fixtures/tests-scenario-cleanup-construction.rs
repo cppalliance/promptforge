@@ -75,15 +75,21 @@ fn parked_final_construction_cleans_up_the_initialized_interim_worker() {
     let final_decoder = ScriptedDecoder::new();
     final_decoder.arm_construction();
     let factory = ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone());
-    let timeout = policy().with_startup_timeout(Duration::from_millis(20));
+    let (expire, expired) = std::sync::mpsc::channel();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let constructor = std::thread::spawn(move || {
-        drop(result_tx.send(SttEngine::new(factory, timeout)));
+        drop(result_tx.send(SttEngine::new_with_stuck_role(
+            factory,
+            policy(),
+            DecodeMode::Final,
+            &expired,
+        )));
     });
     assert!(
         final_decoder.wait_until_construction_parked(WAIT),
         "final construction reaches its deterministic park"
     );
+    let _ = expire.send(());
     let error = result_rx
         .recv_timeout(WAIT)
         .expect("startup returns by its deadline")

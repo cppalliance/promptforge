@@ -23,7 +23,30 @@ impl SttEngine {
     /// [`TranscribeError::SpawnWorker`]. If joining partially started workers
     /// also fails, [`TranscribeError::StartupCleanup`] preserves both outcomes.
     pub fn new(factory: impl ModelFactory, policy: EnginePolicy) -> Result<Self, TranscribeError> {
-        Self::new_with(factory, policy, Transcriber::spawn)
+        let wait = startup::shared_deadline(policy.startup_timeout())?;
+        Self::new_with(factory, policy, Transcriber::spawn, wait)
+    }
+
+    /// Builds like [`SttEngine::new`], but on the test's schedule instead of
+    /// a clock: the other role's worker is awaited until it reports, and the
+    /// `stuck` role is judged only once `expire` fires or its sender drops.
+    /// A test that parks `stuck` then sees exactly that role time out,
+    /// however long the other worker takes to start.
+    #[cfg(test)]
+    pub(crate) fn new_with_stuck_role(
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        stuck: DecodeMode,
+        expire: &std::sync::mpsc::Receiver<()>,
+    ) -> Result<Self, TranscribeError> {
+        Self::new_with(factory, policy, Transcriber::spawn, |init, mode| {
+            if mode == stuck {
+                let _ = expire.recv();
+                startup::outcome(init, mode, std::time::Instant::now())
+            } else {
+                init.recv().unwrap_or(Err(TranscribeError::WorkerGone))
+            }
+        })
     }
 
     fn new_with(
@@ -41,13 +64,9 @@ impl SttEngine {
             ),
             TranscribeError,
         >,
+        mut wait: impl FnMut(&startup::Report, DecodeMode) -> Result<bool, TranscribeError>,
     ) -> Result<Self, TranscribeError> {
         let factory: Arc<dyn ModelFactory> = Arc::new(factory);
-        let startup_deadline = std::time::Instant::now()
-            .checked_add(policy.startup_timeout())
-            .ok_or_else(|| {
-                TranscribeError::InvalidConfig("stt.startup_timeout is too large".to_owned())
-            })?;
         let (transcriber, interim_init) = spawn(
             "stt-interim",
             Arc::clone(&factory),
@@ -62,8 +81,7 @@ impl SttEngine {
         ) {
             Ok(worker) => worker,
             Err(final_spawn) => {
-                let interim =
-                    startup::outcome(&interim_init, DecodeMode::Interim, startup_deadline);
+                let interim = wait(&interim_init, DecodeMode::Interim);
                 let interim_timed_out = startup::timed_out(&interim);
                 let Err(startup) = startup::pair(interim, Err(final_spawn)) else {
                     unreachable!("the final spawn failure prevents construction");
@@ -77,8 +95,8 @@ impl SttEngine {
                 return Err(Transcriber::startup_failure(startup, cleanup));
             }
         };
-        let interim = startup::outcome(&interim_init, DecodeMode::Interim, startup_deadline);
-        let final_result = startup::outcome(&final_init, DecodeMode::Final, startup_deadline);
+        let interim = wait(&interim_init, DecodeMode::Interim);
+        let final_result = wait(&final_init, DecodeMode::Final);
         let interim_timed_out = startup::timed_out(&interim);
         let final_timed_out = startup::timed_out(&final_result);
         let (interim_exists, final_exists) = match startup::pair(interim, final_result) {
@@ -239,6 +257,7 @@ mod tests {
                 }
                 Transcriber::spawn(name, factory, mode, capacity)
             },
+            startup::shared_deadline(policy().startup_timeout()).expect("the test deadline fits"),
         )
         .expect_err("both concurrent startup failures prevent construction");
         let TranscribeError::StartupFailures { failures, .. } = error else {

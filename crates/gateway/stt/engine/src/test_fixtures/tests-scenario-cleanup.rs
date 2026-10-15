@@ -44,13 +44,17 @@ async fn run_blocked_decode(decoder: &ScriptedDecoder, engine: &Arc<SttEngine>, 
 
 fn run_timed_out_construction(decoder: &ScriptedDecoder) {
     let factory = ScriptedModelFactory::new(decoder.clone());
-    let timeout = policy().with_startup_timeout(Duration::from_millis(20));
+    let (expire, expired) = std::sync::mpsc::channel();
     let (result, ()) = factory
         .with_construction_blocked(
             WAIT,
             WAIT,
-            |factory| SttEngine::new(factory, timeout),
-            || (),
+            move |factory| {
+                SttEngine::new_with_stuck_role(factory, policy(), DecodeMode::Interim, &expired)
+            },
+            || {
+                let _ = expire.send(());
+            },
         )
         .expect("construction reaches the blocked scenario and its bounded result");
     assert!(matches!(

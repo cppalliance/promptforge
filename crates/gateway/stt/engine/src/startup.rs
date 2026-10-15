@@ -1,9 +1,23 @@
 //! Shared worker startup deadline and partial-construction cleanup.
 
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{DecodeMode, TranscribeError};
+
+/// One worker's startup report: whether its optional decoder exists.
+pub(crate) type Report = mpsc::Receiver<Result<bool, TranscribeError>>;
+
+/// The production startup wait: every role's outcome is judged against one
+/// deadline, taken before any worker spawns.
+pub(crate) fn shared_deadline(
+    timeout: Duration,
+) -> Result<impl FnMut(&Report, DecodeMode) -> Result<bool, TranscribeError>, TranscribeError> {
+    let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+        TranscribeError::InvalidConfig("stt.startup_timeout is too large".to_owned())
+    })?;
+    Ok(move |init: &Report, mode: DecodeMode| outcome(init, mode, deadline))
+}
 
 pub(crate) fn outcome(
     outcome: &mpsc::Receiver<Result<bool, TranscribeError>>,
