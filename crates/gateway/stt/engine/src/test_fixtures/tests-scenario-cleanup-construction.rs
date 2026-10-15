@@ -32,6 +32,29 @@ fn construction_rendezvous_timeout_releases_a_late_arrival_and_permits_a_follow_
 }
 
 #[test]
+fn missed_rendezvous_with_a_stuck_role_returns_instead_of_hanging() {
+    let decoder = ScriptedDecoder::new();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let constructing = decoder.clone();
+    std::thread::spawn(move || {
+        let missed = construct_with_stuck_interim(
+            &constructing,
+            Duration::from_millis(10),
+            Duration::from_millis(50),
+        )
+        .is_none();
+        let _ = done_tx.send(missed);
+    });
+    assert_eq!(
+        done_rx.recv_timeout(WAIT * 10),
+        Ok(true),
+        "a missed rendezvous returns None instead of hanging on the stuck role"
+    );
+    assert!(decoder.wait_until_worker_dropped(WAIT));
+    run_timed_out_construction(&decoder);
+}
+
+#[test]
 fn construction_result_timeout_releases_and_permits_a_follow_up() {
     let decoder = ScriptedDecoder::new();
     let factory = ScriptedModelFactory::new(decoder.clone());

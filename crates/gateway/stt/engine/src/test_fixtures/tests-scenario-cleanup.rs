@@ -42,20 +42,28 @@ async fn run_blocked_decode(decoder: &ScriptedDecoder, engine: &Arc<SttEngine>, 
     );
 }
 
-fn run_timed_out_construction(decoder: &ScriptedDecoder) {
+fn construct_with_stuck_interim(
+    decoder: &ScriptedDecoder,
+    rendezvous: Duration,
+    late_by: Duration,
+) -> Option<(Result<SttEngine, TranscribeError>, ())> {
     let factory = ScriptedModelFactory::new(decoder.clone());
     let (expire, expired) = std::sync::mpsc::channel();
-    let (result, ()) = factory
-        .with_construction_blocked(
-            WAIT,
-            WAIT,
-            move |factory| {
-                SttEngine::new_with_stuck_role(factory, policy(), DecodeMode::Interim, &expired)
-            },
-            || {
-                let _ = expire.send(());
-            },
-        )
+    factory.with_construction_blocked(
+        rendezvous,
+        WAIT,
+        move |factory| {
+            std::thread::sleep(late_by);
+            SttEngine::new_with_stuck_role(factory, policy(), DecodeMode::Interim, &expired)
+        },
+        move || {
+            let _ = expire.send(());
+        },
+    )
+}
+
+fn run_timed_out_construction(decoder: &ScriptedDecoder) {
+    let (result, ()) = construct_with_stuck_interim(decoder, WAIT, Duration::ZERO)
         .expect("construction reaches the blocked scenario and its bounded result");
     assert!(matches!(
         result.expect_err("parked construction times out"),

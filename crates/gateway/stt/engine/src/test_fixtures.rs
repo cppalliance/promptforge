@@ -136,6 +136,7 @@ impl ScriptedModelFactory {
 
             if !wait_until_all_constructing(&decoders, rendezvous_timeout) {
                 drop(blocks);
+                drop(while_blocked);
                 constructor
                     .join()
                     .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
