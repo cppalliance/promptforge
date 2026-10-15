@@ -8,11 +8,6 @@
 //! facade, the parser's Lua programs), so they run here rather than against
 //! the `promptforge` facade, whose own suite holds the rest.
 
-use serde_json::json;
-
-use crate::test_support::FnTool;
-use crate::tools::{ToolError, ToolOutput};
-
 mod args_surface;
 mod exec_flow;
 mod execution;
@@ -23,19 +18,3 @@ mod parsing;
 mod prepare;
 mod require;
 mod vfs;
-
-/// The fixture Plugin's `tools/echo`, which echoes its `value` argument.
-fn echo_tool() -> FnTool {
-    let schema = json!({
-        "type": "object",
-        "properties": { "value": { "type": "string" } },
-        "required": ["value"]
-    });
-    FnTool::new("tools/echo", schema, |args| {
-        let value = args["value"]
-            .as_str()
-            .ok_or_else(|| ToolError::message("echo requires a string `value` argument"))?;
-        Ok(ToolOutput::trusted(format!("echoed: {value}")))
-    })
-    .description("Echo the value argument back to the caller.")
-}

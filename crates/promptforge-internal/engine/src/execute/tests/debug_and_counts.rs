@@ -6,7 +6,7 @@ use super::*;
 
 #[tokio::test]
 async fn debug_capture_receives_request_and_response_when_set() {
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
@@ -55,7 +55,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
     // A nested infer called from Lua must route its request/response
     // capture to the run's owned debug sink instead of dropping it.
-    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
+    let gateway = ScriptedChat::new(vec![text("final answer")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
@@ -103,7 +103,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
     // The arm's debug side channel: the fanout's run-context fork keeps
     // the run's own debug sink, so an arm's model-turn events land on the
     // run's sink under the worker's section name.
-    let gateway = ScriptedChat::new(vec![resp_text("arm reply")]);
+    let gateway = ScriptedChat::new(vec![text("arm reply")]);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
@@ -151,7 +151,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
 
 #[tokio::test]
 async fn debug_capture_none_changes_nothing() {
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
@@ -205,8 +205,8 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     use crate::test_support::tokio_driver::TokioDriver;
 
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
-        resp_text("final answer"),
+        calls(&[("call_x", "echo", "{\"value\":\"x\"}")]),
+        text("final answer"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/failing')\n\
@@ -233,14 +233,11 @@ async fn a_model_call_and_a_script_call_count_under_the_id_and_a_local_tool_unde
     use crate::test_support::tokio_driver::TokioDriver;
 
     let gateway = ScriptedChat::new(vec![
-        ScriptedReply::ToolCalls {
-            model: MOCK_MODEL.to_owned(),
-            calls: vec![
-                scripted_call("call_1", "echo", r#"{"value":"model"}"#),
-                scripted_call("call_2", "grab", r#"{"value":"local"}"#),
-            ],
-        },
-        resp_text("final answer"),
+        calls(&[
+            ("call_1", "echo", r#"{"value":"model"}"#),
+            ("call_2", "grab", r#"{"value":"local"}"#),
+        ]),
+        text("final answer"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -340,7 +337,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
 async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     // The one infer shape: `handle:infer(...)` returns the round's text and never
     // sets `reply` or `sys.reply_finish_reason`.
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
+    let gateway = ScriptedChat::new(vec![text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\

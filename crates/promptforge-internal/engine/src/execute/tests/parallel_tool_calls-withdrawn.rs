@@ -90,7 +90,7 @@ fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
         withdrawn.is_empty(),
         "issuing withdraws nothing: {withdrawn:?}"
     );
-    run.resume(infer, text_reply("go"));
+    run.resume(infer, chat_answer(&text("go")));
     let (linger, effect) = {
         let (mut issued, withdrawn) = withdrawals(run.step());
         assert_eq!(
@@ -107,7 +107,7 @@ fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
     for id in calls {
         run.resume(id, EffectAnswer::Dropped);
     }
-    run.resume(linger, text_reply("done"));
+    run.resume(linger, chat_answer(&text("done")));
     let Step::Done { result, .. } = run.step() else {
         panic!("Main's second round ends the run");
     };
@@ -118,7 +118,7 @@ fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
 fn a_call_issued_and_withdrawn_in_one_step_is_listed_twice() {
     let (mut run, _fixture, infer, round) = cancelled_child();
     run.resume(round, two_echoes());
-    run.resume(infer, text_reply("go"));
+    run.resume(infer, chat_answer(&text("go")));
     let (issued, withdrawn) = withdrawals(run.step());
     let calls = tool_call_ids(&issued);
     assert_eq!(
@@ -130,7 +130,7 @@ fn a_call_issued_and_withdrawn_in_one_step_is_listed_twice() {
     for (id, effect) in &issued {
         let answer = match effect {
             Effect::ToolCall { .. } => EffectAnswer::Dropped,
-            _ => text_reply("done"),
+            _ => chat_answer(&text("done")),
         };
         run.resume(*id, answer);
     }
@@ -223,7 +223,7 @@ fn one_step_lists_every_tasks_withdrawn_calls_in_effect_id_order() {
         .map(|(_, effect)| call_value(effect))
         .collect();
     assert_eq!(values, ["a", "b"], "A's call issues before B's");
-    run.resume(asking("wait"), text_reply("go"));
+    run.resume(asking("wait"), chat_answer(&text("go")));
     let (linger, withdrawn) = withdrawals(run.step());
     assert_eq!(
         withdrawn,
@@ -236,7 +236,7 @@ fn one_step_lists_every_tasks_withdrawn_calls_in_effect_id_order() {
     let [(linger, _)] = linger.as_slice() else {
         panic!("the cancels issue only Main's next round: {linger:?}");
     };
-    run.resume(*linger, text_reply("done"));
+    run.resume(*linger, chat_answer(&text("done")));
     let Step::Done { result, .. } = run.step() else {
         panic!("Main's second round ends the run");
     };

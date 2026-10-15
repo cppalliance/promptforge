@@ -4,20 +4,18 @@
 
 use promptforge_model_client::detail::tool_schema_name;
 
-use crate::test_support::scripted_chat::ScriptedChat;
+use crate::test_support::scripted_chat::{ScriptedChat, text};
 
-use super::super::super::{resp_text, test_model_catalog};
-use super::super::echo_tool;
+use super::super::super::echo_tool;
 use super::*;
 
 /// A `require` case over `source` with the echo tool, the test model as
 /// the current model, and `chat` answering its model rounds.
 fn effect_case(source: &PromptSource, chat: &ScriptedChat) -> Scenario {
-    let model = test_model_catalog().models()[0].clone();
     require_case(source.build())
         .tool(echo_tool())
         .chat(chat)
-        .context(move |ctx| ctx.model(model))
+        .bound()
 }
 
 /// The fixture tools Plugin and the `writer` role every effect case
@@ -39,7 +37,7 @@ fn library_code_makes_store_model_and_tool_calls_while_it_loads() {
             local reply = models.infer('ping')
             return table.concat({ store.read('lib.md'), tostring(echoed), tostring(reply) }, '|')",
         );
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
+    let gateway = ScriptedChat::new(vec![text("pong")]);
     let trace = effect_case(&source, &gateway).run();
     assert_eq!(trace.text(), "stored|echoed: lib|pong");
     assert_eq!(trace.read("lib.md").expect("the write landed"), "stored");
@@ -61,7 +59,7 @@ fn an_h1_library_sets_prompt_wide_state_every_later_section_sees() {
         )
         .section("setup", "models.default('writer')")
         .section("offers", "tools.offer('tools/echo')");
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
+    let gateway = ScriptedChat::new(vec![text("pong")]);
     let trace = effect_case(&source, &gateway).run();
     assert_eq!(
         trace.text(),

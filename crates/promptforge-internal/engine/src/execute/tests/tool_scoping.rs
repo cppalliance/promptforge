@@ -30,7 +30,10 @@ fn offered_tools_are_not_injected_without_an_offer() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispatches_by_id() {
-    let gateway = ScriptedChat::new(aliased_tool_script("tools_concrete"));
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("aliased_call", "tools_concrete", "{\"value\":\"payload\"}")]),
+        text("aliased final"),
+    ]);
     let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
     let tools = FixtureTools::new(vec![fixture_binding(
         "tools_concrete",
@@ -78,7 +81,10 @@ async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
-    let gateway = ScriptedChat::new(aliased_tool_script("tools_section"));
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("aliased_call", "tools_section", "{\"value\":\"payload\"}")]),
+        text("aliased final"),
+    ]);
     let tool = Arc::new(ScopedFixtureTool::new("section", "Section concrete."));
     let tools = FixtureTools::new(vec![fixture_binding(
         "tools_section",

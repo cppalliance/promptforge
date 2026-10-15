@@ -89,9 +89,9 @@ fn advertised(body: &ScriptedCall) -> Vec<String> {
 #[tokio::test(flavor = "current_thread")]
 async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
+        text("done"),
     ]);
     let md = owner_prompt(
         "",
@@ -140,8 +140,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Only\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "task", "{\"target\":\"## Only\"}")]),
+        text("done"),
     ]);
     let md = owner_prompt(
         "",
@@ -175,8 +175,8 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
 #[tokio::test(flavor = "current_thread")]
 async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -233,8 +233,8 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     // abandoned. Two same-origin tasks could not tell the arm's two sides
     // apart.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -305,11 +305,11 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "task",
         "{\"target\":\"## Child\"}",
-    )]);
+    )])]);
     let md = owner_prompt(
         "max_tool_iterations: 1\n",
         "tools.allow_tasks()\n\
@@ -356,9 +356,9 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
 #[tokio::test(flavor = "current_thread")]
 async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_cancel", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -402,8 +402,8 @@ async fn the_model_sees_only_its_own_tasks() {
     // The author's task is `0.0`; the model's status read of it is refused
     // and the author's cancel then ends it, so the run completes clean.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task_status", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task_status", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -431,7 +431,7 @@ async fn the_model_sees_only_its_own_tasks() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn without_allow_tasks_the_built_ins_are_not_advertised() {
-    let gateway = ScriptedChat::new(vec![resp_text("bye")]);
+    let gateway = ScriptedChat::new(vec![text("bye")]);
     let md = owner_prompt(
         "",
         "local msgs = messages.new()\n\

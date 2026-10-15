@@ -150,7 +150,7 @@ async fn a_script_reaches_a_catalog_tool_left_out_of_the_offering_by_id() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_call_advertises_nothing_until_the_tool_is_offered() {
-    let gateway = ScriptedChat::new(vec![resp_text("before"), resp_text("after")]);
+    let gateway = ScriptedChat::new(vec![text("before"), text("after")]);
     let prompt = full_id_prompt(
         "tools.call('tools/echo', { value = 'a' })\n\
          tools.call('tools/concrete', { value = 'b' })\n\

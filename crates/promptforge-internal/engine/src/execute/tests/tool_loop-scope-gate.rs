@@ -32,11 +32,11 @@ async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
     // The loop's scope gate: a model call naming a tool the run offers but
     // the section never offered fails with OutOfScopeToolCall holding the
     // offered-but-unscoped hint.
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "global_tool",
         "{\"value\":\"x\"}",
-    )]);
+    )])]);
     let prompt = parse(&scoped_loop());
     let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
@@ -70,11 +70,11 @@ async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_su
     // The canonical id of the advertised `scoped` is out of scope, but it
     // names no tool the section left unoffered, so the error drops the
     // offered-but-unscoped hint.
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "tools/scoped",
         "{\"value\":\"x\"}",
-    )]);
+    )])]);
     let prompt = parse(&scoped_loop());
     let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
     let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
@@ -106,11 +106,11 @@ async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_su
 
 #[tokio::test(flavor = "current_thread")]
 async fn model_calling_pure_unknown_tool_is_a_hard_error() {
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "nonexistent",
         "{\"value\":\"x\"}",
-    )]);
+    )])]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
     )));

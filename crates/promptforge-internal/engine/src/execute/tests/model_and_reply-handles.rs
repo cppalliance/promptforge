@@ -6,72 +6,47 @@
 
 use super::*;
 
-/// Runs a parsed prompt against a scripted model with no external tools.
-async fn run_with_gateway(
-    test: &TestPrompt,
-    gateway: &ScriptedChat,
-    store: &TestStore,
-) -> Result<String> {
-    run(test, "", &[], store, gatewayed(gateway)).await
+/// The prompt declaring the `writer` and `analyst` roles and parking
+/// `writer` as the prompt-wide default.
+fn writer_and_analyst() -> PromptSource {
+    PromptSource::new()
+        .front("models: { writer: {}, analyst: {} }")
+        .h1("models.default('writer')")
 }
 
-/// Runs a prompt with hand-filled model bindings and no prepare pass: the
-/// multi-model shape the trivial fill cannot produce (it binds every role
-/// to the one current model), exercising the runtime's label resolution
-/// directly. `bindings` pairs a declared role label with the gateway model
-/// id it resolves to.
-async fn run_with_bindings(
-    md: &str,
-    bindings: &[(&str, &str)],
-    gateway: &ScriptedChat,
-    store: &TestStore,
-) -> Result<String> {
-    let prompt = parse(md);
-    let mut ctx = test_context(EXECUTION).vfs(store.vfs());
-    for (label, model) in bindings {
-        ctx.model_bindings.bind(
-            label,
-            ModelDescriptor::new(
-                ModelId::gateway(*model).expect("the test model id is valid"),
-                "A test model",
-                NonZeroU32::new(131_072).expect("131072 is non-zero"),
-                ThinkingMode::Switchable,
-            ),
-        );
-    }
-    let fixture = RunFixture::new().client(gateway_client(gateway));
-    match crate::test_support::run_prepared(&prompt, "", ctx, fixture).await {
-        RunResult::Ok(out) => Ok(out),
-        RunResult::Cancelled => Err(Error::Interrupted),
-        RunResult::Failure(error) => Err(Error::from(error)),
-    }
+/// A run of `source` with the `writer` and `analyst` roles bound by hand to
+/// `writer-model` and `analyst-model` and no prepare: the multi-model shape
+/// the trivial fill cannot produce (it binds every role to the one current
+/// model), exercising the runtime's label resolution directly.
+#[track_caller]
+fn bound_by_hand(source: &PromptSource) -> Scenario {
+    Scenario::new(source.build())
+        .unprepared()
+        .context(bind_role("writer", test_model("writer-model")))
+        .context(bind_role("analyst", test_model("analyst-model")))
 }
 
-#[tokio::test]
-async fn models_get_returns_a_handle_without_changing_the_section_model() {
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
-# T\n\n\
-```lua\n\
-models.default('writer')\n\
-```\n\n\
-## Only\n\n\
-```lua\nstore.write('handle.txt', models.get('analyst').name)\n```\n\n\
-Ask the model.\n\n\
-```lua\nreturn models.infer(prose)\n```\n";
-    let store = TestStore::new();
-    let out = run_with_bindings(
-        md,
-        &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        &gateway,
-        &store,
-    )
-    .await
-    .unwrap();
+#[test]
+fn models_get_returns_a_handle_without_changing_the_section_model() {
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
+    let source = writer_and_analyst().prose(
+        "Only",
+        "
+            ```lua
+            store.write('handle.txt', models.get('analyst').name)
+            ```
 
-    assert_eq!(out, "hello from the mock");
+            Ask the model.
+
+            ```lua
+            return models.infer(prose)
+            ```",
+    );
+    let trace = bound_by_hand(&source).chat(&gateway).run();
+
+    assert_eq!(trace.text(), "hello from the mock");
     assert_eq!(
-        store.read("handle.txt").unwrap(),
+        trace.read("handle.txt").unwrap(),
         "analyst",
         "models.get must return the analyst handle"
     );
@@ -85,18 +60,24 @@ Ask the model.\n\n\
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn models_infer_uses_the_section_model_without_touching_reply() {
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\n\
-```lua\nvar.r = models.infer('ping')\n```\n\n\
-```lua\nreturn var.r .. ':' .. tostring(reply)\n```\n";
-    let out = run_with_gateway(&bound_for_model(md), &gateway, &TestStore::new())
-        .await
-        .unwrap();
+#[test]
+fn models_infer_uses_the_section_model_without_touching_reply() {
+    let gateway = ScriptedChat::new(vec![text("pong")]);
+    let source = with_writer(PromptSource::new()).prose(
+        "Only",
+        "
+        ```lua
+        var.r = models.infer('ping')
+        ```
+
+        ```lua
+        return var.r .. ':' .. tostring(reply)
+        ```",
+    );
+    let trace = Scenario::new(source.build()).bound().chat(&gateway).run();
     assert_eq!(
-        out, "pong:nil",
+        trace.text(),
+        "pong:nil",
         "models.infer must not bind the section's reply"
     );
 
@@ -115,25 +96,12 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
-# T\n\n\
-```lua\n\
-models.default('writer')\n\
-```\n\n\
-## Only\n\n\
-```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
-    let out = run_with_bindings(
-        md,
-        &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        &gateway,
-        &TestStore::new(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "pong");
+#[test]
+fn handle_infer_uses_that_model_regardless_of_the_section_model() {
+    let gateway = ScriptedChat::new(vec![text("pong")]);
+    let source = writer_and_analyst().section("Only", "return models.get('analyst'):infer('ping')");
+    let trace = bound_by_hand(&source).chat(&gateway).run();
+    assert_eq!(trace.text(), "pong");
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");
@@ -144,30 +112,23 @@ models.default('writer')\n\
     );
 }
 
-#[tokio::test]
-async fn models_use_reselection_steers_the_next_round() {
-    let gateway = ScriptedChat::new(vec![resp_text("first"), resp_text("second")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
-# T\n\n\
-```lua\n\
-models.default('writer')\n\
-```\n\n\
-## Only\n\n\
-```lua\n\
-models.use('writer')\n\
-models.infer('ping')\n\
-models.use('analyst')\n\
-return models.infer('ping')\n\
-```\n";
-    let out = run_with_bindings(
-        md,
-        &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        &gateway,
-        &TestStore::new(),
-    )
-    .await
-    .expect("re-selection within a section must succeed");
-    assert_eq!(out, "second");
+#[test]
+fn models_use_reselection_steers_the_next_round() {
+    let gateway = ScriptedChat::new(vec![text("first"), text("second")]);
+    let source = writer_and_analyst().section(
+        "Only",
+        "
+        models.use('writer')
+        models.infer('ping')
+        models.use('analyst')
+        return models.infer('ping')",
+    );
+    let trace = bound_by_hand(&source).chat(&gateway).run();
+    assert_eq!(
+        trace.text(),
+        "second",
+        "re-selection within a section must succeed"
+    );
     let requests = gateway.requests();
     assert_eq!(
         requests.len(),
@@ -186,27 +147,22 @@ return models.infer('ping')\n\
     );
 }
 
-#[tokio::test]
-async fn models_infer_without_use_or_default_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
-# T\n\n\
-## Only\n\n\
-```lua\nreturn models.infer('ping')\n```\n";
-    let prompt = parse(md);
-    let mut ctx = test_context(EXECUTION);
-    ctx.model_bindings.bind(
-        "analyst",
-        ModelDescriptor::new(
-            ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
-            "A careful analysis model",
-            NonZeroU32::new(131_072).expect("131072 is non-zero"),
-            ThinkingMode::Switchable,
-        ),
-    );
-    let error = match crate::test_support::run_prepared(&prompt, "", ctx, RunFixture::new()).await {
-        RunResult::Failure(error) => error,
-        other => panic!("models.infer with no current model must fail: {other:?}"),
-    };
+/// The prompt declaring only the `analyst` role, with no prompt-wide
+/// default, whose `Only` section runs `lua`.
+fn analyst_only(lua: &str) -> String {
+    PromptSource::new()
+        .front("models: { analyst: {} }")
+        .section("Only", lua)
+        .build()
+}
+
+#[test]
+fn models_infer_without_use_or_default_errors() {
+    let trace = Scenario::new(analyst_only("return models.infer('ping')"))
+        .unprepared()
+        .context(bind_role("analyst", test_model("analyst-model")))
+        .run();
+    let error = trace.error();
     assert!(
         error
             .to_string()
@@ -215,51 +171,32 @@ async fn models_infer_without_use_or_default_errors() {
     );
 }
 
-#[tokio::test]
-async fn a_handles_provider_is_the_catalog_provider_or_nil() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
-# T\n\n\
-## Only\n\n\
-```lua\n\
-return tostring(models.get('writer').provider) .. ':' .. tostring(models.get('analyst').provider)\n\
-```\n";
-    let prompt = parse(md);
-    let mut ctx = test_context(EXECUTION);
-    let descriptor = |model: &str| {
-        ModelDescriptor::new(
-            ModelId::gateway(model).expect("the test model id is valid"),
-            "A test model",
-            NonZeroU32::new(131_072).expect("131072 is non-zero"),
-            ThinkingMode::Switchable,
-        )
-    };
-    ctx.model_bindings
-        .bind("writer", descriptor("writer-model").with_provider("xai"));
-    ctx.model_bindings
-        .bind("analyst", descriptor("analyst-model"));
-    let out = match crate::test_support::run_prepared(&prompt, "", ctx, RunFixture::new()).await {
-        RunResult::Ok(out) => out,
-        other => panic!("reading handle providers must succeed: {other:?}"),
-    };
-    assert_eq!(out, "xai:nil");
+#[test]
+fn a_handles_provider_is_the_catalog_provider_or_nil() {
+    let source = PromptSource::new()
+        .front("models: { writer: {}, analyst: {} }")
+        .section(
+            "Only",
+            "return tostring(models.get('writer').provider) .. ':' .. tostring(models.get('analyst').provider)",
+        );
+    let writer = test_model("writer-model").with_provider("xai");
+    let trace = Scenario::new(source.build())
+        .unprepared()
+        .context(bind_role("writer", writer))
+        .context(bind_role("analyst", test_model("analyst-model")))
+        .run();
+    assert_eq!(trace.text(), "xai:nil");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn models_get_infer_works_without_any_section_model() {
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
-# T\n\n\
-## Only\n\n\
-```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
-    let out = run_with_bindings(
-        md,
-        &[("analyst", "analyst-model")],
-        &gateway,
-        &TestStore::new(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "pong");
+#[test]
+fn models_get_infer_works_without_any_section_model() {
+    let gateway = ScriptedChat::new(vec![text("pong")]);
+    let trace = Scenario::new(analyst_only("return models.get('analyst'):infer('ping')"))
+        .unprepared()
+        .context(bind_role("analyst", test_model("analyst-model")))
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "pong");
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");

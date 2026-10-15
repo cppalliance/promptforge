@@ -1,54 +1,50 @@
 //! One finite pipeline end to end through the unified prompt model: explicit
 //! lazy `prose`, `models.infer`, the Rust-backed `models.loop` with tool
 //! dispatch, `messages.new()` builders, and synchronous `call`, driven
-//! through the public `run` against a scripted gateway at `promptforge: 0`.
+//! through a run against a scripted gateway at `promptforge: 0`.
+
+use promptforge_parser::test_support::PromptSource;
 
 use super::*;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
+#[test]
+fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     let gateway = ScriptedChat::new(vec![
-        resp_text("draft text"),
-        resp_tool_call("call_1", "tools_echo", "{\"value\":\"polish\"}"),
-        resp_text("refined text"),
+        text("draft text"),
+        calls(&[("call_1", "tools_echo", "{\"value\":\"polish\"}")]),
+        text("refined text"),
     ]);
 
-    let source = "---\nname: unified\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Unified\n\n\
-        ```lua\n\
-        models.default('writer')\n\
-        ```\n\n\
-        ## Draft\n\n\
-        Summarize in one word: {{ args }}\n\n\
-        ```lua\n\
-        var.draft = models.infer(prose)\n\
-        ```\n\n\
-        ## Refine\n\n\
-        ```lua\n\
-        tools.offer('tools/echo')\n\
-        local msgs = messages.new()\n\
-        msgs:system('You refine drafts.')\n\
-        msgs:user(var.draft)\n\
-        assert(models.loop(msgs) == nil, 'models.loop returns nil')\n\
-        assert(msgs[#msgs].role == 'assistant', 'the terminal record is the assistant reply')\n\
-        return call('## Deliver', msgs[#msgs].content)\n\
-        ```\n\n\
-        ## Deliver\n\n\
-        ```lua\n\
-        return 'delivered: ' .. args\n\
-        ```\n";
-    let test = bound_with_tools(source);
-    let out = super::run(
-        &test,
-        "quantum",
-        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
-        &TestStore::new(),
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("the unified pipeline must run end to end");
+    let source = with_writer(PromptSource::new().front("plugins: [tools]"))
+        .prose(
+            "Draft",
+            "
+            Summarize in one word: {{ args }}
 
-    assert_eq!(out, "delivered: refined text");
+            ```lua
+            var.draft = models.infer(prose)
+            ```",
+        )
+        .section(
+            "Refine",
+            "
+            tools.offer('tools/echo')
+            local msgs = messages.new()
+            msgs:system('You refine drafts.')
+            msgs:user(var.draft)
+            assert(models.loop(msgs) == nil, 'models.loop returns nil')
+            assert(msgs[#msgs].role == 'assistant', 'the terminal record is the assistant reply')
+            return call('## Deliver', msgs[#msgs].content)",
+        )
+        .section("Deliver", "return 'delivered: ' .. args");
+    let trace = Scenario::new(source.build())
+        .args("quantum")
+        .bound()
+        .tool(echo_tool())
+        .chat(&gateway)
+        .run();
+
+    assert_eq!(trace.text(), "delivered: refined text");
     assert_eq!(
         gateway.call_count(),
         3,

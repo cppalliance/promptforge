@@ -9,7 +9,7 @@ use super::*;
 async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
     // On a current-thread runtime the nested call and both infers complete
     // on the one thread.
-    let gateway = ScriptedChat::new(vec![resp_text("inner answer"), resp_text("outer answer")]);
+    let gateway = ScriptedChat::new(vec![text("inner answer"), text("outer answer")]);
     let md = "---\nname: gate\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
         ## Outer\n\n\
@@ -49,9 +49,9 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
-    let gateway = ScriptedChat::new(vec![resp_delayed_text(
-        "too late",
+    let gateway = ScriptedChat::new(vec![delayed(
         std::time::Duration::from_secs(30),
+        text("too late"),
     )]);
     let md = "---\nname: cancel\ndescription: d\npromptforge: 0\n---\n\n\
         # Cancel\n\n\
@@ -116,7 +116,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     // a section's explicit `models.infer(prose)` reaches that gateway rather
     // than falling back to an environment client; the returned text becomes
     // the run's result.
-    let gateway = ScriptedChat::new(vec![resp_text("prose answer")]);
+    let gateway = ScriptedChat::new(vec![text("prose answer")]);
     let md = "---\nname: prose\ndescription: d\npromptforge: 0\n---\n\n\
         # Prose\n\n\
         ## Only\n\n\

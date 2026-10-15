@@ -13,7 +13,7 @@ use promptforge_parser::test_support::parse_ok;
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
-use super::super::{resp_text, test_context};
+use super::super::{test_context, text};
 
 /// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(
@@ -149,7 +149,7 @@ const DECLARES_NO_THINKING: &str = concat!(
 
 #[test]
 fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
+    let gateway = ScriptedChat::new(vec![text("pong")]);
     let model = current_model(32_000, ThinkingMode::Switchable);
     let trace = under_model(DECLARES_NO_THINKING, "switchable", model)
         .chat(&gateway)

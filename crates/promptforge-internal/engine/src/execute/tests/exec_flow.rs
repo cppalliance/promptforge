@@ -1,116 +1,110 @@
 //! Tests for section walk control flow: `call`, `jump`, `fanout`, the `prompt` reads, and `var`.
 
-use super::run;
-use super::*;
-use promptforge_parser::test_support::synthetic_section;
+use promptforge_parser::test_support::{PromptSource, synthetic_section};
 
-/// The frontmatter every flow test shares, fused into the prompt literal at
-/// compile time so a test states only its sections.
-macro_rules! flow_prompt {
-    ($body:literal) => {
-        concat!(
-            "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
-            $body
-        )
-    };
-}
+use super::*;
 
 /// Alternating lua/prose blocks run in order; each Lua block that wants the
 /// model reads its own pending prose buffer into an explicit infer, and the
 /// run result is the final Lua return.
-#[tokio::test]
-async fn section_with_alternating_blocks_executes_in_order() {
-    let gateway = ScriptedChat::new(vec![resp_text("reply-1"), resp_text("reply-2")]);
-    let md = flow_prompt!(
-        "\
-## Only\n\n\
-```lua\nstore.append('order.txt', 'lua1\\n')\n```\n\n\
-First ask.\n\n\
-```lua\nstore.append('order.txt', 'lua2:' .. models.infer(prose) .. '\\n')\n```\n\n\
-Final ask.\n\n\
-```lua\nstore.append('order.txt', 'lua3\\n')\nreturn models.infer(prose)\n```\n"
-    );
-    let store = TestStore::new();
-    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(&gateway))
-        .await
-        .expect("alternating blocks must execute");
+#[test]
+fn section_with_alternating_blocks_executes_in_order() {
+    let gateway = ScriptedChat::new(vec![text("reply-1"), text("reply-2")]);
+    let source = with_writer(PromptSource::new()).prose(
+        "Only",
+        r"
+        ```lua
+        store.append('order.txt', 'lua1\n')
+        ```
 
-    assert_eq!(out, "reply-2");
+        First ask.
+
+        ```lua
+        store.append('order.txt', 'lua2:' .. models.infer(prose) .. '\n')
+        ```
+
+        Final ask.
+
+        ```lua
+        store.append('order.txt', 'lua3\n')
+        return models.infer(prose)
+        ```",
+    );
+    let trace = Scenario::new(source.build()).bound().chat(&gateway).run();
+
+    assert_eq!(trace.text(), "reply-2");
     assert_eq!(gateway.call_count(), 2);
     assert_eq!(
-        store.read("order.txt").expect("order log"),
+        trace.read("order.txt").expect("order log"),
         "lua1\nlua2:reply-1\nlua3\n"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_runs_named_section_as_subroutine() {
-    let gateway = ScriptedChat::new(vec![resp_text("research-reply")]);
+#[test]
+fn call_runs_named_section_as_subroutine() {
+    let gateway = ScriptedChat::new(vec![text("research-reply")]);
 
     // The subroutine sits after its run-ending caller: a contained chain
     // falls through like any walk, so a subroutine placed before later
     // sections would pull them into the chain.
-    let md = flow_prompt!(
-        "\
-## Main\n\n\
-```lua\n\
-local by_name = call('## Research')\n\
-assert(by_name == 'research-reply')\n\
-assert(store.read('evidence.md') == 'research-reply')\n\
-return by_name\n\
-```\n\n\
-## Research\n\n\
-Research {{ args }}.\n\n\
-```lua\n\
-local answer = models.infer(prose)\n\
-store.write('evidence.md', answer)\n\
-return answer\n\
-```\n"
-    );
-    let store = TestStore::new();
-    let out = run(
-        &bound_for_model(md),
-        "topic",
-        &[],
-        &store,
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("call must run named section as subroutine");
-    assert_eq!(out, "research-reply");
+    let source = with_writer(PromptSource::new())
+        .section(
+            "Main",
+            "
+            local by_name = call('## Research')
+            assert(by_name == 'research-reply')
+            assert(store.read('evidence.md') == 'research-reply')
+            return by_name",
+        )
+        .prose(
+            "Research",
+            "
+            Research {{ args }}.
+
+            ```lua
+            local answer = models.infer(prose)
+            store.write('evidence.md', answer)
+            return answer
+            ```",
+        );
+    let trace = Scenario::new(source.build())
+        .args("topic")
+        .bound()
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "research-reply");
 }
 
 /// The `with_args` fork scopes a call's input over its whole chain:
 /// a no-input `call` nested inside the chain defaults to the chain's
 /// args, not the run's.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn nested_call_without_input_inherits_the_chains_args() {
-    let gateway = ScriptedChat::new(vec![resp_text("inner-reply")]);
-    let md = flow_prompt!(
-        "\
-## Main\n\n\
-```lua\n\
-local r = call('## Sub', 'chain-args')\n\
-assert(r == 'inner-reply')\n\
-return r\n\
-```\n\n\
-## Sub\n\n\
-```lua\nreturn call('## Inner')\n```\n\n\
-## Inner\n\n\
-Args: {{ args }}\n\n\
-```lua\nreturn models.infer(prose)\n```\n"
-    );
-    let store = TestStore::new();
-    let out = run(
-        &bound_for_model(md),
-        "run-args",
-        &[],
-        &store,
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("the nested call must inherit the chain's args");
-    assert_eq!(out, "inner-reply");
+#[test]
+fn nested_call_without_input_inherits_the_chains_args() {
+    let gateway = ScriptedChat::new(vec![text("inner-reply")]);
+    let source = with_writer(PromptSource::new())
+        .section(
+            "Main",
+            "
+            local r = call('## Sub', 'chain-args')
+            assert(r == 'inner-reply')
+            return r",
+        )
+        .section("Sub", "return call('## Inner')")
+        .prose(
+            "Inner",
+            "
+            Args: {{ args }}
+
+            ```lua
+            return models.infer(prose)
+            ```",
+        );
+    let trace = Scenario::new(source.build())
+        .args("run-args")
+        .bound()
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "inner-reply");
     let body = gateway
         .last_request()
         .expect("the inner section's infer must reach the gateway");
@@ -140,41 +134,27 @@ fn duplicate_top_level_section_names_error_loudly() {
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
 }
 
-/// The scaffold the fanout-arm capability tests share: a `## Parent` that
-/// fans `### Worker` out over one `alpha` member and returns the first arm's
-/// text. The worker body and its sibling sections follow.
-const ARM_FANOUT_PARENT: &str = flow_prompt!(
-    "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n"
-);
+/// [`arm_fanout`] under the `writer` role, with a `### Worker` whose Lua is
+/// `worker`.
+fn writer_arm(worker: &str) -> String {
+    with_writer(arm_fanout())
+        .section("### Worker", worker)
+        .build()
+}
+
+/// The worker Lua that asks the model through the `writer` handle.
+const HANDLE_INFER: &str = "return models.get('writer'):infer('ping about ' .. item)";
 
 /// `handle:infer(...)` works inside an arm, so a worker's Lua can call the model
 /// directly.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_model_infer_works_inside_an_arm() {
-    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-return models.get('writer'):infer('ping about ' .. item)\n\
-```\n",
-    ]
-    .concat();
-    let out = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &TestStore::new(),
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("handle infer inside an arm must run");
-    assert_eq!(out, "pong");
+#[test]
+fn fanout_arm_model_infer_works_inside_an_arm() {
+    let gateway = ScriptedChat::new(vec![text("pong")]);
+    let trace = Scenario::new(writer_arm(HANDLE_INFER))
+        .bound()
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "pong");
 
     let body = gateway
         .last_request()
@@ -196,23 +176,13 @@ return models.get('writer'):infer('ping about ' .. item)\n\
 
 /// `handle:infer(...)` inside an arm handed no client surfaces the lazy-creation
 /// error.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
-    // A test driver without a client performs every `Chat` against the disabled
-    // gateway: the round fails with that error and nothing reaches the
-    // network, however the process environment is configured.
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-return models.get('writer'):infer('ping about ' .. item)\n\
-```\n",
-    ]
-    .concat();
-    let error = run(&bound_for_model(&md), "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("handle infer in an arm with no client must surface the disabled gateway");
-    let rendered = error.to_string();
+#[test]
+fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
+    // A scenario without a model answers every `Chat` with the disabled
+    // gateway's failure: the round fails with that error and nothing
+    // reaches the network, however the process environment is configured.
+    let trace = Scenario::new(writer_arm(HANDLE_INFER)).bound().run();
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("model access is turned off or not configured"),
         "an arm's models.infer must surface the disabled-gateway completion error: {rendered}"
@@ -220,20 +190,12 @@ return models.get('writer'):infer('ping about ' .. item)\n\
 }
 
 /// An unknown model alias errors loudly inside an arm, same as on the walk.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-return models.get('ghost'):infer('ping')\n\
-```\n",
-    ]
-    .concat();
-    let error = run(&bound_for_model(&md), "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("an unknown model alias inside an arm must fail loudly");
-    let rendered = error.to_string();
+#[test]
+fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
+    let trace = Scenario::new(writer_arm("return models.get('ghost'):infer('ping')"))
+        .bound()
+        .run();
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("models.get alias \"ghost\" is not a bound model role"),
         "the unknown alias must be named: {rendered}"

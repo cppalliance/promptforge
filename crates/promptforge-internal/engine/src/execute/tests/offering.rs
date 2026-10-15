@@ -176,8 +176,8 @@ fn the_offering_leaves_out_a_name_that_is_reserved_unadvertisable_or_repeated() 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_wire_name() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "tools_echo", r#"{"value":"hi"}"#),
-        resp_text("done"),
+        calls(&[("call_1", "tools_echo", r#"{"value":"hi"}"#)]),
+        text("done"),
     ]);
     let prompt = offering_prompt(
         "",
@@ -284,8 +284,8 @@ fn model_call(id: &str, alias: &str, value: &str) -> EffectRecord {
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its_wire_name() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "tools_echo", r#"{"value":"hi"}"#),
-        resp_text("done"),
+        calls(&[("call_1", "tools_echo", r#"{"value":"hi"}"#)]),
+        text("done"),
     ]);
     let prompt = offering_prompt(
         "plugins:\n  - tools\n",
@@ -313,8 +313,8 @@ async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "gh_search", r#"{"value":"q"}"#),
-        resp_text("done"),
+        calls(&[("call_1", "gh_search", r#"{"value":"q"}"#)]),
+        text("done"),
     ]);
     let prompt = offering_prompt(
         "",

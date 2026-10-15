@@ -329,7 +329,7 @@ async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
 
 #[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
-    let gateway = ScriptedChat::new(vec![resp_text("aliased final")]);
+    let gateway = ScriptedChat::new(vec![text("aliased final")]);
     let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
     let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
@@ -407,7 +407,10 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     use super::models_loop::{echo_tools, loop_context_observed, loop_events, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 
-    let gateway = ScriptedChat::new(echo_then_text_script());
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
+    ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
          local msgs = messages.new()\n\

@@ -144,8 +144,8 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
     // with `blocked == 'queued'` and no section - and its start event
     // fires only once the first child ends and frees the slot.
     let gateway = ScriptedChat::new(vec![
-        resp_delayed_text("slow", Duration::from_millis(200)),
-        resp_text("fast"),
+        delayed(Duration::from_millis(200), text("slow")),
+        text("fast"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\
@@ -263,12 +263,12 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
     // scheduler that admitted fresh starts first would let S2's request
     // reach the gateway before the walker's W1.
     let gateway = ScriptedChat::new(vec![
-        resp_text("S1"),
-        resp_text("W1"),
-        resp_text("S2"),
-        resp_text("W2"),
-        resp_text("S3"),
-        resp_text("W3"),
+        text("S1"),
+        text("W1"),
+        text("S2"),
+        text("W2"),
+        text("S3"),
+        text("W3"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Resume\n\n\
@@ -322,14 +322,14 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
     // admitted only once both of the first have ended - a limit that
     // admitted a third arm early would interleave x:a, y:a, z:a, ...
     let gateway = ScriptedChat::new(vec![
-        resp_text("r1"),
-        resp_text("r2"),
-        resp_text("r3"),
-        resp_text("r4"),
-        resp_text("r5"),
-        resp_text("r6"),
-        resp_text("r7"),
-        resp_text("r8"),
+        text("r1"),
+        text("r2"),
+        text("r3"),
+        text("r4"),
+        text("r5"),
+        text("r6"),
+        text("r7"),
+        text("r8"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\

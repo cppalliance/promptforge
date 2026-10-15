@@ -1,8 +1,39 @@
 //! Fixture tools the execution suites bind and call.
 
 use super::*;
+use crate::test_support::FnTool;
 
 // Wrap/nonce tests live in the untrusted module; these just confirm wiring.
+
+/// The `value` schema both echo tools share.
+fn value_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": { "value": { "type": "string" } },
+        "required": ["value"]
+    })
+}
+
+/// The fixture Plugin's `tools/echo`, which echoes its `value` argument.
+#[track_caller]
+pub(super) fn echo_tool() -> FnTool {
+    FnTool::new("tools/echo", value_schema(), |args| {
+        let value = require_string_arg(&args, "value")?;
+        Ok(ToolOutput::trusted(format!("echoed: {value}")))
+    })
+    .description("Echo the value argument back to the caller.")
+}
+
+/// The fixture Plugin's `tools/untrusted_echo`, which echoes its `value`
+/// argument as untrusted external data, so its output is guard-wrapped.
+#[track_caller]
+pub(super) fn untrusted_echo_tool() -> FnTool {
+    FnTool::new("tools/untrusted_echo", value_schema(), |args| {
+        let value = require_string_arg(&args, "value")?;
+        Ok(ToolOutput::untrusted(format!("echoed: {value}")))
+    })
+    .description("Echo the value argument back as untrusted external data.")
+}
 
 /// A trivial tool that echoes back the `value` argument it is given.
 pub(super) struct EchoTool;

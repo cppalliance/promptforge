@@ -148,8 +148,8 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
     // needs `tools.offer_local` and `models.loop` in H1, both section-only
     // before the one-install-path consolidation.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "decide", "{\"choice\":\"use_mcp\"}"),
-        resp_text("decided"),
+        calls(&[("call_1", "decide", "{\"choice\":\"use_mcp\"}")]),
+        text("decided"),
     ]);
     let md = "---\nname: h1-decision\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Decide\n\n\

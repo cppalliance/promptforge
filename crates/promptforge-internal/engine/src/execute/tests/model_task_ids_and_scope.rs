@@ -26,11 +26,11 @@ use crate::test_support::tokio_driver::TokioDriver;
 /// model-origin starts, and the order in which the tasks succeeded.
 async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, Vec<TaskId>) {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## A\"}"),
-        resp_tool_call("call_2", "task", "{\"target\":\"## B\"}"),
-        resp_tool_call("call_3", "await_tasks", "{}"),
-        resp_tool_call("call_4", "await_tasks", "{}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## A\"}")]),
+        calls(&[("call_2", "task", "{\"target\":\"## B\"}")]),
+        calls(&[("call_3", "await_tasks", "{}")]),
+        calls(&[("call_4", "await_tasks", "{}")]),
+        text("bye"),
     ]);
     let md = two_child_prompt(
         &loop_owner(
@@ -104,11 +104,11 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
     // the round as `out_of_scope_tool` naming the call, under one failed
     // tool-call observation, before the built-in arm can start anything.
     // The loop raises at the call site with nothing appended.
-    let gateway = ScriptedChat::new(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "task",
         "{\"target\":\"## Child\"}",
-    )]);
+    )])]);
     let md = owner_prompt(
         "",
         "local msgs = messages.new()\n\

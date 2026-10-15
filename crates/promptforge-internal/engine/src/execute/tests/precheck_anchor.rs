@@ -115,7 +115,7 @@ async fn a_round_with_no_reported_usage_leaves_the_second_round_on_the_estimate(
     // The same conversation as the admitted case, but the first reply
     // reports no usage, so nothing anchors the second request and its full
     // estimate refuses it.
-    let (out, gateway) = run_rounds(&two_rounds(11_000, 4000), vec![resp_text("ok")]).await;
+    let (out, gateway) = run_rounds(&two_rounds(11_000, 4000), vec![text("ok")]).await;
     assert_eq!(out, "context_exhausted:precheck");
     assert_eq!(gateway.call_count(), 1, "only the first round ran");
 }
@@ -127,10 +127,7 @@ async fn reported_reasoning_tokens_come_off_the_anchor() {
     // count is 4016, which fits. Counting the reasoning would give 4816.
     let (out, gateway) = run_rounds(
         &two_rounds(5, 400),
-        vec![
-            reply_with_usage("ok", 3000, 1200, Some(800)),
-            resp_text("done"),
-        ],
+        vec![reply_with_usage("ok", 3000, 1200, Some(800)), text("done")],
     )
     .await;
     assert_eq!(out, "sent");
@@ -240,7 +237,7 @@ async fn a_model_switch_leaves_the_second_round_on_the_estimate() {
          return err.kind .. ':' .. err.reason";
     let (out, gateway) = run_rounds(
         section,
-        vec![reply_with_usage("ok", 3400, 100, None), resp_text("done")],
+        vec![reply_with_usage("ok", 3400, 100, None), text("done")],
     )
     .await;
     assert_eq!(out, "sent");
@@ -318,7 +315,7 @@ async fn a_return_to_the_first_model_uses_the_estimate() {
         vec![
             reply_with_usage("ok", 3400, 100, None),
             reply_with_usage("again", 3400, 100, None),
-            resp_text("done"),
+            text("done"),
         ],
     )
     .await;
@@ -333,7 +330,7 @@ async fn a_return_to_the_first_model_uses_the_estimate() {
 /// Runs `lua` on a binding that sets `max_tokens`, over the 4096-token
 /// window.
 async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedChat) {
-    let gateway = ScriptedChat::new(vec![resp_text("ok")]);
+    let gateway = ScriptedChat::new(vec![text("ok")]);
     let prompt = parse(&loop_prompt(lua));
     let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
     {
@@ -384,7 +381,7 @@ async fn a_bindings_max_tokens_is_the_room_kept_for_the_reply() {
         "the precheck refuses before dispatch"
     );
 
-    let (out, _gateway) = run_rounds(&one_round(12_400), vec![resp_text("ok")]).await;
+    let (out, _gateway) = run_rounds(&one_round(12_400), vec![text("ok")]).await;
     assert_eq!(out, "sent", "the default reserve admits the longer request");
 }
 

@@ -150,9 +150,9 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     // dispatch took the notice queue, so the notice misses round 2 and
     // lands in round 3 as one user record.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -205,9 +205,9 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "await_tasks", "{}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "await_tasks", "{}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -248,10 +248,10 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_times_out_naming_the_tasks_still_running() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_3", "await_tasks", "{\"timeout\":0.1}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_3", "await_tasks", "{\"timeout\":0.1}")]),
+        text("bye"),
     ]);
     let md = owner_prompt("", &loop_owner("return msgs[7].content"), PARKED_CHILD);
     let prompt = parse(&md);
@@ -271,10 +271,10 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "await_tasks", "{}"),
-        resp_tool_call("call_2", "await_tasks", "{\"timeout\":0.05}"),
-        resp_tool_call("call_3", "await_tasks", "{\"timeout\":\"soon\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "await_tasks", "{}")]),
+        calls(&[("call_2", "await_tasks", "{\"timeout\":0.05}")]),
+        calls(&[("call_3", "await_tasks", "{\"timeout\":\"soon\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -306,9 +306,9 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
     // `await_tasks` within a few ms, so the sibling's log lands after the
     // round that answered `await_tasks` and before the child's end.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "await_tasks", "{}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "await_tasks", "{}")]),
+        text("bye"),
     ]);
     let md = "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
               # ModelTasks\n\n\

@@ -44,7 +44,7 @@ fn failing_echo_tools() -> FixtureTools {
 /// duplicate before the cap could fire.
 fn never_converging_script(rounds: usize) -> Vec<ScriptedReply> {
     (0..rounds)
-        .map(|round| resp_tool_call(&format!("call_{round}"), "echo", "{\"value\":\"x\"}"))
+        .map(|round| calls(&[(&format!("call_{round}"), "echo", "{\"value\":\"x\"}")]))
         .collect()
 }
 
@@ -143,7 +143,10 @@ fn run_resolves_cap_from_frontmatter_else_default() {
 async fn tool_loop_dispatches_then_returns_text() {
     // One tool-call round and one text round: the terminal text is the
     // list's last record and the run's turn counter advanced twice.
-    let gateway = ScriptedChat::new(echo_then_text_script());
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
+    ]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
     )));
@@ -166,8 +169,8 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     // message, nonce-wrapped as untrusted - with TOOL_CALL_FAILED firing
     // alongside it, and the loop continues to the terminal reply.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
-        resp_text("final answer"),
+        calls(&[("call_x", "echo", "{\"value\":\"x\"}")]),
+        text("final answer"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/failing')\n\
@@ -248,7 +251,7 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
-    let gateway = ScriptedChat::new(vec![resp_failure(
+    let gateway = ScriptedChat::new(vec![fail(
         CompletionErrorKind::ServerError,
         500,
         "private backend response",
@@ -291,7 +294,7 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
     // Same status class as a provider overflow, unrelated body: not context
     // overflow, so the bare rejection propagates and no compactor is
     // invoked.
-    let gateway = ScriptedChat::new(vec![resp_failure(
+    let gateway = ScriptedChat::new(vec![fail(
         CompletionErrorKind::Rejected,
         400,
         "invalid request: unknown field",
@@ -313,7 +316,10 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
-    let gateway = ScriptedChat::new(echo_then_text_script());
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
+    ]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
     )));
@@ -345,9 +351,9 @@ async fn untrusted_nonce_is_stable_across_rounds() {
     // stamped with the same nonce, so identical content wraps
     // byte-identically and KV-cache prefixes stay shared across rounds.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_0", "echo", "{\"value\":\"hi\"}"),
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
+        calls(&[("call_0", "echo", "{\"value\":\"hi\"}")]),
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
     ]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
@@ -372,7 +378,10 @@ async fn untrusted_nonce_is_stable_across_rounds() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
-    let gateway = ScriptedChat::new(echo_then_text_script());
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
+    ]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
     )));
@@ -398,7 +407,10 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 async fn cancel_during_in_flight_tool_call_returns_promptly() {
     use std::time::{Duration, Instant};
 
-    let gateway = ScriptedChat::new(echo_then_text_script());
+    let gateway = ScriptedChat::new(vec![
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("final answer"),
+    ]);
     let prompt = parse(&loop_prompt(&format!(
         "tools.offer('test/tools/slow')\n{LOOP_TO_TEXT}"
     )));

@@ -139,17 +139,6 @@ impl Observer for TurnRecorder {
     }
 }
 
-/// A response requesting every `(id, name, arguments)` call in one batch.
-fn resp_batch(calls: &[(&str, &str, &str)]) -> ScriptedReply {
-    ScriptedReply::ToolCalls {
-        model: MOCK_MODEL.to_owned(),
-        calls: calls
-            .iter()
-            .map(|(id, name, arguments)| scripted_call(id, name, arguments))
-            .collect(),
-    }
-}
-
 /// The block every test here runs: registers `grab` with `handler` as its
 /// body, then one loop over a single user message, returning the final
 /// record's text. `setup` runs first.
@@ -197,12 +186,12 @@ async fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
         &loop_prompt(&grab_block(OFFER_ECHO, INFER_HANDLER)),
         echo_tools(),
         vec![
-            resp_batch(&[
+            calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
                 ("c2", "echo", "{\"value\":\"b\"}"),
             ]),
-            resp_text("inner reply"),
-            resp_text("final answer"),
+            text("inner reply"),
+            text("final answer"),
         ],
     )
     .await;
@@ -237,13 +226,13 @@ async fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_tur
         &loop_prompt(&grab_block(OFFER_ECHO, handler)),
         echo_tools(),
         vec![
-            resp_batch(&[
+            calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
                 ("c2", "echo", "{\"value\":\"b\"}"),
             ]),
-            resp_tool_call("i1", "echo", "{\"value\":\"x\"}"),
-            resp_text("inner done"),
-            resp_text("final answer"),
+            calls(&[("i1", "echo", "{\"value\":\"x\"}")]),
+            text("inner done"),
+            text("final answer"),
         ],
     )
     .await;
@@ -276,12 +265,12 @@ async fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_
         &md,
         echo_tools(),
         vec![
-            resp_batch(&[
+            calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
                 ("c2", "echo", "{\"value\":\"b\"}"),
             ]),
-            resp_text("helper reply"),
-            resp_text("final answer"),
+            text("helper reply"),
+            text("final answer"),
         ],
     )
     .await;
@@ -307,12 +296,12 @@ async fn a_later_task_status_answer_reports_the_batch_turn() {
         &loop_prompt(&grab_block("tools.allow_tasks()\n", INFER_HANDLER)),
         ToolSet::default(),
         vec![
-            resp_batch(&[
+            calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
                 ("c2", "task_status", "{\"id\":\"0.0\"}"),
             ]),
-            resp_text("inner reply"),
-            resp_text("final answer"),
+            text("inner reply"),
+            text("final answer"),
         ],
     )
     .await;
@@ -333,12 +322,12 @@ async fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() 
         &loop_prompt(&grab_block("tools.allow_tasks()\n", INFER_HANDLER)),
         ToolSet::default(),
         vec![
-            resp_batch(&[
+            calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
                 ("c2", "await_tasks", "{\"timeout\":0.01}"),
             ]),
-            resp_text("inner reply"),
-            resp_text("final answer"),
+            text("inner reply"),
+            text("final answer"),
         ],
     )
     .await;

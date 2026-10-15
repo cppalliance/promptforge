@@ -62,7 +62,7 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
 
 #[tokio::test(flavor = "current_thread")]
 async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
-    let gateway = ScriptedChat::new(vec![resp_text("answer")]);
+    let gateway = ScriptedChat::new(vec![text("answer")]);
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
@@ -92,8 +92,8 @@ async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per_call() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", r#"{"value":"hi"}"#),
-        resp_text("done"),
+        calls(&[("call_1", "echo", r#"{"value":"hi"}"#)]),
+        text("done"),
     ]);
     let prompt = parse(&loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -281,7 +281,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
-    let gateway = ScriptedChat::new(vec![resp_text("answer")]);
+    let gateway = ScriptedChat::new(vec![text("answer")]);
     let prompt = parse(&loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -305,7 +305,7 @@ async fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_nested_infer_round_is_the_runs_first_with_the_infer_origin() {
-    let gateway = ScriptedChat::new(vec![resp_text("answer")]);
+    let gateway = ScriptedChat::new(vec![text("answer")]);
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let (ctx, fixture) = effect_context(&prompt, ToolSet::default(), RunFixture::new());
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));

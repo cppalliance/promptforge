@@ -12,7 +12,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -43,7 +43,7 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_raises_context_exhaustion_at_the_call_site() {
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -66,7 +66,7 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
-    let gateway = ScriptedChat::new(vec![resp_failure(
+    let gateway = ScriptedChat::new(vec![fail(
         crate::model::CompletionErrorKind::ContextOverflow,
         400,
         "This model's maximum context length is 4096 tokens.",
@@ -102,7 +102,7 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     // a float "number", anything else its Lua type name. No round runs.
     // Each value is passed to `models.loop` and to a handle's `loop`;
     // both entries reach the compactor check.
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -189,7 +189,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
 async fn cancel_during_a_looping_compactor_returns_promptly() {
     use std::time::{Duration, Instant};
 
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\

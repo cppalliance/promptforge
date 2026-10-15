@@ -196,11 +196,8 @@ async fn drive_loop(
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_text_reply_is_the_loops_terminal_record() {
-    let (out, events, turns) = drive_loop(
-        vec![resp_text_finish("all done", "stop")],
-        ToolSet::default(),
-    )
-    .await;
+    let (out, events, turns) =
+        drive_loop(vec![text_finish("all done", "stop")], ToolSet::default()).await;
     assert_eq!(out.expect("a text reply ends the loop"), "2|all done");
     assert_eq!(turns, 1);
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
@@ -209,7 +206,7 @@ async fn a_text_reply_is_the_loops_terminal_record() {
 #[tokio::test(flavor = "current_thread")]
 async fn length_finish_reason_reports_model_turn_truncated() {
     let (out, events, turns) = drive_loop(
-        vec![resp_text_finish("partial answer", "length")],
+        vec![text_finish("partial answer", "length")],
         ToolSet::default(),
     )
     .await;
@@ -234,8 +231,8 @@ async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
     // record as the terminal text.
     let (out, events, turns) = drive_loop(
         vec![
-            resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-            resp_text_finish("", "stop"),
+            calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+            text_finish("", "stop"),
         ],
         echo_tools(),
     )
@@ -263,7 +260,7 @@ async fn empty_stop_turn_without_tool_calls_fails() {
     // completed - the scheduler counts and reports it - and the shim's exit
     // rule raises against its finish reason.
     for tools in [FixtureTools::default(), echo_tools()] {
-        let (out, events, turns) = drive_loop(vec![resp_text_finish("", "stop")], tools).await;
+        let (out, events, turns) = drive_loop(vec![text_finish("", "stop")], tools).await;
         match out {
             Err(Error::Completion(error)) => {
                 assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
@@ -286,8 +283,7 @@ async fn empty_truncated_final_text_fails_without_truncation_detail() {
     // `finish_reason: "length"` is never a clean exit, even with empty text,
     // and an empty round reports no truncation: there is no reply to have
     // truncated.
-    let (out, events, _) =
-        drive_loop(vec![resp_text_finish("", "length")], ToolSet::default()).await;
+    let (out, events, _) = drive_loop(vec![text_finish("", "length")], ToolSet::default()).await;
     match out {
         Err(Error::Completion(error)) => {
             assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
@@ -303,10 +299,7 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
     // Fail closed: a missing finish reason is not "stop", so the empty turn
     // is an error even after a successful dispatch.
     let (out, events, turns) = drive_loop(
-        vec![
-            resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-            resp_text(""),
-        ],
+        vec![calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]), text("")],
         echo_tools(),
     )
     .await;
@@ -333,7 +326,7 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     // The raise is pcall-able as the `empty_model_reply` kind holding the
     // finish reason as its field and the client's phrase as its message,
     // and the rejected round leaves the author's list untouched.
-    let gateway = ScriptedChat::new(vec![resp_text_finish("", "stop")]);
+    let gateway = ScriptedChat::new(vec![text_finish("", "stop")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('say nothing')\n\

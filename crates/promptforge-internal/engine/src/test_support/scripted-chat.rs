@@ -6,7 +6,9 @@
 //! suite asserts on the effect rather than on a request body. The answers
 //! follow the rules the gateway client's reader applies: an empty reply is
 //! the reader's `EmptyReply` failure, and a reply past the run's timeout is
-//! the client's `Timeout` failure.
+//! the client's `Timeout` failure. The reply constructors beside it -
+//! [`text`], [`text_finish`], [`calls`], [`fail`], and [`delayed`] - write
+//! the script.
 //!
 //! This file names only external crates so the bench target can include
 //! it by `#[path]` beside the in-crate suites; it is not part of the
@@ -27,6 +29,70 @@ use serde_json::Value;
 /// The specific the reader adds to an empty reply whose reasoning it
 /// ignored as answer text.
 const REASONING_IGNORED: &str = "reasoning content was present but ignored";
+
+/// The model every scripted reply names as its server.
+pub(crate) const MOCK_MODEL: &str = "mock-model";
+
+/// A text reply naming [`MOCK_MODEL`], with no finish reason, reasoning,
+/// or metrics.
+pub(crate) fn text(content: &str) -> ScriptedReply {
+    mock_text(content, None)
+}
+
+/// A text reply naming [`MOCK_MODEL`] that the backend stopped with
+/// `finish_reason`.
+pub(crate) fn text_finish(content: &str, finish_reason: &str) -> ScriptedReply {
+    mock_text(content, Some(finish_reason))
+}
+
+/// A text reply naming [`MOCK_MODEL`], with no reasoning or metrics.
+fn mock_text(content: &str, finish_reason: Option<&str>) -> ScriptedReply {
+    ScriptedReply::Text {
+        model: MOCK_MODEL.to_owned(),
+        content: content.to_owned(),
+        finish_reason: finish_reason.map(str::to_owned),
+        reasoning: None,
+        metrics: None,
+    }
+}
+
+/// A tool-call batch naming [`MOCK_MODEL`]: each call's id, wire name, and
+/// JSON-encoded arguments, in batch order.
+///
+/// # Panics
+/// When a call's arguments are not JSON.
+#[track_caller]
+pub(crate) fn calls(calls: &[(&str, &str, &str)]) -> ScriptedReply {
+    let calls = calls
+        .iter()
+        .map(|&(id, name, arguments)| {
+            let arguments = serde_json::from_str(arguments)
+                .unwrap_or_else(|error| panic!("call {id} arguments {arguments:?}: {error}"));
+            (id.to_owned(), name.to_owned(), arguments)
+        })
+        .collect();
+    ScriptedReply::ToolCalls {
+        model: MOCK_MODEL.to_owned(),
+        calls,
+    }
+}
+
+/// A failed round of `kind`, as the gateway client reports a non-success
+/// `status` with `body`: the kind's phrase with the status appended, and
+/// the body as the detail.
+pub(crate) fn fail(kind: CompletionErrorKind, status: u16, body: &str) -> ScriptedReply {
+    ScriptedReply::Failure {
+        kind,
+        message: format!("{} (status {status})", kind.phrase()),
+        detail: Some(body.to_owned()),
+        finish_reason: None,
+    }
+}
+
+/// `reply`, answered after `delay`, which the run's timeout bounds.
+pub(crate) fn delayed(delay: Duration, reply: ScriptedReply) -> ScriptedReply {
+    ScriptedReply::Delayed(delay, Box::new(reply))
+}
 
 /// One scripted answer to a round.
 #[derive(Clone, Debug)]
@@ -76,8 +142,9 @@ impl ScriptedReply {
         }
     }
 
-    /// Answers a round with this reply.
-    fn answer(&self) -> Result<Completion, CompletionError> {
+    /// Answers a round with this reply, ignoring its delay: the answer
+    /// [`ScriptedChat::complete_now`] gives a round within the timeout.
+    pub(crate) fn answer(&self) -> Result<Completion, CompletionError> {
         match self {
             ScriptedReply::Text {
                 model,

@@ -6,7 +6,7 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_research_person_shape_returns_the_last_reply() {
-    let gateway = ScriptedChat::new(vec![resp_text("a factual summary")]);
+    let gateway = ScriptedChat::new(vec![text("a factual summary")]);
     let md = "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n\
         # Loop\n\n\
         ## Research\n\n\
@@ -36,7 +36,7 @@ async fn the_research_person_shape_returns_the_last_reply() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_chat_agent_shape_completes_both_turns() {
-    let gateway = ScriptedChat::new(vec![resp_text("first reply"), resp_text("second reply")]);
+    let gateway = ScriptedChat::new(vec![text("first reply"), text("second reply")]);
     let md = loop_prompt(
         "local history = messages.new()\n\
          for _, text in ipairs({ 'first question', 'second question' }) do\n\

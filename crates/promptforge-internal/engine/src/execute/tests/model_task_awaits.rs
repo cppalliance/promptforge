@@ -23,10 +23,10 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     // 0.2, never exists) and the run does not wait on `Parked` or the
     // timeout.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Parked\"}"),
-        resp_tool_call("call_2", "task", "{\"target\":\"## Quick\"}"),
-        resp_tool_call("call_3", "await_tasks", "{\"timeout\":30}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Parked\"}")]),
+        calls(&[("call_2", "task", "{\"target\":\"## Quick\"}")]),
+        calls(&[("call_3", "await_tasks", "{\"timeout\":30}")]),
+        text("bye"),
     ]);
     let md = format!(
         "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
@@ -81,9 +81,9 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     // `Abandoned` (still running at the owner's end), and the transcript
     // shows one wake.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "await_tasks", "{\"timeout\":1}"),
-        resp_delayed_text("bye", Duration::from_millis(1200)),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "await_tasks", "{\"timeout\":1}")]),
+        delayed(Duration::from_millis(1200), text("bye")),
     ]);
     let md = owner_prompt(
         "",

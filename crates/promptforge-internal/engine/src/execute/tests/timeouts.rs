@@ -22,7 +22,7 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
     // The child parks on a slow model round; a 50ms wait times out and
     // returns nil, the child is still running, and a second untimed wait
     // delivers it - so nothing leaks at chain end.
-    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
+    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local first, ok, result = tasks.join_any({ t }, { timeout = 0.05 })\n\
@@ -114,7 +114,7 @@ async fn join_returns_timed_out_with_the_unfinished_members_absent() {
     // `join` returns Quick's entry, no entry for Slow, and
     // `timed_out = true`; Slow keeps running and a second untimed
     // `join` delivers it with `timed_out = false`.
-    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
+    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
     let md = tasks_prompt(
         "local q = tasks.spawn('## Quick')\n\
          local s = tasks.spawn('## Slow')\n\
@@ -191,7 +191,7 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
     // the child's status mid-wait and sees one owned task (the grandchild),
     // never the timer; the child's own `pending` mid-wait cannot be read,
     // so the parent's view is the proof.
-    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
+    let gateway = ScriptedChat::new(vec![delayed(SLOW, text("slow answer"))]);
     let md = tasks_prompt(
         "local c = tasks.spawn('## Child')\n\
          store.write('park', 'x')\n\

@@ -41,10 +41,10 @@ fn thinking(result: CompletionResult, thought: &str) -> EffectAnswer {
 #[tokio::test(flavor = "current_thread")]
 async fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_rounds() {
     let gateway = ScriptedChat::new(vec![
-        resp_text("a"),
-        resp_tool_call("call_1", "echo", r#"{"value":"hi"}"#),
-        resp_text("b"),
-        resp_text("c"),
+        text("a"),
+        calls(&[("call_1", "echo", r#"{"value":"hi"}"#)]),
+        text("b"),
+        text("c"),
     ]);
     let prompt = parse(&loop_prompt(&format!(
         "{INFER_THEN_LOOP} .. '|' .. models.infer('third')"

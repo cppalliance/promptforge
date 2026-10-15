@@ -164,11 +164,7 @@ async fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
     for result in &serial_results_limited(&prompt, &store, ceiling_eight()) {
         assert_eq!(ok_text(result), expected);
     }
-    let gateway = ScriptedChat::new(
-        (1..=10)
-            .map(|i| resp_text(&format!("r{i}")))
-            .collect::<Vec<_>>(),
-    );
+    let gateway = ScriptedChat::new((1..=10).map(|i| text(&format!("r{i}"))).collect::<Vec<_>>());
     for result in &tokio_results_limited(&prompt, &store, ceiling_eight(), || {
         Some(gateway_client(&gateway))
     })

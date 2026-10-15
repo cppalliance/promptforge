@@ -11,7 +11,7 @@ use super::super::models_loop::{bound_tool, echo_tools, loop_events};
 use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
-use crate::test_support::scenario::{text_of, tool_call_reply};
+use crate::test_support::scenario::{chat_answer, text_of};
 
 /// Records every observation and every content report as one line, in
 /// order, so a test reads the whole trace a run reports.
@@ -134,8 +134,8 @@ fn only_effect(step: Step) -> (EffectId, Effect) {
 #[tokio::test(flavor = "current_thread")]
 async fn a_failing_bound_tool_counts_toward_the_clean_exit() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "fail", "{}"),
-        resp_text_finish("", "stop"),
+        calls(&[("call_1", "fail", "{}")]),
+        text_finish("", "stop"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/failing')\n\
@@ -169,9 +169,9 @@ async fn a_failing_bound_tool_counts_toward_the_clean_exit() {
 #[tokio::test(flavor = "current_thread")]
 async fn the_clean_exit_counts_only_the_calls_of_its_own_loop_call() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text("done"),
-        resp_text_finish("", "stop"),
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("done"),
+        text_finish("", "stop"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -194,11 +194,10 @@ async fn a_handler_raising_mid_batch_leaves_the_list_untouched_and_raises_its_ow
     // The second call's handler raises its own table: the batch never
     // lands, the call reports a failed tool call with no `ToolResult`, and
     // the very table the handler raised reaches the loop's caller.
-    let gateway = ScriptedChat::new(vec![resp_two_tool_calls(
-        "grab",
-        ("c1", "{\"value\":\"a\"}"),
-        ("c2", "{\"value\":\"b\"}"),
-    )]);
+    let gateway = ScriptedChat::new(vec![calls(&[
+        ("c1", "grab", "{\"value\":\"a\"}"),
+        ("c2", "grab", "{\"value\":\"b\"}"),
+    ])]);
     let md = loop_prompt(
         "local own = { reason = 'mine' }\n\
          local count = 0\n\
@@ -255,7 +254,7 @@ fn a_dropped_model_issued_call_raises_cancelled_at_the_loop_call_site() {
     );
     run.resume(
         round,
-        tool_call_reply("call_1", "echo", json!({ "value": "x" })),
+        chat_answer(&calls(&[("call_1", "echo", r#"{"value":"x"}"#)])),
     );
     let (call, effect) = only_effect(run.step());
     assert!(
@@ -272,15 +271,12 @@ fn a_dropped_model_issued_call_raises_cancelled_at_the_loop_call_site() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_local_tools_first_return_value_is_its_text_and_nil_is_empty() {
     let gateway = ScriptedChat::new(vec![
-        ScriptedReply::ToolCalls {
-            model: MOCK_MODEL.to_owned(),
-            calls: vec![
-                scripted_call("c1", "none", "{}"),
-                scripted_call("c2", "num", "{}"),
-                scripted_call("c3", "two", "{}"),
-            ],
-        },
-        resp_text("done"),
+        calls(&[
+            ("c1", "none", "{}"),
+            ("c2", "num", "{}"),
+            ("c3", "two", "{}"),
+        ]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer_local('none', 'Returns nothing', {}, function() end)\n\
@@ -302,8 +298,8 @@ async fn a_local_tool_cancelled_mid_handler_reports_no_failed_tool_call() {
     use std::time::Duration;
 
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let md = loop_prompt(
         "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
@@ -342,9 +338,9 @@ async fn a_local_tool_cancelled_mid_handler_reports_no_failed_tool_call() {
 #[tokio::test(flavor = "current_thread")]
 async fn the_scheduler_reports_the_whole_trace_of_a_bound_round_a_local_round_and_a_reply() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"a\"}"),
-        resp_tool_call("call_2", "grab", "{\"value\":\"b\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "echo", "{\"value\":\"a\"}")]),
+        calls(&[("call_2", "grab", "{\"value\":\"b\"}")]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\

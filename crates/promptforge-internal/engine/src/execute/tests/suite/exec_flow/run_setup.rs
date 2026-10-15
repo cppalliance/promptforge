@@ -3,8 +3,7 @@
 
 use std::sync::Arc;
 
-use super::super::super::test_context;
-use super::super::echo_tool;
+use super::super::super::{echo_tool, test_context};
 use super::*;
 
 use crate::RunErrorKind;

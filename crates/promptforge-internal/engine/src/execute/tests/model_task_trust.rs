@@ -12,7 +12,7 @@ use super::model_task_notices::loop_owner;
 use super::model_tasks::owner_prompt;
 use super::serial_driver::drive_scripted;
 use super::*;
-use crate::test_support::scenario::{text_of, text_reply, tool_call_reply};
+use crate::test_support::scenario::{chat_answer, text_of};
 
 /// The run nonce every test here wraps under: the fixed test seed's.
 fn run_nonce() -> GuardNonce {
@@ -80,9 +80,9 @@ fn a_finished_tasks_result_reaches_the_model_only_inside_the_runs_envelope() {
     let (result, events) = drive_scripted(
         &owner_prompt("", &loop_owner(FIRST_NOTICE), "return 'child result'"),
         vec![
-            tool_call_reply("call_1", "task", json!({ "target": "## Child" })),
-            tool_call_reply("call_2", "task_status", json!({ "id": "0.0" })),
-            text_reply("bye"),
+            chat_answer(&calls(&[("call_1", "task", "{\"target\":\"## Child\"}")])),
+            chat_answer(&calls(&[("call_2", "task_status", r#"{"id":"0.0"}"#)])),
+            chat_answer(&text("bye")),
         ],
     );
     let text = text_of(result);
@@ -110,9 +110,9 @@ fn await_tasks_hands_the_model_the_same_enveloped_result() {
     let (result, events) = drive_scripted(
         &owner_prompt("", &loop_owner(CALL_2_ANSWER), "return 'child result'"),
         vec![
-            tool_call_reply("call_1", "task", json!({ "target": "## Child" })),
-            tool_call_reply("call_2", "await_tasks", json!({})),
-            text_reply("bye"),
+            chat_answer(&calls(&[("call_1", "task", "{\"target\":\"## Child\"}")])),
+            chat_answer(&calls(&[("call_2", "await_tasks", "{}")])),
+            chat_answer(&text("bye")),
         ],
     );
     let text = text_of(result);
@@ -139,9 +139,9 @@ fn a_task_result_forging_the_close_tag_is_neutralized_inside_the_envelope() {
     let (result, _) = drive_scripted(
         &owner_prompt("", &loop_owner(FIRST_NOTICE), &child),
         vec![
-            tool_call_reply("call_1", "task", json!({ "target": "## Child" })),
-            tool_call_reply("call_2", "task_status", json!({ "id": "0.0" })),
-            text_reply("bye"),
+            chat_answer(&calls(&[("call_1", "task", "{\"target\":\"## Child\"}")])),
+            chat_answer(&calls(&[("call_2", "task_status", r#"{"id":"0.0"}"#)])),
+            chat_answer(&text("bye")),
         ],
     );
     let text = text_of(result);

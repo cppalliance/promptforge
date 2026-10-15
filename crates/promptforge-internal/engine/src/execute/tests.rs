@@ -16,7 +16,10 @@ use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
-use crate::test_support::scripted_chat::{ScriptedCall, ScriptedChat, ScriptedReply};
+use crate::test_support::scenario::Scenario;
+use crate::test_support::scripted_chat::{
+    MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
+};
 use crate::test_support::tokio_driver::TokioDriver;
 use crate::test_support::{RunFixture, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
@@ -64,26 +67,26 @@ impl TestTool for SlowTool {
     }
 }
 
-#[tokio::test]
-async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
+#[test]
+fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
     use crate::cancel::CancelHandle;
+    use promptforge_parser::test_support::prompt;
 
     // The explicit-cancel wiring of the public entry point: a handle passed
     // through `RunContext::cancel` is installed around the whole run body, so
-    // the section's Lua instruction hook observes it and the run maps the
-    // interruption to `RunErrorKind::Cancelled`.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
+    // the section's Lua instruction hook observes it and the run ends
+    // cancelled.
+    let source = prompt("", &[("Loop", "local n = 0\nwhile true do n = n + 1 end")]);
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_context(&fixture(md), |ctx, fixture| (ctx.cancel(handle), fixture))
-        .await
-        .expect_err("a pre-cancelled handle must fail the run");
+    let trace = Scenario::new(source)
+        .context(move |ctx| ctx.cancel(handle))
+        .run();
     assert!(
-        matches!(error.kind(), RunErrorKind::Cancelled),
-        "expected RunErrorKind::Cancelled, got {error:?}"
+        matches!(trace.result(), RunResult::Cancelled),
+        "a pre-cancelled handle must end the run cancelled, got {:?}",
+        trace.result()
     );
-    assert!(error.is_cancelled());
 }
 
 // --- Guard-wrapping of untrusted tool results in the loop ---
@@ -125,32 +128,27 @@ fn tool_turn_nonces(bodies: &[ScriptedCall]) -> Vec<String> {
         .collect()
 }
 
-#[tokio::test]
-async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
+#[test]
+fn untrusted_nonce_differs_across_runs_under_different_seeds() {
+    use promptforge_parser::test_support::PromptSource;
+
     // The nonce is the run seed's: two runs of the same prompt under
     // different caller-drawn seeds wrap the same untrusted tool result under
     // different nonces, so an envelope's tag stays unguessable from one run
     // to the next as long as the caller draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('tools/untrusted_echo', { value = 'hi' })\n```\n\n\
-        ## setup\n\n```lua\nmodels.default('writer')\n```\n";
-    let test = bound_with_tools(md);
+    let source = setup_prompt(PromptSource::new().front("plugins: [tools]").section(
+        "Only",
+        "return tools.call('tools/untrusted_echo', { value = 'hi' })",
+    ));
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {
-        let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
-        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT).tools(catalog);
-        let fixture = RunFixture::new().tools(table);
-        if let Some(model) = test.models.models().first() {
-            ctx = ctx.model(model.clone());
-        }
-        let out = match crate::test_support::run_with_fixture(&test.prompt, "", ctx, fixture).await
-        {
-            RunResult::Ok(out) => out,
-            other => panic!("the echo run succeeds: {other:?}"),
-        };
+        let trace = Scenario::new(&source)
+            .seed(seed)
+            .bound()
+            .tool(untrusted_echo_tool())
+            .run();
+        let out = trace.text();
         let marker = "<untrusted_input_";
         let start = out.find(marker).expect("the result is guard-wrapped") + marker.len();
         let end = out[start..]

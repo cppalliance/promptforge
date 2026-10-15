@@ -62,7 +62,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
     // An H1-only prompt whose Lua reads its pending buffer into an explicit
     // infer ends the run with the inferred text: the scalar return
     // short-circuits the (empty) walk.
-    let gateway = ScriptedChat::new(vec![resp_text("h1 reply")]);
+    let gateway = ScriptedChat::new(vec![text("h1 reply")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Only Prose\n\n\
         ```lua\n\
@@ -87,7 +87,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
 async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // The live H1 pass and the H2 section each read their own pending
     // buffer into an explicit infer - two completions, in source order.
-    let gateway = ScriptedChat::new(vec![resp_text("h1 reply"), resp_text("h2 reply")]);
+    let gateway = ScriptedChat::new(vec![text("h1 reply"), text("h2 reply")]);
     let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
@@ -168,7 +168,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // The pass reads its pending buffer only through an explicit infer, and
     // `var` writes accumulate across the pass into the walk.
-    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
+    let gateway = ScriptedChat::new(vec![text("final answer")]);
     let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\

@@ -2,19 +2,8 @@
 //! `fanout`, and `jump` over the worker's visible set, the depth cap
 //! across the arm boundary, and an arm's text when it replies nothing.
 
+use super::super::super::arm_fanout;
 use super::*;
-
-/// The scaffold the fanout-arm capability tests share: a `## Parent` that
-/// fans `### Worker` out over one `alpha` member and returns the first arm's
-/// text. The worker body and its sibling sections follow.
-fn arm_fanout() -> PromptSource {
-    PromptSource::new().section(
-        "Parent",
-        "
-        local r = tasks.fanout('### Worker', {'alpha'})
-        return r[1].text",
-    )
-}
 
 /// `prompt.list` inside a fanout arm reads a list section's items: the arm
 /// resolves like any section (the worker's siblings minus the worker, plus

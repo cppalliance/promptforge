@@ -369,7 +369,7 @@ async fn join_any_joins_the_task_it_returns_and_only_that_task() {
             "batching {index} produced an illegal verdict: {text}"
         );
     }
-    let gateway = ScriptedChat::new(vec![resp_text("ra"), resp_text("rb")]);
+    let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
     for (index, result) in tokio_results(&prompt, &store, || Some(gateway_client(&gateway)))
         .await
         .iter()
@@ -391,7 +391,7 @@ async fn join_any_joins_the_task_it_returns_and_only_that_task() {
             "expected determinism, got {result:?}"
         );
     }
-    let gateway = ScriptedChat::new(vec![resp_text("ra"), resp_text("rb")]);
+    let gateway = ScriptedChat::new(vec![text("ra"), text("rb")]);
     for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
         .await
         .iter()
@@ -440,9 +440,9 @@ async fn a_timed_join_joins_the_members_it_delivers_and_a_later_join_the_rest() 
             "expected determinism, got {result:?}"
         );
     }
-    let gateway = ScriptedChat::new(vec![resp_delayed_text(
-        "slow answer",
+    let gateway = ScriptedChat::new(vec![delayed(
         std::time::Duration::from_millis(500),
+        text("slow answer"),
     )]);
     for (index, result) in tokio_results(&fail, &store, || Some(gateway_client(&gateway)))
         .await
@@ -463,9 +463,9 @@ async fn a_cancelled_tasks_partial_write_is_readable_after_the_join() {
     for result in &serial_results(&prompt, &store) {
         assert_eq!(ok_text(result), "partial");
     }
-    let gateway = ScriptedChat::new(vec![resp_delayed_text(
-        "slow answer",
+    let gateway = ScriptedChat::new(vec![delayed(
         std::time::Duration::from_millis(500),
+        text("slow answer"),
     )]);
     for result in &tokio_results(&prompt, &store, || Some(gateway_client(&gateway))).await {
         assert_eq!(ok_tokio_text(result), "partial");

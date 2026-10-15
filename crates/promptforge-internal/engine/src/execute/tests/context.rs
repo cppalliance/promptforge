@@ -1,6 +1,8 @@
-//! Shared context builders, parsers, stores, and recorders for the
-//! execution suites. The fixture tool-set helpers sit in `tools` and
-//! are re-exported here.
+//! Shared context builders, prompt sources, parsers, stores, and recorders
+//! for the execution suites. The fixture tool-set helpers sit in `tools`
+//! and are re-exported here.
+
+use promptforge_parser::test_support::PromptSource;
 
 use super::*;
 
@@ -8,7 +10,54 @@ use super::*;
 mod tools;
 
 pub(super) use self::tools::*;
-pub(super) use crate::test_support::scenario::{EXECUTION, TEST_SEED, TEST_STARTED_AT, TestStore};
+pub(super) use crate::test_support::scenario::{
+    EXECUTION, TEST_MODEL, TEST_SEED, TEST_STARTED_AT, TestStore, test_model,
+};
+
+/// Declares the `writer` role in `source`'s frontmatter and parks it as the
+/// prompt-wide default in its H1, so a bound scenario runs its sections
+/// under the test model.
+pub(super) fn with_writer(source: PromptSource) -> PromptSource {
+    source
+        .front("models: { writer: {} }")
+        .h1("models.default('writer')")
+}
+
+/// The prompt `source` builds, declaring the `writer` role and requiring
+/// `## setup` from its H1: the library, after `source`'s sections, that
+/// parks the role as the prompt-wide default.
+pub(super) fn setup_prompt(source: PromptSource) -> String {
+    source
+        .front("models: { writer: {} }")
+        .h1("require '## setup'")
+        .section("setup", "models.default('writer')")
+        .build()
+}
+
+/// The scaffold the fanout-arm capability tests share: a `## Parent` that
+/// fans `### Worker` out over one `alpha` member and returns the first arm's
+/// text. The worker body and its sibling sections follow.
+pub(super) fn arm_fanout() -> PromptSource {
+    PromptSource::new().section(
+        "Parent",
+        "
+        local r = tasks.fanout('### Worker', {'alpha'})
+        return r[1].text",
+    )
+}
+
+/// The context edit binding the role `label` to `model` by hand, for a run
+/// that skips the prepare.
+pub(super) fn bind_role(
+    label: &str,
+    model: ModelDescriptor,
+) -> impl FnOnce(RunContext) -> RunContext + 'static {
+    let label = label.to_owned();
+    move |mut ctx| {
+        ctx.model_bindings.bind(&label, model);
+        ctx
+    }
+}
 
 /// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
@@ -80,12 +129,6 @@ pub(super) struct TestPrompt {
     pub(super) models: ModelCatalog,
 }
 
-impl TestPrompt {
-    pub(super) fn prompt(&self) -> &Prompt {
-        &self.prompt
-    }
-}
-
 /// Builds the tool-free parsed form consumed by the complete lifecycle path.
 pub(super) fn fixture(md: &str) -> TestPrompt {
     TestPrompt {
@@ -94,15 +137,9 @@ pub(super) fn fixture(md: &str) -> TestPrompt {
     }
 }
 
+#[track_caller]
 pub(super) fn test_model_catalog() -> ModelCatalog {
-    let context = NonZeroU32::new(131_072).expect("131072 is non-zero");
-    ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("claude-sonnet-4-6").expect("the test model alias is valid"),
-        "A general model for tests",
-        context,
-        ThinkingMode::Switchable,
-    )])
-    .expect("the test catalog has a single unique model")
+    ModelCatalog::new([test_model(TEST_MODEL)]).expect("the test catalog has a single unique model")
 }
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
@@ -157,25 +194,6 @@ pub(super) struct RunOptions {
     pub(super) observer: Arc<dyn Observer>,
     pub(super) client: Option<ScriptedChat>,
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
-}
-
-/// Builds a [`RunContext`] and its [`RunFixture`] from the test-local
-/// [`RunOptions`], for the tests that call
-/// [`run_with_fixture`](crate::test_support::run_with_fixture) directly.
-/// The context sets the test model as the current selection, so prepare's
-/// trivial fill binds every declared role to it; the observer, client, and
-/// capture go on the fixture the test driver performs and reports through.
-pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunFixture) {
-    let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
-    let mut fixture = RunFixture::new().observer(opts.observer);
-    if let Some(client) = opts.client {
-        fixture = fixture.client(client);
-    }
-    if let Some(debug) = opts.debug {
-        ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        fixture = fixture.debug(debug);
-    }
-    (ctx, fixture)
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -261,17 +279,6 @@ pub(super) async fn run(
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
-}
-
-/// The test-support driver ([`crate::test_support::run_with_fixture`]) with the
-/// context and fixture [`to_context`] assembled (observer, client, capture).
-pub(super) async fn run_assembled(
-    prompt: &Prompt,
-    args: &str,
-    prepared: (RunContext, RunFixture),
-) -> RunResult {
-    let (ctx, fixture) = prepared;
-    crate::test_support::run_with_fixture(prompt, args, ctx, fixture).await
 }
 
 /// Runs a fixture offline through the test-support driver

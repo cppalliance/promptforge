@@ -56,7 +56,7 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
     // tasks (the walk and three arms) land in the buffer in a shuffled
     // order. Each task's own sequence must still be dense from zero, and
     // an arm's events must never borrow the walk's counter.
-    let gateway = ScriptedChat::new(vec![resp_text("A"), resp_text("B"), resp_text("C")]);
+    let gateway = ScriptedChat::new(vec![text("A"), text("B"), text("C")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\

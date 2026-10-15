@@ -18,7 +18,7 @@ use super::*;
 use crate::execute::run::{Effect, EffectAnswer, Run, Step};
 use crate::test_support::drive;
 use crate::test_support::scenario::{
-    Batching, drive_batched, echo_chat, infer_prompt, perform_locally, text_reply, tool_call_reply,
+    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, perform_locally,
 };
 
 /// Drives `md` with the model played by `rounds`, one canned answer per
@@ -235,12 +235,12 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
     let (result, events) = drive(Run::from_state(state), |_, effect| {
         perform_locally(effect, &mut |effect| {
             if infer_prompt(effect) == "child work" {
-                return text_reply("child result");
+                return chat_answer(&text("child result"));
             }
             rounds += 1;
             match rounds {
-                1 => tool_call_reply("call_1", "task", json!({ "target": "## Child" })),
-                _ => text_reply("bye"),
+                1 => chat_answer(&calls(&[("call_1", "task", "{\"target\":\"## Child\"}")])),
+                _ => chat_answer(&text("bye")),
             }
         })
     });

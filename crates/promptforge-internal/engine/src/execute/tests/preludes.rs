@@ -13,7 +13,7 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
 use crate::test_support::drive;
-use crate::test_support::scenario::{perform_locally, text_reply};
+use crate::test_support::scenario::{chat_answer, perform_locally};
 
 /// A prelude contributed by the Plugin `id`.
 pub(super) fn prelude(id: &str, source: &str) -> Prelude {
@@ -67,7 +67,7 @@ fn drive_recorded(run: Run) -> (RunResult, Vec<EffectRecord>) {
             Effect::ToolCall { args, .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted(
                 format!("echoed: {}", args["value"].as_str().unwrap_or_default()),
             ))),
-            other => perform_locally(other, &mut |_| text_reply("unused")),
+            other => perform_locally(other, &mut |_| chat_answer(&text("unused"))),
         }
     });
     (result, records)

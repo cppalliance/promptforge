@@ -340,7 +340,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
     // The one-time section scope install is shared between the first script
     // dispatch and the model resolution: a script `tools.call` that runs
     // first must not swallow the install a later `models.infer` relies on.
-    let gateway = ScriptedChat::new(vec![resp_text("prose answer")]);
+    let gateway = ScriptedChat::new(vec![text("prose answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\

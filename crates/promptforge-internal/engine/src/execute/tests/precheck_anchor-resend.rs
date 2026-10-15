@@ -43,7 +43,7 @@ async fn a_refused_send_writes_no_record_and_the_resend_extends_the_last_issued_
          return msgs[#msgs].content";
     let (out, records) = run_recorded(
         section,
-        vec![reply_with_usage("ok", 3400, 100, None), resp_text("done")],
+        vec![reply_with_usage("ok", 3400, 100, None), text("done")],
     )
     .await;
     assert_eq!(out, "done");

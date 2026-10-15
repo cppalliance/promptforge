@@ -9,8 +9,8 @@ use crate::test_support::tokio_driver::TokioDriver;
 #[tokio::test(flavor = "current_thread")]
 async fn a_round_advertises_the_section_scope_with_local_tools() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"x\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "grab", "{\"value\":\"x\"}")]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\

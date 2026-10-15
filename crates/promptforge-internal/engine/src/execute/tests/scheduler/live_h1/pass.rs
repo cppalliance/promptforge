@@ -10,7 +10,7 @@ use super::*;
 async fn live_h1_infer_runs_once() {
     // The H1 pass selects the default model by label, a handle's `infer`
     // yields through the shim, and the H1 `var` hand-off seeds the walk.
-    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
+    let gateway = ScriptedChat::new(vec![text("h1 answer")]);
     let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
@@ -35,7 +35,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // The H1 `models.infer` (no handle) resolves the current model from the
     // shared set and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
-    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
+    let gateway = ScriptedChat::new(vec![text("h1 answer")]);
     let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\

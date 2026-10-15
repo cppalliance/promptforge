@@ -54,7 +54,7 @@ async fn the_default_compactor_is_whatever_compactors_fail_holds_at_the_call() {
     // checked: an author's replacement becomes the default, and a
     // non-function there lets an ordinary round run and fails only at an
     // overflow round, with Lua's own call error as a string.
-    let gateway = ScriptedChat::new(vec![resp_text("fine")]);
+    let gateway = ScriptedChat::new(vec![text("fine")]);
     let md = loop_prompt(
         "local big = messages.new()\n\
          big:user(string.rep('x', 100000))\n\
@@ -85,7 +85,7 @@ async fn the_default_compactor_is_whatever_compactors_fail_holds_at_the_call() {
 async fn a_light_userdata_compactor_is_named_userdata_as_lua_names_it() {
     // A JSON null in a structured tool's result is a null light userdata,
     // which Lua's `type()` calls `userdata`.
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "tools.offer('tools/structured')\n\
          local null = tools.call('tools/structured', {}).none\n\
@@ -118,7 +118,7 @@ async fn a_light_userdata_compactor_is_named_userdata_as_lua_names_it() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_number_no_argument_or_a_handle_in_the_lists_place_is_the_list_error() {
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local other = models.get('other')\n\
          local msgs = messages.new()\n\
@@ -153,7 +153,7 @@ async fn the_list_error_still_raises_when_the_author_has_rebound_error() {
     // instead of hanging the test.
     use std::time::Duration;
 
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "error = function() end\n\
          local ok, err = pcall(models.loop, 42)\n\
@@ -186,9 +186,9 @@ async fn an_empty_list_raises_unless_a_pending_notice_fills_its_round() {
     // nothing pending the call raises before any request, and once the
     // author's cancel queues a notice, an empty list runs one round over it.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("started"),
-        resp_text("read"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("started"),
+        text("read"),
     ]);
     let md = owner_prompt(
         "",
@@ -231,7 +231,7 @@ async fn an_empty_list_raises_unless_a_pending_notice_fills_its_round() {
 #[tokio::test(flavor = "current_thread")]
 async fn an_uncaught_loop_arity_error_fails_the_run_naming_the_authors_prompt_line() {
     // The loop block opens at prompt line 12, so its third line is 14.
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -262,10 +262,10 @@ async fn two_notices_drained_into_one_round_land_in_the_order_their_tasks_ended(
     // The author cancels the model's second task before its first, so the
     // queue holds the second's notice first.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task", "{\"target\":\"## Child\"}"),
-        resp_text("started"),
-        resp_text("read"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task", "{\"target\":\"## Child\"}")]),
+        text("started"),
+        text("read"),
     ]);
     let md = owner_prompt(
         "",
@@ -315,7 +315,7 @@ async fn two_notices_drained_into_one_round_land_in_the_order_their_tasks_ended(
 
 #[tokio::test(flavor = "current_thread")]
 async fn each_loop_entry_returns_exactly_one_value() {
-    let gateway = ScriptedChat::new(vec![resp_text("one"), resp_text("two")]);
+    let gateway = ScriptedChat::new(vec![text("one"), text("two")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('first')\n\
@@ -335,7 +335,7 @@ async fn each_loop_entry_returns_exactly_one_value() {
 async fn the_compactor_gets_only_the_reason_and_may_suspend_before_raising() {
     // The compactor runs inside the block, so its own `models.infer`
     // round suspends and resumes like any other.
-    let gateway = ScriptedChat::new(vec![resp_text("summary")]);
+    let gateway = ScriptedChat::new(vec![text("summary")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\

@@ -19,7 +19,7 @@ const LIST_REFUSAL: &str = "lua:models.loop needs a messages.new() list; build o
 /// gateway reply is scripted, so a call that sends a request fails the
 /// run.
 async fn refusals(calls: &str) -> String {
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(&format!(
         "local other = models.get('other')\n\
          local msgs = messages.new()\n\
@@ -48,12 +48,7 @@ async fn refusals(calls: &str) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn every_argument_form_resolves_the_list() {
-    let gateway = ScriptedChat::new(vec![
-        resp_text("r1"),
-        resp_text("r2"),
-        resp_text("r3"),
-        resp_text("r4"),
-    ]);
+    let gateway = ScriptedChat::new(vec![text("r1"), text("r2"), text("r3"), text("r4")]);
     let md = loop_prompt(
         "local other = models.get('other')\n\
          local msgs = messages.new()\n\
@@ -179,7 +174,7 @@ async fn each_entry_checks_the_handle_then_the_arity_then_the_compactor_then_the
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_plain_array_in_the_lists_place_is_refused_with_the_list_error() {
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(
         "local other = models.get('other')\n\
          local plain = { { role = 'user', content = 'hi' } }\n\
@@ -215,9 +210,9 @@ async fn a_non_list_is_refused_with_the_list_error_while_a_task_notice_waits_for
     // The author's cancel of the model's parked task queues its notice at
     // once, so every refused call below runs with that notice pending.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("started"),
-        resp_text("read"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("started"),
+        text("read"),
     ]);
     let md = owner_prompt(
         "",

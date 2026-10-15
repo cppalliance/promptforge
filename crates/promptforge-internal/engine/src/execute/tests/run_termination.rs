@@ -16,7 +16,7 @@ use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::run::{Effect, Run, Step};
 use crate::test_support::recording::forward;
-use crate::test_support::scenario::{perform_locally, text_reply};
+use crate::test_support::scenario::{chat_answer, perform_locally};
 
 /// The spawner starts `Child` and waits on it; the child parks on a model
 /// round the test never answers, so the run is cancelled with the task
@@ -68,7 +68,7 @@ fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResul
                 for (id, _, effect) in effects {
                     run.resume(
                         id,
-                        perform_locally(&effect, &mut |_| text_reply("too late")),
+                        perform_locally(&effect, &mut |_| chat_answer(&text("too late"))),
                     );
                 }
             }

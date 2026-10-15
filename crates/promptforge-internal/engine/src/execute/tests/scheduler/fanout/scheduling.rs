@@ -12,7 +12,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
     // Arm "two" finishes first (one infer) while arm "one" is still parked
     // on its second; the packed sequence must follow collection order. A
     // join that keyed results by completion order would return "r2|r1:r3".
-    let gateway = ScriptedChat::new(vec![resp_text("r1"), resp_text("r2"), resp_text("r3")]);
+    let gateway = ScriptedChat::new(vec![text("r1"), text("r2"), text("r3")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -50,12 +50,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
     // driven sequentially would log `one:1`, `one:2` first. Each arm
     // returns its first answer, so the result is deterministic regardless
     // of which arm's second answer lands first.
-    let gateway = ScriptedChat::new(vec![
-        resp_text("r1"),
-        resp_text("r2"),
-        resp_text("r3"),
-        resp_text("r4"),
-    ]);
+    let gateway = ScriptedChat::new(vec![text("r1"), text("r2"), text("r3"), text("r4")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -94,12 +89,12 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
     // fanout spawns every arm up front, so the later arms wait queued,
     // holding no Lua VM, until the ceiling admits them.
     let gateway = ScriptedChat::new(vec![
-        resp_text("r1"),
-        resp_text("r2"),
-        resp_text("r3"),
-        resp_text("r4"),
-        resp_text("r5"),
-        resp_text("r6"),
+        text("r1"),
+        text("r2"),
+        text("r3"),
+        text("r4"),
+        text("r5"),
+        text("r6"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -194,7 +189,7 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
     // builds a VM per queued arm at spawn - all 1025 would complete
     // regardless - but the tally's peak sees it, because every VM would be
     // live at once.
-    let gateway = ScriptedChat::new(vec![resp_text("r"); 1025]);
+    let gateway = ScriptedChat::new(vec![text("r"); 1025]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\

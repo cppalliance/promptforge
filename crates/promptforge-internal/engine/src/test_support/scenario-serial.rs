@@ -1,32 +1,23 @@
 //! The serial helpers for suites that drive a bare [`Run`]: the canned
-//! completions, the local performer, and the batched driver.
+//! chat answer, the local performer, and the batched driver.
 
 use std::collections::BTreeMap;
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{Provenance, TaskId};
-use serde_json::Value;
 
+use super::super::scripted_chat::{ScriptedReply, text};
 use crate::execute::{Effect, EffectAnswer, EffectId, EffectRecord, Run, RunResult, Step};
 use crate::lua::run_store_op;
-use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::tools::ToolError;
 
-/// A canned text reply from the test model.
-pub(crate) fn text_reply(text: &str) -> EffectAnswer {
-    let completion = Completion::from_result(CompletionResult::Text(text.to_owned()), "test-model")
-        .expect("a text result is accepted");
-    EffectAnswer::Chat(Ok(Box::new(completion)))
-}
-
-/// A canned tool-call round from the test model: one call, `name` with
-/// `arguments`, under `call_id`.
-#[track_caller]
-pub(crate) fn tool_call_reply(call_id: &str, name: &str, arguments: Value) -> EffectAnswer {
-    let call = ToolCall::from_parts(call_id, name, arguments).expect("a scripted call is whole");
-    let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "test-model")
-        .expect("a one-call batch is accepted");
-    EffectAnswer::Chat(Ok(Box::new(completion)))
+/// The answer a `Chat` effect gets from the scripted model's `reply`,
+/// built as [`ScriptedChat::complete_now`] builds it for a round within the
+/// timeout.
+///
+/// [`ScriptedChat::complete_now`]: super::super::scripted_chat::ScriptedChat::complete_now
+pub(crate) fn chat_answer(reply: &ScriptedReply) -> EffectAnswer {
+    EffectAnswer::Chat(reply.answer().map(Box::new))
 }
 
 /// The first user message of a `Chat` effect, read off its record: the
@@ -72,7 +63,7 @@ pub(crate) fn text_of(result: RunResult) -> String {
 
 /// A chat performer that echoes the infer prompt back as `r(<prompt>)`.
 pub(crate) fn echo_chat(effect: &Effect) -> EffectAnswer {
-    text_reply(&format!("r({})", infer_prompt(effect)))
+    chat_answer(&text(&format!("r({})", infer_prompt(effect))))
 }
 
 /// How a batched driver delivers a step's answers.

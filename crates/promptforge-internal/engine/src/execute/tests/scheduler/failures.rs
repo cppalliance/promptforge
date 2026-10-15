@@ -177,8 +177,8 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     // The 30-second sibling answer and the timeout guard prove the driver
     // never waits on the aborted arm.
     let gateway = ScriptedChat::new(vec![
-        resp_text("boom-answer"),
-        resp_delayed_text("slow-answer", std::time::Duration::from_secs(30)),
+        text("boom-answer"),
+        delayed(std::time::Duration::from_secs(30), text("slow-answer")),
     ]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -251,9 +251,9 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
     // past a stale answer the aborted sibling's already-completed I/O task
     // may have posted, which the driver must discard rather than fail on.
     let gateway = ScriptedChat::new(vec![
-        resp_text("boom-answer"),
-        resp_text("slow-answer"),
-        resp_text("after-answer"),
+        text("boom-answer"),
+        text("slow-answer"),
+        text("after-answer"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -294,9 +294,9 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // settles each with one `abandoned` terminal naming the run's end -
     // not a cancel or a failure of the arm's own. The 30-second answers
     // and the timeout guard prove the aborted I/O is never awaited.
-    let gateway = ScriptedChat::new(vec![resp_delayed_text(
-        "too late",
+    let gateway = ScriptedChat::new(vec![delayed(
         std::time::Duration::from_secs(30),
+        text("too late"),
     )]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -373,7 +373,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     // its block, and no TaskStarted or TaskCancelled fires for it: a task
     // that never ran reports no start and no terminal, though its slot
     // still reaches Cancelled.
-    let gateway = ScriptedChat::new(vec![resp_text("after-answer")]);
+    let gateway = ScriptedChat::new(vec![text("after-answer")]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -443,7 +443,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
     // discarded.
-    let gateway = ScriptedChat::new(vec![resp_text("real-answer")]);
+    let gateway = ScriptedChat::new(vec![text("real-answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Infer\n\n\
         ## Only\n\n\

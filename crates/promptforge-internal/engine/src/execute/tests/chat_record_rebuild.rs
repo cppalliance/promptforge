@@ -13,7 +13,7 @@ use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run};
 use crate::model::{CompletionError, CompletionErrorKind};
 use crate::test_support::drive;
-use crate::test_support::scenario::{text_of, text_reply, tool_call_reply};
+use crate::test_support::scenario::{chat_answer, text_of};
 
 /// One issued round as the driver saw it: its record, and the wire
 /// messages the live effect sent.
@@ -113,8 +113,8 @@ fn a_tool_round_logs_only_the_call_and_its_result() {
          models.loop(msgs)\n\
          return msgs[#msgs].content",
         vec![
-            tool_call_reply("call_1", "echo", json!({ "value": "hi" })),
-            text_reply("done"),
+            chat_answer(&calls(&[("call_1", "echo", r#"{"value":"hi"}"#)])),
+            chat_answer(&text("done")),
         ],
     );
     assert_eq!(out, "done");
@@ -140,7 +140,11 @@ fn a_compaction_keeps_only_the_messages_before_the_first_change() {
          msgs:user('three')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",
-        vec![text_reply("a1"), text_reply("a2"), text_reply("a3")],
+        vec![
+            chat_answer(&text("a1")),
+            chat_answer(&text("a2")),
+            chat_answer(&text("a3")),
+        ],
     );
     assert_eq!(out, "a3");
     assert_rebuilds(&sent);
@@ -175,7 +179,7 @@ fn an_add_then_a_remove_between_two_sends_adds_nothing_to_the_log() {
          msgs:replace(#msgs, #msgs)\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",
-        vec![text_reply("a1"), text_reply("a2")],
+        vec![chat_answer(&text("a1")), chat_answer(&text("a2"))],
     );
     assert_eq!(out, "a2");
     assert_rebuilds(&sent);
@@ -200,7 +204,7 @@ fn a_resend_with_no_changes_logs_no_messages_and_keeps_the_whole_request() {
          assert(#msgs == 1, 'a failed round adds no record')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",
-        vec![EffectAnswer::Chat(Err(failure)), text_reply("a1")],
+        vec![EffectAnswer::Chat(Err(failure)), chat_answer(&text("a1"))],
     );
     assert_eq!(out, "a1");
     assert_rebuilds(&sent);
@@ -222,7 +226,11 @@ fn re_inserting_an_identical_record_adds_nothing_to_the_log() {
          msgs:user('three')\n\
          models.loop(msgs)\n\
          return msgs[#msgs].content",
-        vec![text_reply("a1"), text_reply("a2"), text_reply("a3")],
+        vec![
+            chat_answer(&text("a1")),
+            chat_answer(&text("a2")),
+            chat_answer(&text("a3")),
+        ],
     );
     assert_eq!(out, "a3");
     assert_rebuilds(&sent);
@@ -247,9 +255,9 @@ fn removing_the_terminal_reply_and_resending_repeats_the_request_it_answered() {
          models.loop(msgs)\n\
          return msgs[#msgs].content",
         vec![
-            tool_call_reply("call_1", "echo", json!({ "value": "hi" })),
-            text_reply("first"),
-            text_reply("second"),
+            chat_answer(&calls(&[("call_1", "echo", r#"{"value":"hi"}"#)])),
+            chat_answer(&text("first")),
+            chat_answer(&text("second")),
         ],
     );
     assert_eq!(out, "second");

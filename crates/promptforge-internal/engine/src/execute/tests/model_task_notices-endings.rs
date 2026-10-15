@@ -11,14 +11,14 @@ use super::*;
 use crate::execute::RunResult;
 use crate::execute::run::Run;
 use crate::test_support::drive;
-use crate::test_support::scenario::{infer_prompt, perform_locally, text_reply, tool_call_reply};
+use crate::test_support::scenario::{chat_answer, infer_prompt, perform_locally};
 
 /// Runs the two-section prompt with the model starting `Child` in round 1
 /// and replying in round 2, then returns every notice reported.
 async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, String)> {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt("", &loop_owner(owner_tail), child_body);
     let prompt = parse(&md);
@@ -80,8 +80,8 @@ async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_
     // task still parked, so the walk position is past the slice's end when
     // the chain's end abandons the task and queues its notice.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"### Child\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"### Child\"}")]),
+        text("bye"),
     ]);
     let md = format!(
         "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
@@ -156,12 +156,12 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
     let (result, events) = drive(Run::from_state(state), |_, effect| {
         perform_locally(effect, &mut |effect| {
             if infer_prompt(effect) == "child work" {
-                return text_reply("child result");
+                return chat_answer(&text("child result"));
             }
             rounds += 1;
             match rounds {
-                1 => tool_call_reply("call_1", "task", json!({ "target": "### Child" })),
-                _ => text_reply("bye"),
+                1 => chat_answer(&calls(&[("call_1", "task", "{\"target\":\"### Child\"}")])),
+                _ => chat_answer(&text("bye")),
             }
         })
     });
@@ -205,9 +205,9 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
 #[tokio::test(flavor = "current_thread")]
 async fn a_model_issued_cancel_queues_no_notice() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_cancel", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
     let prompt = parse(&md);

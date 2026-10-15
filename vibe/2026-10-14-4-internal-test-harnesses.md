@@ -662,7 +662,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-9>
 
-### Step 9: Engine reply script and context-built runs
+### Step 9: Engine reply script and context-built runs [completed]
 
 - Component: engine Run level
 - Tests:

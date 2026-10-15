@@ -29,8 +29,8 @@ fn grab_loop(handler: &str) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn local_tool_handler_result_returns_to_the_model() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("final answer"),
     ]);
     let prompt = parse(&grab_loop("return 'got ' .. args.value"));
     let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
@@ -59,12 +59,11 @@ async fn local_tool_handler_result_returns_to_the_model() {
 #[tokio::test(flavor = "current_thread")]
 async fn local_tool_multiple_calls_in_one_response_all_run() {
     let gateway = ScriptedChat::new(vec![
-        resp_two_tool_calls(
-            "grab",
-            ("c1", "{\"value\":\"a\"}"),
-            ("c2", "{\"value\":\"b\"}"),
-        ),
-        resp_text("final answer"),
+        calls(&[
+            ("c1", "grab", "{\"value\":\"a\"}"),
+            ("c2", "grab", "{\"value\":\"b\"}"),
+        ]),
+        text("final answer"),
     ]);
     let md = loop_prompt(
         "local calls = {}\n\
@@ -103,8 +102,8 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
 #[tokio::test(flavor = "current_thread")]
 async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let prompt = parse(&grab_loop("error('handler exploded')"));
     let recorder = Arc::new(ToolRecorder::default());
@@ -142,8 +141,8 @@ async fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
     use std::time::{Duration, Instant};
 
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let prompt = parse(&grab_loop("while true do end"));
     let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
@@ -172,8 +171,8 @@ async fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("final answer"),
     ]);
     let prompt = parse(&grab_loop(
         "store.write('grab.txt', 'kept ' .. args.value)\n\
@@ -204,8 +203,8 @@ fn jump_prompt(lua: &str) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn a_handler_that_calls_jump_fails_the_run() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let prompt = parse(&jump_prompt(
         "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
@@ -259,8 +258,8 @@ async fn a_saved_jump_reference_is_refused_in_a_handler_the_script_calls() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_saved_jump_reference_is_refused_in_a_handler_the_model_calls() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let prompt = parse(&jump_prompt(&format!(
         "{SAVED_JUMP_GRAB}local msgs = messages.new()\n\
@@ -321,8 +320,8 @@ async fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
 #[tokio::test(flavor = "current_thread")]
 async fn jump_works_in_the_same_block_after_the_loop_returns() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("final answer"),
     ]);
     let prompt = parse(&jump_prompt(
         "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
@@ -344,8 +343,8 @@ async fn jump_works_in_the_same_block_after_the_loop_returns() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
+        calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
+        text("unreachable"),
     ]);
     let prompt = parse(&grab_loop("return { args.value }"));
     let recorder = Arc::new(Recorder::default());
@@ -375,8 +374,8 @@ async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "tools_concrete", "{}"),
-        resp_text("final answer"),
+        calls(&[("call_1", "tools_concrete", "{}")]),
+        text("final answer"),
     ]);
     let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
     let tools = FixtureTools::new(vec![fixture_binding(

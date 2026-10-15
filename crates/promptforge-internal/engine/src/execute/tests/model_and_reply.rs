@@ -2,47 +2,62 @@
 //! The `sys.model`, `item`, and `reply` reads sit in `globals`, and the
 //! `models.get` and handle `infer` cases in `handles`.
 
-use super::run;
+use promptforge_parser::test_support::{PromptSource, parse_ok};
+
+use crate::test_support::scenario::Trace;
+
 use super::*;
 
-#[tokio::test]
-async fn models_use_forwards_binding_completion_options_to_the_gateway() {
+/// The run's observations as section and detail pairs, from its start on:
+/// the parse events before it are left out.
+fn run_events(trace: &Trace) -> Vec<(String, String)> {
+    trace
+        .records()
+        .into_iter()
+        .skip_while(|record| record.detail != detail::RUN_STARTED.to_string())
+        .map(|record| (record.section, record.detail))
+        .collect()
+}
+
+#[test]
+fn models_use_forwards_binding_completion_options_to_the_gateway() {
     // models.use -> completion_options -> GatewayChat::complete must set
     // the binding's model, the hard-keyword thinking switch, and the
     // section's `models.use` sampling options on the chat body. Roles
     // declare no sampling fields, so a section on the prompt-wide default
     // sends none.
-    let gateway = ScriptedChat::new(vec![
-        resp_text("hello from the mock"),
-        resp_text("hello again"),
-    ]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst:\n    keywords: [no-thinking]\n---\n\n\
-# T\n\n\
-```lua\nmodels.default('analyst')\n```\n\n\
-## Only\n\n\
-```lua\nmodels.use('analyst', { temperature = 0, max_tokens = 256 })\n```\n\n\
-Ask the model.\n\n\
-```lua\nmodels.infer(prose)\n```\n\n\
-## Next\n\n\
-Ask again.\n\n\
-```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = Prompt::parse(md, EXECUTION).0.expect("fixture must parse");
-    let mut ctx = test_context(EXECUTION);
-    ctx.model_bindings.bind(
-        "analyst",
-        ModelDescriptor::new(
-            ModelId::gateway("analyst").expect("the test model alias is valid"),
-            "A careful analysis model",
-            NonZeroU32::new(131_072).expect("131072 is non-zero"),
-            ThinkingMode::Switchable,
-        ),
-    );
-    let fixture = RunFixture::new().client(gateway_client(&gateway));
-    let out = match crate::test_support::run_prepared(&prompt, "", ctx, fixture).await {
-        RunResult::Ok(out) => out,
-        other => panic!("the run must succeed: {other:?}"),
-    };
-    assert_eq!(out, "hello again");
+    let gateway = ScriptedChat::new(vec![text("hello from the mock"), text("hello again")]);
+    let source = PromptSource::new()
+        .front("models: { analyst: { keywords: [no-thinking] } }")
+        .h1("models.default('analyst')")
+        .prose(
+            "Only",
+            "
+            ```lua
+            models.use('analyst', { temperature = 0, max_tokens = 256 })
+            ```
+
+            Ask the model.
+
+            ```lua
+            models.infer(prose)
+            ```",
+        )
+        .prose(
+            "Next",
+            "
+            Ask again.
+
+            ```lua
+            return models.infer(prose)
+            ```",
+        );
+    let trace = Scenario::new(source.build())
+        .unprepared()
+        .context(bind_role("analyst", test_model("analyst")))
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "hello again");
 
     let requests = gateway.requests();
     assert_eq!(requests.len(), 2, "one round per section: {requests:?}");
@@ -69,33 +84,28 @@ Ask again.\n\n\
     );
 }
 
-#[tokio::test]
-async fn an_explicit_client_is_used_instead_of_the_environment() {
-    // `client: Some(..)` is what a caller configured from a file passes;
-    // nothing here reads `PROMPTFORGE_*`, and the run still reaches a
-    // gateway and reports its model turn.
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\nSay something.\n\n```lua\nreturn models.infer(prose)\n```\n";
-    let recorder = Arc::new(Recorder::default());
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &TestStore::new(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(&gateway)),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "hello from the mock");
+/// One section that infers its prose, `Say something.`, then runs `epilog`.
+fn say_something(epilog: &str) -> String {
+    let body = format!("Say something.\n\n```lua\n{epilog}\n```");
+    with_writer(PromptSource::new())
+        .prose("Only", &body)
+        .build()
+}
+
+#[test]
+fn an_explicit_client_is_used_instead_of_the_environment() {
+    // The scenario's scripted model is what a caller configured from a
+    // file passes; nothing here reads `PROMPTFORGE_*`, and the run still
+    // reaches a gateway and reports its model turn.
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
+    let trace = Scenario::new(say_something("return models.infer(prose)"))
+        .bound()
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "hello from the mock");
 
     assert_eq!(
-        recorder.events(),
+        run_events(&trace),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
@@ -129,42 +139,26 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     );
 }
 
-#[tokio::test]
-async fn epilog_runs_after_prose_and_can_return() {
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\nSay something.\n\n```lua\n\
-local text = models.infer(prose)\n\
-assert(text == 'hello from the mock')\n\
-store.write('epilog-ran.txt', 'yes')\n\
-return 'epilog result'\n\
-```\n";
-    let prompt = bound_for_model(md);
-    let entry = promptforge_parser::detail::entry(prompt.prompt()).expect("fixture has sections");
+#[test]
+fn epilog_runs_after_prose_and_can_return() {
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
+    let source = say_something(
+        "local text = models.infer(prose)\n\
+         assert(text == 'hello from the mock')\n\
+         store.write('epilog-ran.txt', 'yes')\n\
+         return 'epilog result'",
+    );
+    let prompt = parse_ok(&source);
+    let entry = promptforge_parser::detail::entry(&prompt).expect("fixture has sections");
     assert!(entry.prologue().is_none());
     assert!(entry.epilog().is_some());
 
-    let recorder = Arc::new(Recorder::default());
-    let store = TestStore::new();
-    let out = run(
-        &prompt,
-        "",
-        &[],
-        &store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(&gateway)),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap();
+    let trace = Scenario::new(source).bound().chat(&gateway).run();
 
-    assert_eq!(out, "epilog result");
-    assert_eq!(store.read("epilog-ran.txt").unwrap(), "yes");
+    assert_eq!(trace.text(), "epilog result");
+    assert_eq!(trace.read("epilog-ran.txt").unwrap(), "yes");
     assert_eq!(
-        recorder.events(),
+        run_events(&trace),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
@@ -199,17 +193,22 @@ return 'epilog result'\n\
     );
 }
 
-#[tokio::test]
-async fn offer_over_an_empty_catalog_fails_the_run_loudly() {
+/// The `Only` section that offers `web/search` before prose no model may
+/// read.
+const OFFER_WEB_SEARCH: &str = "
+    ```lua
+    tools.offer('web/search')
+    ```
+
+    This prose must not reach a model.";
+
+#[test]
+fn offer_over_an_empty_catalog_fails_the_run_loudly() {
     // A prompt with no H1 Lua goes through the same validated VM over an
     // empty offering, so the id is rejected.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-## Only\n\n```lua\ntools.offer('web/search')\n```\n\nThis prose must not reach a model.\n";
-    let prompt = fixture(md);
-    let error = run(&prompt, "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("an unoffered id must fail the run");
+    let source = PromptSource::new().prose("Only", OFFER_WEB_SEARCH);
+    let trace = Scenario::new(source.build()).run();
+    let error = trace.error();
     assert!(
         error
             .to_string()
@@ -218,17 +217,15 @@ async fn offer_over_an_empty_catalog_fails_the_run_loudly() {
     );
 }
 
-#[tokio::test]
-async fn offer_after_an_h1_helper_fails_the_run_loudly() {
+#[test]
+fn offer_after_an_h1_helper_fails_the_run_loudly() {
     // A prompt whose H1 Lua declares nothing runs over the same empty
     // offering, so tools.offer in a prologue is rejected the same way.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-```lua\nfunction helper() return 'no declarations' end\n```\n\n\
-## Only\n\n```lua\ntools.offer('web/search')\n```\n\nThis prose must not reach a model.\n";
-    let error = run(&fixture(md), "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("an unoffered id must fail the run");
+    let source = PromptSource::new()
+        .h1("function helper() return 'no declarations' end")
+        .prose("Only", OFFER_WEB_SEARCH);
+    let trace = Scenario::new(source.build()).run();
+    let error = trace.error();
     assert!(
         error
             .to_string()
@@ -237,49 +234,59 @@ async fn offer_after_an_h1_helper_fails_the_run_loudly() {
     );
 }
 
-#[tokio::test]
-async fn prologue_return_skips_model_and_epilog() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-## Only\n\n```lua\nreturn 'early'\n```\n\n\
-This prose must not reach a model.\n\n\
-```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'late'\n```\n";
-    let store = TestStore::new();
-    let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
+#[test]
+fn prologue_return_skips_model_and_epilog() {
+    let source = PromptSource::new().prose(
+        "Only",
+        "
+        ```lua
+        return 'early'
+        ```
 
-    assert_eq!(out, "early");
-    assert!(store.read("epilog-ran.txt").is_err());
+        This prose must not reach a model.
+
+        ```lua
+        store.write('epilog-ran.txt', 'yes')
+        return 'late'
+        ```",
+    );
+    let trace = Scenario::new(source.build()).run();
+
+    assert_eq!(trace.text(), "early");
+    assert!(trace.read("epilog-ran.txt").is_err());
 }
 
-#[tokio::test]
-async fn a_required_helper_survives_prologue_model_and_epilog() {
-    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-## Only\n\n```lua\nrequire '## helpers'\nvar.question = decorate(args)\n```\n\n\
-Ask using {{ var.question }}.\n\n\
-```lua\nreturn decorate(models.infer(prose))\n```\n\n\
-## helpers\n\n\
-```lua\nfunction decorate(value) return '<' .. value .. '>' end\n```\n";
-    let recorder = Arc::new(Recorder::default());
-    let out = run(
-        &bound_for_model(md),
-        "input",
-        &[],
-        &TestStore::new(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(&gateway)),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap();
+#[test]
+fn a_required_helper_survives_prologue_model_and_epilog() {
+    let gateway = ScriptedChat::new(vec![text("hello from the mock")]);
+    let source = with_writer(PromptSource::new())
+        .prose(
+            "Only",
+            "
+            ```lua
+            require '## helpers'
+            var.question = decorate(args)
+            ```
 
-    assert_eq!(out, "<hello from the mock>");
+            Ask using {{ var.question }}.
+
+            ```lua
+            return decorate(models.infer(prose))
+            ```",
+        )
+        .section(
+            "helpers",
+            "function decorate(value) return '<' .. value .. '>' end",
+        );
+    let trace = Scenario::new(source.build())
+        .args("input")
+        .bound()
+        .chat(&gateway)
+        .run();
+
+    assert_eq!(trace.text(), "<hello from the mock>");
     assert_eq!(
-        recorder.events(),
+        run_events(&trace),
         [
             ("Test prompt".to_owned(), detail::RUN_STARTED.to_string()),
             (
@@ -323,46 +330,56 @@ Ask using {{ var.question }}.\n\n\
     );
 }
 
-#[tokio::test]
-async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-## Only\n\n```lua\nvar.phase = 'prologue'\n```\n\n\
-```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
+#[test]
+fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
+    let source = PromptSource::new().prose(
+        "Only",
+        "
+        ```lua
+        var.phase = 'prologue'
+        ```
+
+        ```lua
+        if reply ~= nil then error('empty prose must not bind a reply') end
+        return var.phase .. '-epilog'
+        ```",
+    );
 
     assert_eq!(
-        run(&fixture(md), "", &[], &TestStore::new(), silent())
-            .await
-            .unwrap(),
+        Scenario::new(source.build()).run().text(),
         "prologue-epilog"
     );
 }
 
-#[tokio::test]
-async fn whitespace_only_prose_skips_model_without_binding() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+#[test]
+fn whitespace_only_prose_skips_model_without_binding() {
+    // The source builder trims every line, which would empty the
+    // whitespace-only prose under test, so the source is literal.
+    let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\n-- prologue\n```\n\n   \n\t\n\n\
 ```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n";
-    assert_eq!(
-        run(&fixture(md), "", &[], &TestStore::new(), silent())
-            .await
-            .unwrap(),
-        "ok"
-    );
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
-#[tokio::test]
-async fn model_required_when_infer_has_no_binding() {
+#[test]
+fn model_required_when_infer_has_no_binding() {
     // Prose itself never requires a model; only an explicit `models.infer`
     // of it does.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
-    let error = run(&fixture(md), "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("an explicit infer without a model binding must fail");
-    assert!(
-        matches!(error, Error::ModelRequired { .. }),
+    let source = PromptSource::new().prose(
+        "Only",
+        "
+        Ask the model.
+
+        ```lua
+        return models.infer(prose)
+        ```",
+    );
+    let trace = Scenario::new(source.build()).run();
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Binding,
         "expected ModelRequired, got {error}"
     );
     assert!(

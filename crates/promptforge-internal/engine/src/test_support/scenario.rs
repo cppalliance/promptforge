@@ -1,14 +1,16 @@
 //! The run-level test driver. A [`Scenario`] holds a run's setup as data:
-//! its source, args, run name, context edits, store, tools, and model. It
-//! parses the source, prepares the run, and steps it on the calling thread,
-//! answering every effect the moment it is issued, and returns a [`Trace`]
-//! of what the run produced. Nothing awaits, spawns, or sleeps: a timer
-//! fires at once, a tool is a closure, and the model is a script.
+//! its source, args, run name, seed, context edits, store, tools, model,
+//! and the effects it holds. It parses the source, prepares the run, and
+//! steps it on the calling thread, answering every effect it does not hold
+//! the moment it is issued, and returns a [`Trace`] of what the run
+//! produced. Nothing awaits, spawns, or sleeps: a timer fires at once, a
+//! tool is a closure, and the model is a script.
 //!
 //! The serial helpers the scheduler-level suites drive a bare [`Run`] with
 //! sit beside it in `serial`.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,14 +28,14 @@ use crate::execute::{
     RunResult,
 };
 use crate::lua::run_store_op;
+use crate::model::{ModelDescriptor, ModelId, ThinkingMode};
 use crate::parser::Prompt;
 
 #[path = "scenario-serial.rs"]
 mod serial;
 
 pub(crate) use serial::{
-    Batching, drive_batched, echo_chat, infer_prompt, perform_locally, text_of, text_reply,
-    tool_call_reply,
+    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, perform_locally, text_of,
 };
 
 /// The run name a test that does not choose one runs under.
@@ -45,8 +47,26 @@ pub(crate) const EXECUTION: &str = "execute-test";
 pub(crate) const TEST_SEED: u64 = 1;
 pub(crate) const TEST_STARTED_AT: Timestamp = Timestamp::from_unix_millis(1_700_000_000_000);
 
+/// The gateway model a bound scenario's roles resolve to.
+pub(crate) const TEST_MODEL: &str = "claude-sonnet-4-6";
+
+/// The gateway model `id` as the tests bind it: a 131072-token window and
+/// switchable thinking.
+#[track_caller]
+pub(crate) fn test_model(id: &str) -> ModelDescriptor {
+    ModelDescriptor::new(
+        ModelId::gateway(id).expect("the test model id is valid"),
+        "A general model for tests",
+        NonZeroU32::new(131_072).expect("131072 is non-zero"),
+        ThinkingMode::Switchable,
+    )
+}
+
 /// The edit a scenario applies to its run's context before the prepare.
 type ContextEdit = Box<dyn FnOnce(RunContext) -> RunContext>;
+
+/// Which effects a scenario leaves unanswered.
+type Hold = Box<dyn Fn(&Effect) -> bool>;
 
 /// A run's setup as data. [`run`](Scenario::run) drives it to its end;
 /// [`start`](Scenario::start) hands back the run to step by hand.
@@ -55,27 +75,31 @@ pub(crate) struct Scenario {
     source: String,
     args: String,
     name: String,
+    seed: u64,
     context: ContextEdit,
     store: TestStore,
     tools: Vec<FnTool>,
     chat: Option<ScriptedChat>,
+    hold: Option<Hold>,
     prepare: bool,
 }
 
 impl Scenario {
     /// A run of `source` named [`EXECUTION`], under [`TEST_SEED`] and
     /// [`TEST_STARTED_AT`], with empty args, a fresh memory store, no tools,
-    /// and no model, prepared as `run_with_fixture` prepares: an
-    /// unsatisfiable prompt is refused before it starts.
+    /// no model, and no held effect, prepared as `run_with_fixture`
+    /// prepares: an unsatisfiable prompt is refused before it starts.
     pub(crate) fn new(source: impl Into<String>) -> Scenario {
         Scenario {
             source: source.into(),
             args: String::new(),
             name: EXECUTION.to_owned(),
+            seed: TEST_SEED,
             context: Box::new(|ctx| ctx),
             store: TestStore::new(),
             tools: Vec::new(),
             chat: None,
+            hold: None,
             prepare: true,
         }
     }
@@ -90,6 +114,18 @@ impl Scenario {
     pub(crate) fn name(mut self, name: &str) -> Scenario {
         name.clone_into(&mut self.name);
         self
+    }
+
+    /// Sets the seed the run's untrusted-envelope nonce derives from.
+    pub(crate) fn seed(mut self, seed: u64) -> Scenario {
+        self.seed = seed;
+        self
+    }
+
+    /// Makes the [`TEST_MODEL`] the context's current model, so the
+    /// prepare's trivial fill binds every role the prompt declares to it.
+    pub(crate) fn bound(self) -> Scenario {
+        self.context(|ctx| ctx.model(test_model(TEST_MODEL)))
     }
 
     /// Adds `edit` to the edits applied to the run's context, after the
@@ -129,6 +165,14 @@ impl Scenario {
         self
     }
 
+    /// Leaves every effect `held` matches unanswered while the run keeps
+    /// stepping, so a cancel can land between steps. Once the run decides
+    /// its outcome, each held effect is answered `Dropped`.
+    pub(crate) fn hold(mut self, held: impl Fn(&Effect) -> bool + 'static) -> Scenario {
+        self.hold = Some(Box::new(held));
+        self
+    }
+
     /// Parses the source, prepares the run, and starts it.
     ///
     /// # Panics
@@ -140,7 +184,7 @@ impl Scenario {
             Ok(prompt) => prompt,
             Err(error) => panic!("expected the scenario source to parse, got {error}"),
         };
-        let mut ctx = RunContext::new(self.name, TEST_SEED, TEST_STARTED_AT).vfs(self.store.vfs());
+        let mut ctx = RunContext::new(self.name, self.seed, TEST_STARTED_AT).vfs(self.store.vfs());
         if !self.tools.is_empty() {
             let descriptors: Vec<_> = self.tools.iter().map(TestTool::descriptor).collect();
             let catalog = ToolCatalog::new(&descriptors).expect("the scenario's tool ids differ");
@@ -160,6 +204,7 @@ impl Scenario {
                 .map(|tool| (tool.id(), tool))
                 .collect(),
             chat: self.chat,
+            hold: self.hold,
             timeout: ctx.limits.timeout(),
         };
         let run = refused
@@ -171,6 +216,7 @@ impl Scenario {
             answers,
             events,
             effects: Vec::new(),
+            held: Vec::new(),
             store: self.store,
         }
     }
@@ -187,18 +233,24 @@ impl Scenario {
 
 /// How a scenario answers its run's effects: a store operation on the
 /// effect's own access, a timer at once, a tool call through the
-/// scenario's tool of that id, and a model round from its script.
+/// scenario's tool of that id, and a model round from its script, unless
+/// the scenario holds the effect.
 struct Answers {
     tools: BTreeMap<ToolId, FnTool>,
     chat: Option<ScriptedChat>,
+    hold: Option<Hold>,
     timeout: Duration,
 }
 
 impl Answers {
-    /// Answers `effect` at once. A tool the scenario does not hold is
-    /// refused, and so is a model round when the scenario has no model.
-    fn answer(&self, effect: &Effect) -> EffectAnswer {
-        match effect {
+    /// Answers `effect` at once, or `None` when the scenario holds it. A
+    /// call to a tool the scenario lacks is refused, and so is a model
+    /// round when the scenario has no model.
+    fn answer(&self, effect: &Effect) -> Option<EffectAnswer> {
+        if self.hold.as_ref().is_some_and(|held| held(effect)) {
+            return None;
+        }
+        let answer = match effect {
             Effect::Chat {
                 messages,
                 tools,
@@ -217,7 +269,8 @@ impl Answers {
             },
             Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
             Effect::Timer { .. } => EffectAnswer::Timer,
-        }
+        };
+        Some(answer)
     }
 }
 
@@ -230,24 +283,38 @@ pub(crate) struct Driving {
     /// The parse events, then every event the run reported, in order.
     events: Vec<Event>,
     effects: Vec<(EffectRecord, AnswerRecord)>,
+    /// The effects the scenario holds, unanswered until the run decides.
+    held: Vec<(EffectId, Effect)>,
     store: TestStore,
 }
 
 impl Driving {
-    /// Steps the run once, answering every effect the step issued, and
-    /// returns whether the run is still pending.
+    /// Steps the run once, answering every effect the step issued that the
+    /// scenario does not hold, and returns whether stepping again can move
+    /// the run: `false` once it is done, and while it waits only on held
+    /// effects.
     pub(crate) fn step(&mut self) -> bool {
         let Some(run) = self.run.as_mut() else {
             return false;
         };
         let answers = &self.answers;
         let effects = &mut self.effects;
+        let mut moved = false;
         let mut perform = |_: EffectId, effect: &Effect| answers.answer(effect);
         let mut answered = |effect: &Effect, answer: &EffectAnswer| {
+            moved = true;
             effects.push((effect.record(), answer.record()));
         };
-        let Some(result) = drive_step(run, &mut perform, &mut answered, &mut self.events) else {
-            return true;
+        let holding = self.held.len();
+        let stepped = drive_step(
+            run,
+            &mut perform,
+            &mut answered,
+            &mut self.held,
+            &mut self.events,
+        );
+        let Some(result) = stepped else {
+            return moved || self.held.len() > holding;
         };
         self.result = Some(result);
         self.run = None;
@@ -255,12 +322,21 @@ impl Driving {
     }
 
     /// Steps the run to its end and returns what it produced.
+    ///
+    /// # Panics
+    /// When the run waits only on held effects, which nothing releases
+    /// until the run decides.
+    #[track_caller]
     pub(crate) fn finish(mut self) -> Trace {
         while self.step() {}
+        let Some(result) = self.result else {
+            panic!(
+                "the run waits only on {} held effects, and no cancel has decided it",
+                self.held.len()
+            );
+        };
         Trace {
-            result: self
-                .result
-                .expect("a run that stopped stepping has its result"),
+            result,
             events: self.events,
             effects: self.effects,
             store: self.store,
@@ -279,6 +355,11 @@ pub(crate) struct Trace {
 }
 
 impl Trace {
+    /// The run's result.
+    pub(crate) fn result(&self) -> &RunResult {
+        &self.result
+    }
+
     /// The text of a run that succeeded.
     ///
     /// # Panics
@@ -303,17 +384,23 @@ impl Trace {
         }
     }
 
-    /// Every effect the run issued, beside its answer, in issue order. An
-    /// effect issued after the run decided its outcome is paired with
-    /// [`AnswerRecord::Dropped`].
+    /// Every effect the run issued, beside its answer, in the order the
+    /// answers went, which is issue order for every effect the scenario
+    /// does not hold. An effect issued after the run decided its outcome,
+    /// and a held one, is paired with [`AnswerRecord::Dropped`].
     pub(crate) fn effects(&self) -> &[(EffectRecord, AnswerRecord)] {
         &self.effects
+    }
+
+    /// Replays the events onto `observer`, parse events first.
+    pub(crate) fn replay(&self, observer: &dyn Observer) {
+        forward(self.events.clone(), observer);
     }
 
     /// The events as the suites' observer sees them, parse events first.
     pub(crate) fn records(&self) -> Vec<Record> {
         let recorder = Recorder::default();
-        forward(self.events.clone(), &recorder);
+        self.replay(&recorder);
         recorder
             .0
             .into_inner()

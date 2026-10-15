@@ -23,6 +23,8 @@ use crate::execute::run::{
 };
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::parser::Prompt;
+use crate::test_support::scenario::chat_answer;
+use crate::test_support::scripted_chat::text;
 
 /// A run over one section whose Lua is `body`, with the `writer` role
 /// bound to `test-model` and `tools/echo` in the catalog.
@@ -260,13 +262,6 @@ fn parked_wait(run: &mut Run) -> (EffectId, EffectId) {
     (timer, chat)
 }
 
-/// A text completion of `text`.
-fn text(text: &str) -> EffectAnswer {
-    let completion = Completion::from_result(CompletionResult::Text(text.to_owned()), "m")
-        .expect("a text result is accepted");
-    EffectAnswer::Chat(Ok(Box::new(completion)))
-}
-
 #[test]
 fn a_dropped_timer_raises_the_cancelled_error_into_a_timed_waits_pcall_and_the_run_continues() {
     for wait in ["tasks.join_any", "tasks.join"] {
@@ -284,7 +279,7 @@ fn a_dropped_timer_raises_the_cancelled_error_into_a_timed_waits_pcall_and_the_r
             effects.is_empty(),
             "{wait}: the caught drop issued nothing new: {effects:?}"
         );
-        run.resume(chat, text("child"));
+        run.resume(chat, chat_answer(&text("child")));
         let Step::Done { result, .. } = run.step() else {
             panic!("{wait}: the run ends once the child's round is answered");
         };

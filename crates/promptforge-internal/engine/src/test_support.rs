@@ -102,21 +102,34 @@ pub fn drive(
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,
 ) -> (RunResult, Vec<Event>) {
     let mut reported = Vec::new();
+    let mut answer = |id: EffectId, effect: &Effect| Some(perform(id, effect));
     loop {
-        if let Some(result) = drive_step(&mut run, &mut perform, &mut |_, _| {}, &mut reported) {
+        let stepped = drive_step(
+            &mut run,
+            &mut answer,
+            &mut |_, _| {},
+            &mut Vec::new(),
+            &mut reported,
+        );
+        if let Some(result) = stepped {
             return (result, reported);
         }
     }
 }
 
 /// One step of [`drive`]: steps `run`, appends the step's events to
-/// `reported`, answers every effect the step issued, hands each effect and
-/// its answer to `answered`, `Dropped` ones included, and returns the run's
-/// result once it has one.
+/// `reported`, answers every effect the step issued through `perform`,
+/// hands each effect and its answer to `answered`, `Dropped` ones included,
+/// and returns the run's result once it has one.
+///
+/// An effect `perform` answers `None` joins `held`, unanswered. Once the
+/// run has decided its outcome, every effect it issues and every held one
+/// is answered `Dropped`.
 pub(crate) fn drive_step(
     run: &mut Run,
-    perform: &mut impl FnMut(EffectId, &Effect) -> EffectAnswer,
+    perform: &mut impl FnMut(EffectId, &Effect) -> Option<EffectAnswer>,
     answered: &mut impl FnMut(&Effect, &EffectAnswer),
+    held: &mut Vec<(EffectId, Effect)>,
     reported: &mut Vec<Event>,
 ) -> Option<RunResult> {
     match run.step() {
@@ -128,10 +141,11 @@ pub(crate) fn drive_step(
             effects, events, ..
         } => {
             reported.extend(events);
-            if effects.is_empty() {
-                // Every effect is answered the step it is issued, so a
-                // pending step that issued nothing has nothing to wait
-                // on: an invariant failure reported rather than a hang.
+            if effects.is_empty() && held.is_empty() {
+                // Every effect is answered the step it is issued unless it
+                // is held, so a pending step that issued nothing while
+                // holding nothing has nothing to wait on: an invariant
+                // failure reported rather than a hang.
                 let error = Error::internal(
                     "the serial driver was handed a pending run with no effect to answer",
                 );
@@ -140,12 +154,23 @@ pub(crate) fn drive_step(
             let decided = run.decided();
             for (id, _, effect) in effects {
                 let answer = if decided {
-                    EffectAnswer::Dropped
+                    Some(EffectAnswer::Dropped)
                 } else {
                     perform(id, &effect)
                 };
-                answered(&effect, &answer);
-                run.resume(id, answer);
+                match answer {
+                    Some(answer) => {
+                        answered(&effect, &answer);
+                        run.resume(id, answer);
+                    }
+                    None => held.push((id, effect)),
+                }
+            }
+            if decided {
+                for (id, effect) in held.drain(..) {
+                    answered(&effect, &EffectAnswer::Dropped);
+                    run.resume(id, EffectAnswer::Dropped);
+                }
             }
             None
         }

@@ -194,8 +194,8 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -243,14 +243,11 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one() {
     let gateway = ScriptedChat::new(vec![
-        ScriptedReply::ToolCalls {
-            model: MOCK_MODEL.to_owned(),
-            calls: vec![
-                scripted_call("call_1", "grab", "{\"value\":\"x\"}"),
-                scripted_call("call_2", "echo", "{\"value\":\"y\"}"),
-            ],
-        },
-        resp_text("done"),
+        calls(&[
+            ("call_1", "grab", "{\"value\":\"x\"}"),
+            ("call_2", "echo", "{\"value\":\"y\"}"),
+        ]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -287,7 +284,7 @@ async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one
 async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     // Readable at the call site as the `out_of_scope_tool` kind with the
     // loop's exact message, and typed when it escapes the section.
-    let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
+    let gateway = ScriptedChat::new(vec![calls(&[("call_1", "rogue", "{}")])]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
          local msgs = messages.new()\n\
@@ -320,7 +317,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
         "the rejected call reports a failed tool call: {lines:?}"
     );
 
-    let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
+    let gateway = ScriptedChat::new(vec![calls(&[("call_1", "rogue", "{}")])]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
          local msgs = messages.new()\n\
@@ -354,7 +351,7 @@ async fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_repl
     // The arm resumes the empty round with the reply absent and its finish
     // reason; with no answered tool call before it, the loop's exit rules
     // raise `empty_model_reply` carrying that finish reason.
-    let gateway = ScriptedChat::new(vec![resp_text_finish("", "stop")]);
+    let gateway = ScriptedChat::new(vec![text_finish("", "stop")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('say nothing')\n\
@@ -396,7 +393,7 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
          end)\n\
          assert(not ok, 'the compactor raise ends the loop')\n\
          return seen";
-    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
+    let gateway = ScriptedChat::new(vec![text("unreachable")]);
     let md = loop_prompt(&format!(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\

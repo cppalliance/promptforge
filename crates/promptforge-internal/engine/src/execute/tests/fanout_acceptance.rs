@@ -102,10 +102,10 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
     // the lowest-index arm's end would hold `c` until `a` finished:
     // `[a:1, b:1, a:2, c:1]`.
     let gateway = ScriptedChat::new(vec![
-        resp_delayed_text("A1", PARKED),
-        resp_text("B"),
-        resp_text("C"),
-        resp_text("A2"),
+        delayed(PARKED, text("A1")),
+        text("B"),
+        text("C"),
+        text("A2"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -156,8 +156,8 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
     // `cancelled`), the queued arm never starts and reports nothing, and
     // the driver never waits on the aborted answer.
     let gateway = ScriptedChat::new(vec![
-        resp_text("boom-answer"),
-        resp_delayed_text("slow-answer", Duration::from_secs(30)),
+        text("boom-answer"),
+        delayed(Duration::from_secs(30), text("slow-answer")),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -305,17 +305,17 @@ async fn ids_are_identical_across_runs_whose_arms_finish_in_different_orders() {
     // byte-identical because every id is allocated from chain-local
     // counters at spawn, never from completion order.
     let (first_out, first_requests, first_succeeded) = identity_run(vec![
-        resp_delayed_text("A1", PARKED),
-        resp_text("B1"),
-        resp_text("B2"),
-        resp_text("A2"),
+        delayed(PARKED, text("A1")),
+        text("B1"),
+        text("B2"),
+        text("A2"),
     ])
     .await;
     let (second_out, second_requests, second_succeeded) = identity_run(vec![
-        resp_text("A1"),
-        resp_delayed_text("B1", PARKED),
-        resp_text("A2"),
-        resp_text("B2"),
+        text("A1"),
+        delayed(PARKED, text("B1")),
+        text("A2"),
+        text("B2"),
     ])
     .await;
 
@@ -358,12 +358,12 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
     // exchange (user, assistant tool call, tool result) so the loop, not a
     // bare infer, is what ran in every arm.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_a", "echo", "{\"value\":\"a\"}"),
-        resp_tool_call("call_b", "echo", "{\"value\":\"b\"}"),
-        resp_tool_call("call_c", "echo", "{\"value\":\"c\"}"),
-        resp_text("final"),
-        resp_text("final"),
-        resp_text("final"),
+        calls(&[("call_a", "echo", "{\"value\":\"a\"}")]),
+        calls(&[("call_b", "echo", "{\"value\":\"b\"}")]),
+        calls(&[("call_c", "echo", "{\"value\":\"c\"}")]),
+        text("final"),
+        text("final"),
+        text("final"),
     ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\

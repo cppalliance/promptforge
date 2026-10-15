@@ -120,7 +120,7 @@ pub(super) fn loop_prompt(lua: &str) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
-    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
+    let gateway = ScriptedChat::new(vec![text("final answer")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -153,9 +153,9 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"one\"}"),
-        resp_tool_call("call_2", "echo", "{\"value\":\"two\"}"),
-        resp_text("both done"),
+        calls(&[("call_1", "echo", "{\"value\":\"one\"}")]),
+        calls(&[("call_2", "echo", "{\"value\":\"two\"}")]),
+        text("both done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -205,8 +205,8 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
     // request body carries the messages verbatim, which model-client's
     // `build_request_body` tests check against the OpenAI schema.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"one\"}"),
-        resp_text("done"),
+        calls(&[("call_1", "echo", "{\"value\":\"one\"}")]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -251,9 +251,9 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_dispatches_local_and_bound_tools() {
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"x\"}"),
-        resp_tool_call("call_2", "echo", "{\"value\":\"y\"}"),
-        resp_text("tools done"),
+        calls(&[("call_1", "grab", "{\"value\":\"x\"}")]),
+        calls(&[("call_2", "echo", "{\"value\":\"y\"}")]),
+        text("tools done"),
     ]);
     let md = loop_prompt(
         "tools.offer('tools/echo')\n\
@@ -287,9 +287,9 @@ async fn models_loop_dispatches_local_and_bound_tools() {
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_reads_the_tool_scope_at_each_call() {
     let gateway = ScriptedChat::new(vec![
-        resp_text("no tools yet"),
-        resp_tool_call("call_1", "echo", "{\"value\":\"late\"}"),
-        resp_text("scoped in"),
+        text("no tools yet"),
+        calls(&[("call_1", "echo", "{\"value\":\"late\"}")]),
+        text("scoped in"),
     ]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
@@ -334,7 +334,7 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_handles_loop_runs_on_its_frozen_binding() {
-    let gateway = ScriptedChat::new(vec![resp_text("first"), resp_text("second")]);
+    let gateway = ScriptedChat::new(vec![text("first"), text("second")]);
     let md = loop_prompt(
         "local other = models.get('other')\n\
          local msgs = messages.new()\n\
@@ -370,12 +370,11 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
     // assistant record. After the round the assistant record and both
     // results land together, in call order, ahead of the terminal text.
     let gateway = ScriptedChat::new(vec![
-        resp_two_tool_calls(
-            "grab",
-            ("c1", "{\"value\":\"a\"}"),
-            ("c2", "{\"value\":\"b\"}"),
-        ),
-        resp_text("done"),
+        calls(&[
+            ("c1", "grab", "{\"value\":\"a\"}"),
+            ("c2", "grab", "{\"value\":\"b\"}"),
+        ]),
+        text("done"),
     ]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\

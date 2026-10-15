@@ -125,8 +125,8 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
     // the sibling `TaskSucceeded`.
     let cap = 2;
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_0", "echo", "{\"value\":\"x\"}"),
-        resp_tool_call("call_1", "echo", "{\"value\":\"x\"}"),
+        calls(&[("call_0", "echo", "{\"value\":\"x\"}")]),
+        calls(&[("call_1", "echo", "{\"value\":\"x\"}")]),
     ]);
     let md = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\nmax_tool_iterations: {cap}\n---\n\n\

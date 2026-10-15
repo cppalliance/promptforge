@@ -15,7 +15,7 @@ use super::models_loop::{echo_tools, loop_context, loop_prompt};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
 use crate::model::{Completion, CompletionResult, ToolCall};
-use crate::test_support::scenario::{text_of, text_reply};
+use crate::test_support::scenario::{chat_answer, text_of};
 
 /// The effects one step issued, in issue order, and the events it
 /// reported. Panics when the run is over.
@@ -125,7 +125,7 @@ fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
         ["first", "second"],
         "the records hold c1's result before c2's"
     );
-    run.resume(next[0].0, text_reply("done"));
+    run.resume(next[0].0, chat_answer(&text("done")));
     let Step::Done { result, .. } = run.step() else {
         panic!("the reply ends the section");
     };
@@ -198,7 +198,7 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
         4,
         "all four results reach the round"
     );
-    run.resume(next, text_reply("done"));
+    run.resume(next, chat_answer(&text("done")));
     let Step::Done { result, .. } = run.step() else {
         panic!("the reply ends the section");
     };
@@ -281,7 +281,7 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
     );
     let (calls, _) = pending(run.step());
     assert_eq!(calls.len(), 2, "both calls are in flight: {calls:?}");
-    run.resume(infer, text_reply("go"));
+    run.resume(infer, chat_answer(&text("go")));
     // Main outlives the cancel, so a call the cancel left pending would
     // land on Child's cleared batch instead of in the run's teardown.
     let (linger, effect) = only_effect(run.step());
@@ -294,7 +294,7 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
     }
     let (issued, _) = pending(run.step());
     assert!(issued.is_empty(), "both orphans are discarded: {issued:?}");
-    run.resume(linger, text_reply("done"));
+    run.resume(linger, chat_answer(&text("done")));
     let Step::Done { result, .. } = run.step() else {
         panic!("Main's second round ends the run");
     };

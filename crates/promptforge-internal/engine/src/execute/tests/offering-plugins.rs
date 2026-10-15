@@ -51,7 +51,7 @@ async fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_off
         called = round("Called"),
         worker = round("Worker"),
     ));
-    let gateway = ScriptedChat::new(vec![resp_text("done"); 5]);
+    let gateway = ScriptedChat::new(vec![text("done"); 5]);
     let (ctx, fixture) = offering_context(
         &prompt,
         &[

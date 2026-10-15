@@ -136,9 +136,9 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     // record correlated to its call, and the task starts once and
     // succeeds once.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -218,8 +218,8 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
     // at the owner's end), the notice was queued when the task ended but
     // no round ever read it, and the author's own filter stays empty.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
@@ -290,11 +290,11 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
     // the reply round holds only the answered calls. Neither wait
     // allocates a timer.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Quick\"}"),
-        resp_tool_call("call_2", "task", "{\"target\":\"## Slow\"}"),
-        resp_tool_call("call_3", "await_tasks", "{}"),
-        resp_tool_call("call_4", "await_tasks", "{}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Quick\"}")]),
+        calls(&[("call_2", "task", "{\"target\":\"## Slow\"}")]),
+        calls(&[("call_3", "await_tasks", "{}")]),
+        calls(&[("call_4", "await_tasks", "{}")]),
+        text("bye"),
     ]);
     let md = two_child_prompt(
         &loop_owner("return msgs[7].content .. '|' .. msgs[9].content .. '|' .. #msgs"),
@@ -378,10 +378,10 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
     // is an internal slot that starts nothing observable, and the model's
     // own cancel queues no notice.
     let gateway = ScriptedChat::new(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "await_tasks", "{\"timeout\":0.1}"),
-        resp_tool_call("call_3", "task_cancel", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
+        calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
+        calls(&[("call_2", "await_tasks", "{\"timeout\":0.1}")]),
+        calls(&[("call_3", "task_cancel", "{\"id\":\"0.0\"}")]),
+        text("bye"),
     ]);
     let md = owner_prompt(
         "",
