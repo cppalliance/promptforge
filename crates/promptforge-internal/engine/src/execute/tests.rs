@@ -192,50 +192,6 @@ const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\
 ## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
 ## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";
 
-/// Records every [`DebugEvent`] so tests can assert capture wiring.
-#[derive(Default)]
-struct RecordingCapture(
-    Mutex<
-        Vec<(
-            String,
-            String,
-            u32,
-            crate::test_support::recording::DebugEvent,
-        )>,
-    >,
-);
-
-impl crate::test_support::recording::DebugCapture for RecordingCapture {
-    fn on_event(
-        &self,
-        execution: &str,
-        section: &str,
-        turn_index: u32,
-        event: crate::test_support::recording::DebugEvent,
-    ) {
-        self.0
-            .lock()
-            .expect("the capture mutex must not be poisoned")
-            .push((execution.to_owned(), section.to_owned(), turn_index, event));
-    }
-}
-
-impl RecordingCapture {
-    fn events(
-        &self,
-    ) -> Vec<(
-        String,
-        String,
-        u32,
-        crate::test_support::recording::DebugEvent,
-    )> {
-        self.0
-            .lock()
-            .expect("the capture mutex must not be poisoned")
-            .clone()
-    }
-}
-
 mod batch_turn;
 mod chat_arm;
 mod chat_record_rebuild;

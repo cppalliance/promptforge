@@ -6,118 +6,12 @@
 //! shim's exit rules and compactor then act on. The round's tool scope is
 //! covered in `chat_scope`.
 
-use super::models_loop::{echo_tools, loop_context_observed, loop_prompt};
+use promptforge_parser::test_support::one_section;
+use promptforge_types::event::{Event, ReplyOrigin};
+use promptforge_types::metrics::{CallMetrics, Usage};
+
+use super::models_loop::loop_scenario;
 use super::*;
-use crate::lua::ToolSet;
-use crate::test_support::tokio_driver::TokioDriver;
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent, Usage};
-
-/// Records every observation and every content report as one rendered
-/// line: the boundary events, the turn numbers, the model name, the
-/// metrics presence, and the text or calls the model produced.
-#[derive(Default)]
-struct RoundRecorder(Mutex<Vec<String>>);
-
-impl RoundRecorder {
-    fn push(&self, line: String) {
-        self.0
-            .lock()
-            .expect("the round recorder mutex is not poisoned")
-            .push(line);
-    }
-
-    fn lines(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .expect("the round recorder mutex is not poisoned")
-            .clone()
-    }
-
-    /// The index of the first line containing `needle`.
-    fn position(&self, needle: &str) -> Option<usize> {
-        self.lines().iter().position(|line| line.contains(needle))
-    }
-}
-
-impl Observer for RoundRecorder {
-    fn observe(&self, _execution: &str, section: &str, event: Observation) {
-        self.push(format!("{section}: {event}"));
-    }
-
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
-        self.push(format!(
-            "{section}: thinking chain={chain_id} depth={depth} turn={turn} model={model} text={text}"
-        ));
-    }
-
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
-        self.push(format!(
-            "{section}: reply origin={origin:?} chain={chain_id} depth={depth} turn={turn} text={text} \
-             finish={finish_reason:?} model={model} metrics={}",
-            metrics.is_some()
-        ));
-    }
-
-    fn on_assistant_tool_calls(
-        &self,
-        _execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        calls: &[ToolCallEvent],
-    ) {
-        let names: Vec<&str> = calls.iter().map(|call| call.name.as_str()).collect();
-        let tools: Vec<Option<String>> = calls
-            .iter()
-            .map(|call| call.tool.as_ref().map(ToString::to_string))
-            .collect();
-        self.push(format!(
-            "{section}: tool_calls chain={chain_id} depth={depth} turn={turn} model={model} \
-             calls={names:?} tools={tools:?}"
-        ));
-    }
-
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        _content: &str,
-        trusted: bool,
-    ) {
-        self.push(format!(
-            "{section}: tool_result turn={turn} id={tool_call_id} alias={alias} trusted={trusted}"
-        ));
-    }
-}
 
 /// A text reply with everything a round can report: a model name, a
 /// reasoning side channel, a finish reason, and usage metrics.
@@ -142,48 +36,66 @@ fn rich_text_reply(content: &str) -> ScriptedReply {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
+/// The index of the first of `events` that `matches`, panicking with
+/// `missing` and every event when there is none.
+#[track_caller]
+fn position(events: &[Event], missing: &str, matches: impl Fn(&Event) -> bool) -> usize {
+    events
+        .iter()
+        .position(matches)
+        .unwrap_or_else(|| panic!("{missing}: {events:?}"))
+}
+
+#[test]
+fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     let gateway = ScriptedChat::new(vec![rich_text_reply("final answer")]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('hello')\n\
-         models.loop(msgs)\n\
-         assert(#msgs == 2, 'the loop appends the reply')\n\
-         assert(msgs[2].role == 'assistant', 'the appended record is the assistant reply')\n\
-         assert(msgs[2].content == 'final answer', 'the reply text resumes')\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('hello')
+         models.loop(msgs)
+         assert(#msgs == 2, 'the loop appends the reply')
+         assert(msgs[2].role == 'assistant', 'the appended record is the assistant reply')
+         assert(msgs[2].content == 'final answer', 'the reply text resumes')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("one text round ends the loop");
-    assert_eq!(out, "ok");
-    let lines = recorder.lines();
-    let thinking = recorder
-        .position("thinking")
-        .unwrap_or_else(|| panic!("the reasoning side channel is reported: {lines:?}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
+    let events = trace.events();
+    let thinking = position(events, "the reasoning side channel is reported", |event| {
+        matches!(event, Event::Thinking { .. })
+    });
     assert!(
-        lines[thinking].contains("model=served-model text=let me think"),
-        "{lines:?}"
+        matches!(
+            &events[thinking],
+            Event::Thinking { model, text, .. } if model == "served-model" && text == "let me think"
+        ),
+        "{events:?}"
     );
-    let reply = recorder
-        .position("reply origin=Chat")
-        .unwrap_or_else(|| panic!("the arm reports a chat-origin reply: {lines:?}"));
+    let reply = position(events, "the arm reports a chat-origin reply", |event| {
+        matches!(
+            event,
+            Event::AssistantReply {
+                origin: ReplyOrigin::Chat,
+                ..
+            }
+        )
+    });
     assert!(
-        lines[reply]
-            .contains("text=final answer finish=Some(\"stop\") model=served-model metrics=true"),
-        "the reply carries its finish reason, serving model, and metrics: {lines:?}"
+        matches!(
+            &events[reply],
+            Event::AssistantReply { text, finish_reason, model, metrics, .. }
+                if text == "final answer"
+                    && finish_reason.as_deref() == Some("stop")
+                    && model == "served-model"
+                    && metrics.is_some()
+        ),
+        "the reply carries its finish reason, serving model, and metrics: {events:?}"
     );
-    assert!(thinking < reply, "thinking precedes the reply: {lines:?}");
+    assert!(thinking < reply, "thinking precedes the reply: {events:?}");
     assert_eq!(
         gateway.requests()[0].tools[0].name(),
         "echo",
@@ -191,57 +103,56 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
+#[test]
+fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("done"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('call the tool')\n\
-         models.loop(msgs)\n\
-         local call = msgs[2].tool_calls[1]\n\
-         assert(call.id == 'call_1', 'the call keeps its id')\n\
-         assert(call.name == 'echo', 'the call keeps its wire name')\n\
-         assert(call.arguments.value == 'hi', 'the arguments stay parsed')\n\
-         assert(msgs[3].role == 'tool' and msgs[3].tool_call_id == 'call_1', \
-           'the result answers the call')\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('call the tool')
+         models.loop(msgs)
+         local call = msgs[2].tool_calls[1]
+         assert(call.id == 'call_1', 'the call keeps its id')
+         assert(call.name == 'echo', 'the call keeps its wire name')
+         assert(call.arguments.value == 'hi', 'the arguments stay parsed')
+         assert(msgs[3].role == 'tool' and msgs[3].tool_call_id == 'call_1', 'the result answers the call')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the tool round and the closing reply run");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
     assert_eq!(gateway.call_count(), 2, "one tool round, one closing round");
-    let lines = recorder.lines();
-    let batch = recorder
-        .position("calls=[\"echo\"]")
-        .unwrap_or_else(|| panic!("the requested calls are reported: {lines:?}"));
-    let result = recorder
-        .position("tool_result")
-        .unwrap_or_else(|| panic!("the shim dispatches the call: {lines:?}"));
+    let events = trace.events();
+    let batch = position(events, "the requested calls are reported", |event| {
+        matches!(
+            event,
+            Event::AssistantToolCalls { calls, .. }
+                if calls.iter().map(|call| call.name.as_str()).eq(["echo"])
+        )
+    });
+    let result = position(events, "the shim dispatches the call", |event| {
+        matches!(event, Event::ToolResult { .. })
+    });
     assert!(
-        lines[result].contains("id=call_1 alias=echo"),
-        "the result fires under the model's call id: {lines:?}"
+        matches!(
+            &events[result],
+            Event::ToolResult { tool_call_id, alias, .. } if tool_call_id == "call_1" && alias == "echo"
+        ),
+        "the result fires under the model's call id: {events:?}"
     );
     assert!(
         batch < result,
-        "the arm reports the batch unexecuted, then the shim dispatches it: {lines:?}"
+        "the arm reports the batch unexecuted, then the shim dispatches it: {events:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one() {
+#[test]
+fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one() {
     let gateway = ScriptedChat::new(vec![
         calls(&[
             ("call_1", "grab", "{\"value\":\"x\"}"),
@@ -249,90 +160,79 @@ async fn a_batch_names_the_tool_behind_a_bound_alias_and_none_behind_a_local_one
         ]),
         text("done"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
-           return 'grabbed ' .. args.value\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('use both tools')\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)
+           return 'grabbed ' .. args.value
+         end)
+         local msgs = messages.new()
+         msgs:user('use both tools')
+         models.loop(msgs)
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the batch and the closing reply run");
-    assert_eq!(out, "ok");
-    let lines = recorder.lines();
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
+    let events = trace.events();
     assert!(
-        lines.iter().any(
-            |line| line.ends_with(r#"calls=["grab", "echo"] tools=[None, Some("tools/echo")]"#)
-        ),
-        "the bound alias names its tool and the local one names none: {lines:?}"
+        events.iter().any(|event| matches!(
+            event,
+            Event::AssistantToolCalls { calls, .. }
+                if calls.iter().map(|call| call.name.as_str()).eq(["grab", "echo"])
+                    && calls
+                        .iter()
+                        .map(|call| call.tool.as_ref().map(ToString::to_string))
+                        .eq([None, Some("tools/echo".to_owned())])
+        )),
+        "the bound alias names its tool and the local one names none: {events:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
+#[test]
+fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     // Readable at the call site as the `out_of_scope_tool` kind with the
     // loop's exact message, and typed when it escapes the section.
     let gateway = ScriptedChat::new(vec![calls(&[("call_1", "rogue", "{}")])]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('go rogue')\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'an out-of-scope call raises')\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('go rogue')
+         local ok, err = pcall(models.loop, msgs)
+         assert(not ok, 'an out-of-scope call raises')
          return err.kind .. '|' .. err.name .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
     assert_eq!(
-        out,
+        trace.text(),
         "out_of_scope_tool|rogue|tool \"rogue\" is not in this section's scope; \
          in-scope aliases: [\"echo\"]"
     );
-    let lines = recorder.lines();
+    let events = trace.events();
     assert!(
-        lines
+        events
             .iter()
-            .any(|line| line.ends_with(&format!(": {}", detail::TOOL_CALL_FAILED))),
-        "the rejected call reports a failed tool call: {lines:?}"
+            .any(|event| matches!(event, Event::ToolCallFailed { .. })),
+        "the rejected call reports a failed tool call: {events:?}"
     );
 
     let gateway = ScriptedChat::new(vec![calls(&[("call_1", "rogue", "{}")])]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('go rogue')\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('go rogue')
+         models.loop(msgs)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) =
-        loop_context_observed(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("an uncaught out-of-scope call fails the section");
-    match error {
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    match trace.error().inner() {
         Error::OutOfScopeToolCall {
             name,
             global_exists,
@@ -340,76 +240,57 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
         } => {
             assert_eq!(name, "rogue");
             assert!(!global_exists, "rogue is bound nowhere");
-            assert_eq!(in_scope, vec!["echo".to_owned()]);
+            assert_eq!(in_scope, &["echo".to_owned()]);
         }
         other => panic!("expected OutOfScopeToolCall, got {other:?}"),
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_reply() {
+#[test]
+fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_reply() {
     // The arm resumes the empty round with the reply absent and its finish
     // reason; with no answered tool call before it, the loop's exit rules
     // raise `empty_model_reply` carrying that finish reason.
     let gateway = ScriptedChat::new(vec![text_finish("", "stop")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('say nothing')\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'an empty first reply raises')\n\
-         assert(#msgs == 1, 'the empty round appends nothing')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('say nothing')
+         local ok, err = pcall(models.loop, msgs)
+         assert(not ok, 'an empty first reply raises')
+         assert(#msgs == 1, 'the empty round appends nothing')
          return err.kind .. '|' .. tostring(err.finish_reason)",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
-    assert_eq!(out, "empty_model_reply|stop");
-    let lines = recorder.lines();
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "empty_model_reply|stop");
+    let events = trace.events();
     assert!(
-        lines
+        events
             .iter()
-            .any(|line| line.ends_with(&format!(": {}", detail::MODEL_TURN_COMPLETED))),
-        "the empty round is a completed turn: {lines:?}"
+            .any(|event| matches!(event, Event::ModelTurnCompleted { .. })),
+        "the empty round is a completed turn: {events:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
+#[test]
+fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
     // The arm answers an overflow as a flag, not a raise, so the loop hands
     // the reason to the compactor. The precheck refuses before any request
     // leaves.
-    let compacting_loop = "local seen\n\
-         local ok = pcall(models.loop, msgs, function(reason)\n\
-           seen = reason\n\
-           error('compacted', 0)\n\
-         end)\n\
-         assert(not ok, 'the compactor raise ends the loop')\n\
+    let compacting_loop = "local seen
+         local ok = pcall(models.loop, msgs, function(reason)
+           seen = reason
+           error('compacted', 0)
+         end)
+         assert(not ok, 'the compactor raise ends the loop')
          return seen";
     let gateway = ScriptedChat::new(vec![text("unreachable")]);
-    let md = loop_prompt(&format!(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
+    let source = one_section(&format!(
+        "local msgs = messages.new()
+         msgs:user(string.rep('x', 100000))
          {compacting_loop}"
     ));
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the compactor's raise is pcall-able");
-    assert_eq!(out, "precheck");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "precheck");
     assert_eq!(
         gateway.call_count(),
         0,
@@ -418,34 +299,24 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
 
     // A broker-reported context overflow is the same flag after one
     // request, and a failed turn.
-    let client = OverflowClient::default();
-    let md = loop_prompt(&format!(
-        "local msgs = messages.new()\n\
-         msgs:user('a small prompt')\n\
+    let rounds = Arc::new(AtomicUsize::new(0));
+    let source = one_section(&format!(
+        "local msgs = messages.new()
+         msgs:user('a small prompt')
          {compacting_loop}"
     ));
-    let prompt = parse(&md);
-    let recorder = Arc::new(RoundRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
-        .drive()
-        .await
-        .expect("the compactor's raise is pcall-able");
-    assert_eq!(out, "provider");
+    let trace = loop_scenario(source).chat_with(overflowing(&rounds)).run();
+    assert_eq!(trace.text(), "provider");
     assert_eq!(
-        client.calls.load(Ordering::SeqCst),
+        rounds.load(Ordering::SeqCst),
         1,
         "the request left and was refused"
     );
-    let lines = recorder.lines();
+    let events = trace.events();
     assert!(
-        lines
+        events
             .iter()
-            .any(|line| line.ends_with(&format!(": {}", detail::MODEL_TURN_FAILED))),
-        "a refused round is a failed turn: {lines:?}"
+            .any(|event| matches!(event, Event::ModelTurnFailed { .. })),
+        "a refused round is a failed turn: {events:?}"
     );
 }

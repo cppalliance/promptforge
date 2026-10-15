@@ -249,6 +249,13 @@ impl Run {
             .as_mut()
             .expect("a run built from a state holds its scheduler")
     }
+
+    /// The run's model-turn counter, for the suites that count turns: zero
+    /// for a run that failed to start.
+    #[cfg(test)]
+    pub(crate) fn turns_for_test(&self) -> u32 {
+        self.scheduler.as_ref().map_or(0, Scheduler::turns_for_test)
+    }
 }
 
 /// Assembles the run state from the caller's context, checking the version

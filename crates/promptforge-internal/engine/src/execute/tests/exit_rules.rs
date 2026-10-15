@@ -4,121 +4,117 @@
 //! model's clean empty exit after tool work, and the empty rounds that
 //! raise `empty_model_reply`).
 
-use super::models_loop::{
-    echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
-};
-use super::run;
+use promptforge_parser::test_support::{PromptSource, one_section, prompt};
+
+use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
-use crate::lua::ToolSet;
 use crate::model::CompletionErrorKind;
-use crate::test_support::tokio_driver::TokioDriver;
+use crate::test_support::scenario::Trace;
 
-#[tokio::test]
-async fn falls_through_to_next_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## First\n\n```lua\nlocal x = 1\n```\n\n\
-## Second\n\n```lua\nreturn \"second\"\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "second");
+#[test]
+fn falls_through_to_next_section() {
+    let source = prompt(
+        "",
+        &[("First", "local x = 1"), ("Second", "return \"second\"")],
+    );
+    assert_eq!(Scenario::new(source).run().text(), "second");
 }
 
-#[tokio::test]
-async fn explicit_return_stops_fall_through() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## First\n\n```lua\nreturn \"first\"\n```\n\n\
-## Second\n\n```lua\nreturn \"unreached\"\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "first");
+#[test]
+fn explicit_return_stops_fall_through() {
+    let source = prompt(
+        "",
+        &[
+            ("First", "return \"first\""),
+            ("Second", "return \"unreached\""),
+        ],
+    );
+    assert_eq!(Scenario::new(source).run().text(), "first");
 }
 
-#[tokio::test]
-async fn generic_result_when_nothing_produced() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\n```lua\nlocal x = 1\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "done");
+#[test]
+fn generic_result_when_nothing_produced() {
+    let trace = Scenario::new(one_section("local x = 1")).run();
+    assert_eq!(trace.text(), "done");
 }
 
-#[tokio::test]
-async fn sys_id_increments_per_section() {
+#[test]
+fn sys_id_increments_per_section() {
     // First section files nothing and falls through; second returns its id:
     // entry 2 of the root chain (entry 0 is the H1 pass, present or not).
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## First\n\n```lua\nlocal x = 1\n```\n\n\
-## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "0.2");
+    let source = prompt(
+        "",
+        &[
+            ("First", "local x = 1"),
+            ("Second", "return tostring(sys.id)"),
+        ],
+    );
+    assert_eq!(Scenario::new(source).run().text(), "0.2");
 }
 
 // --- H1-only prompts (no ## sections) ---
 
-#[tokio::test]
-async fn h1_only_lua_return() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Title\n\n```lua\nreturn \"hello\"\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "hello");
+#[test]
+fn h1_only_lua_return() {
+    let source = PromptSource::new().title("Title").h1("return \"hello\"");
+    assert_eq!(Scenario::new(source.build()).run().text(), "hello");
 }
 
-#[tokio::test]
-async fn h1_only_lua_no_return() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Title\n\n```lua\nlocal x = 1\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "done");
+#[test]
+fn h1_only_lua_no_return() {
+    let source = PromptSource::new().title("Title").h1("local x = 1");
+    assert_eq!(Scenario::new(source.build()).run().text(), "done");
 }
 
 // --- Version gate at the top of `run` ---
 
-#[tokio::test]
-async fn supported_major_zero_proceeds() {
-    // A `promptforge: 0` prompt clears the gate and runs to completion.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "ran");
+/// The `## Only` prompt returning `ran`, under the frontmatter version
+/// line `version`, or with none when `version` is empty.
+fn ran_under(version: &str) -> String {
+    one_section("return \"ran\"").replacen("promptforge: 0\n", version, 1)
 }
 
-#[tokio::test]
-async fn unsupported_major_one_is_refused() {
+#[test]
+fn supported_major_zero_proceeds() {
+    // A `promptforge: 0` prompt clears the gate and runs to completion.
+    let trace = Scenario::new(ran_under("promptforge: 0\n")).run();
+    assert_eq!(trace.text(), "ran");
+}
+
+#[test]
+fn unsupported_major_one_is_refused() {
     // Major 1 is unsupported: the gate refuses it and names the
     // declared version rather than silently degrading to major 0.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let err = run_offline(md)
-        .await
-        .expect_err("major 1 must be refused after the 0-only gate flip");
-    assert!(matches!(err, Error::UnsupportedVersion(1)));
+    let trace = Scenario::new(ran_under("promptforge: 1\n")).run();
+    assert!(matches!(
+        trace.error().inner(),
+        Error::UnsupportedVersion(1)
+    ));
 }
 
-#[tokio::test]
-async fn unsupported_major_is_refused() {
+#[test]
+fn unsupported_major_is_refused() {
     // Any major other than 0 is refused, never silently degraded to major 0.
-    let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
-## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let err = run_offline(md)
-        .await
-        .expect_err("an unsupported major must be refused");
-    assert!(matches!(err, Error::UnsupportedVersion(2)));
+    let trace = Scenario::new(ran_under("promptforge: 2\n")).run();
+    assert!(matches!(
+        trace.error().inner(),
+        Error::UnsupportedVersion(2)
+    ));
 }
 
-#[tokio::test]
-async fn missing_version_is_not_a_promptforge_prompt() {
+#[test]
+fn missing_version_is_not_a_promptforge_prompt() {
     // No `promptforge:` key: not our prompt, so `run` declines with a Parse
     // error rather than executing it.
-    let md = "---\nname: t\ndescription: d\n---\n\n\
-## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let err = run_offline(md)
-        .await
-        .expect_err("a prompt with no promptforge version must be declined");
-    match err {
+    let trace = Scenario::new(ran_under("")).run();
+    match trace.error().inner() {
         Error::ParseStructured {
             kind,
             message,
             name,
             ..
         } => {
-            assert_eq!(kind, ParseErrorKind::Structure);
+            assert_eq!(*kind, ParseErrorKind::Structure);
             assert_eq!(
                 name.as_deref(),
                 Some("t"),
@@ -135,25 +131,32 @@ async fn missing_version_is_not_a_promptforge_prompt() {
 
 // --- Cross-section store persistence ---
 
-#[tokio::test]
-async fn store_persists_across_sections() {
+#[test]
+fn store_persists_across_sections() {
     // One store is created for the run and threaded to every section. The
     // first section's Lua writes a file; the second, in a fresh context,
     // reads it back - proving the store outlives the context-clearing
     // transition. The read lands in `var`, so it round-trips the value.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Writer\n\n```lua\nstore.write('note.txt', 'handoff text')\n```\n\n\
-## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
-    let store = TestStore::new();
-    let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
+    let source = prompt(
+        "",
+        &[
+            ("Writer", "store.write('note.txt', 'handoff text')"),
+            (
+                "Reader",
+                "var.seen = store.read('note.txt')\nreturn var.seen",
+            ),
+        ],
+    );
+    let trace = Scenario::new(source).run();
     assert_eq!(
-        out, "handoff text",
+        trace.text(),
+        "handoff text",
         "the second section must read what the first wrote"
     );
     // The very same handle still holds the file after the run, confirming
     // both sections shared one store rather than each getting a fresh one.
     assert_eq!(
-        store.read("note.txt").expect("read"),
+        trace.read("note.txt").expect("read"),
         "handoff text",
         "the run's store must retain the written file"
     );
@@ -161,60 +164,50 @@ async fn store_persists_across_sections() {
 
 // --- The `models.loop` shim's exit rules ---
 
-/// The section body every loop exit-rule test runs: one loop over a single
-/// user message, then the list's length and the terminal record's text.
-const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
-     msgs:user('ask the model')\n\
-     models.loop(msgs)\n\
-     return #msgs .. '|' .. msgs[#msgs].content";
-
-/// Drives `LOOP_TO_TEXT` against `replies` with `tools` offered, returning
-/// the section's result, the loop's observation sequence, and the run's
-/// turn count.
-async fn drive_loop(
-    replies: Vec<ScriptedReply>,
-    tools: impl Into<FixtureTools>,
-) -> (Result<String>, Vec<String>, u32) {
-    let gateway = ScriptedChat::new(replies);
-    let tools = tools.into();
-    let prompt = parse(&loop_prompt(&format!(
-        "{}{LOOP_TO_TEXT}",
-        tools.offer_lines()
-    )));
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) =
-        loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await;
-    (
-        out,
-        loop_events(&recorder),
-        ctx.turns().load(Ordering::Relaxed),
-    )
+/// The section body every loop exit-rule test runs: the shared loop over a
+/// single user message, returning the list's length ahead of the terminal
+/// record's text.
+fn loop_to_count_and_text() -> String {
+    LOOP_TO_TEXT.replacen("return ", "return #msgs .. '|' .. ", 1)
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_text_reply_is_the_loops_terminal_record() {
-    let (out, events, turns) =
-        drive_loop(vec![text_finish("all done", "stop")], ToolSet::default()).await;
-    assert_eq!(out.expect("a text reply ends the loop"), "2|all done");
-    assert_eq!(turns, 1);
+/// Drives [`loop_to_count_and_text`] against `replies`, with `offered`, when
+/// given, in scope under the wire name `echo`, and returns the run's trace
+/// beside the loop's observation sequence.
+#[track_caller]
+fn drive_loop(replies: Vec<ScriptedReply>, offered: Option<FnTool>) -> (Trace, Vec<String>) {
+    let gateway = ScriptedChat::new(replies);
+    let offer = offered.as_ref().map_or_else(String::new, |tool| {
+        format!("tools.offer('{}')\n", tool.id())
+    });
+    let mut scenario = loop_scenario(one_section(&format!("{offer}{}", loop_to_count_and_text())));
+    if let Some(tool) = offered {
+        scenario = scenario.offer("echo", tool);
+    }
+    let trace = scenario.chat(&gateway).run();
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
+    let events = loop_events(&recorder);
+    (trace, events)
+}
+
+#[test]
+fn a_text_reply_is_the_loops_terminal_record() {
+    let (trace, events) = drive_loop(vec![text_finish("all done", "stop")], None);
+    assert_eq!(trace.text(), "2|all done");
+    assert_eq!(trace.turns(), 1);
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn length_finish_reason_reports_model_turn_truncated() {
-    let (out, events, turns) = drive_loop(
-        vec![text_finish("partial answer", "length")],
-        ToolSet::default(),
-    )
-    .await;
+#[test]
+fn length_finish_reason_reports_model_turn_truncated() {
+    let (trace, events) = drive_loop(vec![text_finish("partial answer", "length")], None);
     assert_eq!(
-        out.expect("a truncated reply still ends the loop"),
-        "2|partial answer"
+        trace.text(),
+        "2|partial answer",
+        "a truncated reply still ends the loop"
     );
-    assert_eq!(turns, 1);
+    assert_eq!(trace.turns(), 1);
     assert_eq!(
         events,
         vec![
@@ -224,25 +217,28 @@ async fn length_finish_reason_reports_model_turn_truncated() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
+#[test]
+fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
     // The model stopped deliberately after doing its work through a tool
     // call: the loop accepts the empty turn and appends an empty assistant
     // record as the terminal text.
-    let (out, events, turns) = drive_loop(
+    let (trace, events) = drive_loop(
         vec![
             calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
             text_finish("", "stop"),
         ],
-        echo_tools(),
-    )
-    .await;
+        Some(echo_tool()),
+    );
     assert_eq!(
-        out.expect("the run must succeed"),
+        trace.text(),
         "4|",
         "a clean stop-exit appends an empty terminal record after the exchange"
     );
-    assert_eq!(turns, 2, "the tool-call turn and the accepted empty turn");
+    assert_eq!(
+        trace.turns(),
+        2,
+        "the tool-call turn and the accepted empty turn"
+    );
     assert_eq!(
         events,
         vec![
@@ -253,16 +249,16 @@ async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn empty_stop_turn_without_tool_calls_fails() {
+#[test]
+fn empty_stop_turn_without_tool_calls_fails() {
     // Zero prior dispatches: the acceptance conditions cannot hold, so the
     // empty "stop" turn is an `EmptyModelReply` failure. The round itself
     // completed - the scheduler counts and reports it - and the shim's exit
     // rule raises against its finish reason.
-    for tools in [FixtureTools::default(), echo_tools()] {
-        let (out, events, turns) = drive_loop(vec![text_finish("", "stop")], tools).await;
-        match out {
-            Err(Error::Completion(error)) => {
+    for offered in [None, Some(echo_tool())] {
+        let (trace, events) = drive_loop(vec![text_finish("", "stop")], offered);
+        match trace.error().inner() {
+            Error::Completion(error) => {
                 assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
                 assert_eq!(error.finish_reason(), Some("stop"));
                 assert_eq!(
@@ -273,19 +269,19 @@ async fn empty_stop_turn_without_tool_calls_fails() {
             }
             other => panic!("expected an EmptyReply failure, got {other:?}"),
         }
-        assert_eq!(turns, 1, "the empty round is a completed turn");
+        assert_eq!(trace.turns(), 1, "the empty round is a completed turn");
         assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn empty_truncated_final_text_fails_without_truncation_detail() {
+#[test]
+fn empty_truncated_final_text_fails_without_truncation_detail() {
     // `finish_reason: "length"` is never a clean exit, even with empty text,
     // and an empty round reports no truncation: there is no reply to have
     // truncated.
-    let (out, events, _) = drive_loop(vec![text_finish("", "length")], ToolSet::default()).await;
-    match out {
-        Err(Error::Completion(error)) => {
+    let (trace, events) = drive_loop(vec![text_finish("", "length")], None);
+    match trace.error().inner() {
+        Error::Completion(error) => {
             assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
             assert_eq!(error.finish_reason(), Some("length"));
         }
@@ -294,23 +290,26 @@ async fn empty_truncated_final_text_fails_without_truncation_detail() {
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn empty_turn_without_finish_reason_after_tool_call_fails() {
+#[test]
+fn empty_turn_without_finish_reason_after_tool_call_fails() {
     // Fail closed: a missing finish reason is not "stop", so the empty turn
     // is an error even after a successful dispatch.
-    let (out, events, turns) = drive_loop(
+    let (trace, events) = drive_loop(
         vec![calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]), text("")],
-        echo_tools(),
-    )
-    .await;
-    match out {
-        Err(Error::Completion(error)) => {
+        Some(echo_tool()),
+    );
+    match trace.error().inner() {
+        Error::Completion(error) => {
             assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
             assert_eq!(error.finish_reason(), None);
         }
         other => panic!("expected an EmptyReply failure, got {other:?}"),
     }
-    assert_eq!(turns, 2, "the tool-call turn and the completed empty round");
+    assert_eq!(
+        trace.turns(),
+        2,
+        "the tool-call turn and the completed empty round"
+    );
     assert_eq!(
         events,
         vec![
@@ -321,34 +320,29 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
+#[test]
+fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     // The raise is pcall-able as the `empty_model_reply` kind holding the
     // finish reason as its field and the client's phrase as its message,
     // and the rejected round leaves the author's list untouched.
     let gateway = ScriptedChat::new(vec![text_finish("", "stop")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('say nothing')\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'the empty round raises')\n\
-         assert(#msgs == 1, 'a rejected round appends nothing')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('say nothing')
+         local ok, err = pcall(models.loop, msgs)
+         assert(not ok, 'the empty round raises')
+         assert(#msgs == 1, 'a rejected round appends nothing')
          return err.kind .. '|' .. tostring(err.finish_reason) .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = loop_scenario(source).chat(&gateway).run();
     assert_eq!(
-        out,
+        trace.text(),
         "empty_model_reply|stop|the model replied with no text and no tool calls"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
+#[test]
+fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
     // The crate's own wording extends the fixed phrase after a colon, so the
     // author sees why the round counted as empty.
     let gateway = ScriptedChat::new(vec![ScriptedReply::Text {
@@ -358,20 +352,15 @@ async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
         reasoning: Some("only thinking".to_owned()),
         metrics: None,
     }]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('think only')\n\
-         local ok, err = pcall(models.loop, msgs)\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('think only')
+         local ok, err = pcall(models.loop, msgs)
          return err.kind .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = loop_scenario(source).chat(&gateway).run();
     assert_eq!(
-        out,
+        trace.text(),
         "empty_model_reply|the model replied with no text and no tool calls: \
          reasoning content was present but ignored"
     );

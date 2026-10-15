@@ -7,12 +7,12 @@
 //! built-ins (answered at once or parked in `await_tasks`) all report the
 //! requesting round's turn.
 
-use super::models_loop::{echo_tools, loop_context_observed, loop_prompt};
+use promptforge_parser::test_support::{one_section, prompt};
+use promptforge_types::event::Event;
+
+use super::models_loop::loop_scenario;
 use super::*;
-use crate::lua::ToolSet;
-use crate::test_support::tokio_driver::TokioDriver;
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
+use crate::test_support::scenario::Trace;
 
 /// One turn-bearing report: a requested batch (its call ids joined by
 /// commas), a tool result (its call id), or an assistant reply (its text).
@@ -23,119 +23,73 @@ enum TurnReport {
     Reply { turn: u32, text: String },
 }
 
-/// Records the turn on every batch, result, and reply, in order.
-#[derive(Default)]
-struct TurnRecorder(Mutex<Vec<TurnReport>>);
+/// The turn on every batch, result, and reply a run reported, in order.
+#[derive(Debug)]
+struct Turns(Vec<TurnReport>);
 
-impl TurnRecorder {
-    fn push(&self, report: TurnReport) {
-        self.0
-            .lock()
-            .expect("the turn recorder mutex is not poisoned")
-            .push(report);
-    }
-
-    fn reports(&self) -> Vec<TurnReport> {
-        self.0
-            .lock()
-            .expect("the turn recorder mutex is not poisoned")
-            .clone()
+impl Turns {
+    /// The turn-bearing reports among `trace`'s events.
+    fn of(trace: &Trace) -> Turns {
+        let reports = trace.events().iter().filter_map(|event| match event {
+            Event::AssistantToolCalls { turn, calls, .. } => {
+                let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
+                Some(TurnReport::Batch {
+                    turn: *turn,
+                    ids: ids.join(","),
+                })
+            }
+            Event::ToolResult {
+                turn, tool_call_id, ..
+            } => Some(TurnReport::Result {
+                turn: *turn,
+                id: tool_call_id.clone(),
+            }),
+            Event::AssistantReply { turn, text, .. } => Some(TurnReport::Reply {
+                turn: *turn,
+                text: text.clone(),
+            }),
+            _ => None,
+        });
+        Turns(reports.collect())
     }
 
     /// The turn of the batch whose ids are exactly `ids`.
+    #[track_caller]
     fn batch_turn(&self, ids: &str) -> u32 {
-        let reports = self.reports();
-        reports
+        self.0
             .iter()
             .find_map(|report| match report {
                 TurnReport::Batch { turn, ids: seen } if seen == ids => Some(*turn),
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("no batch {ids} in {reports:?}"))
+            .unwrap_or_else(|| panic!("no batch {ids} in {:?}", self.0))
     }
 
     /// The turn of the one result reported under `id`.
+    #[track_caller]
     fn result_turn(&self, id: &str) -> u32 {
-        let reports = self.reports();
-        let turns: Vec<u32> = reports
+        let turns: Vec<u32> = self
+            .0
             .iter()
             .filter_map(|report| match report {
                 TurnReport::Result { turn, id: seen } if seen == id => Some(*turn),
                 _ => None,
             })
             .collect();
-        assert_eq!(turns.len(), 1, "one result under {id}: {reports:?}");
+        assert_eq!(turns.len(), 1, "one result under {id}: {:?}", self.0);
         turns[0]
     }
 
     /// The turn of the reply whose text is `text`.
+    #[track_caller]
     fn reply_turn(&self, text: &str) -> u32 {
-        let reports = self.reports();
-        reports
+        self.0
             .iter()
             .find_map(|report| match report {
                 TurnReport::Reply { turn, text: seen } if seen == text => Some(*turn),
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("no reply {text:?} in {reports:?}"))
-    }
-}
-
-impl Observer for TurnRecorder {
-    fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
-
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        _section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        text: &str,
-        _finish_reason: Option<&str>,
-        _model: &str,
-        _metrics: Option<&CallMetrics>,
-        _origin: ReplyOrigin,
-    ) {
-        self.push(TurnReport::Reply {
-            turn,
-            text: text.to_owned(),
-        });
-    }
-
-    fn on_assistant_tool_calls(
-        &self,
-        _execution: &str,
-        _section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        _model: &str,
-        calls: &[ToolCallEvent],
-    ) {
-        let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
-        self.push(TurnReport::Batch {
-            turn,
-            ids: ids.join(","),
-        });
-    }
-
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        _section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        _alias: &str,
-        _content: &str,
-        _trusted: bool,
-    ) {
-        self.push(TurnReport::Result {
-            turn,
-            id: tool_call_id.to_owned(),
-        });
+            .unwrap_or_else(|| panic!("no reply {text:?} in {:?}", self.0))
     }
 }
 
@@ -161,30 +115,20 @@ const INFER_HANDLER: &str = "return 'inferred ' .. models.infer('inner prompt')"
 /// The [`grab_block`] setup that puts the `echo` fixture in scope.
 const OFFER_ECHO: &str = "tools.offer('tools/echo')\n";
 
-/// Drives `md` against `replies` under `tools`, returning the run's output
-/// and the recorder.
-async fn drive(
-    md: &str,
-    tools: impl Into<FixtureTools>,
-    replies: Vec<ScriptedReply>,
-) -> (String, Arc<TurnRecorder>) {
+/// Drives `scenario` against `replies`, returning the run's output and its
+/// turn reports.
+#[track_caller]
+fn drive(scenario: Scenario, replies: Vec<ScriptedReply>) -> (String, Turns) {
     let gateway = ScriptedChat::new(replies);
-    let prompt = parse(md);
-    let recorder = Arc::new(TurnRecorder::default());
-    let (ctx, fixture) =
-        loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the batch runs to the final reply");
-    (out, recorder)
+    let trace = scenario.chat(&gateway).run();
+    (trace.text().to_owned(), Turns::of(&trace))
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
-    let (out, recorder) = drive(
-        &loop_prompt(&grab_block(OFFER_ECHO, INFER_HANDLER)),
-        echo_tools(),
+#[test]
+fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
+    let (out, turns) = drive(
+        loop_scenario(one_section(&grab_block(OFFER_ECHO, INFER_HANDLER)))
+            .offer("echo", echo_tool()),
         vec![
             calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
@@ -193,38 +137,30 @@ async fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
             text("inner reply"),
             text("final answer"),
         ],
-    )
-    .await;
+    );
     assert_eq!(out, "final answer");
-    let batch = recorder.batch_turn("c1,c2");
+    let batch = turns.batch_turn("c1,c2");
     assert_eq!(
-        recorder.reply_turn("inner reply"),
+        turns.reply_turn("inner reply"),
         batch + 1,
-        "the handler's inference advanced the counter mid-batch: {:?}",
-        recorder.reports()
+        "the handler's inference advanced the counter mid-batch: {turns:?}"
     );
+    assert_eq!(turns.result_turn("c1"), batch, "the handler's own result");
     assert_eq!(
-        recorder.result_turn("c1"),
+        turns.result_turn("c2"),
         batch,
-        "the handler's own result"
-    );
-    assert_eq!(
-        recorder.result_turn("c2"),
-        batch,
-        "the bound call dispatched after the handler reports the batch turn: {:?}",
-        recorder.reports()
+        "the bound call dispatched after the handler reports the batch turn: {turns:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_turn() {
+#[test]
+fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_turn() {
     let handler = "local inner = messages.new()\n\
                    inner:user('inner')\n\
                    models.loop(inner)\n\
                    return inner[#inner].content";
-    let (out, recorder) = drive(
-        &loop_prompt(&grab_block(OFFER_ECHO, handler)),
-        echo_tools(),
+    let (out, turns) = drive(
+        loop_scenario(one_section(&grab_block(OFFER_ECHO, handler))).offer("echo", echo_tool()),
         vec![
             calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
@@ -234,36 +170,35 @@ async fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_tur
             text("inner done"),
             text("final answer"),
         ],
-    )
-    .await;
+    );
     assert_eq!(out, "final answer");
-    let outer = recorder.batch_turn("c1,c2");
-    let inner = recorder.batch_turn("i1");
+    let outer = turns.batch_turn("c1,c2");
+    let inner = turns.batch_turn("i1");
     assert!(inner > outer, "the inner round follows the outer one");
     assert_eq!(
-        recorder.result_turn("i1"),
+        turns.result_turn("i1"),
         inner,
         "the inner result reports the inner round"
     );
-    assert_eq!(recorder.result_turn("c1"), outer);
+    assert_eq!(turns.result_turn("c1"), outer);
     assert_eq!(
-        recorder.result_turn("c2"),
+        turns.result_turn("c2"),
         outer,
-        "the outer batch's later call reports the outer turn: {:?}",
-        recorder.reports()
+        "the outer batch's later call reports the outer turn: {turns:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_section() {
-    let md = format!(
-        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{}\n```\n\n\
-         ## Helper\n\n```lua\nreturn models.infer('helper prompt')\n```\n",
-        grab_block(OFFER_ECHO, "return call('## Helper')")
+#[test]
+fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_section() {
+    let source = prompt(
+        "",
+        &[
+            ("Only", &grab_block(OFFER_ECHO, "return call('## Helper')")),
+            ("Helper", "return models.infer('helper prompt')"),
+        ],
     );
-    let (out, recorder) = drive(
-        &md,
-        echo_tools(),
+    let (out, turns) = drive(
+        loop_scenario(source).offer("echo", echo_tool()),
         vec![
             calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
@@ -272,29 +207,28 @@ async fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_
             text("helper reply"),
             text("final answer"),
         ],
-    )
-    .await;
+    );
     assert_eq!(out, "final answer");
-    let batch = recorder.batch_turn("c1,c2");
+    let batch = turns.batch_turn("c1,c2");
     assert_eq!(
-        recorder.reply_turn("helper reply"),
+        turns.reply_turn("helper reply"),
         batch + 1,
-        "the called section shares its caller's counter: {:?}",
-        recorder.reports()
+        "the called section shares its caller's counter: {turns:?}"
     );
     assert_eq!(
-        recorder.result_turn("c2"),
+        turns.result_turn("c2"),
         batch,
-        "the call dispatched after the handler reports the batch turn: {:?}",
-        recorder.reports()
+        "the call dispatched after the handler reports the batch turn: {turns:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_later_task_status_answer_reports_the_batch_turn() {
-    let (out, recorder) = drive(
-        &loop_prompt(&grab_block("tools.allow_tasks()\n", INFER_HANDLER)),
-        ToolSet::default(),
+#[test]
+fn a_later_task_status_answer_reports_the_batch_turn() {
+    let (out, turns) = drive(
+        loop_scenario(one_section(&grab_block(
+            "tools.allow_tasks()\n",
+            INFER_HANDLER,
+        ))),
         vec![
             calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
@@ -303,24 +237,24 @@ async fn a_later_task_status_answer_reports_the_batch_turn() {
             text("inner reply"),
             text("final answer"),
         ],
-    )
-    .await;
+    );
     assert_eq!(out, "final answer");
-    let batch = recorder.batch_turn("c1,c2");
-    assert_eq!(recorder.reply_turn("inner reply"), batch + 1);
+    let batch = turns.batch_turn("c1,c2");
+    assert_eq!(turns.reply_turn("inner reply"), batch + 1);
     assert_eq!(
-        recorder.result_turn("c2"),
+        turns.result_turn("c2"),
         batch,
-        "the built-in's answer reports the batch turn: {:?}",
-        recorder.reports()
+        "the built-in's answer reports the batch turn: {turns:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() {
-    let (out, recorder) = drive(
-        &loop_prompt(&grab_block("tools.allow_tasks()\n", INFER_HANDLER)),
-        ToolSet::default(),
+#[test]
+fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() {
+    let (out, turns) = drive(
+        loop_scenario(one_section(&grab_block(
+            "tools.allow_tasks()\n",
+            INFER_HANDLER,
+        ))),
         vec![
             calls(&[
                 ("c1", "grab", "{\"value\":\"a\"}"),
@@ -329,15 +263,13 @@ async fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() 
             text("inner reply"),
             text("final answer"),
         ],
-    )
-    .await;
+    );
     assert_eq!(out, "final answer");
-    let batch = recorder.batch_turn("c1,c2");
-    assert_eq!(recorder.reply_turn("inner reply"), batch + 1);
+    let batch = turns.batch_turn("c1,c2");
+    assert_eq!(turns.reply_turn("inner reply"), batch + 1);
     assert_eq!(
-        recorder.result_turn("c2"),
+        turns.result_turn("c2"),
         batch,
-        "the wake reports the turn stored at dispatch: {:?}",
-        recorder.reports()
+        "the wake reports the turn stored at dispatch: {turns:?}"
     );
 }

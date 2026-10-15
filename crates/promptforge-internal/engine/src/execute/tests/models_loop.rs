@@ -42,8 +42,9 @@ pub(super) fn loop_scenario(source: impl Into<String>) -> Scenario {
     Scenario::new(source).unprepared().models(loop_models())
 }
 
-/// The section body the cap, trust, and scoping tests run: one loop over
-/// a single user message, then the terminal record's text.
+/// The section body the cap, trust, scoping, exit-rule, and observation
+/// tests run: one loop over a single user message, then the terminal
+/// record's text.
 pub(super) const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      msgs:user('ask the model')\n\
      models.loop(msgs)\n\

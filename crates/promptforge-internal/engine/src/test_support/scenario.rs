@@ -347,11 +347,13 @@ impl Scenario {
             run,
             result: refused,
             answers,
+            parsed: events.len(),
             events,
             effects: Vec::new(),
             held: Vec::new(),
             store: self.store,
             canceller,
+            turns: 0,
         }
     }
 

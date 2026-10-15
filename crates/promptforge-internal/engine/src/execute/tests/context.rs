@@ -93,27 +93,6 @@ const fn _public_execution_types_are_send_sync_static() {
 /// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
 pub(super) const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
-/// The `writer` role declaration every model-facing fixture prompt includes:
-/// the frontmatter slot, filled by prepare's trivial fill from the
-/// context's current model.
-const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
-
-/// The H1 block parking the declared role as the prompt-wide default.
-const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
-
-/// Declares the `writer` role in the prompt's frontmatter, unless the
-/// frontmatter already declares roles.
-fn declare_writer(source: &str) -> String {
-    let frontmatter_end = source.find("\n---\n").expect("frontmatter closes");
-    let frontmatter = &source[..frontmatter_end];
-    if frontmatter.contains("\nmodels:") {
-        return source.to_string();
-    }
-    let mut out = source.to_string();
-    out.insert_str(frontmatter_end + 1, MODEL_ROLE_DECL);
-    out
-}
-
 /// Lua-only prompts never build the gateway client, so these run offline.
 pub(super) fn parse(md: &str) -> Prompt {
     let source = if md.lines().any(|line| line.starts_with("# ")) {
@@ -142,50 +121,6 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
     ModelCatalog::new([test_model(TEST_MODEL)]).expect("the test catalog has a single unique model")
 }
 
-/// Declares the `writer` role and parks it as the prompt-wide default, so a
-/// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts with their own `models.default` call (or a `models.bind` call,
-/// which the tests expect to fail) keep their shape and get only the role
-/// declaration.
-fn ensure_model_h1(md: &str) -> String {
-    let source = md.to_string();
-    if source.contains("models.default") || source.contains("models.bind") {
-        return declare_writer(&source);
-    }
-    let mut source = declare_writer(&source);
-    if let Some(pos) = source.find("\n\n## ") {
-        source.insert_str(pos + 2, MODEL_DEFAULT_H1);
-        return source;
-    }
-    source.replacen(
-        "---\n\n",
-        &format!("---\n\n# Test prompt\n\n{MODEL_DEFAULT_H1}"),
-        1,
-    )
-}
-
-pub(super) fn bound_for_model(md: &str) -> TestPrompt {
-    TestPrompt {
-        prompt: parse(&ensure_model_h1(md)),
-        models: test_model_catalog(),
-    }
-}
-
-// The helper takes no resolver: live tool binding resolves elsewhere, so a
-// resolver argument would imply a resolution path the helper does not
-// exercise. The fixture Plugin's tools are in the run's catalog.
-pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
-    let source = ensure_model_h1(md);
-    TestPrompt {
-        prompt: parse(&source),
-        models: if source.contains("models.") {
-            test_model_catalog()
-        } else {
-            ModelCatalog::empty()
-        },
-    }
-}
-
 /// Owned run inputs a test supplies: the run name, the progress observer,
 /// and optional client/capture sinks. The instrumentation is owned `Arc`s
 /// so it can build a [`RunContext`].
@@ -196,50 +131,10 @@ pub(super) struct RunOptions {
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
 }
 
-/// Options that report nowhere and build no client - what a Lua-only,
-/// offline test wants.
-pub(super) fn silent() -> RunOptions {
-    RunOptions {
-        execution: EXECUTION,
-        observer: Arc::new(NullObserver::default()),
-        client: None,
-        debug: None,
-    }
-}
-
 /// A client answering from the given scripted model, sharing its script,
 /// count, and record.
 pub(super) fn gateway_client(chat: &ScriptedChat) -> ScriptedChat {
     chat.clone()
-}
-
-/// Options that report nowhere and answer the run's rounds from the given
-/// scripted model.
-pub(super) fn gatewayed(chat: &ScriptedChat) -> RunOptions {
-    RunOptions {
-        execution: EXECUTION,
-        observer: Arc::new(NullObserver::default()),
-        client: Some(gateway_client(chat)),
-        debug: None,
-    }
-}
-
-/// Options that answer from a scripted model and record debug events.
-pub(super) fn gatewayed_with_debug(
-    chat: &ScriptedChat,
-    capture: Arc<dyn DebugCapture>,
-) -> RunOptions {
-    RunOptions {
-        debug: Some(capture),
-        ..gatewayed(chat)
-    }
-}
-
-/// Parses `md` and runs it offline with empty `args`, no tools, and a fresh
-/// in-memory store created for the run - the ergonomic path for the
-/// Lua-only tests that do not care about the store's contents.
-pub(super) async fn run_offline(md: &str) -> Result<String> {
-    run(&fixture(md), "", &[], &TestStore::new(), silent()).await
 }
 
 pub(super) async fn run(
@@ -278,28 +173,6 @@ pub(super) async fn run(
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
-    }
-}
-
-/// Runs a fixture offline through the test-support driver
-/// ([`crate::test_support::run_with_fixture`]) with a caller-customized
-/// [`RunContext`] and [`RunFixture`], returning the typed [`RunError`]
-/// so a test can assert on its kind (limits, cancellation).
-pub(super) async fn run_with_context(
-    test: &TestPrompt,
-    configure: impl FnOnce(RunContext, RunFixture) -> (RunContext, RunFixture),
-) -> std::result::Result<String, RunError> {
-    let (mut ctx, fixture) = configure(test_context(EXECUTION), RunFixture::new());
-    ctx = ctx.vfs(TestStore::new().vfs());
-    if ctx.model.is_none()
-        && let Some(model) = test.models.models().first()
-    {
-        ctx = ctx.model(model.clone());
-    }
-    match crate::test_support::run_with_fixture(&test.prompt, "", ctx, fixture).await {
-        RunResult::Ok(output) => Ok(output),
-        RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
-        RunResult::Failure(error) => Err(error),
     }
 }
 

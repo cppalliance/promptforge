@@ -4,8 +4,11 @@
 
 use promptforge_types::ids::RoundId;
 
+use super::super::models_loop::{loop_context, loop_prompt};
 use super::*;
 use crate::execute::run::EffectRecord;
+use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// Runs `lua` as the section of a loop prompt on the 4096-token window and
 /// returns what it returned, beside the record of every effect it issued.

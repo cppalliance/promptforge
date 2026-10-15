@@ -1,7 +1,10 @@
 //! Test-only hooks over the scheduler's private state: the seams the
 //! `execute::tests` suites drive the scheduler's edge paths through
-//! (overflow bounds, inline answers, and task slots). Compiled only under
-//! test; nothing here exists in a shipped Engine.
+//! (overflow bounds, inline answers, and task slots) and the turn counter
+//! they read. Compiled only under test; nothing here exists in a shipped
+//! Engine.
+
+use std::sync::atomic::Ordering;
 
 use promptforge_types::ids::{ChainId, TaskId};
 use promptforge_types::tools::ToolId;
@@ -43,6 +46,12 @@ impl Scheduler {
     /// was ever started, so a test can prove a chain's end moved its slot.
     pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
         self.tasks.get(task).map(|slot| slot.state)
+    }
+
+    /// The model-turn counter of the run's ambient context, which the main
+    /// walk and its `call` children advance.
+    pub(crate) fn turns_for_test(&self) -> u32 {
+        self.ctx.turns().load(Ordering::Relaxed)
     }
 
     /// Starts a chain over the top-level slice at `index`, as a jump out

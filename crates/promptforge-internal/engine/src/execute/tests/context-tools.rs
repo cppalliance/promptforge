@@ -2,8 +2,6 @@
 //! set beside the test driver's tool table behind it, and the helpers that
 //! arm a run state with them.
 
-use std::fmt::Write as _;
-
 use super::*;
 
 /// A binding for a fixture tool beside its implementation: the binding
@@ -58,18 +56,6 @@ impl FixtureTools {
     /// The bindings as the run's set, for a test that inspects them.
     pub(in super::super) fn set(&self) -> &crate::lua::ToolSet {
         &self.set
-    }
-
-    /// One `tools.offer('<id>')` line per binding, in binding order, for a
-    /// test section whose rounds use the fixture's tools; empty when the
-    /// fixture binds nothing.
-    pub(in super::super) fn offer_lines(&self) -> String {
-        let mut lines = String::new();
-        for binding in self.set.offered() {
-            writeln!(lines, "tools.offer('{}')", binding.id())
-                .expect("writing to a String cannot fail");
-        }
-        lines
     }
 
     /// Arms the run state with the set and returns it beside `fixture`

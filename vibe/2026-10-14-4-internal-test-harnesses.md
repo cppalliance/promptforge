@@ -710,7 +710,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-11>
 
-### Step 11: Engine chat and section-loop runs
+### Step 11: Engine chat and section-loop runs [completed]
 
 - Component: engine Run level
 - Tests:
