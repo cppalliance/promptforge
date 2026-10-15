@@ -14,14 +14,8 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::execute::run::{EffectRecord, Round, ToolCallOrigin, ToolCaller};
 use crate::lua::ToolSet;
+use crate::test_support::scenario::round_trip;
 use crate::test_support::tokio_driver::TokioDriver;
-
-/// Serializes a record and reads it back: the round trip a run log and a
-/// replay depend on.
-fn round_trip(record: &EffectRecord) -> EffectRecord {
-    let text = serde_json::to_string(record).expect("a record serializes");
-    serde_json::from_str(&text).expect("a serialized record deserializes")
-}
 
 /// Asserts every recorded effect survives the round trip unchanged.
 fn assert_round_trips(records: &[EffectRecord]) {

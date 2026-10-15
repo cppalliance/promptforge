@@ -76,11 +76,6 @@ pub(crate) struct RunState {
     /// every section VM's instruction hook. The context's one handle, the
     /// same flag the caller watches and the run's `cancel` sets.
     cancel: CancelHandle,
-    /// Test-only: a copy of every drained event, so a test can assert on
-    /// the values themselves - their provenance included - without
-    /// collecting each step's batch.
-    #[cfg(test)]
-    tap: Option<Arc<Mutex<Vec<Event>>>>,
     /// The model-turn counter this context advances: the run's, or a
     /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
@@ -158,8 +153,6 @@ impl RunState {
             events,
             emitter,
             cancel: ctx.cancel.clone(),
-            #[cfg(test)]
-            tap: None,
             turns: Arc::new(AtomicU32::new(0)),
             tool_set,
             catalog_bindings: Arc::new(catalog_bindings(ctx)),
@@ -192,17 +185,6 @@ impl RunState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = set;
         self
-    }
-
-    /// Keeps a copy of every event the driver drains from this run's
-    /// buffer, so a test can assert on the values - provenance included.
-    /// Install before the scheduler is built: the drain reads the tap
-    /// through the scheduler's root context.
-    #[cfg(test)]
-    pub(super) fn record_events_for_test(&mut self) -> Arc<Mutex<Vec<Event>>> {
-        let tap = Arc::new(Mutex::new(Vec::new()));
-        self.tap = Some(Arc::clone(&tap));
-        tap
     }
 
     /// Replaces the run's tool set with `set`, so a test can arm the run
@@ -273,14 +255,7 @@ impl RunState {
     /// drain, in push order. The run's `step` calls this once per step and
     /// returns the batch to the caller.
     pub(super) fn take_events(&self) -> Vec<Event> {
-        let events = self.events.take();
-        #[cfg(test)]
-        if let Some(tap) = &self.tap {
-            tap.lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend(events.iter().cloned());
-        }
-        events
+        self.events.take()
     }
 
     /// The model-turn counter this context advances.
@@ -415,9 +390,7 @@ impl fmt::Debug for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut state = f.debug_struct("RunState");
         #[cfg(test)]
-        state
-            .field("raw_shims", &self.raw_shims)
-            .field("tap", &self.tap.is_some());
+        state.field("raw_shims", &self.raw_shims);
         state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)

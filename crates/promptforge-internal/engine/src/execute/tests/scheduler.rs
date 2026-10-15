@@ -1,6 +1,7 @@
 //! Scheduler-side tests, split by seam into the `walk`, `live_h1`, `fanout`,
 //! `concurrency`, `store_gate`, and `failures` submodules. The context builders `writer_models`,
-//! `scheduler_context`, `scheduler_context_on`, and `scheduler_context_from`, the
+//! `scheduler_context`, `scheduler_context_on`, and `scheduler_context_from`, their
+//! scenario `scheduler_scenario`, the
 //! gateway-request helper `request_prompts`, and the task-lifecycle counter
 //! `terminal_count` with its labels live here because more than one submodule uses
 //! them.
@@ -20,6 +21,12 @@ fn writer_models() -> ModelSet {
         )],
         default: Some("writer".to_owned()),
     }
+}
+
+/// A run of `source` over the [`writer_models`], unprepared, so the run
+/// starts with the set the scheduler context builders fill and no catalog.
+pub(super) fn scheduler_scenario(source: impl Into<String>) -> Scenario {
+    Scenario::new(source).unprepared().models(writer_models())
 }
 
 /// Builds the run context and its silent fixture for a scheduler test: the

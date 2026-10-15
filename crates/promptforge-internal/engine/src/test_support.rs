@@ -58,6 +58,18 @@ pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub(crate) use tools::FnTool;
 pub use tools::{TestTool, TestToolTable};
 
+/// A fresh default handle's access capability, for tests that inject Engine
+/// values into a standalone VM.
+#[cfg(test)]
+#[track_caller]
+pub(crate) fn fresh_access() -> Arc<promptforge_vfs::Access> {
+    Arc::new(
+        promptforge_vfs::VfsRef::default()
+            .acquire(promptforge_vfs::Origin::new("test fixture"))
+            .expect("the stock backend acquires"),
+    )
+}
+
 /// The suites' scripted model answers a `Chat` round in process under the
 /// run's limits.
 #[cfg(test)]

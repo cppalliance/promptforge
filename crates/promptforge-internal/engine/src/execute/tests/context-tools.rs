@@ -1,12 +1,12 @@
 //! Fixture tool sets: a binding beside its implementation, a run's tool
-//! set beside the test driver's tool table behind it, and the helpers that
-//! arm a run state with them.
+//! set beside the test driver's tool table behind it, and the helper that
+//! splits fixture tools into a catalog and a table.
 
 use super::*;
 
 /// A binding for a fixture tool beside its implementation: the binding
 /// goes into the run's offering under `alias` as its wire name, the
-/// implementation into the tool table [`arm_tools`] hands the test driver,
+/// implementation into the tool table [`FixtureTools`] hands the test driver,
 /// so a model call on the wire name or a script call on the id resolves
 /// through the same id the binding journals.
 pub(in super::super) fn fixture_binding(
@@ -76,18 +76,6 @@ impl From<crate::lua::ToolSet> for FixtureTools {
             table: TestToolTable::new(),
         }
     }
-}
-
-/// Arms the run state's shared tool set with `bindings`, none of them in
-/// any section's scope until the section offers it, and returns the state
-/// beside `fixture` carrying the implementations, so `TokioDriver::new`
-/// performs the calls.
-pub(in super::super) fn arm_tools(
-    ctx: RunState,
-    fixture: RunFixture,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> (RunState, RunFixture) {
-    FixtureTools::new(bindings).install(ctx, fixture)
 }
 
 /// The test's tools as two halves: the catalog of descriptors the run

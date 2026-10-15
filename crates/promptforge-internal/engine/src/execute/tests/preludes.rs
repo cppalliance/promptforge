@@ -11,9 +11,7 @@ use promptforge_types::plugins::{PluginId, Prelude};
 
 use super::*;
 use crate::execute::protocol::VfsOp;
-use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
-use crate::test_support::drive;
-use crate::test_support::scenario::{chat_answer, perform_locally};
+use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 
 /// A prelude contributed by the Plugin `id`.
 pub(super) fn prelude(id: &str, source: &str) -> Prelude {
@@ -34,67 +32,43 @@ const EFFECT_FIRST: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
     ## Only\n\n\
     ```lua\nreturn 'done'\n```\n";
 
-/// Prepares `md` against the echo fixture's catalog, the test model, and
-/// `preludes`, and starts a run over the prepared context.
-fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Run {
-    let prompt = parse(md);
-    let (catalog, _table) = fixture_tools(&[Arc::new(echo_tool()) as Arc<dyn TestTool>]);
-    let model = test_model_catalog()
-        .models()
-        .first()
-        .cloned()
-        .expect("the test catalog holds one model");
-    let (ctx, requirements) = test_context(EXECUTION)
-        .model(model)
-        .tools(catalog)
-        .preludes(preludes)
-        .prepare(&prompt);
-    assert!(
-        requirements.is_satisfied(),
-        "the fixture prompt prepares: {requirements:?}"
-    );
-    Run::new(Arc::new(prompt), "", ctx)
+/// Runs `md` prepared against the echo tool as its catalog, the test model,
+/// and `preludes`.
+#[track_caller]
+fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Trace {
+    Scenario::new(md)
+        .bound()
+        .tool(echo_tool())
+        .context(move |ctx| ctx.preludes(preludes))
+        .run()
 }
 
-/// Drives `run` to its end on the serial driver, answering a tool call
-/// with the echo of its `value` and every other effect locally, and
-/// returns the result beside the record of every effect, in issue order.
-fn drive_recorded(run: Run) -> (RunResult, Vec<EffectRecord>) {
-    let mut records = Vec::new();
-    let (result, _events) = drive(run, |_, effect| {
-        records.push(effect.record());
-        match effect {
-            Effect::ToolCall { args, .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted(
-                format!("echoed: {}", args["value"].as_str().unwrap_or_default()),
-            ))),
-            other => perform_locally(other, &mut |_| chat_answer(&text("unused"))),
-        }
-    });
-    (result, records)
-}
-
-/// The text of a run that succeeds.
-fn succeeded(result: RunResult) -> String {
-    match result {
-        RunResult::Ok(text) => text,
-        other => panic!("the run succeeds: {other:?}"),
-    }
+/// The record of every effect `trace`'s run issued, in issue order.
+fn records(trace: &Trace) -> Vec<EffectRecord> {
+    trace
+        .effects()
+        .iter()
+        .map(|(effect, _)| effect.clone())
+        .collect()
 }
 
 /// Asserts `md` issues an effect when run without preludes, and that with
 /// `preludes` it instead fails as a Lua failure naming every fragment,
 /// before it issues any effect.
+#[track_caller]
 fn assert_fails_before_any_effect(md: &str, preludes: Vec<Prelude>, fragments: &[&str]) {
-    let (control, control_records) = drive_recorded(prelude_run(md, Vec::new()));
-    succeeded(control);
+    let control = prelude_run(md, Vec::new());
     assert!(
-        !control_records.is_empty(),
+        matches!(control.result(), RunResult::Ok(_)),
+        "without preludes the prompt succeeds: {:?}",
+        control.result()
+    );
+    assert!(
+        !control.effects().is_empty(),
         "without preludes the prompt issues an effect, so the check below is not vacuous"
     );
-    let (result, records) = drive_recorded(prelude_run(md, preludes));
-    let RunResult::Failure(error) = result else {
-        panic!("the prelude fails the run: {result:?}");
-    };
+    let trace = prelude_run(md, preludes);
+    let error = trace.error();
     assert_eq!(error.kind(), RunErrorKind::Lua, "{error:?}");
     let message = error.to_string();
     for fragment in fragments {
@@ -103,6 +77,7 @@ fn assert_fails_before_any_effect(md: &str, preludes: Vec<Prelude>, fragments: &
             "the failure names `{fragment}`: {message}"
         );
     }
+    let records = records(&trace);
     assert!(records.is_empty(), "no effect is issued: {records:?}");
 }
 
@@ -139,12 +114,9 @@ fn a_prelude_global_named_like_an_offered_tools_wire_name_installs() {
         # Preludes\n\n\
         ## Only\n\n\
         ```lua\nreturn tools_echo .. '|' .. tools.get('tools/echo').id\n```\n";
-    let (result, _) = drive_recorded(prelude_run(
-        md,
-        vec![prelude("echoes", "tools_echo = 'mine'")],
-    ));
+    let trace = prelude_run(md, vec![prelude("echoes", "tools_echo = 'mine'")]);
     assert_eq!(
-        succeeded(result),
+        trace.text(),
         "mine|tools/echo",
         "no tool is a global, so the prelude's global and the tool sit side by side"
     );
@@ -156,9 +128,9 @@ fn a_prelude_global_named_like_a_model_role_label_installs() {
         # Preludes\n\n\
         ## Only\n\n\
         ```lua\nreturn writer .. '|' .. models.get('writer').name\n```\n";
-    let (result, _) = drive_recorded(prelude_run(md, vec![prelude("writer", "writer = 'mine'")]));
+    let trace = prelude_run(md, vec![prelude("writer", "writer = 'mine'")]);
     assert_eq!(
-        succeeded(result),
+        trace.text(),
         "mine|writer",
         "the prelude's global and the role's handle sit side by side"
     );
@@ -200,9 +172,9 @@ fn a_library_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
         local at_load = greeter.greet('library')\n\
         function library_greeting() return at_load end\n\
         ```\n";
-    let (result, _) = drive_recorded(prelude_run(md, vec![prelude("greeter", GREETER)]));
+    let trace = prelude_run(md, vec![prelude("greeter", GREETER)]);
     assert_eq!(
-        succeeded(result),
+        trace.text(),
         "hello library|hello arm|hello task",
         "the library reads the prelude while loading, and the arm and the task chain see it"
     );
@@ -223,9 +195,12 @@ fn a_prelude_write_across_two_arms_ends_the_run_with_determinism_caught_or_not()
         "store.write('seeded.txt', 'seed')",
         "pcall(function() store.write('seeded.txt', 'seed') end)",
     ] {
-        let (result, _) = drive_recorded(prelude_run(md, vec![prelude("seeder", source)]));
-        let RunResult::Failure(error) = result else {
-            panic!("the second arm's install-time write ends the run: `{source}`: {result:?}");
+        let trace = prelude_run(md, vec![prelude("seeder", source)]);
+        let RunResult::Failure(error) = trace.result() else {
+            panic!(
+                "the second arm's install-time write ends the run: `{source}`: {:?}",
+                trace.result()
+            );
         };
         assert_eq!(
             error.kind(),
@@ -246,10 +221,10 @@ fn a_prelude_function_called_from_a_block_reaches_the_yielding_store_shims() {
           store.write('notes.md', text)\n\
           return store.read('notes.md')\n\
         end";
-    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("notes", notes)]));
-    assert_eq!(succeeded(result), "kept");
+    let trace = prelude_run(md, vec![prelude("notes", notes)]);
+    assert_eq!(trace.text(), "kept");
     assert_eq!(
-        records,
+        records(&trace),
         vec![
             EffectRecord::Vfs {
                 op: VfsOp::Write {
@@ -279,10 +254,10 @@ fn a_tool_call_made_inside_a_prelude_function_records_a_script_caller() {
         function echoer.say(value)\n\
           return tools.call('tools/echo', { value = value })\n\
         end";
-    let (result, records) = drive_recorded(prelude_run(md, vec![prelude("echoer", echoer)]));
-    assert_eq!(succeeded(result), "echoed: hi");
+    let trace = prelude_run(md, vec![prelude("echoer", echoer)]);
+    assert_eq!(trace.text(), "echoed: hi");
     assert_eq!(
-        records,
+        records(&trace),
         vec![EffectRecord::ToolCall {
             tool: ToolId::parse("tools/echo").expect("a valid id"),
             alias: "tools_echo".to_owned(),

@@ -12,7 +12,7 @@
 use promptforge_vfs::ExecId;
 use promptforge_vfs::detail::access_id;
 
-use super::model_tasks::model_task_context_with;
+use super::models_loop::loop_models;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
 use crate::test_support::drive;
@@ -78,15 +78,15 @@ impl Identities {
     }
 }
 
-/// A run over `md` with the files tool as its catalog.
+/// A run over `md` with the files tool as its whole catalog, nothing
+/// offered, and the loop models filled in, for the test to step.
+#[track_caller]
 fn files_run(md: &str) -> Run {
-    let prompt = parse(md);
-    let (state, _fixture) = model_task_context_with(
-        &prompt,
-        Arc::new(NullObserver::default()),
-        Arc::new(files_tool()),
-    );
-    Run::from_state(state)
+    Scenario::new(md)
+        .models(loop_models())
+        .offering(Vec::new())
+        .tool(files_tool())
+        .into_run()
 }
 
 /// Performs a store effect, or panics on the model round no files run

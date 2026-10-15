@@ -9,7 +9,7 @@
 //! a declared Plugin and of another one, since a tool is never a global
 //! either.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mlua::Value;
 use serde_json::json;
@@ -18,12 +18,11 @@ use promptforge_lua::{RESERVED_NAMES, Reserved, reserved_name};
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 
-use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{Library, SectionText, SectionVm, ToolBinding, ToolSet};
+use super::{VmBinds, set_up_vm};
+use crate::execute::section_vm::VmSeed;
+use crate::lua::{SectionVm, ToolBinding, ToolSet};
 use crate::model::ModelSet;
-use crate::test_support::recording::null_emitter;
 use crate::test_support::scenario::test_binding;
-use crate::untrusted::GuardNonce;
 
 /// The role labels every fully bound VM fills: one plain label, and one
 /// that names an Engine global.
@@ -73,51 +72,21 @@ fn offering() -> ToolSet {
 /// `prose`, the model roles in [`ROLE_LABELS`], the tools of
 /// [`offering`], and a `require` whose resolver reaches no library.
 fn fully_bound_vm(argv_writable: bool) -> SectionVm {
-    let emitter = null_emitter();
-    let mut vm = SectionVm::new_for_section(
-        &GuardNonce::from_seed(0x9e5),
-        &Arc::new(offering()),
-        &Arc::new(Mutex::new(roles())),
-        &emitter,
-        "Globals",
-    )
-    .expect("the section VM builds");
-    let sys = json!({});
     let argv = json!({ "prose": "" });
     let item = json!("member");
     let ui = Arc::new(json!({}));
-    let access = Arc::new(
-        promptforge_vfs::VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("reserved names fixture"))
-            .expect("the stock backend acquires"),
-    );
-    let setup = SectionVmSetup {
-        args: "",
+    let vm = set_up_vm(&VmBinds {
+        section: "Globals",
+        tools: &offering(),
+        models: &roles(),
         argv: Some(&argv),
         argv_writable,
-        sys: &sys,
-        access: &access,
         seed: VmSeed {
             var: None,
             item: Some(&item),
         },
-        emitter: &emitter,
-        section_name: "Globals",
-        max_tool_iterations: 24,
         ui: Some(&ui),
-        preludes: &[],
-        raw_shims: false,
-    };
-    let read = |_: String| -> std::result::Result<Option<SectionText>, crate::Error> { Ok(None) };
-    let resolve = |heading: String, _| -> std::result::Result<Library, crate::Error> {
-        Err(crate::Error::Lua(format!(
-            "no library `{heading}` in reach"
-        )))
-    };
-    setup_section_vm(&mut vm, &setup, read, resolve, |template, _| {
-        Ok(template.to_owned())
-    })
-    .expect("the setup installs");
+    });
     vm.install_lazy_prose(|_| Ok("the block's prose".to_owned()))
         .expect("the prose guard installs");
     vm

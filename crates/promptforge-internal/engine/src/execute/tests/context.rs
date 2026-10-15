@@ -1,8 +1,9 @@
-//! Shared context builders, prompt sources, parsers, stores, and recorders
-//! for the execution suites. The fixture tool-set helpers sit in `tools`
-//! and are re-exported here.
+//! Shared context builders, prompt sources, parsers, stores, task ids, and
+//! recorders for the execution suites. The fixture tool-set helpers sit in
+//! `tools` and are re-exported here.
 
 use promptforge_parser::test_support::PromptSource;
+use promptforge_types::ids::TaskId;
 
 use super::*;
 
@@ -46,6 +47,22 @@ pub(super) fn arm_fanout() -> PromptSource {
     )
 }
 
+/// The task `id` names.
+#[track_caller]
+pub(super) fn task(id: &str) -> TaskId {
+    id.parse().expect("a task id parses")
+}
+
+/// The `(section, detail)` sequence the run itself reported, as the suites'
+/// observer sees it: the parse events ahead of it are left out.
+pub(super) fn sequence(trace: &Trace) -> Vec<(String, String)> {
+    trace
+        .run_records()
+        .into_iter()
+        .map(|record| (record.section, record.detail))
+        .collect()
+}
+
 /// The context edit binding the role `label` to `model` by hand, for a run
 /// that skips the prepare.
 pub(super) fn bind_role(
@@ -57,16 +74,6 @@ pub(super) fn bind_role(
         ctx.model_bindings.bind(&label, model);
         ctx
     }
-}
-
-/// A fresh default handle's access capability, for tests that inject Engine
-/// values into a standalone VM.
-pub(super) fn fresh_access() -> Arc<Access> {
-    Arc::new(
-        VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("execute test fixture"))
-            .expect("the stock backend acquires"),
-    )
 }
 
 /// A [`RunContext`] for the run `name` under the fixed test inputs.
@@ -103,77 +110,10 @@ pub(super) fn parse(md: &str) -> Prompt {
     Prompt::parse(&source, EXECUTION).0.unwrap()
 }
 
-pub(super) struct TestPrompt {
-    pub(super) prompt: Prompt,
-    pub(super) models: ModelCatalog,
-}
-
-/// Builds the tool-free parsed form consumed by the complete lifecycle path.
-pub(super) fn fixture(md: &str) -> TestPrompt {
-    TestPrompt {
-        prompt: parse(md),
-        models: ModelCatalog::empty(),
-    }
-}
-
-#[track_caller]
-pub(super) fn test_model_catalog() -> ModelCatalog {
-    ModelCatalog::new([test_model(TEST_MODEL)]).expect("the test catalog has a single unique model")
-}
-
-/// Owned run inputs a test supplies: the run name, the progress observer,
-/// and optional client/capture sinks. The instrumentation is owned `Arc`s
-/// so it can build a [`RunContext`].
-pub(super) struct RunOptions {
-    pub(super) execution: &'static str,
-    pub(super) observer: Arc<dyn Observer>,
-    pub(super) client: Option<ScriptedChat>,
-    pub(super) debug: Option<Arc<dyn DebugCapture>>,
-}
-
 /// A client answering from the given scripted model, sharing its script,
 /// count, and record.
 pub(super) fn gateway_client(chat: &ScriptedChat) -> ScriptedChat {
     chat.clone()
-}
-
-pub(super) async fn run(
-    test: &TestPrompt,
-    args: &str,
-    tools: &[Arc<dyn TestTool>],
-    store: &TestStore,
-    opts: RunOptions,
-) -> Result<String> {
-    let mut fixture = RunFixture::new().observer(opts.observer);
-    // The test store's handle is the run's whole filesystem: the context
-    // takes it as given, so post-run assertions read what the run
-    // actually wrote.
-    let mut ctx = test_context(opts.execution).vfs(store.vfs());
-    if !tools.is_empty() {
-        // With tools: the fixtures' descriptors form the catalog the run
-        // offers, and the implementations go to the tool table the test
-        // driver's tool performer resolves a `ToolCall` effect in.
-        let (catalog, table) = fixture_tools(tools);
-        ctx = ctx.tools(catalog);
-        fixture = fixture.tools(table);
-    }
-    // The context holds the current model, and
-    // prepare's trivial fill binds every declared role to it.
-    if let Some(model) = test.models.models().first() {
-        ctx = ctx.model(model.clone());
-    }
-    if let Some(client) = opts.client {
-        fixture = fixture.client(client);
-    }
-    if let Some(debug) = opts.debug {
-        ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        fixture = fixture.debug(debug);
-    }
-    match crate::test_support::run_with_fixture(&test.prompt, args, ctx, fixture).await {
-        RunResult::Ok(output) => Ok(output),
-        RunResult::Cancelled => Err(Error::Interrupted),
-        RunResult::Failure(error) => Err(Error::from(error)),
-    }
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -208,33 +148,4 @@ impl Recorder {
             .map(|(_, section, detail)| (section.clone(), detail.clone()))
             .collect()
     }
-}
-
-/// Runs `md` offline under a fresh recorder and returns the result together
-/// with every complete correlated record the recorder saw.
-pub(super) async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)>) {
-    let recorder = Arc::new(Recorder::default());
-    let result = run(
-        &fixture(md),
-        "",
-        &[],
-        &TestStore::new(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: None,
-            debug: None,
-        },
-    )
-    .await;
-    (result, recorder.records())
-}
-
-/// Discards only the execution field when an older ordering regression is
-/// intentionally about section and detail rather than correlation.
-pub(super) fn events(records: &[(String, String, String)]) -> Vec<(String, String)> {
-    records
-        .iter()
-        .map(|(_, section, detail)| (section.clone(), detail.clone()))
-        .collect()
 }

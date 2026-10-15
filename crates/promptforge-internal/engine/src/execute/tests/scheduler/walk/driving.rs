@@ -1,14 +1,14 @@
-//! Whole runs on a current-thread runtime: a nested call with two infers,
+//! Whole runs on the calling thread: a nested call with two infers,
 //! cancellation while suspended on an infer, the call depth cap, a prose
 //! infer through the run's configured client, and a dispatch failure
 //! caught by `pcall`.
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
-    // On a current-thread runtime the nested call and both infers complete
-    // on the one thread.
+#[test]
+fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
+    // On the calling thread the nested call and both infers complete in
+    // order.
     let gateway = ScriptedChat::new(vec![text("inner answer"), text("outer answer")]);
     let md = "---\nname: gate\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
@@ -21,14 +21,9 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
         ```lua\n\
         return models.infer('inner ask')\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the gate scenario runs end to end on one thread");
+    let trace = scheduler_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "outer answer");
+    assert_eq!(trace.text(), "outer answer");
     assert_eq!(
         gateway.call_count(),
         2,
@@ -47,8 +42,10 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
+#[test]
+fn cancellation_while_suspended_on_infer_interrupts_the_run() {
+    // The 30-second reply is held, and the cancel lands once its round is
+    // issued.
     let gateway = ScriptedChat::new(vec![delayed(
         std::time::Duration::from_secs(30),
         text("too late"),
@@ -57,36 +54,30 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         # Cancel\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('hang')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let canceller = driver.cancel_handle();
-    let calls = Arc::clone(&gateway.calls);
-    tokio::spawn(async move {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while calls.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await;
-        canceller.cancel();
-    });
-
-    let result = driver.drive().await;
+    let is_round = |effect: &Effect| matches!(effect, Effect::Chat { .. });
+    let trace = scheduler_scenario(md)
+        .chat(&gateway)
+        .hold(is_round)
+        .cancel_when(is_round)
+        .run();
 
     assert!(
-        matches!(result, Err(Error::Interrupted)),
-        "cancelling a suspended infer must interrupt the run, got {result:?}"
+        matches!(trace.result(), RunResult::Cancelled),
+        "cancelling a suspended infer must interrupt the run, got {:?}",
+        trace.result()
     );
-    assert_eq!(
-        gateway.call_count(),
-        1,
-        "the cancellation must occur after infer reached the gateway"
+    assert!(
+        matches!(
+            trace.effects(),
+            [(EffectRecord::Chat { .. }, AnswerRecord::Dropped)]
+        ),
+        "the cancellation must occur after infer reached the caller: {:?}",
+        trace.effects()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn call_depth_cap_reads_the_chain_field() {
+#[test]
+fn call_depth_cap_reads_the_chain_field() {
     // Two sections calling each other ping-pong through nested call
     // chains; the cap must fire from the requesting chain's call-depth
     // field. The typed error then round-trips through every parent's
@@ -97,21 +88,16 @@ async fn call_depth_cap_reads_the_chain_field() {
         ```lua\nreturn call('## Beta')\n```\n\n\
         ## Beta\n\n\
         ```lua\nreturn call('## Alpha')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("the depth cap must fail the run");
+    let trace = scheduler_scenario(md).run();
 
-    match &error {
+    match trace.error().inner() {
         Error::Lua(message) => assert_eq!(message, "call recursion exceeded cap of 8"),
         other => panic!("expected the typed depth-cap Lua error, got {other:?}"),
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
+#[test]
+fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     // The chain's client slot is seeded from the run's configured client, so
     // a section's explicit `models.infer(prose)` reaches that gateway rather
     // than falling back to an environment client; the returned text becomes
@@ -122,14 +108,9 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
         ## Only\n\n\
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("an explicit infer of the prose runs through the scheduler");
+    let trace = scheduler_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "prose answer");
+    assert_eq!(trace.text(), "prose answer");
     assert_eq!(gateway.call_count(), 1, "the infer drives one completion");
     let requests = gateway.requests();
     let content = requests[0].messages[0].content();
@@ -139,8 +120,8 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
+#[test]
+fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
     // A failed dispatch (here an unresolvable call target) is the call's
     // answer resumed through the error envelope, so an author `pcall`
     // catches it; a driver that failed the chain instead would error the
@@ -153,13 +134,9 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
         if ok then return 'uncaught' end\n\
         return 'caught: ' .. tostring(err)\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the dispatch failure is catchable");
+    let trace = scheduler_scenario(md).run();
 
+    let out = trace.text();
     assert!(
         out.starts_with("caught: "),
         "the pcall catches the dispatch failure, got {out:?}"

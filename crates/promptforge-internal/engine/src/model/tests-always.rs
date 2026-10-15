@@ -2,18 +2,6 @@
 
 use super::*;
 
-/// Compiles one Lua chunk for a section VM drive.
-fn chunk(source: &str) -> crate::lua::LuaProgram {
-    crate::lua::LuaProgram::compile(
-        source,
-        "chunk",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        &null_emitter(),
-        "Section",
-    )
-    .expect("test Lua must compile")
-}
-
 #[test]
 fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
     let models = shared_models(vec![bound_role(

@@ -3,37 +3,39 @@
 //! observations: started under the caller's section, the terminal under the
 //! worker's.
 
-use super::super::models_loop::{echo_tools, loop_context_observed};
+use super::super::models_loop::loop_scenario;
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn fanout_empty_collection_errors_before_any_scheduling() {
+/// The run's events replayed onto a fresh recorder.
+fn recorded(trace: &Trace) -> Recorder {
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
+    recorder
+}
+
+#[test]
+fn fanout_empty_collection_errors_before_any_scheduling() {
     // Pin of the pre-scheduling guard: the fanout errors before any arm is
     // created - no STARTED observation, and the worker's store tripwire
     // never fires.
-    let store = TestStore::new();
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\ntasks.fanout('### Worker', {})\n```\n\n\
         ### Worker\n\n\
         ```lua\nstore.write('ran.txt', 'yes')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, recorder.clone());
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("an empty collection must error");
+    let trace = scheduler_scenario(md).run();
 
+    let error = trace.error();
     assert!(
         error.to_string().contains("empty collection"),
         "error was: {error}"
     );
     assert!(
-        store.read("ran.txt").is_err(),
+        trace.read("ran.txt").is_err(),
         "the worker never ran: the rejection precedes scheduling"
     );
+    let recorder = recorded(&trace);
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         0,
@@ -42,8 +44,8 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fanout_worker_that_is_a_list_section_errors() {
+#[test]
+fn fanout_worker_that_is_a_list_section_errors() {
     // Pin of the worker-template guard: a resolved list section is not a
     // worker template.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -53,13 +55,9 @@ async fn fanout_worker_that_is_a_list_section_errors() {
         ### Items\n\n\
         - a\n\
         - b\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a list section is not a worker template");
+    let trace = scheduler_scenario(md).run();
 
+    let error = trace.error();
     assert!(
         error
             .to_string()
@@ -68,8 +66,8 @@ async fn fanout_worker_that_is_a_list_section_errors() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fanout_depth_cap_reads_the_chain_field() {
+#[test]
+fn fanout_depth_cap_reads_the_chain_field() {
     // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong calls
     // through nested call chains, and the chain that lands at depth 8 calls
     // fanout - each arm would run one level deeper, so the cap fires from
@@ -94,15 +92,11 @@ async fn fanout_depth_cap_reads_the_chain_field() {
         var.n = var.n + 1\n\
         return call('## Alpha')\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("the fanout depth cap must fail the run");
+    let trace = scheduler_scenario(md).run();
 
+    let error = trace.error();
     assert!(
-        matches!(&error, Error::Lua(message) if message == "tasks.fanout recursion exceeded cap of 8"),
+        matches!(error.inner(), Error::Lua(message) if message == "tasks.fanout recursion exceeded cap of 8"),
         "expected the typed Lua depth-cap error with fanout's own wording, got {error:?}"
     );
     assert_eq!(
@@ -112,8 +106,8 @@ async fn fanout_depth_cap_reads_the_chain_field() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_lands() {
+#[test]
+fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_lands() {
     // The `tool_loop_exhausted` arm rule: one arm's `models.loop` runs its
     // round cap against a never-converging model and fails as
     // `tool_loop_exhausted`; the shim turns that arm's slot into the
@@ -153,20 +147,14 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
         return 'plain:' .. item\n\
         ```\n"
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("an exhausted arm must not fail the fanout");
+    let trace = loop_scenario(md)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
 
     assert_eq!(
-        out, "## loop\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)|plain:plain",
+        trace.text(),
+        "## loop\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)|plain:plain",
         "the exhausted slot is the stub and the sibling's result lands"
     );
     assert_eq!(
@@ -174,6 +162,7 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
         cap,
         "the looping arm made exactly `cap` round trips before exhausting"
     );
+    let recorder = recorded(&trace);
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         2,
@@ -200,8 +189,8 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
+#[test]
+fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
     // The arms write unordered: whichever op reaches the backend second
     // meets the first's standing write claim, because claims are never
     // released during a run, so the conflict cannot depend on timing.
@@ -215,8 +204,6 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
     // fails on its own, and at most the winner reports a terminal (the
     // loser is stranded mid-chain by the run's own failure, which is the
     // record of how it ended).
-    let recorder = Arc::new(Recorder::default());
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -229,15 +216,9 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         store.write('shared.txt', item)\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) =
-        scheduler_context_on(&prompt, &store, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("two arms writing one path must terminate the run");
+    let trace = scheduler_scenario(md).run();
 
-    match &error {
+    match trace.error().inner() {
         Error::Determinism(detail) => {
             assert!(detail.contains("shared.txt"), "error was: {detail}");
             assert!(
@@ -252,6 +233,7 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         }
         other => panic!("expected the fatal determinism violation, got {other:?}"),
     }
+    let recorder = recorded(&trace);
     assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
         2,
@@ -271,15 +253,14 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation() {
+#[test]
+fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation() {
     // The case the WriteScope registry never caught: `append`
     // claims write intent, so two arms appending to one path conflict
     // exactly as two writes do - and under happens-before the conflict is
     // unconditional, because the arms never join each other before the
     // fanout's own rounds deliver them. The conflict is the fatal
     // determinism violation, not a per-arm store error.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -292,14 +273,9 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         store.append('evidence.md', item .. '\\n')\n\
         return item\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("two arms appending one path must terminate the run");
+    let trace = scheduler_scenario(md).run();
 
-    match &error {
+    match trace.error().inner() {
         Error::Determinism(detail) => {
             assert!(detail.contains("evidence.md"), "error was: {detail}");
             assert_eq!(

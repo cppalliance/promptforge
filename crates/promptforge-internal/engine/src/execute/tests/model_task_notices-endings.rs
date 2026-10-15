@@ -4,46 +4,44 @@
 //! between two sections - reports under the section the owner last
 //! entered; and a model-issued cancel queues no notice.
 
+use std::cell::Cell;
+
 use promptforge_types::event::Event;
 use promptforge_types::ids::AbandonReason;
 
+use super::super::model_tasks::model_task_scenario;
 use super::*;
 use crate::execute::RunResult;
-use crate::execute::run::Run;
-use crate::test_support::drive;
-use crate::test_support::scenario::{chat_answer, infer_prompt, perform_locally};
+use crate::test_support::scenario::{chat_answer, infer_prompt};
 
 /// Runs the two-section prompt with the model starting `Child` in round 1
 /// and replying in round 2, then returns every notice reported.
-async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, String)> {
+#[track_caller]
+fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, String)> {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         text("bye"),
     ]);
     let md = owner_prompt("", &loop_owner(owner_tail), child_body);
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, fixture) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(SlowTool),
+    let trace = model_task_scenario(md).chat(&gateway).run();
+    assert!(
+        matches!(trace.result(), RunResult::Ok(_)),
+        "the owner ends clean: {:?}",
+        trace.result()
     );
-    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the owner ends clean");
+    let recorder = NoticeRecorder::default();
+    trace.replay(&recorder);
     recorder.notices()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn notice_texts_name_how_a_task_ended() {
+#[test]
+fn notice_texts_name_how_a_task_ended() {
     let cancelled = notices_for(
         "local mine = tasks.pending({ origin = 'model' })\n\
          tasks.cancel(mine[1])\n\
          return 'ok'",
         PARKED_CHILD,
-    )
-    .await;
+    );
     assert_eq!(
         cancelled,
         vec![(
@@ -54,7 +52,7 @@ async fn notice_texts_name_how_a_task_ended() {
         "an author cancel of a model task is one notice"
     );
 
-    let abandoned = notices_for("return 'ok'", PARKED_CHILD).await;
+    let abandoned = notices_for("return 'ok'", PARKED_CHILD);
     assert_eq!(
         abandoned,
         vec![(
@@ -65,7 +63,7 @@ async fn notice_texts_name_how_a_task_ended() {
         "an owner ending first is one abandonment notice"
     );
 
-    let failed = notices_for("return 'ok'", "error('boom')").await;
+    let failed = notices_for("return 'ok'", "error('boom')");
     assert_eq!(failed.len(), 1, "a failed task is one notice: {failed:?}");
     assert!(
         failed[0].2.starts_with("Task id=0.0 (## Child) failed: ") && failed[0].2.contains("boom"),
@@ -74,8 +72,8 @@ async fn notice_texts_name_how_a_task_ended() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_that_section() {
+#[test]
+fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_that_section() {
     // `Last` is the walk's only section and falls through with the model's
     // task still parked, so the walk position is past the slice's end when
     // the chain's end abandons the task and queues its notice.
@@ -92,17 +90,14 @@ async fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_
          ```lua\n{PARKED_CHILD}\n```\n",
         loop_owner("")
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, fixture) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(SlowTool),
+    let trace = model_task_scenario(md).chat(&gateway).run();
+    assert!(
+        matches!(trace.result(), RunResult::Ok(_)),
+        "a model task the walk's end strands is abandoned, never leaked: {:?}",
+        trace.result()
     );
-    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a model task the walk's end strands is abandoned, never leaked");
+    let recorder = NoticeRecorder::default();
+    trace.replay(&recorder);
     let events = recorder.events();
     assert!(
         events.iter().any(|(section, event)| section == "Child"
@@ -146,29 +141,21 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
          ```lua\nreturn 'owner done'\n```\n",
         loop_owner("")
     );
-    let prompt = parse(&md);
-    let (state, _fixture) = model_task_context_with(
-        &prompt,
-        Arc::new(NullObserver::default()),
-        Arc::new(SlowTool),
-    );
-    let mut rounds = 0;
-    let (result, events) = drive(Run::from_state(state), |_, effect| {
-        perform_locally(effect, &mut |effect| {
+    let rounds = Cell::new(0);
+    let trace = model_task_scenario(md)
+        .chat_with(move |effect| {
             if infer_prompt(effect) == "child work" {
                 return chat_answer(&text("child result"));
             }
-            rounds += 1;
-            match rounds {
+            rounds.set(rounds.get() + 1);
+            match rounds.get() {
                 1 => chat_answer(&calls(&[("call_1", "task", "{\"target\":\"### Child\"}")])),
                 _ => chat_answer(&text("bye")),
             }
         })
-    });
-    let RunResult::Ok(text) = result else {
-        panic!("the owner returns: {result:?}");
-    };
-    assert_eq!(text, "owner done");
+        .run();
+    assert_eq!(trace.text(), "owner done");
+    let events = trace.run_events();
     let child = task("0.0");
     let first_finished = events
         .iter()
@@ -202,25 +189,22 @@ fn a_task_that_ends_while_its_owner_is_between_sections_reports_under_the_sectio
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_model_issued_cancel_queues_no_notice() {
+#[test]
+fn a_model_issued_cancel_queues_no_notice() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
     let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, fixture) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(SlowTool),
+    let trace = model_task_scenario(md).chat(&gateway).run();
+    assert!(
+        matches!(trace.result(), RunResult::Ok(_)),
+        "the cancel leaves nothing live: {:?}",
+        trace.result()
     );
-    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the cancel leaves nothing live");
+    let recorder = NoticeRecorder::default();
+    trace.replay(&recorder);
     assert!(
         recorder.notices().is_empty(),
         "the model already read `Task id=0.0 cancelled`; no notice repeats it: {:?}",

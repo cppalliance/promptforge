@@ -6,8 +6,7 @@
 //! batching-pairing property (answers delivered one per step, all at once,
 //! and shuffled within a batch produce identical per-task effects and
 //! events), and a model task whose owner ends first reporting `abandoned`
-//! in both its event and its notice. The scripted driver here is shared
-//! with the other suites.
+//! in both its event and its notice.
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, TaskId};
@@ -15,28 +14,11 @@ use promptforge_types::ids::{AbandonReason, TaskId};
 use super::model_tasks::model_task_context_with;
 use super::scheduler::scheduler_context_from;
 use super::*;
-use crate::execute::run::{Effect, EffectAnswer, Run, Step};
+use crate::execute::run::{Effect, Run, Step};
 use crate::test_support::drive;
 use crate::test_support::scenario::{
     Batching, chat_answer, drive_batched, echo_chat, infer_prompt, perform_locally,
 };
-
-/// Drives `md` with the model played by `rounds`, one canned answer per
-/// `chat` round in order.
-pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
-    let prompt = parse(md);
-    let (state, _fixture) = model_task_context_with(
-        &prompt,
-        Arc::new(NullObserver::default()),
-        Arc::new(SlowTool),
-    );
-    let mut rounds = rounds.into_iter();
-    drive(Run::from_state(state), |_, effect| {
-        perform_locally(effect, &mut |_| {
-            rounds.next().expect("the script covers every round")
-        })
-    })
-}
 
 /// A run over `md` with the `writer` model pre-bound, as the scheduler
 /// suites build one.

@@ -32,6 +32,7 @@ use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::ModelSet;
+use crate::test_support::fresh_access;
 use crate::test_support::recording::null_emitter;
 use crate::test_support::scenario::test_binding;
 use crate::tools::ToolId;
@@ -78,32 +79,56 @@ fn scheduler_vm_with_tools(
     tools: &ToolSet,
     var: Option<&serde_json::Value>,
 ) -> SectionVm {
+    set_up_vm(&VmBinds {
+        section: "Test",
+        tools,
+        models,
+        argv: None,
+        argv_writable: false,
+        seed: VmSeed { var, item: None },
+        ui: None,
+    })
+}
+
+/// What a test's section VM binds beyond an empty run's: its section, the
+/// run's offering and model set, and the conditional Engine globals.
+struct VmBinds<'a> {
+    section: &'a str,
+    tools: &'a ToolSet,
+    models: &'a ModelSet,
+    argv: Option<&'a serde_json::Value>,
+    argv_writable: bool,
+    seed: VmSeed<'a>,
+    ui: Option<&'a Arc<serde_json::Value>>,
+}
+
+/// Builds the section VM `binds` describes through the real setup path,
+/// with no args or preludes and a `require` whose resolver reaches no
+/// library.
+#[track_caller]
+fn set_up_vm(binds: &VmBinds<'_>) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
-        &Arc::new(tools.clone()),
-        &Arc::new(Mutex::new(models.clone())),
+        &Arc::new(binds.tools.clone()),
+        &Arc::new(Mutex::new(binds.models.clone())),
         &emitter,
-        "Test",
+        binds.section,
     )
     .expect("the section VM builds");
     let sys = json!({});
-    let access = Arc::new(
-        promptforge_vfs::VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("coroutine test fixture"))
-            .expect("the stock backend acquires"),
-    );
+    let access = fresh_access();
     let setup = SectionVmSetup {
         args: "",
-        argv: None,
-        argv_writable: false,
+        argv: binds.argv,
+        argv_writable: binds.argv_writable,
         sys: &sys,
         access: &access,
-        seed: VmSeed { var, item: None },
+        seed: binds.seed,
         emitter: &emitter,
-        section_name: "Test",
+        section_name: binds.section,
         max_tool_iterations: 24,
-        ui: None,
+        ui: binds.ui,
         preludes: &[],
         raw_shims: false,
     };

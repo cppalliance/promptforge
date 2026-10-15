@@ -5,8 +5,8 @@
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
+#[test]
+fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
     // The whole script path in one pass: the shim yields, the scheduler
     // dispatches the bound tool, the plain binding resumes as a Lua
     // string, and the counts land in the same `tools.calls` table the
@@ -19,22 +19,12 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
         local out = tools.call('tools/echo', { value = 'hi' })\n\
         return out .. '|' .. tostring(tools.calls['tools/echo'])\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the script dispatch succeeds");
-    assert_eq!(out, "echoed: hi|1");
+    let trace = scheduler_scenario(md).offer("echo", echo_tool()).run();
+    assert_eq!(trace.text(), "echoed: hi|1");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
+#[test]
+fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
     // The object form: `tools.get` reads the tool object, and passing it as
     // the leading argument dispatches the tool it names, identically to the
     // bare id string.
@@ -47,22 +37,12 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
         assert(type(echo) == 'userdata', 'tools.get reads a tool object')\n\
         return tools.call(echo, { value = 'hi' })\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the handle-form dispatch succeeds");
-    assert_eq!(out, "echoed: hi");
+    let trace = scheduler_scenario(md).offer("echo", echo_tool()).run();
+    assert_eq!(trace.text(), "echoed: hi");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
+#[test]
+fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
     // Script-initiated resolution runs against the run's whole offering,
     // so the unknown-name error lists every offered id, not the section's
     // effective scope.
@@ -70,18 +50,8 @@ async fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.offer('tools/echo')\nreturn tools.call('missing', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("an unbound name fails the block");
-    match &error {
+    let trace = scheduler_scenario(md).offer("echo", echo_tool()).run();
+    match trace.error().inner() {
         Error::UnboundToolCall { name, ids } => {
             assert_eq!(name, "missing");
             assert_eq!(ids, &["tools/echo".to_owned()]);
@@ -90,8 +60,8 @@ async fn a_script_tools_call_with_an_unbound_name_lists_the_offered_ids() {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_reaches_an_offered_tool_outside_the_section_scope() {
+#[test]
+fn a_script_tools_call_reaches_an_offered_tool_outside_the_section_scope() {
     // A tool in the run's offering but never scoped into the section (no
     // `tools.offer`) still dispatches for a script: the scope shapes what
     // the model is offered, and the author's own code is not the model.
@@ -103,107 +73,44 @@ async fn a_script_tools_call_reaches_an_offered_tool_outside_the_section_scope()
         local out = tools.call('tools/echo', { value = 'hi' })\n\
         return out .. '|' .. tostring(tools.calls['tools/echo'])\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("an offered but unscoped tool dispatches for a script");
-    assert_eq!(out, "echoed: hi|1");
+    let trace = scheduler_scenario(md).offer("echo", echo_tool()).run();
+    assert_eq!(trace.text(), "echoed: hi|1");
 }
 
-/// A tool that signals its start and then never completes, so the
-/// cancellation test fires only once the dispatch is in flight.
-struct SignallingSlowTool {
-    started: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl TestTool for SignallingSlowTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/slow").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "a deliberately slow tool"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    async fn call(
-        &self,
-        _args: serde_json::Value,
-    ) -> std::result::Result<crate::tools::ToolOutput, crate::tools::ToolError> {
-        self.started.fetch_add(1, Ordering::SeqCst);
-        std::future::pending().await
-    }
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn cancellation_interrupts_a_slow_script_tools_call() {
+#[test]
+fn cancellation_interrupts_a_slow_script_tools_call() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\ntools.offer('tools/slow')\nreturn tools.call('tools/slow', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
+        ```lua\ntools.offer('test/tools/slow')\nreturn tools.call('test/tools/slow', {})\n```\n";
     let started = Arc::new(AtomicUsize::new(0));
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding(
-            "slow",
-            "slow tool",
-            Arc::new(SignallingSlowTool {
-                started: Arc::clone(&started),
-            }),
-        )],
-    );
-    let mut driver = TokioDriver::new(&ctx, fixture, None);
-    let canceller = driver.cancel_handle();
-    let observed = Arc::clone(&started);
-    tokio::spawn(async move {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while observed.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let dispatched = Arc::clone(&started);
+    let trace = scheduler_scenario(md)
+        .offer("slow", slow_tool())
+        .hold(move |effect| {
+            let slow = calls_slow_tool(effect);
+            if slow {
+                dispatched.fetch_add(1, Ordering::SeqCst);
             }
+            slow
         })
-        .await;
-        canceller.cancel();
-    });
-
-    let start = std::time::Instant::now();
-    let result = driver.drive().await;
+        .cancel_when(calls_slow_tool)
+        .run();
 
     assert!(
-        matches!(result, Err(Error::Interrupted)),
-        "cancelling a suspended tools.call must interrupt the run, got {result:?}"
+        matches!(trace.result(), RunResult::Cancelled),
+        "cancelling a suspended tools.call must interrupt the run, got {:?}",
+        trace.result()
     );
     assert_eq!(
         started.load(Ordering::SeqCst),
         1,
         "the cancellation must land after the tool call was in flight"
     );
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(5),
-        "the slow tool must not hold the run, took {:?}",
-        start.elapsed()
-    );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
+#[test]
+fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -211,21 +118,10 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
         tools.offer('tools/untrusted_echo')\n\
         return tools.call('tools/untrusted_echo', { value = 'hi' })\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding(
-            "fetch",
-            "untrusted echo tool",
-            Arc::new(untrusted_echo_tool()),
-        )],
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the untrusted dispatch succeeds");
+    let trace = scheduler_scenario(md)
+        .offer("fetch", untrusted_echo_tool())
+        .run();
+    let out = trace.text();
     assert!(
         out.contains("<untrusted_input_") && out.contains("</untrusted_input_"),
         "the script must receive the nonce-wrapped envelope, got: {out}"
@@ -236,8 +132,8 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_structured_binding_resumes_as_a_lua_table() {
+#[test]
+fn a_structured_binding_resumes_as_a_lua_table() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -246,40 +142,25 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         local r = tools.call('tools/structured', {})\n\
         return r.text .. '|' .. tostring(#r.images)\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(structured_tool("{\"text\":\"typed\",\"images\":[]}", true)),
-    );
-    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the structured dispatch succeeds");
-    assert_eq!(out, "typed|0");
+    let trace = scheduler_scenario(md)
+        .offer(
+            "form",
+            structured_tool("{\"text\":\"typed\",\"images\":[]}", true),
+        )
+        .run();
+    assert_eq!(trace.text(), "typed|0");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
+#[test]
+fn invalid_json_from_a_structured_tool_is_a_tool_error() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.offer('tools/structured')\nreturn tools.call('tools/structured', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(structured_tool("not json", true)),
-    );
-    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("invalid structured output fails the call");
-    match &error {
+    let trace = scheduler_scenario(md)
+        .offer("form", structured_tool("not json", true))
+        .run();
+    match trace.error().inner() {
         Error::Tool { message, .. } => {
             assert!(
                 message.contains("returned invalid JSON"),
@@ -290,8 +171,8 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_untrusted_structured_output_is_wrapped_before_classification() {
+#[test]
+fn an_untrusted_structured_output_is_wrapped_before_classification() {
     // The untrusted nonce wrap precedes the structured JSON parse, so an
     // untrusted binding's valid JSON still fails the call: this ordering is
     // what restricts structured output to trusted tools. If classification
@@ -300,19 +181,10 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.offer('tools/structured')\nreturn tools.call('tools/structured', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(structured_tool("{\"text\":\"typed\"}", false)),
-    );
-    let (ctx, fixture) = arm_tools(ctx, fixture, vec![binding]);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("untrusted structured output fails the call");
-    match &error {
+    let trace = scheduler_scenario(md)
+        .offer("form", structured_tool("{\"text\":\"typed\"}", false))
+        .run();
+    match trace.error().inner() {
         Error::Tool { message, .. } => {
             assert!(
                 message.contains("returned invalid JSON"),
@@ -323,8 +195,8 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_before_infer_keeps_the_model_install() {
+#[test]
+fn a_script_tools_call_before_infer_keeps_the_model_install() {
     // The one-time section scope install is shared between the first script
     // dispatch and the model resolution: a script `tools.call` that runs
     // first must not swallow the install a later `models.infer` relies on.
@@ -335,38 +207,21 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
         ```lua\ntools.offer('tools/echo')\ntools.call('tools/echo', { value = 'x' })\n```\n\n\
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("infer after a script dispatch still resolves the model");
-    assert_eq!(out, "prose answer");
+    let trace = scheduler_scenario(md)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "prose answer");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_document_prompt_without_tools_call_is_unaffected() {
+#[test]
+fn a_document_prompt_without_tools_call_is_unaffected() {
     // Bindings installed, shim present, `tools.call` never called: the
     // section runs exactly as before the dispatch arm existed.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.offer('tools/echo')\nreturn 'plain'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let (ctx, fixture) = arm_tools(
-        ctx,
-        fixture,
-        vec![fixture_binding("echo", "echo tool", Arc::new(echo_tool()))],
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a prompt that never calls tools.call is unchanged");
-    assert_eq!(out, "plain");
+    let trace = scheduler_scenario(md).offer("echo", echo_tool()).run();
+    assert_eq!(trace.text(), "plain");
 }

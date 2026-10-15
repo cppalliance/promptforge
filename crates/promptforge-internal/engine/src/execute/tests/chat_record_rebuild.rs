@@ -4,16 +4,17 @@
 //! the wire messages on that round's live effect. Each case edits the list
 //! between sends in a way that changes what the log must hold.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use promptforge_types::ids::RoundId;
 
-use super::models_loop::{echo_tools, loop_context, loop_prompt};
+use super::models_loop::{loop_prompt, loop_scenario};
 use super::*;
-use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run};
+use crate::execute::run::{Effect, EffectAnswer, EffectRecord};
 use crate::model::{CompletionError, CompletionErrorKind};
-use crate::test_support::drive;
-use crate::test_support::scenario::{chat_answer, text_of};
+use crate::test_support::scenario::chat_answer;
 
 /// One issued round as the driver saw it: its record, and the wire
 /// messages the live effect sent.
@@ -39,29 +40,42 @@ impl Sent {
 }
 
 /// Drives `lua` as a loop section with `echo` bound and offered, answering
-/// the model rounds from `replies` in order and every tool call with
-/// trusted text, and returns the section's result beside each round as it
-/// was sent, in issue order.
+/// the model rounds from `replies` in order and every tool call with the
+/// echo tool, and returns the section's result beside each round as it was
+/// sent, in issue order.
+#[track_caller]
 fn drive_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (String, Vec<Sent>) {
-    let prompt = parse(&loop_prompt(&format!("tools.offer('tools/echo')\n{lua}")));
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut replies = replies.into_iter();
-    let mut sent = Vec::new();
-    let (result, _events) = drive(Run::from_state(state), |_, effect| match effect {
-        Effect::Chat { messages, .. } => {
-            sent.push(Sent {
+    let replies = RefCell::new(replies.into_iter());
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let rounds = Rc::clone(&sent);
+    let trace = loop_scenario(loop_prompt(&format!("tools.offer('tools/echo')\n{lua}")))
+        .offer("echo", echo_tool())
+        .chat_with(move |effect| {
+            let Effect::Chat { messages, .. } = effect else {
+                panic!("only model rounds reach the model: {effect:?}");
+            };
+            rounds.borrow_mut().push(Sent {
                 record: effect.record(),
                 live: messages
                     .iter()
                     .map(|message| serde_json::to_value(message).expect("a message serializes"))
                     .collect(),
             });
-            replies.next().expect("the script covers every round")
-        }
-        Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("echoed"))),
-        other => panic!("only model rounds and tool calls are issued: {other:?}"),
-    });
-    (text_of(result), sent)
+            replies
+                .borrow_mut()
+                .next()
+                .expect("the script covers every round")
+        })
+        .run();
+    assert!(
+        trace.effects().iter().all(|(effect, _)| matches!(
+            effect,
+            EffectRecord::Chat { .. } | EffectRecord::ToolCall { .. }
+        )),
+        "only model rounds and tool calls are issued: {:?}",
+        trace.effects()
+    );
+    (trace.text().to_owned(), sent.take())
 }
 
 /// Rebuilds every request from the records alone and asserts each equals

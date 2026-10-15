@@ -6,7 +6,7 @@
 //! belong to whoever performs the effects. `RunFixture` is that bundle for
 //! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
 //! [`TestToolTable`] a `ToolCall` effect's id resolves in, and the
-//! observer and capture the run's events are replayed onto.
+//! observer the run's events are replayed onto.
 //! [`performers`](RunFixture::performers) and
 //! [`sink`](RunFixture::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use promptforge_types::event::Event;
 
-use super::recording::{self, DebugCapture, NullObserver, Observer};
+use super::recording::{self, NullObserver, Observer};
 #[cfg(test)]
 use super::tokio_driver::EventSink;
 use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
@@ -48,8 +48,6 @@ pub trait ChatClient: Send + Sync {
 pub struct RunFixture {
     /// The progress observer every drained event is replayed onto.
     observer: Arc<dyn Observer>,
-    /// The opt-in raw request/response capture.
-    debug: Option<Arc<dyn DebugCapture>>,
     /// The chat client `Chat` effects are performed with; `None` answers
     /// every round with the disabled-gateway failure.
     client: Option<Arc<dyn ChatClient>>,
@@ -58,13 +56,11 @@ pub struct RunFixture {
 }
 
 impl RunFixture {
-    /// Builds the silent bundle: a null observer, no capture, no client,
-    /// and no tools.
+    /// Builds the silent bundle: a null observer, no client, and no tools.
     #[must_use]
     pub fn new() -> RunFixture {
         RunFixture {
             observer: Arc::new(NullObserver::default()),
-            debug: None,
             client: None,
             tools: TestToolTable::new(),
         }
@@ -74,16 +70,6 @@ impl RunFixture {
     #[must_use]
     pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunFixture {
         self.observer = observer;
-        self
-    }
-
-    /// Sets the opt-in raw request/response capture. The Engine reports
-    /// the raw pair only when the context asks for it
-    /// ([`RunContext::report_debug`](crate::execute::RunContext::report_debug)).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunFixture {
-        self.debug = Some(debug);
         self
     }
 
@@ -154,11 +140,10 @@ impl RunFixture {
     }
 
     /// The bundle's event sink for the tokio test driver: every event is
-    /// replayed onto the observer and, for the debug pair, the capture.
+    /// replayed onto the observer.
     pub fn sink(&self) -> impl FnMut(Event) + Send + use<> {
         let observer = Arc::clone(&self.observer);
-        let debug = self.debug.clone();
-        move |event| recording::forward_one(event, observer.as_ref(), debug.as_deref())
+        move |event| recording::forward_one(event, observer.as_ref(), None)
     }
 
     /// The sink, boxed for the driver.
@@ -178,7 +163,6 @@ impl fmt::Debug for RunFixture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RunFixture")
             .field("observer", &"<dyn Observer>")
-            .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())
             .field("tools", &self.tools)
             .finish()

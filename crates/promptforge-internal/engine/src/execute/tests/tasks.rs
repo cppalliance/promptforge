@@ -5,7 +5,7 @@
 //! `sys.taskid`), and spawn shares `call`'s target resolution and depth cap.
 //! The chain-end rules sit in `chain_end`.
 
-use promptforge_types::ids::{TaskId, TaskOrigin};
+use promptforge_types::ids::TaskOrigin;
 
 use super::scheduler::scheduler_context_on;
 use super::*;
@@ -42,10 +42,6 @@ impl TaskRecorder {
             .position(|(seen_section, seen)| seen_section == section && seen == event)
             .unwrap_or_else(|| panic!("no record ({section}, {event:?}) in {records:?}"))
     }
-}
-
-fn task(id: &str) -> TaskId {
-    id.parse().expect("a task id parses")
 }
 
 /// A two-section prompt whose first section spawns the second and then

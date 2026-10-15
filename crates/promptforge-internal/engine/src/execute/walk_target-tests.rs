@@ -9,7 +9,7 @@ use promptforge_parser::test_support::{prose_block, synthetic_section};
 /// `#### Sibling` and `#### Self`, `## Top` holds a second `### Helpers`,
 /// and `## Lib` is laid out as prose, Lua, Lua, prose, Lua, then trailing
 /// prose.
-const TREE: &str = concat!(
+const LIBRARY_TREE: &str = concat!(
     "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n",
     "## Top\n\nx\n\n",
     "### Helpers\n\nx\n\n",
@@ -28,7 +28,7 @@ const TREE: &str = concat!(
 );
 
 fn tree() -> Prompt {
-    Prompt::parse(TREE, "library-test")
+    Prompt::parse(LIBRARY_TREE, "library-test")
         .0
         .expect("the tree parses")
 }

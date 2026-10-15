@@ -1,7 +1,7 @@
 //! The run-level test driver. A [`Scenario`] holds a run's setup as data:
 //! its source, args, run name, seed, context edits, store, tools, model,
 //! the sets it fills in before the run starts, the effects it holds, and
-//! the answer that cancels it. It parses the source, prepares the run, and
+//! the effect that cancels it. It parses the source, prepares the run, and
 //! steps it on the calling thread, answering every effect it does not hold
 //! the moment it is issued, and returns a [`Trace`] of what the run
 //! produced. Nothing awaits or sleeps: a timer fires at once, a tool is a
@@ -9,28 +9,27 @@
 //! on a second thread, and the scenario joins it.
 //!
 //! The serial helpers the scheduler-level suites drive a bare [`Run`] with
-//! sit beside it in `serial`, and the started run and its trace in
-//! `driving`.
+//! sit beside it in `serial`, and the started run, how it answers its
+//! effects, its store, and its trace in `driving`.
 
-use std::collections::BTreeMap;
+use std::cell::Cell;
 use std::num::NonZeroU32;
-use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 
 use promptforge_model_client::model::ModelInvocation;
 use promptforge_types::detail::model_id_from_validated;
+use promptforge_types::event::Event;
 use promptforge_types::timestamp::Timestamp;
-use promptforge_types::tools::{ToolCatalog, ToolId};
-use promptforge_vfs::{Origin, VfsError, VfsRef};
+use promptforge_types::tools::ToolCatalog;
+use promptforge_vfs::VfsRef;
 
 use super::scripted_chat::ScriptedChat;
-use super::tokio_driver::{refuse_chat, refuse_tool_call};
 use super::{FnTool, TestTool};
 use crate::Error;
-use crate::execute::{Effect, EffectAnswer, Run, RunContext, RunError, RunResult};
-use crate::lua::{ToolBinding, ToolSet, run_store_op};
+use crate::execute::{Effect, EffectAnswer, Run, RunContext, RunError, RunLimits, RunResult};
+use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{
     CompletionErrorKind, ModelBinding, ModelDescriptor, ModelId, ModelSet, ThinkingMode,
 };
@@ -41,10 +40,11 @@ mod driving;
 #[path = "scenario-serial.rs"]
 mod serial;
 
-pub(crate) use driving::{Driving, Record, Trace};
+use driving::Answers;
+pub(crate) use driving::{Driving, Record, TestStore, Trace};
 pub(crate) use serial::{
     Batching, chat_answer, drive_batched, echo_chat, infer_prompt, only_effect, perform_locally,
-    text_of,
+    round_trip, text_of,
 };
 
 /// The run name a test that does not choose one runs under.
@@ -142,6 +142,7 @@ pub(crate) struct Scenario {
     hold: Option<Matcher>,
     signal: Option<Matcher>,
     prepare: bool,
+    bind_roles: bool,
 }
 
 impl Scenario {
@@ -165,6 +166,7 @@ impl Scenario {
             hold: None,
             signal: None,
             prepare: true,
+            bind_roles: false,
         }
     }
 
@@ -190,6 +192,20 @@ impl Scenario {
     /// prepare's trivial fill binds every role the prompt declares to it.
     pub(crate) fn bound(self) -> Scenario {
         self.context(|ctx| ctx.model(test_model(TEST_MODEL)))
+    }
+
+    /// Binds every role the prompt declares to the [`TEST_MODEL`] in the
+    /// context's model bindings, as the prepare's fill would, without making
+    /// it the current model, so the run's model set starts empty for the
+    /// live H1 pass to fill.
+    pub(crate) fn bind_roles(mut self) -> Scenario {
+        self.bind_roles = true;
+        self
+    }
+
+    /// Runs under `limits` in place of the default limits.
+    pub(crate) fn limits(self, limits: RunLimits) -> Scenario {
+        self.context(move |ctx| ctx.limits(limits))
     }
 
     /// Adds `edit` to the edits applied to the run's context, after the
@@ -283,10 +299,11 @@ impl Scenario {
         self
     }
 
-    /// Cancels the run from a second thread once the scenario answers an
-    /// effect `signal` matches. The thread waits for that answer untimed,
-    /// so the cancel lands before the next step or while it runs; the
-    /// scenario joins the thread before it hands back the trace.
+    /// Cancels the run from a second thread once the scenario answers or
+    /// holds an effect `signal` matches. The thread waits for that effect
+    /// untimed, so the cancel lands before the next step or while it runs;
+    /// a run left waiting only on held effects waits for the cancel, and
+    /// the scenario joins the thread before it hands back the trace.
     pub(crate) fn cancel_when(mut self, signal: impl Fn(&Effect) -> bool + 'static) -> Scenario {
         self.signal = Some(Box::new(signal));
         self
@@ -297,25 +314,8 @@ impl Scenario {
     /// # Panics
     /// When the source fails to parse, naming the error.
     #[track_caller]
-    pub(crate) fn start(self) -> Driving {
-        let (parsed, events) = Prompt::parse(&self.source, &self.name);
-        let prompt = match parsed {
-            Ok(prompt) => prompt,
-            Err(error) => panic!("expected the scenario source to parse, got {error}"),
-        };
-        let mut ctx = RunContext::new(self.name, self.seed, TEST_STARTED_AT).vfs(self.store.vfs());
-        if !self.tools.is_empty() {
-            let descriptors: Vec<_> = self.tools.iter().map(TestTool::descriptor).collect();
-            let catalog = ToolCatalog::new(&descriptors).expect("the scenario's tool ids differ");
-            ctx = ctx.tools(catalog);
-        }
-        let mut ctx = (self.context)(ctx);
-        let mut refused = None;
-        if self.prepare {
-            let requirements;
-            (ctx, requirements) = ctx.prepare(&prompt);
-            refused = requirements.refusal().map(RunResult::Failure);
-        }
+    pub(crate) fn start(mut self) -> Driving {
+        let (prompt, events, ctx, refused) = self.prepared();
         let (signal, signalled) = match self.signal {
             Some(signal) => {
                 let (sender, receiver) = mpsc::channel();
@@ -330,6 +330,7 @@ impl Scenario {
             chat: self.chat,
             hold: self.hold,
             signal,
+            signalled: Cell::new(false),
             timeout: ctx.limits.timeout(),
         };
         let run = refused
@@ -365,6 +366,56 @@ impl Scenario {
     pub(crate) fn run(self) -> Trace {
         self.start().finish()
     }
+
+    /// Parses the source, prepares the run, and hands it back unstarted,
+    /// for a test that steps it and answers its effects by hand. The
+    /// scenario's tools still shape the catalog and the offering, but its
+    /// answers, holds, and canceller play no part.
+    ///
+    /// # Panics
+    /// When the source fails to parse or the prepare refuses the run,
+    /// naming the error.
+    #[track_caller]
+    pub(crate) fn into_run(mut self) -> Run {
+        let (prompt, _, ctx, refused) = self.prepared();
+        if let Some(refused) = refused {
+            panic!("expected the prepare to accept the run, got {refused:?}");
+        }
+        self.prefill.start(Arc::new(prompt), &self.args, ctx)
+    }
+
+    /// Parses the source and builds the run's context, prepared unless the
+    /// scenario skips the prepare, beside the parse events and the
+    /// prepare's refusal.
+    #[track_caller]
+    fn prepared(&mut self) -> (Prompt, Vec<Event>, RunContext, Option<RunResult>) {
+        let (parsed, events) = Prompt::parse(&self.source, &self.name);
+        let prompt = match parsed {
+            Ok(prompt) => prompt,
+            Err(error) => panic!("expected the scenario source to parse, got {error}"),
+        };
+        let mut ctx =
+            RunContext::new(self.name.clone(), self.seed, TEST_STARTED_AT).vfs(self.store.vfs());
+        if !self.tools.is_empty() {
+            let descriptors: Vec<_> = self.tools.iter().map(TestTool::descriptor).collect();
+            let catalog = ToolCatalog::new(&descriptors).expect("the scenario's tool ids differ");
+            ctx = ctx.tools(catalog);
+        }
+        let edit = std::mem::replace(&mut self.context, Box::new(|ctx| ctx));
+        let mut ctx = edit(ctx);
+        if self.bind_roles {
+            for (label, _) in prompt.frontmatter().models().iter() {
+                ctx.bind_role_for_test(label, test_model(TEST_MODEL));
+            }
+        }
+        let mut refused = None;
+        if self.prepare {
+            let requirements;
+            (ctx, requirements) = ctx.prepare(&prompt);
+            refused = requirements.refusal().map(RunResult::Failure);
+        }
+        (prompt, events, ctx, refused)
+    }
 }
 
 /// What a scenario fills into its run's state before the run starts, in
@@ -399,98 +450,5 @@ impl Prefill {
             }
             state
         })
-    }
-}
-
-/// How a scenario answers its run's effects: a store operation on the
-/// effect's own access, a timer at once, a tool call through the
-/// scenario's tool of that id, and a model round from its script or
-/// closure, unless the scenario holds the effect.
-struct Answers {
-    tools: BTreeMap<ToolId, FnTool>,
-    chat: Option<Chat>,
-    hold: Option<Matcher>,
-    /// Which answer wakes the canceller, and the wake.
-    signal: Option<(Matcher, Sender<()>)>,
-    timeout: Duration,
-}
-
-impl Answers {
-    /// Answers `effect` at once, or `None` when the scenario holds it. A
-    /// call to a tool the scenario lacks is refused, and so is a model
-    /// round when the scenario has no model.
-    fn answer(&self, effect: &Effect) -> Option<EffectAnswer> {
-        if self.hold.as_ref().is_some_and(|held| held(effect)) {
-            return None;
-        }
-        let answer = match effect {
-            Effect::Chat {
-                messages,
-                tools,
-                options,
-                ..
-            } => match &self.chat {
-                Some(Chat::Script(chat)) => {
-                    let (_, answer) = chat.complete_now(messages, tools, options, self.timeout);
-                    EffectAnswer::Chat(answer.map(Box::new))
-                }
-                Some(Chat::Closure(answer)) => answer(effect),
-                None => refuse_chat(),
-            },
-            Effect::ToolCall { tool, args, .. } => match self.tools.get(tool) {
-                Some(tool) => EffectAnswer::ToolCall(tool.call_now(args.clone())),
-                None => refuse_tool_call(),
-            },
-            Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
-            Effect::Timer { .. } => EffectAnswer::Timer,
-        };
-        if let Some((signal, wake)) = &self.signal
-            && signal(effect)
-        {
-            // Only the first signal wakes the canceller; a later send
-            // finds it gone.
-            let _ = wake.send(());
-        }
-        Some(answer)
-    }
-}
-
-/// The test store: a VFS handle, a fresh default one (a memory store at
-/// `/`) unless the test supplies its own, whose `read` and `glob` helpers
-/// each go through a fresh, immediately dropped access and its store view.
-/// A short-lived access per call is what keeps seeding and post-run
-/// assertions conflict-free: each access is its own scope, and its claims
-/// die with it, so a held seeder access would meet the run's own scope as
-/// a false race.
-pub(crate) struct TestStore(Mutex<VfsRef>);
-
-impl TestStore {
-    pub(crate) fn new() -> TestStore {
-        TestStore(Mutex::new(VfsRef::default()))
-    }
-
-    /// Wraps a caller-built handle - a gated backend, say - in the test
-    /// store's seeding and post-run assertion helpers.
-    pub(crate) fn from_vfs(vfs: VfsRef) -> TestStore {
-        TestStore(Mutex::new(vfs))
-    }
-
-    /// The handle the run and the context builders take: the run's whole
-    /// filesystem, store included.
-    pub(crate) fn vfs(&self) -> VfsRef {
-        self.0
-            .lock()
-            .expect("the store lock is not poisoned")
-            .clone()
-    }
-
-    pub(crate) fn read(&self, path: &str) -> Result<String, VfsError> {
-        let access = self.vfs().acquire(Origin::new("TestStore::read"))?;
-        promptforge_vfs::detail::store_view(&access)?.read_string(path)
-    }
-
-    pub(crate) fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-        let access = self.vfs().acquire(Origin::new("TestStore::glob"))?;
-        promptforge_vfs::detail::store_view(&access)?.glob(pattern)
     }
 }

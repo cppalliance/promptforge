@@ -1,21 +1,85 @@
 //! A started scenario: the [`Driving`] run a test steps by hand or to its
-//! end, the [`Trace`] it leaves, and the [`Record`] and [`Capture`] forms
-//! its events take for the suites' assertions.
+//! end, the [`Answers`] it gives the run's effects, the [`TestStore`] the
+//! run writes, the [`Trace`] it leaves, and the [`Record`] and
+//! [`Capture`] forms its events take for the suites' assertions.
 
+use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use promptforge_types::event::Event;
-use promptforge_vfs::VfsError;
+use promptforge_types::tools::ToolId;
+use promptforge_vfs::{Origin, VfsError, VfsRef};
 
+use super::super::FnTool;
 use super::super::recording::{
     DebugCapture, DebugEvent, NullObserver, Observation, Observer, forward_one,
 };
+use super::super::tokio_driver::{refuse_chat, refuse_tool_call};
 use super::super::{drive_step, forward};
-use super::{Answers, TestStore};
+use super::{Chat, Matcher};
 use crate::execute::{
     AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, RunError, RunResult,
 };
+use crate::lua::run_store_op;
+
+/// How a scenario answers its run's effects: a store operation on the
+/// effect's own access, a timer at once, a tool call through the
+/// scenario's tool of that id, and a model round from its script or
+/// closure, unless the scenario holds the effect.
+pub(super) struct Answers {
+    pub(super) tools: BTreeMap<ToolId, FnTool>,
+    pub(super) chat: Option<Chat>,
+    pub(super) hold: Option<Matcher>,
+    /// Which effect wakes the canceller, and the wake.
+    pub(super) signal: Option<(Matcher, Sender<()>)>,
+    /// Whether the canceller was woken.
+    pub(super) signalled: Cell<bool>,
+    pub(super) timeout: Duration,
+}
+
+impl Answers {
+    /// Answers `effect` at once, or `None` when the scenario holds it,
+    /// waking the canceller either way when `effect` is its signal. A call
+    /// to a tool the scenario lacks is refused, and so is a model round
+    /// when the scenario has no model.
+    fn answer(&self, effect: &Effect) -> Option<EffectAnswer> {
+        let held = self.hold.as_ref().is_some_and(|held| held(effect));
+        let answer = (!held).then(|| match effect {
+            Effect::Chat {
+                messages,
+                tools,
+                options,
+                ..
+            } => match &self.chat {
+                Some(Chat::Script(chat)) => {
+                    let (_, answer) = chat.complete_now(messages, tools, options, self.timeout);
+                    EffectAnswer::Chat(answer.map(Box::new))
+                }
+                Some(Chat::Closure(answer)) => answer(effect),
+                None => refuse_chat(),
+            },
+            Effect::ToolCall { tool, args, .. } => match self.tools.get(tool) {
+                Some(tool) => EffectAnswer::ToolCall(tool.call_now(args.clone())),
+                None => refuse_tool_call(),
+            },
+            Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
+            Effect::Timer { .. } => EffectAnswer::Timer,
+        });
+        if let Some((signal, wake)) = &self.signal
+            && signal(effect)
+        {
+            // Only the first signal wakes the canceller; a later send
+            // finds it gone.
+            let _ = wake.send(());
+            self.signalled.set(true);
+        }
+        answer
+    }
+}
 
 /// A started scenario, stepped by hand or to its end.
 pub(crate) struct Driving {
@@ -41,7 +105,7 @@ impl Driving {
     /// Steps the run once, answering every effect the step issued that the
     /// scenario does not hold, and returns whether stepping again can move
     /// the run: `false` once it is done, and while it waits only on held
-    /// effects.
+    /// effects with no woken canceller to wait for.
     pub(crate) fn step(&mut self) -> bool {
         let Some(run) = self.run.as_mut() else {
             return false;
@@ -63,12 +127,28 @@ impl Driving {
             &mut self.events,
         );
         let Some(result) = stepped else {
-            return moved || self.held.len() > holding;
+            return moved || self.held.len() > holding || self.await_cancel();
         };
         self.turns = run.turns_for_test();
         self.result = Some(result);
         self.run = None;
         false
+    }
+
+    /// Joins the canceller once it is woken, so the next step sees its
+    /// cancel, and returns whether it did. A run waiting only on held
+    /// effects moves again only through that cancel.
+    fn await_cancel(&mut self) -> bool {
+        if !self.answers.signalled.get() {
+            return false;
+        }
+        let Some(canceller) = self.canceller.take() else {
+            return false;
+        };
+        canceller
+            .join()
+            .expect("the canceller thread does not panic");
+        true
     }
 
     /// Sets the run's cancel flag between steps, as a caller cancelling a
@@ -213,6 +293,46 @@ impl Trace {
     /// Reads a store path after the run, through a fresh access.
     pub(crate) fn read(&self, path: &str) -> Result<String, VfsError> {
         self.store.read(path)
+    }
+}
+
+/// The test store: a VFS handle, a fresh default one (a memory store at
+/// `/`) unless the test supplies its own, whose `read` and `glob` helpers
+/// each go through a fresh, immediately dropped access and its store view.
+/// A short-lived access per call is what keeps seeding and post-run
+/// assertions conflict-free: each access is its own scope, and its claims
+/// die with it, so a held seeder access would meet the run's own scope as
+/// a false race.
+pub(crate) struct TestStore(Mutex<VfsRef>);
+
+impl TestStore {
+    pub(crate) fn new() -> TestStore {
+        TestStore(Mutex::new(VfsRef::default()))
+    }
+
+    /// Wraps a caller-built handle - a gated backend, say - in the test
+    /// store's seeding and post-run assertion helpers.
+    pub(crate) fn from_vfs(vfs: VfsRef) -> TestStore {
+        TestStore(Mutex::new(vfs))
+    }
+
+    /// The handle the run and the context builders take: the run's whole
+    /// filesystem, store included.
+    pub(crate) fn vfs(&self) -> VfsRef {
+        self.0
+            .lock()
+            .expect("the store lock is not poisoned")
+            .clone()
+    }
+
+    pub(crate) fn read(&self, path: &str) -> Result<String, VfsError> {
+        let access = self.vfs().acquire(Origin::new("TestStore::read"))?;
+        promptforge_vfs::detail::store_view(&access)?.read_string(path)
+    }
+
+    pub(crate) fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        let access = self.vfs().acquire(Origin::new("TestStore::glob"))?;
+        promptforge_vfs::detail::store_view(&access)?.glob(pattern)
     }
 }
 

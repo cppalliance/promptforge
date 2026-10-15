@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use promptforge_types::ids::TaskId;
 
-use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt, task};
+use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 

@@ -12,7 +12,7 @@ fn test_prompt() -> Prompt {
         .expect("the test prompt parses")
 }
 
-fn test_context(prompt: &Prompt) -> RunState {
+fn test_state(prompt: &Prompt) -> RunState {
     RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -28,20 +28,20 @@ fn test_context(prompt: &Prompt) -> RunState {
 #[test]
 fn new_builds_a_context_over_the_prompt() {
     let prompt = test_prompt();
-    let ctx = test_context(&prompt);
+    let ctx = test_state(&prompt);
     assert_eq!(ctx.prompt().title(), prompt.title());
 }
 
 #[test]
 fn accessor_returns_the_run_prompt() {
     let prompt = test_prompt();
-    let ctx = test_context(&prompt);
+    let ctx = test_state(&prompt);
     assert_eq!(ctx.prompt(), &prompt);
 }
 
 #[test]
 fn clones_share_the_prompt_allocation() {
-    let ctx = test_context(&test_prompt());
+    let ctx = test_state(&test_prompt());
     let clone = ctx.clone();
     assert!(Arc::ptr_eq(&ctx.prompt, &clone.prompt));
 }
@@ -49,7 +49,7 @@ fn clones_share_the_prompt_allocation() {
 #[test]
 fn derived_values_come_from_the_prompt_and_limits() {
     let prompt = test_prompt();
-    let ctx = test_context(&prompt);
+    let ctx = test_state(&prompt);
     assert_eq!(
         ctx.section_count(),
         promptforge_parser::detail::sections(&prompt).len()
@@ -59,7 +59,7 @@ fn derived_values_come_from_the_prompt_and_limits() {
 
 #[test]
 fn forks_swap_only_their_own_fields() {
-    let ctx = test_context(&test_prompt());
+    let ctx = test_state(&test_prompt());
     let chain = ctx.with_args("chain-args");
     assert_eq!(chain.args(), "chain-args");
     assert!(Arc::ptr_eq(&ctx.prompt, &chain.prompt));
@@ -101,7 +101,7 @@ fn the_root_task_sequence_starts_where_the_context_says() {
 
 #[test]
 fn a_task_fork_reports_into_the_shared_buffer_under_its_own_task() {
-    let ctx = test_context(&test_prompt());
+    let ctx = test_state(&test_prompt());
     let task: TaskId = "0.1".parse().expect("a task id parses");
     let arm = ctx.with_task(task.clone(), Arc::new(AtomicU32::new(0)));
     ctx.emitter()

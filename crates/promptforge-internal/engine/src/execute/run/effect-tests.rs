@@ -13,8 +13,9 @@ use serde_json::json;
 use super::*;
 use crate::test_support::scenario::test_binding;
 
-/// Serializes the record and reads it back.
-fn round_trip(record: &AnswerRecord) -> AnswerRecord {
+/// Serializes the answer record and reads it back.
+#[track_caller]
+fn answer_round_trip(record: &AnswerRecord) -> AnswerRecord {
     let text = serde_json::to_string(record).expect("an answer record serializes");
     serde_json::from_str(&text).expect("a serialized answer record deserializes")
 }
@@ -37,7 +38,7 @@ fn chat_effect(messages: Vec<Message>, after: Option<RoundId>, keep: u64) -> Eff
 }
 
 /// The three-message request the record cases send.
-fn request() -> Vec<Message> {
+fn three_messages() -> Vec<Message> {
     vec![
         Message::user("ask"),
         Message::assistant("reply"),
@@ -47,7 +48,7 @@ fn request() -> Vec<Message> {
 
 #[test]
 fn a_chat_record_copies_after_and_keep_and_logs_only_the_messages_after_keep() {
-    let effect = chat_effect(request(), Some(RoundId::new(2)), 2);
+    let effect = chat_effect(three_messages(), Some(RoundId::new(2)), 2);
     let record = effect.record();
     let EffectRecord::Chat {
         round,
@@ -90,7 +91,7 @@ fn a_chat_record_copies_after_and_keep_and_logs_only_the_messages_after_keep() {
 
 #[test]
 fn a_keep_equal_to_the_message_count_logs_no_messages() {
-    let record = chat_effect(request(), Some(RoundId::new(2)), 3).record();
+    let record = chat_effect(three_messages(), Some(RoundId::new(2)), 3).record();
     let EffectRecord::Chat {
         after,
         keep,
@@ -109,7 +110,7 @@ fn a_keep_equal_to_the_message_count_logs_no_messages() {
 
 #[test]
 fn a_first_send_records_no_after_and_logs_every_message() {
-    let record = chat_effect(request(), None, 0).record();
+    let record = chat_effect(three_messages(), None, 0).record();
     let EffectRecord::Chat {
         after,
         keep,
@@ -125,7 +126,7 @@ fn a_first_send_records_no_after_and_logs_every_message() {
 
 /// A completion with `finish_reason` and both bodies set: what a
 /// transport hands the loop, as opposed to the bare canned one.
-fn completion(result: CompletionResult, finish_reason: &str) -> Completion {
+fn finished_completion(result: CompletionResult, finish_reason: &str) -> Completion {
     let raw = RawExchange::new(
         json!({ "messages": [{ "role": "user", "content": "ask" }] }),
         json!({ "model": "test-model", "choices": [{ "index": 0, "finish_reason": finish_reason }] }),
@@ -138,7 +139,7 @@ fn completion(result: CompletionResult, finish_reason: &str) -> Completion {
 
 #[test]
 fn a_chat_answer_records_the_reply_model_and_finish_reason_without_the_bodies() {
-    let answer = EffectAnswer::Chat(Ok(Box::new(completion(
+    let answer = EffectAnswer::Chat(Ok(Box::new(finished_completion(
         CompletionResult::Text("the reply".to_owned()),
         "stop",
     ))));
@@ -157,7 +158,7 @@ fn a_chat_answer_records_the_reply_model_and_finish_reason_without_the_bodies() 
         !text.contains("choices") && !text.contains("messages"),
         "the round's bodies travel as debug events, not in the answer: {text}"
     );
-    assert_eq!(round_trip(&record), record);
+    assert_eq!(answer_round_trip(&record), record);
 }
 
 #[test]
@@ -166,7 +167,7 @@ fn a_chat_answer_with_tool_calls_records_their_names_in_call_order_and_no_reply(
         ToolCall::from_parts("call-1", "grab", json!({ "value": "hi" })).expect("a whole call"),
         ToolCall::from_parts("call-2", "echo", json!({})).expect("a whole call"),
     ]);
-    let answer = EffectAnswer::Chat(Ok(Box::new(completion(calls, "tool_calls"))));
+    let answer = EffectAnswer::Chat(Ok(Box::new(finished_completion(calls, "tool_calls"))));
     let record = answer.record();
     assert_eq!(
         record,
@@ -182,7 +183,7 @@ fn a_chat_answer_with_tool_calls_records_their_names_in_call_order_and_no_reply(
         !text.contains("call-1") && !text.contains("value"),
         "the calls' ids and arguments stay in the tool-call event: {text}"
     );
-    assert_eq!(round_trip(&record), record);
+    assert_eq!(answer_round_trip(&record), record);
 }
 
 #[test]
@@ -218,7 +219,7 @@ fn a_failed_chat_answer_records_the_errors_display_text() {
     assert!(!expected.contains("hidden"), "the detail is never recorded");
     let record = EffectAnswer::Chat(Err(error)).record();
     assert_eq!(record, AnswerRecord::Chat(Err(expected)));
-    assert_eq!(round_trip(&record), record);
+    assert_eq!(answer_round_trip(&record), record);
 }
 
 #[test]
@@ -231,7 +232,7 @@ fn a_tool_call_answer_records_the_outputs_text_and_trust() {
             trusted: true,
         }))
     );
-    assert_eq!(round_trip(&trusted), trusted);
+    assert_eq!(answer_round_trip(&trusted), trusted);
 
     let untrusted = EffectAnswer::ToolCall(Ok(ToolOutput::untrusted("<html>"))).record();
     assert_eq!(
@@ -241,7 +242,7 @@ fn a_tool_call_answer_records_the_outputs_text_and_trust() {
             trusted: false,
         }))
     );
-    assert_eq!(round_trip(&untrusted), untrusted);
+    assert_eq!(answer_round_trip(&untrusted), untrusted);
 }
 
 #[test]
@@ -253,7 +254,7 @@ fn a_failed_tool_call_answer_records_the_errors_display_text_and_hides_its_sourc
         AnswerRecord::ToolCall(Err("backend failed".to_owned())),
         "the display text is the model-safe message; the source stays behind it"
     );
-    assert_eq!(round_trip(&record), record);
+    assert_eq!(answer_round_trip(&record), record);
 }
 
 #[test]
@@ -266,14 +267,14 @@ fn the_store_answer_records_byte_identical_json_for_every_outcome() {
         serde_json::to_string(&unit).expect("a store answer records"),
         r#"{"Vfs":{"Ok":"Unit"}}"#
     );
-    assert_eq!(round_trip(&unit), unit);
+    assert_eq!(answer_round_trip(&unit), unit);
 
     let text = EffectAnswer::Vfs(Ok(VfsOutcome::Text("the read".to_owned()))).record();
     assert_eq!(
         serde_json::to_string(&text).expect("a store answer records"),
         r#"{"Vfs":{"Ok":{"Text":"the read"}}}"#
     );
-    assert_eq!(round_trip(&text), text);
+    assert_eq!(answer_round_trip(&text), text);
 
     let paths = EffectAnswer::Vfs(Ok(VfsOutcome::Paths(vec![
         "a.txt".to_owned(),
@@ -284,14 +285,14 @@ fn the_store_answer_records_byte_identical_json_for_every_outcome() {
         serde_json::to_string(&paths).expect("a store answer records"),
         r#"{"Vfs":{"Ok":{"Paths":["a.txt","b.txt"]}}}"#
     );
-    assert_eq!(round_trip(&paths), paths);
+    assert_eq!(answer_round_trip(&paths), paths);
 
     let flag = EffectAnswer::Vfs(Ok(VfsOutcome::Bool(true))).record();
     assert_eq!(
         serde_json::to_string(&flag).expect("a store answer records"),
         r#"{"Vfs":{"Ok":{"Bool":true}}}"#
     );
-    assert_eq!(round_trip(&flag), flag);
+    assert_eq!(answer_round_trip(&flag), flag);
 }
 
 #[test]
@@ -309,5 +310,5 @@ fn a_failed_store_answer_records_the_vfs_errors_display_text() {
         "a failure keeps the `{{\"Err\": \"...\"}}` shape, now holding the \
          VfsError's display text"
     );
-    assert_eq!(round_trip(&record), record);
+    assert_eq!(answer_round_trip(&record), record);
 }

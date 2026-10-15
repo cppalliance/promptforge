@@ -67,10 +67,6 @@ impl WaitRecorder {
     }
 }
 
-pub(super) fn task(id: &str) -> TaskId {
-    id.parse().expect("a task id parses")
-}
-
 /// A prompt whose first section drives the tasks it spawns over the
 /// remaining sections.
 pub(super) fn tasks_prompt(main: &str, sections: &[(&str, &str)]) -> String {

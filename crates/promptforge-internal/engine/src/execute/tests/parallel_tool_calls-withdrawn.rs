@@ -3,6 +3,7 @@
 //! included, in effect-id order however many tasks it cancels, and a
 //! decided run's step lists none.
 
+use super::super::models_loop::loop_scenario;
 use super::*;
 
 /// The effects one step issued, in issue order, and the tool calls it
@@ -37,13 +38,17 @@ const CANCELLED_CHILD: &str = "---\nname: loop\ndescription: d\npromptforge: 0\n
      models.loop(msgs)\n\
      return 'child done'\n```\n";
 
+/// A run of `source` over the loop models with `echo` offered, stepped by
+/// hand.
+#[track_caller]
+fn echo_run(source: &str) -> Run {
+    loop_scenario(source).offer("echo", echo_tool()).into_run()
+}
+
 /// A run of [`CANCELLED_CHILD`] past its first step, with the ids of
-/// Main's `wait` round and Child's loop round. The fixture must outlive
-/// the run.
-fn cancelled_child() -> (Run, RunFixture, EffectId, EffectId) {
-    let prompt = parse(CANCELLED_CHILD);
-    let (state, fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+/// Main's `wait` round and Child's loop round.
+fn cancelled_child() -> (Run, EffectId, EffectId) {
+    let mut run = echo_run(CANCELLED_CHILD);
     let (rounds, withdrawn) = withdrawals(run.step());
     assert!(
         withdrawn.is_empty(),
@@ -59,7 +64,7 @@ fn cancelled_child() -> (Run, RunFixture, EffectId, EffectId) {
             .unwrap_or_else(|| panic!("a {wanted:?} round: {rounds:?}"))
     };
     let (infer, round) = (origin(ReplyOrigin::Infer), origin(ReplyOrigin::Chat));
-    (run, fixture, infer, round)
+    (run, infer, round)
 }
 
 /// Child's round answer: two echo calls, `c1` then `c2`.
@@ -81,7 +86,7 @@ fn tool_call_ids(effects: &[(EffectId, Effect)]) -> Vec<EffectId> {
 
 #[test]
 fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
-    let (mut run, _fixture, infer, round) = cancelled_child();
+    let (mut run, infer, round) = cancelled_child();
     run.resume(round, two_echoes());
     let (issued, withdrawn) = withdrawals(run.step());
     let calls = tool_call_ids(&issued);
@@ -116,7 +121,7 @@ fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
 
 #[test]
 fn a_call_issued_and_withdrawn_in_one_step_is_listed_twice() {
-    let (mut run, _fixture, infer, round) = cancelled_child();
+    let (mut run, infer, round) = cancelled_child();
     run.resume(round, two_echoes());
     run.resume(infer, chat_answer(&text("go")));
     let (issued, withdrawn) = withdrawals(run.step());
@@ -142,7 +147,7 @@ fn a_call_issued_and_withdrawn_in_one_step_is_listed_twice() {
 
 #[test]
 fn a_decided_run_lists_no_withdrawn_calls() {
-    let (mut run, _fixture, infer, round) = cancelled_child();
+    let (mut run, infer, round) = cancelled_child();
     run.resume(round, two_echoes());
     let (issued, _) = withdrawals(run.step());
     let calls = tool_call_ids(&issued);
@@ -196,9 +201,7 @@ const CANCELLED_PAIR: &str = "---\nname: loop\ndescription: d\npromptforge: 0\n-
 
 #[test]
 fn one_step_lists_every_tasks_withdrawn_calls_in_effect_id_order() {
-    let prompt = parse(CANCELLED_PAIR);
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+    let mut run = echo_run(CANCELLED_PAIR);
     let (rounds, _) = withdrawals(run.step());
     let asking = |user: &str| {
         rounds

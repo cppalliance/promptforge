@@ -17,7 +17,7 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
-use crate::test_support::scenario::{only_effect, test_binding};
+use crate::test_support::scenario::{only_effect, round_trip, test_binding};
 
 #[path = "tests-drops.rs"]
 mod drops;
@@ -30,13 +30,6 @@ fn run_context() -> RunContext {
         1,
         promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
     )
-}
-
-/// Serializes the record and reads it back: the round trip a run log and
-/// a replay depend on.
-fn round_trip(record: &EffectRecord) -> EffectRecord {
-    let text = serde_json::to_string(record).expect("a record serializes");
-    serde_json::from_str(&text).expect("a serialized record deserializes")
 }
 
 fn binding() -> ModelBinding {

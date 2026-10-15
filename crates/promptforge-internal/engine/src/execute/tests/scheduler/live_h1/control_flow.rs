@@ -4,8 +4,8 @@
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn call_from_h1_runs_the_target_as_a_contained_chain() {
+#[test]
+fn call_from_h1_runs_the_target_as_a_contained_chain() {
     // H1 is section 0, so `call` resolves against the top-level sections
     // exactly as in any section.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -15,18 +15,13 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         ```lua\nreturn var.answer\n```\n\n\
         ## Answer\n\n\
         ```lua\nreturn 'called from h1'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("call from H1 runs the target section");
+    let trace = h1_scenario(md).run();
 
-    assert_eq!(out, "called from h1");
+    assert_eq!(trace.text(), "called from h1");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutive_child_ids() {
+#[test]
+fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutive_child_ids() {
     // The H1 pass and the walk that follows it are one root chain, so the
     // hand-off copies the pass's child counter into the walk: a `call`
     // the pass made is child `0.0`, and the walk's first `call` is child
@@ -43,42 +38,34 @@ async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutiv
         ```\n\n\
         ## Answer\n\n\
         ```lua\nreturn sys.id\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a call from H1 and a call from the walk both complete");
+    let trace = h1_scenario(md).run();
 
     assert_eq!(
-        out, "0.0.0,0.1.0",
+        trace.text(),
+        "0.0.0,0.1.0",
         "the H1 call is root child 0 and the walk's call is root child 1"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
+#[test]
+fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
     // A `call` naming no visible section fails as the call's answer: the
     // shim raises it at the call site, where an author `pcall` catches it;
     // uncaught, it ends the run as the H1 gate failure.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\nlocal ok, err = pcall(call, '## Nope'); return tostring(ok) .. ':' .. tostring(err)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the caught call failure is the run's result");
+    let trace = h1_scenario(md).run();
 
+    let out = trace.text();
     assert!(
         out.starts_with("false:") && out.contains("## Nope"),
         "the caught error names the missing section: {out}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_from_h1_starts_the_walk_at_the_target() {
+#[test]
+fn jump_from_h1_starts_the_walk_at_the_target() {
     // A jump out of H1 ends the pass and starts the walk at the resolved
     // top-level target, skipping the sections before it.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -88,36 +75,27 @@ async fn jump_from_h1_starts_the_walk_at_the_target() {
         ```lua\nerror('the jump target must skip this section')\n```\n\n\
         ## Target\n\n\
         ```lua\nreturn 'jumped'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("jump from H1 starts the walk at the target");
+    let trace = h1_scenario(md).run();
 
-    assert_eq!(out, "jumped");
+    assert_eq!(trace.text(), "jumped");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
+#[test]
+fn jump_from_h1_to_an_unknown_section_fails_the_run() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\njump('## Nope')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("jump from H1 to an unknown section must fail");
+    let trace = h1_scenario(md).run();
 
+    let error = trace.error();
     assert!(
         error.to_string().contains("## Nope"),
         "the failure names the missing section: {error}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fanout_from_h1_runs_the_worker_over_the_collection() {
+#[test]
+fn fanout_from_h1_runs_the_worker_over_the_collection() {
     // `fanout` works in H1 as in any section: the worker resolves against
     // the top-level sections and the arms join in collection order.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -130,18 +108,13 @@ async fn fanout_from_h1_runs_the_worker_over_the_collection() {
         ```lua\nreturn var.answer\n```\n\n\
         ## Worker\n\n\
         ```lua\nreturn 'item:' .. item\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("fanout from H1 joins the arms");
+    let trace = h1_scenario(md).run();
 
-    assert_eq!(out, "item:a|item:b");
+    assert_eq!(trace.text(), "item:a|item:b");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
+#[test]
+fn the_h1_decision_tool_idiom_runs_before_the_walk() {
     // The decision-tool idiom in H1: a local tool with an enum parameter is
     // the verdict channel - the model's loop call lands in the Lua handler,
     // and the captured verdict drives the run's shape before the walk. This
@@ -165,14 +138,9 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.verdict\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the H1 decision-tool idiom runs");
+    let trace = h1_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "use_mcp");
+    assert_eq!(trace.text(), "use_mcp");
     assert_eq!(
         gateway.call_count(),
         2,

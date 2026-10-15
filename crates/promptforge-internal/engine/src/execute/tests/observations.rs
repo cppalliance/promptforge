@@ -5,7 +5,6 @@ use promptforge_types::event::Event;
 
 use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
-use crate::test_support::scenario::Trace;
 
 /// The prompt whose one section, `Only`, raises.
 fn failing_prompt() -> String {
@@ -32,16 +31,6 @@ fn stream_fixtures() -> [(&'static str, String); 4] {
         ("failing prompt", failing_prompt()),
         ("second section errors", second_section_errors()),
     ]
-}
-
-/// The `(section, detail)` sequence the run itself reported, as the suites'
-/// observer sees it: the parse events ahead of it are left out.
-fn sequence(trace: &Trace) -> Vec<(String, String)> {
-    trace
-        .run_records()
-        .into_iter()
-        .map(|record| (record.section, record.detail))
-        .collect()
 }
 
 /// The `(section, kind)` trace of a raw event, read off its serialized

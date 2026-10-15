@@ -6,8 +6,8 @@
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn live_h1_infer_runs_once() {
+#[test]
+fn live_h1_infer_runs_once() {
     // The H1 pass selects the default model by label, a handle's `infer`
     // yields through the shim, and the H1 `var` hand-off seeds the walk.
     let gateway = ScriptedChat::new(vec![text("h1 answer")]);
@@ -19,19 +19,14 @@ async fn live_h1_infer_runs_once() {
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the H1 pass must run on the scheduler");
+    let trace = h1_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "h1 answer");
+    assert_eq!(trace.text(), "h1 answer");
     assert_eq!(gateway.call_count(), 1);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
+#[test]
+fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
     // The H1 `models.infer` (no handle) resolves the current model from the
     // shared set and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
@@ -45,14 +40,9 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("H1 models.infer must run on the scheduler");
+    let trace = h1_scenario(md).chat(&gateway).run();
 
-    assert_eq!(out, "h1 answer:true");
+    assert_eq!(trace.text(), "h1 answer:true");
     assert_eq!(gateway.call_count(), 1);
     let body = gateway
         .last_request()
@@ -73,8 +63,8 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
+#[test]
+fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
     // The H1 pass is the root chain's entry 0, so the first walked section
     // takes entry 1 of the same chain.
     let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
@@ -87,18 +77,13 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         assert(sys.id == '0.1', 'the first walked section takes entry 1')\n\
         return 'ok'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
+    let trace = h1_scenario(md).run();
 
-    assert_eq!(out, "ok");
+    assert_eq!(trace.text(), "ok");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
+#[test]
+fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
     // H1's remaining job is the prompt's hard gates: a failed `assert` is
     // the failed assertion, ending the run before the walk with the
     // RequirementsUnmet classification and the failure notice as content.
@@ -110,16 +95,11 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
         ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
         ## Result\n\n\
         ```lua\nreturn 'unexpected'\n```\n";
-    let prompt = parse(md);
-    let store = TestStore::new();
-    let (ctx, fixture) = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a failed H1 assertion must fail the run");
+    let trace = h1_scenario(md).run();
 
+    let error = trace.error();
     assert!(
-        matches!(error, Error::RequirementsUnmet { .. }),
+        matches!(error.inner(), Error::RequirementsUnmet { .. }),
         "the failed assertion classifies as RequirementsUnmet: {error}"
     );
     assert!(
@@ -127,34 +107,29 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
         "the notice includes the assertion's message: {error}"
     );
     assert!(
-        store.read("later.txt").is_err(),
+        trace.read("later.txt").is_err(),
         "the later H1 block must not run after the failed gate"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
+#[test]
+fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
     // The observation boundary of the H1 gate rule: an uncaught assertion
     // failure is the chunk's own failure, so the chunk reports
     // LUA_CHUNK_FAILED and the run ends as RequirementsUnmet.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
         assert(false, 'the gate cannot hold')\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("the failed gate must fail the run");
+    let trace = h1_scenario(md).run();
 
+    let error = trace.error();
     assert!(
-        matches!(error, Error::RequirementsUnmet { .. }),
+        matches!(error.inner(), Error::RequirementsUnmet { .. }),
         "the failed gate classifies as RequirementsUnmet: {error}"
     );
-    let observed = recorder.events();
+    let observed = sequence(&trace);
     let title = "Callback Drain".to_string();
     assert!(
         observed.contains(&(title.clone(), detail::LUA_CHUNK_FAILED.to_string())),
@@ -162,8 +137,8 @@ async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_h1_scalar_return_still_reads_var_back() {
+#[test]
+fn an_h1_scalar_return_still_reads_var_back() {
     // The read-back half of the H1 return rule: the pass reads the
     // final `var` back on every exit, so a reassigned `var` global fails
     // the run even when the block's scalar return would short-circuit it.
@@ -173,15 +148,11 @@ async fn an_h1_scalar_return_still_reads_var_back() {
         var = 5\n\
         return 'early'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a reassigned `var` global must fail the run");
+    let trace = h1_scenario(md).run();
 
+    let error = trace.error();
     assert!(
-        matches!(error, Error::Lua(_)),
+        matches!(error.inner(), Error::Lua(_)),
         "the read-back failure is machinery around the prompt's chunk, \
          not the failed gate, so it keeps the Lua kind: {error}"
     );
@@ -191,8 +162,8 @@ async fn an_h1_scalar_return_still_reads_var_back() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
+#[test]
+fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
     // A library runs inside the H1 chunk that requires it, so its
     // uncaught raise is the chunk's own failure: the failed H1 gate,
     // with the library's message as the notice.
@@ -206,14 +177,10 @@ async fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet()
         ```lua\n\
         error('library boom')\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a failing library load must fail the run");
+    let trace = h1_scenario(md).run();
 
-    let Error::RequirementsUnmet { notice } = &error else {
+    let error = trace.error();
+    let Error::RequirementsUnmet { notice } = error.inner() else {
         panic!("the library's raise is the failed H1 gate: {error}");
     };
     assert!(
@@ -222,27 +189,21 @@ async fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_live_h1_pass_fires_no_section_boundaries() {
+#[test]
+fn the_live_h1_pass_fires_no_section_boundaries() {
     // The completion-flag contract on the scheduler: the H1 frame never
     // arms completion and is never a walked section, so the pass reports
     // its teardown pair but neither SECTION_STARTED nor SECTION_FINISHED;
     // the first walked section reports both.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ```lua\nvar.x = 1\n```\n\n\
         ## Only\n\n\
         ```lua\nreturn 'done-now'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the pass and the walk complete");
+    let trace = h1_scenario(md).run();
 
-    assert_eq!(out, "done-now");
-    let observed = recorder.events();
+    assert_eq!(trace.text(), "done-now");
+    let observed = sequence(&trace);
     let started = detail::SECTION_STARTED.to_string();
     let finished = detail::SECTION_FINISHED.to_string();
     assert!(

@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use super::scheduler::scheduler_context_on;
-use super::waits::{WaitRecorder, task, tasks_prompt};
+use super::waits::{WaitRecorder, tasks_prompt};
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 

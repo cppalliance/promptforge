@@ -374,6 +374,13 @@ impl RunContext {
         &self.model_bindings
     }
 
+    /// Binds the role `label` to `model` as the prepare's fill would, for a
+    /// test that starts the run without the prepare.
+    #[cfg(test)]
+    pub(crate) fn bind_role_for_test(&mut self, label: &str, model: ModelDescriptor) {
+        self.model_bindings.bind(label, model);
+    }
+
     /// Returns the run's tool catalog, set with [`tools`](RunContext::tools).
     /// It is empty by default.
     #[must_use]

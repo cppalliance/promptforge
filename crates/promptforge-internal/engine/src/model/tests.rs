@@ -5,22 +5,25 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::lua::{SectionVm, ToolSet, resolve_model_binding};
+use crate::test_support::fresh_access;
 use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_model_client::model::{CompletionOptions, ModelInvocation};
 use promptforge_types::emitter::Emitter;
-use promptforge_vfs::Access;
 use serde_json::json;
 
-/// A fresh default handle's access capability, for tests that inject Engine
-/// values into a standalone VM.
-fn fresh_access() -> Arc<Access> {
-    Arc::new(
-        promptforge_vfs::VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("model test fixture"))
-            .expect("the stock backend acquires"),
+/// Compiles one Lua chunk for a section VM drive.
+#[track_caller]
+fn chunk(source: &str) -> crate::lua::LuaProgram {
+    crate::lua::LuaProgram::compile(
+        source,
+        "chunk",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        &null_emitter(),
+        "Section",
     )
+    .expect("test Lua must compile")
 }
 
 fn ctx(window: u32) -> NonZeroU32 {

@@ -71,10 +71,6 @@ fn terminals_per_started_task(recorder: &TaskRecorder) -> BTreeMap<TaskId, Vec<&
     terminals
 }
 
-fn task(id: &str) -> TaskId {
-    id.parse().expect("a task id parses")
-}
-
 /// A scheduler context and its observing fixture with the run's concurrency
 /// ceiling narrowed to `ceiling` admitted tasks.
 fn ceiling_context(

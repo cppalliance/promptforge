@@ -11,22 +11,20 @@ use super::scope::prepare_scoped_tools;
 use super::support::advance_turn;
 use super::*;
 use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
-use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
+use crate::model::{ModelDescriptor, ModelSet};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
-use crate::test_support::scenario::Scenario;
+use crate::test_support::scenario::{Scenario, Trace};
 use crate::test_support::scripted_chat::{
     MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
 };
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{FnTool, RunFixture, TestTool, TestToolTable};
+use crate::test_support::{FnTool, RunFixture, TestTool, TestToolTable, fresh_access};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
-use promptforge_model_client::model::ModelCatalog;
 use promptforge_vfs::{Access, VfsError, VfsRef};
 
 mod context;

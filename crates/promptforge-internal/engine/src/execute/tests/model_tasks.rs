@@ -20,10 +20,6 @@ use crate::lua::ToolSet;
 /// full id, so the task stays live until something ends it.
 pub(super) const PARKED_CHILD: &str = "tools.call('test/tools/slow')\nreturn 'never'";
 
-pub(super) fn task(id: &str) -> TaskId {
-    id.parse().expect("a task id parses")
-}
-
 /// The run context and fixture for a model-task test: the parsed prompt, the
 /// shared model set pre-filled, no bound tools, the recorder as observer,
 /// and the never-completing tool in the catalog so a parked child stays

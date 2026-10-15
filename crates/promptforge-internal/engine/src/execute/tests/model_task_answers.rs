@@ -7,13 +7,19 @@
 //! `tools.allow_tasks` the built-ins are not advertised, so the round's
 //! scope gate refuses the call before the arm sees it.
 
-use super::model_tasks::{model_task_context, owner_prompt, task};
+use super::model_tasks::{model_task_scenario, owner_prompt};
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
 
-#[tokio::test(flavor = "current_thread")]
-async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note() {
+/// The run's events replayed onto a fresh task recorder.
+fn task_records(trace: &Trace) -> Vec<(String, Observation)> {
+    let recorder = TaskRecorder::default();
+    trace.replay(&recorder);
+    recorder.records()
+}
+
+#[test]
+fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note() {
     // `Child` publishes a note, spawns `Leaf`, then parks on a tool call,
     // so the status read exercises every live-chain field of the rendering.
     let gateway = ScriptedChat::new(vec![
@@ -43,23 +49,17 @@ async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note(
               tools.call('test/tools/slow')\n\
               return 'never'\n\
               ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the owner's end abandons the parked task and its leaf");
+    let trace = model_task_scenario(md).chat(&gateway).run();
     assert_eq!(
-        out,
+        trace.text(),
         "Task id=0.0 (## Child): running, in ## Child, waiting on tool_call, turns 0, \
          tasks 0.0.0, note: halfway",
         "a live task reports where it is, what it waits on, its tasks, and its note"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn task_status_reports_a_failed_task_as_done_failed() {
+#[test]
+fn task_status_reports_a_failed_task_as_done_failed() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
@@ -74,18 +74,13 @@ async fn task_status_reports_a_failed_task_as_done_failed() {
          return msgs[5].content",
         "error('boom')",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a failed model task never fails its owner");
+    let trace = model_task_scenario(md).chat(&gateway).run();
     assert_eq!(
-        out, "Task id=0.0 (## Child): done, failed, turns 0",
+        trace.text(),
+        "Task id=0.0 (## Child): done, failed, turns 0",
         "a finished task reports its outcome and no live-chain fields"
     );
-    let records = recorder.records();
+    let records = task_records(&trace);
     assert!(
         records.iter().any(|(section, event)| section == "Child"
             && *event == Observation::TaskFailed { task: task("0.0") }),
@@ -93,8 +88,8 @@ async fn task_status_reports_a_failed_task_as_done_failed() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
+#[test]
+fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
     // One round per refusal: `task` without a target, with a non-string
     // target, with a non-string input; `task_status` and `task_cancel`
     // without an id, with a non-string id, with an unparsable id. Each
@@ -119,16 +114,10 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
          return table.concat(answers, '\\n')",
         "return 'child result'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("every refusal is content, not a raise");
+    let trace = model_task_scenario(md).chat(&gateway).run();
     let target = "task: `target` must be a string naming a section heading, such as `## Research`";
     assert_eq!(
-        out.lines().collect::<Vec<_>>(),
+        trace.text().lines().collect::<Vec<_>>(),
         vec![
             target,
             target,
@@ -139,7 +128,7 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
         ],
         "each refusal names the argument and what it must be"
     );
-    let records = recorder.records();
+    let records = task_records(&trace);
     assert_eq!(
         records
             .iter()

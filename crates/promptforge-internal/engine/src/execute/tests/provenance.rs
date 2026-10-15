@@ -10,13 +10,8 @@ use std::collections::BTreeMap;
 use promptforge_types::event::Event;
 use promptforge_types::ids::TaskId;
 
-use super::scheduler::scheduler_context_on;
+use super::scheduler::scheduler_scenario;
 use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
-
-fn task(id: &str) -> TaskId {
-    id.parse().expect("a task id parses")
-}
 
 /// The `seq` of every event, grouped by task in emission order.
 fn seqs_by_task(events: &[Event]) -> BTreeMap<TaskId, Vec<u32>> {
@@ -50,8 +45,8 @@ fn assert_strictly_increasing_from_zero(task: &TaskId, seqs: &[u32]) {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout() {
+#[test]
+fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout() {
     // Three arms interleave at their infer yields, so events from four
     // tasks (the walk and three arms) land in the buffer in a shuffled
     // order. Each task's own sequence must still be dense from zero, and
@@ -69,21 +64,12 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         store.write(item, item)\n\
         return models.infer(item)\n\
         ```\n";
-    let prompt = parse(md);
-    let (mut ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the fanout completes");
+    let trace = scheduler_scenario(md).chat(&gateway).run();
+    let out = trace.text();
     assert_eq!(out.len(), 3, "three one-letter answers: {out}");
 
-    let events = events.lock().expect("the tap mutex is not poisoned");
-    let grouped = seqs_by_task(&events);
+    let events = trace.run_events();
+    let grouped = seqs_by_task(events);
     assert_eq!(
         grouped.keys().cloned().collect::<Vec<_>>(),
         vec![task("0"), task("0.0"), task("0.1"), task("0.2")],
@@ -134,8 +120,8 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_call_child_reports_under_its_callers_task() {
+#[test]
+fn a_call_child_reports_under_its_callers_task() {
     // A `call` blocks its caller, so the two never interleave: the child's
     // events continue the caller's one sequence under task `0`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -144,21 +130,11 @@ async fn a_call_child_reports_under_its_callers_task() {
         ```lua\nreturn call('## Inner')\n```\n\n\
         ## Inner\n\n\
         ```lua\nlog('inner ran')\nreturn 'hello'\n```\n";
-    let prompt = parse(md);
-    let (mut ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the call completes");
-    assert_eq!(out, "hello");
+    let trace = scheduler_scenario(md).run();
+    assert_eq!(trace.text(), "hello");
 
-    let events = events.lock().expect("the tap mutex is not poisoned");
-    let grouped = seqs_by_task(&events);
+    let events = trace.run_events();
+    let grouped = seqs_by_task(events);
     assert_eq!(
         grouped.keys().cloned().collect::<Vec<_>>(),
         vec![task("0")],
@@ -181,14 +157,14 @@ async fn a_call_child_reports_under_its_callers_task() {
     );
 }
 
-#[tokio::test]
-async fn the_run_forwards_every_buffered_event_to_the_callers_observer_in_order() {
-    // The adapter path end to end: a two-section run through `execute::run`
-    // reaches the caller's observer with the exact sequence of the buffered
+#[test]
+fn the_run_forwards_every_buffered_event_to_the_callers_observer_in_order() {
+    // The adapter path end to end: a two-section run's returned events
+    // reach the caller's observer with the exact sequence of the buffered
     // events, run boundaries included.
-    let (result, records) = run_recorded(TWO_SECTIONS).await;
-    assert_eq!(result.unwrap(), "second");
-    let observed = events(&records);
+    let trace = Scenario::new(TWO_SECTIONS).run();
+    assert_eq!(trace.text(), "second");
+    let observed = sequence(&trace);
     assert_eq!(
         observed.first(),
         Some(&("Test prompt".to_owned(), detail::RUN_STARTED.to_string()))

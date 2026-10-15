@@ -5,47 +5,36 @@
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn sections_run_in_fall_through_order() {
+#[test]
+fn sections_run_in_fall_through_order() {
     // A section without a return falls through to the next section in
     // document order, as the order log shows.
-    let store = TestStore::new();
     let md = "---\nname: walk\ndescription: d\npromptforge: 0\n---\n\n\
         # Walk\n\n\
         ## First\n\n\
         ```lua\nstore.append('order.txt', 'First\\n')\n```\n\n\
         ## Second\n\n\
         ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the walk falls through in document order");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "First\nSecond\n");
+    assert_eq!(trace.text(), "First\nSecond\n");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn generic_result_when_nothing_produced() {
+#[test]
+fn generic_result_when_nothing_produced() {
     // A walk that exhausts its slice with no reply yields the shared
     // generic completion.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Generic\n\n\
         ## Only\n\n\
         ```lua\nlocal x = 1\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the empty walk completes");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "done");
+    assert_eq!(trace.text(), "done");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn sys_id_increments_per_section() {
+#[test]
+fn sys_id_increments_per_section() {
     // Every section entry takes the walk chain's next entry id (`0.N`;
     // entry 0 is the H1 pass, present or not).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -54,22 +43,16 @@ async fn sys_id_increments_per_section() {
         ```lua\nlocal x = 1\n```\n\n\
         ## Second\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("each section entry takes the next id");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "0.2");
+    assert_eq!(trace.text(), "0.2");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
+#[test]
+fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     // A executes the off-walk S1, which runs because it is addressed; the
     // chain falls through to S2, and S2's reply returns to A. The main walk
     // ends at B and never runs S1 or S2.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Siblings\n\n\
         ## A\n\n\
@@ -90,18 +73,13 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
         store.append('order.txt', 'S2\\n')\n\
         return 's2-reply'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the chain must run the addressed off-walk target and fall through");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "S1\nS2\nA:s2-reply\nB\n");
+    assert_eq!(trace.text(), "S1\nS2\nA:s2-reply\nB\n");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn var_persists_across_sections_in_fall_through() {
+#[test]
+fn var_persists_across_sections_in_fall_through() {
     // One section's `var` writes reach the next across fall-through.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Var\n\n\
@@ -114,18 +92,13 @@ async fn var_persists_across_sections_in_fall_through() {
         ```\n\n\
         ## C\n\n\
         ```lua\nreturn var.from_a .. var.from_b\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("var must persist across the walk");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "ab");
+    assert_eq!(trace.text(), "ab");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn call_clones_var_in_and_discards_child_writes() {
+#[test]
+fn call_clones_var_in_and_discards_child_writes() {
     // `call` clones the caller's `var` in; the contained chain reads the
     // clone, and its writes are discarded when the chain ends.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -143,22 +116,16 @@ async fn call_clones_var_in_and_discards_child_writes() {
         var.child_write = 'sub'\n\
         return 'sub saw ' .. var.shared\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("call must clone var in and discard child writes");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "ok");
+    assert_eq!(trace.text(), "ok");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
+#[test]
+fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
     // The contained chain is the walk's first child `0.0`, so its entries
     // are `0.0.N`, and the outer walk resumes its own `0.N` sequence when
     // the chain ends.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
         ## Main\n\n\
@@ -181,18 +148,13 @@ async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_
         assert(sys.id == '0.0.1', 'the chain fall-through takes its next entry')\n\
         return 'tail-reply'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a call chain must take ids nested under its own chain");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "tail-reply\n");
+    assert_eq!(trace.text(), "tail-reply\n");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn entering_the_same_section_twice_takes_two_ids() {
+#[test]
+fn entering_the_same_section_twice_takes_two_ids() {
     // Entering the same section twice hands out two distinct `sys.id`
     // values - two call children of the walk, so two chains `0.0` and
     // `0.1`.
@@ -206,39 +168,27 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         ```\n\n\
         ## Sub\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("re-entering a section must take a fresh id");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "0.0.0,0.1.0");
+    assert_eq!(trace.text(), "0.0.0,0.1.0");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn fall_through_fires_section_finished_before_the_next_section_starts() {
+#[test]
+fn fall_through_fires_section_finished_before_the_next_section_starts() {
     // Each entered section's armed frame drop fires SECTION_FINISHED at the
     // fall-through, before the next section's SECTION_STARTED.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ## One\n\n\
         ```lua\nlocal x = 1\n```\n\n\
         ## Two\n\n\
         ```lua\nreturn 'two-ran'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the walk completes both sections");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "two-ran");
+    assert_eq!(trace.text(), "two-ran");
     let started = detail::SECTION_STARTED.to_string();
     let finished = detail::SECTION_FINISHED.to_string();
-    let boundaries: Vec<(String, String)> = recorder
-        .events()
+    let boundaries: Vec<(String, String)> = sequence(&trace)
         .into_iter()
         .filter(|(_, event)| event == &started || event == &finished)
         .collect();

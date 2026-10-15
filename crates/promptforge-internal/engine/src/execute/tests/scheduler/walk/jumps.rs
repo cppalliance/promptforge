@@ -6,11 +6,10 @@
 
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
+#[test]
+fn jump_transfer_skips_the_jumpers_remaining_blocks() {
     // The jump transfers control and the jumper's remaining blocks never
     // run.
-    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Jump\n\n\
         ## Check\n\n\
@@ -25,41 +24,31 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
         ```lua\n\
         return 'helped:' .. store.read('seen.txt')\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("jump must transfer control");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "helped:check");
-    assert_eq!(store.read("seen.txt").expect("seen"), "check");
+    assert_eq!(trace.text(), "helped:check");
+    assert_eq!(trace.read("seen.txt").expect("seen"), "check");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn section_cannot_jump_to_itself() {
+#[test]
+fn section_cannot_jump_to_itself() {
     // The caller is outside its own visible set, so naming its own heading
     // to `jump` resolves as not-found.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Self\n\n\
         ## Self\n\n\
         ```lua\njump('## Self')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("self-jump must fail");
+    let trace = scheduler_scenario(md).run();
 
-    let rendered = error.to_string();
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("not found"),
         "the caller is not in its own visible set: {rendered}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_to_off_walk_section_runs_it() {
+#[test]
+fn jump_to_off_walk_section_runs_it() {
     // A jump addresses an off-walk section directly, so it runs.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Addressed\n\n\
@@ -70,18 +59,13 @@ async fn jump_to_off_walk_section_runs_it() {
         ```lua\nreturn 'b-ran'\n```\n\n\
         ## C\n\n\
         ```lua\nreturn 'c-ran'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a jump to an off-walk section must run it");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "b-ran");
+    assert_eq!(trace.text(), "b-ran");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn var_persists_across_a_jump() {
+#[test]
+fn var_persists_across_a_jump() {
     // The jumper's `var` writes cross the transfer, and the target's
     // writes roll forward into the fall-through that follows.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -103,41 +87,29 @@ async fn var_persists_across_a_jump() {
         assert(var.from_c == 'c', 'fall-through after the jumped target keeps var')\n\
         return var.from_a .. var.from_c\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("var must persist across the jump");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "ac");
+    assert_eq!(trace.text(), "ac");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts() {
+#[test]
+fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts() {
     // The jump half of the observation-boundary contract (the fall-through
     // half is `fall_through_fires_section_finished_before_the_next_section_starts`
     // above): a jump is a completion, so the jumper's armed frame drop
     // fires SECTION_FINISHED before the target's SECTION_STARTED.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ## A\n\n\
         ```lua\njump('## B')\n```\n\n\
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the jump completes both sections");
+    let trace = scheduler_scenario(md).run();
 
-    assert_eq!(out, "b-ran");
+    assert_eq!(trace.text(), "b-ran");
     let started = detail::SECTION_STARTED.to_string();
     let finished = detail::SECTION_FINISHED.to_string();
-    let boundaries: Vec<(String, String)> = recorder
-        .events()
+    let boundaries: Vec<(String, String)> = sequence(&trace)
         .into_iter()
         .filter(|(_, event)| event == &started || event == &finished)
         .collect();
@@ -152,21 +124,18 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_erroring_section_reports_started_but_not_finished() {
+#[test]
+fn an_erroring_section_reports_started_but_not_finished() {
     // A section that errors mid-walk emits SECTION_STARTED and never
     // SECTION_FINISHED - the frame's drop stays unarmed on the error path.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fail\n\n\
         ## Only\n\n\
         ```lua\nerror('expected failure')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, fixture, None).drive().await;
+    let trace = scheduler_scenario(md).run();
 
-    assert!(result.is_err());
-    let observed = recorder.events();
+    assert!(matches!(trace.result(), RunResult::Failure(_)));
+    let observed = sequence(&trace);
     assert!(
         observed.contains(&("Only".to_string(), detail::SECTION_STARTED.to_string())),
         "the erroring section must report started: {observed:?}"
@@ -179,26 +148,23 @@ async fn an_erroring_section_reports_started_but_not_finished() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failed_jump_resolution_still_finishes_the_jumper() {
+#[test]
+fn a_failed_jump_resolution_still_finishes_the_jumper() {
     // The error half of the jump observation boundary: the jumper's frame
     // closes as completed before the heading resolves, so SECTION_FINISHED
     // fires for the jumper even when the target does not resolve.
-    let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Unresolved\n\n\
         ## A\n\n\
         ```lua\njump('## Missing')\n```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, fixture, None).drive().await;
+    let trace = scheduler_scenario(md).run();
 
-    let error = result.expect_err("an unresolvable jump target must fail the run");
+    let error = trace.error();
     assert!(
         error.to_string().contains("not found"),
         "the failure is the resolution, not the transfer: {error}"
     );
-    let observed = recorder.events();
+    let observed = sequence(&trace);
     assert!(
         observed.contains(&("A".to_string(), detail::SECTION_FINISHED.to_string())),
         "the jumper completed before the resolution failed: {observed:?}"

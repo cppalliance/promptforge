@@ -729,7 +729,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-12>
 
-### Step 12: Engine Run-level model tasks and scheduler-directory walks
+### Step 12: Engine Run-level model tasks and scheduler-directory walks [completed]
 
 - Component: engine Run level
 - Tests:

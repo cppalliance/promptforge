@@ -19,7 +19,7 @@ use std::time::Duration;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
-use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt, task};
+use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 

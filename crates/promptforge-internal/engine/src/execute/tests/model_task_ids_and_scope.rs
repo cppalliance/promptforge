@@ -16,7 +16,7 @@ use super::model_task_acceptance::{
     LATER, SOON, count_under, model_starts, task_lifecycle, two_child_prompt,
 };
 use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
-use super::model_tasks::{model_task_context_with, owner_prompt, task};
+use super::model_tasks::{model_task_context_with, owner_prompt};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 

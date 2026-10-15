@@ -1,6 +1,6 @@
 //! The serial helpers for suites that drive a bare [`Run`]: the canned
-//! chat answer, the one-effect step, the local performer, and the batched
-//! driver.
+//! chat answer, the one-effect step, the effect record's round trip, the
+//! local performer, and the batched driver.
 
 use std::collections::BTreeMap;
 
@@ -37,6 +37,14 @@ pub(crate) fn only_effect(step: Step) -> (EffectId, Effect) {
     );
     let (id, _, effect) = effects.remove(0);
     (id, effect)
+}
+
+/// Serializes `record` and reads it back: the round trip a run log and a
+/// replay depend on.
+#[track_caller]
+pub(crate) fn round_trip(record: &EffectRecord) -> EffectRecord {
+    let text = serde_json::to_string(record).expect("a record serializes");
+    serde_json::from_str(&text).expect("a serialized record deserializes")
 }
 
 /// The first user message of a `Chat` effect, read off its record: the
