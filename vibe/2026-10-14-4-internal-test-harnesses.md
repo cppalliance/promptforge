@@ -613,7 +613,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-7>
 
-### Step 7: Engine Seeded and the synchronous ScriptedChat core
+### Step 7: Engine Seeded and the synchronous ScriptedChat core [completed]
 
 - Component: engine Run level
 - Tests:

@@ -146,6 +146,12 @@ fn empty_reply(reasoning_present: bool, finish_reason: Option<&str>) -> Completi
     }
 }
 
+/// The client's failure for a reply that missed the run's timeout.
+fn timed_out() -> CompletionError {
+    let kind = CompletionErrorKind::Timeout;
+    CompletionError::new(kind, kind.phrase())
+}
+
 /// What one round's `Chat` effect carried.
 #[derive(Clone, Debug)]
 pub(crate) struct ScriptedCall {
@@ -221,8 +227,43 @@ impl ScriptedChat {
             .cloned()
     }
 
-    /// Answers one round: records what it carried, waits out a delayed
-    /// reply under `timeout`, and returns the completion or the failure.
+    /// Answers one round at once: records what it carried, counts it, and
+    /// returns the reply's total delay beside the completion or the
+    /// failure. Nothing waits: a delay past `timeout` answers the `Timeout`
+    /// failure, and any other delay answers the inner reply.
+    ///
+    /// The answer is the scripted failure, the `Timeout` failure for a
+    /// delay past `timeout`, the `EmptyReply` failure for an empty text
+    /// reply, the `MalformedResponse` failure for a tool call the wire
+    /// decoder would refuse, or the completion.
+    pub(crate) fn complete_now(
+        &self,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        options: &CompletionOptions,
+        timeout: Duration,
+    ) -> (Duration, Result<Completion, CompletionError>) {
+        let index = self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(ScriptedCall {
+                messages: messages.to_vec(),
+                tools: tools.to_vec(),
+                options: options.clone(),
+            });
+        let reply = &self.replies[index.min(self.replies.len() - 1)];
+        let delay = reply.delay();
+        let answer = if delay > timeout {
+            Err(timed_out())
+        } else {
+            reply.answer()
+        };
+        (delay, answer)
+    }
+
+    /// Answers one round as `complete_now` does, then waits out the
+    /// reply's delay under `timeout` before returning the answer.
     /// `max_bytes` bounds nothing, because no bytes are read.
     ///
     /// # Errors
@@ -238,25 +279,14 @@ impl ScriptedChat {
         timeout: Duration,
         _max_bytes: NonZeroU64,
     ) -> Result<Completion, CompletionError> {
-        let index = self.calls.fetch_add(1, Ordering::SeqCst);
-        self.requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(ScriptedCall {
-                messages: messages.to_vec(),
-                tools: tools.to_vec(),
-                options: options.clone(),
-            });
-        let reply = &self.replies[index.min(self.replies.len() - 1)];
-        let delay = reply.delay();
+        let (delay, answer) = self.complete_now(messages, tools, options, timeout);
         if !delay.is_zero()
             && tokio::time::timeout(timeout, tokio::time::sleep(delay))
                 .await
                 .is_err()
         {
-            let kind = CompletionErrorKind::Timeout;
-            return Err(CompletionError::new(kind, kind.phrase()));
+            return Err(timed_out());
         }
-        reply.answer()
+        answer
     }
 }

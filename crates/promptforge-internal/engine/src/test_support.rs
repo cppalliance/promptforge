@@ -42,6 +42,8 @@ pub mod recording;
 #[path = "test_support/scripted-chat.rs"]
 pub(crate) mod scripted_chat;
 #[cfg(test)]
+pub(crate) mod seeded;
+#[cfg(test)]
 pub(crate) mod temp_root;
 pub(crate) mod tokio_driver;
 mod tools;
