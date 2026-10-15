@@ -449,7 +449,7 @@ Closes D1-18, a user-added lead that predates the target (`6409ac358` rewrote th
 
 <step-5>
 
-### Step 5: Check the Engine graph on every platform
+### Step 5: Check the Engine graph on every platform [completed]
 
 - Component: Engine guards
 - Tests:

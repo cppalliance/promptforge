@@ -287,6 +287,36 @@ fn a_forbidden_crate_reached_through_a_dev_dependency_is_reported() {
 }
 
 #[test]
+fn a_forbidden_crate_reached_only_on_another_platform_is_reported() {
+    let engine = "crates/promptforge-internal/engine";
+    let root = graph_workspace(&[
+        (
+            "vendor/driver",
+            "driver",
+            "[target.wasm32-unknown-unknown.dependencies]\ntokio = { path = \"../tokio\" }\n",
+        ),
+        (
+            engine,
+            "promptforge-engine",
+            "[dependencies]\ndriver = { path = \"../../../vendor/driver\" }\n",
+        ),
+    ]);
+    let declared = forbidden_engine_dependencies(&root.path().join(engine).join("Cargo.toml"));
+    assert!(
+        declared.is_empty(),
+        "the manifest names no forbidden crate, so only the graph can catch it: {declared:?}"
+    );
+    let found = graph_findings(root.path(), engine);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("promptforge-engine")
+            && found[0].contains("resolved graph")
+            && found[0].contains("tokio"),
+        "a forbidden crate behind a non-host target edge is reported: {found:?}"
+    );
+}
+
+#[test]
 fn getrandom_reached_through_any_edge_is_reported() {
     let root = graph_workspace(&[
         (

@@ -16,12 +16,12 @@
 //!   `[dev-dependencies]`, directly and under `[target.<cfg>]`, and
 //!   resolves `package = ...` renames.
 //! - The resolved-graph check runs `cargo tree` for each Engine crate with
-//!   all features over its normal, build, and dev edges, so a forbidden
-//!   crate is reported when it arrives through another crate or behind an
-//!   optional dependency. Each crate is resolved on its own, because
-//!   `cargo metadata` resolves features for the whole workspace at once,
-//!   and a feature another workspace crate turns on must not flag an
-//!   Engine crate.
+//!   all features and all targets over its normal, build, and dev edges, so
+//!   a forbidden crate is reported when it arrives through another crate,
+//!   behind an optional dependency, or only on another platform. Each crate
+//!   is resolved on its own, because `cargo metadata` resolves features for
+//!   the whole workspace at once, and a feature another workspace crate
+//!   turns on must not flag an Engine crate.
 //!
 //! The calls that would break determinism without a dependency, a sleep, a
 //! clock read, a timed wait, or an OS-seeded hasher, are clippy bans that
@@ -110,7 +110,7 @@ impl fmt::Display for Violation {
                 package,
             } => write!(
                 f,
-                "{engine_crate}: the resolved graph (all features; {GRAPH_EDGES} edges) reaches {package}; {rule}"
+                "{engine_crate}: the resolved graph (all features; all targets; {GRAPH_EDGES} edges) reaches {package}; {rule}"
             ),
             Self::Unreadable { manifest, error } => {
                 write!(f, "{}: {error}", manifest.display())
@@ -158,9 +158,9 @@ pub(crate) fn forbidden_engine_dependencies(manifest: &Path) -> Vec<Violation> {
     violations
 }
 
-/// Resolves the graph of the Engine crate in `crate_dir` with `cargo tree`,
-/// run in the workspace at `root` by the cargo running this process, and
-/// reports each forbidden package it reaches once. A root without a
+/// Resolves the graph of the Engine crate in `crate_dir` for all targets with
+/// `cargo tree`, run in the workspace at `root` by the cargo running this
+/// process, and reports each forbidden package it reaches once. A root without a
 /// `Cargo.toml` has no workspace to resolve, a crate whose manifest cannot
 /// be read or parsed is left to the manifest scan, which reports it, and a
 /// manifest that names no package yields one [`Violation::Unresolved`].
@@ -185,8 +185,9 @@ pub(crate) fn forbidden_engine_graph(root: &Path, crate_dir: &Path) -> Vec<Viola
         .current_dir(root)
         .args(["tree", "--quiet", "--manifest-path"])
         .arg(&workspace)
-        .args(["--package", &engine_crate, "--all-features", "--edges"])
-        .args([GRAPH_EDGES, "--prefix", "none"])
+        .args(["--package", &engine_crate, "--all-features"])
+        .args(["--target", "all", "--edges", GRAPH_EDGES])
+        .args(["--prefix", "none"])
         .output();
     let stdout = match output {
         Ok(output) if output.status.success() => output.stdout,
