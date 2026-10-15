@@ -353,7 +353,7 @@ Fixes D1-1, introduced by `1b25e9ead`. Paths are under `crates/gateway/stt/engin
 
 <step-2>
 
-### Step 2: Parse the run log seed through `RunSeed`'s serde form
+### Step 2: Parse the run log seed through `RunSeed`'s serde form [completed]
 
 - Component: Run log seed parsing
 - Tests:

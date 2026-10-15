@@ -24,7 +24,7 @@ impl RunLog {
         let meta = RunMeta {
             name: row.get(0)?,
             prompt_hash: row.get(2)?,
-            seed: to_seed(&row.get::<String>(3)?)?,
+            seed: to_seed(row.get::<String>(3)?)?,
             flags: to_u32(row.get(4)?, "flags")?,
             started_at: row.get(5)?,
         };
@@ -119,38 +119,10 @@ fn to_u32(value: i64, column: &str) -> Result<u32, LogError> {
         .map_err(|_| LogError::Corrupt(format!("expected {column} to fit u32, found {value}")))
 }
 
-/// A stored `seed` column, refusing anything but 64 lowercase hex
-/// characters.
-fn to_seed(text: &str) -> Result<RunSeed, LogError> {
-    let required = "expected seed to be 64 lowercase hex characters";
-    if let Some((at, found)) = text
-        .char_indices()
-        .find(|(_, c)| !matches!(c, '0'..='9' | 'a'..='f'))
-    {
-        return Err(LogError::Corrupt(format!(
-            "{required}, found {found:?} at byte {at}"
-        )));
-    }
-    if text.len() != 64 {
-        return Err(LogError::Corrupt(format!(
-            "{required}, found {} characters",
-            text.len()
-        )));
-    }
-    let mut bytes = [0u8; 32];
-    let (pairs, _) = text.as_bytes().as_chunks::<2>();
-    for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
-        *byte = (hex_digit(*high) << 4) | hex_digit(*low);
-    }
-    Ok(RunSeed::from_bytes(bytes))
-}
-
-/// The value of one lowercase hex digit `to_seed` has already checked.
-const fn hex_digit(digit: u8) -> u8 {
-    match digit {
-        b'0'..=b'9' => digit - b'0',
-        _ => digit - b'a' + 10,
-    }
+/// A stored `seed` column, parsed as `RunSeed`'s serde form defines it.
+fn to_seed(text: String) -> Result<RunSeed, LogError> {
+    serde_json::from_value(serde_json::Value::String(text))
+        .map_err(|error| LogError::Corrupt(format!("seed: {error}")))
 }
 
 /// Rebuilds a [`RunOutcome`] from its four columns.
