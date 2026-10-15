@@ -1,0 +1,34 @@
+# Clippy reads only the nearest `clippy.toml` above a crate's manifest and
+# never merges it with the root file, so this file repeats every root entry,
+# then adds the Engine's determinism bans. The same text sits in
+# `crates/promptforge-internal/`, `crates/promptforge/`, and
+# `crates/promptforge-plugin/`. `cargo test -p build-xtask` checks that every
+# Engine crate resolves to one of the three, that each holds every root entry
+# and every ban, and that no Engine source allows or expects
+# `clippy::disallowed_methods`.
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# The first seven entries are the root file's process-global installers. The
+# rest are the determinism bans: no Engine code, tests included, sleeps, reads
+# the wall clock, waits with a timeout, or draws entropy from the OS. No entry
+# names a `replacement`, because no alternative takes the same arguments and
+# returns the same value.
+disallowed-methods = [
+    { path = "std::panic::set_hook", reason = "use a returned error instead, because the panic hook is process-global state that only a binary entry point may install" },
+    { path = "log::set_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
+    { path = "log::set_boxed_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
+    { path = "tracing::subscriber::set_global_default", reason = "use `tracing::subscriber::with_default` instead, because the global default subscriber is process-global state that only a binary entry point may install" },
+    { path = "tracing_subscriber::util::SubscriberInitExt::init", reason = "use `tracing::subscriber::with_default` instead, because `init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
+    { path = "tracing_subscriber::util::SubscriberInitExt::try_init", reason = "use `tracing::subscriber::with_default` instead, because `try_init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
+    { path = "rustls::crypto::CryptoProvider::install_default", reason = "use `ClientConfig::builder_with_provider` or `ServerConfig::builder_with_provider` instead, because the default crypto provider is process-global state that only a binary entry point may install" },
+    { path = "std::thread::sleep", reason = "use a timer effect the test answers instead, because a sleep makes the result depend on the machine's speed" },
+    { path = "std::time::SystemTime::now", reason = "use a fixed `Timestamp`, or a count of what happened, instead, because a wall-clock reading differs on every run" },
+    { path = "std::time::Instant::now", reason = "use a fixed `Timestamp`, or a count of what happened, instead, because a clock reading differs on every run" },
+    { path = "std::collections::hash_map::RandomState::new", reason = "use `Seeded` instead, because std's `RandomState` seeds itself from the OS, so its order differs on every run" },
+    { path = "std::sync::Condvar::wait_timeout", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
+    { path = "std::sync::Condvar::wait_timeout_while", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
+    { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
+    { path = "std::thread::park_timeout", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
+]

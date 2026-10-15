@@ -88,7 +88,7 @@ fn source_violations(file: &Path, text: &str) -> Vec<String> {
         }
     };
     let mut lines = Vec::new();
-    collect_relaxations(tokens, &mut lines);
+    collect_relaxations(tokens, &|lint| lint.is_ident("unsafe_code"), &mut lines);
     lines
         .into_iter()
         .map(|line| {
@@ -102,9 +102,14 @@ fn source_violations(file: &Path, text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Walks `tokens` at every depth and records the line of each attribute
-/// that expects or allows `unsafe_code`.
-fn collect_relaxations(tokens: TokenStream, lines: &mut Vec<usize>) {
+/// Walks `tokens` at every depth, macro bodies included, and records the
+/// line of each `#[...]` or `#![...]` attribute that expects or allows a
+/// lint `is_lint` accepts.
+pub(crate) fn collect_relaxations(
+    tokens: TokenStream,
+    is_lint: &dyn Fn(&syn::Path) -> bool,
+    lines: &mut Vec<usize>,
+) {
     let mut tokens = tokens.into_iter().peekable();
     while let Some(token) = tokens.next() {
         match token {
@@ -115,21 +120,23 @@ fn collect_relaxations(tokens: TokenStream, lines: &mut Vec<usize>) {
                 if let Some(TokenTree::Group(content)) = tokens.peek()
                     && content.delimiter() == Delimiter::Bracket
                 {
-                    if syn::parse2::<Meta>(content.stream()).is_ok_and(|meta| relaxes(&meta)) {
+                    if syn::parse2::<Meta>(content.stream())
+                        .is_ok_and(|meta| relaxes(&meta, is_lint))
+                    {
                         lines.push(pound.span().start().line);
                     }
                     tokens.next();
                 }
             }
-            TokenTree::Group(group) => collect_relaxations(group.stream(), lines),
+            TokenTree::Group(group) => collect_relaxations(group.stream(), is_lint, lines),
             _ => {}
         }
     }
 }
 
-/// Whether one attribute expects or allows `unsafe_code`, directly or
-/// through each attribute a `cfg_attr` applies.
-fn relaxes(meta: &Meta) -> bool {
+/// Whether one attribute expects or allows a lint `is_lint` accepts,
+/// directly or through each attribute a `cfg_attr` applies.
+fn relaxes(meta: &Meta, is_lint: &dyn Fn(&syn::Path) -> bool) -> bool {
     let Meta::List(list) = meta else {
         return false;
     };
@@ -137,11 +144,11 @@ fn relaxes(meta: &Meta) -> bool {
         return false;
     };
     if list.path.is_ident("cfg_attr") {
-        parts.iter().skip(1).any(relaxes)
+        parts.iter().skip(1).any(|part| relaxes(part, is_lint))
     } else if list.path.is_ident("expect") || list.path.is_ident("allow") {
         parts
             .iter()
-            .any(|part| matches!(part, Meta::Path(path) if path.is_ident("unsafe_code")))
+            .any(|part| matches!(part, Meta::Path(path) if is_lint(path)))
     } else {
         false
     }

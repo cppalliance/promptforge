@@ -22,13 +22,13 @@ fn provenance() -> Provenance {
 }
 
 #[derive(Default)]
-struct Recorder {
+struct SeamRecorder {
     observed: Mutex<Vec<(String, String)>>,
     content: Mutex<Vec<String>>,
     captured: Mutex<Vec<(u32, String)>>,
 }
 
-impl Observer for Recorder {
+impl Observer for SeamRecorder {
     fn observe(&self, _execution: &str, section: &str, event: Observation) {
         self.observed
             .lock()
@@ -133,7 +133,7 @@ impl Observer for Recorder {
     }
 }
 
-impl DebugCapture for Recorder {
+impl DebugCapture for SeamRecorder {
     fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
         let kind = match event {
             DebugEvent::Request { .. } => "request",
@@ -148,7 +148,7 @@ impl DebugCapture for Recorder {
 
 #[test]
 fn each_event_group_reaches_its_seam_in_batch_order() {
-    let recorder = Recorder::default();
+    let recorder = SeamRecorder::default();
     let events = vec![
         Event::SectionStarted {
             execution: "run".to_owned(),
@@ -232,7 +232,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
 fn a_reply_forwards_its_origin_to_the_observer() {
     // A reply's provenance reaches the observer: dropping it, defaulting it
     // to `Chat`, or routing it to a second kind would change this line.
-    let recorder = Recorder::default();
+    let recorder = SeamRecorder::default();
     forward(
         vec![Event::AssistantReply {
             execution: "run".to_owned(),
@@ -260,7 +260,7 @@ fn a_reply_forwards_its_origin_to_the_observer() {
 
 #[test]
 fn a_library_load_forwards_its_library_to_the_observer() {
-    let recorder = Recorder::default();
+    let recorder = SeamRecorder::default();
     forward(
         vec![
             Event::LuaLibraryLoadStarted {
@@ -306,7 +306,7 @@ fn a_library_load_forwards_its_library_to_the_observer() {
 
 #[test]
 fn debug_events_are_dropped_without_a_capture() {
-    let recorder = Recorder::default();
+    let recorder = SeamRecorder::default();
     forward(
         vec![Event::Request {
             execution: "run".to_owned(),

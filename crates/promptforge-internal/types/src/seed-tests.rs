@@ -5,11 +5,8 @@
 use std::fmt::Write as _;
 
 use super::*;
-use crate::test_support::{Seeded, assert_wire};
+use crate::test_support::{SEED, Seeded, assert_wire};
 use crate::untrusted::GuardNonce;
-
-/// The seed every draw in these tests starts from; a failure names it.
-const SEED: u64 = 0x5EED;
 
 /// `bytes` as lowercase hex.
 fn hex(bytes: &[u8]) -> String {

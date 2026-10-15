@@ -118,7 +118,7 @@ const OFFER_ECHO: &str = "tools.offer('tools/echo')\n";
 /// Drives `scenario` against `replies`, returning the run's output and its
 /// turn reports.
 #[track_caller]
-fn drive(scenario: Scenario, replies: Vec<ScriptedReply>) -> (String, Turns) {
+fn run_turns(scenario: Scenario, replies: Vec<ScriptedReply>) -> (String, Turns) {
     let gateway = ScriptedChat::new(replies);
     let trace = scenario.chat(&gateway).run();
     (trace.text().to_owned(), Turns::of(&trace))
@@ -126,7 +126,7 @@ fn drive(scenario: Scenario, replies: Vec<ScriptedReply>) -> (String, Turns) {
 
 #[test]
 fn a_later_bound_result_reports_the_batch_turn_after_a_handler_infers() {
-    let (out, turns) = drive(
+    let (out, turns) = run_turns(
         loop_scenario(one_section(&grab_block(OFFER_ECHO, INFER_HANDLER)))
             .offer("echo", echo_tool()),
         vec![
@@ -159,7 +159,7 @@ fn a_handlers_own_loop_reports_its_round_and_the_outer_batch_keeps_its_turn() {
                    inner:user('inner')\n\
                    models.loop(inner)\n\
                    return inner[#inner].content";
-    let (out, turns) = drive(
+    let (out, turns) = run_turns(
         loop_scenario(one_section(&grab_block(OFFER_ECHO, handler))).offer("echo", echo_tool()),
         vec![
             calls(&[
@@ -197,7 +197,7 @@ fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_sectio
             ("Helper", "return models.infer('helper prompt')"),
         ],
     );
-    let (out, turns) = drive(
+    let (out, turns) = run_turns(
         loop_scenario(source).offer("echo", echo_tool()),
         vec![
             calls(&[
@@ -224,7 +224,7 @@ fn a_later_result_keeps_the_batch_turn_after_a_handler_calls_an_inferring_sectio
 
 #[test]
 fn a_later_task_status_answer_reports_the_batch_turn() {
-    let (out, turns) = drive(
+    let (out, turns) = run_turns(
         loop_scenario(one_section(&grab_block(
             "tools.allow_tasks()\n",
             INFER_HANDLER,
@@ -250,7 +250,7 @@ fn a_later_task_status_answer_reports_the_batch_turn() {
 
 #[test]
 fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() {
-    let (out, turns) = drive(
+    let (out, turns) = run_turns(
         loop_scenario(one_section(&grab_block(
             "tools.allow_tasks()\n",
             INFER_HANDLER,

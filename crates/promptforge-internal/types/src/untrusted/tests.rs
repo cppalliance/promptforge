@@ -3,10 +3,7 @@
 
 use super::*;
 use crate::seed::RunSeed;
-use crate::test_support::Seeded;
-
-/// The seed every draw in these tests starts from; a failure names it.
-const SEED: u64 = 0x5EED;
+use crate::test_support::{SEED, Seeded};
 
 /// A nonce over a seed drawn from `SEED`, standing in for a caller's
 /// CSPRNG-drawn run seed.

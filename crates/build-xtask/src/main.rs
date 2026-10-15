@@ -11,6 +11,7 @@
 
 mod api;
 mod doc_hidden;
+mod engine_clippy;
 mod engine_deps;
 mod engine_guards;
 mod facade_shape;

@@ -8,6 +8,9 @@ use serde::de::DeserializeOwned;
 
 use crate::seed::RunSeed;
 
+/// The seed every draw in this crate's tests starts from; a failure names it.
+pub(crate) const SEED: u64 = 0x5EED;
+
 /// A `SplitMix64` generator over a fixed seed, so a randomized test replays
 /// exactly. Its checks put `seed <n>` in every failure message.
 pub(crate) struct Seeded {

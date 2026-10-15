@@ -422,7 +422,7 @@ impl TestStore {
 
 /// `events` as the suites' observer sees them, in order.
 fn records_of(events: &[Event]) -> Vec<Record> {
-    let recorder = Recorder::default();
+    let recorder = RecordObserver::default();
     forward(events.to_vec(), &recorder);
     recorder
         .0
@@ -452,9 +452,9 @@ impl Record {
 
 /// The observer [`Trace::records`] replays the events onto.
 #[derive(Default)]
-struct Recorder(Mutex<Vec<Record>>);
+struct RecordObserver(Mutex<Vec<Record>>);
 
-impl Observer for Recorder {
+impl Observer for RecordObserver {
     fn observe(&self, execution: &str, section: &str, event: Observation) {
         self.0
             .lock()

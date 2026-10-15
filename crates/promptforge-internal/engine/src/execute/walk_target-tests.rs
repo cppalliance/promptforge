@@ -27,7 +27,7 @@ const LIBRARY_TREE: &str = concat!(
     "Trailing.\n",
 );
 
-fn tree() -> Prompt {
+fn library_tree() -> Prompt {
     Prompt::parse(LIBRARY_TREE, "library-test")
         .0
         .expect("the tree parses")
@@ -82,7 +82,7 @@ fn a_library_pairs_each_program_with_the_prose_right_before_it() {
 
 #[test]
 fn resolve_library_builds_a_parsed_section_without_its_trailing_prose() {
-    let prompt = tree();
+    let prompt = library_tree();
     let library =
         resolve_library(&prompt, &RequireOrigin::H1, "## Lib", None).expect("## Lib resolves");
     assert_eq!(library.heading, "## Lib");
@@ -92,7 +92,7 @@ fn resolve_library_builds_a_parsed_section_without_its_trailing_prose() {
 
 #[test]
 fn a_key_maps_back_to_its_section_position() {
-    let prompt = tree();
+    let prompt = library_tree();
     let library =
         resolve_library(&prompt, &self_origin(), "#### Sibling", None).expect("a sibling resolves");
     assert_eq!(
@@ -109,7 +109,7 @@ fn a_key_maps_back_to_its_section_position() {
 
 #[test]
 fn one_heading_from_two_positions_names_two_libraries() {
-    let prompt = tree();
+    let prompt = library_tree();
     let near = resolve_library(&prompt, &self_origin(), "### Helpers", None)
         .expect("the parent's sibling resolves");
     let top = RequireOrigin::Section(SlicePath::root(), 0);
@@ -121,7 +121,7 @@ fn one_heading_from_two_positions_names_two_libraries() {
 
 #[test]
 fn a_keyed_lookup_resolves_from_the_librarys_reach() {
-    let prompt = tree();
+    let prompt = library_tree();
     let sibling =
         resolve_library(&prompt, &self_origin(), "#### Sibling", None).expect("a sibling resolves");
     resolve_library(&prompt, &RequireOrigin::H1, "##### Niece", None)

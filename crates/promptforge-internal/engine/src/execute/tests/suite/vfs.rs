@@ -21,7 +21,7 @@ use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
 
 use super::super::context::{parse, test_context};
 
-const ROUND_TRIP: &str = concat!(
+const ROUND_TRIP_PROMPT: &str = concat!(
     "---\n",
     "name: round-trip\n",
     "description: Seed, run, extract\n",
@@ -143,10 +143,10 @@ fn an_end_to_end_run_threads_one_vfs_ref_through_every_section() {
 
 #[test]
 fn a_caller_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
-    let (text, vfs) = seeded_run(ROUND_TRIP, "vfs-round-trip", "the paper body");
+    let (text, vfs) = seeded_run(ROUND_TRIP_PROMPT, "vfs-round-trip", "the paper body");
     assert_eq!(text, "done");
     let store = fresh_store_view(&vfs, "round-trip extraction");
-    let report = extract_declared_output(&store, &parse_ok(ROUND_TRIP))
+    let report = extract_declared_output(&store, &parse_ok(ROUND_TRIP_PROMPT))
         .expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
 }

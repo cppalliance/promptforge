@@ -1,7 +1,7 @@
 //! Engine guards, live: the dependency guard's manifest scan and
-//! resolved-graph check run over the Engine crates, and the `test-support`
-//! leak guard runs over the whole workspace, as part of
-//! `cargo test -p build-xtask` and `cargo xtask tidy`.
+//! resolved-graph check and the clippy guard run over the Engine crates,
+//! and the `test-support` leak guard runs over the whole workspace, as
+//! part of `cargo test -p build-xtask` and `cargo xtask tidy`.
 //!
 //! The Engine is the `promptforge` facade, the `promptforge-plugin`
 //! contract, and every crate under the `crates/promptforge-internal/`
@@ -68,11 +68,12 @@ fn engine_dependency_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Every Engine guard, in one list: the dependency guard and the
-/// workspace-wide `test-support` leak guard.
+/// Every Engine guard, in one list: the dependency guard, the clippy
+/// guard, and the workspace-wide `test-support` leak guard.
 #[must_use]
 pub(crate) fn engine_guard_violations(root: &Path) -> Vec<String> {
     let mut violations = engine_dependency_violations(root);
+    violations.extend(crate::engine_clippy::engine_clippy_violations(root));
     violations.extend(crate::test_support_leak::test_support_leak_violations(root));
     violations
 }

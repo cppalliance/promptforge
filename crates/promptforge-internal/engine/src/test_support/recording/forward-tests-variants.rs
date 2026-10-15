@@ -6,7 +6,7 @@ use promptforge_types::ids::{AbandonReason, RoundId, TaskOrigin};
 use super::*;
 
 /// One of the three sinks an event can land in, as an index into
-/// [`Recorder::counts`].
+/// [`SeamRecorder::counts`].
 #[derive(Clone, Copy, Debug)]
 enum Seam {
     Observed,
@@ -14,7 +14,7 @@ enum Seam {
     Captured,
 }
 
-impl Recorder {
+impl SeamRecorder {
     /// How many records each seam holds, indexed by [`Seam`].
     fn counts(&self) -> [usize; 3] {
         [
@@ -334,7 +334,7 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
 fn every_event_variant_reaches_exactly_one_seam() {
     for (event, seam) in one_of_every_event_variant() {
         let named = format!("{event:?}");
-        let recorder = Recorder::default();
+        let recorder = SeamRecorder::default();
         // A variant no group claims hits `forward_one`'s catch-all and
         // panics here; a variant a group claims but does not destructure
         // falls through that group's own `_ => {}` and records nothing.

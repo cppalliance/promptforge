@@ -28,10 +28,12 @@ fn write_crate(root: &Path, dir: &str, manifest: &str, lib: &str) {
     std::fs::write(src.join("lib.rs"), lib).expect("lib.rs writes");
 }
 
-/// A fake workspace whose root Engine crates are clean, so a fixture can
-/// add one container crate and see only that crate's findings.
+/// A fake workspace whose root Engine crates and clippy files are clean, so
+/// a fixture can add one container crate and see only that crate's
+/// findings.
 fn clean_engine_root() -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
+    test_support::write_engine_clippy_tomls(root.path());
     for name in ENGINE_ROOT_CRATES {
         write_crate(
             root.path(),
@@ -112,6 +114,7 @@ fn a_forbidden_dependency_in_the_plugin_contract_fails_the_guard() {
 #[test]
 fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_guard() {
     let root = tempfile::TempDir::new().expect("tempdir");
+    test_support::write_engine_clippy_tomls(root.path());
     test_support::write_crate(
         root.path(),
         "promptforge-internal/engine",
@@ -159,6 +162,7 @@ fn a_forbidden_dependency_in_a_container_crate_fails_the_guard() {
 #[test]
 fn a_missing_root_engine_crate_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
+    test_support::write_engine_clippy_tomls(root.path());
     write_crate(
         root.path(),
         "promptforge-internal/engine",

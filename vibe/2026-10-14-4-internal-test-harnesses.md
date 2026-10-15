@@ -882,7 +882,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-18>
 
-### Step 18: Clippy determinism bans, rule text, and exit criteria
+### Step 18: Clippy determinism bans, rule text, and exit criteria [completed]
 
 - Component: determinism policing
 - Tests:
@@ -925,6 +925,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
   - Every exit-criteria command passes, and the two `rg` checks, the `tempfile` `rg`, and the duplicate-helper search print nothing; the graph loop prints an empty list for all eight Engine crates.
   - The leaf comparison prints nothing marked `<=` except, under `build-xtask`, `a_forbidden_crate_in_dev_dependencies_only_passes`, `an_optional_entry_enabled_only_by_test_support_passes`, and `a_dep_gated_entry_with_only_a_weak_feature_path_passes`. It prints `=>` only for: under `promptforge-types`, `seeded_failure_messages_name_the_seed`, `derive_matches_its_known_answer`, `the_nonce_and_run_id_differ_from_each_other_and_the_seed_and_repeat`, `a_run_seed_round_trips_through_serde_as_64_hex_characters`, and `a_run_seeds_debug_shows_no_seed_bytes`; under `promptforge-engine`, `temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder`, `seeded_failure_messages_name_the_seed`, and `a_run_contexts_debug_shows_the_run_id_and_not_the_seed`; under `promptforge-vfs` and `promptforge`, `temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder`; under `workshop-run-log`, `a_32_byte_seed_survives_a_run_log_round_trip`; under `build-xtask`, the three renamed tests, Step 17's five new tests, and this step's five.
   - The engine's and lua's test line counts are lower than in `lines-before.txt`, against rough targets of 15 to 25 percent for the engine and 10 to 15 percent for lua, and the parser and engine together are lower. The four smaller crates may rise only by the utilities they host and those utilities' self-tests, as the Product Requirements allow. Report all six counts beside the baseline in the commit message.
+- Result: test lines, baseline then final: engine 35,714 to 31,609 (-11.5%); lua 11,052 to 10,405 (-5.9%); vfs 3,811 to 3,535 (-7.2%); parser 2,366 to 2,387 (+0.9%, the cross-crate builder); types 2,282 to 2,429 (+6.4%, `Seeded`, the shared helpers, and the new run-seed tests); model-client 727 to 726. Parser and engine together 38,080 to 33,996. The engine and lua dropped but missed their rough targets. Two timing-flaky `gateway-stt-engine` tests failed one full run under load and passed the next; they are outside this plan and deferred.
 
 </step-18>
 

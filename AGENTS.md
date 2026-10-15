@@ -61,6 +61,10 @@ Four words have exactly one meaning each, everywhere in this repository: code co
 ## Structural Rules
 
 - If Cargo rejects a dependency cycle, the design is wrong, not the graph.
+- Engine crates, tests included, never depend on `tokio`, `tokio-util`, `async-trait`, `reqwest`, `getrandom`, or `fastrand`, directly or transitively.
+- No Engine test sleeps, reads the wall clock, waits with a timeout, or draws entropy from the OS.
+- Pseudo-random test input comes only from a fixed seed that the failure prints.
+- Temporary directory names come from the test's name, the process id, and a counter.
 - Source directories are flat by default. A subdirectory of source files must contain at least three files, and its count includes the files in its nested subdirectories; one or two files belong beside the parent module as `foo-bar.rs` (parent stem, dash, kebab label), wired with an explicit path attribute so the module name stays clean: `#[path = "foo-bar.rs"] mod bar;`. The two forms are convertible in both directions: when a `foo-*.rs` sibling group grows to three files, rehydrate it into a `foo/` subdirectory in standard module layout (`foo/bar.rs` beside `foo.rs`) and drop the path attributes; when a subdirectory shrinks below three files, flatten it back to kebab siblings. Both conversions apply at each level of nesting. Apply whichever conversion applies when you touch files in a group on the wrong side of the line. Top-level `tests/` and `benches/` trees are exempt; they follow Cargo target conventions.
 
 ## SPA and CSS Rules

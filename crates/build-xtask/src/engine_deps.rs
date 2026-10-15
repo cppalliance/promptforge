@@ -22,6 +22,10 @@
 //!   `cargo metadata` resolves features for the whole workspace at once,
 //!   and a feature another workspace crate turns on must not flag an
 //!   Engine crate.
+//!
+//! The calls that would break determinism without a dependency, a sleep, a
+//! clock read, a timed wait, or an OS-seeded hasher, are clippy bans that
+//! `engine_clippy` keeps in force.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
