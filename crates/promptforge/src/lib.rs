@@ -26,6 +26,8 @@ pub use promptforge_engine::UnmetRequirement;
 pub use promptforge_parser::ParseError;
 pub use promptforge_parser::ParseErrorKind;
 pub use promptforge_parser::Prompt;
+pub use promptforge_types::seed::RunSeed;
+pub use promptforge_types::seed::RunUid;
 
 pub mod effect {
     //! The outside work a run asks for, the answers it takes back, and the

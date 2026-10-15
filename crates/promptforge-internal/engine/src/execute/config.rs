@@ -9,6 +9,7 @@ mod limits;
 use promptforge_types::emitter::DebugMode;
 use promptforge_types::plugins::{PluginId, Prelude};
 use promptforge_types::replay::Flags;
+use promptforge_types::seed::{RunSeed, RunUid};
 use promptforge_types::timestamp::Timestamp;
 
 pub use limits::RunLimits;
@@ -43,15 +44,16 @@ use super::requirements::{Requirements, UnavailablePlugin};
 /// are required. For a live run, the caller must draw the seed from a
 /// CSPRNG and read the start time from its own clock. The caller records both
 /// values, and a replay passes back the recorded ones. Given the same
-/// inputs and the same answers, a run reproduces its nonces, `sys.when`,
-/// effects, and events.
+/// inputs and the same answers, a run reproduces its run id, nonces,
+/// `sys.when`, effects, and events. The `Debug` form shows the run id
+/// ([`uid`](RunContext::uid)) and never the seed.
 #[non_exhaustive]
 pub struct RunContext {
     /// Run identity, stamped on every report and event.
     pub(super) name: String,
-    /// The run's seed, as the caller supplied it: the source of the
-    /// untrusted-envelope nonce (and of every other in-run random choice).
-    pub(super) seed: u64,
+    /// The run's seed, as the caller supplied it: the source of the run id,
+    /// the untrusted-envelope nonce, and every other in-run random choice.
+    pub(super) seed: RunSeed,
     /// The behavior flags the run records; empty by default.
     flags: Flags,
     /// When the run began, as the caller stamped it: rendered as `sys.when`
@@ -119,13 +121,13 @@ impl RunContext {
     /// [`Flags`], and the default filesystem, which is a fresh memory store
     /// at `/`.
     ///
-    /// `seed` is the source of the untrusted-envelope nonce. For a live
-    /// run, the caller must draw it from a CSPRNG, because a predictable
-    /// seed makes a guessable nonce. `started_at` is the instant every
-    /// section reads as `sys.when`. The caller records both values, and a
-    /// replay passes them back verbatim.
+    /// `seed` is the source of the run id and the untrusted-envelope nonce.
+    /// For a live run, the caller must draw its 32 bytes from a CSPRNG,
+    /// because a predictable seed makes a guessable nonce. `started_at` is
+    /// the instant every section reads as `sys.when`. The caller records
+    /// both values, and a replay passes them back verbatim.
     #[must_use]
-    pub fn new(name: impl Into<String>, seed: u64, started_at: Timestamp) -> RunContext {
+    pub fn new(name: impl Into<String>, seed: RunSeed, started_at: Timestamp) -> RunContext {
         RunContext {
             name: name.into(),
             seed,
@@ -397,8 +399,18 @@ impl RunContext {
 
     /// Returns the run's seed, as the caller supplied it.
     #[must_use]
-    pub fn seed(&self) -> u64 {
+    pub fn seed(&self) -> RunSeed {
         self.seed
+    }
+
+    /// Returns the run's id, derived from its seed.
+    ///
+    /// The id is one-way, so it can be shown in logs, records, and views
+    /// without revealing the seed or the nonce. A replay under the recorded
+    /// seed has the same id.
+    #[must_use]
+    pub fn uid(&self) -> RunUid {
+        RunUid::from_seed(&self.seed)
     }
 
     /// Returns the behavior flags the run records. Set them with
@@ -429,7 +441,7 @@ impl fmt::Debug for RunContext {
         let mut state = f.debug_struct("RunContext");
         state
             .field("name", &self.name)
-            .field("seed", &self.seed)
+            .field("uid", &self.uid())
             .field("flags", &self.flags)
             .field("started_at", &self.started_at)
             .field("provenance_start", &self.provenance_start)
@@ -451,6 +463,6 @@ impl fmt::Debug for RunContext {
                     .map(Prelude::plugin)
                     .collect::<Vec<_>>(),
             )
-            .finish()
+            .finish_non_exhaustive()
     }
 }

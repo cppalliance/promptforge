@@ -15,7 +15,7 @@ use promptforge::model::{
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, RunSeed, Step};
 use serde_json::json;
 
 use super::*;
@@ -66,7 +66,8 @@ fn tool_round(offered: &[Offered]) -> Round {
         NonZeroU32::new(8_192).expect("8192 is non-zero"),
         ThinkingMode::Never,
     );
-    let ctx = RunContext::new("round", 7, Timestamp::UNIX_EPOCH).model(model);
+    let ctx =
+        RunContext::new("round", RunSeed::from_bytes([7; 32]), Timestamp::UNIX_EPOCH).model(model);
     let catalog = ToolCatalog::new(&descriptors).expect("the offered tools are distinct");
     let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(requirements.refusal().is_none(), "the round prepares");

@@ -24,6 +24,7 @@ use promptforge_lua::{
 };
 use promptforge_model_client::model::ModelSet;
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+use promptforge_types::seed::RunSeed;
 use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
@@ -39,7 +40,7 @@ fn emitter() -> Emitter {
 /// installed as the executor installs it.
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::from_seed(1),
+        &GuardNonce::from_seed(&RunSeed::from_bytes([1; 32])),
         &Arc::new(ToolSet::default()),
         &Arc::new(Mutex::new(ModelSet::default())),
         &emitter(),

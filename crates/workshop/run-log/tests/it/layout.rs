@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+use harness::record::RunSeed;
 use workshop_run_log::{RunLog, RunMeta, RunOutcome};
 
 /// An unstamped layout: a `session_id` column in place of `name`, and
@@ -49,7 +50,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "conversation-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
-        seed: 7,
+        seed: RunSeed::from_bytes([7; 32]),
         flags: 0,
         started_at: 1_700_000_000_000,
     }

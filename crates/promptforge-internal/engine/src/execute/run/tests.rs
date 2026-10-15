@@ -17,7 +17,7 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
-use crate::test_support::scenario::{only_effect, round_trip, test_binding};
+use crate::test_support::scenario::{TEST_SEED, only_effect, round_trip, test_binding};
 
 #[path = "tests-drops.rs"]
 mod drops;
@@ -27,7 +27,7 @@ mod drops;
 fn run_context() -> RunContext {
     RunContext::new(
         "run-test",
-        1,
+        TEST_SEED,
         promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
     )
 }

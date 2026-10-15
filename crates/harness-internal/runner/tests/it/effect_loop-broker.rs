@@ -22,7 +22,7 @@ use promptforge::{Prompt, Run, RunContext};
 use serde_json::{Value, json};
 
 use super::begun_log;
-use crate::support::{EXECUTION, unused};
+use crate::support::{EXECUTION, TEST_SEED, unused};
 
 /// A program that infers once and then chats once: the nested round
 /// first, then the section's own round over its message list.
@@ -48,7 +48,7 @@ fn infers_then_chats() -> Run {
         NonZeroU32::new(131_072).expect("131072 is non-zero"),
         ThinkingMode::Never,
     );
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).model(model);
+    let ctx = RunContext::new(EXECUTION, TEST_SEED, Timestamp::UNIX_EPOCH).model(model);
     let (ctx, requirements) = ctx.prepare(&prompt);
     assert!(
         requirements.is_satisfied(),

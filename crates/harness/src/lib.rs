@@ -40,7 +40,7 @@ pub mod plugin {
 
 pub mod record {
     //! The recorder that receives every effect, answer, and event of a run,
-    //! and an in-memory recorder.
+    //! an in-memory recorder, and the seed each run's meta records.
 
     pub use harness_runner::recorder::MemoryRecorder;
     pub use harness_runner::recorder::Record;
@@ -51,6 +51,7 @@ pub mod record {
     pub use harness_runner::recorder::RunMeta;
     pub use harness_runner::recorder::RunOutcome;
     pub use harness_runner::recorder::RunRecorder;
+    pub use promptforge::RunSeed;
 }
 
 pub mod vfs {

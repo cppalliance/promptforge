@@ -1,5 +1,6 @@
 //! The read path: the whole transcript for session views.
 
+use harness::record::RunSeed;
 use serde_json::json;
 use workshop_run_log::{LogError, Record, RecordKind, RunId, RunLog, RunMeta};
 
@@ -11,7 +12,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
-        seed: 3,
+        seed: RunSeed::from_bytes([3; 32]),
         flags: 0,
         started_at: 1_700_000_000_000,
     }

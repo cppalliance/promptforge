@@ -6,6 +6,8 @@ use std::fmt::{Debug, Display};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::seed::RunSeed;
+
 /// A `SplitMix64` generator over a fixed seed, so a randomized test replays
 /// exactly. Its checks put `seed <n>` in every failure message.
 pub(crate) struct Seeded {
@@ -27,6 +29,15 @@ impl Seeded {
         let z = (self.state ^ (self.state >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         let z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
+    }
+
+    /// A run seed of four draws.
+    pub(crate) fn run_seed(&mut self) -> RunSeed {
+        let mut bytes = [0u8; 32];
+        for chunk in bytes.as_chunks_mut::<8>().0 {
+            *chunk = self.next_u64().to_le_bytes();
+        }
+        RunSeed::from_bytes(bytes)
     }
 
     /// A draw in `0..n`.

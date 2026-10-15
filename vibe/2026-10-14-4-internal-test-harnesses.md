@@ -820,7 +820,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-16>
 
-### Step 16: 256-bit run seed and run id
+### Step 16: 256-bit run seed and run id [completed]
 
 - Component: run seed
 - Tests:

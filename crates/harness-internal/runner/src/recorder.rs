@@ -19,6 +19,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
+use promptforge::RunSeed;
+
 #[path = "recorder-memory.rs"]
 mod memory;
 
@@ -119,8 +121,9 @@ pub struct RunMeta {
     /// A content hash of the prompt file, so a transcript can be matched
     /// to the exact text that produced it.
     pub prompt_hash: String,
-    /// The seed the Harness drew and passed to the Engine.
-    pub seed: u64,
+    /// The seed the Harness drew and passed to the Engine. A replay passes
+    /// it back, and the run's id derives from it.
+    pub seed: RunSeed,
     /// The Engine's behavior flags, as a bitset.
     pub flags: u32,
     /// When the run started, in UTC milliseconds since the Unix epoch.

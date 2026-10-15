@@ -7,17 +7,18 @@
 //! clock at append, kept for display only. `(task_id, task_seq)` is the
 //! record's `Provenance`, stored beside the payload.
 //!
-//! Every integer that is a `u64` in Rust (`seed`, `effect_id`) is stored
+//! Every integer that is a `u64` in Rust (`effect_id`) is stored
 //! as its two's-complement `i64` reinterpretation, since SQLite integers
-//! are signed; see `append::signed` and `append::unsigned`. `task_id` is
-//! the Engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
-//! text, since a path of unbounded depth has no integer form. Timestamps
-//! are UTC milliseconds since the Unix epoch.
+//! are signed; see `append::signed` and `append::unsigned`. `seed` is the
+//! run's 32-byte seed as 64 lowercase hex characters. `task_id` is the
+//! Engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as text,
+//! since a path of unbounded depth has no integer form. Timestamps are UTC
+//! milliseconds since the Unix epoch.
 
 /// The layout these tables describe, stamped into `layout`. Bump it with
 /// any change to them, so a file written in an older layout is set aside
 /// instead of written into with columns it lacks.
-pub(crate) const LAYOUT_VERSION: i64 = 1;
+pub(crate) const LAYOUT_VERSION: i64 = 2;
 
 /// The DDL, idempotent so a file in the current layout opens without
 /// change.
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS runs (
     name          TEXT    NOT NULL,
     agent         TEXT    NOT NULL,
     prompt_hash   TEXT    NOT NULL,
-    seed          INTEGER NOT NULL,
+    seed          TEXT    NOT NULL,
     flags         INTEGER NOT NULL,
     started_at    INTEGER NOT NULL,
     ended_at      INTEGER,

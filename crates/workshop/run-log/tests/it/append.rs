@@ -1,5 +1,6 @@
 //! The write path: a run begins, records append in loop order, the run ends.
 
+use harness::record::RunSeed;
 use serde_json::json;
 use workshop_run_log::{
     LogError, Record, RecordFilter, RecordKind, RunId, RunLog, RunMeta, RunOutcome,
@@ -19,7 +20,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
-        seed: u64::MAX - 1,
+        seed: RunSeed::from_bytes([0xfe; 32]),
         flags: 0,
         started_at: 1_700_000_000_000,
     }
@@ -258,6 +259,57 @@ async fn an_unknown_run_is_refused() {
 
     let read = log.run(ghost).await;
     assert!(matches!(read, Err(LogError::UnknownRun(id)) if id == ghost));
+}
+
+#[tokio::test]
+async fn a_32_byte_seed_survives_a_run_log_round_trip() {
+    // Distinct bytes from a leading `07` to a trailing `ff`, so a dropped
+    // leading zero, a swapped pair, or a sign bit shows.
+    let seed = RunSeed::from_bytes(std::array::from_fn(|i| u8::try_from(i * 8 + 7).unwrap()));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("runs.db");
+    let run = {
+        let mut log = RunLog::open(&path).await.unwrap();
+        let meta = RunMeta { seed, ..meta() };
+        log.begin_run(meta, AGENT).await.unwrap()
+    };
+
+    let log = RunLog::open(&path).await.unwrap();
+    let read = log.run(run).await.unwrap().meta.seed;
+    assert_eq!(read.as_bytes(), seed.as_bytes());
+    drop(log);
+
+    let raw = turso::Builder::new_local(path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap()
+        .connect()
+        .unwrap();
+    let mut rows = raw
+        .query("SELECT seed FROM runs WHERE run_id = ?1", (run.get(),))
+        .await
+        .unwrap();
+    let stored: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(
+        stored,
+        seed.to_string(),
+        "the column holds the 64 hex digits"
+    );
+    drop(rows);
+    raw.execute(
+        "UPDATE runs SET seed = 'not a seed' WHERE run_id = ?1",
+        (run.get(),),
+    )
+    .await
+    .unwrap();
+    drop(raw);
+
+    let log = RunLog::open(&path).await.unwrap();
+    let refused = log.run(run).await;
+    assert!(
+        matches!(&refused, Err(LogError::Corrupt(message)) if message.contains("seed")),
+        "a malformed seed is a read error naming the column: {refused:?}"
+    );
 }
 
 #[tokio::test]

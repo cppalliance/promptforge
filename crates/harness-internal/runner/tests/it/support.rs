@@ -21,12 +21,15 @@ use promptforge::vfs::{
     Access, AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
     VfsRef,
 };
-use promptforge::{Prompt, Run, RunContext};
+use promptforge::{Prompt, Run, RunContext, RunSeed};
 use promptforge_plugin::Package;
 use serde_json::{Value, json};
 
 /// The run's execution identifier.
 pub(crate) const EXECUTION: &str = "runner-test";
+
+/// The fixed seed every fixture run and recorded meta takes.
+pub(crate) const TEST_SEED: RunSeed = RunSeed::from_bytes([7; 32]);
 
 /// A registry holding the natives and each of `packages`, which a suite
 /// builds its Host over before it installs them by name.
@@ -69,7 +72,7 @@ fn prompt(lua: &str) -> Arc<Prompt> {
 /// prepared against the fixture [`catalog`], over the run's filesystem
 /// `vfs`.
 fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).vfs(vfs);
+    let ctx = RunContext::new(EXECUTION, TEST_SEED, Timestamp::UNIX_EPOCH).vfs(vfs);
     let (ctx, requirements) = ctx.tools(catalog()).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),

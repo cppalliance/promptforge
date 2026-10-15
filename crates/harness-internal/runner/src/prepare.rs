@@ -40,7 +40,7 @@ use promptforge::model::ModelDescriptor;
 use promptforge::prompt::FileDecl;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::VfsRef;
-use promptforge::{ParseError, Prompt, Requirements, Run, RunContext, RunError};
+use promptforge::{ParseError, Prompt, Requirements, Run, RunContext, RunError, RunSeed};
 use promptforge_plugin::HostServices;
 use sha2::{Digest as _, Sha256};
 
@@ -249,7 +249,7 @@ pub(crate) async fn prepare_noting_cancel(
 
     // The inputs the Engine leaves to the Harness, recorded before the
     // run exists so the record has them however the run ends.
-    let seed: u64 = rand::random();
+    let seed = RunSeed::from_bytes(rand::random());
     let started_at = now_timestamp();
     let run_id = recorder
         .begin_run(RunMeta {

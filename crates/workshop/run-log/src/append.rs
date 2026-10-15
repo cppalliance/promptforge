@@ -87,7 +87,7 @@ impl RunLog {
                     meta.name,
                     agent,
                     meta.prompt_hash,
-                    signed(meta.seed),
+                    meta.seed.to_string(),
                     i64::from(meta.flags),
                     meta.started_at,
                 ),

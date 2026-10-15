@@ -28,9 +28,13 @@ use promptforge_engine::test_support::{drive, perform_locally};
 use promptforge_engine::{Effect, EffectAnswer, Run, RunContext, RunLimits, RunResult};
 use promptforge_parser::Prompt;
 use promptforge_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_types::seed::RunSeed;
 use promptforge_types::timestamp::Timestamp;
 
 const EXECUTION: &str = "bench";
+
+/// The fixed seed every bench run starts from.
+const SEED: RunSeed = RunSeed::from_bytes([1; 32]);
 
 /// A scripted model whose every round gets the same terminal-text reply,
 /// so a `models.loop` bench measures exactly one round per iteration.
@@ -83,7 +87,7 @@ fn parse_loop_prompt() -> Prompt {
 /// refuses ends with the refusal.
 fn run_once(prompt: &Prompt, chat: &ScriptedChat, context: u32) -> RunResult {
     let limits = RunLimits::new();
-    let ctx = RunContext::new(EXECUTION, 1, Timestamp::UNIX_EPOCH)
+    let ctx = RunContext::new(EXECUTION, SEED, Timestamp::UNIX_EPOCH)
         .model(bench_catalog(context).models()[0].clone())
         .limits(limits);
     let (ctx, requirements) = ctx.prepare(prompt);

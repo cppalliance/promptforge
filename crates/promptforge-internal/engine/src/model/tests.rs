@@ -7,6 +7,7 @@ use super::*;
 use crate::lua::{SectionVm, ToolSet, resolve_model_binding};
 use crate::test_support::fresh_access;
 use crate::test_support::recording::null_emitter;
+use crate::test_support::scenario::TEST_SEED;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_model_client::model::{CompletionOptions, ModelInvocation};
@@ -75,7 +76,7 @@ fn section_vm_with_models(
     section: &str,
 ) -> Result<SectionVm> {
     Ok(SectionVm::new_for_section(
-        &GuardNonce::from_seed(0x7e57),
+        &GuardNonce::from_seed(&TEST_SEED),
         &shared_tools(),
         models,
         emitter,

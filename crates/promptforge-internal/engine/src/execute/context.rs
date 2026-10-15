@@ -144,7 +144,7 @@ impl RunState {
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
         Self {
             prompt,
-            nonce: GuardNonce::from_seed(ctx.seed),
+            nonce: GuardNonce::from_seed(&ctx.seed),
             vfs: vfs.clone(),
             execution,
             args: Arc::from(args),

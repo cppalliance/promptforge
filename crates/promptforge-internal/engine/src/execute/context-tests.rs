@@ -1,6 +1,7 @@
 //! Tests for `RunContext` construction, forking, and task sequence seeding.
 
 use super::*;
+use crate::test_support::scenario::TEST_SEED;
 
 fn test_prompt() -> Prompt {
     let source = concat!(
@@ -19,7 +20,7 @@ fn test_state(prompt: &Prompt) -> RunState {
         &promptforge_vfs::VfsRef::default(),
         &RunContext::new(
             "run-context-test",
-            1,
+            TEST_SEED,
             promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
         ),
     )
@@ -83,7 +84,7 @@ fn the_root_task_sequence_starts_where_the_context_says() {
         &promptforge_vfs::VfsRef::default(),
         &RunContext::new(
             "run-context-test",
-            1,
+            TEST_SEED,
             promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
         )
         .provenance_start(5),

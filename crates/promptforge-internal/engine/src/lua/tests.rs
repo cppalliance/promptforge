@@ -34,7 +34,7 @@ use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolS
 use crate::model::ModelSet;
 use crate::test_support::fresh_access;
 use crate::test_support::recording::null_emitter;
-use crate::test_support::scenario::test_binding;
+use crate::test_support::scenario::{TEST_SEED, test_binding};
 use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
 use promptforge_types::tools::ToolDescriptor;
@@ -109,7 +109,7 @@ struct VmBinds<'a> {
 fn set_up_vm(binds: &VmBinds<'_>) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::from_seed(0x7e57),
+        &GuardNonce::from_seed(&TEST_SEED),
         &Arc::new(binds.tools.clone()),
         &Arc::new(Mutex::new(binds.models.clone())),
         &emitter,

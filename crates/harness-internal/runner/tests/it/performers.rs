@@ -18,7 +18,9 @@ use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
 use serde_json::{Value, json};
 
-use crate::support::{PendingTool, RaiseOnDrop, TIMED_MAIN, WAITS, run, run_with_child, unused};
+use crate::support::{
+    PendingTool, RaiseOnDrop, TEST_SEED, TIMED_MAIN, WAITS, run, run_with_child, unused,
+};
 
 /// A Host's timer: sleeps on the test runtime's clock for the effect's
 /// seconds, and raises `dropped` when a sleep is torn down unfinished.
@@ -42,7 +44,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "session-1".to_owned(),
         prompt_hash: "sha256:fixture".to_owned(),
-        seed: 7,
+        seed: TEST_SEED,
         flags: 0,
         started_at: 0,
     }

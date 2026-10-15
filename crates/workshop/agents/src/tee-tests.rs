@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use harness::record::{
     MemoryRecorder, Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome,
-    RunRecorder,
+    RunRecorder, RunSeed,
 };
 use promptforge::event::Event;
 use promptforge::ids::Provenance;
@@ -20,7 +20,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "conversation-1".to_owned(),
         prompt_hash: "sha256:00".to_owned(),
-        seed: 7,
+        seed: RunSeed::from_bytes([7; 32]),
         flags: 0,
         started_at: 0,
     }

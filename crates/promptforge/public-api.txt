@@ -81,6 +81,8 @@ auto promptforge::RunError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSa
 auto promptforge::RunErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::RunLimits: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::RunResult: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::RunSeed: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::RunUid: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::SourceLocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Step: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::UnavailablePlugin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -198,6 +200,8 @@ derives promptforge::RunError: Debug
 derives promptforge::RunErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::RunLimits: Clone, Copy, Debug, Default
 derives promptforge::RunResult: Debug
+derives promptforge::RunSeed: Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::RunUid: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::SourceLocation: Clone, Debug, Eq, PartialEq
 derives promptforge::Step: Debug
 derives promptforge::UnavailablePlugin: Clone, Debug, Eq, PartialEq
@@ -323,6 +327,8 @@ impl core::error::Error for promptforge::tools::ToolIdError
 impl core::error::Error for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::ParseError
 impl core::fmt::Display for promptforge::RunError
+impl core::fmt::Display for promptforge::RunSeed
+impl core::fmt::Display for promptforge::RunUid
 impl core::fmt::Display for promptforge::effect::EffectId
 impl core::fmt::Display for promptforge::ids::ChainId
 impl core::fmt::Display for promptforge::ids::ParseIdError
@@ -361,6 +367,8 @@ impl promptforge::vfs::Vfs for promptforge::vfs::MemoryBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::RealBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::VfsRef
 impl<'a> promptforge::vfs::OpEvent<'a>
+pub const fn promptforge::RunSeed::as_bytes(&self) -> &[u8; 32]
+pub const fn promptforge::RunSeed::from_bytes(bytes: [u8; 32]) -> promptforge::RunSeed
 pub const fn promptforge::effect::EffectId::get(self) -> u64
 pub const fn promptforge::ids::RoundId::get(self) -> u64
 pub const fn promptforge::ids::RoundId::new(id: u64) -> Self
@@ -414,17 +422,18 @@ pub fn promptforge::RunContext::limits(self, limits: promptforge::RunLimits) -> 
 pub fn promptforge::RunContext::model(self, model: promptforge::model::ModelDescriptor) -> promptforge::RunContext
 pub fn promptforge::RunContext::model_bindings(&self) -> &promptforge::model::ModelBindings
 pub fn promptforge::RunContext::name(&self) -> &str
-pub fn promptforge::RunContext::new(name: impl core::convert::Into<alloc::string::String>, seed: u64, started_at: promptforge::timestamp::Timestamp) -> promptforge::RunContext
+pub fn promptforge::RunContext::new(name: impl core::convert::Into<alloc::string::String>, seed: promptforge::RunSeed, started_at: promptforge::timestamp::Timestamp) -> promptforge::RunContext
 pub fn promptforge::RunContext::plugins(self, usable: alloc::vec::Vec<promptforge::plugins::PluginId>, unavailable: alloc::vec::Vec<promptforge::UnavailablePlugin>) -> promptforge::RunContext
 pub fn promptforge::RunContext::preludes(self, preludes: alloc::vec::Vec<promptforge::plugins::Prelude>) -> promptforge::RunContext
 pub fn promptforge::RunContext::prepare(self, prompt: &promptforge::Prompt) -> (promptforge::RunContext, promptforge::Requirements)
 pub fn promptforge::RunContext::provenance_start(self, start: u32) -> promptforge::RunContext
 pub fn promptforge::RunContext::report_debug(self, mode: promptforge::event::DebugMode) -> promptforge::RunContext
 pub fn promptforge::RunContext::run_flags(&self) -> promptforge::replay::Flags
-pub fn promptforge::RunContext::seed(&self) -> u64
+pub fn promptforge::RunContext::seed(&self) -> promptforge::RunSeed
 pub fn promptforge::RunContext::started_at(&self) -> promptforge::timestamp::Timestamp
 pub fn promptforge::RunContext::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::RunContext
 pub fn promptforge::RunContext::ui(self, snapshot: serde_json::value::Value) -> promptforge::RunContext
+pub fn promptforge::RunContext::uid(&self) -> promptforge::RunUid
 pub fn promptforge::RunContext::vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::RunContext
 pub fn promptforge::RunContext::vfs_handle(&self) -> &promptforge::vfs::VfsRef
 pub fn promptforge::RunError::is_cancelled(&self) -> bool
@@ -444,6 +453,7 @@ pub fn promptforge::RunLimits::request_timeout(self, value: core::time::Duration
 pub fn promptforge::RunLimits::response_bytes(&self) -> core::num::nonzero::NonZeroU64
 pub fn promptforge::RunLimits::timeout(&self) -> core::time::Duration
 pub fn promptforge::RunLimits::tool_iterations(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::RunUid::from_seed(seed: &promptforge::RunSeed) -> promptforge::RunUid
 pub fn promptforge::UnavailablePlugin::new(plugin: promptforge::plugins::PluginId, reason: impl core::convert::Into<alloc::string::String>) -> promptforge::UnavailablePlugin
 pub fn promptforge::cancel::CancelHandle::cancel(&self)
 pub fn promptforge::cancel::CancelHandle::cancelled(&self) -> promptforge::cancel::Cancelled
@@ -1334,6 +1344,8 @@ pub promptforge::vfs::VfsOutcome::Text(..)
 pub promptforge::vfs::VfsOutcome::Text::0: alloc::string::String
 pub promptforge::vfs::VfsOutcome::Unit
 pub struct promptforge::Run { /* private fields */ }
+pub struct promptforge::RunSeed(/* private fields */)
+pub struct promptforge::RunUid(/* private fields */)
 pub struct promptforge::SourceLocation { .. }
 pub struct promptforge::cancel::CancelHandle { /* private fields */ }
 pub struct promptforge::cancel::Cancelled { /* private fields */ }

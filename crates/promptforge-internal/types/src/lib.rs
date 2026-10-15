@@ -20,7 +20,9 @@
 //! holds an implementation. [`ids`] is the hierarchical, deterministic
 //! identity of a run's chains and tasks and the [`Provenance`](ids::Provenance)
 //! replay key stamped on every effect and event; [`timestamp`] is the UTC
-//! instant a run starts from, rendered over std alone; and [`replay`] holds
+//! instant a run starts from, rendered over std alone; [`seed`] is the
+//! caller's [`RunSeed`](seed::RunSeed) and the one-way derivations from
+//! it, the run id [`RunUid`](seed::RunUid) among them; and [`replay`] holds
 //! the behavior [`Flags`](replay::Flags) a run records and the
 //! [`ReplayError`](replay::ReplayError) kinds. This crate depends on no
 //! other promptforge crate, so every promptforge crate may depend on it,
@@ -44,6 +46,7 @@ pub mod models;
 pub mod names;
 pub mod plugins;
 pub mod replay;
+pub mod seed;
 #[cfg(test)]
 mod test_support;
 pub mod timestamp;

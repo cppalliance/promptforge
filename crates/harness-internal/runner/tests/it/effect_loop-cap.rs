@@ -26,7 +26,7 @@ use tokio::sync::{Notify, Semaphore};
 
 use super::begun_log;
 use crate::scripted::{Kept, MODEL, ScriptedBroker, reply};
-use crate::support::{EXECUTION, unused};
+use crate::support::{EXECUTION, TEST_SEED, unused};
 
 /// How long a test waits for a run before it fails.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -86,7 +86,7 @@ fn run_of(sections: &str) -> Run {
         json!({ "type": "object", "properties": { "name": { "type": "string" } } }),
     );
     let catalog = ToolCatalog::new(&[tool]).expect("the one-tool catalog is valid");
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).model(model);
+    let ctx = RunContext::new(EXECUTION, TEST_SEED, Timestamp::UNIX_EPOCH).model(model);
     let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(
         requirements.is_satisfied(),

@@ -15,7 +15,7 @@ use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId,
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Run, RunContext, RunResult, RunSeed, Step};
 
 /// Writes a note, asks the `writer` role to reply, and shouts the reply.
 pub const GREETER: &str = concat!(
@@ -72,16 +72,21 @@ pub fn greet() -> Result<String, Box<dyn Error>> {
     let prompt = parsed?;
 
     // 2. Build the context: run events number on from the parse events, and
-    //    the model is set.
+    //    the model is set. A live caller draws the seed's 32 bytes from a
+    //    CSPRNG; the example fixes them.
     let model = ModelDescriptor::new(
         ModelId::gateway("canned")?,
         "Always replies hi there",
         NonZeroU32::new(8_192).ok_or("a context window is never zero")?,
         ThinkingMode::Never,
     );
-    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
-        .provenance_start(u32::try_from(parse_events.len())?)
-        .model(model);
+    let ctx = RunContext::new(
+        "greeter",
+        RunSeed::from_bytes([7; 32]),
+        Timestamp::UNIX_EPOCH,
+    )
+    .provenance_start(u32::try_from(parse_events.len())?)
+    .model(model);
 
     // 3. Offer the shout tool, prepare, and refuse to run when prepare
     //    reports a gap.

@@ -21,6 +21,7 @@ use std::thread;
 use promptforge_model_client::model::ModelInvocation;
 use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::event::Event;
+use promptforge_types::seed::RunSeed;
 use promptforge_types::timestamp::Timestamp;
 use promptforge_types::tools::ToolCatalog;
 use promptforge_vfs::VfsRef;
@@ -52,7 +53,7 @@ pub(crate) const EXECUTION: &str = "execute-test";
 /// The fixed caller inputs every test run shares: a seed and a start instant
 /// a test that does not care about them never has to choose. The tests of
 /// the inputs themselves (`run_inputs`) build their contexts directly.
-pub(crate) const TEST_SEED: u64 = 1;
+pub(crate) const TEST_SEED: RunSeed = RunSeed::from_bytes([1; 32]);
 pub(crate) const TEST_STARTED_AT: Timestamp = Timestamp::from_unix_millis(1_700_000_000_000);
 
 /// The gateway model a bound scenario's roles resolve to.
@@ -129,7 +130,7 @@ pub(crate) struct Scenario {
     source: String,
     args: String,
     name: String,
-    seed: u64,
+    seed: RunSeed,
     context: ContextEdit,
     store: TestStore,
     /// The catalog's tools.
@@ -181,7 +182,7 @@ impl Scenario {
     }
 
     /// Sets the seed the run's untrusted-envelope nonce derives from.
-    pub(crate) fn seed(mut self, seed: u64) -> Scenario {
+    pub(crate) fn seed(mut self, seed: RunSeed) -> Scenario {
         self.seed = seed;
         self
     }

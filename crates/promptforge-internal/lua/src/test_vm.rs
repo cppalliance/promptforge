@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use mlua::FromLuaMulti;
+use promptforge_types::seed::RunSeed;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use promptforge_vfs::{Origin, VfsRef};
 use serde_json::json;
@@ -18,7 +19,7 @@ use crate::{
 };
 
 /// The one guard-nonce seed of every test VM.
-pub(crate) const TEST_SEED: u64 = 0x6c75_6174_6573;
+pub(crate) const TEST_SEED: RunSeed = RunSeed::from_bytes([0x73; 32]);
 
 /// The section a test VM reports under unless `section` names another.
 pub(crate) const TEST_SECTION: &str = "Test";
@@ -27,7 +28,7 @@ pub(crate) const TEST_SECTION: &str = "Test";
 /// VM's construction itself.
 #[track_caller]
 pub(crate) fn test_nonce() -> GuardNonce {
-    GuardNonce::from_seed(TEST_SEED)
+    GuardNonce::from_seed(&TEST_SEED)
 }
 
 /// A fresh default handle's access capability: the store is declared at

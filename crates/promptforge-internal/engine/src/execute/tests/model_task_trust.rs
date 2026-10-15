@@ -23,7 +23,7 @@ fn run_scripted(md: &str, replies: Vec<ScriptedReply>) -> Trace {
 
 /// The run nonce every test here wraps under: the fixed test seed's.
 fn run_nonce() -> GuardNonce {
-    GuardNonce::from_seed(TEST_SEED)
+    GuardNonce::from_seed(&TEST_SEED)
 }
 
 /// A Lua tail returning the first user record that is a task notice.

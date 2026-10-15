@@ -22,12 +22,15 @@ use promptforge::model::{Completion, ModelDescriptor};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::ToolCatalog;
 use promptforge::vfs::perform_vfs_op;
-use promptforge::{Prompt, Requirements, Run, RunContext, RunResult, Step};
+use promptforge::{Prompt, Requirements, Run, RunContext, RunResult, RunSeed, Step};
 use serde_json::json;
 
 use super::{Reply, TestResult, Tool, canned, descriptor};
 
 type Edit = Box<dyn Fn(RunContext) -> RunContext>;
+
+/// The seed every scenario's run takes.
+const TEST_SEED: RunSeed = RunSeed::from_bytes([7; 32]);
 
 /// One test's setup. Every scenario sets [`canned`] unless it names a
 /// model, numbers run events on from the parse events, and fails to start
@@ -111,7 +114,7 @@ impl Scenario {
             Some(model) => model.clone(),
             None => canned()?,
         };
-        let mut ctx = RunContext::new("greeter", 7, self.started_at)
+        let mut ctx = RunContext::new("greeter", TEST_SEED, self.started_at)
             .provenance_start(u32::try_from(events.len())?)
             .model(model);
         if let Some(tool) = &self.tool {

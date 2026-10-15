@@ -18,8 +18,8 @@ promptforge-plugin.workspace = true
 # The Engine's public API: the Run this crate drives, the effects and
 # answers it correlates, and the run's VFS handle.
 promptforge.workspace = true
-# The run seed is drawn from the OS CSPRNG at preparation: it is the
-# untrusted-envelope nonce's source, so it must be unguessable.
+# The run seed's 32 bytes are drawn from the OS CSPRNG at preparation: it
+# is the untrusted-envelope nonce's source, so it must be unguessable.
 rand.workspace = true
 serde_json.workspace = true
 # The prompt's content hash for the run row, so a transcript can be

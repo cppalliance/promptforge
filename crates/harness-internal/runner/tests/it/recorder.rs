@@ -12,11 +12,13 @@ use harness_runner::recorder::{
 };
 use serde_json::json;
 
+use crate::support::TEST_SEED;
+
 fn meta(name: &str) -> RunMeta {
     RunMeta {
         name: name.to_owned(),
         prompt_hash: "sha256:00".to_owned(),
-        seed: 7,
+        seed: TEST_SEED,
         flags: 0,
         started_at: 1_700_000_000_000,
     }

@@ -19,6 +19,7 @@ use crate::test_support::scenario::{Scenario, Trace};
 use crate::test_support::scripted_chat::{
     MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
 };
+use crate::test_support::seeded::Seeded;
 use crate::test_support::{FnTool, fresh_access};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
@@ -126,8 +127,9 @@ fn untrusted_nonce_differs_across_runs_under_different_seeds() {
         "Only",
         "return tools.call('tools/untrusted_echo', { value = 'hi' })",
     ));
+    let mut rng = Seeded::new(0x5EED);
     let mut run_nonces = Vec::new();
-    for seed in [1, 2] {
+    for seed in [rng.run_seed(), rng.run_seed()] {
         let trace = Scenario::new(&source)
             .seed(seed)
             .bound()
@@ -142,9 +144,9 @@ fn untrusted_nonce_differs_across_runs_under_different_seeds() {
             .expect("the guard tag closes");
         run_nonces.push(out[start..end].to_string());
     }
-    assert_ne!(
-        run_nonces[0], run_nonces[1],
-        "each run must mint its own nonce"
+    rng.check(
+        run_nonces[0] != run_nonces[1],
+        "each run must mint its own nonce",
     );
 }
 

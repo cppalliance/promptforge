@@ -1,6 +1,9 @@
 //! Section VM execution: direct chunk runs and block coroutines, from
 //! their start through each resume to the classified end.
 
+#[cfg(test)]
+use promptforge_types::seed::RunSeed;
+
 use super::SectionVm;
 use crate::protocol::{Answer, Request, YieldParse};
 #[cfg(test)]
@@ -350,7 +353,11 @@ pub(crate) fn run_chunk(
     emitter: &Emitter,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let mut vm = SectionVm::new(&GuardNonce::from_seed(0), emitter, section)?;
+    let mut vm = SectionVm::new(
+        &GuardNonce::from_seed(&RunSeed::from_bytes([0; 32])),
+        emitter,
+        section,
+    )?;
     vm.inject_values(args, sys, access)?;
     vm.install_engine_globals(emitter, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;

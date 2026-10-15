@@ -87,7 +87,7 @@ fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     let (tool, called) = scoped_tool("section", "Section concrete.");
     let tools = offering_of("tools_section", "capability", &tool);
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::from_seed(0x7e57),
+        &GuardNonce::from_seed(&TEST_SEED),
         &Arc::new(tools),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),

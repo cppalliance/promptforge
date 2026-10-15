@@ -5,6 +5,7 @@
 //! so a float whose text does not parse exactly, or an object whose key
 //! order changes, would make a replayed run differ from the run that ran.
 
+use harness::record::RunSeed;
 use promptforge::event::{Event, ReplyOrigin};
 use promptforge::ids::{ParseIdError, Provenance, RoundId, TaskId};
 use promptforge::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
@@ -26,7 +27,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "session-1".to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
-        seed: 3,
+        seed: RunSeed::from_bytes([3; 32]),
         flags: 0,
         started_at: 1_700_000_000_000,
     }

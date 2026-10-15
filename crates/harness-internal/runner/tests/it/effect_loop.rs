@@ -21,8 +21,8 @@ use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
 use serde_json::json;
 
 use crate::support::{
-    ClosingTool, PanickingTool, PendingTimer, PendingTool, TIMED_MAIN, TextTool, WAITS, run,
-    run_over, run_with_child, unused,
+    ClosingTool, PanickingTool, PendingTimer, PendingTool, TEST_SEED, TIMED_MAIN, TextTool, WAITS,
+    run, run_over, run_with_child, unused,
 };
 
 #[path = "effect_loop-broker.rs"]
@@ -39,7 +39,7 @@ fn meta() -> RunMeta {
     RunMeta {
         name: "session-1".to_owned(),
         prompt_hash: "sha256:fixture".to_owned(),
-        seed: 7,
+        seed: TEST_SEED,
         flags: 0,
         started_at: 0,
     }

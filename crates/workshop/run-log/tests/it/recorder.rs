@@ -13,7 +13,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use harness::record::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
+use harness::record::{
+    Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder, RunSeed,
+};
 use serde_json::json;
 use workshop_run_log::{LogError, RecordFilter, RunLog, TursoRecorder};
 
@@ -31,7 +33,7 @@ fn meta(name: &str) -> RunMeta {
     RunMeta {
         name: name.to_owned(),
         prompt_hash: "sha256:abc".to_owned(),
-        seed: u64::MAX - 1,
+        seed: RunSeed::from_bytes([0xfe; 32]),
         flags: 0,
         started_at: 1_700_000_000_000,
     }

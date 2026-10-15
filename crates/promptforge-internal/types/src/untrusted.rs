@@ -45,7 +45,7 @@
 
 use std::fmt;
 
-use sha2::{Digest as _, Sha256};
+use crate::seed::{RunSeed, derive};
 
 mod inventory;
 
@@ -70,22 +70,16 @@ impl GuardNonce {
     /// its envelopes byte for byte. A run has one nonce, shared by every
     /// envelope the run wraps.
     ///
-    /// The nonce is the first 16 bytes of SHA-256 over the ASCII tag
-    /// `promptforge.guard-nonce.v1` followed by the seed's 8 bytes in
-    /// little-endian order, rendered as 32 lowercase hex digits. The
-    /// derivation is part of the run's replay contract and never changes
-    /// silently. It is one-way: the nonce appears in every envelope the
-    /// model sees, but it does not give back the seed, and finding the
-    /// seed from a nonce means searching all 2^64 seeds. The nonce's
-    /// unpredictability is the seed's, so the caller must draw the seed from
-    /// a CSPRNG (64 bits, still far beyond any guessing margin fetched
-    /// content has).
+    /// The nonce is the first 16 bytes of [`derive()`] under the ASCII tag
+    /// `promptforge.guard-nonce.v1`, rendered as 32 lowercase hex digits.
+    /// The derivation is part of the run's replay contract and never
+    /// changes silently. It is one-way: the nonce appears in every envelope
+    /// the model sees, but it does not give back the seed. The caller must
+    /// draw the seed from a CSPRNG, and then the nonce's unpredictability
+    /// is its full 128 bits.
     #[must_use]
-    pub fn from_seed(seed: u64) -> GuardNonce {
-        let digest = Sha256::new()
-            .chain_update(NONCE_DOMAIN)
-            .chain_update(seed.to_le_bytes())
-            .finalize();
+    pub fn from_seed(seed: &RunSeed) -> GuardNonce {
+        let digest = derive(NONCE_DOMAIN, seed);
         let mut first = [0u8; 16];
         first.copy_from_slice(&digest[..16]);
         GuardNonce(format!("{:032x}", u128::from_be_bytes(first)))

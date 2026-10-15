@@ -2,6 +2,7 @@
 //! delimiter escaping and neutralization pass.
 
 use super::*;
+use crate::seed::RunSeed;
 use crate::test_support::Seeded;
 
 /// The seed every draw in these tests starts from; a failure names it.
@@ -10,7 +11,7 @@ const SEED: u64 = 0x5EED;
 /// A nonce over a seed drawn from `SEED`, standing in for a caller's
 /// CSPRNG-drawn run seed.
 fn fresh() -> GuardNonce {
-    GuardNonce::from_seed(Seeded::new(SEED).next_u64())
+    GuardNonce::from_seed(&Seeded::new(SEED).run_seed())
 }
 
 /// Every live `<untrusted_input_...>` open-or-close delimiter in `text`.
@@ -38,28 +39,30 @@ fn a_seeded_nonce_is_a_function_of_its_seed_alone() {
     // given the same seed wraps identically; a different seed is a
     // different nonce, and the rendering keeps the 32-hex-digit shape
     // `neutralize` relies on.
-    let first = GuardNonce::from_seed(7);
-    let second = GuardNonce::from_seed(7);
-    assert_eq!(first, second, "same seed, same nonce");
-    assert_ne!(
-        first,
-        GuardNonce::from_seed(8),
-        "the seed selects the nonce"
+    let mut rng = Seeded::new(SEED);
+    let (seed, other) = (rng.run_seed(), rng.run_seed());
+    let first = GuardNonce::from_seed(&seed);
+    let second = GuardNonce::from_seed(&seed);
+    rng.check_eq(&first, &second, "same seed, same nonce");
+    rng.check(
+        first != GuardNonce::from_seed(&other),
+        "the seed selects the nonce",
     );
+    let zero = RunSeed::from_bytes([0; 32]);
     assert_ne!(
-        GuardNonce::from_seed(0),
-        GuardNonce::from_seed(u64::MAX),
+        GuardNonce::from_seed(&zero),
+        GuardNonce::from_seed(&RunSeed::from_bytes([0xff; 32])),
         "the extremes do not collide"
     );
     let hex = first.to_string();
-    assert_eq!(hex.len(), 32, "32 hex digits: {hex}");
-    assert!(
+    rng.check_eq(&hex.len(), &32, format_args!("32 hex digits: {hex}"));
+    rng.check(
         hex.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-        "lowercase hex: {hex}"
+        format_args!("lowercase hex: {hex}"),
     );
     assert_ne!(
-        GuardNonce::from_seed(0).to_string(),
+        GuardNonce::from_seed(&zero).to_string(),
         "0".repeat(32),
         "a zero seed is mixed, not echoed"
     );
@@ -68,12 +71,12 @@ fn a_seeded_nonce_is_a_function_of_its_seed_alone() {
 #[test]
 fn a_seeded_nonce_matches_the_documented_sha256_derivation() {
     // The derivation is part of the replay contract, so one known answer
-    // pins it: SHA-256 over `promptforge.guard-nonce.v1` and the seed's
-    // little-endian bytes, first 16 bytes as lowercase hex, computed once
-    // outside this crate.
+    // pins it: SHA-256 over `promptforge.guard-nonce.v1` and the seed's 32
+    // bytes, first 16 bytes as lowercase hex, computed once outside this
+    // crate.
     assert_eq!(
-        GuardNonce::from_seed(7).to_string(),
-        "ab22feddfa5ea06b226ac2d588efa9eb"
+        GuardNonce::from_seed(&RunSeed::from_bytes([7; 32])).to_string(),
+        "827c7c01fad939373c973575a1e5aab6"
     );
 }
 
@@ -159,7 +162,7 @@ fn guard_nonce_equality_and_hash() {
     set.insert(nonce);
     assert!(set.contains(&clone), "equal nonces hash equally");
     let mut rng = Seeded::new(SEED);
-    let mut draw = || GuardNonce::from_seed(rng.next_u64());
+    let mut draw = || GuardNonce::from_seed(&rng.run_seed());
     assert_ne!(draw(), draw(), "nonces over two drawn seeds differ");
 }
 
