@@ -1,16 +1,9 @@
 //! Tests for the deterministic `pairs`/`next` installer.
 
-use mlua::{Lua, LuaSerdeExt, MetaMethod, UserData, UserDataMethods, Value};
+use mlua::{LuaSerdeExt, MetaMethod, UserData, UserDataMethods, Value};
 use serde_json::json;
 
-use super::install_deterministic_iteration;
-
-/// A VM with the deterministic iterator installed, as a section VM has it.
-fn vm() -> Lua {
-    let lua = Lua::new();
-    install_deterministic_iteration(&lua).expect("the installer runs");
-    lua
-}
+use crate::test_vm::{BuiltVm, TestVm};
 
 /// A userdata whose `__pairs` yields `(i, i * 10)` for `i` in `1..=count`.
 struct Counted {
@@ -40,37 +33,38 @@ struct Opaque;
 impl UserData for Opaque {}
 
 /// Evaluates a chunk that returns a sequence table and reads it back as JSON.
-fn sequence(lua: &Lua, source: &str) -> Vec<serde_json::Value> {
-    let value: Value = lua.load(source).eval().expect("the chunk evaluates");
-    lua.from_value(value).expect("the result is JSON data")
+#[track_caller]
+fn sequence(vm: &BuiltVm, source: &str) -> Vec<serde_json::Value> {
+    let value: Value = vm.eval(source);
+    vm.lua().from_value(value).expect("the result is JSON data")
 }
 
 #[test]
 fn pairs_visits_string_keys_in_byte_order() {
     // Two insertion orders produce the same key sequence: the order is a
     // function of the keys, not of the table's hash state.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local out = {}; for k in pairs({zeta=1, alpha=2, mid=3, beta=4}) \
                   do out[#out+1] = k end; return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("alpha"), json!("beta"), json!("mid"), json!("zeta")]
     );
     let source = "local out = {}; for k in pairs({beta=4, mid=3, alpha=2, zeta=1}) \
                   do out[#out+1] = k end; return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("alpha"), json!("beta"), json!("mid"), json!("zeta")]
     );
 }
 
 #[test]
 fn pairs_visits_the_array_part_before_the_hash_part() {
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local out = {}; for k in pairs({10, 20, 30, extra='x', another='y'}) \
                   do out[#out+1] = k end; return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![
             json!(1),
             json!(2),
@@ -83,12 +77,12 @@ fn pairs_visits_the_array_part_before_the_hash_part() {
 
 #[test]
 fn pairs_orders_mixed_key_types_booleans_then_numbers_then_strings() {
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local out = {}; \
                   for k in pairs({[true]='t', [7]='seven', b='bee', [false]='f', [2.5]='half', a='ay'}) \
                   do out[#out+1] = k end; return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![
             json!(false),
             json!(true),
@@ -104,7 +98,7 @@ fn pairs_orders_mixed_key_types_booleans_then_numbers_then_strings() {
 fn pairs_honors_a_pairs_metamethod() {
     // The table is empty, so only the metamethod can yield the two pairs; a
     // stock `pairs` would return nothing.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = setmetatable({}, {__pairs = function() \
                     local i = 0 \
                     return function() i = i + 1; if i <= 2 then return i, i * 10 end end \
@@ -112,38 +106,38 @@ fn pairs_honors_a_pairs_metamethod() {
                   local out = {} \
                   for k, v in pairs(t) do out[#out+1] = k .. ':' .. v end \
                   return out";
-    assert_eq!(sequence(&lua, source), vec![json!("1:10"), json!("2:20")]);
+    assert_eq!(sequence(&vm, source), vec![json!("1:10"), json!("2:20")]);
 }
 
 #[test]
 fn pairs_honors_a_userdata_pairs_metamethod() {
-    let lua = vm();
-    let counted = lua
+    let vm = TestVm::new().build();
+    let counted = vm
+        .lua()
         .create_userdata(Counted { count: 2 })
         .expect("the userdata is created");
-    lua.globals()
+    vm.lua()
+        .globals()
         .set("counted", counted)
         .expect("the global is set");
     let source = "local out = {} \
                   for k, v in pairs(counted) do out[#out+1] = k .. ':' .. v end \
                   return out";
-    assert_eq!(sequence(&lua, source), vec![json!("1:10"), json!("2:20")]);
+    assert_eq!(sequence(&vm, source), vec![json!("1:10"), json!("2:20")]);
 }
 
 #[test]
 fn pairs_refuses_a_userdata_without_a_pairs_metamethod() {
-    let lua = vm();
-    let opaque = lua
+    let vm = TestVm::new().build();
+    let opaque = vm
+        .lua()
         .create_userdata(Opaque)
         .expect("the userdata is created");
-    lua.globals()
+    vm.lua()
+        .globals()
         .set("opaque", opaque)
         .expect("the global is set");
-    let error = lua
-        .load("return pairs(opaque)")
-        .exec()
-        .expect_err("a userdata without __pairs is refused");
-    let message = error.to_string();
+    let message = vm.eval_err("return pairs(opaque)").to_string();
     assert!(
         message.contains("bad argument #1 to 'pairs' (table expected, got userdata)"),
         "the refusal must name the expected and actual types: {message}"
@@ -152,16 +146,16 @@ fn pairs_refuses_a_userdata_without_a_pairs_metamethod() {
 
 #[test]
 fn next_is_nil_for_an_empty_table() {
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {}; return {next(t) == nil, next(t, nil) == nil}";
-    assert_eq!(sequence(&lua, source), vec![json!(true), json!(true)]);
+    assert_eq!(sequence(&vm, source), vec![json!(true), json!(true)]);
 }
 
 #[test]
 fn next_returns_the_first_pair_of_a_non_empty_table() {
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local k, v = next({only=1}); return {k == 'only', v == 1}";
-    assert_eq!(sequence(&lua, source), vec![json!(true), json!(true)]);
+    assert_eq!(sequence(&vm, source), vec![json!(true), json!(true)]);
 }
 
 #[test]
@@ -171,7 +165,7 @@ fn next_resumes_after_a_cleared_boolean_key_without_replaying_the_array_part() {
     // sort positions would place the array segment after the cleared boolean
     // and replay it. Clearing each boolean key mid-walk must still visit every
     // key exactly once and stop at the end.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {10, 20, [false] = 'f', [true] = 't'} \
                   local out = {} \
                   for k in next, t do \
@@ -184,7 +178,7 @@ fn next_resumes_after_a_cleared_boolean_key_without_replaying_the_array_part() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!(1), json!(2), json!("false"), json!("true")]
     );
 }
@@ -196,7 +190,7 @@ fn next_visits_a_live_boolean_key_after_array_elements_are_cleared() {
     // as a scalar number and the resume stopped before the boolean hash key.
     // An integer key must stay in the array segment regardless of the mutable
     // length hint, so the walk still reaches the live `false`.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {10, 20, [false] = 'f'} \
                   local out = {} \
                   for k in next, t do \
@@ -205,7 +199,7 @@ fn next_visits_a_live_boolean_key_after_array_elements_are_cleared() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("1"), json!("2"), json!("false")]
     );
     let source = "local t = {10, [false] = 'f'} \
@@ -215,7 +209,7 @@ fn next_visits_a_live_boolean_key_after_array_elements_are_cleared() {
                     t[k] = nil \
                   end \
                   return out";
-    assert_eq!(sequence(&lua, source), vec![json!("1"), json!("false")]);
+    assert_eq!(sequence(&vm, source), vec![json!("1"), json!("false")]);
 }
 
 #[test]
@@ -226,7 +220,7 @@ fn next_replays_the_scalar_segment_when_a_non_array_integer_key_is_cleared() {
     // are the scalar hash keys, so the resume returns to `false` and `3` and
     // replays them before reaching the end. No key is lost, and `pairs` is
     // unaffected because it advances a captured snapshot.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = { [false]='b', [3]='c', [7]='y' } \
                   local out = {} \
                   for k in next, t do \
@@ -235,7 +229,7 @@ fn next_replays_the_scalar_segment_when_a_non_array_integer_key_is_cleared() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![
             json!("false"),
             json!("3"),
@@ -252,7 +246,7 @@ fn next_resumes_after_a_cleared_non_scalar_key() {
     // back to the trailing segment without ending the walk. Clearing one
     // table-valued key must still yield the other, then terminate, however the
     // raw `pairs` order placed the two.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {a = 1} \
                   local first, second = {}, {} \
                   t[first] = 'f' \
@@ -268,14 +262,14 @@ fn next_resumes_after_a_cleared_non_scalar_key() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("a"), json!("key"), json!("key")]
     );
 }
 
 #[test]
 fn pairs_skips_a_key_cleared_before_it_is_visited() {
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {a=1, b=2, c=3} \
                   local out = {} \
                   for k in pairs(t) do \
@@ -283,7 +277,7 @@ fn pairs_skips_a_key_cleared_before_it_is_visited() {
                     if k == 'a' then t.b = nil end \
                   end \
                   return out";
-    assert_eq!(sequence(&lua, source), vec![json!("a"), json!("c")]);
+    assert_eq!(sequence(&vm, source), vec![json!("a"), json!("c")]);
 }
 
 #[test]
@@ -291,7 +285,7 @@ fn pairs_skips_the_key_cleared_by_the_current_step() {
     // Clearing the current key leaves the previous-key cursor pointing at a
     // key no longer in the table; the walk resumes at the next live key
     // instead of erroring or dropping the rest of the traversal.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {a=1, b=2, c=3} \
                   local out = {} \
                   for k in pairs(t) do \
@@ -300,7 +294,7 @@ fn pairs_skips_the_key_cleared_by_the_current_step() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("a"), json!("b"), json!("c")]
     );
 }
@@ -312,7 +306,7 @@ fn pairs_does_not_revisit_the_array_part_when_a_boolean_key_is_cleared() {
     // the boolean key and replays it. The array part, the boolean key, and the
     // clear must all coexist for the defect to surface; each key must still be
     // yielded exactly once.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {10, 20, [false] = 'f'} \
                   local out = {} \
                   for k in pairs(t) do \
@@ -321,7 +315,7 @@ fn pairs_does_not_revisit_the_array_part_when_a_boolean_key_is_cleared() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!(1), json!(2), json!(false)]
     );
 }
@@ -332,7 +326,7 @@ fn pairs_visits_remaining_non_scalar_keys_after_one_is_cleared() {
     // current table-valued key mid-loop must not end the walk, so the other
     // table key is still visited. Both clear, so the count pins the fix without
     // depending on the raw `pairs` order between the two table keys.
-    let lua = vm();
+    let vm = TestVm::new().build();
     let source = "local t = {a = 1} \
                   local first, second = {}, {} \
                   t[first] = 'f' \
@@ -348,7 +342,7 @@ fn pairs_visits_remaining_non_scalar_keys_after_one_is_cleared() {
                   end \
                   return out";
     assert_eq!(
-        sequence(&lua, source),
+        sequence(&vm, source),
         vec![json!("a"), json!("key"), json!("key")]
     );
 }

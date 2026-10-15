@@ -189,4 +189,6 @@ pub use vm::{reset_section_vm_peak, section_vm_peak};
 pub use program::LuaProgram;
 
 #[cfg(test)]
+pub(crate) mod test_vm;
+#[cfg(test)]
 mod tests;

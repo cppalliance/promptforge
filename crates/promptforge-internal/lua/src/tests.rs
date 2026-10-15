@@ -7,6 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::test_vm::{BuiltVm, TestVm, fresh_access, test_nonce};
 use crate::vm::{LuaOutcome, run_chunk};
 use promptforge_types::tools::ToolDescriptor;
 use promptforge_vfs::{AcquireContext, ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
@@ -31,18 +32,6 @@ mod store_errors;
 mod store_reports;
 mod sys_and_var;
 mod tool_scoping;
-
-/// A fresh default handle's access capability for a test VM: the store is
-/// declared at the root and the vended identity is the test's own, so
-/// seeding through the store view and the VM's store ops never meet a
-/// second live identity.
-fn fresh_access() -> Arc<Access> {
-    Arc::new(
-        VfsRef::default()
-            .acquire(Origin::new("lua test fixture"))
-            .expect("the stock backend acquires"),
-    )
-}
 
 /// The store view derived from a test's access: the same view the `store`
 /// table's closures operate through, for seeding and extraction.
@@ -161,13 +150,6 @@ fn run(source: &str, args: &str) -> Result<LuaOutcome> {
     )
 }
 
-/// Mints the guard nonce for a test-owned VM; every wrap that VM's
-/// `untrusted` global performs shares it, matching the per-run nonce the
-/// executor mints.
-fn test_nonce() -> GuardNonce {
-    GuardNonce::from_seed(0x6c75_6174_6573)
-}
-
 /// Runs a chunk against a caller-supplied access, so a test can inspect the
 /// store through the same identity after the chunk has run.
 fn run_with(source: &str, access: &Arc<Access>) -> Result<LuaOutcome> {
@@ -234,71 +216,6 @@ fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
             .collect(),
         ..ToolSet::default()
     }
-}
-
-/// Shares a fixture set the way the run shares its own: one allocation every
-/// section VM clones.
-fn shared_set(bindings: ToolSet) -> Arc<ToolSet> {
-    Arc::new(bindings)
-}
-
-fn section_vm_with_set(
-    tools: &Arc<ToolSet>,
-    emitter: &Emitter,
-    section: &str,
-) -> Result<SectionVm> {
-    SectionVm::new_for_section(
-        &test_nonce(),
-        tools,
-        &Arc::new(Mutex::new(ModelSet::default())),
-        emitter,
-        section,
-    )
-}
-
-fn section_vm_with_bindings(
-    bindings: &ToolSet,
-    emitter: &Emitter,
-    section: &str,
-) -> Result<SectionVm> {
-    section_vm_with_set(&shared_set(bindings.clone()), emitter, section)
-}
-
-/// Builds a section VM through construction, Engine injection, and the
-/// persistent Engine globals, then runs `first` as its first chunk. Tests
-/// that need control globals add them by hand.
-fn section_vm_after(
-    first: &LuaProgram,
-    args: &str,
-    access: &Arc<Access>,
-    emitter: &Emitter,
-    section: &str,
-) -> Result<SectionVm> {
-    let mut vm = SectionVm::new(&test_nonce(), emitter, section)?;
-    vm.inject_values(args, &json!({}), access)?;
-    vm.install_engine_globals(emitter, section)?;
-    run_scalar(&vm, first, emitter, section)?;
-    Ok(vm)
-}
-
-/// A section VM with the coroutine shims installed, so the shim's `pcall`
-/// and `xpcall` replacements are live, under `cancel` when one is given.
-fn shim_vm(cancel: Option<promptforge_types::cancel::CancelHandle>) -> SectionVm {
-    let emitter = null_emitter();
-    let mut vm = SectionVm::new(&test_nonce(), &emitter, "Loop").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    vm.install_engine_globals(&emitter, "Loop")
-        .expect("Engine globals must install");
-    vm.install_scheduler_control_globals(|_| {
-        Ok::<Option<SectionText>, std::convert::Infallible>(None)
-    })
-    .expect("the control globals must install");
-    vm.install_coro_shims(1).expect("coro shims must install");
-    if let Some(cancel) = cancel {
-        vm.set_cancel(cancel);
-    }
-    vm
 }
 
 /// The 1-based number of the first line where two texts differ. When one is

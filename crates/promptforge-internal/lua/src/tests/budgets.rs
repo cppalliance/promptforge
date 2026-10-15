@@ -21,14 +21,7 @@ fn the_first_chunk_consumes_the_configured_log_budget() {
     // `apply_lua_limits` lands before any chunk runs, so the first chunk
     // spends the configured log budget rather than the construction
     // defaults.
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
-    vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 1)
-        .expect("limits apply");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values inject");
-    let observer = null_emitter();
-    vm.install_engine_globals(&observer, "Budget")
-        .expect("Engine globals must install");
+    let vm = TestVm::new().limits(DEFAULT_LUA_MEMORY_BYTES, 1).build();
     let error = run_scalar(
         &vm,
         &program("log('one')\nlog('two')"),
@@ -45,21 +38,16 @@ fn the_first_chunk_consumes_the_configured_log_budget() {
         ),
         "log-budget exhaustion must surface as a typed LuaQuota: {error:?}"
     );
-    vm.teardown(&null_emitter(), "Budget");
+    vm.teardown();
 }
 
 #[test]
 fn the_memory_budget_error_stays_reachable() {
     // The heap ceiling refuses a block that allocates past the memory budget
     // `apply_lua_limits` set.
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
-    vm.apply_lua_limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
-        .expect("limits apply");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values inject");
-    let observer = null_emitter();
-    vm.install_engine_globals(&observer, "Budget")
-        .expect("Engine globals must install");
+    let vm = TestVm::new()
+        .limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
+        .build();
     let error = run_scalar(
         &vm,
         &program(
@@ -73,5 +61,5 @@ fn the_memory_budget_error_stays_reachable() {
         lua_error_message(&error).contains("memory"),
         "the memory ceiling must surface its refusal: {error:?}"
     );
-    vm.teardown(&null_emitter(), "Budget");
+    vm.teardown();
 }

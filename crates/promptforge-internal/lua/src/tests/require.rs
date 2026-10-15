@@ -76,17 +76,19 @@ fn resolver(
 /// A shim VM with `require` installed over `entries`, rendering library
 /// prose verbatim and reporting through `emitter`, and the log of its
 /// resolver calls.
-fn require_vm(entries: Vec<Entry>, emitter: &Emitter) -> (SectionVm, Calls) {
+#[track_caller]
+fn require_vm(entries: Vec<Entry>, emitter: &Emitter) -> (BuiltVm, Calls) {
     require_vm_rendering(entries, |template, _| Ok(template.to_owned()), emitter)
 }
 
 /// [`require_vm`] with library prose rendered through `render`.
-fn require_vm_rendering<P>(entries: Vec<Entry>, render: P, emitter: &Emitter) -> (SectionVm, Calls)
+#[track_caller]
+fn require_vm_rendering<P>(entries: Vec<Entry>, render: P, emitter: &Emitter) -> (BuiltVm, Calls)
 where
     P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let calls = Calls::default();
-    let vm = shim_vm(None);
+    let vm = TestVm::new().shims().build();
     vm.install_require(resolver(entries, &calls), render, emitter, SECTION)
         .expect("require must install");
     (vm, calls)

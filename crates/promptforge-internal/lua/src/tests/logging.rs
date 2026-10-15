@@ -9,14 +9,11 @@ const EXECUTION: &str = "lua-test";
 #[test]
 fn logs_are_correlated_and_ordered_across_chunks() {
     let recorder = Arc::new(Recorder::default());
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Gather")
-        .expect("the section VM builds over the offering");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-    let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Gather")
-        .expect("Engine globals must install");
+    let vm = TestVm::new()
+        .tools(fixture_set(&[("search", "search the web")]))
+        .emitter(recorder.emitter())
+        .section("Gather")
+        .build();
     run_scalar(
         &vm,
         &program("log('prologue checkpoint')"),
@@ -31,7 +28,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
         "Gather",
     )
     .expect("second chunk log must succeed");
-    vm.teardown(recorder.emitter(), "Gather");
+    vm.teardown();
 
     assert_eq!(
         recorder.records(),
@@ -208,15 +205,11 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
     // 400-byte messages (200 two-byte chars each) exceed it on the third
     // call, while only three of the four events have been spent - so the
     // BYTE ceiling, not the event ceiling, is what refuses the call.
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
-    vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 4)
-        .expect("limits apply");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values inject");
     let recorder = Arc::new(Recorder::default());
-    let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Budget")
-        .expect("Engine globals must install");
+    let vm = TestVm::new()
+        .limits(DEFAULT_LUA_MEMORY_BYTES, 4)
+        .emitter(recorder.emitter())
+        .build();
     let program = program(
         "log(string.rep('é', 200))\n\
              log(string.rep('é', 200))\n\
@@ -245,7 +238,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
         logged, 2,
         "the first two messages fit under the byte budget; the third is refused"
     );
-    vm.teardown(&null_emitter(), "Budget");
+    vm.teardown();
 }
 
 #[test]
@@ -296,13 +289,7 @@ fn installed_log_persists_across_chunks() {
     // `log` is installed once per section by `install_engine_globals`, so a saved
     // reference stays live for every later chunk in the same VM.
     let recorder = Arc::new(Recorder::default());
-    let observer = recorder.emitter().clone();
-    let mut vm =
-        SectionVm::new(&test_nonce(), &null_emitter(), "Section").expect("VM must construct");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
-    vm.install_engine_globals(&observer, "Section")
-        .expect("Engine globals must install");
+    let vm = TestVm::new().emitter(recorder.emitter()).build();
     run_scalar(
         &vm,
         &program("saved_log = log; log('first chunk')"),
@@ -317,7 +304,7 @@ fn installed_log_persists_across_chunks() {
         "Section",
     )
     .expect("a retained log reference stays live for the section's lifecycle");
-    vm.teardown(recorder.emitter(), "Section");
+    vm.teardown();
 
     let details = recorder
         .records()

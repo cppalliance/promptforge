@@ -130,6 +130,13 @@ impl InstructionBudget {
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancel.get().is_some_and(CancelHandle::is_cancelled)
     }
+
+    /// How many hook firings have counted. A firing under a set cancel
+    /// flag aborts before it counts.
+    #[cfg(test)]
+    pub(crate) fn fired(&self) -> u64 {
+        self.fired.load(Ordering::Relaxed)
+    }
 }
 
 /// Whether `cancel` holds a set flag: the hook's poll, one `OnceLock` read

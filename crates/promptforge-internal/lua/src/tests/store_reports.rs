@@ -10,20 +10,16 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
     // `store.exists` must report its pair there for both a present and an
     // absent file, and for a failure the chunk catches with `pcall`.
     let checks = program("store.exists('seed.txt')\nstore.exists('missing.txt')");
-    let access = fresh_access();
-    store_view(&access)
+    let recorder = Arc::new(Recorder::default());
+    let vm = TestVm::new()
+        .emitter(recorder.emitter())
+        .section("Direct")
+        .build();
+    store_view(&vm.access)
         .write("seed.txt", b"planted")
         .expect("the memory store can prepare a file");
-    let recorder = Arc::new(Recorder::default());
-    let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Direct").expect("VM must build");
-    vm.inject_values("", &json!({}), &access)
-        .expect("Engine values must inject");
-    let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Direct")
-        .expect("Engine globals must install");
     run_scalar(&vm, &checks, recorder.emitter(), "Direct").expect("the checks must run");
-    vm.teardown(recorder.emitter(), "Direct");
+    vm.teardown();
     assert_eq!(
         recorder.observations(),
         [
@@ -44,16 +40,14 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
          assert(not ok, 'the failing backend must refuse the check')",
     );
     let recorder = Arc::new(Recorder::default());
-    let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Direct").expect("VM must build");
-    vm.inject_values("", &json!({}), &failing_access())
-        .expect("Engine values must inject");
-    let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Direct")
-        .expect("Engine globals must install");
+    let vm = TestVm::new()
+        .access(failing_access())
+        .emitter(recorder.emitter())
+        .section("Direct")
+        .build();
     run_scalar(&vm, &failing_check, recorder.emitter(), "Direct")
         .expect("the pcall-caught failure must not abort the chunk");
-    vm.teardown(recorder.emitter(), "Direct");
+    vm.teardown();
     assert_eq!(
         recorder.observations(),
         [

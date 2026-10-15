@@ -7,15 +7,14 @@ use super::*;
 #[test]
 fn direct_output_is_absent_in_every_executable_lua_vm() {
     let library = program("assert(print == nil); assert(warn == nil); log('library load')");
-    let library_vm = section_vm_after(&library, "", &fresh_access(), &null_emitter(), "Section")
+    let library_vm = TestVm::new().build();
+    run_scalar(&library_vm, &library, &null_emitter(), "Section")
         .expect("library VM must not expose direct output");
-    library_vm.teardown(&null_emitter(), "Section");
+    library_vm.teardown();
 
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("section VM must not expose direct output");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new()
+        .tools(fixture_set(&[("search", "search the web")]))
+        .build();
     run_scalar(
         &vm,
         &program("assert(print == nil); assert(warn == nil)"),
@@ -30,7 +29,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
         "Section",
     )
     .expect("epilog must not expose direct output");
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 
     assert_eq!(
         run("return tostring(print) .. ':' .. tostring(warn)", "")
@@ -59,7 +58,7 @@ fn dangerous_globals_absent() {
 
 #[test]
 fn an_installed_require_is_promptforges_and_loads_no_module() {
-    let vm = shim_vm(None);
+    let vm = TestVm::new().shims().build();
     vm.install_require(
         |heading, _| {
             Err::<Library, _>(Error::Lua(format!(
@@ -89,7 +88,9 @@ fn an_installed_require_is_promptforges_and_loads_no_module() {
 
 #[test]
 fn setmetatable_refuses_finalizers_and_weak_globals_but_keeps_g_handlers() {
-    let step = shim_vm(None)
+    let step = TestVm::new()
+        .shims()
+        .build()
         .start_block_coro(&program(
             "local _, gc = pcall(function() setmetatable({}, { __gc = function() end }) end)\n\
              local _, mode = pcall(function() setmetatable(_G, { __mode = 'v' }) end)\n\

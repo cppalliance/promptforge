@@ -6,11 +6,9 @@ use super::*;
 
 #[test]
 fn tool_objects_are_frozen() {
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new()
+        .tools(fixture_set(&[("search", "search the web")]))
+        .build();
     let error = run_scalar(
         &vm,
         &program("tools.get('fixtures/search').description = 'x'"),
@@ -22,16 +20,14 @@ fn tool_objects_are_frozen() {
         error.to_string().contains("description"),
         "the error must name the frozen field: {error}"
     );
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 }
 
 #[test]
 fn a_tool_reads_through_its_object_and_never_through_a_global() {
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new()
+        .tools(fixture_set(&[("search", "search the web")]))
+        .build();
     run_scalar(
         &vm,
         &program(
@@ -45,7 +41,7 @@ fn a_tool_reads_through_its_object_and_never_through_a_global() {
         "Section",
     )
     .expect("the offered tool reads through its object");
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 }
 
 #[test]
@@ -55,10 +51,7 @@ fn section_scope_keeps_each_tool_at_its_first_offer() {
         "tools.offer('fixtures/search')\n\
          tools.offer({'fixtures/fetch', 'fixtures/search'})",
     );
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &prologue, &null_emitter(), "Section").expect("section offers must record");
     let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
@@ -78,10 +71,7 @@ fn tools_offer_accepts_tool_objects_and_arrays() {
          tools.offer({fetch})\n\
          tools.offer({'fixtures/fetch', search})",
     );
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("tools.offer must accept tool objects, ids, and arrays");
     let (bindings, runtime) = vm.tool_bag_handles();
@@ -91,7 +81,7 @@ fn tools_offer_accepts_tool_objects_and_arrays() {
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
         ["fixtures_search", "fixtures_fetch"]
     );
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 }
 
 #[test]
@@ -103,10 +93,7 @@ fn empty_offer_is_a_no_op_and_failed_bulk_offer_is_atomic() {
              if ok then error('invalid offer unexpectedly succeeded') end; \
              tools.offer('fixtures/fetch')",
     );
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("caught failed offer must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles();
@@ -134,10 +121,7 @@ fn offer_rejects_a_second_argument_and_records_nothing() {
          end; \
          tools.offer('fixtures/search')",
     );
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("refused offers must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles();
@@ -148,16 +132,14 @@ fn offer_rejects_a_second_argument_and_records_nothing() {
         ["fixtures_search"],
         "refused calls record nothing and the later valid offer still lands"
     );
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 }
 
 #[test]
 fn an_unknown_id_fails_before_scope_closure() {
-    let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let vm = TestVm::new()
+        .tools(fixture_set(&[("search", "search the web")]))
+        .build();
     let error = run_scalar(
         &vm,
         &program("tools.offer('fixtures/missing')"),
@@ -171,7 +153,7 @@ fn an_unknown_id_fails_before_scope_closure() {
             .contains("tools.offer: \"fixtures/missing\" is not a catalog tool in this run"),
         "the error names the id: {error}"
     );
-    vm.teardown(&null_emitter(), "Section");
+    vm.teardown();
 }
 
 #[test]
@@ -185,10 +167,10 @@ fn tool_objects_install_without_payload_reports() {
         ..ToolSet::default()
     };
     let recorder = Recorder::default();
-    let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Section")
-        .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    let _vm = TestVm::new()
+        .tools(bindings)
+        .emitter(recorder.emitter())
+        .build();
     let trace = format!("{:?}", recorder.observations());
     assert!(!trace.contains("private_alias"));
     assert!(!trace.contains("private capability"));
@@ -207,9 +189,7 @@ fn offer_over_an_empty_offering_fails_in_a_chunk() {
 
 #[test]
 fn offer_over_an_empty_offering_fails_in_a_prologue() {
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
+    let vm = TestVm::new().build();
     let error = run_scalar(
         &vm,
         &program("tools.offer('web/search')"),
@@ -223,16 +203,14 @@ fn offer_over_an_empty_offering_fails_in_a_prologue() {
             .contains("is not a catalog tool in this run"),
         "the error must report the missing tool: {error}"
     );
-    vm.teardown(&null_emitter(), "Test");
+    vm.teardown();
 }
 
 #[test]
 fn a_section_vm_over_an_empty_offering_snapshots_to_an_empty_scope() {
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
+    let vm = TestVm::new().build();
     let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
     assert!(scope.is_empty());
-    vm.teardown(&null_emitter(), "Test");
+    vm.teardown();
 }

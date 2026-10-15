@@ -7,13 +7,12 @@ use super::*;
 #[test]
 fn long_running_lua_block_cancels_cooperatively() {
     use promptforge_types::cancel::CancelHandle;
-    use std::time::{Duration, Instant};
 
     // An unbounded loop that, without cooperative cancellation, would run
     // forever: no instruction ceiling ends it. With the cancel flag set, the
-    // very first instruction-hook firing aborts it; the hook's error is the
-    // raw cancellation message, which the VM classifies as
-    // `Error::Interrupted` once the flag is observed set.
+    // very first instruction-hook firing aborts it before counting itself;
+    // the hook's error is the raw cancellation message, which the VM
+    // classifies as `Error::Interrupted` once the flag is observed set.
     let program = LuaProgram::compile(
         "local n = 0\nwhile true do n = n + 1 end",
         "cancel loop",
@@ -26,17 +25,17 @@ fn long_running_lua_block_cancels_cooperatively() {
     let handle = CancelHandle::new();
     handle.cancel();
 
-    let start = Instant::now();
     let lua = Lua::new();
     let budget = install_instruction_budget(&lua).expect("hook installs on a fresh VM");
     budget.set_cancel(handle);
     let func = program.load(&lua).expect("bytecode loads");
+    let fired = budget.fired();
     let outcome = func.call::<()>(());
 
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "a cancelled Lua block must abort promptly, took {:?}",
-        start.elapsed()
+    assert_eq!(
+        budget.fired(),
+        fired,
+        "a cancelled Lua block must abort at the first hook firing, required no counted firing"
     );
     assert!(
         budget.is_cancelled(),
@@ -54,32 +53,25 @@ fn long_running_lua_block_cancels_cooperatively() {
 #[test]
 fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
     use promptforge_types::cancel::CancelHandle;
-    use std::time::{Duration, Instant};
 
     // No instruction ceiling aborts a runaway block anymore; the cancel flag,
     // polled by the instruction hook, is the kill switch. With the flag set
     // before the chunk starts, the first hook firing inside a tight
-    // `while true do end` aborts it within a bounded wall-clock.
+    // `while true do end` aborts it before counting itself.
     let handle = CancelHandle::new();
     handle.cancel();
 
-    let start = Instant::now();
-    let outcome = (|| {
-        let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Loop")?;
-        vm.set_cancel(handle);
-        vm.inject_values("", &json!({}), &fresh_access())?;
-        let observer = null_emitter();
-        vm.install_engine_globals(&observer, "Loop")?;
-        let result = run_scalar(&vm, &program("while true do end"), &null_emitter(), "Loop");
-        vm.teardown(&null_emitter(), "Loop");
-        result
-    })();
+    let vm = TestVm::new().build();
+    vm.set_cancel(handle);
+    let fired = vm.hook_firings();
+    let outcome = run_scalar(&vm, &program("while true do end"), &null_emitter(), "Loop");
 
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "a cancelled tight loop must abort within a bounded wall-clock, took {:?}",
-        start.elapsed()
+    assert_eq!(
+        vm.hook_firings(),
+        fired,
+        "a cancelled tight loop must abort at the first hook firing, required no counted firing"
     );
+    vm.teardown();
     assert!(
         matches!(outcome, Err(Error::Interrupted)),
         "expected Interrupted, got {outcome:?}"
@@ -88,10 +80,13 @@ fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
 
 /// Starts `source` as a block coroutine on a shim VM whose run is already
 /// cancelled.
+#[track_caller]
 fn start_cancelled_block(source: &str) -> Result<CoroStep> {
     let handle = promptforge_types::cancel::CancelHandle::new();
     handle.cancel();
-    shim_vm(Some(handle)).start_block_coro(&program(source))
+    let vm = TestVm::new().shims().build();
+    vm.set_cancel(handle);
+    vm.start_block_coro(&program(source))
 }
 
 #[test]
@@ -117,7 +112,9 @@ fn a_cancelled_run_unwinds_through_an_author_xpcall_loop() {
 
 #[test]
 fn a_pcall_failure_without_a_cancel_flag_still_returns_false_and_the_error() {
-    let step = shim_vm(None)
+    let step = TestVm::new()
+        .shims()
+        .build()
         .start_block_coro(&program(
             "local ok, err = pcall(error, 'boom')\nreturn tostring(ok) .. '|' .. tostring(err)",
         ))
@@ -141,7 +138,9 @@ fn a_cancelled_run_skips_a_looping_xpcall_message_handler() {
 
 #[test]
 fn an_xpcall_message_handler_without_a_cancel_flag_still_receives_the_failure() {
-    let step = shim_vm(None)
+    let step = TestVm::new()
+        .shims()
+        .build()
         .start_block_coro(&program(
             "local ok, handled = xpcall(error, function(e) return 'handled ' .. tostring(e) end, 'boom')\n\
              return tostring(ok) .. '|' .. tostring(handled)",

@@ -1,11 +1,11 @@
 //! Tests for the `models` namespace: `use`, `default`, `get`, and the model runtime selection.
 
-use super::{ModelRuntime, UseOptions, install_models};
-use mlua::Lua;
+use super::{ModelRuntime, UseOptions};
+use crate::test_vm::{BuiltVm, TestVm};
 use promptforge_model_client::model::ModelBinding;
 use promptforge_model_client::model::{ModelInvocation, ModelSet, Temperature};
 use promptforge_types::detail::model_id_from_validated;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// The runtime's selected label, if any.
 fn used(runtime: &ModelRuntime) -> Option<&str> {
@@ -52,35 +52,31 @@ fn bound_role(label: &str, capabilities: &[&str]) -> ModelBinding {
 
 /// A fresh VM with the `models` table installed over a shared set holding
 /// the `writer` and `critic` roles.
-fn models_vm() -> (Lua, Arc<Mutex<ModelSet>>, Arc<Mutex<ModelRuntime>>) {
-    let lua = Lua::new();
-    let set = Arc::new(Mutex::new(ModelSet::from_parts(
-        vec![
-            bound_role("writer", &["frontier", "thinking"]),
-            bound_role("critic", &["fast"]),
-        ],
-        None,
-    )));
-    let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
-    install_models(&lua, &lua.globals(), &set, &runtime, false)
-        .expect("the models install cannot fail on a fresh VM");
-    (lua, set, runtime)
+#[track_caller]
+fn models_vm() -> BuiltVm {
+    TestVm::new()
+        .models(ModelSet::from_parts(
+            vec![
+                bound_role("writer", &["frontier", "thinking"]),
+                bound_role("critic", &["fast"]),
+            ],
+            None,
+        ))
+        .build()
 }
 
 #[test]
 fn the_models_namespace_has_no_bind() {
     // `models.infer` suspends, so only the coroutine shim layer defines it.
-    let (lua, _, _) = models_vm();
+    let vm = models_vm();
     let (bind_is_nil, has_use, has_default, has_get, infer_is_nil): (bool, bool, bool, bool, bool) =
-        lua.load(
+        vm.eval(
             "return models.bind == nil, \
                     type(models.use) == 'function', \
                     type(models.default) == 'function', \
                     type(models.get) == 'function', \
                     models.infer == nil",
-        )
-        .eval()
-        .expect("the namespace probe evaluates");
+        );
     assert!(bind_is_nil && has_use && has_default && has_get);
     assert!(
         infer_is_nil,
@@ -90,11 +86,9 @@ fn the_models_namespace_has_no_bind() {
 
 #[test]
 fn a_handle_reads_nil_methods_where_the_shim_prelude_never_ran() {
-    let (lua, _, _) = models_vm();
-    let (infer_is_nil, loop_is_nil): (bool, bool) = lua
-        .load("local h = models.get('writer'); return h.infer == nil, h.loop == nil")
-        .eval()
-        .expect("the method probe evaluates");
+    let vm = models_vm();
+    let (infer_is_nil, loop_is_nil): (bool, bool) =
+        vm.eval("local h = models.get('writer'); return h.infer == nil, h.loop == nil");
     assert!(
         infer_is_nil && loop_is_nil,
         "with no shim prelude a handle's infer and loop must read nil"
@@ -103,22 +97,18 @@ fn a_handle_reads_nil_methods_where_the_shim_prelude_never_ran() {
 
 #[test]
 fn models_use_selects_a_bound_role_by_label() {
-    let (lua, _, runtime) = models_vm();
-    let handle: String = lua
-        .load("local h = models.use('writer'); return h.label .. '|' .. h.name")
-        .eval()
-        .expect("a bound label selects");
+    let vm = models_vm();
+    let handle: String = vm.eval("local h = models.use('writer'); return h.label .. '|' .. h.name");
     assert_eq!(handle, "writer|writer");
-    assert_eq!(used(&runtime.lock().expect("runtime lock")), Some("writer"));
+    assert_eq!(
+        used(&vm.model_runtime.lock().expect("runtime lock")),
+        Some("writer")
+    );
 }
 
 #[test]
 fn models_use_rejects_an_unbound_label() {
-    let (lua, _, _) = models_vm();
-    let error = lua
-        .load("models.use('ghost')")
-        .exec()
-        .expect_err("an unbound label is a hard error");
+    let error = models_vm().eval_err("models.use('ghost')");
     assert!(
         error
             .to_string()
@@ -129,26 +119,24 @@ fn models_use_rejects_an_unbound_label() {
 
 #[test]
 fn models_use_options_reach_the_returned_handle() {
-    let (lua, _, runtime) = models_vm();
-    let (temperature, max_tokens): (f64, u32) = lua
-        .load(
-            "local h = models.use('writer', { temperature = 0.3, max_tokens = 256 }); \
-             return h.temperature, h.max_tokens",
-        )
-        .eval()
-        .expect("a valid options table is accepted");
+    let vm = models_vm();
+    let (temperature, max_tokens): (f64, u32) = vm.eval(
+        "local h = models.use('writer', { temperature = 0.3, max_tokens = 256 }); \
+         return h.temperature, h.max_tokens",
+    );
     assert!((temperature - 0.3).abs() < f64::EPSILON);
     assert_eq!(max_tokens, 256);
-    assert_eq!(used(&runtime.lock().expect("runtime lock")), Some("writer"));
+    assert_eq!(
+        used(&vm.model_runtime.lock().expect("runtime lock")),
+        Some("writer")
+    );
 }
 
 #[test]
 fn models_use_accepts_an_integer_temperature_and_leaves_omitted_fields_nil() {
-    let (lua, _, _) = models_vm();
-    let (temperature, max_tokens_is_nil): (f64, bool) = lua
-        .load("local h = models.use('writer', { temperature = 0 }); return h.temperature, h.max_tokens == nil")
-        .eval()
-        .expect("an integer temperature is accepted");
+    let (temperature, max_tokens_is_nil): (f64, bool) = models_vm().eval(
+        "local h = models.use('writer', { temperature = 0 }); return h.temperature, h.max_tokens == nil",
+    );
     assert!(temperature.abs() < f64::EPSILON);
     assert!(
         max_tokens_is_nil,
@@ -209,17 +197,14 @@ fn models_use_rejects_invalid_options_without_selecting() {
         ),
     ];
     for (chunk, expected) in cases {
-        let (lua, _, runtime) = models_vm();
-        let error = lua
-            .load(chunk)
-            .exec()
-            .expect_err("an invalid options argument is a hard error");
+        let vm = models_vm();
+        let error = vm.eval_err(chunk);
         assert!(
             error.to_string().contains(expected),
             "{chunk}: expected {expected:?} in {error}"
         );
         assert!(
-            used(&runtime.lock().expect("runtime lock")).is_none(),
+            used(&vm.model_runtime.lock().expect("runtime lock")).is_none(),
             "{chunk}: a rejected call must not select"
         );
     }
@@ -245,11 +230,7 @@ fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
     ];
     for (chunk, expected) in cases {
         for _ in 0..32 {
-            let (lua, _, _) = models_vm();
-            let error = lua
-                .load(chunk)
-                .exec()
-                .expect_err("an invalid options table is a hard error");
+            let error = models_vm().eval_err(chunk);
             assert!(
                 error.to_string().contains(expected),
                 "{chunk}: expected {expected:?} in {error}"
@@ -260,11 +241,9 @@ fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
 
 /// The section's effective binding's `(temperature, max_tokens)`, read the
 /// way the Engine's Chat-effect sites read it.
-fn effective_sampling(
-    set: &std::sync::Mutex<ModelSet>,
-    runtime: &std::sync::Mutex<ModelRuntime>,
-) -> (Option<f64>, Option<u32>) {
-    let binding = crate::resolve_model_binding(set, runtime)
+#[track_caller]
+fn effective_sampling(vm: &BuiltVm) -> (Option<f64>, Option<u32>) {
+    let binding = crate::resolve_model_binding(vm.models.as_ref(), &vm.model_runtime)
         .expect("the model state is readable")
         .expect("a selection resolves");
     let invocation = binding.invocation();
@@ -276,19 +255,15 @@ fn effective_sampling(
 
 #[test]
 fn the_selection_carries_its_options_until_a_later_models_use_replaces_them() {
-    let (lua, set, runtime) = models_vm();
-    lua.load("models.use('writer', { temperature = 0.5, max_tokens = 64 })")
-        .exec()
-        .expect("a valid options table is accepted");
-    assert_eq!(effective_sampling(&set, &runtime), (Some(0.5), Some(64)));
+    let vm = models_vm();
+    vm.eval::<()>("models.use('writer', { temperature = 0.5, max_tokens = 64 })");
+    assert_eq!(effective_sampling(&vm), (Some(0.5), Some(64)));
 
-    let (temperature_is_nil, max_tokens_is_nil): (bool, bool) = lua
-        .load("local h = models.use('writer'); return h.temperature == nil, h.max_tokens == nil")
-        .eval()
-        .expect("a plain models.use selects");
+    let (temperature_is_nil, max_tokens_is_nil): (bool, bool) =
+        vm.eval("local h = models.use('writer'); return h.temperature == nil, h.max_tokens == nil");
     assert!(temperature_is_nil && max_tokens_is_nil);
     assert_eq!(
-        effective_sampling(&set, &runtime),
+        effective_sampling(&vm),
         (None, None),
         "a plain models.use clears the earlier options"
     );
@@ -296,46 +271,35 @@ fn the_selection_carries_its_options_until_a_later_models_use_replaces_them() {
 
 #[test]
 fn a_models_get_handle_for_the_selected_label_keeps_the_role_defaults() {
-    let (lua, _, _) = models_vm();
-    let (temperature_is_nil, max_tokens_is_nil): (bool, bool) = lua
-        .load(
-            "models.use('writer', { temperature = 0.5, max_tokens = 64 }); \
-             local h = models.get('writer'); \
-             return h.temperature == nil, h.max_tokens == nil",
-        )
-        .eval()
-        .expect("models.get inspects the bound role");
+    let (temperature_is_nil, max_tokens_is_nil): (bool, bool) = models_vm().eval(
+        "models.use('writer', { temperature = 0.5, max_tokens = 64 }); \
+         local h = models.get('writer'); \
+         return h.temperature == nil, h.max_tokens == nil",
+    );
     assert!(temperature_is_nil && max_tokens_is_nil);
 }
 
 #[test]
 fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
-    let (lua, set, _) = models_vm();
-    lua.load("models.default('writer')")
-        .exec()
-        .expect("a bound label becomes the default");
+    let vm = models_vm();
+    vm.eval::<()>("models.default('writer')");
     assert_eq!(
-        set.lock().expect("set lock").default.as_deref(),
+        vm.models.lock().expect("set lock").default.as_deref(),
         Some("writer")
     );
 }
 
 #[test]
 fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
-    let (lua, set, _) = models_vm();
+    let vm = models_vm();
     // A library every section requires re-runs in each, so re-naming the
     // same default must be a no-op.
-    lua.load("models.default('writer'); models.default('writer')")
-        .exec()
-        .expect("re-naming the same default is a no-op");
+    vm.eval::<()>("models.default('writer'); models.default('writer')");
     assert_eq!(
-        set.lock().expect("set lock").default.as_deref(),
+        vm.models.lock().expect("set lock").default.as_deref(),
         Some("writer")
     );
-    let error = lua
-        .load("models.default('critic')")
-        .exec()
-        .expect_err("the prompt-wide default cannot change mid-run");
+    let error = vm.eval_err("models.default('critic')");
     assert!(
         error
             .to_string()
@@ -346,11 +310,7 @@ fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
 
 #[test]
 fn models_default_rejects_an_unbound_label() {
-    let (lua, _, _) = models_vm();
-    let error = lua
-        .load("models.default('ghost')")
-        .exec()
-        .expect_err("an unbound label is a hard error");
+    let error = models_vm().eval_err("models.default('ghost')");
     assert!(
         error
             .to_string()
@@ -361,62 +321,24 @@ fn models_default_rejects_an_unbound_label() {
 
 #[test]
 fn the_handle_exposes_label_and_the_full_keyword_set() {
-    let (lua, _, _) = models_vm();
-    let inspected: String = lua
-        .load(
-            "local h = models.get('writer'); \
-             return h.label .. '|' .. h.model_id .. '|' .. table.concat(h.capabilities, ',')",
-        )
-        .eval()
-        .expect("the handle inspects");
+    let inspected: String = models_vm().eval(
+        "local h = models.get('writer'); \
+         return h.label .. '|' .. h.model_id .. '|' .. table.concat(h.capabilities, ',')",
+    );
     assert_eq!(inspected, "writer|m1|frontier,thinking");
-}
-
-/// Builds a section VM with the raw-model-id fallback set to `raw_ids`,
-/// Engine values injected (which installs the `models` table).
-fn h2_vm(raw_ids: bool) -> crate::SectionVm {
-    let emitter = crate::tests::recording::null_emitter();
-    let mut vm = crate::SectionVm::new(
-        &promptforge_types::untrusted::GuardNonce::from_seed(1),
-        &emitter,
-        "S",
-    )
-    .expect("the VM builds");
-    if raw_ids {
-        vm.allow_raw_model_ids();
-    }
-    vm.inject_values(
-        "",
-        &serde_json::json!({}),
-        &std::sync::Arc::new(
-            promptforge_vfs::VfsRef::default()
-                .acquire(promptforge_vfs::Origin::new("models test fixture"))
-                .expect("the stock backend acquires"),
-        ),
-    )
-    .expect("value injection installs the models table");
-    vm
 }
 
 #[test]
 fn models_get_resolves_an_undeclared_alias_as_a_raw_gateway_id_only_when_permitted() {
-    let vm = h2_vm(true);
-    let resolved: String = vm
-        .lua()
-        .load("local h = models.get('qwen/qwen3-8b'); return h.name .. '|' .. h.model_id .. '|' .. h.context")
-        .eval()
-        .expect("the raw-id opt-in resolves the undeclared alias");
+    let resolved: String = TestVm::new().raw_model_ids().build().eval(
+        "local h = models.get('qwen/qwen3-8b'); return h.name .. '|' .. h.model_id .. '|' .. h.context",
+    );
     assert_eq!(
         resolved, "qwen/qwen3-8b|qwen/qwen3-8b|8192",
         "the handle freezes the raw gateway id under the fallback context window"
     );
 
-    let vm = h2_vm(false);
-    let error = vm
-        .lua()
-        .load("models.get('ghost')")
-        .exec()
-        .expect_err("without the opt-in an undeclared alias is an error");
+    let error = TestVm::new().build().eval_err("models.get('ghost')");
     assert!(
         error.to_string().contains("is not a bound model role"),
         "the strict path names the bound-role rule: {error}"
@@ -425,12 +347,10 @@ fn models_get_resolves_an_undeclared_alias_as_a_raw_gateway_id_only_when_permitt
 
 #[test]
 fn the_raw_id_fallback_still_validates_the_gateway_id() {
-    let vm = h2_vm(true);
-    let error = vm
-        .lua()
-        .load("models.get('bad\\nid')")
-        .exec()
-        .expect_err("a control character fails the id's own validation");
+    let error = TestVm::new()
+        .raw_model_ids()
+        .build()
+        .eval_err("models.get('bad\\nid')");
     assert!(
         error.to_string().contains("is invalid"),
         "the raw path validates as a gateway id, not as an alias: {error}"
@@ -439,19 +359,19 @@ fn the_raw_id_fallback_still_validates_the_gateway_id() {
 
 #[test]
 fn a_poisoned_model_set_reaches_the_caller_as_a_lua_error() {
-    let (_, set, runtime) = models_vm();
-    runtime
+    let vm = models_vm();
+    vm.model_runtime
         .lock()
         .expect("runtime lock")
         .select("writer".to_owned(), UseOptions::default());
-    let poisoner = Arc::clone(&set);
+    let poisoner = Arc::clone(&vm.models);
     let _ = std::thread::spawn(move || {
         let _guard = poisoner.lock();
         panic!("poison the model set");
     })
     .join();
 
-    let error = crate::resolve_model_binding(set.as_ref(), &runtime)
+    let error = crate::resolve_model_binding(vm.models.as_ref(), &vm.model_runtime)
         .expect_err("a poisoned model set cannot resolve a binding");
     assert!(
         matches!(&error, crate::Error::Lua(message) if message == "model set mutex was poisoned"),

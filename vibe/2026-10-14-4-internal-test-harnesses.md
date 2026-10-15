@@ -572,7 +572,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-5>
 
-### Step 5: lua TestVm and the section-VM tests
+### Step 5: lua TestVm and the section-VM tests [completed]
 
 - Component: lua
 - Tests:

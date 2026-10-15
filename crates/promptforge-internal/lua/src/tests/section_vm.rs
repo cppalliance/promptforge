@@ -139,7 +139,7 @@ fn section_vm_value_injection_bypasses_chunk_global_metatables() {
     let bindings = fixture_set(&[("search", "search the web")]);
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
-        &shared_set(bindings),
+        &Arc::new(bindings),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),
         "Test",
@@ -196,7 +196,6 @@ fn section_vm_reports_store_operations_in_each_chunk() {
 
 #[test]
 fn section_vm_accepts_only_scalar_top_level_returns() {
-    let access = fresh_access();
     for (source, expected) in [
         ("return 'text'", Some("text")),
         ("return 42", Some("42")),
@@ -204,9 +203,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         ("return true", Some("true")),
         ("return nil", None),
     ] {
-        let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-        vm.inject_values("", &json!({}), &access)
-            .expect("Engine values must inject");
+        let vm = TestVm::new().build();
         assert_eq!(
             run_scalar(&vm, &program(source), &null_emitter(), "Test")
                 .expect("scalar return must work")
@@ -215,9 +212,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         );
     }
 
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &access)
-        .expect("Engine values must inject");
+    let vm = TestVm::new().build();
     let error = run_scalar(&vm, &program("return {}"), &null_emitter(), "Test")
         .expect_err("table returns must be refused");
     assert!(error.to_string().contains("cannot return a table"));
@@ -228,10 +223,10 @@ fn section_vms_isolate_mutated_globals() {
     let seed = program("counter = 0");
     let increment = program("counter = counter + 1; return counter");
     let access = fresh_access();
-    let first = section_vm_after(&seed, "", &access, &null_emitter(), "First")
-        .expect("first VM must build");
-    let second = section_vm_after(&seed, "", &access, &null_emitter(), "Second")
-        .expect("second VM must build");
+    let first = TestVm::new().access(Arc::clone(&access)).build();
+    run_scalar(&first, &seed, &null_emitter(), "First").expect("first VM must seed");
+    let second = TestVm::new().access(access).build();
+    run_scalar(&second, &seed, &null_emitter(), "Second").expect("second VM must seed");
 
     assert_eq!(
         run_scalar(&first, &increment, &null_emitter(), "First")
@@ -297,16 +292,13 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
 fn section_lifecycle_failures_report_their_phase() {
     let recorder = Arc::new(Recorder::default());
     let failing = program("error('private chunk failure')");
-    let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Failing").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    let observer = recorder.emitter().clone();
-    vm.install_engine_globals(&observer, "Failing")
-        .expect("Engine globals must install");
+    let vm = TestVm::new()
+        .emitter(recorder.emitter())
+        .section("Failing")
+        .build();
     run_scalar(&vm, &failing, recorder.emitter(), "Failing")
         .expect_err("the failing chunk must fail");
-    vm.teardown(recorder.emitter(), "Failing");
+    vm.teardown();
     let observations = recorder.observations();
     assert_eq!(
         observations,
@@ -339,12 +331,7 @@ fn call_with_a_non_string_target_errors() {
     // The control callback resolves its target through the same
     // `resolve_section_target` boundary as the Engine: a number is not a
     // heading, and the error says so.
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    let observer = null_emitter();
-    vm.install_engine_globals(&observer, "Test")
-        .expect("Engine globals must install");
+    let vm = TestVm::new().build();
     vm.install_control_globals(
         |target, _, _| resolve_section_target(target).map_err(Error::lua),
         |_| Err(Error::Lua("prompt reads are not needed here".to_owned())),
@@ -362,7 +349,7 @@ fn call_with_a_non_string_target_errors() {
     )
     .expect("a non-string call target must error");
     assert_eq!(out.as_deref(), Some("ok"));
-    vm.teardown(&null_emitter(), "Test");
+    vm.teardown();
 }
 
 #[test]
@@ -375,19 +362,7 @@ fn a_chunk_sees_the_tools_table_and_no_tool_global_ever_installs() {
         "tools.offer(tools.get('fixtures/search'))\n\
          assert(fixtures_search == nil, 'no tool installs as a global')",
     );
-    let mut vm = SectionVm::new_for_section(
-        &test_nonce(),
-        &shared_set(bindings),
-        &Arc::new(Mutex::new(ModelSet::default())),
-        &null_emitter(),
-        "Test",
-    )
-    .expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    let observer = null_emitter();
-    vm.install_engine_globals(&observer, "Test")
-        .expect("Engine globals must install");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &scope, &null_emitter(), "Test").expect("the tools table must work");
 
     assert_eq!(
@@ -422,19 +397,7 @@ fn functions_resolve_engine_globals_when_called_from_a_later_chunk() {
              return var.scoped\n\
          end",
     );
-    let mut vm = SectionVm::new_for_section(
-        &test_nonce(),
-        &shared_set(bindings),
-        &Arc::new(Mutex::new(ModelSet::default())),
-        &null_emitter(),
-        "Test",
-    )
-    .expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
-    let observer = null_emitter();
-    vm.install_engine_globals(&observer, "Test")
-        .expect("Engine globals must install");
+    let vm = TestVm::new().tools(bindings).build();
     run_scalar(&vm, &define, &null_emitter(), "Test").expect("the defining chunk must run");
 
     assert_eq!(

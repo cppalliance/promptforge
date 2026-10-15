@@ -6,18 +6,13 @@
 //! a name. The list against a set-up VM's globals is the Engine's test,
 //! over its real section setup.
 
-use std::sync::Arc;
-
-use mlua::{FromLuaMulti, Lua, LuaOptions, StdLib};
-use promptforge_types::untrusted::GuardNonce;
+use mlua::{Lua, LuaOptions, StdLib};
 use serde_json::json;
 
 use super::{GLOBALS_CHUNK_NAME, GLOBALS_SOURCE, RESERVED_NAMES, Reserved, reserved_name};
-use crate::tests::recording::null_emitter;
+use crate::Argv;
+use crate::test_vm::{BuiltVm, TestVm};
 use crate::tests::{assert_chunk_name_resolves, refusal_line};
-use crate::{Argv, SectionText, SectionVm};
-
-const SECTION: &str = "Globals";
 
 /// The refusal line of an assignment to the frozen `argv` global.
 const ARGV_REFUSAL: &str = "argv is frozen outside H1: assign it in H1 only";
@@ -31,50 +26,26 @@ const PROSE: &str = "the block's prose";
 /// Builds a section VM the way section setup does up to the Plugin
 /// preludes: frozen `argv`, the Engine globals, the control globals, and the
 /// coroutine shims, with a block's lazy `prose` installed.
-fn frozen_vm() -> SectionVm {
+#[track_caller]
+fn frozen_vm() -> BuiltVm {
     let argv = json!({ "query": "papers" });
     section_vm(Argv::Frozen(Some(&argv)))
 }
 
 /// [`frozen_vm`] with `argv` installed in the given mode.
-fn section_vm(argv: Argv<'_>) -> SectionVm {
-    let emitter = null_emitter();
-    let mut vm =
-        SectionVm::new(&GuardNonce::from_seed(11), &emitter, SECTION).expect("the VM builds");
-    let access = Arc::new(
-        promptforge_vfs::VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("globals test fixture"))
-            .expect("the stock backend acquires"),
-    );
-    vm.inject_values_with_var("", &json!({ "id": 1 }), &access, None, argv)
-        .expect("Engine values inject");
-    vm.install_engine_globals(&emitter, SECTION)
-        .expect("the Engine globals install");
-    vm.install_scheduler_control_globals(|_| {
-        Ok::<Option<SectionText>, std::convert::Infallible>(None)
-    })
-    .expect("the control globals install");
-    vm.install_coro_shims(1)
-        .expect("the coroutine shims install");
+#[track_caller]
+fn section_vm(argv: Argv<'_>) -> BuiltVm {
+    let vm = TestVm::new().argv(argv).shims().build();
     vm.install_lazy_prose(|_| Ok(PROSE.to_owned()))
         .expect("the prose guard installs");
     vm
 }
 
-/// Runs author code on the VM's main state under the chunk name `probe`.
-fn eval<T: FromLuaMulti>(vm: &SectionVm, source: &str) -> T {
-    vm.lua()
-        .load(source)
-        .set_name("probe")
-        .eval()
-        .expect("the author chunk runs")
-}
-
 /// The caught refusals of assigning `argv` and `prose`, each reduced to its
 /// first line.
-fn assignment_refusals(vm: &SectionVm) -> (String, String) {
-    let (argv, prose): (String, String) = eval(
-        vm,
+#[track_caller]
+fn assignment_refusals(vm: &BuiltVm) -> (String, String) {
+    let (argv, prose): (String, String) = vm.eval(
         "local _, argv_err = pcall(function() argv = 'hijacked' end)\n\
          local _, prose_err = pcall(function() prose = 'overwritten' end)\n\
          return tostring(argv_err), tostring(prose_err)",
@@ -87,8 +58,9 @@ fn assignment_refusals(vm: &SectionVm) -> (String, String) {
 
 /// Asserts `argv` and `prose` still read as the Engine set them and still
 /// refuse assignment with their unchanged refusals.
-fn assert_guards_hold(vm: &SectionVm, after: &str) {
-    let (query, prose): (String, String) = eval(vm, "return argv.query, prose");
+#[track_caller]
+fn assert_guards_hold(vm: &BuiltVm, after: &str) {
+    let (query, prose): (String, String) = vm.eval("return argv.query, prose");
     assert_eq!(
         (query.as_str(), prose.as_str()),
         ("papers", PROSE),
@@ -135,12 +107,10 @@ fn no_setmetatable_call_on_g_frees_argv_or_prose() {
          __newindex = function() end })",
     ] {
         let vm = frozen_vm();
-        eval::<()>(&vm, attempt);
+        vm.eval::<()>(attempt);
         assert_guards_hold(&vm, attempt);
-        let captured: bool = eval(
-            &vm,
-            "return captured == nil or (captured.argv == nil and captured.prose == nil)",
-        );
+        let captured: bool =
+            vm.eval("return captured == nil or (captured.argv == nil and captured.prose == nil)");
         assert!(
             captured,
             "the author's __newindex never sees argv or prose after {attempt}"
@@ -151,8 +121,7 @@ fn no_setmetatable_call_on_g_frees_argv_or_prose() {
 #[test]
 fn the_h1_argv_is_a_plain_global_that_no_author_metatable_intercepts() {
     let vm = section_vm(Argv::Writable(None));
-    let (absent, hooked, query): (bool, bool, String) = eval(
-        &vm,
+    let (absent, hooked, query): (bool, bool, String) = vm.eval(
         "seen = {}\n\
          setmetatable(_G, {\n\
            __index = function(_, key) error('undefined global ' .. key, 2) end,\n\
@@ -172,8 +141,7 @@ fn the_h1_argv_is_a_plain_global_that_no_author_metatable_intercepts() {
         vm.argv_json().expect("the repair reads back"),
         Some(json!({ "query": "repaired" }))
     );
-    let (prose_refusal, cleared): (String, bool) = eval(
-        &vm,
+    let (prose_refusal, cleared): (String, bool) = vm.eval(
         "local _, err = pcall(function() prose = 'x' end)\n\
          argv = nil\n\
          return tostring(err), argv == nil",
@@ -185,10 +153,9 @@ fn the_h1_argv_is_a_plain_global_that_no_author_metatable_intercepts() {
 #[test]
 fn editing_the_table_getmetatable_returns_cannot_free_argv_or_prose() {
     let vm = frozen_vm();
-    let before: bool = eval(&vm, "return getmetatable(_G) == nil");
+    let before: bool = vm.eval("return getmetatable(_G) == nil");
     assert!(before, "with no author metatable, getmetatable(_G) is nil");
-    eval::<()>(
-        &vm,
+    vm.eval::<()>(
         "setmetatable(_G, {})\n\
          local mt = getmetatable(_G)\n\
          mt.__index = function() return 'author' end\n\
@@ -201,8 +168,7 @@ fn editing_the_table_getmetatable_returns_cannot_free_argv_or_prose() {
 #[test]
 fn no_sandbox_route_reaches_the_guard_or_a_raw_global() {
     let vm = frozen_vm();
-    let reachable: String = eval(
-        &vm,
+    let reachable: String = vm.eval(
         "local found = {}\n\
          for _, name in ipairs({ 'rawget', 'rawset', 'rawequal', 'rawlen', 'debug', 'load', \
          'loadstring', 'dofile', 'loadfile', 'require', 'package', 'getfenv', 'setfenv', \
@@ -220,8 +186,7 @@ fn no_sandbox_route_reaches_the_guard_or_a_raw_global() {
 #[test]
 fn getmetatable_on_g_returns_the_author_metatable_and_edits_take_effect_live() {
     let vm = frozen_vm();
-    let (same, untouched, returned): (bool, bool, bool) = eval(
-        &vm,
+    let (same, untouched, returned): (bool, bool, bool) = vm.eval(
         "author = {}\n\
          local returned = setmetatable(_G, author) == _G\n\
          return getmetatable(_G) == author, next(author) == nil, returned",
@@ -233,8 +198,7 @@ fn getmetatable_on_g_returns_the_author_metatable_and_edits_take_effect_live() {
     );
     assert!(returned, "setmetatable(_G, mt) returns _G");
 
-    let live: String = eval(
-        &vm,
+    let live: String = vm.eval(
         "getmetatable(_G).__index = function(_, key) return 'default ' .. key end\n\
          return missing_one",
     );
@@ -242,8 +206,7 @@ fn getmetatable_on_g_returns_the_author_metatable_and_edits_take_effect_live() {
         live, "default missing_one",
         "a later __index edit applies at once"
     );
-    let (hooked, raw): (String, bool) = eval(
-        &vm,
+    let (hooked, raw): (String, bool) = vm.eval(
         "local seen = {}\n\
          author.__newindex = function(_, key, value) seen[key] = value end\n\
          hooked_global = 'x'\n\
@@ -254,8 +217,7 @@ fn getmetatable_on_g_returns_the_author_metatable_and_edits_take_effect_live() {
     assert!(raw, "the hooked write never landed in _G");
     assert_guards_hold(&vm, "live edits to the author metatable");
 
-    let cleared: (bool, String) = eval(
-        &vm,
+    let cleared: (bool, String) = vm.eval(
         "setmetatable(_G, nil)\n\
          plain_global = 'raw'\n\
          return getmetatable(_G) == nil, plain_global",
@@ -271,8 +233,7 @@ fn getmetatable_on_g_returns_the_author_metatable_and_edits_take_effect_live() {
 #[test]
 fn an_author_metatable_with_a_metatable_field_protects_g_as_lua_would() {
     let vm = frozen_vm();
-    let (label, tone, replace, clear): (String, String, String, String) = eval(
-        &vm,
+    let (label, tone, replace, clear): (String, String, String, String) = vm.eval(
         "setmetatable(_G, { __metatable = 'locked', __index = { tone = 'friendly' } })\n\
          local _, replace = pcall(function() setmetatable(_G, {}) end)\n\
          local _, clear = pcall(function() setmetatable(_G, nil) end)\n\
@@ -297,8 +258,7 @@ fn an_author_metatable_with_a_metatable_field_protects_g_as_lua_would() {
 #[test]
 fn setmetatable_on_g_rejects_what_the_base_function_rejects() {
     let vm = frozen_vm();
-    let (number, missing, boolean): (String, String, String) = eval(
-        &vm,
+    let (number, missing, boolean): (String, String, String) = vm.eval(
         "local _, number = pcall(setmetatable, _G, 5)\n\
          local _, missing = pcall(setmetatable, _G)\n\
          local _, boolean = pcall(function() setmetatable(_G, false) end)\n\
@@ -316,15 +276,14 @@ fn setmetatable_on_g_rejects_what_the_base_function_rejects() {
         boolean,
         "[string \"probe\"]:3: bad argument #2 to 'setmetatable' (nil or table expected, got boolean)"
     );
-    let untouched: bool = eval(&vm, "return getmetatable(_G) == nil");
+    let untouched: bool = vm.eval("return getmetatable(_G) == nil");
     assert!(untouched, "a rejected call records nothing");
 }
 
 #[test]
 fn the_other_fields_of_the_author_metatable_apply_to_g_from_each_setmetatable() {
     let vm = frozen_vm();
-    let (called, shown): (String, String) = eval(
-        &vm,
+    let (called, shown): (String, String) = vm.eval(
         "author = {\n\
            __call = function(_, name) return 'called ' .. name end,\n\
            __tostring = function() return 'globals' end,\n\
@@ -334,8 +293,7 @@ fn the_other_fields_of_the_author_metatable_apply_to_g_from_each_setmetatable() 
     );
     assert_eq!(called, "called twice");
     assert_eq!(shown, "globals");
-    let (before, after): (String, String) = eval(
-        &vm,
+    let (before, after): (String, String) = vm.eval(
         "author.__tostring = function() return 'edited' end\n\
          local before = tostring(_G)\n\
          setmetatable(_G, author)\n\
@@ -346,8 +304,7 @@ fn the_other_fields_of_the_author_metatable_apply_to_g_from_each_setmetatable() 
         ("globals", "edited"),
         "other fields are copied when setmetatable(_G, mt) runs"
     );
-    let (plain, callable): (bool, bool) = eval(
-        &vm,
+    let (plain, callable): (bool, bool) = vm.eval(
         "setmetatable(_G, nil)\n\
          return tostring(_G):find('^table: ') ~= nil, (pcall(_G))",
     );
@@ -393,19 +350,19 @@ out[#out + 1] = tostring(select(2, pcall(setmetatable, setmetatable({}, { __meta
 out[#out + 1] = tostring(select(2, pcall(getmetatable)))
 return table.concat(out, '\\n')";
     let vm = frozen_vm();
-    let guarded: String = eval(&vm, probe);
+    let guarded: String = vm.eval(probe);
     assert_eq!(guarded, stock_eval(probe));
 }
 
 #[test]
 fn sealed_engine_values_keep_their_metatable_protection() {
     let vm = frozen_vm();
-    let (sys_label, argv_label, sys_refusal, var_refusal): (String, String, String, String) = eval(
-        &vm,
-        "local _, sys_err = pcall(function() setmetatable(sys, {}) end)\n\
+    let (sys_label, argv_label, sys_refusal, var_refusal): (String, String, String, String) = vm
+        .eval(
+            "local _, sys_err = pcall(function() setmetatable(sys, {}) end)\n\
          local _, var_err = pcall(function() setmetatable(var, {}) end)\n\
          return getmetatable(sys), getmetatable(argv), tostring(sys_err), tostring(var_err)",
-    );
+        );
     assert_eq!(sys_label, "sys is sealed");
     assert_eq!(argv_label, "argv is frozen");
     assert_eq!(

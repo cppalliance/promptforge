@@ -3,27 +3,6 @@
 
 use super::*;
 
-/// Builds a section VM with `argv` installed the way the executor installs
-/// it: writable for the H1 pass, frozen for every other section.
-fn argv_vm(argv: Option<&Json>, writable: bool) -> SectionVm {
-    let mut vm = SectionVm::new_for_section(
-        &test_nonce(),
-        &shared_set(ToolSet::default()),
-        &Arc::new(Mutex::new(ModelSet::default())),
-        &null_emitter(),
-        "Argv",
-    )
-    .expect("section VM must build");
-    let argv = if writable {
-        Argv::Writable(argv)
-    } else {
-        Argv::Frozen(argv)
-    };
-    vm.inject_values_with_var("", &json!({}), &fresh_access(), None, argv)
-        .expect("values must inject");
-    vm
-}
-
 /// Runs one chunk on an argv VM, returning the block's failure.
 fn run_argv(vm: &SectionVm, source: &str) -> Result<Option<String>> {
     run_scalar(vm, &program(source), &null_emitter(), "Argv")
@@ -32,7 +11,7 @@ fn run_argv(vm: &SectionVm, source: &str) -> Result<Option<String>> {
 #[test]
 fn frozen_argv_reads_through_the_guard() {
     let argv = json!({ "query": "papers", "nested": { "hits": 2 } });
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     let out = run_argv(
         &vm,
         "assert(argv.query == 'papers', 'a field reads through')\n\
@@ -42,26 +21,26 @@ fn frozen_argv_reads_through_the_guard() {
     )
     .expect("frozen argv must read");
     assert_eq!(out.as_deref(), Some("papers"));
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn frozen_argv_rejects_reassignment() {
     let argv = json!({ "query": "papers" });
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     let error = run_argv(&vm, "argv = { query = 'hijacked' }")
         .expect_err("reassigning argv outside H1 must fail");
     assert!(
         error.to_string().contains("argv is frozen"),
         "the error names the freeze: {error}"
     );
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn frozen_argv_rejects_writes_at_any_depth() {
     let argv = json!({ "query": "papers", "nested": { "hits": 2 } });
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     let error = run_argv(&vm, "argv.query = 'hijacked'")
         .expect_err("a field write on frozen argv must fail");
     assert!(
@@ -74,13 +53,13 @@ fn frozen_argv_rejects_writes_at_any_depth() {
         error.to_string().contains("argv is frozen"),
         "the deep freeze rejects nested writes: {error}"
     );
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
     let argv = json!({ "query": "papers" });
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     for (target, refusal) in [
         (
             "argv.query",
@@ -99,12 +78,12 @@ fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
     }
     let label = run_argv(&vm, "return getmetatable(argv)").expect("getmetatable reads");
     assert_eq!(label.as_deref(), Some("argv is frozen"));
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn frozen_nil_argv_reads_nil_and_rejects_assignment() {
-    let vm = argv_vm(None, false);
+    let vm = TestVm::new().argv(Argv::Frozen(None)).build();
     let out = run_argv(&vm, "assert(argv == nil, 'no argv reads nil') return 'ok'")
         .expect("a nil argv reads nil");
     assert_eq!(out.as_deref(), Some("ok"));
@@ -114,13 +93,13 @@ fn frozen_nil_argv_reads_nil_and_rejects_assignment() {
         error.to_string().contains("argv is frozen"),
         "the error names the freeze: {error}"
     );
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn frozen_scalar_argv_reads_and_rejects_assignment() {
     let argv = json!(5);
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     let out =
         run_argv(&vm, "assert(argv == 5) return tostring(argv)").expect("a scalar argv reads");
     assert_eq!(out.as_deref(), Some("5"));
@@ -129,13 +108,13 @@ fn frozen_scalar_argv_reads_and_rejects_assignment() {
         error.to_string().contains("argv is frozen"),
         "the error names the freeze: {error}"
     );
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn the_frozen_argv_guard_leaves_other_globals_alone() {
     let argv = json!({ "query": "papers" });
-    let vm = argv_vm(Some(&argv), false);
+    let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     let out = run_argv(
         &vm,
         "scratch = 42\n\
@@ -145,14 +124,14 @@ fn the_frozen_argv_guard_leaves_other_globals_alone() {
     )
     .expect("ordinary globals must be untouched by the argv guard");
     assert_eq!(out.as_deref(), Some("ok"));
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn writable_argv_repairs_and_reads_back() {
     // The H1 repair pattern: malformed args start as nil argv; H1 assigns
     // the repaired table; the Engine reads the repair back at the freeze.
-    let vm = argv_vm(None, true);
+    let vm = TestVm::new().argv(Argv::Writable(None)).build();
     let out = run_argv(
         &vm,
         "assert(argv == nil, 'malformed args start as nil argv')\n\
@@ -164,24 +143,24 @@ fn writable_argv_repairs_and_reads_back() {
     assert_eq!(out.as_deref(), Some("repaired"));
     let read_back = vm.argv_json().expect("the repair reads back");
     assert_eq!(read_back, Some(json!({ "query": "repaired", "extra": 1 })));
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn writable_argv_field_writes_read_back() {
     let argv = json!({ "query": "broken" });
-    let vm = argv_vm(Some(&argv), true);
+    let vm = TestVm::new().argv(Argv::Writable(Some(&argv))).build();
     let out = run_argv(&vm, "argv.query = 'fixed' return argv.query")
         .expect("a field write on the writable argv runs");
     assert_eq!(out.as_deref(), Some("fixed"));
     let read_back = vm.argv_json().expect("the field write reads back");
     assert_eq!(read_back, Some(json!({ "query": "fixed" })));
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }
 
 #[test]
 fn argv_read_back_rejects_a_non_data_assignment() {
-    let vm = argv_vm(None, true);
+    let vm = TestVm::new().argv(Argv::Writable(None)).build();
     run_argv(&vm, "argv = function() end return 'ok'").expect("the assignment itself runs");
     let error = vm
         .argv_json()
@@ -190,5 +169,5 @@ fn argv_read_back_rejects_a_non_data_assignment() {
         error.to_string().contains("argv must be JSON data"),
         "the error says why: {error}"
     );
-    vm.teardown(&null_emitter(), "Argv");
+    vm.teardown();
 }

@@ -155,6 +155,12 @@ impl SectionVm {
     pub fn has_local_tool(&self, alias: &str) -> Result<bool> {
         self.local_tools.contains(alias)
     }
+
+    /// How many of this VM's instruction-hook firings have counted.
+    #[cfg(test)]
+    pub(crate) fn hook_firings(&self) -> u64 {
+        self.instruction_budget.fired()
+    }
 }
 
 /// Reads the section's effective tool bindings without mutating the tool

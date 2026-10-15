@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn a_prelude_sees_only_its_restricted_environment() {
-    let vm = section_vm_with_var(Some(&json!({ "mode": "fast" })));
+    let vm = section_vm_with_var(&json!({ "mode": "fast" }));
     install_ui(vm.lua(), Arc::new(json!({}))).expect("the ui global installs");
     let probe = "\
 function probe_hidden()
@@ -33,8 +33,7 @@ end";
     )
     .expect("the preludes install");
 
-    let author_view: String = eval(
-        &vm,
+    let author_view: String = vm.eval(
         "return type(ui) .. ',' .. type(argv) .. ',' .. type(sys) .. ',' .. type(models) \
          .. ',' .. type(first_global)",
     );
@@ -42,11 +41,11 @@ end";
         !author_view.contains("nil"),
         "author code sees every probed global: {author_view}"
     );
-    let hidden: String = eval(&vm, "return probe_hidden()");
+    let hidden: String = vm.eval("return probe_hidden()");
     assert_eq!(hidden, "nil,nil,nil,nil,nil");
-    let visible: String = eval(&vm, "return probe_visible()");
+    let visible: String = vm.eval("return probe_visible()");
     assert_eq!(visible, "function,table,function,function");
-    let (mode, ok, kind, message): (String, bool, String, String) = eval(&vm, "return probe_var()");
+    let (mode, ok, kind, message): (String, bool, String, String) = vm.eval("return probe_var()");
     assert_eq!(mode, "fast", "var reads through the view");
     assert!(!ok, "a write to var raises");
     assert_eq!(
@@ -57,17 +56,17 @@ end";
         message.contains("var is read-only") && message.contains("'mode'"),
         "the refusal names var and the field: {message}"
     );
-    let author_mode: String = eval(&vm, "return var.mode");
+    let author_mode: String = vm.eval("return var.mode");
     assert_eq!(author_mode, "fast", "the refused write left var unchanged");
-    let same_pcall: bool = eval(&vm, "return probe_pcall() == pcall");
+    let same_pcall: bool = vm.eval("return probe_pcall() == pcall");
     assert!(same_pcall, "the prelude's pcall is the normalized global");
 }
 
 #[test]
 fn the_var_view_is_read_only_at_every_depth() {
-    let vm = section_vm_with_var(Some(&json!({
+    let vm = section_vm_with_var(&json!({
         "cfg": { "mode": "fast", "list": [{ "n": 1 }] }
-    })));
+    }));
     let probe = "\
 function probe_meta()
   return getmetatable(var), getmetatable(var.cfg)
@@ -80,7 +79,7 @@ function probe_write(path)
 end";
     install_preludes(vm.lua(), &[prelude("probe", probe)]).expect("the prelude installs");
 
-    let (root, nested): (String, String) = eval(&vm, "return probe_meta()");
+    let (root, nested): (String, String) = vm.eval("return probe_meta()");
     assert_eq!(
         (root.as_str(), nested.as_str()),
         ("var is read-only", "var is read-only"),
@@ -90,14 +89,14 @@ end";
         ("cfg", "var.cfg is read-only", "'mode'"),
         ("deep", "var.cfg.list[1] is read-only", "'n'"),
     ] {
-        let (ok, message): (bool, String) = eval(&vm, &format!("return probe_write('{path}')"));
+        let (ok, message): (bool, String) = vm.eval(&format!("return probe_write('{path}')"));
         assert!(!ok, "a nested write through the view raises");
         assert!(
             message.contains(refusal) && message.contains(field),
             "the refusal names the nested path and the field: {message}"
         );
     }
-    let (mode, n): (String, i64) = eval(&vm, "return var.cfg.mode, var.cfg.list[1].n");
+    let (mode, n): (String, i64) = vm.eval("return var.cfg.mode, var.cfg.list[1].n");
     assert_eq!(
         (mode.as_str(), n),
         ("fast", 1),
@@ -107,7 +106,7 @@ end";
 
 #[test]
 fn the_var_view_raises_the_whole_refusal_for_a_string_or_integer_key() {
-    let vm = section_vm_with_var(Some(&json!({ "mode": "fast" })));
+    let vm = section_vm_with_var(&json!({ "mode": "fast" }));
     let probe = "\
 function probe_set(key)
   local ok, err = pcall(function() var[key] = 1 end)
@@ -124,7 +123,7 @@ end";
             "var is read-only inside a Plugin prelude; cannot set 'Integer(1)'",
         ),
     ] {
-        let message: String = eval(&vm, &format!("return probe_set({key})"));
+        let message: String = vm.eval(&format!("return probe_set({key})"));
         assert_eq!(refusal_line(&message), Some(refusal), "writing var[{key}]");
     }
 }

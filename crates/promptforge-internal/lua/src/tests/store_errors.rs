@@ -14,13 +14,7 @@ fn direct_store_failure_caught_by_pcall_carries_the_reason_tag() {
         "local ok, err = pcall(function() return store.read('missing.txt') end)\n\
              direct_store_error = err",
     );
-    let access = fresh_access();
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &access)
-        .expect("Engine values must inject");
-    vm.install_engine_globals(&null_emitter(), "Test")
-        .expect("Engine globals must install");
-    vm.install_coro_shims(1).expect("coro shims must install");
+    let vm = TestVm::new().shims().build();
     run_scalar(&vm, &catch, &null_emitter(), "Test").expect("the catching chunk must run");
     let out = run_scalar(
         &vm,
