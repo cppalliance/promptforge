@@ -8,27 +8,7 @@ use crate::Error;
 use crate::protocol::{
     ContentPart, MessageContent, MessageRecord, MessageRole, Request, ToolCallRecord, YieldParse,
 };
-
-fn record(role: MessageRole, text: &str) -> MessageRecord {
-    MessageRecord {
-        role,
-        content: MessageContent::Text(text.to_owned()),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
-    }
-}
-
-fn system(text: &str) -> MessageRecord {
-    record(MessageRole::System, text)
-}
-
-fn user(text: &str) -> MessageRecord {
-    record(MessageRole::User, text)
-}
-
-fn assistant(text: &str) -> MessageRecord {
-    record(MessageRole::Assistant, text)
-}
+use crate::tests::{assistant, system, user};
 
 fn tool(id: &str, text: &str) -> MessageRecord {
     MessageRecord {

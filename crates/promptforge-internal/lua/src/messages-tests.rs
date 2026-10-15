@@ -5,8 +5,9 @@ use serde_json::json;
 
 use super::MessageList;
 use crate::Error;
-use crate::protocol::{Answer, MessageContent, MessageRecord, MessageRole, Request, YieldParse};
+use crate::protocol::{Answer, MessageRole, Request, YieldParse};
 use crate::test_vm::TestVm;
+use crate::tests::text;
 
 #[path = "messages-tests-list.rs"]
 mod list;
@@ -31,15 +32,6 @@ fn chat_error(parse: YieldParse) -> String {
     match parse {
         YieldParse::Call(Answer::Chat(Err(Error::Lua(message)))) => message,
         other => panic!("expected the chat call error, got {other:?}"),
-    }
-}
-
-fn text(role: MessageRole, content: &str) -> MessageRecord {
-    MessageRecord {
-        role,
-        content: MessageContent::Text(content.to_owned()),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
     }
 }
 

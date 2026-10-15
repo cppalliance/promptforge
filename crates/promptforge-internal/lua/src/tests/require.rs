@@ -10,9 +10,6 @@ mod errors;
 mod prose;
 mod reports;
 
-/// The section every test VM's `require` reports under.
-const SECTION: &str = "Main";
-
 /// One resolver entry: the heading as written, the identity of the library
 /// whose load requires it (`None` for any other call), and the library it
 /// resolves to.
@@ -37,7 +34,7 @@ fn library(identity: &str, heading: &str, sources: &[&str]) -> Library {
                     &format!("library {heading}"),
                     NonZeroU32::new(100).expect("100 is non-zero"),
                     &null_emitter(),
-                    SECTION,
+                    TEST_SECTION,
                 )
                 .expect("library Lua must compile"),
                 prose: String::new(),
@@ -89,7 +86,7 @@ where
 {
     let calls = Calls::default();
     let vm = TestVm::new().shims().build();
-    vm.install_require(resolver(entries, &calls), render, emitter, SECTION)
+    vm.install_require(resolver(entries, &calls), render, emitter, TEST_SECTION)
         .expect("require must install");
     (vm, calls)
 }

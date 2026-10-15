@@ -1,7 +1,7 @@
 //! Tests for the per-record rules a list enforces as `append` adds a
 //! record, each refusal naming the position the record would take.
 
-use super::list::{refusal, run};
+use super::list::refusal;
 use crate::test_vm::TestVm;
 
 /// Appends every record of the Lua array `records` but the last to a
@@ -9,13 +9,10 @@ use crate::test_vm::TestVm;
 #[track_caller]
 fn refused_append(records: &str) -> String {
     let vm = TestVm::new().messages().build();
-    run(
-        &vm,
-        &format!(
-            "records = {records}\n\
+    vm.exec(&format!(
+        "records = {records}\n\
              for i = 1, #records - 1 do msgs:append(records[i]) end"
-        ),
-    );
+    ));
     refusal(&vm, "msgs:append(records[#records])")
 }
 

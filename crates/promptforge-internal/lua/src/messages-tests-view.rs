@@ -4,20 +4,20 @@
 use mlua::{LuaSerdeExt, Value};
 use serde_json::{Value as Json, json};
 
-use super::list::{refusal, run};
+use super::list::refusal;
 use crate::messages::MessageList;
 use crate::protocol::{
     ContentPart, MessageContent, MessageRecord, MessageRole, ToolCallRecord, parse_record,
 };
 use crate::test_vm::{BuiltVm, TestVm};
+use crate::tests::text;
 
 /// One record table of each shape, held in the global `shapes` and
 /// appended to `msgs` in order: plain text, content parts, tool calls,
 /// and a tool result.
 #[track_caller]
 fn shapes(vm: &BuiltVm) {
-    run(
-        vm,
+    vm.exec(
         "shapes = { \
            { role = 'system', content = 'be terse' }, \
            { role = 'user', content = { \
@@ -45,12 +45,6 @@ fn read(vm: &BuiltVm, expr: &str) -> Option<Json> {
 
 #[test]
 fn to_json_round_trips_every_record_shape_through_parse_record() {
-    let text = |role, content: &str| MessageRecord {
-        role,
-        content: MessageContent::Text(content.to_owned()),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
-    };
     let records = [
         text(MessageRole::System, "be terse"),
         MessageRecord {
@@ -122,10 +116,7 @@ fn each_view_field_reads_like_the_record_table_and_a_view_is_userdata() {
 #[test]
 fn an_integral_float_index_reads_like_its_integer_and_other_keys_read_nil() {
     let vm = TestVm::new().messages().build();
-    run(
-        &vm,
-        "msgs:user('u1'):append({ role = 'user', content = 'u2', extra = 1 })",
-    );
+    vm.exec("msgs:user('u1'):append({ role = 'user', content = 'u2', extra = 1 })");
     assert_eq!(
         read(&vm, "msgs[2.0]"),
         Some(json!({ "role": "user", "content": "u2" }))
@@ -200,7 +191,7 @@ fn a_view_appended_or_converted_gives_the_same_record_as_its_table_form() {
                 .expect("userdata creation cannot fail"),
         )
         .expect("a global set cannot fail");
-    run(&vm, "for i = 1, #msgs do other:append(msgs[i]) end");
+    vm.exec("for i = 1, #msgs do other:append(msgs[i]) end");
     assert_eq!(other.records(), vm.messages().records());
     for index in 1..=4 {
         let view = read(&vm, &format!("msgs[{index}]")).expect("the view is present");
@@ -261,7 +252,7 @@ fn pairs_ipairs_and_a_counted_loop_visit_every_record_in_order_as_views() {
                    table.concat(seen.counted, ' ')";
     let empty: (String, String, String) = vm.eval(visit);
     assert_eq!(empty, (String::new(), String::new(), String::new()));
-    run(&vm, "msgs:user('u1'):assistant('a1'):user('u2')");
+    vm.exec("msgs:user('u1'):assistant('a1'):user('u2')");
     let full: (String, String, String) = vm.eval(visit);
     let every = "1:userdata:u1 2:userdata:a1 3:userdata:u2".to_owned();
     assert_eq!(full, (every.clone(), every.clone(), every));
@@ -270,7 +261,7 @@ fn pairs_ipairs_and_a_counted_loop_visit_every_record_in_order_as_views() {
 #[test]
 fn a_pairs_loop_that_appends_ends_after_the_records_it_started_with() {
     let vm = TestVm::new().messages().build();
-    run(&vm, "msgs:user('u1'):assistant('a1'):user('u2')");
+    vm.exec("msgs:user('u1'):assistant('a1'):user('u2')");
     let ended: (i64, i64) = vm.eval(
         "local n = 0 \
          for _ in pairs(msgs) do \
@@ -286,7 +277,7 @@ fn a_pairs_loop_that_appends_ends_after_the_records_it_started_with() {
 #[test]
 fn a_pairs_loop_stops_early_when_the_list_shrinks_below_its_next_index() {
     let vm = TestVm::new().messages().build();
-    run(&vm, "msgs:user('u1'):assistant('a1'):user('u2')");
+    vm.exec("msgs:user('u1'):assistant('a1'):user('u2')");
     let seen: String = vm.eval(
         "local seen = {} \
          for i, view in pairs(msgs) do \
@@ -302,7 +293,7 @@ fn a_pairs_loop_stops_early_when_the_list_shrinks_below_its_next_index() {
 fn pairs_keeps_its_starting_length_while_ipairs_reads_the_live_list() {
     let walk = |iterate: &str| -> String {
         let vm = TestVm::new().messages().build();
-        run(&vm, "msgs:user('u1'):assistant('a1'):user('u2')");
+        vm.exec("msgs:user('u1'):assistant('a1'):user('u2')");
         vm.eval(&format!(
             "local seen = {{}} \
              for i, view in {iterate}(msgs) do \

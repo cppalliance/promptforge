@@ -595,7 +595,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-6>
 
-### Step 6: lua tool fixtures on TestVm
+### Step 6: lua tool fixtures on TestVm [completed]
 
 - Component: lua
 - Tests:

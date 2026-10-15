@@ -20,7 +20,7 @@ use crate::models::LuaModelHandle;
 use crate::protocol::{Answer, ChatResult, LocalToolOutcome, Request, YieldParse};
 
 /// A requested call named `echo`, its arguments naming its id.
-pub(super) fn call(id: &str) -> ToolCallEvent {
+pub(super) fn echo_call(id: &str) -> ToolCallEvent {
     ToolCallEvent {
         id: id.to_owned(),
         name: "echo".to_owned(),
@@ -156,7 +156,7 @@ fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
     let served = ChatResult {
         tool_calls: Some(vec![ToolCallEvent {
             tool: Some(ToolId::parse("web/fetch").unwrap()),
-            ..call("c1")
+            ..echo_call("c1")
         }]),
         finish_reason: Some("tool_calls".to_owned()),
         ..round()
@@ -204,7 +204,7 @@ fn parsed(lua: &Lua, then: Then<Value>) -> Request {
 fn act_yields_each_request_as_the_protocol_parses_it() {
     let lua = Lua::new();
     let tool_call = Then::ToolCall {
-        call: call("c1"),
+        call: echo_call("c1"),
         turn: 7,
     };
     let Request::ToolCall {

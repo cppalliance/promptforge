@@ -2,7 +2,7 @@
 //! place of the Lua values it passes along, and a plain list read back
 //! through `records()`.
 
-use super::super::tests::{call, round};
+use super::super::tests::{echo_call, round};
 use super::{Input, Machine, Phase, Then};
 use crate::compactors::OverflowReason;
 use crate::messages::MessageList;
@@ -67,7 +67,7 @@ fn answered(round: ChatResult) -> Input<V> {
 /// A round requesting one call per id, in order.
 fn batch(ids: &[&str]) -> Input<V> {
     answered(ChatResult {
-        tool_calls: Some(ids.iter().copied().map(call).collect()),
+        tool_calls: Some(ids.iter().copied().map(echo_call).collect()),
         ..round()
     })
 }
@@ -89,7 +89,7 @@ fn stop() -> Input<V> {
 }
 
 /// A bound tool's answer `text`.
-fn text(text: &str) -> Input<V> {
+fn dispatched(text: &str) -> Input<V> {
     Input::Dispatched(Ok(text.to_owned()))
 }
 
@@ -139,7 +139,7 @@ fn a_round_is_judged_overflow_then_calls_then_reply_then_clean_exit_then_empty()
         overflow: true,
         overflow_reason: Some(OverflowReason::Precheck),
         reply: Some("text".to_owned()),
-        tool_calls: Some(vec![call("c1")]),
+        tool_calls: Some(vec![echo_call("c1")]),
         finish_reason: Some("stop".to_owned()),
         empty_detail: Some("nothing".to_owned()),
         ..round()
@@ -216,7 +216,7 @@ fn a_short_batch_answer_sends_the_next_call_alone_then_the_rest_together() {
         show(&machine.step(batched(&["one"]))),
         r#"tool_call c2 echo {"id":"c2"}@7"#
     );
-    assert_eq!(show(&machine.step(text("two"))), "tool_calls c3,c4@7");
+    assert_eq!(show(&machine.step(dispatched("two"))), "tool_calls c3,c4@7");
     assert!(
         records(&list).is_empty(),
         "a half-answered batch adds nothing"
@@ -402,7 +402,7 @@ fn an_input_its_phase_does_not_await_raises_internal() {
     let unexpected = "new internal|internal invariant violated: the models.loop step received \
                       an input its phase does not await";
     let (mut machine, _) = Machine::begin(2, MessageList::default(), "list", None, "compactor");
-    assert_eq!(show(&machine.step(text("early"))), unexpected);
+    assert_eq!(show(&machine.step(dispatched("early"))), unexpected);
     assert_eq!(
         show(&machine.step(reply("late"))),
         unexpected,

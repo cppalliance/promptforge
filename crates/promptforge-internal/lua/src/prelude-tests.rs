@@ -9,7 +9,7 @@ use promptforge_types::plugins::{PluginId, Prelude};
 use serde_json::json;
 
 use super::install_preludes;
-use crate::test_vm::{BuiltVm, TestVm};
+use crate::test_vm::{BuiltVm, TEST_SECTION, TestVm};
 use crate::tests::recording::null_emitter;
 use crate::tests::refusal_line;
 use crate::{
@@ -19,8 +19,6 @@ use crate::{
 
 #[path = "prelude-tests-environment.rs"]
 mod environment;
-
-const SECTION: &str = "Prelude";
 
 /// Builds a section VM through section setup up to where preludes install:
 /// Engine injection with a bound `argv`, the Engine globals, the control

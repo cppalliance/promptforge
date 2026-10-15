@@ -3,27 +3,11 @@
 //! object's `plugin` getter, and the roster's usable and unavailable
 //! Plugins.
 
-use std::sync::{Arc, Mutex};
-
-use mlua::Lua;
 use promptforge_types::plugins::PluginId;
-use promptforge_types::tools::{ToolDescriptor, ToolId};
-use serde_json::json;
 
-use super::install_plugins;
-use crate::ToolBinding;
 use crate::handles::ToolSet;
-use crate::scope::ToolRuntime;
-use crate::tools::install_tools;
-
-/// A tool as data under `id`.
-fn tool_at(id: &str) -> ToolDescriptor {
-    ToolDescriptor::new(
-        ToolId::parse(id).expect("valid id"),
-        format!("{id} tool"),
-        json!({ "type": "object" }),
-    )
-}
+use crate::test_vm::{lua_over, scoped, tool_at};
+use crate::{SectionVm, ToolBinding};
 
 /// A set declaring `web` and then `mail`, which offers no tool, beside the
 /// undeclared Plugins `alpha` and `gh`, every tool in id order under its
@@ -64,43 +48,15 @@ fn roster_set() -> ToolSet {
     }
 }
 
-/// Installs `tools` and then `plugins` over `set` on a fresh VM, the
-/// section setup order, and returns it with the runtime `tools.offer` and
-/// `plugins.offer` record into and the shared set.
-fn lua_over(set: ToolSet) -> (Lua, Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
-    let lua = Lua::new();
-    let globals = lua.globals();
-    let set = Arc::new(set);
-    let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
-    install_tools(
-        &lua,
-        &globals,
-        &set,
-        &runtime,
-        &crate::vm::LocalTools::default(),
-    )
-    .expect("the tools install on a fresh VM");
-    install_plugins(&lua, &globals, &set, &runtime).expect("the plugins install on a fresh VM");
-    (lua, set, runtime)
-}
-
-/// The Plugins `plugins.offer` recorded in `runtime`, by name.
-fn offered_plugins(runtime: &Mutex<ToolRuntime>) -> Vec<String> {
-    runtime
+/// The Plugins `plugins.offer` recorded on `vm`, by name.
+#[track_caller]
+fn offered_plugins(vm: &SectionVm) -> Vec<String> {
+    vm.tool_runtime
         .lock()
         .expect("the runtime mutex is not poisoned")
         .plugins
         .iter()
         .map(ToString::to_string)
-        .collect()
-}
-
-/// The wire names a round over `set` and `runtime` advertises, in order.
-fn scoped(set: &ToolSet, runtime: &Mutex<ToolRuntime>) -> Vec<String> {
-    crate::current_tool_bindings(set, runtime)
-        .expect("the scope resolves")
-        .iter()
-        .map(|binding| binding.alias().to_owned())
         .collect()
 }
 
@@ -113,19 +69,16 @@ const NAMES: &str = "local function names(list)\n\
 
 #[test]
 fn required_lists_every_declared_plugin_in_name_order_and_extras_the_rest() {
-    let (lua, _, _) = lua_over(plugin_set());
-    let result: (String, String, i64, String, bool, bool, String) = lua
-        .load(format!(
-            "{NAMES}\
-             local ok, err = pcall(plugins.get, 42)\n\
-             assert(not ok, 'a non-string is refused')\n\
-             return names(plugins.required()), names(plugins.extras()), \
-               #plugins.get('mail').tools, plugins.get('gh').name, \
-               plugins.get('missing') == nil, plugins.get('web/fetch') == nil, \
-               tostring(err)"
-        ))
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(plugin_set());
+    let result: (String, String, i64, String, bool, bool, String) = vm.eval(&format!(
+        "{NAMES}\
+         local ok, err = pcall(plugins.get, 42)\n\
+         assert(not ok, 'a non-string is refused')\n\
+         return names(plugins.required()), names(plugins.extras()), \
+           #plugins.get('mail').tools, plugins.get('gh').name, \
+           plugins.get('missing') == nil, plugins.get('web/fetch') == nil, \
+           tostring(err)"
+    ));
     assert_eq!(
         result.0, "mail,web",
         "every declared Plugin is required, in name order"
@@ -151,18 +104,15 @@ fn required_lists_every_declared_plugin_in_name_order_and_extras_the_rest() {
 
 #[test]
 fn plugins_get_returns_the_one_object_required_and_extras_hand_out() {
-    let (lua, _, _) = lua_over(plugin_set());
-    let result: (bool, bool, bool, bool, bool) = lua
-        .load(
-            "local required = plugins.required()\n\
-             return plugins.get('web') == plugins.get('web'), \
-               required[2] == plugins.get('web'), \
-               plugins.extras()[2] == plugins.get('gh'), \
-               plugins.required() ~= required, \
-               plugins.extras() ~= plugins.extras()",
-        )
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(plugin_set());
+    let result: (bool, bool, bool, bool, bool) = vm.eval(
+        "local required = plugins.required()\n\
+         return plugins.get('web') == plugins.get('web'), \
+           required[2] == plugins.get('web'), \
+           plugins.extras()[2] == plugins.get('gh'), \
+           plugins.required() ~= required, \
+           plugins.extras() ~= plugins.extras()",
+    );
     assert_eq!(
         result,
         (true, true, true, true, true),
@@ -172,29 +122,21 @@ fn plugins_get_returns_the_one_object_required_and_extras_hand_out() {
 
 #[test]
 fn a_plugins_tools_are_the_shared_tool_objects_in_a_fresh_array_that_offer_takes() {
-    let (lua, set, runtime) = lua_over(plugin_set());
-    let result: (i64, bool, bool, bool) = lua
-        .load(
-            "local web = plugins.get('web')\n\
-             local tools_list = web.tools\n\
-             tools.offer(web.tools)\n\
-             return #tools_list, tools_list[1] == tools.get('web/fetch'), \
-               tools_list[2] == tools.get('web/search'), web.tools ~= tools_list",
-        )
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(plugin_set());
+    let result: (i64, bool, bool, bool) = vm.eval(
+        "local web = plugins.get('web')\n\
+         local tools_list = web.tools\n\
+         tools.offer(web.tools)\n\
+         return #tools_list, tools_list[1] == tools.get('web/fetch'), \
+           tools_list[2] == tools.get('web/search'), web.tools ~= tools_list",
+    );
     assert_eq!(
         result,
         (2, true, true, true),
         "a Plugin's tools are its shared tool objects, in id order, in a new array per read"
     );
-    let scoped: Vec<String> = crate::current_tool_bindings(&set, &runtime)
-        .expect("the scope resolves")
-        .iter()
-        .map(|binding| binding.alias().to_owned())
-        .collect();
     assert_eq!(
-        scoped,
+        scoped(&vm),
         ["web_fetch", "web_search"],
         "tools.offer takes a Plugin's tools array"
     );
@@ -202,16 +144,13 @@ fn a_plugins_tools_are_the_shared_tool_objects_in_a_fresh_array_that_offer_takes
 
 #[test]
 fn assigning_a_field_on_a_plugin_object_is_refused() {
-    let (lua, _, _) = lua_over(plugin_set());
-    let (name, extra, read): (String, String, String) = lua
-        .load(
-            "local web = plugins.get('web')\n\
-             local _, name = pcall(function() web.name = 'x' end)\n\
-             local _, extra = pcall(function() web.extra = 1 end)\n\
-             return tostring(name), tostring(extra), web.name",
-        )
-        .eval()
-        .expect("the refusals are caught");
+    let vm = lua_over(plugin_set());
+    let (name, extra, read): (String, String, String) = vm.eval(
+        "local web = plugins.get('web')\n\
+         local _, name = pcall(function() web.name = 'x' end)\n\
+         local _, extra = pcall(function() web.extra = 1 end)\n\
+         return tostring(name), tostring(extra), web.name",
+    );
     assert!(
         name.contains("Plugin objects are frozen: cannot assign field \"name\""),
         "the refusal names the field: {name}"
@@ -225,23 +164,20 @@ fn assigning_a_field_on_a_plugin_object_is_refused() {
 
 #[test]
 fn every_tool_objects_plugin_is_its_plugins_object() {
-    let (lua, _, _) = lua_over(plugin_set());
-    let mismatched: String = lua
-        .load(
-            "local bad = {}\n\
-             for _, list in ipairs({ tools.required(), tools.extras() }) do\n\
-               for _, tool in ipairs(list) do\n\
-                 local name = tool.id:match('^[^/]+')\n\
-                 if tool.plugin ~= plugins.get(name) or tool.plugin.name ~= name then\n\
-                   bad[#bad + 1] = tool.id\n\
-                 end\n\
-               end\n\
+    let vm = lua_over(plugin_set());
+    let mismatched: String = vm.eval(
+        "local bad = {}\n\
+         for _, list in ipairs({ tools.required(), tools.extras() }) do\n\
+           for _, tool in ipairs(list) do\n\
+             local name = tool.id:match('^[^/]+')\n\
+             if tool.plugin ~= plugins.get(name) or tool.plugin.name ~= name then\n\
+               bad[#bad + 1] = tool.id\n\
              end\n\
-             assert(#tools.required() + #tools.extras() == 5, 'every tool is walked')\n\
-             return table.concat(bad, ',')",
-        )
-        .eval()
-        .expect("the probe evaluates");
+           end\n\
+         end\n\
+         assert(#tools.required() + #tools.extras() == 5, 'every tool is walked')\n\
+         return table.concat(bad, ',')",
+    );
     assert_eq!(
         mismatched, "",
         "each tool object's plugin is == to its Plugin's object"
@@ -250,24 +186,22 @@ fn every_tool_objects_plugin_is_its_plugins_object() {
 
 #[test]
 fn offer_records_each_plugin_once_from_a_name_an_object_or_a_list() {
-    let (lua, _, runtime) = lua_over(plugin_set());
-    lua.load(
+    let vm = lua_over(plugin_set());
+    vm.exec(
         "plugins.offer('gh')\n\
          plugins.offer(plugins.get('alpha'))\n\
          plugins.offer({ 'gh', plugins.get('web') })\n\
          plugins.offer(plugins.required())\n\
          plugins.offer({})\n\
          assert(select('#', plugins.offer('gh')) == 0, 'the verb returns nothing')",
-    )
-    .exec()
-    .expect("every accepted shape offers");
+    );
     assert_eq!(
-        offered_plugins(&runtime),
+        offered_plugins(&vm),
         ["gh", "alpha", "web", "mail"],
         "each Plugin is recorded once, in first-offer order"
     );
     assert!(
-        runtime
+        vm.tool_runtime
             .lock()
             .expect("the runtime mutex is not poisoned")
             .added
@@ -278,7 +212,7 @@ fn offer_records_each_plugin_once_from_a_name_an_object_or_a_list() {
 
 #[test]
 fn offer_refuses_a_wrong_or_extra_argument_and_an_absent_plugin_and_records_nothing() {
-    let (lua, _, runtime) = lua_over(plugin_set());
+    let vm = lua_over(plugin_set());
     let shape = "plugins.offer takes a Plugin name, a Plugin object, or a list of them, got";
     let absent = "plugins.offer: no Plugin named \"mcp\" in this run; declare it under \
                   plugins: to require it, or offer it only when plugins.get(\"mcp\") returns it";
@@ -302,7 +236,8 @@ fn offer_refuses_a_wrong_or_extra_argument_and_an_absent_plugin_and_records_noth
         ("plugins.offer('mcp')", absent.to_owned()),
         ("plugins.offer({ 'web', 'mcp' })", absent.to_owned()),
     ] {
-        let error: String = lua
+        let error: String = vm
+            .lua()
             .load(format!(
                 "local ok, err = pcall(function() {call} end)\n\
                  assert(not ok, 'the call is refused')\n\
@@ -313,21 +248,19 @@ fn offer_refuses_a_wrong_or_extra_argument_and_an_absent_plugin_and_records_noth
         assert!(error.contains(&expected), "{call}: {error}");
     }
     assert!(
-        offered_plugins(&runtime).is_empty(),
+        offered_plugins(&vm).is_empty(),
         "a refused call records no Plugin"
     );
 }
 
 #[test]
 fn the_scope_lists_section_tools_then_each_offered_plugins_tools_each_name_once() {
-    let (lua, set, runtime) = lua_over(plugin_set());
-    lua.load(
+    let vm = lua_over(plugin_set());
+    vm.exec(
         "tools.offer('web/search')\n\
          plugins.offer({ 'gh', 'web', 'alpha' })",
-    )
-    .exec()
-    .expect("the offers record");
-    let before = scoped(&set, &runtime);
+    );
+    let before = scoped(&vm);
     assert_eq!(
         before,
         [
@@ -340,28 +273,19 @@ fn the_scope_lists_section_tools_then_each_offered_plugins_tools_each_name_once(
         "section tools first, then Plugins in offer order with tools in id order, \
          each name at its first place"
     );
-    lua.load("plugins.offer('mail')")
-        .exec()
-        .expect("a declared Plugin with no tools is accepted");
-    assert_eq!(
-        scoped(&set, &runtime),
-        before,
-        "a Plugin with no tools adds nothing"
-    );
+    vm.exec("plugins.offer('mail')");
+    assert_eq!(scoped(&vm), before, "a Plugin with no tools adds nothing");
 }
 
 #[test]
 fn a_usable_roster_plugin_with_no_tools_has_an_object_and_is_an_extra_in_name_order() {
-    let (lua, set, runtime) = lua_over(roster_set());
-    let result: (String, String, String, i64) = lua
-        .load(format!(
-            "{NAMES}\
-             plugins.offer('subagents')\n\
-             local stub = plugins.get('subagents')\n\
-             return names(plugins.required()), names(plugins.extras()), stub.name, #stub.tools"
-        ))
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(roster_set());
+    let result: (String, String, String, i64) = vm.eval(&format!(
+        "{NAMES}\
+         plugins.offer('subagents')\n\
+         local stub = plugins.get('subagents')\n\
+         return names(plugins.required()), names(plugins.extras()), stub.name, #stub.tools"
+    ));
     assert_eq!(
         result,
         (
@@ -372,24 +296,21 @@ fn a_usable_roster_plugin_with_no_tools_has_an_object_and_is_an_extra_in_name_or
         ),
         "a usable Plugin with no tools is an extra once, beside the ones with tools"
     );
-    assert_eq!(offered_plugins(&runtime), ["subagents"]);
+    assert_eq!(offered_plugins(&vm), ["subagents"]);
     assert!(
-        scoped(&set, &runtime).is_empty(),
+        scoped(&vm).is_empty(),
         "offering a Plugin with no tools adds nothing to a round"
     );
 }
 
 #[test]
 fn an_unavailable_roster_plugin_reads_nil_stays_out_of_the_lists_and_offer_raises_its_reason() {
-    let (lua, _, runtime) = lua_over(roster_set());
-    let listed: (bool, String, String) = lua
-        .load(format!(
-            "{NAMES}\
-             return plugins.get('mcp') == nil, names(plugins.required()), \
-               names(plugins.extras())"
-        ))
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(roster_set());
+    let listed: (bool, String, String) = vm.eval(&format!(
+        "{NAMES}\
+         return plugins.get('mcp') == nil, names(plugins.required()), \
+           names(plugins.extras())"
+    ));
     assert_eq!(
         listed,
         (true, "mail,web".to_owned(), "alpha,gh,subagents".to_owned()),
@@ -398,7 +319,8 @@ fn an_unavailable_roster_plugin_reads_nil_stays_out_of_the_lists_and_offer_raise
     let unavailable = "plugins.offer: the mcp Plugin is unavailable in this run: \
                        the mcp server is down";
     for call in ["plugins.offer('mcp')", "plugins.offer({ 'web', 'mcp' })"] {
-        let error: String = lua
+        let error: String = vm
+            .lua()
             .load(format!(
                 "local ok, err = pcall(function() {call} end)\n\
                  assert(not ok, 'the call is refused')\n\
@@ -409,7 +331,7 @@ fn an_unavailable_roster_plugin_reads_nil_stays_out_of_the_lists_and_offer_raise
         assert!(error.contains(unavailable), "{call}: {error}");
     }
     assert!(
-        offered_plugins(&runtime).is_empty(),
+        offered_plugins(&vm).is_empty(),
         "a refused call records no Plugin"
     );
 }

@@ -155,20 +155,6 @@ fn untrusted_global_wraps_every_call_under_the_run_nonce() {
 }
 
 #[test]
-fn untrusted_global_is_callable_before_engine_values_inject() {
-    // Construction installs `untrusted`, ahead of every later setup step.
-    let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.lua()
-        .load(
-            "local wrapped = untrusted('a < b')\n\
-             assert(wrapped:find('a &lt; b', 1, true), 'the caller sees the escaped body')",
-        )
-        .exec()
-        .expect("untrusted must be callable right after construction");
-    vm.teardown(&null_emitter(), "Test");
-}
-
-#[test]
 fn untrusted_global_rejects_a_non_string_argument() {
     let error = run("return untrusted({})", "").expect_err("a table is not a string");
     assert!(

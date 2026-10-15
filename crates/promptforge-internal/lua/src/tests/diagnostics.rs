@@ -62,38 +62,6 @@ fn runtime_assert_failure_reports_chunk_name_and_line() {
 }
 
 #[test]
-fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
-    // An unset live slot is a legitimate state and yields the
-    // fallback; a poisoned lock is a real failure and must NOT masquerade as
-    // the fallback.
-    let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Section").expect("VM must build");
-    let fallback = json!({ "id": 7 });
-    let got = vm
-        .current_sys(&fallback)
-        .expect("an unset live slot yields the fallback");
-    assert_eq!(got, fallback, "unset must return the fallback verbatim");
-
-    // Poison the live mutex via a panicking guard, then a snapshot must be a
-    // concrete error rather than a silent fallback.
-    let handle = vm.sys_live_handle();
-    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _guard = handle.lock().expect("first lock is not poisoned");
-        panic!("poison the sys_live mutex");
-    }));
-    assert!(
-        poisoned.is_err(),
-        "the panic must unwind and poison the lock"
-    );
-    let error = vm
-        .current_sys(&fallback)
-        .expect_err("a poisoned live slot must surface a concrete error");
-    assert!(
-        error.to_string().contains("poisoned"),
-        "the error must name the poison: {error}"
-    );
-}
-
-#[test]
 fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
     let local = LocalTools::default();
     let schema = promptforge_model_client::detail::tool_schema_new(

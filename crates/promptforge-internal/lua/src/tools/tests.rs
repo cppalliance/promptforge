@@ -1,29 +1,17 @@
 //! Tests for the `tools` namespace installers, alias decoding, and the local params schema.
 
 use mlua::{Lua, Value, Variadic};
-use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
 use super::decode::{collect_offer_entries, local_params_schema, tool_name};
 use super::userdata::LuaToolHandle;
-use super::{install_tool_call_counts, install_tools};
+use crate::ToolBinding;
 use crate::handles::ToolSet;
-use crate::scope::{TaskAllowlist, ToolRuntime};
-use crate::{SectionVm, ToolBinding};
-use promptforge_types::tools::ToolId;
-use std::sync::{Arc, Mutex};
+use crate::scope::TaskAllowlist;
+use crate::test_vm::{TestVm, echo_tool, lua_over, tool_at};
 
 #[path = "tests-offering.rs"]
 mod offering;
-
-/// A fresh default handle's access capability for a test VM.
-fn fresh_access() -> Arc<crate::Access> {
-    Arc::new(
-        promptforge_vfs::VfsRef::default()
-            .acquire(promptforge_vfs::Origin::new("tool test fixture"))
-            .expect("the stock backend acquires"),
-    )
-}
 
 /// A userdata that is not a Tool object, for the foreign-userdata rejection.
 struct Foreign;
@@ -184,54 +172,20 @@ fn local_params_schema_rejects_an_unsupported_type() {
     );
 }
 
-/// Installs the tools namespace over `set` on a fresh VM and returns it
-/// with the shared set and the runtime the namespace records into.
-fn lua_over(set: ToolSet) -> (Lua, Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
-    let lua = Lua::new();
-    let globals = lua.globals();
-    let set = Arc::new(set);
-    let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
-    install_tools(
-        &lua,
-        &globals,
-        &set,
-        &runtime,
-        &crate::vm::LocalTools::default(),
-    )
-    .expect("the tools install cannot fail on a fresh VM");
-    (lua, set, runtime)
-}
-
-/// Installs the tools namespace on a fresh VM and returns it with the
-/// runtime the namespace records into.
-fn lua_with_tools_and_runtime() -> (Lua, Arc<Mutex<ToolRuntime>>) {
-    let (lua, _, runtime) = lua_over(ToolSet::default());
-    (lua, runtime)
-}
-
-/// Installs the tools namespace on a fresh VM and returns it.
-fn lua_with_tools() -> Lua {
-    lua_with_tools_and_runtime().0
-}
-
 #[test]
 fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
-    let (lua, runtime) = lua_with_tools_and_runtime();
+    let vm = TestVm::new().build();
     let allowlist = || {
-        runtime
+        vm.tool_runtime
             .lock()
             .expect("the runtime mutex is not poisoned")
             .allowed_tasks
             .clone()
     };
     assert_eq!(allowlist(), None, "nothing is allowed before the call");
-    lua.load("tools.allow_tasks()")
-        .exec()
-        .expect("the bare call allows any target");
+    vm.exec("tools.allow_tasks()");
     assert_eq!(allowlist(), Some(TaskAllowlist::Any));
-    lua.load("tools.allow_tasks({ '## Research', ' ## Draft ' })")
-        .exec()
-        .expect("a list narrows the allowlist");
+    vm.exec("tools.allow_tasks({ '## Research', ' ## Draft ' })");
     let narrowed = allowlist().expect("the list is recorded");
     assert_eq!(
         narrowed,
@@ -245,10 +199,7 @@ fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
         ("tools.allow_tasks({ 7 })", "got integer"),
         ("tools.allow_tasks({ '  ' })", "non-empty"),
     ] {
-        let error = lua
-            .load(call)
-            .exec()
-            .expect_err("a malformed allowlist is refused");
+        let error = vm.eval_err(call);
         assert!(
             error.to_string().contains(fragment),
             "{call} names its fault: {error}"
@@ -269,51 +220,39 @@ fn the_tools_namespace_exposes_scoping_without_bind_or_call() {
     // `call` is absent here on purpose: it suspends, so the coroutine shim
     // prelude installs it - this table exposes exactly the non-suspending
     // operations. `bind` is absent too.
-    let lua = lua_with_tools();
-    let (has_offer, has_offer_local, call_is_nil, bind_is_nil): (bool, bool, bool, bool) = lua
-        .load(
-            "return type(tools.offer) == 'function', \
-                    type(tools.offer_local) == 'function', \
-                    tools.call == nil, \
-                    tools.bind == nil",
-        )
-        .eval()
-        .expect("the namespace probe evaluates");
+    let vm = TestVm::new().build();
+    let (has_offer, has_offer_local, call_is_nil, bind_is_nil): (bool, bool, bool, bool) = vm.eval(
+        "return type(tools.offer) == 'function', \
+                type(tools.offer_local) == 'function', \
+                tools.call == nil, \
+                tools.bind == nil",
+    );
     assert!(has_offer && has_offer_local && call_is_nil && bind_is_nil);
 }
 
 #[test]
 fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
-    let nonce = GuardNonce::from_seed(1);
-    let observer = crate::tests::recording::null_emitter();
-    let mut vm =
-        SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("value injection cannot fail");
-    vm.install_coro_shims(24)
-        .expect("the shim prelude installs");
-    let (call_is_function, bare_is_nil): (bool, bool) = vm
-        .lua()
-        .load("return type(tools.call) == 'function', tool_call == nil")
-        .eval()
-        .expect("the namespace probe evaluates");
+    let vm = TestVm::new().shims().build();
+    let (call_is_function, bare_is_nil): (bool, bool) =
+        vm.eval("return type(tools.call) == 'function', tool_call == nil");
     assert!(call_is_function, "tools.call installs on the tools table");
     assert!(bare_is_nil, "the bare tool_call global is gone");
-    vm.teardown(&observer, "Test");
+    vm.teardown();
 }
 
 #[test]
 fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
-    let lua = lua_with_tools();
-    let bound = ToolSet {
+    let echo = ToolBinding::from_descriptor("tools_echo", &echo_tool());
+    let vm = lua_over(ToolSet {
         offered: vec![
-            ToolBinding::from_descriptor("tools_echo", &echo_tool()),
+            echo.clone(),
             ToolBinding::from_descriptor("tools_other", &tool_at("tools/other")),
         ],
         ..ToolSet::default()
-    };
-    let counts =
-        install_tool_call_counts(&lua, &bound, &bound.offered()[..1]).expect("the counts install");
+    });
+    let counts = vm
+        .install_tool_call_counts(&[echo])
+        .expect("the counts install");
     assert_eq!(counts.get("tools/echo").expect("read"), Some(0));
     assert_eq!(
         counts.get("tools_echo").expect("read"),
@@ -321,11 +260,9 @@ fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
         "counts key a catalog tool by its id, never its wire name"
     );
     let read = |key: &str| -> String {
-        lua.load(format!(
+        vm.eval(&format!(
             "local ok, err = pcall(function() return tools.calls[{key:?}] end); return tostring(err)"
         ))
-        .eval::<String>()
-        .expect("the unseeded read raises")
     };
     let offered = read("tools/other");
     assert!(
@@ -344,18 +281,4 @@ fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
             "an unknown key names itself and the remedy: {error}"
         );
     }
-}
-
-/// A trivial tool as data, so the counts test can bind an id.
-fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
-    tool_at("tools/echo")
-}
-
-/// A tool as data under `id`, described as `<id> tool`.
-fn tool_at(id: &str) -> promptforge_types::tools::ToolDescriptor {
-    promptforge_types::tools::ToolDescriptor::new(
-        ToolId::parse(id).expect("valid id"),
-        format!("{id} tool"),
-        json!({ "type": "object" }),
-    )
 }

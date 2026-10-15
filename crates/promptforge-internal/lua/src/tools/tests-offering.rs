@@ -2,16 +2,13 @@
 //! over ids and tool objects, the `required` and `extras` lists,
 //! `tools.get`, and `tools.offer_local`.
 
-use std::sync::{Arc, Mutex};
-
 use mlua::{Lua, Value, Variadic};
 use promptforge_types::plugins::PluginId;
 
 use super::super::decode::collect_offer_entries;
-use super::{lua_over, tool_at};
 use crate::ToolBinding;
 use crate::handles::ToolSet;
-use crate::scope::ToolRuntime;
+use crate::test_vm::{lua_over, scoped, tool_at};
 
 /// A set declaring the Plugin `web` and offering its two tools beside the
 /// two of the undeclared Plugin `gh`, in id order, under their wire names.
@@ -28,27 +25,15 @@ fn offering_set() -> ToolSet {
     }
 }
 
-/// The section's scope as wire names.
-fn scoped(set: &Arc<ToolSet>, runtime: &Arc<Mutex<ToolRuntime>>) -> Vec<String> {
-    crate::current_tool_bindings(set, runtime)
-        .expect("the scope resolves")
-        .iter()
-        .map(|binding| binding.alias().to_owned())
-        .collect()
-}
-
 #[test]
 fn a_tool_object_reads_its_id_and_catalog_description_and_refuses_assignment() {
-    let (lua, _, _) = lua_over(offering_set());
-    let result: (String, String, bool, String) = lua
-        .load(
-            "local tool = tools.get('gh/search')\n\
-             tools.offer(tool)\n\
-             local ok, err = pcall(function() tool.description = 'x' end)\n\
-             return tool.id, tool.description, ok, tostring(err)",
-        )
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(offering_set());
+    let result: (String, String, bool, String) = vm.eval(
+        "local tool = tools.get('gh/search')\n\
+         tools.offer(tool)\n\
+         local ok, err = pcall(function() tool.description = 'x' end)\n\
+         return tool.id, tool.description, ok, tostring(err)",
+    );
     assert_eq!(result.0, "gh/search");
     assert_eq!(
         result.1, "gh/search tool",
@@ -66,17 +51,15 @@ fn a_tool_object_reads_its_id_and_catalog_description_and_refuses_assignment() {
 
 #[test]
 fn offer_decodes_ids_tool_objects_and_arrays_into_wire_names() {
-    let (lua, set, runtime) = lua_over(offering_set());
-    lua.load(
+    let vm = lua_over(offering_set());
+    vm.exec(
         "tools.offer('web/search')\n\
          tools.offer(tools.get('gh/search'))\n\
          tools.offer({ 'gh/issues.list', tools.get('web/fetch'), 'web/search' })\n\
          tools.offer()",
-    )
-    .exec()
-    .expect("ids, objects, and arrays offer");
+    );
     assert_eq!(
-        scoped(&set, &runtime),
+        scoped(&vm),
         ["web_search", "gh_search", "gh_issues_list", "web_fetch"],
         "each tool enters the scope once, under its wire name, in first-offer order"
     );
@@ -85,18 +68,13 @@ fn offer_decodes_ids_tool_objects_and_arrays_into_wire_names() {
 #[test]
 fn offer_records_nothing_when_any_entry_is_not_a_catalog_tool() {
     for bad in ["gh/missing", "Not An Id", "gh_search", "helper"] {
-        let (lua, set, runtime) = lua_over(offering_set());
-        lua.load("tools.offer_local('helper', 'a local helper', {}, function() return '' end)")
-            .exec()
-            .expect("the local tool registers");
-        let error: String = lua
-            .load(format!(
-                "local ok, err = pcall(tools.offer, {{ 'web/search', {bad:?} }})\n\
-                 assert(not ok, 'the bad entry is refused')\n\
-                 return tostring(err)"
-            ))
-            .eval()
-            .expect("the refusal is caught");
+        let vm = lua_over(offering_set());
+        vm.exec("tools.offer_local('helper', 'a local helper', {}, function() return '' end)");
+        let error: String = vm.eval(&format!(
+            "local ok, err = pcall(tools.offer, {{ 'web/search', {bad:?} }})\n\
+             assert(not ok, 'the bad entry is refused')\n\
+             return tostring(err)"
+        ));
         assert!(
             error.contains(&format!(
                 "tools.offer: {bad:?} is not a catalog tool in this run"
@@ -104,7 +82,7 @@ fn offer_records_nothing_when_any_entry_is_not_a_catalog_tool() {
             "tools.offer names {bad:?}: {error}"
         );
         assert!(
-            scoped(&set, &runtime).is_empty(),
+            scoped(&vm).is_empty(),
             "a refused call records no entry, the valid one included ({bad:?})"
         );
     }
@@ -113,43 +91,29 @@ fn offer_records_nothing_when_any_entry_is_not_a_catalog_tool() {
 #[test]
 fn offering_a_tool_object_matches_offering_its_id() {
     let by_object = lua_over(offering_set());
-    by_object
-        .0
-        .load("tools.offer(tools.get('gh/search'))")
-        .exec()
-        .expect("the object offers");
+    by_object.exec("tools.offer(tools.get('gh/search'))");
     let by_id = lua_over(offering_set());
-    by_id
-        .0
-        .load("tools.offer('gh/search')")
-        .exec()
-        .expect("the id offers");
-    assert_eq!(
-        scoped(&by_object.1, &by_object.2),
-        scoped(&by_id.1, &by_id.2)
-    );
-    assert_eq!(scoped(&by_id.1, &by_id.2), ["gh_search"]);
+    by_id.exec("tools.offer('gh/search')");
+    assert_eq!(scoped(&by_object), scoped(&by_id));
+    assert_eq!(scoped(&by_id), ["gh_search"]);
 }
 
 #[test]
 fn required_and_extras_split_the_offering_by_declared_plugin_and_share_objects() {
-    let (lua, _, _) = lua_over(offering_set());
-    let result: (String, String, bool, bool, bool, bool) = lua
-        .load(
-            "local function ids(list)\n\
-               local out = {}\n\
-               for i, tool in ipairs(list) do out[i] = tool.id end\n\
-               return table.concat(out, ',')\n\
-             end\n\
-             local required, extras = tools.required(), tools.extras()\n\
-             return ids(required), ids(extras), \
-               required[1] == tools.get('web/fetch'), \
-               extras[2] == tools.get('gh/search'), \
-               tools.required() ~= required, \
-               tools.required()[2] == required[2]",
-        )
-        .eval()
-        .expect("the lists evaluate");
+    let vm = lua_over(offering_set());
+    let result: (String, String, bool, bool, bool, bool) = vm.eval(
+        "local function ids(list)\n\
+           local out = {}\n\
+           for i, tool in ipairs(list) do out[i] = tool.id end\n\
+           return table.concat(out, ',')\n\
+         end\n\
+         local required, extras = tools.required(), tools.extras()\n\
+         return ids(required), ids(extras), \
+           required[1] == tools.get('web/fetch'), \
+           extras[2] == tools.get('gh/search'), \
+           tools.required() ~= required, \
+           tools.required()[2] == required[2]",
+    );
     assert_eq!(
         result,
         (
@@ -167,18 +131,15 @@ fn required_and_extras_split_the_offering_by_declared_plugin_and_share_objects()
 
 #[test]
 fn tools_get_reads_one_object_by_id_and_nil_for_anything_else() {
-    let (lua, _, _) = lua_over(offering_set());
-    let result: (String, bool, bool, bool, bool, String) = lua
-        .load(
-            "tools.offer_local('helper', 'a local helper', {}, function() return '' end)\n\
-             local ok, err = pcall(tools.get, 42)\n\
-             assert(not ok, 'a non-string is refused')\n\
-             return tools.get('gh/search').id, tools.get('gh/missing') == nil, \
-               tools.get('helper') == nil, tools.get('Not An Id') == nil, \
-               tools.get('gh_search') == nil, tostring(err)",
-        )
-        .eval()
-        .expect("the probe evaluates");
+    let vm = lua_over(offering_set());
+    let result: (String, bool, bool, bool, bool, String) = vm.eval(
+        "tools.offer_local('helper', 'a local helper', {}, function() return '' end)\n\
+         local ok, err = pcall(tools.get, 42)\n\
+         assert(not ok, 'a non-string is refused')\n\
+         return tools.get('gh/search').id, tools.get('gh/missing') == nil, \
+           tools.get('helper') == nil, tools.get('Not An Id') == nil, \
+           tools.get('gh_search') == nil, tostring(err)",
+    );
     assert_eq!(result.0, "gh/search");
     assert!(
         result.1 && result.2 && result.3 && result.4,
@@ -193,17 +154,14 @@ fn tools_get_reads_one_object_by_id_and_nil_for_anything_else() {
 
 #[test]
 fn offer_local_registers_a_local_tool_and_names_itself_in_its_errors() {
-    let (lua, _, _) = lua_over(offering_set());
-    let errors: (String, String, String) = lua
-        .load(
-            "tools.offer_local('gh_search', 'a local search', {}, function() return '' end)\n\
-             local _, duplicate = pcall(tools.offer_local, 'gh_search', 'again', {}, function() end)\n\
-             local _, param = pcall(tools.offer_local, 'other', 'x', { p = 'table' }, function() end)\n\
-             local _, alias = pcall(tools.offer_local, 'web/search', 'x', {}, function() end)\n\
-             return tostring(duplicate), tostring(param), tostring(alias)",
-        )
-        .eval()
-        .expect("a local tool may take an offered wire name");
+    let vm = lua_over(offering_set());
+    let errors: (String, String, String) = vm.eval(
+        "tools.offer_local('gh_search', 'a local search', {}, function() return '' end)\n\
+         local _, duplicate = pcall(tools.offer_local, 'gh_search', 'again', {}, function() end)\n\
+         local _, param = pcall(tools.offer_local, 'other', 'x', { p = 'table' }, function() end)\n\
+         local _, alias = pcall(tools.offer_local, 'web/search', 'x', {}, function() end)\n\
+         return tostring(duplicate), tostring(param), tostring(alias)",
+    );
     assert!(
         errors
             .0
@@ -227,16 +185,13 @@ fn offer_local_registers_a_local_tool_and_names_itself_in_its_errors() {
 
 #[test]
 fn the_tools_namespace_installs_its_six_functions() {
-    let (lua, _, _) = lua_over(offering_set());
-    let kinds: String = lua
-        .load(
-            "local kinds = {}\n\
-             for _, name in ipairs({ 'offer', 'offer_local', 'required', \
-               'extras', 'get', 'allow_tasks' }) do kinds[#kinds + 1] = type(tools[name]) end\n\
-             return table.concat(kinds, ',')",
-        )
-        .eval()
-        .expect("the namespace probe evaluates");
+    let vm = lua_over(offering_set());
+    let kinds: String = vm.eval(
+        "local kinds = {}\n\
+         for _, name in ipairs({ 'offer', 'offer_local', 'required', \
+           'extras', 'get', 'allow_tasks' }) do kinds[#kinds + 1] = type(tools[name]) end\n\
+         return table.concat(kinds, ',')",
+    );
     assert_eq!(
         kinds,
         "function,function,function,function,function,function"

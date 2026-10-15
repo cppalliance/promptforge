@@ -1,12 +1,14 @@
 //! The test VM builder: a section VM set up the way section setup builds
 //! one, through construction, the run's limits, Engine injection, and the
 //! persistent Engine globals, with the control globals and coroutine shims
-//! on request, handed back with named handles to what the VM shares.
+//! on request, handed back with named handles to what the VM shares. Also
+//! the tool fixtures as data and the scope a VM's offers resolve to.
 
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use mlua::FromLuaMulti;
+use promptforge_types::tools::{ToolDescriptor, ToolId};
 use promptforge_vfs::{Origin, VfsRef};
 use serde_json::json;
 
@@ -17,6 +19,9 @@ use crate::{
 
 /// The one guard-nonce seed of every test VM.
 pub(crate) const TEST_SEED: u64 = 0x6c75_6174_6573;
+
+/// The section a test VM reports under unless `section` names another.
+pub(crate) const TEST_SECTION: &str = "Test";
 
 /// The guard nonce [`TEST_SEED`] mints, for a test that drives a section
 /// VM's construction itself.
@@ -37,8 +42,42 @@ pub(crate) fn fresh_access() -> Arc<Access> {
     )
 }
 
+/// A tool as data under `id`, described as `<id> tool`.
+#[track_caller]
+pub(crate) fn tool_at(id: &str) -> ToolDescriptor {
+    ToolDescriptor::new(
+        ToolId::parse(id).expect("valid id"),
+        format!("{id} tool"),
+        json!({ "type": "object" }),
+    )
+}
+
+/// The `tools/echo` fixture tool as data. No implementation is ever
+/// called: the VM binds descriptors and dispatch sees canned outputs.
+#[track_caller]
+pub(crate) fn echo_tool() -> ToolDescriptor {
+    tool_at("tools/echo")
+}
+
+/// A test VM whose `tools` and `plugins` tables are installed over `set`.
+#[track_caller]
+pub(crate) fn lua_over(set: ToolSet) -> BuiltVm {
+    TestVm::new().tools(set).build()
+}
+
+/// The wire names a round on `vm` advertises, in order.
+#[track_caller]
+pub(crate) fn scoped(vm: &SectionVm) -> Vec<String> {
+    let (set, runtime) = vm.tool_bag_handles();
+    crate::current_tool_bindings(&set, &runtime)
+        .expect("the scope resolves")
+        .iter()
+        .map(|binding| binding.alias().to_owned())
+        .collect()
+}
+
 /// A section VM's setup as data. Unset, the VM shares an empty tool and
-/// model set, reports nowhere under the section `Test`, gets a fresh store,
+/// model set, reports nowhere under [`TEST_SECTION`], gets a fresh store,
 /// empty `args` and `sys`, a frozen nil `argv`, and an empty `var`.
 pub(crate) struct TestVm<'a> {
     tools: ToolSet,
@@ -62,7 +101,7 @@ impl<'a> TestVm<'a> {
             models: ModelSet::default(),
             access: None,
             emitter: null_emitter(),
-            section: "Test",
+            section: TEST_SECTION,
             argv: Argv::Frozen(None),
             var: None,
             limits: None,
@@ -226,6 +265,18 @@ impl BuiltVm {
             .set_name("probe")
             .eval()
             .expect("the test chunk runs")
+    }
+
+    /// Runs `source` on the VM's main state under the chunk name `probe`
+    /// for its effects, failing the test when it raises.
+    #[track_caller]
+    pub(crate) fn exec(&self, source: &str) {
+        self.vm
+            .lua()
+            .load(source)
+            .set_name("probe")
+            .exec()
+            .expect("the test chunk runs");
     }
 
     /// Runs `source` on the VM's main state under the chunk name `probe`

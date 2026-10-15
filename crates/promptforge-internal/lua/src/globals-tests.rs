@@ -29,12 +29,12 @@ const PROSE: &str = "the block's prose";
 #[track_caller]
 fn frozen_vm() -> BuiltVm {
     let argv = json!({ "query": "papers" });
-    section_vm(Argv::Frozen(Some(&argv)))
+    prose_vm(Argv::Frozen(Some(&argv)))
 }
 
 /// [`frozen_vm`] with `argv` installed in the given mode.
 #[track_caller]
-fn section_vm(argv: Argv<'_>) -> BuiltVm {
+fn prose_vm(argv: Argv<'_>) -> BuiltVm {
     let vm = TestVm::new().argv(argv).shims().build();
     vm.install_lazy_prose(|_| Ok(PROSE.to_owned()))
         .expect("the prose guard installs");
@@ -120,7 +120,7 @@ fn no_setmetatable_call_on_g_frees_argv_or_prose() {
 
 #[test]
 fn the_h1_argv_is_a_plain_global_that_no_author_metatable_intercepts() {
-    let vm = section_vm(Argv::Writable(None));
+    let vm = prose_vm(Argv::Writable(None));
     let (absent, hooked, query): (bool, bool, String) = vm.eval(
         "seen = {}\n\
          setmetatable(_G, {\n\

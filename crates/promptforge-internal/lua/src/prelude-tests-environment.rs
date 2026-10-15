@@ -144,7 +144,7 @@ fn a_prelude_function_called_from_a_block_yields_its_tool_call() {
         "prelude test block",
         NonZeroU32::new(1).expect("a non-zero line"),
         &null_emitter(),
-        SECTION,
+        TEST_SECTION,
     )
     .expect("the block compiles");
 
