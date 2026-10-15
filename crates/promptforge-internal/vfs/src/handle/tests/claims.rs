@@ -9,8 +9,7 @@ fn one_identity_never_conflicts_with_itself() -> Result<(), VfsError> {
     // Borrow semantics: a blocking call chain uses the parent's
     // access, so sequential ops on one path by one identity stay
     // legal - no new identity, no false conflict.
-    let vfs = handle(&StubFs::default());
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::default()))?;
     access.write("/f.txt", b"one")?;
     access.write("/f.txt", b"two")?;
     access.append("/f.txt", b"!")?;
@@ -20,9 +19,9 @@ fn one_identity_never_conflicts_with_itself() -> Result<(), VfsError> {
 
 #[test]
 fn a_write_conflicts_with_another_identitys_read_claim() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-    let reader = vfs.acquire(test_origin())?;
-    let writer = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/f.txt", "data")]));
+    let reader = access(&vfs)?;
+    let writer = access(&vfs)?;
     reader.read("/f.txt")?;
     let message = conflict_message(writer.write("/f.txt", b"new"));
     assert!(message.contains("/f.txt"), "names the path: {message}");
@@ -47,10 +46,10 @@ fn a_write_conflicts_with_another_identitys_read_claim() -> Result<(), VfsError>
 
 #[test]
 fn a_read_conflicts_with_another_identitys_write_claim() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
-    let writer = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::default());
+    let writer = access(&vfs)?;
     writer.write("/f.txt", b"x")?;
-    let reader = vfs.acquire(test_origin())?;
+    let reader = access(&vfs)?;
     match reader.read("/f.txt") {
         Err(VfsError::Conflict { .. }) => {}
         other => panic!("expected a conflict, got {other:?}"),
@@ -60,10 +59,10 @@ fn a_read_conflicts_with_another_identitys_write_claim() -> Result<(), VfsError>
 
 #[test]
 fn two_writes_by_two_identities_conflict() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
-    let first = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::default());
+    let first = access(&vfs)?;
     first.write("/f.txt", b"1")?;
-    let second = vfs.acquire(test_origin())?;
+    let second = access(&vfs)?;
     let message = conflict_message(second.write("/f.txt", b"2"));
     assert!(message.contains("write claim"), "{message}");
     Ok(())
@@ -71,9 +70,9 @@ fn two_writes_by_two_identities_conflict() -> Result<(), VfsError> {
 
 #[test]
 fn reads_by_two_identities_never_conflict() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-    let first = vfs.acquire(test_origin())?;
-    let second = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/f.txt", "data")]));
+    let first = access(&vfs)?;
+    let second = access(&vfs)?;
     first.read("/f.txt")?;
     assert_eq!(second.read("/f.txt")?, b"data");
     Ok(())
@@ -83,10 +82,10 @@ fn reads_by_two_identities_never_conflict() -> Result<(), VfsError> {
 fn a_copy_conflicts_with_another_identitys_write_on_the_source() -> Result<(), VfsError> {
     // Copy claims the source as a read, and a read booms on another
     // scope's write claim.
-    let vfs = handle(&StubFs::default());
-    let writer = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::default());
+    let writer = access(&vfs)?;
     writer.write("/src.txt", b"data")?;
-    let copier = vfs.acquire(test_origin())?;
+    let copier = access(&vfs)?;
     let message = conflict_message(copier.copy("/src.txt", "/dst.txt"));
     assert!(message.contains("/src.txt"), "names the source: {message}");
     Ok(())
@@ -97,10 +96,10 @@ fn a_copy_shares_the_source_with_another_identitys_read() -> Result<(), VfsError
     // The source claim is a read, not a write: another identity's
     // read claim on the source must not block the copy. Were the
     // source claimed as a write, this copy would conflict.
-    let vfs = handle(&StubFs::seeded(&[("/src.txt", "data")]));
-    let reader = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/src.txt", "data")]));
+    let reader = access(&vfs)?;
     reader.read("/src.txt")?;
-    let copier = vfs.acquire(test_origin())?;
+    let copier = access(&vfs)?;
     copier.copy("/src.txt", "/dst.txt")?;
     assert_eq!(copier.read("/dst.txt")?, b"data");
     Ok(())
@@ -110,13 +109,10 @@ fn a_copy_shares_the_source_with_another_identitys_read() -> Result<(), VfsError
 fn a_copy_conflicts_with_another_identitys_claim_on_the_destination() -> Result<(), VfsError> {
     // The destination is claimed as a write, so any other live
     // identity's claim on it blocks the copy.
-    let vfs = handle(&StubFs::seeded(&[
-        ("/src.txt", "data"),
-        ("/dst.txt", "old"),
-    ]));
-    let reader = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/src.txt", "data"), ("/dst.txt", "old")]));
+    let reader = access(&vfs)?;
     reader.read("/dst.txt")?;
-    let copier = vfs.acquire(test_origin())?;
+    let copier = access(&vfs)?;
     let message = conflict_message(copier.copy("/src.txt", "/dst.txt"));
     assert!(
         message.contains("/dst.txt"),
@@ -127,10 +123,10 @@ fn a_copy_conflicts_with_another_identitys_claim_on_the_destination() -> Result<
 
 #[test]
 fn a_rename_conflicts_with_a_claim_on_the_source_path() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/from.txt", "data")]));
-    let reader = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/from.txt", "data")]));
+    let reader = access(&vfs)?;
     reader.read("/from.txt")?;
-    let renamer = vfs.acquire(test_origin())?;
+    let renamer = access(&vfs)?;
     let message = conflict_message(renamer.rename("/from.txt", "/to.txt"));
     assert!(message.contains("/from.txt"), "names the source: {message}");
     Ok(())
@@ -140,13 +136,10 @@ fn a_rename_conflicts_with_a_claim_on_the_source_path() -> Result<(), VfsError> 
 fn a_rename_conflicts_with_a_claim_on_the_destination_path() -> Result<(), VfsError> {
     // Both paths are claimed as writes; were the second gate dropped,
     // this rename would sail through against the standing claim.
-    let vfs = handle(&StubFs::seeded(&[
-        ("/from.txt", "data"),
-        ("/to.txt", "old"),
-    ]));
-    let reader = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/from.txt", "data"), ("/to.txt", "old")]));
+    let reader = access(&vfs)?;
     reader.read("/to.txt")?;
-    let renamer = vfs.acquire(test_origin())?;
+    let renamer = access(&vfs)?;
     let message = conflict_message(renamer.rename("/from.txt", "/to.txt"));
     assert!(
         message.contains("/to.txt"),
@@ -157,13 +150,13 @@ fn a_rename_conflicts_with_a_claim_on_the_destination_path() -> Result<(), VfsEr
 
 #[test]
 fn transfer_of_control_moves_the_identity_with_the_access() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-    let original = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/f.txt", "data")]));
+    let original = access(&vfs)?;
     original.read("/f.txt")?;
     // Transfer of control moves the access object; the identity - and
     // with it the scope's reference count - moves with it.
     let moved = original;
-    let other = vfs.acquire(test_origin())?;
+    let other = access(&vfs)?;
     let message = conflict_message(other.write("/f.txt", b"new"));
     assert!(message.contains(&format!("{:?}", moved.id)));
     assert_eq!(moved.read("/f.txt")?, b"data");
@@ -172,10 +165,10 @@ fn transfer_of_control_moves_the_identity_with_the_access() -> Result<(), VfsErr
 
 #[test]
 fn alias_spellings_of_one_file_land_on_one_claim_key() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/a/b.txt", "x")]));
-    let reader = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/a/b.txt", "x")]));
+    let reader = access(&vfs)?;
     reader.read("/a/./b.txt")?;
-    let writer = vfs.acquire(test_origin())?;
+    let writer = access(&vfs)?;
     let message = conflict_message(writer.write("/a//b.txt", b"y"));
     assert!(message.contains("/a/b.txt"), "the canonical key: {message}");
     Ok(())
@@ -183,11 +176,11 @@ fn alias_spellings_of_one_file_land_on_one_claim_key() -> Result<(), VfsError> {
 
 #[test]
 fn claims_are_shared_across_handle_clones() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
+    let vfs = handle(TestFs::default());
     let clone = vfs.clone();
-    let first = vfs.acquire(test_origin())?;
+    let first = access(&vfs)?;
     first.write("/f.txt", b"1")?;
-    let second = clone.acquire(test_origin())?;
+    let second = access(&clone)?;
     let message = conflict_message(second.write("/f.txt", b"2"));
     assert!(message.contains("/f.txt"), "{message}");
     Ok(())
@@ -197,12 +190,12 @@ fn claims_are_shared_across_handle_clones() -> Result<(), VfsError> {
 fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
     let verdict = Arc::new(Mutex::new(Verdict::Deny("writes are sealed".to_owned())));
     let vfs = VfsRef::with_policy(
-        StubFs::default(),
+        TestFs::default(),
         FlipPolicy {
             verdict: Arc::clone(&verdict),
         },
     );
-    let denied = vfs.acquire(test_origin())?;
+    let denied = access(&vfs)?;
     match denied.write("/f.txt", b"x") {
         Err(VfsError::PermissionDenied { path, reason }) => {
             assert_eq!(path, "/f.txt");
@@ -212,7 +205,7 @@ fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
     }
     // The caller flips the policy mid-run through shared state.
     *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
-    let allowed = vfs.acquire(test_origin())?;
+    let allowed = access(&vfs)?;
     // Had the denied attempt registered a write claim, this write
     // would conflict with it.
     allowed.write("/f.txt", b"x")?;
@@ -222,15 +215,15 @@ fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
 
 #[test]
 fn a_refused_claim_never_registers_a_claim() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/src.txt", "s"), ("/copied.txt", "c")]));
-    let prober = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::seeded(&[("/src.txt", "s"), ("/copied.txt", "c")]));
+    let prober = access(&vfs)?;
     prober.exists("/d")?;
     // The write's may-create claim on `/d` races with the probe.
-    let refused = vfs.acquire(test_origin())?;
+    let refused = access(&vfs)?;
     conflict_message(refused.write("/d/f", b"f"));
     // Had the refused write registered its claim on `/d/f`, this
     // read would conflict with it.
-    let reader = vfs.acquire(test_origin())?;
+    let reader = access(&vfs)?;
     assert!(
         matches!(reader.read("/d/f"), Err(VfsError::NotFound { .. })),
         "the read reaches the backend"
@@ -238,15 +231,15 @@ fn a_refused_claim_never_registers_a_claim() -> Result<(), VfsError> {
 
     // A rename refused on its destination leaves its source
     // unclaimed.
-    let renamer = vfs.acquire(test_origin())?;
+    let renamer = access(&vfs)?;
     conflict_message(renamer.rename("/src.txt", "/d/g"));
     assert_eq!(reader.read("/src.txt")?, b"s");
 
     // A copy refused on its destination leaves no read claim on its
     // source, so a later unordered write to the source goes through.
-    let copier = vfs.acquire(test_origin())?;
+    let copier = access(&vfs)?;
     conflict_message(copier.copy("/copied.txt", "/d/h"));
-    let writer = vfs.acquire(test_origin())?;
+    let writer = access(&vfs)?;
     writer.write("/copied.txt", b"w")?;
     Ok(())
 }

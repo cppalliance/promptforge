@@ -11,7 +11,7 @@ fn a_sink_receives_events_in_order_with_op_path_and_label() -> Result<(), VfsErr
     let events: Arc<Mutex<Vec<Recorded>>> = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&events);
     let vfs = VfsRef::builder()
-        .mount("/", StubFs::seeded(&[("/a.txt", "x")]))
+        .mount("/", TestFs::seeded(&[("/a.txt", "x")]))
         .on_op(move |event: OpEvent<'_>| {
             recorded
                 .lock()
@@ -48,8 +48,7 @@ fn a_sink_receives_events_in_order_with_op_path_and_label() -> Result<(), VfsErr
 fn a_handle_without_a_sink_serves_operations_without_firing() -> Result<(), VfsError> {
     // The None sink branch: no `on_op`, and operations behave
     // exactly as before - not firing is a no-op, never a panic.
-    let vfs = VfsRef::builder().mount("/", StubFs::default()).build();
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::default()))?;
     access.write("/f.txt", b"x")?;
     assert_eq!(access.read("/f.txt")?, b"x");
     Ok(())
@@ -61,7 +60,7 @@ fn a_policy_denied_operation_never_fires_the_sink() -> Result<(), VfsError> {
     let events: Arc<Mutex<Vec<Op>>> = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&events);
     let vfs = VfsRef::builder()
-        .mount("/", StubFs::default())
+        .mount("/", TestFs::default())
         .policy(FlipPolicy {
             verdict: Arc::clone(&verdict),
         })
@@ -72,7 +71,7 @@ fn a_policy_denied_operation_never_fires_the_sink() -> Result<(), VfsError> {
                 .push(event.op());
         })
         .build();
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&vfs)?;
     assert!(matches!(
         access.write("/f.txt", b"x"),
         Err(VfsError::PermissionDenied { .. })

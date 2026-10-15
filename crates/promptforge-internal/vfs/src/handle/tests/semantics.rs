@@ -1,15 +1,9 @@
-use crate::memory::MemoryBackend;
-
-use super::{VfsError, VfsRef, test_origin};
+use super::{VfsError, VfsRef, access};
 use crate::PathReason;
-
-fn memory() -> VfsRef {
-    VfsRef::new(MemoryBackend::new())
-}
 
 #[test]
 fn a_relative_path_joins_onto_the_access_root() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     access.write("notes/a.txt", b"hi")?;
     assert_eq!(access.read("/notes/a.txt")?, b"hi");
     assert_eq!(access.read("notes/a.txt")?, b"hi");
@@ -18,7 +12,7 @@ fn a_relative_path_joins_onto_the_access_root() -> Result<(), VfsError> {
 
 #[test]
 fn dotdot_stops_at_the_access_root() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     access.write("/drafts/f.txt", b"x")?;
     assert_eq!(access.read("drafts/../drafts/f.txt")?, b"x");
     assert_eq!(
@@ -33,7 +27,7 @@ fn dotdot_stops_at_the_access_root() -> Result<(), VfsError> {
 
 #[test]
 fn removing_a_missing_path_is_ok_false() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     assert!(!access.remove("/gone.txt", false)?);
     access.write("/f.txt", b"x")?;
     assert!(access.remove("/f.txt", false)?);
@@ -43,7 +37,7 @@ fn removing_a_missing_path_is_ok_false() -> Result<(), VfsError> {
 
 #[test]
 fn glob_returns_files_and_a_trailing_slash_selects_directories() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     access.write("/d/a.txt", b"")?;
     access.write("/d/sub/c.txt", b"")?;
     assert_eq!(access.glob("/d/*")?, vec!["/d/a.txt".to_owned()]);
@@ -53,7 +47,7 @@ fn glob_returns_files_and_a_trailing_slash_selects_directories() -> Result<(), V
 
 #[test]
 fn glob_refuses_a_backslash_in_the_raw_pattern() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     access.write("/a.txt", b"")?;
     // A backslash is refused as written, never turned into a
     // separator by canonicalization.
@@ -76,7 +70,7 @@ fn glob_refuses_a_backslash_in_the_raw_pattern() -> Result<(), VfsError> {
 
 #[test]
 fn glob_names_the_rule_for_an_empty_control_or_over_long_pattern() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     assert_eq!(
         access.glob(""),
         Err(VfsError::InvalidPath {
@@ -104,7 +98,7 @@ fn glob_names_the_rule_for_an_empty_control_or_over_long_pattern() -> Result<(),
 
 #[test]
 fn a_relative_pattern_yields_relative_results() -> Result<(), VfsError> {
-    let access = memory().acquire(test_origin())?;
+    let access = access(&VfsRef::default())?;
     access.write("/d/a.txt", b"")?;
     access.write("/d/b.md", b"")?;
     access.write("/d/sub/c.txt", b"")?;

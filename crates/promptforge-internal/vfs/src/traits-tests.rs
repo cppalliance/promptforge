@@ -1,119 +1,17 @@
-use std::collections::BTreeMap;
-
-use super::{AllowAll, Op, Policy, Verdict, VfsAccess};
+use super::{AllowAll, Op, Policy, Verdict, Vfs, VfsAccess};
 use crate::error::VfsError;
-use crate::path::{VfsPath, canonicalize_absolute};
-use crate::stat::{Entry, Stat};
+use crate::test_support::{TestFs, context, path};
 
-/// Minimal in-memory backend exercising the trait defaults: the
-/// required methods are direct map operations.
-struct StubBackend {
-    files: BTreeMap<String, Vec<u8>>,
-}
-
-fn stub(files: &[(&str, &str)]) -> StubBackend {
-    StubBackend {
-        files: files
-            .iter()
-            .map(|(name, text)| ((*name).to_owned(), text.as_bytes().to_vec()))
-            .collect(),
-    }
-}
-
-fn path(s: &str) -> Result<VfsPath, VfsError> {
-    canonicalize_absolute(s)
-}
-
-impl VfsAccess for StubBackend {
-    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-        self.files
-            .get(path.as_str())
-            .cloned()
-            .ok_or_else(|| VfsError::NotFound {
-                path: path.to_string(),
-            })
-    }
-
-    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.files.insert(path.to_string(), contents.to_vec());
-        Ok(())
-    }
-
-    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.files
-            .entry(path.to_string())
-            .or_default()
-            .extend_from_slice(contents);
-        Ok(())
-    }
-
-    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        let _ = recursive;
-        self.files
-            .remove(path.as_str())
-            .map(|_| ())
-            .ok_or_else(|| VfsError::NotFound {
-                path: path.to_string(),
-            })
-    }
-
-    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        Ok(self.files.contains_key(path.as_str()))
-    }
-
-    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-        Err(VfsError::Unsupported {
-            path: pattern.to_owned(),
-            detail: "the stub does not glob".into(),
-        })
-    }
-
-    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-        Err(VfsError::Unsupported {
-            path: path.to_string(),
-            detail: "the stub does not list".into(),
-        })
-    }
-
-    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        Err(VfsError::Unsupported {
-            path: path.to_string(),
-            detail: "the stub does not stat".into(),
-        })
-    }
-
-    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        let _ = (path, recursive);
-        Ok(())
-    }
-
-    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        let bytes = self
-            .files
-            .remove(from.as_str())
-            .ok_or_else(|| VfsError::NotFound {
-                path: from.to_string(),
-            })?;
-        self.files.insert(to.to_string(), bytes);
-        Ok(())
-    }
-
-    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        let bytes = self
-            .files
-            .get(from.as_str())
-            .cloned()
-            .ok_or_else(|| VfsError::NotFound {
-                path: from.to_string(),
-            })?;
-        self.files.insert(to.to_string(), bytes);
-        Ok(())
-    }
+/// A session on the test backend, whose access implements only the
+/// required methods, so every provided method below runs its default.
+#[track_caller]
+fn stub(files: &[(&str, &str)]) -> Result<Box<dyn VfsAccess>, VfsError> {
+    TestFs::seeded(files).acquire(&context())
 }
 
 #[test]
 fn the_default_read_range_slices_a_whole_read() -> Result<(), VfsError> {
-    let backend = stub(&[("/a.txt", "hello world")]);
+    let backend = stub(&[("/a.txt", "hello world")])?;
     let bytes = backend.read_range(&path("/a.txt")?, 6, 5)?;
     assert_eq!(bytes, b"world");
     Ok(())
@@ -121,7 +19,7 @@ fn the_default_read_range_slices_a_whole_read() -> Result<(), VfsError> {
 
 #[test]
 fn the_default_read_range_clips_at_the_end_of_the_file() -> Result<(), VfsError> {
-    let backend = stub(&[("/a.txt", "hello")]);
+    let backend = stub(&[("/a.txt", "hello")])?;
     assert_eq!(backend.read_range(&path("/a.txt")?, 2, 100)?, b"llo");
     assert!(backend.read_range(&path("/a.txt")?, 100, 5)?.is_empty());
     Ok(())
@@ -129,7 +27,7 @@ fn the_default_read_range_clips_at_the_end_of_the_file() -> Result<(), VfsError>
 
 #[test]
 fn the_default_str_replace_rewrites_the_unique_occurrence() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "alpha beta gamma")]);
+    let mut backend = stub(&[("/a.txt", "alpha beta gamma")])?;
     backend.str_replace(&path("/a.txt")?, "beta", "BETA")?;
     assert_eq!(backend.read(&path("/a.txt")?)?, b"alpha BETA gamma");
     Ok(())
@@ -137,7 +35,7 @@ fn the_default_str_replace_rewrites_the_unique_occurrence() -> Result<(), VfsErr
 
 #[test]
 fn the_default_str_replace_rejects_zero_matches() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "alpha beta")]);
+    let mut backend = stub(&[("/a.txt", "alpha beta")])?;
     let result = backend.str_replace(&path("/a.txt")?, "missing", "x");
     assert_eq!(
         result,
@@ -153,7 +51,7 @@ fn the_default_str_replace_rejects_zero_matches() -> Result<(), VfsError> {
 
 #[test]
 fn the_default_str_replace_rejects_multiple_matches() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "foo and foo")]);
+    let mut backend = stub(&[("/a.txt", "foo and foo")])?;
     let result = backend.str_replace(&path("/a.txt")?, "foo", "bar");
     assert_eq!(
         result,
@@ -169,7 +67,7 @@ fn the_default_str_replace_rejects_multiple_matches() -> Result<(), VfsError> {
 
 #[test]
 fn the_default_str_replace_refuses_an_empty_anchor_on_an_empty_file() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "")]);
+    let mut backend = stub(&[("/a.txt", "")])?;
     let result = backend.str_replace(&path("/a.txt")?, "", "x");
     match result {
         Err(VfsError::Anchor {
@@ -189,7 +87,7 @@ fn the_default_str_replace_refuses_an_empty_anchor_on_an_empty_file() -> Result<
 
 #[test]
 fn the_default_str_replace_refuses_an_empty_anchor_on_a_non_empty_file() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "alpha beta")]);
+    let mut backend = stub(&[("/a.txt", "alpha beta")])?;
     let result = backend.str_replace(&path("/a.txt")?, "", "x");
     match result {
         Err(VfsError::Anchor {
@@ -209,7 +107,7 @@ fn the_default_str_replace_refuses_an_empty_anchor_on_a_non_empty_file() -> Resu
 
 #[test]
 fn the_default_str_replace_reports_non_utf8_text() -> Result<(), VfsError> {
-    let mut backend = stub(&[]);
+    let mut backend = stub(&[])?;
     backend.write(&path("/bin.dat")?, &[0xff, 0xfe])?;
     assert_eq!(
         backend.str_replace(&path("/bin.dat")?, "x", "y"),
@@ -222,7 +120,7 @@ fn the_default_str_replace_reports_non_utf8_text() -> Result<(), VfsError> {
 
 #[test]
 fn unsupported_posix_defaults_return_the_right_error_kind() -> Result<(), VfsError> {
-    let mut backend = stub(&[("/a.txt", "x")]);
+    let mut backend = stub(&[("/a.txt", "x")])?;
     assert!(matches!(
         backend.symlink(&path("/a.txt")?, &path("/b.txt")?),
         Err(VfsError::Unsupported { .. })

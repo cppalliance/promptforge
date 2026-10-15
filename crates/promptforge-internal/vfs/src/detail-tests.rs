@@ -1,8 +1,6 @@
 use super::{access_spawn, end_scope, probe_store, scope_handle, store_view};
-use crate::{
-    Access, AcquireContext, ExecId, MemoryBackend, Origin, PathReason, Vfs, VfsAccess, VfsError,
-    VfsRef,
-};
+use crate::test_support::{TestFs, access, handle};
+use crate::{Access, MemoryBackend, Origin, PathReason, VfsError, VfsRef};
 
 /// A base at `/` beside a store declared at `/my/store`: the shape
 /// most store-view tests start from.
@@ -14,10 +12,9 @@ fn stock() -> VfsRef {
 }
 
 /// The chain's access and its store view, in one scope.
+#[track_caller]
 fn chain(vfs: &VfsRef) -> (Access, Access) {
-    let access = vfs
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
+    let access = access(vfs).expect("the stock backend acquires");
     let view = store_view(&access).expect("the handle declares a store");
     (access, view)
 }
@@ -121,9 +118,7 @@ fn errors_report_paths_in_the_callers_relative_form() -> Result<(), VfsError> {
     view.write("f.txt", b"one")?;
     // A second chain's write races, and the diagnosis names the
     // logical path, never the canonical one.
-    let other_access = vfs
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
+    let other_access = access(&vfs)?;
     let other = store_view(&other_access).expect("the handle declares a store");
     match other.write("f.txt", b"two") {
         Err(VfsError::Conflict { path, detail }) => {
@@ -174,7 +169,7 @@ fn a_two_path_backend_error_keeps_a_destination_that_repeats_the_store_root() ->
 #[test]
 fn a_read_only_store_reports_its_denial_in_the_callers_relative_form() {
     let vfs = VfsRef::builder()
-        .store("/my/store", ReadOnly(MemoryBackend::new()))
+        .store("/my/store", TestFs::default().with_read_only())
         .build();
     let (_access, view) = chain(&vfs);
     // The router refuses before the backend, naming the canonical
@@ -195,10 +190,13 @@ fn a_read_only_store_reports_its_denial_in_the_callers_relative_form() {
 
 #[test]
 fn the_store_probe_acquires_the_store_backend() {
-    let vfs = VfsRef::builder().store("/my/store", Refusing).build();
-    let access = vfs
-        .acquire(Origin::new("store view test"))
-        .expect("the router acquires lazily");
+    let refusing = TestFs::default().on_acquire(|_| {
+        Err(VfsError::Backend {
+            message: "the store backend refuses every session".to_owned(),
+        })
+    });
+    let vfs = VfsRef::builder().store("/my/store", refusing).build();
+    let access = access(&vfs).expect("the router acquires lazily");
     // Deriving the view alone never reaches the store backend.
     assert!(store_view(&access).is_ok());
     match probe_store(&access) {
@@ -215,41 +213,9 @@ fn the_store_probe_treats_a_missing_store_root_as_success() -> Result<(), VfsErr
         .mount("/data", MemoryBackend::new())
         .build();
     let vfs = VfsRef::builder().store("/", inner).build();
-    let access = vfs.acquire(Origin::new("store view test"))?;
+    let access = access(&vfs)?;
     assert!(matches!(access.stat("/"), Err(VfsError::NotFound { .. })));
     probe_store(&access)
-}
-
-/// A backend whose sessions always refuse to open.
-struct Refusing;
-
-impl Vfs for Refusing {
-    fn acquire(&mut self, _cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
-        Err(VfsError::Backend {
-            message: "the store backend refuses every session".to_owned(),
-        })
-    }
-
-    fn release(&mut self, _id: ExecId) -> Result<(), VfsError> {
-        Ok(())
-    }
-}
-
-/// A backend that forwards to `0` but reports itself read-only.
-struct ReadOnly(MemoryBackend);
-
-impl Vfs for ReadOnly {
-    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
-        self.0.acquire(cx)
-    }
-
-    fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
-        self.0.release(id)
-    }
-
-    fn read_only(&self) -> bool {
-        true
-    }
 }
 
 #[test]
@@ -281,16 +247,9 @@ fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() -> Result<(), VfsError>
         view.write("mount/secret.txt", b"stored")?;
     }
     // The write landed in the store mount's own storage...
-    let probe = VfsRef::new(store.clone());
-    let probe_access = probe
-        .acquire(Origin::new("store view test"))
-        .expect("the probe backend acquires");
-    assert!(probe_access.exists("/mount/secret.txt")?);
+    assert!(access(&handle(store.clone()))?.exists("/mount/secret.txt")?);
     // ...and the `/mount` directory mounted beneath the store never saw it.
-    let outer = vfs
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
-    assert!(!outer.exists("/mount/secret.txt")?);
+    assert!(!access(&vfs)?.exists("/mount/secret.txt")?);
     Ok(())
 }
 
@@ -375,10 +334,7 @@ fn an_overlay_inherits_its_bases_store() -> Result<(), VfsError> {
     }
     // The base handle reads the store write: one store, shared
     // storage, served through either handle.
-    let base_access = base
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
-    assert_eq!(base_access.read("/my/store/notes.md")?, b"overlay");
+    assert_eq!(access(&base)?.read("/my/store/notes.md")?, b"overlay");
     Ok(())
 }
 
@@ -388,16 +344,12 @@ fn the_outermost_declaration_counts() -> Result<(), VfsError> {
     // itself: the mounting handle declares no store, so no view.
     let inner = VfsRef::builder().store("/s", MemoryBackend::new()).build();
     let outer = VfsRef::builder().mount("/inner", inner).build();
-    let access = outer
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
-    match store_view(&access) {
+    match store_view(&access(&outer)?) {
         Err(VfsError::Unsupported { detail, .. }) => {
             assert!(detail.contains("no store"), "{detail}");
         }
         other => panic!("expected no declared store, got {other:?}"),
     }
-    drop(access);
 
     // The outer builder's own declaration is the one the view uses.
     let inner = VfsRef::builder().store("/s", MemoryBackend::new()).build();
@@ -405,9 +357,7 @@ fn the_outermost_declaration_counts() -> Result<(), VfsError> {
         .mount("/inner", inner)
         .store("/outer-store", MemoryBackend::new())
         .build();
-    let access = outer
-        .acquire(Origin::new("store view test"))
-        .expect("the stock backend acquires");
+    let access = access(&outer)?;
     let view = store_view(&access).expect("the outer handle declares a store");
     view.write("a.txt", b"outer")?;
     drop(view);
@@ -425,7 +375,7 @@ fn acquire_store_roots_logical_paths_at_the_declared_store() -> Result<(), VfsEr
         assert_eq!(view.read("paper.md")?, b"seeded");
     }
     // The write landed under the store root, beside the base at `/`.
-    let access = vfs.acquire(Origin::new("acquire_store test"))?;
+    let access = access(&vfs)?;
     assert_eq!(access.read("/my/store/paper.md")?, b"seeded");
     assert!(!access.exists("/paper.md")?);
     Ok(())

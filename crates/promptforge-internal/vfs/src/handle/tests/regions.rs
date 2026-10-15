@@ -8,8 +8,7 @@ fn a_glob_racing_a_siblings_write_conflicts_in_either_order() -> Result<(), VfsE
     // The pattern-overlaps-path rule, both ways round: whichever
     // access runs second detects the overlap between the pattern and
     // the path it matches.
-    let vfs = handle(&StubFs::default());
-    let parent = vfs.acquire(test_origin())?;
+    let parent = access(&handle(TestFs::default()))?;
     let globber = parent.spawn(test_origin())?;
     let writer = parent.spawn(test_origin())?;
     globber.glob("/research/*")?;
@@ -19,8 +18,7 @@ fn a_glob_racing_a_siblings_write_conflicts_in_either_order() -> Result<(), VfsE
         "the write detects the glob: {message}"
     );
 
-    let vfs = handle(&StubFs::default());
-    let parent = vfs.acquire(test_origin())?;
+    let parent = access(&handle(TestFs::default()))?;
     let writer = parent.spawn(test_origin())?;
     let globber = parent.spawn(test_origin())?;
     writer.write("/research/5.md", b"five")?;
@@ -36,8 +34,7 @@ fn a_glob_racing_a_siblings_write_conflicts_in_either_order() -> Result<(), VfsE
 fn an_exists_racing_a_write_into_the_directory_conflicts() -> Result<(), VfsError> {
     // A write covers the ancestors it may create, so a sibling's
     // `exists` on the directory conflicts however the two land.
-    let vfs = handle(&StubFs::default());
-    let parent = vfs.acquire(test_origin())?;
+    let parent = access(&handle(TestFs::default()))?;
     let prober = parent.spawn(test_origin())?;
     let writer = parent.spawn(test_origin())?;
     prober.exists("/research")?;
@@ -63,8 +60,7 @@ fn a_write_into_a_directory_racing_a_siblings_write_or_remove_of_it_conflicts_in
     ];
     for (name, directory) in on_directory {
         for into_first in [true, false] {
-            let vfs = handle(&StubFs::default());
-            let parent = vfs.acquire(test_origin())?;
+            let parent = access(&handle(TestFs::default()))?;
             let first = parent.spawn(test_origin())?;
             let second = parent.spawn(test_origin())?;
             let (lead, trail) = if into_first {
@@ -85,15 +81,6 @@ fn a_write_into_a_directory_racing_a_siblings_write_or_remove_of_it_conflicts_in
 
 type ClaimStep = fn(&Access) -> Result<(), VfsError>;
 
-/// Lists `dir`, counting the stub's refusal to list as success: the
-/// claim is taken before the backend is asked.
-fn list_claim(access: &Access, dir: &str) -> Result<(), VfsError> {
-    match access.list(dir) {
-        Ok(_) | Err(VfsError::Unsupported { .. }) => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
 /// Runs `lead` in one child of a parent and returns `trail`'s result
 /// in a sibling. When `joined`, the parent joins the first child
 /// before spawning the second, which orders the two.
@@ -102,8 +89,12 @@ fn run_pair(
     trail: ClaimStep,
     joined: bool,
 ) -> Result<Result<(), VfsError>, VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/a/b", "b")]));
-    let parent = vfs.acquire(test_origin())?;
+    // The claims are the subject, so storage stays out of the way:
+    // `/a/b` is a directory a write can land under, and removals never
+    // reach storage, so each pair's second step finds what the first
+    // touched.
+    let fs = TestFs::seeded(&[("/a/b/c", "c")]).on_remove(|_, _| Ok(()));
+    let parent = access(&handle(fs))?;
     let first = parent.spawn(test_origin())?;
     if joined {
         lead(&first)?;
@@ -133,13 +124,13 @@ fn racing_pairs() -> [(&'static str, ClaimStep, ClaimStep); 5] {
         ),
         (
             "list /a against remove /a/b",
-            |access| list_claim(access, "/a"),
+            |access| access.list("/a").map(|_| ()),
             |access| access.remove("/a/b", true).map(|_| ()),
         ),
         (
             "write /a/b/c against list /a",
             |access| access.write("/a/b/c", b"c"),
-            |access| list_claim(access, "/a"),
+            |access| access.list("/a").map(|_| ()),
         ),
         (
             "write /a/b/c against glob /a/*",
@@ -175,7 +166,7 @@ fn a_join_orders_each_claims_gap_pair() -> Result<(), VfsError> {
 
 #[test]
 fn a_listing_does_not_conflict_with_a_recursive_remove_of_a_grandchild() -> Result<(), VfsError> {
-    let list: ClaimStep = |access| list_claim(access, "/a");
+    let list: ClaimStep = |access| access.list("/a").map(|_| ());
     let remove: ClaimStep = |access| access.remove("/a/b/c", true).map(|_| ());
     for (lead, trail) in [(list, remove), (remove, list)] {
         run_pair(lead, trail, false)??;

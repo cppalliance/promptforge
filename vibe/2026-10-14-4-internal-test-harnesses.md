@@ -523,7 +523,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-3>
 
-### Step 3: vfs configurable test backend and handle helpers
+### Step 3: vfs configurable test backend and handle helpers [completed]
 
 - Component: vfs and TempRoot
 - Tests:

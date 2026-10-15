@@ -11,26 +11,15 @@ use super::files::atomic_write;
 use super::resolve::identity_to_virtual;
 use super::{RealBackend, map_io};
 use crate::error::VfsError;
-use crate::handle::Scope;
-use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::FileType;
-use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
+use crate::test_support::{context, path};
+use crate::traits::{Vfs, VfsAccess};
 
 mod atomicity;
 mod links;
 /// The rooted-path, idempotent-remove, and split-glob semantics of
 /// the public capability, exercised over the real-filesystem backend.
 mod semantics;
-
-fn path(s: &str) -> Result<VfsPath, VfsError> {
-    canonicalize_absolute(s)
-}
-
-/// A fresh identity in a fresh scope, for acquiring the backend
-/// directly.
-fn context() -> AcquireContext {
-    AcquireContext::new(ExecId::vend(), Scope::start())
-}
 
 fn temp_dir() -> Result<TempDir, VfsError> {
     tempfile::tempdir().map_err(|err| map_io("the temporary directory", &err))

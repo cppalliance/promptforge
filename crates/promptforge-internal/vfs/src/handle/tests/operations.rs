@@ -5,8 +5,7 @@ use super::*;
 
 #[test]
 fn an_access_reads_and_writes_through_the_handle() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::default()))?;
     access.write("/notes/a.txt", b"hello")?;
     assert_eq!(access.read("/notes/a.txt")?, b"hello");
     assert!(access.exists("/notes/a.txt")?);
@@ -15,17 +14,16 @@ fn an_access_reads_and_writes_through_the_handle() -> Result<(), VfsError> {
 
 #[test]
 fn every_acquire_vends_a_process_unique_identity() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
-    let first = vfs.acquire(test_origin())?;
-    let second = vfs.acquire(test_origin())?;
+    let vfs = handle(TestFs::default());
+    let first = access(&vfs)?;
+    let second = access(&vfs)?;
     assert_ne!(first.id, second.id);
     Ok(())
 }
 
 #[test]
 fn an_empty_anchor_on_an_empty_file_is_refused_and_leaves_the_file_empty() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "")]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", "")])))?;
     match access.str_replace("/f.txt", "", "x") {
         Err(VfsError::Anchor {
             path,
@@ -45,8 +43,7 @@ fn an_empty_anchor_on_an_empty_file_is_refused_and_leaves_the_file_empty() -> Re
 #[test]
 fn an_empty_anchor_on_a_non_empty_file_is_refused_and_leaves_it_unchanged() -> Result<(), VfsError>
 {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "hello")]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", "hello")])))?;
     match access.str_replace("/f.txt", "", "x") {
         Err(VfsError::Anchor {
             path,
@@ -65,8 +62,7 @@ fn an_empty_anchor_on_a_non_empty_file_is_refused_and_leaves_it_unchanged() -> R
 
 #[test]
 fn read_range_slices_lines_one_based_and_inclusive() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")])))?;
     assert_eq!(access.read_range("/f.txt", 2, None)?, "two\nthree");
     assert_eq!(access.read_range("/f.txt", 2, Some(99))?, "two\nthree");
     assert_eq!(access.read_range("/f.txt", 99, None)?, "");
@@ -76,8 +72,7 @@ fn read_range_slices_lines_one_based_and_inclusive() -> Result<(), VfsError> {
 
 #[test]
 fn read_range_rejects_invalid_bounds() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\n")]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", "one\ntwo\n")])))?;
     assert_eq!(
         access.read_range("/f.txt", 0, None),
         Err(VfsError::InvalidRange {
@@ -97,8 +92,7 @@ fn read_range_rejects_invalid_bounds() -> Result<(), VfsError> {
 
 #[test]
 fn read_range_numbered_numbers_absolutely_from_start() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")])))?;
     assert_eq!(
         access.read_range_numbered("/f.txt", 1, None)?,
         "1| one\n2| two\n3| three"
@@ -115,8 +109,7 @@ fn read_range_numbered_numbers_absolutely_from_start() -> Result<(), VfsError> {
 fn read_range_numbered_pads_to_the_widest_emitted_number() -> Result<(), VfsError> {
     let lines: Vec<String> = (1..=10).map(|n| format!("line{n}")).collect();
     let text = lines.join("\n");
-    let vfs = handle(&StubFs::seeded(&[("/f.txt", &text)]));
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::seeded(&[("/f.txt", &text)])))?;
     assert_eq!(
         access.read_range_numbered("/f.txt", 9, Some(10))?,
         " 9| line9\n10| line10"
@@ -126,8 +119,7 @@ fn read_range_numbered_pads_to_the_widest_emitted_number() -> Result<(), VfsErro
 
 #[test]
 fn read_string_rejects_non_utf8() -> Result<(), VfsError> {
-    let vfs = handle(&StubFs::default());
-    let access = vfs.acquire(test_origin())?;
+    let access = access(&handle(TestFs::default()))?;
     access.write("/bin.dat", &[0xff, 0xfe])?;
     match access.read_string("/bin.dat") {
         Err(VfsError::NotUtf8 { path }) => {

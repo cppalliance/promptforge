@@ -1,23 +1,12 @@
 use super::MemoryBackend;
 use crate::error::{PathReason, VfsError};
-use crate::handle::Scope;
-use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::FileType;
-use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
-
-fn path(s: &str) -> Result<VfsPath, VfsError> {
-    canonicalize_absolute(s)
-}
-
-/// A fresh identity in a fresh scope, for acquiring the backend
-/// directly.
-fn context() -> AcquireContext {
-    AcquireContext::new(ExecId::vend(), Scope::start())
-}
+use crate::test_support::{context, path};
+use crate::traits::{ExecId, Vfs, VfsAccess};
 
 /// Returns a session on a backend pre-populated through the write
 /// path, so seeding exercises the same code the tests do.
-fn seeded(files: &[(&str, &str)]) -> Result<Box<dyn VfsAccess>, VfsError> {
+fn seeded_session(files: &[(&str, &str)]) -> Result<Box<dyn VfsAccess>, VfsError> {
     let mut backend = MemoryBackend::new();
     let mut access = backend.acquire(&context())?;
     for (name, text) in files {
@@ -38,7 +27,7 @@ fn read_returns_the_exact_bytes_stored() -> Result<(), VfsError> {
 
 #[test]
 fn read_of_an_absent_path_is_not_found() -> Result<(), VfsError> {
-    let access = seeded(&[])?;
+    let access = seeded_session(&[])?;
     assert!(matches!(
         access.read(&path("/missing.txt")?),
         Err(VfsError::NotFound { .. })
@@ -48,7 +37,7 @@ fn read_of_an_absent_path_is_not_found() -> Result<(), VfsError> {
 
 #[test]
 fn read_of_a_directory_is_is_a_directory() -> Result<(), VfsError> {
-    let access = seeded(&[("/dir/f.txt", "x")])?;
+    let access = seeded_session(&[("/dir/f.txt", "x")])?;
     assert!(matches!(
         access.read(&path("/dir")?),
         Err(VfsError::IsADirectory { .. })
@@ -58,7 +47,7 @@ fn read_of_a_directory_is_is_a_directory() -> Result<(), VfsError> {
 
 #[test]
 fn read_range_slices_bytes_and_clips_at_the_end() -> Result<(), VfsError> {
-    let access = seeded(&[("/f.txt", "hello world")])?;
+    let access = seeded_session(&[("/f.txt", "hello world")])?;
     assert_eq!(access.read_range(&path("/f.txt")?, 6, 5)?, b"world");
     assert_eq!(access.read_range(&path("/f.txt")?, 6, 100)?, b"world");
     assert!(access.read_range(&path("/f.txt")?, 100, 5)?.is_empty());
@@ -67,7 +56,7 @@ fn read_range_slices_bytes_and_clips_at_the_end() -> Result<(), VfsError> {
 
 #[test]
 fn write_creates_overwrites_and_materializes_ancestor_directories() -> Result<(), VfsError> {
-    let mut access = seeded(&[])?;
+    let mut access = seeded_session(&[])?;
     access.write(&path("/a/b/f.txt")?, b"one")?;
     assert_eq!(access.read(&path("/a/b/f.txt")?)?, b"one");
     // No mkdir was needed; the ancestors exist.
@@ -80,7 +69,7 @@ fn write_creates_overwrites_and_materializes_ancestor_directories() -> Result<()
 
 #[test]
 fn write_at_a_directory_path_is_rejected_without_touching_the_tree() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/dir/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/dir/f.txt", "x")])?;
     assert!(matches!(
         access.write(&path("/dir")?, b"y"),
         Err(VfsError::IsADirectory { .. })
@@ -91,7 +80,7 @@ fn write_at_a_directory_path_is_rejected_without_touching_the_tree() -> Result<(
 
 #[test]
 fn append_creates_when_absent_and_extends_when_present() -> Result<(), VfsError> {
-    let mut access = seeded(&[])?;
+    let mut access = seeded_session(&[])?;
     access.append(&path("/log.txt")?, b"first\n")?;
     access.append(&path("/log.txt")?, b"second")?;
     assert_eq!(access.read(&path("/log.txt")?)?, b"first\nsecond");
@@ -100,7 +89,7 @@ fn append_creates_when_absent_and_extends_when_present() -> Result<(), VfsError>
 
 #[test]
 fn remove_of_an_absent_path_is_not_found() -> Result<(), VfsError> {
-    let mut access = seeded(&[])?;
+    let mut access = seeded_session(&[])?;
     assert!(matches!(
         access.remove(&path("/gone.txt")?, false),
         Err(VfsError::NotFound { .. })
@@ -110,7 +99,7 @@ fn remove_of_an_absent_path_is_not_found() -> Result<(), VfsError> {
 
 #[test]
 fn remove_of_a_file_removes_it() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/f.txt", "x")])?;
     access.remove(&path("/f.txt")?, false)?;
     assert!(!access.exists(&path("/f.txt")?)?);
     Ok(())
@@ -118,7 +107,7 @@ fn remove_of_a_file_removes_it() -> Result<(), VfsError> {
 
 #[test]
 fn remove_of_a_nonempty_directory_without_recursive_is_an_error() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/dir/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/dir/f.txt", "x")])?;
     assert!(matches!(
         access.remove(&path("/dir")?, false),
         Err(VfsError::DirectoryNotEmpty { .. })
@@ -131,7 +120,7 @@ fn remove_of_a_nonempty_directory_without_recursive_is_an_error() -> Result<(), 
 
 #[test]
 fn remove_of_an_empty_directory_without_recursive_succeeds() -> Result<(), VfsError> {
-    let mut access = seeded(&[])?;
+    let mut access = seeded_session(&[])?;
     access.mkdir(&path("/empty")?, false)?;
     access.remove(&path("/empty")?, false)?;
     assert!(!access.exists(&path("/empty")?)?);
@@ -140,7 +129,8 @@ fn remove_of_an_empty_directory_without_recursive_succeeds() -> Result<(), VfsEr
 
 #[test]
 fn remove_with_recursive_deletes_the_whole_subtree() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/d/a.txt", "a"), ("/d/sub/b.txt", "b"), ("/keep.txt", "k")])?;
+    let mut access =
+        seeded_session(&[("/d/a.txt", "a"), ("/d/sub/b.txt", "b"), ("/keep.txt", "k")])?;
     access.remove(&path("/d")?, true)?;
     assert!(!access.exists(&path("/d")?)?);
     assert!(!access.exists(&path("/d/sub")?)?);
@@ -151,7 +141,7 @@ fn remove_with_recursive_deletes_the_whole_subtree() -> Result<(), VfsError> {
 
 #[test]
 fn the_namespace_root_cannot_be_removed() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/f.txt", "x")])?;
     assert!(matches!(
         access.remove(&path("/")?, true),
         Err(VfsError::PermissionDenied { .. })
@@ -162,7 +152,7 @@ fn the_namespace_root_cannot_be_removed() -> Result<(), VfsError> {
 
 #[test]
 fn exists_distinguishes_files_directories_and_absence() -> Result<(), VfsError> {
-    let access = seeded(&[("/dir/f.txt", "x")])?;
+    let access = seeded_session(&[("/dir/f.txt", "x")])?;
     assert!(access.exists(&path("/dir/f.txt")?)?);
     assert!(access.exists(&path("/dir")?)?);
     assert!(access.exists(&path("/")?)?);
@@ -172,7 +162,7 @@ fn exists_distinguishes_files_directories_and_absence() -> Result<(), VfsError> 
 
 #[test]
 fn glob_matches_star_within_a_segment_and_double_star_across() -> Result<(), VfsError> {
-    let access = seeded(&[
+    let access = seeded_session(&[
         ("/src/a.rs", ""),
         ("/src/b.rs", ""),
         ("/src/deep/c.rs", ""),
@@ -196,7 +186,7 @@ fn glob_matches_star_within_a_segment_and_double_star_across() -> Result<(), Vfs
 
 #[test]
 fn glob_results_are_sorted_and_include_directories() -> Result<(), VfsError> {
-    let access = seeded(&[("/d/b.txt", ""), ("/d/a.txt", ""), ("/d/sub/c.txt", "")])?;
+    let access = seeded_session(&[("/d/b.txt", ""), ("/d/a.txt", ""), ("/d/sub/c.txt", "")])?;
     assert_eq!(
         access.glob("/d/*")?,
         vec![
@@ -210,7 +200,7 @@ fn glob_results_are_sorted_and_include_directories() -> Result<(), VfsError> {
 
 #[test]
 fn glob_rejects_invalid_patterns() -> Result<(), VfsError> {
-    let access = seeded(&[("/f.txt", "x")])?;
+    let access = seeded_session(&[("/f.txt", "x")])?;
     assert_eq!(
         access.glob("/a/***/b"),
         Err(VfsError::InvalidPath {
@@ -230,7 +220,7 @@ fn glob_rejects_invalid_patterns() -> Result<(), VfsError> {
 
 #[test]
 fn list_returns_sorted_entries_with_stats() -> Result<(), VfsError> {
-    let access = seeded(&[("/d/b.txt", "bb"), ("/d/a.txt", "a"), ("/d/sub/c.txt", "c")])?;
+    let access = seeded_session(&[("/d/b.txt", "bb"), ("/d/a.txt", "a"), ("/d/sub/c.txt", "c")])?;
     let entries = access.list(&path("/d")?)?;
     let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
     assert_eq!(names, vec!["a.txt", "b.txt", "sub"]);
@@ -243,7 +233,7 @@ fn list_returns_sorted_entries_with_stats() -> Result<(), VfsError> {
 
 #[test]
 fn list_of_a_file_or_an_absent_path_is_an_error() -> Result<(), VfsError> {
-    let access = seeded(&[("/f.txt", "x")])?;
+    let access = seeded_session(&[("/f.txt", "x")])?;
     assert!(matches!(
         access.list(&path("/f.txt")?),
         Err(VfsError::NotADirectory { .. })
@@ -257,7 +247,7 @@ fn list_of_a_file_or_an_absent_path_is_an_error() -> Result<(), VfsError> {
 
 #[test]
 fn stat_reports_kinds_and_sizes_without_fabricated_times() -> Result<(), VfsError> {
-    let access = seeded(&[("/dir/f.txt", "hello")])?;
+    let access = seeded_session(&[("/dir/f.txt", "hello")])?;
     let file = access.stat(&path("/dir/f.txt")?)?;
     assert_eq!(file.file_type, FileType::File);
     assert_eq!(file.size, 5);
@@ -273,7 +263,7 @@ fn stat_reports_kinds_and_sizes_without_fabricated_times() -> Result<(), VfsErro
 
 #[test]
 fn mkdir_creates_directories_and_rejects_existing_paths() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/f.txt", "x")])?;
     access.mkdir(&path("/new")?, false)?;
     assert!(access.exists(&path("/new")?)?);
     assert!(matches!(
@@ -289,7 +279,7 @@ fn mkdir_creates_directories_and_rejects_existing_paths() -> Result<(), VfsError
 
 #[test]
 fn mkdir_without_recursive_requires_an_existing_parent() -> Result<(), VfsError> {
-    let mut access = seeded(&[])?;
+    let mut access = seeded_session(&[])?;
     // The error names the target path, not a sentence about its
     // parent, matching the real-filesystem backend's own NotFound spelling.
     assert_eq!(
@@ -306,7 +296,7 @@ fn mkdir_without_recursive_requires_an_existing_parent() -> Result<(), VfsError>
 
 #[test]
 fn mkdir_through_a_file_parent_is_not_a_directory() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/f.txt", "x")])?;
+    let mut access = seeded_session(&[("/f.txt", "x")])?;
     assert!(matches!(
         access.mkdir(&path("/f.txt/g")?, true),
         Err(VfsError::NotADirectory { .. })
@@ -316,7 +306,7 @@ fn mkdir_through_a_file_parent_is_not_a_directory() -> Result<(), VfsError> {
 
 #[test]
 fn rename_moves_a_file_and_leaves_nothing_behind() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/from.txt", "data")])?;
+    let mut access = seeded_session(&[("/from.txt", "data")])?;
     access.rename(&path("/from.txt")?, &path("/sub/to.txt")?)?;
     assert!(!access.exists(&path("/from.txt")?)?);
     assert_eq!(access.read(&path("/sub/to.txt")?)?, b"data");
@@ -325,7 +315,7 @@ fn rename_moves_a_file_and_leaves_nothing_behind() -> Result<(), VfsError> {
 
 #[test]
 fn rename_moves_a_directory_subtree() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/d/a.txt", "a"), ("/d/sub/b.txt", "b")])?;
+    let mut access = seeded_session(&[("/d/a.txt", "a"), ("/d/sub/b.txt", "b")])?;
     access.rename(&path("/d")?, &path("/moved")?)?;
     assert!(!access.exists(&path("/d")?)?);
     assert_eq!(access.read(&path("/moved/a.txt")?)?, b"a");
@@ -335,7 +325,7 @@ fn rename_moves_a_directory_subtree() -> Result<(), VfsError> {
 
 #[test]
 fn renaming_a_directory_onto_the_root_is_rejected() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/d/a.txt", "a"), ("/other.txt", "o")])?;
+    let mut access = seeded_session(&[("/d/a.txt", "a"), ("/other.txt", "o")])?;
     assert!(matches!(
         access.rename(&path("/d")?, &path("/")?),
         Err(VfsError::PermissionDenied { .. })
@@ -354,7 +344,7 @@ fn renaming_a_directory_onto_the_root_is_rejected() -> Result<(), VfsError> {
 
 #[test]
 fn a_failed_rename_leaves_source_and_destination_unchanged() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/dst.txt", "old")])?;
+    let mut access = seeded_session(&[("/dst.txt", "old")])?;
     assert!(matches!(
         access.rename(&path("/missing.txt")?, &path("/dst.txt")?),
         Err(VfsError::NotFound { .. })
@@ -376,7 +366,7 @@ fn a_failed_rename_leaves_source_and_destination_unchanged() -> Result<(), VfsEr
 
 #[test]
 fn copy_duplicates_a_files_bytes() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/src.txt", "data")])?;
+    let mut access = seeded_session(&[("/src.txt", "data")])?;
     access.copy(&path("/src.txt")?, &path("/dst.txt")?)?;
     assert_eq!(access.read(&path("/src.txt")?)?, b"data");
     assert_eq!(access.read(&path("/dst.txt")?)?, b"data");
@@ -385,7 +375,7 @@ fn copy_duplicates_a_files_bytes() -> Result<(), VfsError> {
 
 #[test]
 fn copy_rejects_directories_and_a_failed_copy_changes_nothing() -> Result<(), VfsError> {
-    let mut access = seeded(&[("/d/f.txt", "x"), ("/dst.txt", "old")])?;
+    let mut access = seeded_session(&[("/d/f.txt", "x"), ("/dst.txt", "old")])?;
     assert!(matches!(
         access.copy(&path("/d")?, &path("/dst.txt")?),
         Err(VfsError::IsADirectory { .. })

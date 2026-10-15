@@ -30,6 +30,8 @@ mod path;
 mod real;
 mod router;
 mod stat;
+#[cfg(test)]
+mod test_support;
 mod traits;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
