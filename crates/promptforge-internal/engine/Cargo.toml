@@ -40,8 +40,6 @@ async-trait.workspace = true
 criterion.workspace = true
 promptforge-lua = { workspace = true, features = ["test-support"] }
 promptforge-parser = { workspace = true, features = ["test-support"] }
-# The suite roots a real backend in a temporary directory.
-tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 # The bench drives runs through the tokio test driver, so it needs the

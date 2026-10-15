@@ -10,9 +10,5 @@ publish = false
 # dependencies, workspace or external. The manifest test enforces this.
 [dependencies]
 
-[dev-dependencies]
-# The real-backend tests use temporary directories.
-tempfile.workspace = true
-
 [lints]
 workspace = true

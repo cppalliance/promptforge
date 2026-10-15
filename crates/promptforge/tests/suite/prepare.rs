@@ -8,7 +8,9 @@ use promptforge::tools::{ToolCatalog, ToolDescriptor};
 use promptforge::vfs::{MemoryBackend, Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{RequirementCheck, Requirements, UnmetRequirement};
 
-use super::support::{Prepared, Scenario, TestResult, descriptor, greeter, model, prompt};
+use super::support::{
+    Prepared, Scenario, TempRoot, TestResult, descriptor, greeter, model, prompt,
+};
 
 fn declaring(front: &str) -> String {
     prompt(front, &[("Only", "return 'done'")])
@@ -30,7 +32,8 @@ fn only_unmet(requirements: &Requirements) -> TestResult<&UnmetRequirement> {
 
 #[test]
 fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() -> TestResult {
-    let temp = tempfile::tempdir()?;
+    let temp =
+        TempRoot::new("two_runs_writing_the_same_real_file_through_the_shared_base_conflict");
     let vfs = VfsRef::builder()
         .mount("/", RealBackend::rooted(temp.path())?)
         .store("/my/store", MemoryBackend::new())

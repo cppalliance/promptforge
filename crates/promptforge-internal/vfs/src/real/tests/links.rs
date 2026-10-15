@@ -81,10 +81,11 @@ fn assert_dangling_refusal<T: std::fmt::Debug>(result: Result<T, VfsError>, oper
 
 #[test]
 fn a_rooted_backend_rejects_links_that_escape_the_mount_root() -> Result<(), VfsError> {
-    let outside = temp_dir()?;
+    let label = "a_rooted_backend_rejects_links_that_escape_the_mount_root";
+    let outside = TempRoot::new(label);
     fs::write(outside.path().join("secret.txt"), b"classified")
         .map_err(|err| map_io("seeding the outside file", &err))?;
-    let root = temp_dir()?;
+    let root = TempRoot::new(label);
     if !make_dir_link(&root.path().join("link"), outside.path()) {
         eprintln!(
             "skipped: the operating system refused to create a directory link, so there is no link \
@@ -126,7 +127,8 @@ fn a_rooted_backend_rejects_links_that_escape_the_mount_root() -> Result<(), Vfs
 #[test]
 fn removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target() -> Result<(), VfsError>
 {
-    let root = temp_dir()?;
+    let root =
+        TempRoot::new("removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target");
     fs::write(root.path().join("target.txt"), b"kept")
         .map_err(|err| map_io("seeding the target file", &err))?;
     if !make_file_link(&root.path().join("link"), &root.path().join("target.txt"))? {
@@ -141,10 +143,11 @@ fn removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target() ->
 
 #[test]
 fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), VfsError> {
-    let outside = temp_dir()?;
+    let label = "path_operations_act_on_a_link_to_an_outside_file_as_a_link";
+    let outside = TempRoot::new(label);
     let secret = outside.path().join("secret.txt");
     fs::write(&secret, b"classified").map_err(|err| map_io("seeding the outside file", &err))?;
-    let root = temp_dir()?;
+    let root = TempRoot::new(label);
     if !make_file_link(&root.path().join("link"), &secret)? {
         return Ok(());
     }
@@ -190,7 +193,7 @@ fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), Vf
 
 #[test]
 fn removing_a_dangling_link_succeeds() -> Result<(), VfsError> {
-    let root = temp_dir()?;
+    let root = TempRoot::new("removing_a_dangling_link_succeeds");
     if !make_file_link(
         &root.path().join("dangling"),
         &root.path().join("missing.txt"),
@@ -208,9 +211,10 @@ fn removing_a_dangling_link_succeeds() -> Result<(), VfsError> {
 
 #[test]
 fn content_operations_refuse_a_path_through_a_dangling_link() -> Result<(), VfsError> {
-    let outside = temp_dir()?;
+    let label = "content_operations_refuse_a_path_through_a_dangling_link";
+    let outside = TempRoot::new(label);
     for target_in_root in [true, false] {
-        let root = temp_dir()?;
+        let root = TempRoot::new(label);
         let target = if target_in_root {
             root.path().join("gone")
         } else {
@@ -237,7 +241,8 @@ fn content_operations_refuse_a_path_through_a_dangling_link() -> Result<(), VfsE
 #[test]
 fn path_operations_act_on_a_dangling_link_itself_and_refuse_a_path_through_it()
 -> Result<(), VfsError> {
-    let root = temp_dir()?;
+    let root =
+        TempRoot::new("path_operations_act_on_a_dangling_link_itself_and_refuse_a_path_through_it");
     let link = root.path().join("link");
     make_dangling_dir_link(&link, &root.path().join("gone"))?;
     let mut access = rooted_access(root.path())?;
@@ -255,7 +260,8 @@ fn path_operations_act_on_a_dangling_link_itself_and_refuse_a_path_through_it()
 
 #[test]
 fn removing_a_directory_link_keeps_the_target_directory_and_its_contents() -> Result<(), VfsError> {
-    let root = temp_dir()?;
+    let root =
+        TempRoot::new("removing_a_directory_link_keeps_the_target_directory_and_its_contents");
     let target = root.path().join("real");
     fs::create_dir(&target).map_err(|err| map_io("creating the target directory", &err))?;
     fs::write(target.join("keep.txt"), b"kept")
@@ -280,10 +286,11 @@ fn removing_a_directory_link_keeps_the_target_directory_and_its_contents() -> Re
 #[test]
 fn path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link()
 -> Result<(), VfsError> {
-    let outside = temp_dir()?;
+    let label = "path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link";
+    let outside = TempRoot::new(label);
     let secret = outside.path().join("secret.txt");
     fs::write(&secret, b"classified").map_err(|err| map_io("seeding the outside file", &err))?;
-    let root = temp_dir()?;
+    let root = TempRoot::new(label);
     assert!(
         make_dir_link(&root.path().join("link"), outside.path()),
         "the directory link must be created"

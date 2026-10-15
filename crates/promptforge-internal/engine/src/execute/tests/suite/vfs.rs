@@ -10,6 +10,7 @@
 use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
 use crate::parser::Prompt;
+use crate::test_support::temp_root::TempRoot;
 use promptforge_types::ids::Provenance;
 use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
 
@@ -239,7 +240,7 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
         .result
         .expect("the memory-backed fanout must execute offline");
 
-    let temp = tempfile::tempdir().expect("the temp dir creates");
+    let temp = TempRoot::new("fanout_interleaving_is_invariant_across_memory_and_real_backends");
     let real_vfs = VfsRef::builder()
         .store(
             "/",

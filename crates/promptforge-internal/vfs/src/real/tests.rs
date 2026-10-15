@@ -3,9 +3,8 @@
 //! topic module uses them.
 
 use std::fs;
-use std::path::Path;
-
-use tempfile::TempDir;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::files::atomic_write;
 use super::resolve::identity_to_virtual;
@@ -21,8 +20,56 @@ mod links;
 /// the public capability, exercised over the real-filesystem backend.
 mod semantics;
 
-fn temp_dir() -> Result<TempDir, VfsError> {
-    tempfile::tempdir().map_err(|err| map_io("the temporary directory", &err))
+/// Tells apart roots one process makes; nextest runs each test in its own
+/// process, so the process id tells those apart.
+static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
+/// A real-filesystem folder at
+/// `<temp>/promptforge-tests/<crate>/<label>-<pid>-<n>`, removed on drop.
+/// Its name reads no clock and no random generator.
+#[derive(Debug)]
+struct TempRoot {
+    path: PathBuf,
+}
+
+impl TempRoot {
+    /// Makes the folder for the test named `label`, first removing anything
+    /// an earlier process with the same id left at that path.
+    #[track_caller]
+    fn new(label: &str) -> Self {
+        let n = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir()
+            .join("promptforge-tests")
+            .join(env!("CARGO_PKG_NAME"))
+            .join(format!("{label}-{}-{n}", std::process::id()));
+        let cleared = match fs::symlink_metadata(&path) {
+            Ok(found) if found.is_dir() => fs::remove_dir_all(&path),
+            Ok(_) => fs::remove_file(&path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        };
+        if let Err(err) = cleared.and_then(|()| fs::create_dir_all(&path)) {
+            panic!("the temp root {} must be created: {err}", path.display());
+        }
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempRoot {
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_dir_all(&self.path)
+            && !std::thread::panicking()
+        {
+            panic!(
+                "the temp root {} must be removed: {err}",
+                self.path.display()
+            );
+        }
+    }
 }
 
 /// Acquires a session on a rooted backend over `dir`.
@@ -33,7 +80,7 @@ fn rooted_access(dir: &Path) -> Result<Box<dyn VfsAccess>, VfsError> {
 
 #[test]
 fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("a_rooted_backend_round_trips_files_and_directories");
     let mut access = rooted_access(temp.path())?;
     // Writes materialize ancestor directories, as the memory
     // backend does: no mkdir is needed first.
@@ -81,7 +128,7 @@ fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> 
 
 #[test]
 fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("a_read_only_backend_rejects_every_mutation_but_serves_reads");
     fs::write(temp.path().join("keep.txt"), b"keep")
         .map_err(|err| map_io("seeding the kept file", &err))?;
     let mut backend = RealBackend::rooted(temp.path())?.with_read_only(true);
@@ -111,7 +158,7 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
 
 #[test]
 fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("an_identity_backend_maps_virtual_paths_directly_to_real_paths");
     let real_file = temp.path().join("identity.txt");
     let virtual_spelling = identity_to_virtual(&real_file);
     let mut backend = RealBackend::identity();
@@ -128,7 +175,7 @@ fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(),
 
 #[test]
 fn a_literal_glob_pattern_matches_the_file_itself() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("a_literal_glob_pattern_matches_the_file_itself");
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/d/a.txt")?, b"x")?;
     // A wildcard-free pattern matches the literal path itself, at
@@ -143,7 +190,7 @@ fn a_literal_glob_pattern_matches_the_file_itself() -> Result<(), VfsError> {
 #[test]
 #[cfg(unix)]
 fn exists_surfaces_backend_failures_as_errors() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("exists_surfaces_backend_failures_as_errors");
     let mut access = rooted_access(temp.path())?;
     access.write(&path("/f.txt")?, b"x")?;
     // A lookup through a file ancestor fails with ENOTDIR, not
@@ -158,7 +205,7 @@ fn exists_surfaces_backend_failures_as_errors() -> Result<(), VfsError> {
 
 #[test]
 fn the_rooted_constructor_requires_an_existing_directory() -> Result<(), VfsError> {
-    let temp = temp_dir()?;
+    let temp = TempRoot::new("the_rooted_constructor_requires_an_existing_directory");
     fs::write(temp.path().join("f.txt"), b"x").map_err(|err| map_io("seeding the file", &err))?;
     assert!(matches!(
         RealBackend::rooted(temp.path().join("f.txt")),
@@ -200,6 +247,18 @@ fn map_io_reports_the_canonical_path_not_the_os_sentence() {
         }
         other => panic!("expected a permission denial, got {other:?}"),
     }
+}
+
+#[test]
+fn temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder() {
+    let label = "temp_roots_with_one_label_get_distinct_paths_and_drop_removes_the_folder";
+    let (first, second) = (TempRoot::new(label), TempRoot::new(label));
+    assert_ne!(first.path(), second.path());
+    let dropped = first.path().to_owned();
+    fs::write(dropped.join("f.txt"), b"x").expect("the first root takes a file");
+    drop(first);
+    assert!(!dropped.exists(), "{} survived its drop", dropped.display());
+    assert!(second.path().is_dir(), "the second root outlives the first");
 }
 
 #[test]

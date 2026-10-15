@@ -542,7 +542,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-4>
 
-### Step 4: TempRoot replaces tempfile in the facade, engine, and vfs
+### Step 4: TempRoot replaces tempfile in the facade, engine, and vfs [completed]
 
 - Component: vfs and TempRoot
 - Tests:
