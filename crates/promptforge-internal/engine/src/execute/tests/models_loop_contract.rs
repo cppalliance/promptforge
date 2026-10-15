@@ -9,7 +9,7 @@
 use promptforge_parser::test_support::one_section;
 
 use super::model_task_notices::loop_owner;
-use super::model_tasks::{PARKED_CHILD, model_task_scenario, owner_prompt};
+use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario, owner_prompt};
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::test_support::scenario::Trace;
@@ -164,7 +164,7 @@ fn an_empty_list_raises_unless_a_pending_notice_fills_its_round() {
              return refused .. '|' .. #fresh .. '|' .. fresh[1].role .. ':' .. fresh[1].content \
              .. '|' .. fresh[2].content",
         ),
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
     let trace = model_task_scenario(source).chat(&gateway).run();
     assert_eq!(
@@ -229,7 +229,7 @@ fn two_notices_drained_into_one_round_land_in_the_order_their_tasks_ended() {
              return #msgs .. '|' .. msgs[7].role .. ':' .. msgs[7].content \
              .. '|' .. msgs[8].role .. ':' .. msgs[8].content",
         ),
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
     let trace = model_task_scenario(source).chat(&gateway).run();
     assert_eq!(

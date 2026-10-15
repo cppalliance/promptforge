@@ -8,10 +8,24 @@ use super::*;
 
 /// A child body that parks on a store write and never returns on its own,
 /// so the task stays live until something ends it.
-const PARKED_CHILD: &str = "store.write('park-' .. sys.id, 'x')\nreturn 'never'";
+const CHILD_PARKED_ON_STORE_WRITE: &str = "store.write('park-' .. sys.id, 'x')\nreturn 'never'";
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_ids() {
+/// Whether `records` hold no start and no terminal for any task.
+fn no_task_reports(records: &[(String, Observation)]) -> bool {
+    !records.iter().any(|(_, event)| {
+        matches!(
+            event,
+            Observation::TaskStarted { .. }
+                | Observation::TaskSucceeded { .. }
+                | Observation::TaskFailed { .. }
+                | Observation::TaskCancelled { .. }
+                | Observation::TaskAbandoned { .. }
+        )
+    })
+}
+
+#[test]
+fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_ids() {
     // The spawner ends while both children are live - neither was ever
     // admitted, since the spawner returned without suspending - so the
     // run fails with `tasks_live` naming both ids in spawn order, and
@@ -22,22 +36,12 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
         "tasks.spawn('## Child')\n\
          tasks.spawn('## Child')\n\
          return 'done'",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_STORE_WRITE,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("live author tasks fail their owner's chain");
+    let mut rig = Rig::run(scheduler_scenario(md));
+    let error = rig.trace().error().inner();
 
-    match &error {
+    match error {
         Error::TasksLive { tasks } => {
             assert_eq!(
                 tasks,
@@ -54,27 +58,20 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
     );
     for id in ["0.0", "0.1"] {
         assert_eq!(
-            scheduler.task_state_for_test(&task(id)),
+            rig.task_state_for_test(&task(id)),
             Some(TaskState::Abandoned),
             "a leaked task's slot is Abandoned, not Done or Cancelled"
         );
     }
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
-        !records.iter().any(|(_, event)| matches!(
-            event,
-            Observation::TaskStarted { .. }
-                | Observation::TaskSucceeded { .. }
-                | Observation::TaskFailed { .. }
-                | Observation::TaskCancelled { .. }
-                | Observation::TaskAbandoned { .. }
-        )),
+        no_task_reports(&records),
         "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_task() {
+#[test]
+fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_task() {
     // The spawner errors after spawning: the leak is the lesser fault, so
     // the run's error is the spawner's own, not `tasks_live`; the task
     // still ends with its owner, its slot Abandoned. The task was never
@@ -83,20 +80,10 @@ async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_t
     let md = spawner_prompt(
         "tasks.spawn('## Child')\n\
          error('spawner boom')",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_STORE_WRITE,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("the spawner's error fails the run");
+    let mut rig = Rig::run(scheduler_scenario(md));
+    let error = rig.trace().error().inner();
 
     assert!(
         !matches!(error, Error::TasksLive { .. }),
@@ -107,20 +94,13 @@ async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_t
         "the run's error is the spawner's: {error}"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned),
         "the task ended with its failed owner"
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
-        !records.iter().any(|(_, event)| matches!(
-            event,
-            Observation::TaskStarted { .. }
-                | Observation::TaskSucceeded { .. }
-                | Observation::TaskFailed { .. }
-                | Observation::TaskCancelled { .. }
-                | Observation::TaskAbandoned { .. }
-        )),
+        no_task_reports(&records),
         "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
@@ -143,7 +123,7 @@ fn moving_spawner_prompt(movement: &str) -> String {
          return 'done'\n\
          ```\n\n\
          ## Child\n\n\
-         ```lua\n{PARKED_CHILD}\n```\n"
+         ```lua\n{CHILD_PARKED_ON_STORE_WRITE}\n```\n"
     )
 }
 
@@ -151,61 +131,49 @@ fn moving_spawner_prompt(movement: &str) -> String {
 /// alone, with the task's slot Abandoned because its owner returned. The
 /// task never ran - neither chain suspended between the spawn and the
 /// end - so it reports no start and no terminal.
-async fn assert_task_outlives_movement(md: &str) {
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("the walk still owns the task when the sibling returns");
+#[track_caller]
+fn assert_task_outlives_movement(md: String) {
+    let mut rig = Rig::run(scheduler_scenario(md));
 
-    match &error {
-        Error::TasksLive { tasks } => assert_eq!(tasks, &[task("0.0")]),
+    match rig.trace().error().inner() {
+        Error::TasksLive { tasks } => assert_eq!(
+            tasks,
+            &[task("0.0")],
+            "the walk still owns the task when the sibling returns"
+        ),
         other => panic!("expected tasks_live, got {other:?}"),
     }
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned),
         "the task ended with the chain, not with the section that spawned it"
     );
+    let recorder = TaskRecorder::replayed(rig.trace());
     let records = recorder.records();
     assert!(
-        !records.iter().any(|(_, event)| matches!(
-            event,
-            Observation::TaskStarted { .. }
-                | Observation::TaskSucceeded { .. }
-                | Observation::TaskFailed { .. }
-                | Observation::TaskCancelled { .. }
-                | Observation::TaskAbandoned { .. }
-        )),
+        no_task_reports(&records),
         "a task that never ran reports no start and no terminal: {records:?}"
     );
     recorder.position("Sibling", &detail::SECTION_STARTED);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_task_survives_its_spawning_sections_fall_through() {
+#[test]
+fn a_task_survives_its_spawning_sections_fall_through() {
     // The spawner's chunk ends without a scalar, so the walk falls through
     // to the sibling: the task is the chain's, not the section's, and the
     // sibling's return leaks it.
-    assert_task_outlives_movement(&moving_spawner_prompt("")).await;
+    assert_task_outlives_movement(moving_spawner_prompt(""));
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_task_survives_its_spawning_sections_jump() {
+#[test]
+fn a_task_survives_its_spawning_sections_jump() {
     // A `jump` moves the walk within the same chain, so it settles nothing:
     // the jumped-to sibling's return leaks the task.
-    assert_task_outlives_movement(&moving_spawner_prompt("jump('## Sibling')\n")).await;
+    assert_task_outlives_movement(moving_spawner_prompt("jump('## Sibling')\n"));
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller() {
+#[test]
+fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller() {
     // The leak is the call's answer, not the run's error: the caller's
     // `pcall` sees the `tasks_live` kind with the leaked ids in `tasks`,
     // and the task ended with the call chain that owned it.
@@ -227,17 +195,8 @@ async fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller()
         store.write('park', 'x')\n\
         return 'never'\n\
         ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("the caught leak ends the run normally");
+    let mut rig = Rig::run(scheduler_scenario(md));
+    let out = rig.trace().text();
 
     let (kind, rest) = out.split_once('|').expect("kind|tasks|message");
     let (tasks, message) = rest.split_once('|').expect("tasks|message");
@@ -248,14 +207,14 @@ async fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller()
         "the message names the leaked id: {message}"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0.0")),
+        rig.task_state_for_test(&task("0.0.0")),
         Some(TaskState::Abandoned),
         "the task ended with its owner's call chain"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
+#[test]
+fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
     // H1 spawns a child that parks; the walk's first section returns at
     // once. The hand-off made the walk the task's owner, so the walk's end
     // is the leak: without the reassignment the pass's task would belong
@@ -277,43 +236,29 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
         store.write('park', 'x')\n\
         return 'never'\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("the walk owns H1's task and leaks it");
+    let mut rig = Rig::run(scheduler_scenario(md));
 
-    match &error {
-        Error::TasksLive { tasks } => assert_eq!(tasks, &[task("0.0")]),
+    match rig.trace().error().inner() {
+        Error::TasksLive { tasks } => assert_eq!(
+            tasks,
+            &[task("0.0")],
+            "the walk owns H1's task and leaks it"
+        ),
         other => panic!("expected tasks_live, got {other:?}"),
     }
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned)
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
-        !records.iter().any(|(_, event)| matches!(
-            event,
-            Observation::TaskStarted { .. }
-                | Observation::TaskSucceeded { .. }
-                | Observation::TaskFailed { .. }
-                | Observation::TaskCancelled { .. }
-                | Observation::TaskAbandoned { .. }
-        )),
+        no_task_reports(&records),
         "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn aborting_a_chain_abandons_the_tasks_it_owns() {
+#[test]
+fn aborting_a_chain_abandons_the_tasks_it_owns() {
     // A fatal sibling arm makes the fanout shim cancel the spawning arm
     // before it resumes; the abort takes the arm's task with it: the
     // task's slot is Abandoned because its owner was aborted. The task
@@ -342,26 +287,19 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
         store.write('child-park', 'x')\n\
         return 'never'\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let mut rig = Rig::run(scheduler_scenario(md));
+    let out = rig.trace().text();
+    assert!(
+        out.contains("boom"),
+        "the caught fanout failure ends the run with the fatal arm's error: {out}"
     );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("the caught fanout failure ends the run normally");
-    assert!(out.contains("boom"), "the fatal arm's error: {out}");
 
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0.0")),
+        rig.task_state_for_test(&task("0.0.0")),
         Some(TaskState::Abandoned),
         "the aborted arm's task is Abandoned"
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
         !records.iter().any(|(section, event)| section == "Child"
             && matches!(

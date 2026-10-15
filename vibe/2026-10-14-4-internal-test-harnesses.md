@@ -753,7 +753,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-13>
 
-### Step 13: Engine scheduler rig with the effect tap, round capture, and RunState internals
+### Step 13: Engine scheduler rig with the effect tap, round capture, and RunState internals [completed]
 
 - Component: engine scheduler level
 - Tests:

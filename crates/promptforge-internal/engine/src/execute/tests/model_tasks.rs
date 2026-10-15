@@ -8,6 +8,7 @@
 //! tells the model's tasks from the author's. A scripted mock gateway plays
 //! the model.
 
+use promptforge_parser::test_support::PromptSource;
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
 
 use super::models_loop::loop_models;
@@ -15,30 +16,16 @@ use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 use crate::lua::ToolSet;
+use crate::test_support::rig::Rig;
 
 /// A child body that parks on a call to the never-completing tool, by its
 /// full id, so the task stays live until something ends it.
-pub(super) const PARKED_CHILD: &str = "tools.call('test/tools/slow')\nreturn 'never'";
+pub(super) const CHILD_PARKED_ON_SLOW_TOOL: &str = "tools.call('test/tools/slow')\nreturn 'never'";
 
-/// The run context and fixture for a model-task test: the parsed prompt, the
-/// shared model set pre-filled, no bound tools, the recorder as observer,
-/// and the never-completing tool in the catalog so a parked child stays
-/// parked.
-pub(super) fn model_task_context(
-    prompt: &Prompt,
-    recorder: &Arc<TaskRecorder>,
-) -> (RunState, RunFixture) {
-    model_task_context_with(
-        prompt,
-        Arc::clone(recorder) as Arc<dyn Observer>,
-        Arc::new(SlowTool),
-    )
-}
-
-/// [`model_task_context`] under a caller-chosen observer and the tool a
-/// child parks on, for the suites that time a parked child's release or
-/// record content reports. The tool is the run's whole catalog, so a
-/// section calls it by its full id without binding an alias.
+/// The run context and fixture for a model-task test: the parsed prompt,
+/// the shared model set pre-filled, no bound tools, `observer` watching,
+/// and `park`, the tool a child parks on, as the run's whole catalog, so
+/// a section calls it by its full id without binding an alias.
 pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
@@ -79,14 +66,13 @@ pub(super) fn model_task_scenario(source: impl Into<String>) -> Scenario {
 /// A two-section prompt: `Only` runs the model loop under `frontmatter`
 /// extras, `Child` is the task target.
 pub(super) fn owner_prompt(frontmatter: &str, owner_body: &str, child_body: &str) -> String {
-    format!(
-        "---\nname: mt\ndescription: d\npromptforge: 0\n{frontmatter}---\n\n\
-         # ModelTasks\n\n\
-         ## Only\n\n\
-         ```lua\n{owner_body}\n```\n\n\
-         ## Child\n\n\
-         ```lua\n{child_body}\n```\n"
-    )
+    PromptSource::new()
+        .name("mt")
+        .title("ModelTasks")
+        .front(frontmatter)
+        .section("Only", owner_body)
+        .section("Child", child_body)
+        .build()
 }
 
 /// The names the gateway saw advertised on `body`.
@@ -94,8 +80,8 @@ fn advertised(body: &ScriptedCall) -> Vec<String> {
     body.tool_names().into_iter().map(str::to_owned).collect()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_scripted_model_starts_a_task_and_reads_its_status() {
+#[test]
+fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         calls(&[("call_2", "task_status", "{\"id\":\"0.0\"}")]),
@@ -112,16 +98,12 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
          return msgs[5].content",
         "return 'child result'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the model starts and inspects its task");
+    let rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    let out = rig.trace().text();
     assert!(
         out.starts_with("Task id=0.0 (## Child): done, ok"),
-        "the status text names the task, its target, and its end: {out}"
+        "the model starts and inspects its task, and the status text names the task, \
+         its target, and its end: {out}"
     );
     let bodies = gateway.requests();
     assert_eq!(
@@ -129,7 +111,7 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
         vec!["task", "task_cancel", "task_status", "await_tasks"],
         "allow_tasks advertises exactly the answered built-ins: {bodies:?}"
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
         records.iter().any(|(section, event)| section == "Only"
             && matches!(
@@ -145,8 +127,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() {
+#[test]
+fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Only\"}")]),
         text("done"),
@@ -160,18 +142,14 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
          return msgs[3].content",
         "return 'child result'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the refusal is the call's content, not a raise");
+    let rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    let out = rig.trace().text();
     assert!(
         out.contains("## Only") && out.contains("not allowed") && out.contains("## Child"),
-        "the refusal names the target and the allowlist: {out}"
+        "the refusal is the call's content, not a raise, and names the target and the \
+         allowlist: {out}"
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
         !records
             .iter()
@@ -180,8 +158,8 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
+#[test]
+fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         text("bye"),
@@ -197,23 +175,20 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
          assert(#mine == 0, 'the author started nothing')\n\
          assert(#models == 1 and models[1].task == '0.0', 'the model task is pending')\n\
          return 'ok'",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a live model task never fails its owner as tasks_live");
-    assert_eq!(out, "ok");
+    let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.trace().text(),
+        "ok",
+        "a live model task never fails its owner as tasks_live"
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned),
         "the model task ended with its owner as abandoned"
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
         records.iter().any(|(section, event)| section == "Child"
             && *event
@@ -232,8 +207,8 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     assert_eq!(AbandonReason::OwnerReturned.why(), "the section ended");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
+#[test]
+fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     // Both origins live under one owner at one chain end, so the origin
     // arm in `abandon_owned_tasks` is driven over every `TaskOrigin`
     // variant in a single settle: the author's id is the whole of
@@ -252,33 +227,27 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
          msgs:user('go')\n\
          models.loop(msgs)\n\
          return 'ok'",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("the live author task fails the owner it outlived");
+    let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
 
-    match &error {
+    match rig.trace().error().inner() {
         Error::TasksLive { tasks } => assert_eq!(
             tasks,
             &[task("0.0")],
-            "only the author-origin task is leaked: {tasks:?}"
+            "the live author task fails the owner it outlived, and only the author-origin \
+             task is leaked: {tasks:?}"
         ),
         other => panic!("expected tasks_live, got {other:?}"),
     }
     for id in ["0.0", "0.1"] {
         assert_eq!(
-            scheduler.task_state_for_test(&task(id)),
+            rig.task_state_for_test(&task(id)),
             Some(TaskState::Abandoned),
             "both origins ended with their owner as abandoned"
         );
     }
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     // `abandon_owned_tasks` stamps `Abandoned` before the effect-backed
     // branch that skips the origin match, so the state alone would hold
     // for a slot that never reached the arm. The terminal observation is
@@ -311,8 +280,8 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
+#[test]
+fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "task",
@@ -325,25 +294,19 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
          msgs:user('go')\n\
          models.loop(msgs)\n\
          return 'unreached'",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("one round then the cap fails the owner");
+    let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    let error = rig.trace().error().inner();
     assert!(
         matches!(error, Error::ToolLoopExhausted),
-        "the owner's own error stands: {error:?}"
+        "one round then the cap fails the owner, and the owner's own error stands: {error:?}"
     );
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned)
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     // The owner exhausted before the child ever ran - the loop fails on
     // the round that answered the task call, with no suspension between -
     // so the task was still queued for admission: it reports no start
@@ -361,8 +324,8 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     assert_eq!(AbandonReason::OwnerFailed.why(), "the owner failed");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
+#[test]
+fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "task", "{\"target\":\"## Child\"}")]),
         calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
@@ -376,22 +339,19 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
          models.loop(msgs)\n\
          assert(#tasks.pending() == 0, 'nothing is live after the cancel')\n\
          return msgs[5].content",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let out = scheduler
-        .drive()
-        .await
-        .expect("the cancelled task leaves nothing live");
-    assert_eq!(out, "Task id=0.0 cancelled");
+    let mut rig = Rig::run(model_task_scenario(md).chat(&gateway));
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.trace().text(),
+        "Task id=0.0 cancelled",
+        "the cancelled task leaves nothing live"
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Cancelled)
     );
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     assert!(
         records.iter().any(|(section, event)| section == "Child"
             && *event == Observation::TaskCancelled { task: task("0.0") }),
@@ -405,8 +365,8 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_model_sees_only_its_own_tasks() {
+#[test]
+fn the_model_sees_only_its_own_tasks() {
     // The author's task is `0.0`; the model's status read of it is refused
     // and the author's cancel then ends it, so the run completes clean.
     let gateway = ScriptedChat::new(vec![
@@ -422,23 +382,19 @@ async fn the_model_sees_only_its_own_tasks() {
          models.loop(msgs)\n\
          tasks.cancel(t)\n\
          return msgs[3].content",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the author's cancel ends its task before the chain ends");
+    let rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    let out = rig.trace().text();
     assert!(
         out.contains("no model task with id 0.0"),
-        "an author task is invisible to the model: {out}"
+        "the author's cancel ends its task before the chain ends, and an author task is \
+         invisible to the model: {out}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn without_allow_tasks_the_built_ins_are_not_advertised() {
+#[test]
+fn without_allow_tasks_the_built_ins_are_not_advertised() {
     let gateway = ScriptedChat::new(vec![text("bye")]);
     let md = owner_prompt(
         "",
@@ -448,13 +404,8 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
          return 'ok'",
         "return 'x'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = model_task_context(&prompt, &recorder);
-    TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a tool-free round completes");
+    let rig = Rig::run(model_task_scenario(md).chat(&gateway));
+    assert_eq!(rig.trace().text(), "ok", "a tool-free round completes");
     let bodies = gateway.requests();
     assert!(
         advertised(&bodies[0]).is_empty(),

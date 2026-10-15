@@ -6,11 +6,12 @@
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::ids::RoundId;
 
-use super::models_loop::{echo_tools, loop_context, loop_prompt};
+use super::models_loop::{loop_prompt, loop_scenario};
 use super::*;
-use crate::execute::run::{Effect, EffectAnswer, Round, Run};
+use crate::execute::run::{Effect, EffectAnswer, Round};
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
+use crate::test_support::rig::Rig;
 
 /// Offers `echo`, infers once, then loops over one tool round and its
 /// closing reply.
@@ -38,24 +39,25 @@ fn thinking(result: CompletionResult, thought: &str) -> EffectAnswer {
     EffectAnswer::Chat(Ok(Box::new(completion)))
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_rounds() {
+#[test]
+fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_rounds() {
     let gateway = ScriptedChat::new(vec![
         text("a"),
         calls(&[("call_1", "echo", r#"{"value":"hi"}"#)]),
         text("b"),
         text("c"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
+    let source = loop_prompt(&format!(
         "{INFER_THEN_LOOP} .. '|' .. models.infer('third')"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let rounds = driver.record_rounds_for_test();
-    let out = driver.drive().await.expect("every round completes");
-    assert_eq!(out, "a|b|c");
+    ));
+    let rig = Rig::run(
+        loop_scenario(source)
+            .offer("echo", echo_tool())
+            .chat(&gateway),
+    );
+    assert_eq!(rig.trace().text(), "a|b|c");
     assert_eq!(
-        *rounds.lock().expect("the round tap mutex is not poisoned"),
+        rig.rounds(),
         vec![
             round(0, ReplyOrigin::Infer),
             round(1, ReplyOrigin::Chat),
@@ -68,8 +70,9 @@ async fn round_ids_increase_in_dispatch_order_across_chat_and_nested_infer_round
 
 #[test]
 fn a_rounds_thinking_reply_and_tool_call_events_hold_the_id_its_chat_effect_held() {
-    let prompt = parse(&loop_prompt(INFER_THEN_LOOP));
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
+    let run = loop_scenario(loop_prompt(INFER_THEN_LOOP))
+        .offer("echo", echo_tool())
+        .into_run();
     let call = ToolCall::from_parts("call_1", "echo", json!({ "value": "hi" }))
         .expect("a scripted call is whole");
     let mut answers = vec![
@@ -79,7 +82,7 @@ fn a_rounds_thinking_reply_and_tool_call_events_hold_the_id_its_chat_effect_held
     ]
     .into_iter();
     let mut issued = Vec::new();
-    let (result, events) = drive(Run::from_state(state), |_, effect| match effect {
+    let (result, events) = drive(run, |_, effect| match effect {
         Effect::Chat { round, .. } => {
             issued.push(*round);
             answers.next().expect("the script covers every round")

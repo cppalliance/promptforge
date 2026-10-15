@@ -4,12 +4,12 @@
 //! appends, the nil return, explicit terminal removal, local and bound
 //! tools, call-time tool scope, explicit-handle calls on a frozen binding,
 //! and the atomic append of a tool-call batch. The shared loop fixtures
-//! (`loop_models`, `loop_scenario`, `LOOP_TO_TEXT`, and the `loop_events`
-//! filter, beside the tokio driver's `loop_context`, `loop_prompt`, and
-//! tool sets) sit here for every loop-driven sibling. The compactor
-//! argument's tests sit in `models_loop_compactors`; the loop's exit rules
-//! in `exit_rules`; its cap, scope gate, and result-record trust in
-//! `tool_loop`.
+//! (`loop_models`, `loop_scenario`, `catalog_scenario`, `LOOP_TO_TEXT`,
+//! and the `loop_events` filter, beside the tokio driver's `loop_context`,
+//! `loop_prompt`, and tool sets) sit here for every loop-driven sibling.
+//! The compactor argument's tests sit in `models_loop_compactors`; the
+//! loop's exit rules in `exit_rules`; its cap, scope gate, and
+//! result-record trust in `tool_loop`.
 
 use promptforge_parser::test_support::one_section;
 
@@ -40,6 +40,12 @@ pub(super) fn loop_models() -> ModelSet {
 /// [`loop_context`] builds for the tokio driver.
 pub(super) fn loop_scenario(source: impl Into<String>) -> Scenario {
     Scenario::new(source).unprepared().models(loop_models())
+}
+
+/// A run of `source` over the loop models, prepared, so the scenario's
+/// catalog tools are offered as the prepare offers them.
+pub(super) fn catalog_scenario(source: impl Into<String>) -> Scenario {
+    Scenario::new(source).models(loop_models())
 }
 
 /// The section body the cap, trust, scoping, exit-rule, and observation

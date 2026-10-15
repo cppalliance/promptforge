@@ -19,7 +19,7 @@ use std::time::Duration;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
-use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
+use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_context_with, owner_prompt};
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 
@@ -389,7 +389,7 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
             "assert(#tasks.pending() == 0, 'nothing is live after the cancel')\n\
              return msgs[5].content .. '|' .. msgs[7].content",
         ),
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());

@@ -7,7 +7,9 @@
 //! closure the caller supplies. Nothing there awaits, spawns, or sleeps; a
 //! timer effect is answered however the closure sees fit, so a test's
 //! timeouts are instant. In this crate's own tests, `scenario` builds a
-//! whole run from its setup as data and drives it on the serial driver.
+//! whole run from its setup as data and drives it on the serial driver,
+//! and `rig` drives a scenario's run with its effects tapped and its
+//! scheduler in reach.
 //!
 //! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
 //! `ToolCall` effects through the caller's [`Performers`]
@@ -39,6 +41,8 @@ use crate::parser::Prompt;
 
 mod fixture;
 pub mod recording;
+#[cfg(test)]
+pub(crate) mod rig;
 #[cfg(test)]
 pub(crate) mod scenario;
 #[cfg(test)]
@@ -118,6 +122,7 @@ pub fn drive(
     loop {
         let stepped = drive_step(
             &mut run,
+            &mut |_| {},
             &mut answer,
             &mut |_, _| {},
             &mut Vec::new(),
@@ -130,15 +135,17 @@ pub fn drive(
 }
 
 /// One step of [`drive`]: steps `run`, appends the step's events to
-/// `reported`, answers every effect the step issued through `perform`,
-/// hands each effect and its answer to `answered`, `Dropped` ones included,
-/// and returns the run's result once it has one.
+/// `reported`, hands every effect the step issued to `issued` in issue
+/// order, answers each through `perform`, hands each effect and its answer
+/// to `answered`, `Dropped` ones included, and returns the run's result
+/// once it has one.
 ///
 /// An effect `perform` answers `None` joins `held`, unanswered. Once the
 /// run has decided its outcome, every effect it issues and every held one
 /// is answered `Dropped`.
 pub(crate) fn drive_step(
     run: &mut Run,
+    issued: &mut impl FnMut(&Effect),
     perform: &mut impl FnMut(EffectId, &Effect) -> Option<EffectAnswer>,
     answered: &mut impl FnMut(&Effect, &EffectAnswer),
     held: &mut Vec<(EffectId, Effect)>,
@@ -165,6 +172,7 @@ pub(crate) fn drive_step(
             }
             let decided = run.decided();
             for (id, _, effect) in effects {
+                issued(&effect);
                 let answer = if decided {
                     Some(EffectAnswer::Dropped)
                 } else {

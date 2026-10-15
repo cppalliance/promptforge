@@ -36,8 +36,6 @@
 //! `test-support` feature for it. In production the Harness steps the run.
 
 use std::collections::HashMap;
-#[cfg(test)]
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use promptforge_types::event::Event;
@@ -51,8 +49,6 @@ use crate::test_support::scripted_chat::ScriptedChat;
 use crate::{Error, Result};
 
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
-#[cfg(test)]
-use crate::execute::{EffectRecord, Round};
 #[cfg(test)]
 use crate::test_support::RunFixture;
 
@@ -124,12 +120,6 @@ pub(crate) struct TokioDriver<'a> {
     /// delivers answers in arrival order.
     #[cfg(test)]
     shuffle: Option<u64>,
-    /// Test-only: the record of every effect performed, in issue order.
-    #[cfg(test)]
-    tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
-    /// Test-only: the round of every `Chat` effect issued, in issue order.
-    #[cfg(test)]
-    rounds: Option<Arc<Mutex<Vec<Round>>>>,
 }
 
 impl<'a> TokioDriver<'a> {
@@ -171,10 +161,6 @@ impl<'a> TokioDriver<'a> {
             outstanding: HashMap::new(),
             cancel,
             #[cfg(test)]
-            tap: None,
-            #[cfg(test)]
-            rounds: None,
-            #[cfg(test)]
             shuffle: None,
         }
     }
@@ -206,8 +192,6 @@ impl<'a> TokioDriver<'a> {
                     // events are a report only.
                     let decided = self.run.decided();
                     self.forward(events);
-                    #[cfg(test)]
-                    self.record(&effects);
                     if decided {
                         // The run has decided; every effect it issued in
                         // this step is moot before it is performed, and

@@ -1,12 +1,12 @@
-//! Admission cases that step the run by hand instead of through the
-//! tokio driver: two tasks' `call` children finishing in any order under
-//! every answer batching, and a queue that can never be admitted
-//! reported as a stall.
+//! Admission cases that step the run on the calling thread instead of
+//! through the tokio driver: two tasks' `call` children finishing in any
+//! order under every answer batching, and a queue that can never be
+//! admitted reported as a stall.
 
 use super::*;
 use crate::execute::RunResult;
-use crate::execute::run::{Run, Step};
-use crate::test_support::scenario::{Batching, drive_batched, perform_locally};
+use crate::test_support::rig::Rig;
+use crate::test_support::scenario::{Batching, drive_batched};
 
 #[test]
 fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
@@ -29,19 +29,13 @@ fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
         ```lua\nreturn call('#### Leaf')\n```\n\n\
         #### Leaf\n\n\
         ```lua\nreturn models.infer(var.who)\n```\n";
-    let prompt = parse(md);
     for batching in [
         Batching::OnePerStep,
         Batching::AllAtOnce,
         Batching::Reversed,
     ] {
-        let (state, _fixture) = limited_context(
-            &prompt,
-            &TestStore::new(),
-            ceiling(2),
-            Arc::new(NullObserver::default()),
-        );
-        let outcome = drive_batched(Run::from_state(state), batching);
+        let run = scheduler_scenario(md).limits(ceiling(2)).into_run();
+        let outcome = drive_batched(run, batching);
         let RunResult::Ok(text) = &outcome.result else {
             panic!(
                 "both calls complete under {batching:?}: {:?}",
@@ -71,36 +65,23 @@ fn a_queued_task_that_can_never_be_admitted_is_reported_as_a_stall() {
         ```\n\n\
         ## Child\n\n\
         ```lua\nreturn 'child'\n```\n";
-    let prompt = parse(md);
-    let (state, _fixture) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::new(NullObserver::default()),
+    // The rig answers the store write in the step that issues it, so the
+    // wedge lands before the walk resumes from the write and spawns.
+    let mut rig = Rig::start(scheduler_scenario(md).limits(ceiling(1)));
+    assert!(rig.step(), "the walk parks on its store write");
+    rig.scheduler_for_test().wedge_admission_for_test(0);
+    let rig = rig.finish();
+    assert_eq!(
+        rig.issued().len(),
+        1,
+        "a stalled run must not return Pending with more effects: {:?}",
+        rig.issued()
     );
-    let mut run = Run::from_state(state);
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the walk parks on its store write");
-    };
-    run.scheduler_for_test().wedge_admission_for_test(0);
-    for (id, _, effect) in effects {
-        let answer = perform_locally(&effect, &mut |effect| {
-            panic!("the fixture issues no model round: {effect:?}")
-        });
-        run.resume(id, answer);
-    }
-    match run.step() {
-        Step::Done {
-            result: RunResult::Failure(error),
-            ..
-        } => assert!(
+    match rig.trace().result() {
+        RunResult::Failure(error) => assert!(
             error.to_string().contains("stalled"),
             "the run reports the stall: {error}"
         ),
-        Step::Done { result, .. } => panic!("the stalled run must fail, got {result:?}"),
-        Step::Pending { effects, .. } => panic!(
-            "a stalled run must not return Pending, got {} effects",
-            effects.len()
-        ),
+        result => panic!("the stalled run must fail, got {result:?}"),
     }
 }

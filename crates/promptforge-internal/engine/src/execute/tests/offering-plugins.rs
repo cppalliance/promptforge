@@ -15,8 +15,8 @@ fn round_section(messages: &[Value]) -> String {
         .to_owned()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_offered_it() {
+#[test]
+fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_offered_it() {
     let round = |section: &str| {
         format!(
             "local history = messages.new()\n\
@@ -24,7 +24,7 @@ async fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_off
              models.loop(history)\n"
         )
     };
-    let prompt = parse(&format!(
+    let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
          # Plugins\n\n\
          ```lua\nplugins.offer('kit')\n{h1}```\n\n\
@@ -50,22 +50,18 @@ async fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_off
         b = round("B"),
         called = round("Called"),
         worker = round("Worker"),
-    ));
-    let gateway = ScriptedChat::new(vec![text("done"); 5]);
-    let (ctx, fixture) = offering_context(
-        &prompt,
-        &[
-            offered_tool("kit/a"),
-            offered_tool("kit/b"),
-            offered_tool("web/fetch"),
-        ],
     );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("the walk ends at B");
-    assert_eq!(out, "ok");
-    let records = records.lock().expect("the tap mutex is not poisoned");
-    let (advertised, calls) = rounds_and_calls(&records);
+    let gateway = ScriptedChat::new(vec![text("done"); 5]);
+    let rig = Rig::run(
+        catalog_scenario(source)
+            .tool(offered_tool("kit/a"))
+            .tool(offered_tool("kit/b"))
+            .tool(offered_tool("web/fetch"))
+            .chat(&gateway),
+    );
+    assert_eq!(rig.trace().text(), "ok", "the walk ends at B");
+    let records = rig.issued();
+    let (advertised, calls) = rounds_and_calls(records);
     assert!(calls.is_empty(), "no tool is called: {calls:?}");
     let mut by_section: Vec<(String, Vec<String>)> = records
         .iter()

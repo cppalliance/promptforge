@@ -8,7 +8,7 @@
 use promptforge_parser::test_support::one_section;
 
 use super::super::model_task_notices::loop_owner;
-use super::super::model_tasks::{PARKED_CHILD, model_task_scenario, owner_prompt};
+use super::super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario, owner_prompt};
 use super::*;
 
 /// The list refusal both loop entries raise, as `kind:message`.
@@ -215,7 +215,7 @@ fn a_non_list_is_refused_with_the_list_error_while_a_task_notice_waits_for_the_l
              out[#out + 1] = msgs[5].role .. ':' .. msgs[5].content\n\
              return table.concat(out, '|')",
         ),
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
     let trace = model_task_scenario(source).chat(&gateway).run();
     assert_eq!(

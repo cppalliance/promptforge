@@ -7,9 +7,10 @@
 
 use promptforge_types::ids::TaskOrigin;
 
-use super::scheduler::scheduler_context_on;
+use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
+use crate::test_support::rig::Rig;
 
 /// A recorder that keeps the typed observation, so a variant with a
 /// payload (`TaskStarted`) can be matched whole.
@@ -26,6 +27,14 @@ impl Observer for TaskRecorder {
 }
 
 impl TaskRecorder {
+    /// A recorder holding what `trace`'s events report, parse events
+    /// first.
+    pub(super) fn replayed(trace: &Trace) -> TaskRecorder {
+        let recorder = TaskRecorder::default();
+        trace.replay(&recorder);
+        recorder
+    }
+
     pub(super) fn records(&self) -> Vec<(String, Observation)> {
         self.0
             .lock()
@@ -58,8 +67,8 @@ fn spawner_prompt(spawner_body: &str, child_body: &str) -> String {
     )
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn spawn_returns_to_its_caller_before_the_child_runs() {
+#[test]
+fn spawn_returns_to_its_caller_before_the_child_runs() {
     let md = spawner_prompt(
         "local t = tasks.spawn('## Child')\n\
          log('spawned ' .. t.task)\n\
@@ -67,19 +76,14 @@ async fn spawn_returns_to_its_caller_before_the_child_runs() {
          return 'done'",
         "log('child ran')",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let rig = Rig::run(scheduler_scenario(md));
+    assert_eq!(
+        rig.trace().text(),
+        "done",
+        "the spawner's return ends the run"
     );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the spawner's return ends the run");
-    assert_eq!(out, "done");
 
+    let recorder = TaskRecorder::replayed(rig.trace());
     let spawned = recorder.position("Spawner", &Observation::Lua("spawned 0.0".to_owned()));
     let child_ran = recorder.position("Child", &Observation::Lua("child ran".to_owned()));
     assert!(
@@ -95,29 +99,23 @@ async fn spawn_returns_to_its_caller_before_the_child_runs() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
+#[test]
+fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
     let md = spawner_prompt(
         "tasks.spawn('## Child')\n\
          store.write('park', 'x')\n\
          return 'done'",
         "return 'child result'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    scheduler.drive().await.expect("the run completes");
+    let mut rig = Rig::run(scheduler_scenario(md));
+    assert_eq!(rig.trace().text(), "done", "the run completes");
 
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Done),
         "the child's completion moves its slot to Done"
     );
+    let recorder = TaskRecorder::replayed(rig.trace());
     let started = recorder.position(
         "Spawner",
         &Observation::TaskStarted {
@@ -132,8 +130,8 @@ async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
     );
     let succeeded = recorder.position("Child", &Observation::TaskSucceeded { task: task("0.0") });
     assert!(started < succeeded, "started precedes succeeded");
-    // The store op's own observation fires on the blocking pool, so the
-    // spawner's resume point is its chunk's close, reported by the driver.
+    // The spawner's resume point is its chunk's close, after the store
+    // write's answer.
     let resumed = recorder.position("Spawner", &detail::LUA_CHUNK_SUCCEEDED);
     assert!(
         succeeded < resumed,
@@ -142,33 +140,27 @@ async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
+#[test]
+fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
     let md = spawner_prompt(
         "tasks.spawn('## Child')\n\
          store.write('park', 'x')\n\
          return 'done'",
         "error('child boom')",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+    let mut rig = Rig::run(scheduler_scenario(md));
+    assert_eq!(
+        rig.trace().text(),
+        "done",
+        "a task's failure is the task's outcome, not the run's"
     );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a task's failure is the task's outcome, not the run's");
-    assert_eq!(out, "done");
 
     assert_eq!(
-        scheduler.task_state_for_test(&task("0.0")),
+        rig.task_state_for_test(&task("0.0")),
         Some(TaskState::Done),
         "a failed child's slot is Done with a failed outcome"
     );
+    let recorder = TaskRecorder::replayed(rig.trace());
     recorder.position("Child", &Observation::TaskFailed { task: task("0.0") });
     let records = recorder.records();
     assert!(
@@ -179,8 +171,8 @@ async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
+#[test]
+fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
     let md = spawner_prompt(
         "var.k = 1\n\
          log('root taskid=' .. sys.taskid)\n\
@@ -190,18 +182,10 @@ async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
         "log('taskid=' .. sys.taskid .. ' id=' .. sys.id .. ' index=' .. sys.index\n\
            .. ' item=' .. item.name .. ' args=' .. args .. ' k=' .. tostring(var.k))",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the run completes");
+    let rig = Rig::run(scheduler_scenario(md));
+    assert_eq!(rig.trace().text(), "done", "the run completes");
 
+    let recorder = TaskRecorder::replayed(rig.trace());
     recorder.position(
         "Spawner",
         &Observation::TaskStarted {
@@ -221,8 +205,8 @@ async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
+#[test]
+fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
     // An unresolvable target is the call's answer: `pcall` catches it, and
     // the message is exactly the one `call` produces for the same heading.
     let md = spawner_prompt(
@@ -234,24 +218,16 @@ async fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
          return tostring(err_s)",
         "return 'unused'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the caught errors end the run normally");
+    let rig = Rig::run(scheduler_scenario(md));
+    let out = rig.trace().text();
     assert!(
         out.contains("section heading `## Missing` not found"),
         "unexpected message: {out}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn spawn_shares_calls_depth_cap() {
+#[test]
+fn spawn_shares_calls_depth_cap() {
     // Alpha and Beta spawn each other, each spawned chain one level
     // deeper (a section's visible set excludes itself, as for `call`); the
     // chain at depth 8 is refused with `call`'s own cap message, as the
@@ -272,25 +248,21 @@ async fn spawn_shares_calls_depth_cap() {
         store.write('park-' .. sys.id, 'x')\n\
         return 'done'\n\
         ```\n";
-    let prompt = parse(md);
-    let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
     // Every spawner parks on a store write after spawning, so whether a
-    // spawner resumes before or after its child ends depends on the
-    // blocking pool's answer order: the run ends `done` or `tasks_live`.
+    // spawner resumes before or after its child ends depends on the order
+    // the writes are answered in: the run ends `done` or `tasks_live`.
     // Either way the whole spawn cascade and the one refusal ran before
     // any answer arrived, which is what this test measures.
-    let outcome = TokioDriver::new(&ctx, fixture, None).drive().await;
+    let rig = Rig::run(scheduler_scenario(md));
+    let outcome = rig.trace().result();
     assert!(
-        matches!(outcome, Ok(_) | Err(Error::TasksLive { .. })),
+        matches!(outcome, RunResult::Ok(_))
+            || matches!(outcome, RunResult::Failure(error)
+                if matches!(error.inner(), Error::TasksLive { .. })),
         "unexpected outcome: {outcome:?}"
     );
 
-    let records = recorder.records();
+    let records = TaskRecorder::replayed(rig.trace()).records();
     let refusals = records
         .iter()
         .filter(|(_, event)| {
@@ -305,8 +277,8 @@ async fn spawn_shares_calls_depth_cap() {
     assert_eq!(starts, 8, "depths 1 through 8 start; depth 9 is refused");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn spawn_rejects_a_list_section_target_with_the_worker_message() {
+#[test]
+fn spawn_rejects_a_list_section_target_with_the_worker_message() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Lists\n\n\
         ## Parent\n\n\
@@ -318,19 +290,11 @@ async fn spawn_rejects_a_list_section_target_with_the_worker_message() {
         ### Items\n\n\
         - a\n\
         - b\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = scheduler_context_on(
-        &prompt,
-        &TestStore::new(),
-        Arc::new(NullObserver::default()),
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the caught error ends the run normally");
+    let rig = Rig::run(scheduler_scenario(md));
     assert_eq!(
-        out,
-        "section `Items` is a list section, not a worker template"
+        rig.trace().text(),
+        "section `Items` is a list section, not a worker template",
+        "the caught error ends the run normally"
     );
 }
 

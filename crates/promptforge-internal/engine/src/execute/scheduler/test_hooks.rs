@@ -1,8 +1,8 @@
 //! Test-only hooks over the scheduler's private state: the seams the
 //! `execute::tests` suites drive the scheduler's edge paths through
 //! (overflow bounds, inline answers, and task slots) and the turn counter
-//! they read. Compiled only under test; nothing here exists in a shipped
-//! Engine.
+//! and tool set they read. Compiled only under test; nothing here exists
+//! in a shipped Engine.
 
 use std::sync::atomic::Ordering;
 
@@ -12,6 +12,7 @@ use promptforge_types::tools::ToolId;
 use crate::Result;
 use crate::execute::scope::DispatchTarget;
 use crate::execute::walk_target::SlicePath;
+use crate::lua::ToolSet;
 
 pub(crate) use super::tasks::TaskState;
 use super::{ChainIndex, Counters, Scheduler};
@@ -46,6 +47,12 @@ impl Scheduler {
     /// was ever started, so a test can prove a chain's end moved its slot.
     pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
         self.tasks.get(task).map(|slot| slot.state)
+    }
+
+    /// The run's tool set: its offering, built from the catalog unless a
+    /// test replaced it, and the Plugins the prompt declares.
+    pub(crate) fn tool_set_for_test(&self) -> &ToolSet {
+        self.ctx.tool_set()
     }
 
     /// The model-turn counter of the run's ambient context, which the main

@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
-use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
+use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_context_with, owner_prompt};
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 
@@ -34,7 +34,7 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
          ## Only\n\n\
          ```lua\n{}\n```\n\n\
          ## Parked\n\n\
-         ```lua\n{PARKED_CHILD}\n```\n\n\
+         ```lua\n{CHILD_PARKED_ON_SLOW_TOOL}\n```\n\n\
          ## Quick\n\n\
          ```lua\nreturn 'quick result'\n```\n",
         loop_owner("return msgs[7].content")

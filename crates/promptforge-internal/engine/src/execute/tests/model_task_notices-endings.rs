@@ -40,7 +40,7 @@ fn notice_texts_name_how_a_task_ended() {
         "local mine = tasks.pending({ origin = 'model' })\n\
          tasks.cancel(mine[1])\n\
          return 'ok'",
-        PARKED_CHILD,
+        CHILD_PARKED_ON_SLOW_TOOL,
     );
     assert_eq!(
         cancelled,
@@ -52,7 +52,7 @@ fn notice_texts_name_how_a_task_ended() {
         "an author cancel of a model task is one notice"
     );
 
-    let abandoned = notices_for("return 'ok'", PARKED_CHILD);
+    let abandoned = notices_for("return 'ok'", CHILD_PARKED_ON_SLOW_TOOL);
     assert_eq!(
         abandoned,
         vec![(
@@ -87,7 +87,7 @@ fn a_walk_that_runs_off_its_last_section_reports_the_abandoned_task_under_that_s
          ## Last\n\n\
          ```lua\n{}\n```\n\n\
          ### Child\n\n\
-         ```lua\n{PARKED_CHILD}\n```\n",
+         ```lua\n{CHILD_PARKED_ON_SLOW_TOOL}\n```\n",
         loop_owner("")
     );
     let trace = model_task_scenario(md).chat(&gateway).run();
@@ -196,7 +196,7 @@ fn a_model_issued_cancel_queues_no_notice() {
         calls(&[("call_2", "task_cancel", "{\"id\":\"0.0\"}")]),
         text("bye"),
     ]);
-    let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
+    let md = owner_prompt("", &loop_owner("return 'ok'"), CHILD_PARKED_ON_SLOW_TOOL);
     let trace = model_task_scenario(md).chat(&gateway).run();
     assert!(
         matches!(trace.result(), RunResult::Ok(_)),

@@ -11,9 +11,9 @@
 
 use promptforge_types::event::{Event, ReplyOrigin};
 
-use super::models_loop::{echo_tools, loop_context, loop_prompt};
+use super::models_loop::{loop_prompt, loop_scenario};
 use super::*;
-use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
+use crate::execute::run::{Effect, EffectAnswer, EffectId, Step};
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::scenario::{chat_answer, only_effect, text_of};
 
@@ -82,9 +82,7 @@ fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
          return msgs[3].tool_call_id .. '=' .. msgs[3].content \
          .. '|' .. msgs[4].tool_call_id .. '=' .. msgs[4].content",
     );
-    let prompt = parse(&md);
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+    let mut run = loop_scenario(md).offer("echo", echo_tool()).into_run();
     let mut events = Vec::new();
     let (round, _) = only_effect(run.step());
     run.resume(
@@ -158,9 +156,7 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
          for i = 3, 6 do ids[#ids + 1] = msgs[i].tool_call_id end\n\
          return table.concat(ids, ',') .. '|' .. msgs[4].content",
     );
-    let prompt = parse(&md);
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+    let mut run = loop_scenario(md).offer("echo", echo_tool()).into_run();
     let (round, _) = only_effect(run.step());
     run.resume(
         round,
@@ -207,9 +203,7 @@ fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls
          local ok, err = pcall(models.loop, msgs)\n\
          return tostring(ok) .. ':' .. err.kind .. '|' .. #msgs",
     );
-    let prompt = parse(&md);
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+    let mut run = loop_scenario(md).offer("echo", echo_tool()).into_run();
     let (round, _) = only_effect(run.step());
     // The read-only tool set can't make a round advertise a name it
     // can't bind, so the test adds `nope` to the round's recorded scope:
@@ -251,9 +245,7 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
               msgs:user('go')\n\
               models.loop(msgs)\n\
               return 'child done'\n```\n";
-    let prompt = parse(md);
-    let (state, _fixture) = loop_context(&prompt, echo_tools());
-    let mut run = Run::from_state(state);
+    let mut run = loop_scenario(md).offer("echo", echo_tool()).into_run();
     let (rounds, _) = pending(run.step());
     let origin = |wanted: ReplyOrigin| {
         rounds

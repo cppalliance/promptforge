@@ -354,7 +354,6 @@ impl Scenario {
             held: Vec::new(),
             store: self.store,
             canceller,
-            turns: 0,
         }
     }
 

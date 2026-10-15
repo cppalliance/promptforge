@@ -3,7 +3,6 @@
 //! `use super::*`.
 
 use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
 
 mod chains;
 mod child_levels;

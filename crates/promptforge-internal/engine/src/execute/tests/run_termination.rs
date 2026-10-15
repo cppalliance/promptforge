@@ -19,7 +19,7 @@ use super::*;
 /// The spawner starts `Child` and waits on it; the child parks on a model
 /// round the test never answers, so the run is cancelled with the task
 /// live.
-const PARKED_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+const CHILD_PARKED_ON_ROUND: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
     # Termination\n\n\
     ## Spawner\n\n\
     ```lua\n\
@@ -36,7 +36,7 @@ const PARKED_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
 fn cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_ends() {
     // The child's round is held, and the run is cancelled once only that
     // round is outstanding.
-    let mut driving = scheduler_scenario(PARKED_CHILD)
+    let mut driving = scheduler_scenario(CHILD_PARKED_ON_ROUND)
         .hold(|effect| matches!(effect, Effect::Chat { .. }))
         .start();
     while driving.step() {}

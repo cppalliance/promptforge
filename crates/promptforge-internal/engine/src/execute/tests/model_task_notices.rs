@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use promptforge_types::ids::TaskId;
 
-use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt};
+use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_context_with, owner_prompt};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
@@ -253,7 +253,11 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
         calls(&[("call_3", "await_tasks", "{\"timeout\":0.1}")]),
         text("bye"),
     ]);
-    let md = owner_prompt("", &loop_owner("return msgs[7].content"), PARKED_CHILD);
+    let md = owner_prompt(
+        "",
+        &loop_owner("return msgs[7].content"),
+        CHILD_PARKED_ON_SLOW_TOOL,
+    );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
     let (ctx, fixture) = model_task_context_with(

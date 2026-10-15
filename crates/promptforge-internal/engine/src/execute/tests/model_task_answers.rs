@@ -11,13 +11,6 @@ use super::model_tasks::{model_task_scenario, owner_prompt};
 use super::tasks::TaskRecorder;
 use super::*;
 
-/// The run's events replayed onto a fresh task recorder.
-fn task_records(trace: &Trace) -> Vec<(String, Observation)> {
-    let recorder = TaskRecorder::default();
-    trace.replay(&recorder);
-    recorder.records()
-}
-
 #[test]
 fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note() {
     // `Child` publishes a note, spawns `Leaf`, then parks on a tool call,
@@ -80,7 +73,7 @@ fn task_status_reports_a_failed_task_as_done_failed() {
         "Task id=0.0 (## Child): done, failed, turns 0",
         "a finished task reports its outcome and no live-chain fields"
     );
-    let records = task_records(&trace);
+    let records = TaskRecorder::replayed(&trace).records();
     assert!(
         records.iter().any(|(section, event)| section == "Child"
             && *event == Observation::TaskFailed { task: task("0.0") }),
@@ -128,7 +121,7 @@ fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
         ],
         "each refusal names the argument and what it must be"
     );
-    let records = task_records(&trace);
+    let records = TaskRecorder::replayed(&trace).records();
     assert_eq!(
         records
             .iter()

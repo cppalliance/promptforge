@@ -2,17 +2,20 @@
 //! under its wire name, which `tools.offer` scopes by id or tool object, a
 //! model call resolves by wire name, and a script call resolves by id.
 
-use super::models_loop::loop_models;
+use promptforge_parser::test_support::{PromptSource, one_section, prompt};
+
+use super::models_loop::catalog_scenario;
 use super::*;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::execute::scope::{DispatchTarget, prepare_scoped_tools};
+use crate::test_support::rig::Rig;
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_types::plugins::PluginId;
 
 /// A catalog tool under any id, described by its id, echoing its `value`
 /// argument as `<id>: <value>`, with parameters `schema`.
 #[track_caller]
-fn tool_at(id: &str, schema: Value) -> Arc<dyn TestTool> {
+fn tool_at(id: &str, schema: Value) -> FnTool {
     let label = id.to_owned();
     let tool = FnTool::new(id, schema, move |args| {
         let value = args["value"]
@@ -20,12 +23,12 @@ fn tool_at(id: &str, schema: Value) -> Arc<dyn TestTool> {
             .ok_or_else(|| ToolError::message("the value argument is required"))?;
         Ok(ToolOutput::trusted(format!("{label}: {value}")))
     });
-    Arc::new(tool.description(id))
+    tool.description(id)
 }
 
 /// A catalog tool under `id` taking a string `value`.
 #[track_caller]
-fn offered_tool(id: &str) -> Arc<dyn TestTool> {
+fn offered_tool(id: &str) -> FnTool {
     tool_at(
         id,
         json!({ "type": "object", "properties": { "value": { "type": "string" } } }),
@@ -35,43 +38,24 @@ fn offered_tool(id: &str) -> Arc<dyn TestTool> {
 /// A tool whose parameters are not a JSON object, which no model round can
 /// advertise.
 #[track_caller]
-fn shapeless_tool(id: &str) -> Arc<dyn TestTool> {
+fn shapeless_tool(id: &str) -> FnTool {
     tool_at(id, json!("scalar"))
 }
 
-/// Prepares `prompt` against a catalog of `tools` and builds the run state
-/// with the loop models filled, beside the fixture that holds the
-/// implementations.
-fn offering_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, RunFixture) {
-    let (catalog, table) = fixture_tools(tools);
-    let (prepared, requirements) = test_context(EXECUTION).tools(catalog).prepare(prompt);
-    assert!(
-        requirements.is_satisfied(),
-        "the fixture prompt prepares: {requirements:?}"
-    );
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        &prepared,
-    );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = loop_models();
-    (ctx, RunFixture::new().tools(table))
-}
-
-/// A one-section prompt around `lua` under `frontmatter`, the lines
-/// between `promptforge: 0` and the closing fence.
-fn offering_prompt(frontmatter: &str, lua: &str) -> Prompt {
-    parse(&format!(
-        "---\nname: t\ndescription: d\npromptforge: 0\n{frontmatter}---\n\n# Offering\n\n## Only\n\n```lua\n{lua}\n```\n"
-    ))
+/// The one-section prompt that declares the `tools` Plugin and returns at
+/// once, prepared against a catalog of `tools`.
+fn declaring_tools(tools: Vec<FnTool>) -> Scenario {
+    let source = prompt("plugins: [tools]", &[("Only", "return 'ok'")]);
+    tools
+        .into_iter()
+        .fold(catalog_scenario(source), Scenario::tool)
 }
 
 /// The offered bindings' names and ids, in the set's order.
-fn offered(ctx: &RunState) -> Vec<(String, String)> {
-    ctx.tool_set()
+#[track_caller]
+fn offered(rig: &mut Rig) -> Vec<(String, String)> {
+    rig.scheduler_for_test()
+        .tool_set_for_test()
         .offered()
         .iter()
         .map(|binding| (binding.alias().to_owned(), binding.id().to_string()))
@@ -84,20 +68,16 @@ fn pair(name: &str, id: &str) -> (String, String) {
 
 #[test]
 fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
-    let prompt = offering_prompt("plugins:\n  - tools\n", "return 'ok'");
-    let (ctx, _) = offering_context(
-        &prompt,
-        &[
-            Arc::new(echo_tool()),
-            offered_tool("tools/concrete"),
-            offered_tool("gh/search"),
-            offered_tool("alpha/zed"),
-            offered_tool("gh/issues.list"),
-            offered_tool("alpha/fetch"),
-        ],
-    );
+    let mut rig = Rig::start(declaring_tools(vec![
+        echo_tool(),
+        offered_tool("tools/concrete"),
+        offered_tool("gh/search"),
+        offered_tool("alpha/zed"),
+        offered_tool("gh/issues.list"),
+        offered_tool("alpha/fetch"),
+    ]));
     assert_eq!(
-        offered(&ctx),
+        offered(&mut rig),
         vec![
             pair("alpha_fetch", "alpha/fetch"),
             pair("alpha_zed", "alpha/zed"),
@@ -108,7 +88,7 @@ fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
         ],
         "a declared Plugin's tools are offered beside every other Plugin's"
     );
-    let set = ctx.tool_set();
+    let set = rig.scheduler_for_test().tool_set_for_test();
     assert_eq!(
         set.declared(),
         [PluginId::parse("tools").expect("valid Plugin")],
@@ -131,21 +111,17 @@ fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
 
 #[test]
 fn the_offering_leaves_out_a_name_that_is_reserved_unadvertisable_or_repeated() {
-    let prompt = offering_prompt("plugins:\n  - tools\n", "return 'ok'");
-    let (ctx, _) = offering_context(
-        &prompt,
-        &[
-            Arc::new(echo_tool()),
-            offered_tool("gh/list"),
-            offered_tool("task/cancel"),
-            shapeless_tool("bad/shape"),
-            offered_tool("dup/a.b"),
-            offered_tool("dup/a/b"),
-            offered_tool("ok/fine"),
-        ],
-    );
+    let mut rig = Rig::start(declaring_tools(vec![
+        echo_tool(),
+        offered_tool("gh/list"),
+        offered_tool("task/cancel"),
+        shapeless_tool("bad/shape"),
+        offered_tool("dup/a.b"),
+        offered_tool("dup/a/b"),
+        offered_tool("ok/fine"),
+    ]));
     assert_eq!(
-        offered(&ctx),
+        offered(&mut rig),
         vec![
             pair("dup_a_b", "dup/a/b"),
             pair("gh_list", "gh/list"),
@@ -157,26 +133,22 @@ fn the_offering_leaves_out_a_name_that_is_reserved_unadvertisable_or_repeated() 
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_wire_name() {
+#[test]
+fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_wire_name() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "tools_echo", r#"{"value":"hi"}"#)]),
         text("done"),
     ]);
-    let prompt = offering_prompt(
-        "",
+    let source = one_section(
         "tools.offer(tools.extras())\n\
          local history = messages.new()\n\
          history:user('go')\n\
          models.loop(history)\n\
          return 'ok'",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(echo_tool())]);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("the loop completes");
-    assert_eq!(out, "ok");
-    let records = records.lock().expect("the tap mutex is not poisoned");
+    let rig = Rig::run(catalog_scenario(source).tool(echo_tool()).chat(&gateway));
+    assert_eq!(rig.trace().text(), "ok");
+    let records = rig.issued();
     let advertised: Vec<Vec<String>> = records
         .iter()
         .filter_map(|record| match record {
@@ -204,19 +176,15 @@ async fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_w
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offering_it() {
-    let prompt = offering_prompt(
-        "",
+#[test]
+fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offering_it() {
+    let source = one_section(
         "local tool = tools.extras()[1]\n\
          return tools.call(tool, { value = 'a' }) .. '|' .. \
            tools.call('tools/echo', { value = 'b' }) .. '|' .. tool.id",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(echo_tool())]);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("both calls reach the tool");
-    assert_eq!(out, "echoed: a|echoed: b|tools/echo");
+    let rig = Rig::run(catalog_scenario(source).tool(echo_tool()));
+    assert_eq!(rig.trace().text(), "echoed: a|echoed: b|tools/echo");
     let call = |value: &str| EffectRecord::ToolCall {
         tool: ToolId::parse("tools/echo").expect("valid id"),
         alias: "tools_echo".to_owned(),
@@ -227,10 +195,7 @@ async fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offe
             caller: ToolCaller::Script,
         },
     };
-    assert_eq!(
-        *records.lock().expect("the tap mutex is not poisoned"),
-        vec![call("a"), call("b")]
-    );
+    assert_eq!(rig.issued(), vec![call("a"), call("b")]);
 }
 
 /// The tool names each chat round advertised, and the tool calls issued,
@@ -265,28 +230,31 @@ fn model_call(id: &str, alias: &str, value: &str) -> EffectRecord {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its_wire_name() {
+#[test]
+fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its_wire_name() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "tools_echo", r#"{"value":"hi"}"#)]),
         text("done"),
     ]);
-    let prompt = offering_prompt(
-        "plugins:\n  - tools\n",
-        "tools.offer(plugins.get('tools').tools)\n\
-         local history = messages.new()\n\
-         history:user('go')\n\
-         models.loop(history)\n\
-         return 'ok'",
+    let source = prompt(
+        "plugins: [tools]",
+        &[(
+            "Only",
+            "tools.offer(plugins.get('tools').tools)\n\
+             local history = messages.new()\n\
+             history:user('go')\n\
+             models.loop(history)\n\
+             return 'ok'",
+        )],
     );
-    let (ctx, fixture) =
-        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("the loop completes");
-    assert_eq!(out, "ok");
-    let (advertised, calls) =
-        rounds_and_calls(&records.lock().expect("the tap mutex is not poisoned"));
+    let rig = Rig::run(
+        catalog_scenario(source)
+            .tool(echo_tool())
+            .tool(offered_tool("gh/search"))
+            .chat(&gateway),
+    );
+    assert_eq!(rig.trace().text(), "ok");
+    let (advertised, calls) = rounds_and_calls(rig.issued());
     assert_eq!(
         advertised,
         vec![vec!["tools_echo".to_owned()]; 2],
@@ -295,14 +263,13 @@ async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its
     assert_eq!(calls, vec![model_call("tools/echo", "tools_echo", "hi")]);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
+#[test]
+fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "gh_search", r#"{"value":"q"}"#)]),
         text("done"),
     ]);
-    let prompt = offering_prompt(
-        "",
+    let source = one_section(
         "assert(plugins.get('missing') == nil, 'an unknown Plugin reads nil')\n\
          local gh = plugins.get('gh')\n\
          if gh then tools.offer(gh.tools) end\n\
@@ -311,14 +278,14 @@ async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
          models.loop(history)\n\
          return 'ok'",
     );
-    let (ctx, fixture) =
-        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
-    let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("the loop completes");
-    assert_eq!(out, "ok");
-    let (advertised, calls) =
-        rounds_and_calls(&records.lock().expect("the tap mutex is not poisoned"));
+    let rig = Rig::run(
+        catalog_scenario(source)
+            .tool(echo_tool())
+            .tool(offered_tool("gh/search"))
+            .chat(&gateway),
+    );
+    assert_eq!(rig.trace().text(), "ok");
+    let (advertised, calls) = rounds_and_calls(rig.issued());
     assert_eq!(
         advertised,
         vec![vec!["gh_search".to_owned()]; 2],
@@ -327,23 +294,25 @@ async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
     assert_eq!(calls, vec![model_call("gh/search", "gh_search", "q")]);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_plugins_table_is_installed_in_the_h1_vm() {
-    let prompt = parse(
-        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n\
-         # Offering\n\n\
-         ```lua\n\
-         return plugins.required()[1].name .. '|' .. plugins.extras()[1].name .. '|' .. \
-           tostring(tools.get('gh/search').plugin == plugins.get('gh'))\n\
-         ```\n",
+#[test]
+fn the_plugins_table_is_installed_in_the_h1_vm() {
+    let source = PromptSource::new()
+        .front("plugins: [tools]")
+        .h1(
+            "return plugins.required()[1].name .. '|' .. plugins.extras()[1].name .. '|' .. \
+             tostring(tools.get('gh/search').plugin == plugins.get('gh'))",
+        )
+        .build();
+    let rig = Rig::run(
+        catalog_scenario(source)
+            .tool(echo_tool())
+            .tool(offered_tool("gh/search")),
     );
-    let (ctx, fixture) =
-        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the H1 pass reads the plugins table");
-    assert_eq!(out, "tools|gh|true");
+    assert_eq!(
+        rig.trace().text(),
+        "tools|gh|true",
+        "the H1 pass reads the plugins table"
+    );
 }
 
 #[test]
