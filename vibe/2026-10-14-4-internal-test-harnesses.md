@@ -4,34 +4,34 @@ overview: "Refactor the test suites of the six crates under crates/promptforge-i
 todos:
   - id: reconsolidate
     content: "Decomposition: re-measure test lines, re-inventory helpers (including the rulebook items taken over and timed waits), write concrete steps; the first step saves the baseline test lists and line counts"
-    status: pending
+    status: completed
   - id: parser
     content: "parser: prompt source builder in the parser's test_support, shared with the engine, plus parse_ok / parse_err / assert_parse_error"
-    status: pending
+    status: completed
   - id: types-model-client
     content: "types and model-client: round_trip, assert_json, wire decode helper, one assert_send_sync; Seeded replaces rand in types, which drops its rand dev-dependency; clear the timed wait in types' cancel-tests.rs"
-    status: pending
+    status: completed
   - id: vfs
     content: "vfs: configurable test backend, handle and access helpers; TempRoot replaces tempfile in vfs, the engine, and the facade, and tempfile leaves all three manifests; the same commit clears the facade's timestamp.rs clock read"
-    status: pending
+    status: completed
   - id: lua
     content: "lua: TestVm builder with named handles, eval helpers, one TEST_SEED; the cancellation tests' wall-clock bound becomes deterministic"
-    status: pending
+    status: completed
   - id: engine-run
     content: "engine Run level: Seeded with its self-test and a synchronous ScriptedChat core first, then Scenario over the serial drive, FnTool, shared reply script, source builder; move every tokio test that inspects nothing below Run (drive_tokio, run_with_fixture, and most TokioDriver::new users) to plain #[test], mid-step cancels through a joined canceller thread"
-    status: pending
+    status: completed
   - id: engine-scheduler
     content: "engine scheduler level: serial cfg(test) rig for the remaining TokioDriver tests, the ones that need the effect tap, round capture, shuffles, held answers, or RunState internals"
-    status: pending
+    status: completed
   - id: engine-no-tokio
     content: "engine: delete tokio driver and async types, serial bench, drop tokio/async-trait, clear remaining engine sleeps, clock reads, and timed waits"
-    status: pending
+    status: completed
   - id: run-seed
     content: "256-bit RunSeed replaces the u64 seed; RunUid and GuardNonce derive from it by domain-tagged SHA-256; RunSeed's Debug is redacted and RunContext's Debug shows the run id; Harness draws 32 bytes; Workshop run-log stores hex and bumps LAYOUT_VERSION to 2; tests pass fixed seeds"
-    status: pending
+    status: completed
   - id: determinism-policing
     content: "Engine crates, two commits: (a) engine_deps.rs total with a per-crate all-features cargo tree graph check plus getrandom and fastrand, no exemptions, exemption code removed; (b) three clippy.toml bans plus build-xtask check, rules in root AGENTS.md"
-    status: pending
+    status: completed
 isProject: false
 ---
 
