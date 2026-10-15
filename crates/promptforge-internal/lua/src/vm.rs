@@ -120,10 +120,10 @@ pub struct SectionVm {
 /// Test-support only: a per-thread tally of live section VMs.
 ///
 /// The Engine's scheduler suite drives one run on the test's own thread
-/// (the tokio driver is `current_thread`), and Rust's built-in test harness gives
-/// each test its own thread, so thread-locals keep concurrent tests
-/// independent. A test resets the peak, drives a run, and reads back the
-/// most VMs alive at any moment.
+/// (the serial `Scenario` and the rig step it there), and Rust's built-in
+/// test harness gives each test its own thread, so thread-locals keep
+/// concurrent tests independent. A test resets the peak, drives a run,
+/// and reads back the most VMs alive at any moment.
 #[cfg(feature = "test-support")]
 mod vm_tally {
     use std::cell::Cell;

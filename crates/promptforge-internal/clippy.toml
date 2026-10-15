@@ -26,7 +26,7 @@ disallowed-methods = [
     { path = "std::thread::sleep", reason = "use a timer effect the test answers instead, because a sleep makes the result depend on the machine's speed" },
     { path = "std::time::SystemTime::now", reason = "use a fixed `Timestamp`, or a count of what happened, instead, because a wall-clock reading differs on every run" },
     { path = "std::time::Instant::now", reason = "use a fixed `Timestamp`, or a count of what happened, instead, because a clock reading differs on every run" },
-    { path = "std::collections::hash_map::RandomState::new", reason = "use `Seeded` instead, because std's `RandomState` seeds itself from the OS, so its order differs on every run" },
+    { path = "std::collections::hash_map::RandomState::new", reason = "use a `BTreeMap` or `BTreeSet` where order is observable, or `Seeded` in tests, instead, because std's `RandomState` seeds itself from the OS, so its order differs on every run" },
     { path = "std::sync::Condvar::wait_timeout", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
     { path = "std::sync::Condvar::wait_timeout_while", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },
     { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "use an untimed wait, with nextest's timeout as the backstop, instead, because a wall-clock bound makes the result depend on the machine's speed" },

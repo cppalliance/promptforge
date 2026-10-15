@@ -106,7 +106,7 @@ fn run_once(prompt: &Prompt, chat: &ScriptedChat, context: u32) -> RunResult {
             else {
                 unreachable!("perform_locally hands the model only chat effects");
             };
-            let (_, answer) = chat.complete_now(messages, tools, options, limits.timeout());
+            let answer = chat.complete_now(messages, tools, options, limits.timeout());
             EffectAnswer::Chat(answer.map(Box::new))
         })
     });

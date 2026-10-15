@@ -379,7 +379,7 @@ Closes D1-4, a user-added lead from `7a46c075a`. The file is `crates/workshop/ru
 
 <step-3>
 
-### Step 3: Trim orphaned engine test-support surface and correct its stale docs
+### Step 3: Trim orphaned engine test-support surface and correct its stale docs [completed]
 
 - Component: Engine test harness
 - Tests:

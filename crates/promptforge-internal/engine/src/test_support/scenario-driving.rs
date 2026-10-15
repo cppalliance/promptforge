@@ -70,7 +70,7 @@ impl Answers {
                 ..
             } => match &self.chat {
                 Some(Chat::Script(chat)) => {
-                    let (_, answer) = chat.complete_now(messages, tools, options, self.timeout);
+                    let answer = chat.complete_now(messages, tools, options, self.timeout);
                     EffectAnswer::Chat(answer.map(Box::new))
                 }
                 Some(Chat::Closure(answer)) => answer(effect),

@@ -300,9 +300,13 @@ impl Scenario {
 
     /// Cancels the run from a second thread once the scenario answers or
     /// holds an effect `signal` matches. The thread waits for that effect
-    /// untimed, so the cancel lands before the next step or while it runs;
-    /// a run left waiting only on held effects waits for the cancel, and
-    /// the scenario joins the thread before it hands back the trace.
+    /// untimed, so the cancel lands at some step after the signal, not
+    /// necessarily the next. The stepper joins the thread once a step
+    /// answers nothing and holds nothing new, so a run left waiting only on
+    /// held effects always sees the cancel before it moves again. Use it
+    /// only where the outcome is the same whichever step the cancel lands
+    /// in. Either way, the scenario joins the thread before it hands back
+    /// the trace.
     pub(crate) fn cancel_when(mut self, signal: impl Fn(&Effect) -> bool + 'static) -> Scenario {
         self.signal = Some(Box::new(signal));
         self

@@ -44,11 +44,6 @@ impl Seeded {
         usize::try_from(draw).expect("a draw below a usize is a usize")
     }
 
-    #[track_caller]
-    pub(crate) fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-        &items[self.below(items.len())]
-    }
-
     /// Permutes `items` in place, Fisher-Yates over [`below`](Seeded::below).
     #[track_caller]
     pub(crate) fn shuffle<T>(&mut self, items: &mut [T]) {
@@ -81,9 +76,6 @@ fn seeded_failure_messages_name_the_seed() {
     rng.check_eq(&draw, &replay.next_u64(), "one seed replays its draws");
     let below = rng.below(3);
     rng.check(below < 3, "a draw below 3 is below 3");
-    let items = ["a", "b", "c"];
-    let picked = rng.pick(&items);
-    rng.check(items.contains(picked), "a pick is one of the items");
     let mut shuffled = [1, 2, 3, 4];
     Seeded::new(rng.seed()).shuffle(&mut shuffled);
     let mut replayed = [1, 2, 3, 4];

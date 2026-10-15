@@ -311,21 +311,22 @@ impl ScriptedChat {
     }
 
     /// Answers one round at once: records what it carried, counts it, and
-    /// returns the reply's total delay beside the completion or the
-    /// failure. Nothing waits: a delay past `timeout` answers the `Timeout`
-    /// failure, and any other delay answers the inner reply.
+    /// returns the completion or the failure. Nothing waits: a delay past
+    /// `timeout` answers the `Timeout` failure, and any other delay answers
+    /// the inner reply.
     ///
-    /// The answer is the scripted failure, the `Timeout` failure for a
-    /// delay past `timeout`, the `EmptyReply` failure for an empty text
-    /// reply, the `MalformedResponse` failure for a tool call the wire
-    /// decoder would refuse, or the completion.
+    /// # Errors
+    /// Returns the scripted failure, the `Timeout` failure for a delay past
+    /// `timeout`, the `EmptyReply` failure for an empty text reply, and the
+    /// `MalformedResponse` failure for a tool call the wire decoder would
+    /// refuse.
     pub fn complete_now(
         &self,
         messages: &[Message],
         tools: &[ToolSchema],
         options: &CompletionOptions,
         timeout: Duration,
-    ) -> (Duration, Result<Completion, CompletionError>) {
+    ) -> Result<Completion, CompletionError> {
         let index = self.calls.fetch_add(1, Ordering::SeqCst);
         self.requests
             .lock()
@@ -336,12 +337,10 @@ impl ScriptedChat {
                 options: options.clone(),
             });
         let reply = &self.replies[index.min(self.replies.len() - 1)];
-        let delay = reply.delay();
-        let answer = if delay > timeout {
+        if reply.delay() > timeout {
             Err(timed_out())
         } else {
             reply.answer()
-        };
-        (delay, answer)
+        }
     }
 }
