@@ -3,10 +3,10 @@
 //! every answer batching, and a queue that can never be admitted
 //! reported as a stall.
 
-use super::super::super::serial_driver::{Batching, drive_batched, perform_locally};
 use super::*;
 use crate::execute::RunResult;
 use crate::execute::run::{Run, Step};
+use crate::test_support::scenario::{Batching, drive_batched, perform_locally};
 
 #[test]
 fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {

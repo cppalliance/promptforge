@@ -6,14 +6,14 @@
 
 use std::num::NonZeroU32;
 
-use crate::parser::Prompt;
-use crate::test_support::{RunFixture, run_prepared, run_with_fixture};
-use crate::{RunErrorKind, RunResult};
+use crate::RunErrorKind;
+use crate::test_support::scenario::Scenario;
+use crate::test_support::scripted_chat::ScriptedChat;
+use promptforge_parser::test_support::parse_ok;
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
-use super::super::{ScriptedChat, gateway_client, resp_text};
-use super::support::context;
+use super::super::{resp_text, test_context};
 
 /// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(
@@ -27,18 +27,11 @@ const DECLARES_NOTHING: &str = concat!(
     "Done.\n",
 );
 
-/// Parses a fixture prompt.
-fn parse(source: &str, execution: &str) -> Prompt {
-    Prompt::parse(source, execution)
-        .0
-        .expect("the fixture prompt parses")
-}
-
 #[test]
 fn two_runs_writing_the_same_store_path_do_not_conflict() {
-    let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let (ctx_a, _) = context("run-a").prepare(&prompt);
-    let (ctx_b, _) = context("run-b").prepare(&prompt);
+    let prompt = parse_ok(DECLARES_NOTHING);
+    let (ctx_a, _) = test_context("run-a").prepare(&prompt);
+    let (ctx_b, _) = test_context("run-b").prepare(&prompt);
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))
@@ -90,19 +83,18 @@ fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
     )
 }
 
-#[tokio::test]
-async fn run_with_fixture_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
-    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    let result = run_with_fixture(
-        &prompt,
-        "",
-        context("refuse").model(current_model(32_000, ThinkingMode::Never)),
-        RunFixture::new(),
-    )
-    .await;
-    let RunResult::Failure(error) = result else {
-        panic!("an unsatisfiable prompt is refused: {result:?}");
-    };
+/// A scenario over `source` run under the one current model `model`.
+fn under_model(source: &str, name: &str, model: ModelDescriptor) -> Scenario {
+    Scenario::new(source)
+        .name(name)
+        .context(move |ctx| ctx.model(model))
+}
+
+#[test]
+fn run_with_fixture_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
+    let model = current_model(32_000, ThinkingMode::Never);
+    let trace = under_model(DECLARES_ANALYST, "refuse", model).run();
+    let error = trace.error();
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     // The notice is written to be read by a model: it names the role,
@@ -127,22 +119,13 @@ async fn run_with_fixture_refuses_an_unsatisfiable_prompt_with_a_model_readable_
     );
 }
 
-#[tokio::test]
-async fn run_with_fixture_prepares_implicitly_and_runs_a_satisfiable_prompt() {
-    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
-    // `run_with_fixture` prepares implicitly, and the declared role's
+#[test]
+fn run_with_fixture_prepares_implicitly_and_runs_a_satisfiable_prompt() {
+    // The scenario prepares implicitly, and the declared role's
     // requirements are met by the current model.
-    let result = run_with_fixture(
-        &prompt,
-        "",
-        context("implicit").model(current_model(200_000, ThinkingMode::Always)),
-        RunFixture::new(),
-    )
-    .await;
-    let RunResult::Ok(text) = result else {
-        panic!("a satisfiable prompt runs through implicit prepare: {result:?}");
-    };
-    assert_eq!(text, "done");
+    let model = current_model(200_000, ThinkingMode::Always);
+    let trace = under_model(DECLARES_ANALYST, "implicit", model).run();
+    assert_eq!(trace.text(), "done");
 }
 
 /// A prompt declaring one `no-thinking` role whose section asks it one
@@ -164,23 +147,16 @@ const DECLARES_NO_THINKING: &str = concat!(
     "```\n",
 );
 
-#[tokio::test]
-async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
-    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
+#[test]
+fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let (ctx, requirements) = context("switchable")
-        .model(current_model(32_000, ThinkingMode::Switchable))
-        .prepare(&prompt);
-    assert!(
-        requirements.is_satisfied(),
-        "a switchable model can turn thinking off: {requirements:?}"
-    );
-    let fixture = RunFixture::new().client(gateway_client(&gateway));
-    let result = run_prepared(&prompt, "", ctx, fixture).await;
-    let RunResult::Ok(text) = result else {
-        panic!("the prepared prompt runs: {result:?}");
-    };
-    assert_eq!(text, "pong");
+    let model = current_model(32_000, ThinkingMode::Switchable);
+    let trace = under_model(DECLARES_NO_THINKING, "switchable", model)
+        .chat(&gateway)
+        .run();
+    // An unmet requirement would refuse the run, so the reply also shows
+    // that a switchable model can turn thinking off.
+    assert_eq!(trace.text(), "pong");
     let body = gateway
         .last_request()
         .expect("the round reaches the gateway");
@@ -188,19 +164,11 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
     assert_eq!(body.options.thinking(), Some(false));
 }
 
-#[tokio::test]
-async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
-    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
-    let result = run_with_fixture(
-        &prompt,
-        "",
-        context("always").model(current_model(32_000, ThinkingMode::Always)),
-        RunFixture::new(),
-    )
-    .await;
-    let RunResult::Failure(error) = result else {
-        panic!("a model that always thinks cannot satisfy no-thinking: {result:?}");
-    };
+#[test]
+fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
+    let model = current_model(32_000, ThinkingMode::Always);
+    let trace = under_model(DECLARES_NO_THINKING, "always", model).run();
+    let error = trace.error();
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     assert!(
@@ -229,19 +197,11 @@ const DECLARES_LONG_CONTEXT: &str = concat!(
 
 /// An unmet requirement found at prepare refuses the run with the
 /// model-readable notice text, line for line.
-#[tokio::test]
-async fn an_unmet_requirement_produces_todays_model_readable_notice() {
-    let prompt = parse(DECLARES_LONG_CONTEXT, "declares-long-context");
-    let result = run_with_fixture(
-        &prompt,
-        "",
-        context("notice").model(current_model(32_000, ThinkingMode::Switchable)),
-        RunFixture::new(),
-    )
-    .await;
-    let RunResult::Failure(error) = result else {
-        panic!("a role the current model cannot fill is refused: {result:?}");
-    };
+#[test]
+fn an_unmet_requirement_produces_todays_model_readable_notice() {
+    let model = current_model(32_000, ThinkingMode::Switchable);
+    let trace = under_model(DECLARES_LONG_CONTEXT, "notice", model).run();
+    let error = trace.error();
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert_eq!(
         error.to_string(),

@@ -8,6 +8,7 @@ use super::*;
 mod tools;
 
 pub(super) use self::tools::*;
+pub(super) use crate::test_support::scenario::{EXECUTION, TEST_SEED, TEST_STARTED_AT, TestStore};
 
 /// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
@@ -18,15 +19,6 @@ pub(super) fn fresh_access() -> Arc<Access> {
             .expect("the stock backend acquires"),
     )
 }
-
-pub(super) const EXECUTION: &str = "execute-test";
-
-/// The fixed caller inputs every test run shares: a seed and a start instant
-/// a test that does not care about them never has to choose. The tests of
-/// the inputs themselves (`run_inputs`) build their contexts directly.
-pub(super) const TEST_SEED: u64 = 1;
-pub(super) const TEST_STARTED_AT: promptforge_types::timestamp::Timestamp =
-    promptforge_types::timestamp::Timestamp::from_unix_millis(1_700_000_000_000);
 
 /// A [`RunContext`] for the run `name` under the fixed test inputs.
 pub(super) fn test_context(name: impl Into<String>) -> RunContext {
@@ -165,50 +157,6 @@ pub(super) struct RunOptions {
     pub(super) observer: Arc<dyn Observer>,
     pub(super) client: Option<ScriptedChat>,
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
-}
-
-/// The test store: a fresh default VFS handle (a memory store at `/`)
-/// whose `read`/`glob` helpers each go through a fresh, immediately
-/// dropped access and its store view. A
-/// short-lived access per call is what keeps seeding and post-run
-/// assertions conflict-free: each access is its own scope, and its claims
-/// die with it, so a held seeder access would meet the run's own scope as
-/// a false race.
-pub(super) struct TestStore(Mutex<VfsRef>);
-
-impl TestStore {
-    pub(super) fn new() -> TestStore {
-        TestStore(Mutex::new(VfsRef::default()))
-    }
-
-    /// Wraps a caller-built handle - a gated backend, say - in the test
-    /// store's seeding and post-run assertion helpers.
-    pub(super) fn from_vfs(vfs: VfsRef) -> TestStore {
-        TestStore(Mutex::new(vfs))
-    }
-
-    /// The handle the run and the context builders take: the run's whole
-    /// filesystem, store included.
-    pub(super) fn vfs(&self) -> VfsRef {
-        self.0
-            .lock()
-            .expect("the store lock is not poisoned")
-            .clone()
-    }
-
-    pub(super) fn read(&self, path: &str) -> std::result::Result<String, VfsError> {
-        let access = self
-            .vfs()
-            .acquire(promptforge_vfs::Origin::new("TestStore::read"))?;
-        promptforge_vfs::detail::store_view(&access)?.read_string(path)
-    }
-
-    pub(super) fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, VfsError> {
-        let access = self
-            .vfs()
-            .acquire(promptforge_vfs::Origin::new("TestStore::glob"))?;
-        promptforge_vfs::detail::store_view(&access)?.glob(pattern)
-    }
 }
 
 /// Builds a [`RunContext`] and its [`RunFixture`] from the test-local

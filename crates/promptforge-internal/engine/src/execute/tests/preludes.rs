@@ -9,14 +9,14 @@
 
 use promptforge_types::plugins::{PluginId, Prelude};
 
-use super::serial_driver::{perform_locally, text_reply};
 use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
 use crate::test_support::drive;
+use crate::test_support::scenario::{perform_locally, text_reply};
 
 /// A prelude contributed by the Plugin `id`.
-fn prelude(id: &str, source: &str) -> Prelude {
+pub(super) fn prelude(id: &str, source: &str) -> Prelude {
     Prelude::new(PluginId::parse(id).expect("a valid Plugin id"), source)
 }
 

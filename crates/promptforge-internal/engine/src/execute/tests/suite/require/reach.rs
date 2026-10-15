@@ -6,33 +6,33 @@
 
 use super::*;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_nested_fanout_worker_requires_a_top_level_library() {
-    let md = require_prompt!(
-        "\
-## Research\n\n\
-```lua\n\
-local results = tasks.fanout('### Worker', { 'alpha', 'beta' })\n\
-return table.concat(results, ',')\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-return require('## helpers').label(item)\n\
-```\n\n\
-## helpers\n\n\
-for {{ item }}\n\n\
-```lua\n\
-local seen = prose\n\
-return { label = function(value) return value .. ' ' .. seen end }\n\
-```\n"
-    );
-    let run = run_fixture(md, "require", EXECUTION, "", None).await;
+#[test]
+fn a_nested_fanout_worker_requires_a_top_level_library() {
+    let source = PromptSource::new()
+        .section(
+            "Research",
+            "
+            local results = tasks.fanout('### Worker', { 'alpha', 'beta' })
+            return table.concat(results, ',')",
+        )
+        .section("### Worker", "return require('## helpers').label(item)")
+        .prose(
+            "helpers",
+            "
+            for {{ item }}
+
+            ```lua
+            local seen = prose
+            return { label = function(value) return value .. ' ' .. seen end }
+            ```",
+        );
+    let trace = require_case(source.build()).run();
     assert_eq!(
-        run.result.expect("each arm loads the library"),
+        trace.text(),
         "alpha for alpha,beta for beta",
         "each arm renders the library prose with its own item"
     );
-    let loads = library_loads(&run.recorder.records());
+    let loads = library_loads(&trace.records());
     assert_eq!(
         loads
             .iter()
@@ -44,72 +44,74 @@ return { label = function(value) return value .. ' ' .. seen end }\n\
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_nested_worker_requires_a_library_its_prompt_section_read_cannot_see() {
-    let md = require_prompt!(
-        "\
-## Research\n\n\
-```lua\n\
-return tostring(tasks.fanout('### Worker', { 'alpha' })[1])\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-local read = prompt.section('## house_style')\n\
-return tostring(read) .. '|' .. require '## house_style'\n\
-```\n\n\
-## house_style\n\n\
-Plain words for {{ item }}.\n\n\
-```lua\n\
-return prose\n\
-```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("the worker reaches its parent's sibling");
+#[test]
+fn a_nested_worker_requires_a_library_its_prompt_section_read_cannot_see() {
+    let source = PromptSource::new()
+        .section(
+            "Research",
+            "return tostring(tasks.fanout('### Worker', { 'alpha' })[1])",
+        )
+        .section(
+            "### Worker",
+            "
+            local read = prompt.section('## house_style')
+            return tostring(read) .. '|' .. require '## house_style'",
+        )
+        .prose(
+            "house_style",
+            "
+            Plain words for {{ item }}.
+
+            ```lua
+            return prose
+            ```",
+        );
+    let trace = require_case(source.build()).run();
     assert_eq!(
-        out, "nil|Plain words for alpha.",
+        trace.text(),
+        "nil|Plain words for alpha.",
         "a parent's sibling is outside the visible set but within the reach"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_load_resolves_from_the_library_and_a_later_call_from_the_caller() {
-    let md = require_prompt!(
-        "\
-## Main\n\n\
-```lua\n\
-local lib = require '## lib'\n\
-return lib.helped .. '|' .. lib.later()\n\
-```\n\n\
-### mine\n\n\
-Mine text.\n\n\
-```lua\n\
-return 'mine'\n\
-```\n\n\
-## lib\n\n\
-```lua\n\
-local helped = require '### helper'\n\
-return {\n\
-  helped = helped,\n\
-  later = function()\n\
-    local text = prompt.section('### mine')\n\
-    local found = text ~= nil and text:find('Mine text.', 1, true) ~= nil\n\
-    local helper_ok = pcall(require, '### helper')\n\
-    return table.concat({ require '### mine', call('### mine'), tostring(found), \
-tostring(helper_ok) }, ',')\n\
-  end,\n\
-}\n\
-```\n\n\
-### helper\n\n\
-```lua\n\
-return 'helped'\n\
-```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("each lookup resolves from its own position");
+#[test]
+fn a_load_resolves_from_the_library_and_a_later_call_from_the_caller() {
+    let source = PromptSource::new()
+        .section(
+            "Main",
+            "
+            local lib = require '## lib'
+            return lib.helped .. '|' .. lib.later()",
+        )
+        .prose(
+            "### mine",
+            "
+            Mine text.
+
+            ```lua
+            return 'mine'
+            ```",
+        )
+        .section(
+            "lib",
+            "
+            local helped = require '### helper'
+            return {
+              helped = helped,
+              later = function()
+                local text = prompt.section('### mine')
+                local found = text ~= nil and text:find('Mine text.', 1, true) ~= nil
+                local helper_ok = pcall(require, '### helper')
+                return table.concat({ require '### mine', call('### mine'), tostring(found),
+                  tostring(helper_ok) }, ',')
+              end,
+            }",
+        )
+        .section("### helper", "return 'helped'");
+    let trace = require_case(source.build()).run();
     assert_eq!(
-        out, "helped|mine,mine,true,false",
+        trace.text(),
+        "helped|mine,mine,true,false",
         "the load reaches the library's child; the later call reaches the caller's \
          child and no longer the library's"
     );

@@ -1,24 +1,24 @@
 //! The executor's `VfsRef` contract with its caller: an end-to-end run
 //! over the prepared handle, and the seed-run-extract round trip a caller
-//! drives with no real files - prepare, seed the declared input through
-//! the run's handle, run, extract the declared output, and charge a
+//! drives with no real files - seed the declared input through the run's
+//! handle, prepare and run, extract the declared output, and charge a
 //! missing output to the prompt's promise as an explicit contract error.
 //! Then the run-bounded scope: a run's `Done`, or its drop before `Done`,
 //! ends its scope however long the caller holds the store views it was
 //! handed.
 
+use std::sync::Arc;
+
 use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
 use crate::parser::Prompt;
+use crate::test_support::scenario::{EXECUTION, Scenario, perform_locally};
 use crate::test_support::temp_root::TempRoot;
+use promptforge_parser::test_support::{parse_ok, prompt};
 use promptforge_types::ids::Provenance;
 use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
 
-use super::super::context::{EXECUTION, parse, test_context};
-use super::super::serial_driver::perform_locally;
-use super::support::Recorder;
-use super::support::{RunOptions, drive, parse_execution_fixture, prepare_run, run_fixture};
-use std::sync::Arc;
+use super::super::context::{parse, test_context};
 
 const ROUND_TRIP: &str = concat!(
     "---\n",
@@ -90,7 +90,7 @@ fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, St
         })
 }
 
-/// Seeds the prompt's declared input through the run's prepared handle.
+/// Seeds the prompt's declared input through the handle the run will take.
 /// The seeding access drops here - its scope ends - so the run's own
 /// scope never meets the caller's.
 fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
@@ -103,107 +103,61 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
         .expect("the declared input seeds");
 }
 
-/// Prepares a fixture run and returns the run's handle (for seeding
-/// before and extraction after) plus the pending run: the test's
-/// seed-run-extract sequence is prepare, seed through the handle, drive,
-/// extract through the handle.
-fn offline_run(
-    prompt: &Prompt,
-    execution: &'static str,
-) -> (
-    VfsRef,
-    impl std::future::Future<Output = Result<String, crate::RunError>>,
-) {
-    let recorder = Arc::new(Recorder::default());
-    let prompt = prompt.clone();
-    let (ctx, fixture, vfs) = prepare_run(
-        &prompt,
-        &[],
-        RunOptions {
-            execution,
-            observer: recorder,
-        },
-    );
-    let run = async move { drive(&prompt, "", ctx, fixture).await };
-    (vfs, run)
+/// Seeds `source`'s declared input with `contents` and runs it over the
+/// seeded handle through the prepare, which keeps the handle as given:
+/// the test's seed-run-extract sequence is seed through the handle,
+/// prepare and run, extract through the handle. Returns the run's text
+/// and the handle.
+#[track_caller]
+fn seeded_run(source: &str, name: &str, contents: &str) -> (String, VfsRef) {
+    let vfs = VfsRef::default();
+    seed_declared_input(&vfs, &parse_ok(source), contents);
+    let trace = Scenario::new(source).name(name).vfs(vfs.clone()).run();
+    (trace.text().to_owned(), vfs)
 }
 
-#[tokio::test]
-async fn an_end_to_end_run_threads_one_vfs_ref_through_every_section() {
+#[test]
+fn an_end_to_end_run_threads_one_vfs_ref_through_every_section() {
     // The store survives the context-clearing section transition: one
     // section's write is the next section's read, over the run's
     // prepared handle.
-    let source = "\
----\nname: vfs-end-to-end\ndescription: d\npromptforge: 0\n---\n\n\
-# Title\n\n\
-## First\n\n\
-```lua\n\
-store.write('handoff.txt', 'across the reset')\n\
-```\n\n\
-## Second\n\n\
-```lua\n\
-return store.read('handoff.txt')\n\
-```\n";
-    let recorder = Arc::new(Recorder::default());
-    let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let (ctx, fixture, vfs) = prepare_run(
-        &prompt,
-        &[],
-        RunOptions {
-            execution: "vfs-e2e",
-            observer: recorder,
-        },
+    let source = prompt(
+        "",
+        &[
+            ("First", "store.write('handoff.txt', 'across the reset')"),
+            ("Second", "return store.read('handoff.txt')"),
+        ],
     );
-    let result = drive(&prompt, "", ctx, fixture)
-        .await
-        .expect("the run threads the prepared handle through both sections");
-    assert_eq!(result, "across the reset");
+    let trace = Scenario::new(source).name("vfs-e2e").run();
+    assert_eq!(trace.text(), "across the reset");
     // Extraction after the run takes a fresh access: the run's identities
     // dropped with it, so nothing the run touched can conflict here.
     assert_eq!(
-        fresh_store_view(&vfs, "prepared handle extraction")
-            .read_string("handoff.txt")
+        trace
+            .read("handoff.txt")
             .expect("the run's write persists on the handle"),
         "across the reset"
     );
 }
 
-#[tokio::test]
-async fn a_caller_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
-    let recorder = Arc::new(Recorder::default());
-    let prompt = parse_execution_fixture(
-        ROUND_TRIP,
-        "round-trip",
-        "vfs-round-trip",
-        recorder.as_ref(),
-    );
-    let (vfs, run) = offline_run(&prompt, "vfs-round-trip");
-    seed_declared_input(&vfs, &prompt, "the paper body");
-    let result = run.await.expect("the seeded run executes offline");
-    assert_eq!(result, "done");
+#[test]
+fn a_caller_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
+    let (text, vfs) = seeded_run(ROUND_TRIP, "vfs-round-trip", "the paper body");
+    assert_eq!(text, "done");
     let store = fresh_store_view(&vfs, "round-trip extraction");
-    let report =
-        extract_declared_output(&store, &prompt).expect("the run left its promised output");
+    let report = extract_declared_output(&store, &parse_ok(ROUND_TRIP))
+        .expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
 }
 
-#[tokio::test]
-async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promise() {
-    let recorder = Arc::new(Recorder::default());
-    let prompt = parse_execution_fixture(
-        MISSING_OUTPUT,
-        "missing-output",
-        "vfs-missing-output",
-        recorder.as_ref(),
-    );
-    let (vfs, run) = offline_run(&prompt, "vfs-missing-output");
-    seed_declared_input(&vfs, &prompt, "the paper body");
+#[test]
+fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promise() {
     // The executor does not enforce the declaration; the run succeeds and
     // the caller's extraction is where the broken promise surfaces.
-    let result = run.await.expect("the run itself succeeds");
-    assert_eq!(result, "read: the paper body");
+    let (text, vfs) = seeded_run(MISSING_OUTPUT, "vfs-missing-output", "the paper body");
+    assert_eq!(text, "read: the paper body");
     let store = fresh_store_view(&vfs, "missing-output extraction");
-    let error = extract_declared_output(&store, &prompt)
+    let error = extract_declared_output(&store, &parse_ok(MISSING_OUTPUT))
         .expect_err("the missing output is a contract error");
     assert!(
         error.contains("report.md"),
@@ -215,8 +169,8 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
+#[test]
+fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // The consistency rule: every store operation takes the leaf-yield path
     // uniformly, with no inline fast path, so a run's observable behavior
     // cannot depend on which backend serves the store mount. The same
@@ -228,17 +182,11 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
         include_str!("../../../../tests/prompts/execution/fanout-store-writes.md");
     // Both arms drive the raw caller-supplied handle contract (no prepare
     // pass), so the caller's own backend serves the declared store in each.
-    let memory = run_fixture(
-        FANOUT_STORE_WRITES,
-        "execution/fanout-store-writes.md",
-        "vfs-invariance-memory",
-        "",
-        Some(VfsRef::default()),
-    )
-    .await;
-    let memory_result = memory
-        .result
-        .expect("the memory-backed fanout must execute offline");
+    let memory = Scenario::new(FANOUT_STORE_WRITES)
+        .name("vfs-invariance-memory")
+        .vfs(VfsRef::default())
+        .unprepared()
+        .run();
 
     let temp = TempRoot::new("fanout_interleaving_is_invariant_across_memory_and_real_backends");
     let real_vfs = VfsRef::builder()
@@ -247,26 +195,21 @@ async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
             RealBackend::rooted(temp.path()).expect("the temp dir roots the real backend"),
         )
         .build();
-    let real = run_fixture(
-        FANOUT_STORE_WRITES,
-        "execution/fanout-store-writes.md",
-        "vfs-invariance-real",
-        "",
-        Some(real_vfs),
-    )
-    .await;
-    let real_result = real
-        .result
-        .expect("the real-backed fanout must execute offline");
+    let real = Scenario::new(FANOUT_STORE_WRITES)
+        .name("vfs-invariance-real")
+        .vfs(real_vfs)
+        .unprepared()
+        .run();
 
     assert_eq!(
-        memory_result, real_result,
+        memory.text(),
+        real.text(),
         "the run's result must not depend on the backend"
     );
     for path in ["arm-1.md", "arm-2.md", "merged.md"] {
         assert_eq!(
-            memory.store.read(path).ok(),
-            real.store.read(path).ok(),
+            memory.read(path).ok(),
+            real.read(path).ok(),
             "stored contents at {path} must not depend on the backend"
         );
     }

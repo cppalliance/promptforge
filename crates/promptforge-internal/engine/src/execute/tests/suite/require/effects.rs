@@ -2,98 +2,72 @@
 //! model, and tool calls while it loads, and prompt-wide state an H1
 //! `require` sets for every later section.
 
-use std::sync::Arc;
-
 use promptforge_model_client::detail::tool_schema_name;
 
-use crate::test_support::TestTool;
+use crate::test_support::scripted_chat::ScriptedChat;
 
-use super::super::super::{
-    EchoTool, ScriptedChat, TestStore, bound_with_tools, gatewayed, resp_text, run,
-};
+use super::super::super::{resp_text, test_model_catalog};
+use super::super::echo_tool;
+use super::*;
 
-/// The frontmatter and H1 opening of the effect cases: the fixture tools
-/// Plugin declared, and the `writer` role the test helpers declare.
-macro_rules! effect_prompt {
-    ($body:literal) => {
-        concat!(
-            "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n",
-            "# Require\n\n",
-            $body
-        )
-    };
+/// A `require` case over `source` with the echo tool, the test model as
+/// the current model, and `chat` answering its model rounds.
+fn effect_case(source: &PromptSource, chat: &ScriptedChat) -> Scenario {
+    let model = test_model_catalog().models()[0].clone();
+    require_case(source.build())
+        .tool(echo_tool())
+        .chat(chat)
+        .context(move |ctx| ctx.model(model))
 }
 
-#[tokio::test]
-async fn library_code_makes_store_model_and_tool_calls_while_it_loads() {
-    let md = effect_prompt!(
-        "\
-```lua\n\
-models.default('writer')\n\
-```\n\n\
-## Main\n\n\
-```lua\n\
-return require '## loader'\n\
-```\n\n\
-## loader\n\n\
-```lua\n\
-store.write('lib.md', 'stored')\n\
-local echoed = tools.call('tools/echo', { value = 'lib' })\n\
-local reply = models.infer('ping')\n\
-return table.concat({ store.read('lib.md'), tostring(echoed), tostring(reply) }, '|')\n\
-```\n"
-    );
+/// The fixture tools Plugin and the `writer` role every effect case
+/// declares.
+fn effect_source() -> PromptSource {
+    PromptSource::new().front("plugins: [tools]\nmodels: { writer: {} }")
+}
+
+#[test]
+fn library_code_makes_store_model_and_tool_calls_while_it_loads() {
+    let source = effect_source()
+        .h1("models.default('writer')")
+        .section("Main", "return require '## loader'")
+        .section(
+            "loader",
+            "
+            store.write('lib.md', 'stored')
+            local echoed = tools.call('tools/echo', { value = 'lib' })
+            local reply = models.infer('ping')
+            return table.concat({ store.read('lib.md'), tostring(echoed), tostring(reply) }, '|')",
+        );
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let store = TestStore::new();
-    let out = run(
-        &bound_with_tools(md),
-        "",
-        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
-        &store,
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("the library's effects run for the caller");
-    assert_eq!(out, "stored|echoed: lib|pong");
-    assert_eq!(store.read("lib.md").expect("the write landed"), "stored");
+    let trace = effect_case(&source, &gateway).run();
+    assert_eq!(trace.text(), "stored|echoed: lib|pong");
+    assert_eq!(trace.read("lib.md").expect("the write landed"), "stored");
     assert_eq!(gateway.requests().len(), 1, "one model round ran");
 }
 
-#[tokio::test]
-async fn an_h1_library_sets_prompt_wide_state_every_later_section_sees() {
-    let md = effect_prompt!(
-        "\
-```lua\n\
-require '## setup'\n\
-```\n\n\
-## Main\n\n\
-```lua\n\
-require '## offers'\n\
-local msgs = messages.new()\n\
-msgs:user('ping')\n\
-models.loop(msgs)\n\
-return msgs[#msgs].content\n\
-```\n\n\
-## setup\n\n\
-```lua\n\
-models.default('writer')\n\
-```\n\n\
-## offers\n\n\
-```lua\n\
-tools.offer('tools/echo')\n\
-```\n"
-    );
+#[test]
+fn an_h1_library_sets_prompt_wide_state_every_later_section_sees() {
+    let source = effect_source()
+        .h1("require '## setup'")
+        .section(
+            "Main",
+            "
+            require '## offers'
+            local msgs = messages.new()
+            msgs:user('ping')
+            models.loop(msgs)
+            return msgs[#msgs].content",
+        )
+        .section("setup", "models.default('writer')")
+        .section("offers", "tools.offer('tools/echo')");
     let gateway = ScriptedChat::new(vec![resp_text("pong")]);
-    let out = run(
-        &bound_with_tools(md),
-        "",
-        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
-        &TestStore::new(),
-        gatewayed(&gateway),
-    )
-    .await
-    .expect("the section's loop runs under the H1 library's default");
-    assert_eq!(out, "pong");
+    let trace = effect_case(&source, &gateway).run();
+    assert_eq!(
+        trace.text(),
+        "pong",
+        "the loop runs under the H1 library's default"
+    );
     let round = gateway
         .last_request()
         .expect("the round reaches the gateway");

@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use promptforge_types::ids::RoundId;
 
 use super::models_loop::{echo_tools, loop_context, loop_prompt};
-use super::serial_driver::{text_of, text_reply, tool_call_reply};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run};
 use crate::model::{CompletionError, CompletionErrorKind};
 use crate::test_support::drive;
+use crate::test_support::scenario::{text_of, text_reply, tool_call_reply};
 
 /// One issued round as the driver saw it: its record, and the wire
 /// messages the live effect sent.

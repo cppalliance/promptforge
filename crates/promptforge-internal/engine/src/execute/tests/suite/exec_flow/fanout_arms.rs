@@ -7,36 +7,29 @@ use super::*;
 /// The scaffold the fanout-arm capability tests share: a `## Parent` that
 /// fans `### Worker` out over one `alpha` member and returns the first arm's
 /// text. The worker body and its sibling sections follow.
-const ARM_FANOUT_PARENT: &str = flow_prompt!(
-    "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n"
-);
+fn arm_fanout() -> PromptSource {
+    PromptSource::new().section(
+        "Parent",
+        "
+        local r = tasks.fanout('### Worker', {'alpha'})
+        return r[1].text",
+    )
+}
 
 /// `prompt.list` inside a fanout arm reads a list section's items: the arm
 /// resolves like any section (the worker's siblings minus the worker, plus
 /// its children).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prompt_list_inside_a_fanout_arm_reads_items() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-local items = prompt.list('### Items')\n\
-return item .. ':' .. table.concat(items, ',')\n\
-```\n\n\
-### Items\n\n\
-- x\n\
-- y\n",
-    ]
-    .concat();
-    let out = run_offline(&md)
-        .await
-        .expect("prompt.list inside an arm must read items");
-    assert_eq!(out, "alpha:x,y");
+#[test]
+fn prompt_list_inside_a_fanout_arm_reads_items() {
+    let source = arm_fanout()
+        .section(
+            "### Worker",
+            "
+            local items = prompt.list('### Items')
+            return item .. ':' .. table.concat(items, ',')",
+        )
+        .prose("### Items", "- x\n- y");
+    assert_eq!(Scenario::new(source.build()).run().text(), "alpha:x,y");
 }
 
 /// `call` inside a fanout arm runs a contained chain over the worker's
@@ -47,75 +40,73 @@ return item .. ':' .. table.concat(items, ',')\n\
 /// The run's limit is 1 and the contained chain fans out: while the chain
 /// waits on its arms it gives back the slot its arm holds, so its arms can
 /// run instead of queueing behind that slot forever. The driver fails a
-/// stalled run, and the timeout fails a hung one.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_inside_a_fanout_arm_runs_a_contained_chain() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-tasks.concurrency(1)\n\
-local r = tasks.fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-assert(sys.section_count == 1, 'the arm sees the run top-level section count')\n\
-local got = call('### Sub')\n\
-return 'worker:' .. got .. ':' .. item\n\
-```\n\n\
-### Sub\n\n\
-```lua\n\
-assert(sys.id == '0.0.0.0', 'a contained chain is the arm chain child and starts at entry 0')\n\
-assert(item == nil, 'a contained chain runs as a plain section')\n\
-assert(sys.section_count == 1, 'a contained chain sees the run section count')\n\
-local leaves = tasks.fanout('#### Leaf', {'x', 'y'})\n\
-var.leaves = leaves[1].text .. leaves[2].text\n\
-```\n\n\
-#### Leaf\n\n\
-```lua\n\
-return item .. '!'\n\
-```\n\n\
-### Tail\n\n\
-```lua\n\
-return 'tail-reply:' .. var.leaves\n\
-```\n"
+/// stalled run, and nextest's timeout fails a hung one.
+#[test]
+fn call_inside_a_fanout_arm_runs_a_contained_chain() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                tasks.concurrency(1)
+                local r = tasks.fanout('### Worker', {'alpha'})
+                return r[1].text",
+            ),
+            (
+                "### Worker",
+                "
+                assert(sys.section_count == 1, 'the arm sees the run top-level section count')
+                local got = call('### Sub')
+                return 'worker:' .. got .. ':' .. item",
+            ),
+            (
+                "### Sub",
+                "
+                assert(sys.id == '0.0.0.0', 'a contained chain is the arm chain child and starts at entry 0')
+                assert(item == nil, 'a contained chain runs as a plain section')
+                assert(sys.section_count == 1, 'a contained chain sees the run section count')
+                local leaves = tasks.fanout('#### Leaf', {'x', 'y'})
+                var.leaves = leaves[1].text .. leaves[2].text",
+            ),
+            ("#### Leaf", "return item .. '!'"),
+            ("### Tail", "return 'tail-reply:' .. var.leaves"),
+        ],
     );
-    let out = tokio::time::timeout(std::time::Duration::from_secs(10), run_offline(md))
-        .await
-        .expect("a contained chain's fanout under a limit of 1 must not deadlock")
-        .expect("call inside an arm must run a contained chain");
-    assert_eq!(out, "worker:tail-reply:x!y!:alpha");
+    let trace = Scenario::new(source).run();
+    assert_eq!(trace.text(), "worker:tail-reply:x!y!:alpha");
 }
 
 /// `fanout` inside a fanout arm maps over a collection: the nested worker
 /// resolves over the outer worker's visible set, and the nested structured
 /// results come back to the outer arm.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_inside_a_fanout_arm_maps_over_a_collection() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Outer', {'a', 'b'})\n\
-return table.concat({r[1].text, r[2].text}, ';')\n\
-```\n\n\
-### Outer\n\n\
-```lua\n\
-local inner = tasks.fanout('### Inner', {item .. '1', item .. '2'})\n\
-assert(inner[1].ok and inner[2].ok)\n\
-return item .. ':' .. inner[1].text .. ',' .. inner[2].text\n\
-```\n\n\
-### Inner\n\n\
-```lua\n\
-assert(tostring(sys.index) == string.sub(item, -1), 'a nested fanout restarts sys.index at 1')\n\
-return item .. '!'\n\
-```\n"
+#[test]
+fn fanout_inside_a_fanout_arm_maps_over_a_collection() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Outer', {'a', 'b'})
+                return table.concat({r[1].text, r[2].text}, ';')",
+            ),
+            (
+                "### Outer",
+                "
+                local inner = tasks.fanout('### Inner', {item .. '1', item .. '2'})
+                assert(inner[1].ok and inner[2].ok)
+                return item .. ':' .. inner[1].text .. ',' .. inner[2].text",
+            ),
+            (
+                "### Inner",
+                "
+                assert(tostring(sys.index) == string.sub(item, -1), 'a nested fanout restarts sys.index at 1')
+                return item .. '!'",
+            ),
+        ],
     );
-    let out = run_offline(md)
-        .await
-        .expect("fanout inside an arm must map over the collection");
-    assert_eq!(out, "a:a1!,a2!;b:b1!,b2!");
+    assert_eq!(Scenario::new(source).run().text(), "a:a1!,a2!;b:b1!,b2!");
 }
 
 /// A jump inside a fanout arm transfers control: the arm's remaining blocks
@@ -124,34 +115,31 @@ return item .. '!'\n\
 /// through to the
 /// target's following siblings), and the child walk's reply becomes the arm's
 /// text.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_a_fanout_arm_drives_a_child_walk() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-jump('### Target')\n\
-error('the arm remaining blocks are skipped')\n\
-```\n\n\
-### Target\n\n\
-```lua\n\
-assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
-store.append('order.txt', 'Target\\n')\n\
-```\n\n\
-### Tail\n\n\
-```lua\n\
-store.append('order.txt', 'Tail\\n')\n\
-return 'tail-reply'\n\
-```\n",
-    ]
-    .concat();
-    let store = TestStore::new();
-    let out = run(&fixture(&md), "", &[], &store, silent())
-        .await
-        .expect("a jump inside an arm must drive a child walk");
-    assert_eq!(out, "tail-reply");
+#[test]
+fn jump_inside_a_fanout_arm_drives_a_child_walk() {
+    let source = arm_fanout()
+        .section(
+            "### Worker",
+            "
+            jump('### Target')
+            error('the arm remaining blocks are skipped')",
+        )
+        .section(
+            "### Target",
+            "
+            assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')
+            store.append('order.txt', 'Target\\n')",
+        )
+        .section(
+            "### Tail",
+            "
+            store.append('order.txt', 'Tail\\n')
+            return 'tail-reply'",
+        );
+    let trace = Scenario::new(source.build()).run();
+    assert_eq!(trace.text(), "tail-reply");
     assert_eq!(
-        store.read("order.txt").expect("order log"),
+        trace.read("order.txt").expect("order log"),
         "Target\nTail\n",
         "the child walk runs the target and falls through to its siblings"
     );
@@ -161,35 +149,32 @@ return 'tail-reply'\n\
 /// child-level walk over the worker's child slice: the target takes the arm
 /// chain's next `sys.id` and no `item` seed, and the walk falls
 /// through to the target's child siblings.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-jump('#### Child')\n\
-error('the arm remaining blocks are skipped')\n\
-```\n\n\
-#### Child\n\n\
-```lua\n\
-assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
-assert(item == nil, 'the child walk runs as a plain section')\n\
-store.append('order.txt', 'Child\\n')\n\
-```\n\n\
-#### ChildTail\n\n\
-```lua\n\
-store.append('order.txt', 'ChildTail\\n')\n\
-return 'child-tail-reply'\n\
-```\n",
-    ]
-    .concat();
-    let store = TestStore::new();
-    let out = run(&fixture(&md), "", &[], &store, silent())
-        .await
-        .expect("a jump to a worker child must drive the child slice");
-    assert_eq!(out, "child-tail-reply");
+#[test]
+fn jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice() {
+    let source = arm_fanout()
+        .section(
+            "### Worker",
+            "
+            jump('#### Child')
+            error('the arm remaining blocks are skipped')",
+        )
+        .section(
+            "#### Child",
+            "
+            assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')
+            assert(item == nil, 'the child walk runs as a plain section')
+            store.append('order.txt', 'Child\\n')",
+        )
+        .section(
+            "#### ChildTail",
+            "
+            store.append('order.txt', 'ChildTail\\n')
+            return 'child-tail-reply'",
+        );
+    let trace = Scenario::new(source.build()).run();
+    assert_eq!(trace.text(), "child-tail-reply");
     assert_eq!(
-        store.read("order.txt").expect("order log"),
+        trace.read("order.txt").expect("order log"),
         "Child\nChildTail\n",
         "the child walk runs the target and falls through to its child siblings"
     );
@@ -197,50 +182,30 @@ return 'child-tail-reply'\n\
 
 /// A jump-started child walk that produces no return and no reply exhausts:
 /// the arm's text is the empty string.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_a_fanout_arm_to_a_silent_chain_returns_empty_text() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-jump('### Target')\n\
-```\n\n\
-### Target\n\n\
-```lua\n\
-store.append('order.txt', 'Target\\n')\n\
-```\n",
-    ]
-    .concat();
-    let store = TestStore::new();
-    let out = run(&fixture(&md), "", &[], &store, silent())
-        .await
-        .expect("a jump to a silent chain must succeed with empty text");
+#[test]
+fn jump_inside_a_fanout_arm_to_a_silent_chain_returns_empty_text() {
+    let source = arm_fanout()
+        .section("### Worker", "jump('### Target')")
+        .section("### Target", "store.append('order.txt', 'Target\\n')");
+    let trace = Scenario::new(source.build()).run();
     assert_eq!(
-        out, "",
+        trace.text(),
+        "",
         "an exhausted child walk with no reply maps to empty text"
     );
-    assert_eq!(store.read("order.txt").expect("order log"), "Target\n");
+    assert_eq!(trace.read("order.txt").expect("order log"), "Target\n");
 }
 
 /// A jump from an arm to a heading outside the worker's visible set (the
 /// top-level parent) resolves as not-found, and the error lists only the
 /// worker's visible set.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_a_fanout_arm_to_a_non_visible_heading_errors() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-jump('## Parent')\n\
-```\n\n\
-### Items\n\n\
-- x\n",
-    ]
-    .concat();
-    let error = run_offline(&md)
-        .await
-        .expect_err("a jump to a non-visible heading must fail the arm");
-    let rendered = format!("{error:?}");
+#[test]
+fn jump_inside_a_fanout_arm_to_a_non_visible_heading_errors() {
+    let source = arm_fanout()
+        .section("### Worker", "jump('## Parent')")
+        .prose("### Items", "- x");
+    let trace = Scenario::new(source.build()).run();
+    let rendered = format!("{:?}", trace.error());
     assert!(
         rendered.contains("not found"),
         "a non-visible heading must not resolve: {rendered}"
@@ -254,26 +219,20 @@ jump('## Parent')\n\
 /// `call` and `prompt.list` inside an arm naming a section outside the
 /// worker's visible set both reject it: `call` errors not-found, which the
 /// arm catches with `pcall` and asserts on, and `prompt.list` reads `nil`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_raises_and_list_reads_nil_for_non_visible_sections_in_a_fanout_arm() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-```lua\n\
-local ok_call, err_call = pcall(call, '## Parent')\n\
-assert(not ok_call, 'call of a non-visible section must fail')\n\
-assert(tostring(err_call):find('not found', 1, true), 'call error must be not-found: ' .. tostring(err_call))\n\
-assert(prompt.list('## Parent') == nil, 'prompt.list of a non-visible section must read nil')\n\
-return item .. ':rejected'\n\
-```\n\n\
-### Items\n\n\
-- x\n",
-    ]
-    .concat();
-    let out = run_offline(&md)
-        .await
-        .expect("a non-visible call must error not-found and a non-visible list must read nil");
-    assert_eq!(out, "alpha:rejected");
+#[test]
+fn call_raises_and_list_reads_nil_for_non_visible_sections_in_a_fanout_arm() {
+    let source = arm_fanout()
+        .section(
+            "### Worker",
+            "
+            local ok_call, err_call = pcall(call, '## Parent')
+            assert(not ok_call, 'call of a non-visible section must fail')
+            assert(tostring(err_call):find('not found', 1, true), 'call error must be not-found: ' .. tostring(err_call))
+            assert(prompt.list('## Parent') == nil, 'prompt.list of a non-visible section must read nil')
+            return item .. ':rejected'",
+        )
+        .prose("### Items", "- x");
+    assert_eq!(Scenario::new(source.build()).run().text(), "alpha:rejected");
 }
 
 /// Recursion depth accumulates across a fanout boundary: a section at the
@@ -282,36 +241,26 @@ return item .. ':rejected'\n\
 /// visible set never contains the worker, so only a call chain can reach
 /// the cap); the store counter switches the last recursion step to `fanout`,
 /// which must trip the same cap at the boundary rather than resetting.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
+#[test]
+fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
     // A runs at depths 0, 2, 4, 6, 8 (its 5th run); the fanout there would
     // spawn arms at depth 9, past MAX_CALL_DEPTH (8).
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-local ok, v = pcall(store.read, 'n.txt')\n\
-local n = tonumber(ok and v or '0') + 1\n\
-store.write('n.txt', tostring(n))\n\
-if n >= 5 then\n\
-  return tasks.fanout('## W', {'x'})\n\
-end\n\
-return call('## B')\n\
-```\n\n\
-## B\n\n\
-```lua\n\
-return call('## A')\n\
-```\n\n\
-## W\n\n\
----\n\n\
-```lua\n\
-return item\n\
-```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("a fanout at the call cap must fail");
-    let rendered = format!("{error:?}");
+    let source = PromptSource::new()
+        .section(
+            "A",
+            "
+            local ok, v = pcall(store.read, 'n.txt')
+            local n = tonumber(ok and v or '0') + 1
+            store.write('n.txt', tostring(n))
+            if n >= 5 then
+              return tasks.fanout('## W', {'x'})
+            end
+            return call('## B')",
+        )
+        .section("B", "return call('## A')")
+        .prose("W", "---\n\n```lua\nreturn item\n```");
+    let trace = Scenario::new(source.build()).run();
+    let rendered = format!("{:?}", trace.error());
     assert!(
         rendered.contains("tasks.fanout recursion exceeded cap of 8"),
         "expected the fanout recursion-cap error, got: {rendered}"
@@ -322,43 +271,29 @@ return item\n\
 /// spawned at the cap's edge trips MAX_CALL_DEPTH on its OWN `call`.
 /// Dropping the `+ 1` from the arm's depth in `run_fanout_arms` must fail
 /// this test.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
+#[test]
+fn call_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
     // B runs at depths 1, 3, 5, 7 (its 4th run); the fanout there spawns arms
     // at depth 8, and the arm's own `call` would need depth 9 - past
     // MAX_CALL_DEPTH (8).
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-return call('## B')\n\
-```\n\n\
-## B\n\n\
-```lua\n\
-local ok, v = pcall(store.read, 'n.txt')\n\
-local n = tonumber(ok and v or '0') + 1\n\
-store.write('n.txt', tostring(n))\n\
-if n >= 4 then\n\
-  local r = tasks.fanout('## W', {'x'})\n\
-  return r[1].text\n\
-end\n\
-return call('## A')\n\
-```\n\n\
-## W\n\n\
----\n\n\
-```lua\n\
-return call('## C')\n\
-```\n\n\
-## C\n\n\
----\n\n\
-```lua\n\
-return 'c-reply'\n\
-```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("a call inside an arm spawned at the cap's edge must fail");
-    let rendered = format!("{error:?}");
+    let source = PromptSource::new()
+        .section("A", "return call('## B')")
+        .section(
+            "B",
+            "
+            local ok, v = pcall(store.read, 'n.txt')
+            local n = tonumber(ok and v or '0') + 1
+            store.write('n.txt', tostring(n))
+            if n >= 4 then
+              local r = tasks.fanout('## W', {'x'})
+              return r[1].text
+            end
+            return call('## A')",
+        )
+        .prose("W", "---\n\n```lua\nreturn call('## C')\n```")
+        .prose("C", "---\n\n```lua\nreturn 'c-reply'\n```");
+    let trace = Scenario::new(source.build()).run();
+    let rendered = format!("{:?}", trace.error());
     assert!(
         rendered.contains("call recursion exceeded cap of 8"),
         "expected the call recursion-cap error, got: {rendered}"
@@ -367,24 +302,21 @@ return 'c-reply'\n\
 
 /// A worker that produces no output yields an honest empty
 /// text - "done" would be a lie - and the arm still reports ok.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_without_output_and_no_incoming_reply_yields_empty_text() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha'})\n\
-assert(r[1].ok, 'the arm succeeded')\n\
-assert(r[1].text == '', 'a no-reply arm yields empty text')\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-assert(item == 'alpha')\n\
-```\n"
+#[test]
+fn fanout_arm_without_output_and_no_incoming_reply_yields_empty_text() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {'alpha'})
+                assert(r[1].ok, 'the arm succeeded')
+                assert(r[1].text == '', 'a no-reply arm yields empty text')
+                return 'ok'",
+            ),
+            ("### Worker", "assert(item == 'alpha')"),
+        ],
     );
-    let out = run_offline(md)
-        .await
-        .expect("a no-reply arm must succeed with empty text");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }

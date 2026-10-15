@@ -1,11 +1,8 @@
 //! Concurrent fanout: per-arm start/terminal accounting, store writes across
 //! arms, and the propagated arm-failure error contract.
 
-use std::time::Duration;
-
 use crate::RunErrorKind;
-
-use super::support::{Record, run_fixture};
+use crate::test_support::scenario::{Record, Scenario};
 
 const FANOUT_BASIC_EXECUTION: &str = "fixture-fanout-basic";
 const FANOUT_EPILOG_EXECUTION: &str = "fixture-fanout-epilog";
@@ -65,88 +62,51 @@ fn assert_two_arms_all_succeeded(records: &[Record]) {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_basic_two_items_prologue_return() {
-    let run = run_fixture(
-        FANOUT_BASIC,
-        "execution/fanout-basic.md",
-        FANOUT_BASIC_EXECUTION,
-        "",
-        None,
-    )
-    .await;
-    let result = run
-        .result
-        .expect("the fanout basic fixture must execute offline");
-
+#[test]
+fn fanout_basic_two_items_prologue_return() {
+    let trace = Scenario::new(FANOUT_BASIC)
+        .name(FANOUT_BASIC_EXECUTION)
+        .run();
     // The index-bearing output pins each arm's `item .. '-' .. sys.index`.
-    assert_eq!(result, "alpha-1\nbeta-2");
-    assert_two_arms_all_succeeded(&run.recorder.records());
+    assert_eq!(trace.text(), "alpha-1\nbeta-2");
+    assert_two_arms_all_succeeded(&trace.records());
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_epilog_two_items() {
-    let run = run_fixture(
-        FANOUT_EPILOG,
-        "execution/fanout-epilog.md",
-        FANOUT_EPILOG_EXECUTION,
-        "",
-        None,
-    )
-    .await;
-    let result = run
-        .result
-        .expect("the fanout epilog fixture must execute offline");
-
-    assert_eq!(result, "x-1,y-2");
-    assert_two_arms_all_succeeded(&run.recorder.records());
+#[test]
+fn fanout_epilog_two_items() {
+    let trace = Scenario::new(FANOUT_EPILOG)
+        .name(FANOUT_EPILOG_EXECUTION)
+        .run();
+    assert_eq!(trace.text(), "x-1,y-2");
+    assert_two_arms_all_succeeded(&trace.records());
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_store_writes_persist_across_arms() {
+#[test]
+fn fanout_store_writes_persist_across_arms() {
     // Arm-scoped writes under happens-before: each arm writes only its
     // own path, so no two unordered identities ever claim one path, and
     // the parent's post-join glob sees the merged state because the
     // fanout's join_any rounds join every arm before it returns.
     // Interleaving coverage lives in the scheduler's
     // `fanout_arms_interleave_at_io_points_on_one_thread`.
-    let run = tokio::time::timeout(
-        Duration::from_secs(30),
-        run_fixture(
-            FANOUT_STORE_WRITES,
-            "execution/fanout-store-writes.md",
-            FANOUT_STORE_EXECUTION,
-            "",
-            None,
-        ),
-    )
-    .await
-    .expect("the fanout fixture completes");
-    let result = run
-        .result
-        .expect("the fanout store fixture must execute offline");
-
+    let trace = Scenario::new(FANOUT_STORE_WRITES)
+        .name(FANOUT_STORE_EXECUTION)
+        .run();
     // Both prologue-only arms write distinct paths and the parent reply vector
     // stays list-ordered.
-    assert_eq!(result, "2:alpha,beta");
-    assert_eq!(
-        run.store.read("arm-1.md").expect("arm 1 must write"),
-        "alpha"
-    );
-    assert_eq!(
-        run.store.read("arm-2.md").expect("arm 2 must write"),
-        "beta"
-    );
+    assert_eq!(trace.text(), "2:alpha,beta");
+    assert_eq!(trace.read("arm-1.md").expect("arm 1 must write"), "alpha");
+    assert_eq!(trace.read("arm-2.md").expect("arm 2 must write"), "beta");
     // The ordered merge: the join's collection-order results land in one
     // parent-written file, deterministic by construction.
     assert_eq!(
-        run.store.read("merged.md").expect("the merge must land"),
+        trace.read("merged.md").expect("the merge must land"),
         "alpha,beta"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
+#[test]
+fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
     // The arms append unordered - neither joins the other before the
     // fanout's own rounds - and claims are never released during a run,
     // so the second append's claim check meets the first's standing
@@ -154,22 +114,10 @@ async fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
     // violation is uncatchable: were it resumed into the arm, the
     // handler would record the catch and the run would return
     // "alpha,beta" instead of failing.
-    let run = tokio::time::timeout(
-        Duration::from_secs(30),
-        run_fixture(
-            FANOUT_CROSS_ARM_APPEND,
-            "execution/fanout-cross-arm-append.md",
-            FANOUT_CROSS_ARM_EXECUTION,
-            "",
-            None,
-        ),
-    )
-    .await
-    .expect("the fanout fixture completes");
-    let error = match run.result {
-        Ok(value) => panic!("a cross-arm append must terminate the run, got {value:?}"),
-        Err(error) => error,
-    };
+    let trace = Scenario::new(FANOUT_CROSS_ARM_APPEND)
+        .name(FANOUT_CROSS_ARM_EXECUTION)
+        .run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Determinism,
@@ -191,28 +139,19 @@ async fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
     );
     // The losing arm's append never reached the backend: exactly one arm's
     // line landed.
-    let evidence = run.store.read("evidence.md").expect("one arm appended");
+    let evidence = trace.read("evidence.md").expect("one arm appended");
     assert!(
         evidence == "alpha\n" || evidence == "beta\n",
         "exactly one arm's append may land: {evidence:?}"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_failure_propagates() {
-    let run = run_fixture(
-        FANOUT_ARM_FAILURE,
-        "execution/fanout-arm-failure.md",
-        FANOUT_FAILURE_EXECUTION,
-        "",
-        None,
-    )
-    .await;
-    let error = match run.result {
-        Ok(value) => panic!("the fanout arm failure must propagate, got {value:?}"),
-        Err(error) => error,
-    };
-
+#[test]
+fn fanout_arm_failure_propagates() {
+    let trace = Scenario::new(FANOUT_ARM_FAILURE)
+        .name(FANOUT_FAILURE_EXECUTION)
+        .run();
+    let error = trace.error();
     // Assert the stable classification first, then the preserved source context.
     assert_eq!(
         error.kind(),

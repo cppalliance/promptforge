@@ -1,37 +1,31 @@
 //! What a run starts with: its store handle, a default context, and the
 //! tool and model bindings its frontmatter declares.
 
+use std::sync::Arc;
+
+use super::super::super::test_context;
+use super::super::echo_tool;
 use super::*;
 
 use crate::RunErrorKind;
 use crate::RunResult;
-use crate::test_support::recording::Observer;
-use crate::test_support::{RunFixture, TestToolTable, run_with_fixture};
-use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
-use promptforge_vfs::VfsRef;
-use serde_json::{Value, json};
-
-use super::super::support::{Recorder, context, parse_execution_fixture};
+use crate::test_support::scenario::EXECUTION;
+use promptforge_vfs::{VfsError, VfsRef};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
 /// with [`RunErrorKind::Vfs`]: every run needs a declared store.
 /// (`RunContext::prepare` never replaces the handle, so the raw handle's
 /// declaration is what the run sees.)
-#[tokio::test]
-async fn a_handle_without_a_declared_store_fails_the_run() {
-    let md = flow_prompt!(
-        "# Test prompt\n\n\
-        ## Only\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n"
-    );
+#[test]
+fn a_handle_without_a_declared_store_fails_the_run() {
+    let source = one_section("store.write('overlay.txt', 'overlaid')");
     let vfs = VfsRef::new(promptforge_vfs::MemoryBackend::new());
-    let result = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
-        .await
-        .result
-        .expect_err("a run whose handle declares no store must be refused");
+    let trace = Scenario::new(source).vfs(vfs).unprepared().run();
+    let error = trace.error();
     assert_eq!(
-        result.kind(),
-        crate::RunErrorKind::Vfs,
-        "the run fails as a store error: {result}"
+        error.kind(),
+        RunErrorKind::Vfs,
+        "the run fails as a store error: {error}"
     );
 }
 
@@ -55,13 +49,13 @@ impl promptforge_vfs::Vfs for RefusingStore {
 
 #[test]
 fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
-    let md = flow_prompt!("# Test prompt\n\n## Only\n\n```lua\nreturn 'never runs'\n```\n");
-    let (prompt, _) = crate::parser::Prompt::parse(md, EXECUTION);
+    let source = one_section("return 'never runs'");
+    let (prompt, _) = crate::parser::Prompt::parse(&source, EXECUTION);
     let vfs = VfsRef::builder().store("/", RefusingStore).build();
     let mut run = crate::execute::run::Run::new(
         Arc::new(prompt.expect("the fixture parses")),
         "",
-        context(EXECUTION).vfs(vfs),
+        test_context(EXECUTION).vfs(vfs),
     );
     match run.step() {
         crate::execute::run::Step::Done {
@@ -72,66 +66,46 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
     }
 }
 
-#[tokio::test]
-async fn a_default_context_runs_a_plugin_free_prompt() {
+#[test]
+fn a_default_context_runs_a_plugin_free_prompt() {
     // A prompt declaring no Plugins runs under a default context: no
     // catalog, no roster, no client, no real roots.
-    let md = flow_prompt!(
-        "# Test prompt\n\n\
-        ## Only\n\n```lua\nreturn 'no Plugins'\n```\n"
-    );
-    let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
-        .await
-        .result
-        .expect("a Plugin-free prompt runs under a default context");
-    assert_eq!(out, "no Plugins");
+    let trace = Scenario::new(one_section("return 'no Plugins'")).run();
+    assert_eq!(trace.text(), "no Plugins");
 }
 
-#[tokio::test]
-async fn default_run_context_store_handle_declares_a_fresh_store() {
+#[test]
+fn default_run_context_store_handle_declares_a_fresh_store() {
     // `RunContext` absorbs the filesystem handle with a `VfsRef::default()`
     // (a fresh memory store at `/`) default: a store-using run needs no
     // caller-supplied handle.
-    let md = flow_prompt!(
-        "# Test prompt\n\n\
-        ## First\n\n```lua\nstore.write('default.txt', 'stock')\n```\n\n\
-        ## Second\n\n```lua\nreturn store.read('default.txt')\n```\n"
+    let source = prompt(
+        "",
+        &[
+            ("First", "store.write('default.txt', 'stock')"),
+            ("Second", "return store.read('default.txt')"),
+        ],
     );
-    let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
-        .await
-        .result
-        .expect("the default store handle declares a fresh store");
-    assert_eq!(out, "stock");
+    assert_eq!(Scenario::new(source).run().text(), "stock");
 }
 
-#[tokio::test]
-async fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
+#[test]
+fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
     // An id whose Plugin is active but contributed no such tool is no
     // catalog tool of the run: the offer fails the section before any
-    // round advertises it.
-    let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\n---\n\n",
-        "# Test prompt\n\n\
-        ## Only\n\n```lua\ntools.offer('tools/search')\nreturn 'unreachable'\n```\n"
+    // round advertises it. The catalog holds the Plugin's `echo`, never
+    // `search`.
+    let source = prompt(
+        "plugins: [tools]",
+        &[(
+            "Only",
+            "
+            tools.offer('tools/search')
+            return 'unreachable'",
+        )],
     );
-    let observer: Arc<dyn Observer> = Arc::new(Recorder::default());
-    let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
-    // The catalog holds the Plugin's `echo`, never `search`.
-    let tool: Arc<dyn TestTool> = Arc::new(EchoTool);
-    let table = TestToolTable::from_tools(&[tool]);
-    let catalog = table
-        .catalog()
-        .expect("the fixture tools have distinct ids");
-    let RunResult::Failure(error) = run_with_fixture(
-        &prompt,
-        "",
-        context(EXECUTION).tools(catalog),
-        RunFixture::new().tools(table),
-    )
-    .await
-    else {
-        panic!("offering a tool its Plugin does not offer must fail the run");
-    };
+    let trace = Scenario::new(source).tool(echo_tool()).run();
+    let error = trace.error();
     assert_eq!(error.kind(), RunErrorKind::Lua, "{error}");
     assert!(
         error
@@ -139,40 +113,4 @@ async fn offering_a_tool_its_present_plugin_does_not_offer_fails_the_section() {
             .contains("tools.offer: \"tools/search\" is not a catalog tool in this run"),
         "the failure names the id: {error}"
     );
-}
-
-/// The fixture Plugin's `echo` tool, present so the Plugin of a prompt's
-/// `tools/search` offer is in the catalog while the tool is not. The
-/// implementation is never called by the missing-tool case.
-struct EchoTool;
-
-#[async_trait::async_trait]
-impl TestTool for EchoTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Echo the value argument back to the caller."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": { "value": { "type": "string" } },
-            "required": ["value"]
-        })
-    }
-
-    async fn call(&self, args: Value) -> Result<ToolOutput, ToolError> {
-        let value = args
-            .get("value")
-            .and_then(Value::as_str)
-            .expect("the fixture tool requires a string value");
-        Ok(ToolOutput::trusted(format!("echoed: {value}")))
-    }
 }

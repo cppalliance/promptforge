@@ -3,10 +3,10 @@
 use promptforge_types::event::Event;
 
 use super::run;
-use super::serial_driver::perform_locally;
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;
+use crate::test_support::scenario::perform_locally;
 
 const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";

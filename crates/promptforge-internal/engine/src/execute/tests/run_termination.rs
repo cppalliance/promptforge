@@ -12,11 +12,11 @@ use promptforge_types::ids::{AbandonReason, TaskId};
 
 use super::model_task_acceptance::{task_lifecycle, terminals_per_started_task};
 use super::scheduler::scheduler_context_on;
-use super::serial_driver::{perform_locally, text_reply};
 use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::run::{Effect, Run, Step};
 use crate::test_support::recording::forward;
+use crate::test_support::scenario::{perform_locally, text_reply};
 
 /// The spawner starts `Child` and waits on it; the child parks on a model
 /// round the test never answers, so the run is cancelled with the task

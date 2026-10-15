@@ -6,7 +6,8 @@
 //! thread and answers every effect the moment it is issued, through a
 //! closure the caller supplies. Nothing there awaits, spawns, or sleeps; a
 //! timer effect is answered however the closure sees fit, so a test's
-//! timeouts are instant.
+//! timeouts are instant. In this crate's own tests, `scenario` builds a
+//! whole run from its setup as data and drives it on the serial driver.
 //!
 //! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
 //! `ToolCall` effects through the caller's [`Performers`]
@@ -39,6 +40,8 @@ use crate::parser::Prompt;
 mod fixture;
 pub mod recording;
 #[cfg(test)]
+pub(crate) mod scenario;
+#[cfg(test)]
 #[path = "test_support/scripted-chat.rs"]
 pub(crate) mod scripted_chat;
 #[cfg(test)]
@@ -51,6 +54,8 @@ mod tools;
 pub use fixture::{ChatClient, RunFixture};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
+#[cfg(test)]
+pub(crate) use tools::FnTool;
 pub use tools::{TestTool, TestToolTable};
 
 /// The suites' scripted model answers a `Chat` round in process under the
@@ -98,34 +103,51 @@ pub fn drive(
 ) -> (RunResult, Vec<Event>) {
     let mut reported = Vec::new();
     loop {
-        match run.step() {
-            Step::Done { result, events } => {
-                reported.extend(events);
-                return (result, reported);
+        if let Some(result) = drive_step(&mut run, &mut perform, &mut |_, _| {}, &mut reported) {
+            return (result, reported);
+        }
+    }
+}
+
+/// One step of [`drive`]: steps `run`, appends the step's events to
+/// `reported`, answers every effect the step issued, hands each effect and
+/// its answer to `answered`, `Dropped` ones included, and returns the run's
+/// result once it has one.
+pub(crate) fn drive_step(
+    run: &mut Run,
+    perform: &mut impl FnMut(EffectId, &Effect) -> EffectAnswer,
+    answered: &mut impl FnMut(&Effect, &EffectAnswer),
+    reported: &mut Vec<Event>,
+) -> Option<RunResult> {
+    match run.step() {
+        Step::Done { result, events } => {
+            reported.extend(events);
+            Some(result)
+        }
+        Step::Pending {
+            effects, events, ..
+        } => {
+            reported.extend(events);
+            if effects.is_empty() {
+                // Every effect is answered the step it is issued, so a
+                // pending step that issued nothing has nothing to wait
+                // on: an invariant failure reported rather than a hang.
+                let error = Error::internal(
+                    "the serial driver was handed a pending run with no effect to answer",
+                );
+                return Some(RunResult::Failure(RunError::from(error)));
             }
-            Step::Pending {
-                effects, events, ..
-            } => {
-                reported.extend(events);
-                if effects.is_empty() {
-                    // Every effect is answered the step it is issued, so a
-                    // pending step that issued nothing has nothing to wait
-                    // on: an invariant failure reported rather than a hang.
-                    let error = Error::internal(
-                        "the serial driver was handed a pending run with no effect to answer",
-                    );
-                    return (RunResult::Failure(RunError::from(error)), reported);
-                }
-                let decided = run.decided();
-                for (id, _, effect) in effects {
-                    let answer = if decided {
-                        EffectAnswer::Dropped
-                    } else {
-                        perform(id, &effect)
-                    };
-                    run.resume(id, answer);
-                }
+            let decided = run.decided();
+            for (id, _, effect) in effects {
+                let answer = if decided {
+                    EffectAnswer::Dropped
+                } else {
+                    perform(id, &effect)
+                };
+                answered(&effect, &answer);
+                run.resume(id, answer);
             }
+            None
         }
     }
 }

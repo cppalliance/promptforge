@@ -8,10 +8,10 @@ use promptforge_types::ids::TaskId;
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use super::super::models_loop::{bound_tool, echo_tools, loop_events};
-use super::super::serial_driver::{text_of, tool_call_reply};
 use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
+use crate::test_support::scenario::{text_of, tool_call_reply};
 
 /// Records every observation and every content report as one line, in
 /// order, so a test reads the whole trace a run reports.

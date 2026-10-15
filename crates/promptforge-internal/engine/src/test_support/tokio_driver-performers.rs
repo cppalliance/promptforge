@@ -47,7 +47,7 @@ impl Performers {
 }
 
 /// The `Chat` refusal: the disabled-gateway completion error.
-fn refuse_chat() -> EffectAnswer {
+pub(crate) fn refuse_chat() -> EffectAnswer {
     EffectAnswer::Chat(Err(CompletionError::new(
         CompletionErrorKind::Unavailable,
         "model access is turned off or not configured",

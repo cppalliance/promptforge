@@ -7,11 +7,11 @@
 use promptforge_types::event::Event;
 use promptforge_types::ids::AbandonReason;
 
-use super::super::serial_driver::{infer_prompt, perform_locally, text_reply, tool_call_reply};
 use super::*;
 use crate::execute::RunResult;
 use crate::execute::run::Run;
 use crate::test_support::drive;
+use crate::test_support::scenario::{infer_prompt, perform_locally, text_reply, tool_call_reply};
 
 /// Runs the two-section prompt with the model starting `Child` in round 1
 /// and replying in round 2, then returns every notice reported.

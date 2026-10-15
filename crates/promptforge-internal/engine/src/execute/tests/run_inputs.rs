@@ -7,10 +7,10 @@
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
-use super::serial_driver::text_of;
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;
+use crate::test_support::scenario::text_of;
 
 /// A fixed instant with a millisecond fraction, so the rendering exercises
 /// the fraction branch: `2000-02-29T00:00:00.123Z`.

@@ -10,8 +10,9 @@ use promptforge_types::event::Event;
 
 use super::model_task_notices::loop_owner;
 use super::model_tasks::owner_prompt;
-use super::serial_driver::{drive_scripted, text_of, text_reply, tool_call_reply};
+use super::serial_driver::drive_scripted;
 use super::*;
+use crate::test_support::scenario::{text_of, text_reply, tool_call_reply};
 
 /// The run nonce every test here wraps under: the fixed test seed's.
 fn run_nonce() -> GuardNonce {

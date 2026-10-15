@@ -26,8 +26,8 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 use super::scheduler::scheduler_context_from;
 use super::scheduler::scheduler_context_on;
-use super::serial_driver::{Batching, drive_batched};
 use super::*;
+use crate::test_support::scenario::{Batching, drive_batched};
 
 /// The first canonical pattern: a fanout of seven into one file. The arms
 /// write their own partitions, and the caller merges by index after the

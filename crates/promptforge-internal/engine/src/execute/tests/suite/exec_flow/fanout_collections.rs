@@ -4,59 +4,58 @@
 
 use super::*;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_returns_structured_results() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', prompt.list('### Items'))\n\
-assert(r[1].text == 'alpha-1')\n\
-assert(r[1].ok == true)\n\
-assert(r[1].item == 'alpha')\n\
-assert(r[1].exhausted == false)\n\
-assert(r[2].text == 'beta-2')\n\
-assert(r[2].ok == true)\n\
-assert(r[2].item == 'beta')\n\
-assert(r[2].exhausted == false)\n\
-assert(tostring(r[1]) == r[1].text)\n\
-assert(table.concat(r, ',') == 'alpha-1,beta-2')\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item .. '-' .. sys.index\n```\n\n\
-Do work.\n\n\
-### Items\n\n\
-- alpha\n\
-- beta\n"
-    );
-    let out = run(&fixture(md), "", &[], &TestStore::new(), silent())
-        .await
-        .expect("fanout must return structured results");
-    assert_eq!(out, "ok");
+/// The prompt whose `## Parent` runs `parent` beside a `### Worker` that
+/// returns its `item`.
+fn item_worker(parent: &str) -> String {
+    prompt("", &[("Parent", parent), ("### Worker", "return item")])
+}
+
+#[test]
+fn fanout_returns_structured_results() {
+    let source = PromptSource::new()
+        .section(
+            "Parent",
+            "
+            local r = tasks.fanout('### Worker', prompt.list('### Items'))
+            assert(r[1].text == 'alpha-1')
+            assert(r[1].ok == true)
+            assert(r[1].item == 'alpha')
+            assert(r[1].exhausted == false)
+            assert(r[2].text == 'beta-2')
+            assert(r[2].ok == true)
+            assert(r[2].item == 'beta')
+            assert(r[2].exhausted == false)
+            assert(tostring(r[1]) == r[1].text)
+            assert(table.concat(r, ',') == 'alpha-1,beta-2')
+            return 'ok'",
+        )
+        .prose(
+            "### Worker",
+            "
+            ```lua
+            return item .. '-' .. sys.index
+            ```
+
+            Do work.",
+        )
+        .prose("### Items", "- alpha\n- beta");
+    assert_eq!(Scenario::new(source.build()).run().text(), "ok");
 }
 
 /// An off-walk child section still runs as a fanout worker.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn off_walk_worker_runs_as_a_fanout_arm() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', prompt.list('### Items'))\n\
-return r[1].text .. ',' .. r[2].text\n\
-```\n\n\
-### Worker\n\n\
----\n\n\
-```lua\nreturn item .. '-done'\n```\n\n\
-### Items\n\n\
-- alpha\n\
-- beta\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("an off-walk worker must run as a fanout arm");
-    assert_eq!(out, "alpha-done,beta-done");
+#[test]
+fn off_walk_worker_runs_as_a_fanout_arm() {
+    let source = PromptSource::new()
+        .section(
+            "Parent",
+            "
+            local r = tasks.fanout('### Worker', prompt.list('### Items'))
+            return r[1].text .. ',' .. r[2].text",
+        )
+        .prose("### Worker", "---\n\n```lua\nreturn item .. '-done'\n```")
+        .prose("### Items", "- alpha\n- beta");
+    let trace = Scenario::new(source.build()).run();
+    assert_eq!(trace.text(), "alpha-done,beta-done");
 }
 
 /// A 1025-member collection runs through the prompt-level path: the
@@ -64,103 +63,85 @@ return r[1].text .. ',' .. r[2].text\n\
 /// `fanout` dispatches every member.
 /// The worker is pure Lua with an immediate return, so the run works
 /// without a client and stays fast.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local members = {}\n\
-for i = 1, 1025 do members[i] = 'm' .. i end\n\
-local r = tasks.fanout('### Worker', members)\n\
-assert(#r == 1025, 'every member ran')\n\
-return r[1025].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-return item\n\
-```\n"
+#[test]
+fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
+    let source = item_worker(
+        "
+        local members = {}
+        for i = 1, 1025 do members[i] = 'm' .. i end
+        local r = tasks.fanout('### Worker', members)
+        assert(#r == 1025, 'every member ran')
+        return r[1025].text",
     );
-    let out = run_offline(md)
-        .await
-        .expect("a collection over the old default cap must succeed");
-    assert_eq!(out, "m1025");
+    assert_eq!(Scenario::new(source).run().text(), "m1025");
 }
 
 /// Array members arrive as themselves, in collection order: a string stays a
 /// string, a number a number, a boolean a boolean, a nested table a table.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_collection_array_members_arrive_as_themselves_in_order() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'b', 2, true, {nested='x'}})\n\
-assert(#r == 4)\n\
-assert(r[1].text == 'string:b')\n\
-assert(r[2].text == 'number:2')\n\
-assert(r[3].text == 'boolean:true')\n\
-assert(r[4].text == 'table:x')\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-if type(item) == 'table' then return 'table:' .. item.nested end\n\
-return type(item) .. ':' .. tostring(item)\n\
-```\n"
+#[test]
+fn fanout_collection_array_members_arrive_as_themselves_in_order() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {'b', 2, true, {nested='x'}})
+                assert(#r == 4)
+                assert(r[1].text == 'string:b')
+                assert(r[2].text == 'number:2')
+                assert(r[3].text == 'boolean:true')
+                assert(r[4].text == 'table:x')
+                return 'ok'",
+            ),
+            (
+                "### Worker",
+                "
+                if type(item) == 'table' then return 'table:' .. item.nested end
+                return type(item) .. ':' .. tostring(item)",
+            ),
+        ],
     );
-    let out = run_offline(md)
-        .await
-        .expect("array members must arrive as themselves");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// Hash members arrive as pair tables (`item.key` / `item.value`), and
 /// `.item` on each arm result returns the same pair table.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_collection_hash_members_arrive_as_pair_tables() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {alpha=1, beta='two'})\n\
-assert(#r == 2)\n\
-local seen = {}\n\
-for i = 1, #r do\n\
-  assert(type(r[i].item) == 'table')\n\
-  assert(r[i].item.key ~= nil and r[i].item.value ~= nil)\n\
-  seen[r[i].text] = true\n\
-end\n\
-assert(seen['alpha=1'] and seen['beta=two'])\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item.key .. '=' .. tostring(item.value)\n```\n"
+#[test]
+fn fanout_collection_hash_members_arrive_as_pair_tables() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {alpha=1, beta='two'})
+                assert(#r == 2)
+                local seen = {}
+                for i = 1, #r do
+                  assert(type(r[i].item) == 'table')
+                  assert(r[i].item.key ~= nil and r[i].item.value ~= nil)
+                  seen[r[i].text] = true
+                end
+                assert(seen['alpha=1'] and seen['beta=two'])
+                return 'ok'",
+            ),
+            (
+                "### Worker",
+                "return item.key .. '=' .. tostring(item.value)",
+            ),
+        ],
     );
-    let out = run_offline(md)
-        .await
-        .expect("hash members must arrive as pair tables");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// An empty collection is an error: no work is likely a bug (a list section
 /// that parsed empty, a wrong variable), so the fanout is rejected before
 /// any scheduling rather than returning zero results.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_collection_empty_errors() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-tasks.fanout('### Worker', {})\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("an empty collection must error");
-    let rendered = error.to_string();
+#[test]
+fn fanout_collection_empty_errors() {
+    let trace = Scenario::new(item_worker("tasks.fanout('### Worker', {})")).run();
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("empty collection"),
         "error was: {rendered}"
@@ -168,91 +149,75 @@ tasks.fanout('### Worker', {})\n\
 }
 
 /// `.item` on each arm result returns the member value as a Lua value.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_collection_item_round_trips_members() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {1, 'two', {n=3}})\n\
-assert(r[1].item == 1)\n\
-assert(r[2].item == 'two')\n\
-assert(type(r[3].item) == 'table' and r[3].item.n == 3)\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn 'done'\n```\n"
+#[test]
+fn fanout_collection_item_round_trips_members() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {1, 'two', {n=3}})
+                assert(r[1].item == 1)
+                assert(r[2].item == 'two')
+                assert(type(r[3].item) == 'table' and r[3].item.n == 3)
+                return 'ok'",
+            ),
+            ("### Worker", "return 'done'"),
+        ],
     );
-    let out = run_offline(md)
-        .await
-        .expect(".item must round-trip each member");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// A worker resolves as a sibling: a top-level worker marked off-walk is
 /// shared infrastructure the walk never visits.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_worker_resolves_as_a_sibling() {
-    let md = flow_prompt!(
-        "\
-## Main\n\n\
-```lua\n\
-local r = tasks.fanout('## Worker', {'x'})\n\
-return r[1].text\n\
-```\n\n\
-## Worker\n\n\
----\n\n\
-```lua\nreturn item .. '-done'\n```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("a sibling worker must resolve");
-    assert_eq!(out, "x-done");
+#[test]
+fn fanout_worker_resolves_as_a_sibling() {
+    let source = PromptSource::new()
+        .section(
+            "Main",
+            "
+            local r = tasks.fanout('## Worker', {'x'})
+            return r[1].text",
+        )
+        .prose("Worker", "---\n\n```lua\nreturn item .. '-done'\n```");
+    assert_eq!(Scenario::new(source.build()).run().text(), "x-done");
 }
 
 /// One off-walk sibling worker is shared by two sibling callers.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_worker_shared_by_two_sibling_callers() {
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-local r = tasks.fanout('## Worker', {'a'})\n\
-store.write('a.txt', r[1].text)\n\
-```\n\n\
-## B\n\n\
-```lua\n\
-local r = tasks.fanout('## Worker', {'b'})\n\
-return store.read('a.txt') .. ',' .. r[1].text\n\
-```\n\n\
-## Worker\n\n\
----\n\n\
-```lua\nreturn item .. '-done'\n```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("one worker must serve two sibling callers");
-    assert_eq!(out, "a-done,b-done");
+#[test]
+fn fanout_worker_shared_by_two_sibling_callers() {
+    let source = PromptSource::new()
+        .section(
+            "A",
+            "
+            local r = tasks.fanout('## Worker', {'a'})
+            store.write('a.txt', r[1].text)",
+        )
+        .section(
+            "B",
+            "
+            local r = tasks.fanout('## Worker', {'b'})
+            return store.read('a.txt') .. ',' .. r[1].text",
+        )
+        .prose("Worker", "---\n\n```lua\nreturn item .. '-done'\n```");
+    assert_eq!(Scenario::new(source.build()).run().text(), "a-done,b-done");
 }
 
 /// A sibling's child (a niece) is outside the caller's visible set and
 /// resolves as not-found.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_niece_worker_is_not_visible() {
-    let md = flow_prompt!(
-        "\
-## Main\n\n\
-```lua\n\
-tasks.fanout('### Niece', {'x'})\n\
-```\n\n\
-## Other\n\n\
-```lua\nlocal x = 1\n```\n\n\
-### Niece\n\n\
-```lua\nreturn item\n```\n"
+#[test]
+fn fanout_niece_worker_is_not_visible() {
+    let source = prompt(
+        "",
+        &[
+            ("Main", "tasks.fanout('### Niece', {'x'})"),
+            ("Other", "local x = 1"),
+            ("### Niece", "return item"),
+        ],
     );
-    let error = run_offline(md)
-        .await
-        .expect_err("a niece worker must not be visible");
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert!(
         error.to_string().contains("not found"),
         "error was: {error}"
@@ -260,23 +225,14 @@ tasks.fanout('### Niece', {'x'})\n\
 }
 
 /// The two-string form errors at the boundary, pointing at `prompt.list`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_string_second_parameter_errors_pointing_at_prompt_list() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-tasks.fanout('### Worker', '### Items')\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n\n\
-### Items\n\n\
-- alpha\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("the two-string form must be rejected");
-    let rendered = error.to_string();
+#[test]
+fn fanout_string_second_parameter_errors_pointing_at_prompt_list() {
+    let source = PromptSource::new()
+        .section("Parent", "tasks.fanout('### Worker', '### Items')")
+        .section("### Worker", "return item")
+        .prose("### Items", "- alpha");
+    let trace = Scenario::new(source.build()).run();
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("tasks.fanout's second parameter is a collection"),
         "error was: {rendered}"
@@ -288,62 +244,40 @@ tasks.fanout('### Worker', '### Items')\n\
 }
 
 /// A number or boolean second parameter is not a collection.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_number_and_boolean_second_parameters_error() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local ok_n, err_n = pcall(tasks.fanout, '### Worker', 5)\n\
-assert(not ok_n and tostring(err_n):find('collection'), tostring(err_n))\n\
-local ok_b, err_b = pcall(tasks.fanout, '### Worker', true)\n\
-assert(not ok_b and tostring(err_b):find('collection'), tostring(err_b))\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n"
+#[test]
+fn fanout_number_and_boolean_second_parameters_error() {
+    let source = item_worker(
+        "
+        local ok_n, err_n = pcall(tasks.fanout, '### Worker', 5)
+        assert(not ok_n and tostring(err_n):find('collection'), tostring(err_n))
+        local ok_b, err_b = pcall(tasks.fanout, '### Worker', true)
+        assert(not ok_b and tostring(err_b):find('collection'), tostring(err_b))
+        return 'ok'",
     );
-    let out = run_offline(md)
-        .await
-        .expect("number and boolean second parameters must error");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// A function member cannot cross into an arm; the error names its index.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_function_member_errors_naming_the_index() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-tasks.fanout('### Worker', {'a', function() end})\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("a function member must error");
-    let rendered = error.to_string();
+#[test]
+fn fanout_function_member_errors_naming_the_index() {
+    let source = item_worker("tasks.fanout('### Worker', {'a', function() end})");
+    let trace = Scenario::new(source).run();
+    let rendered = trace.error().to_string();
     assert!(rendered.contains("index 2"), "error was: {rendered}");
     assert!(rendered.contains("function"), "error was: {rendered}");
 }
 
 /// A non-scalar (table) key cannot be represented; the error says so.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_table_keyed_member_errors() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local t = {}\n\
-t[{}] = 'x'\n\
-tasks.fanout('### Worker', t)\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n"
+#[test]
+fn fanout_table_keyed_member_errors() {
+    let source = item_worker(
+        "
+        local t = {}
+        t[{}] = 'x'
+        tasks.fanout('### Worker', t)",
     );
-    let error = run_offline(md).await.expect_err("a table key must error");
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert!(
         error
             .to_string()
@@ -353,21 +287,13 @@ tasks.fanout('### Worker', t)\n\
 }
 
 /// A list section is not a worker template; naming one as the worker errors.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_worker_that_is_a_list_section_errors() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-tasks.fanout('### Items', {'x'})\n\
-```\n\n\
-### Items\n\n\
-- a\n\
-- b\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("a list section is not a worker template");
+#[test]
+fn fanout_worker_that_is_a_list_section_errors() {
+    let source = PromptSource::new()
+        .section("Parent", "tasks.fanout('### Items', {'x'})")
+        .prose("### Items", "- a\n- b");
+    let trace = Scenario::new(source.build()).run();
+    let error = trace.error();
     assert!(
         error
             .to_string()

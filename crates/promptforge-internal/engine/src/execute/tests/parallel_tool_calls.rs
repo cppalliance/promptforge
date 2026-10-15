@@ -12,10 +12,10 @@
 use promptforge_types::event::{Event, ReplyOrigin};
 
 use super::models_loop::{echo_tools, loop_context, loop_prompt};
-use super::serial_driver::{text_of, text_reply};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
 use crate::model::{Completion, CompletionResult, ToolCall};
+use crate::test_support::scenario::{text_of, text_reply};
 
 /// The effects one step issued, in issue order, and the events it
 /// reported. Panics when the run is over.

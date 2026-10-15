@@ -13,10 +13,10 @@ use promptforge_vfs::ExecId;
 use promptforge_vfs::detail::access_id;
 
 use super::model_tasks::model_task_context_with;
-use super::serial_driver::{perform_locally, text_of};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
 use crate::test_support::drive;
+use crate::test_support::scenario::{perform_locally, text_of};
 
 /// The suite's one tool, called by its full id: it is the run's whole
 /// catalog.

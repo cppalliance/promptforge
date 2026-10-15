@@ -65,6 +65,8 @@ mod performers;
 #[path = "tokio_driver-test-hooks.rs"]
 mod test_hooks;
 
+#[cfg(test)]
+pub(crate) use performers::refuse_chat;
 pub(crate) use performers::refuse_tool_call;
 pub use performers::{BoxFuture, Performer, Performers};
 #[cfg(test)]

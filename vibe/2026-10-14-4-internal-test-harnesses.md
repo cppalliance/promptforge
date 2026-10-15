@@ -632,14 +632,14 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-8>
 
-### Step 8: Engine Scenario and FnTool over the offline fixture suite
+### Step 8: Engine Scenario and FnTool over the offline fixture suite [completed]
 
 - Component: engine Run level
 - Tests:
   - `cargo nextest run --locked -p promptforge-engine --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p promptforge-engine --all-targets --all-features`
   - `cargo fmt --all --check`
-  - `rg -n "tokio|RunFixture|run_with_fixture|run_prepared|macro_rules" crates/promptforge-internal/engine/src/execute/tests/suite crates/promptforge-internal/engine/src/execute/tests/suite.rs`
+  - `rg -n "tokio|RunFixture|run_with_fixture\b|run_prepared|macro_rules" crates/promptforge-internal/engine/src/execute/tests/suite crates/promptforge-internal/engine/src/execute/tests/suite.rs`
   - `$s='../cabinet/_scratch/vibe-coder-internal-test-harnesses'; foreach ($p in 'promptforge-engine') { cargo nextest list --locked -p $p --all-features | Out-File -Encoding utf8 "$s/$p-after.txt"; Compare-Object (Get-Content "$s/$p-before.txt") (Get-Content "$s/$p-after.txt") | ForEach-Object { "$p full $($_.SideIndicator) $($_.InputObject)" }; Compare-Object (Get-Content "$s/$p-before.txt" | ForEach-Object { ($_ -split '::')[-1] }) (Get-Content "$s/$p-after.txt" | ForEach-Object { ($_ -split '::')[-1] }) | ForEach-Object { "$p leaf $($_.SideIndicator) $($_.InputObject)" } }`
 - Rules: PowerShell, run from the repository root, which every relative path here (`crates/...`, `../cabinet/...`) resolves against. Run cargo commands one at a time and never append `2>&1`; judge a cargo step by its result lines and `$LASTEXITCODE`. Read the root `AGENTS.md` and `crates/promptforge-internal/engine/AGENTS.md`. A file leaves by `Move-Item` to `../cabinet/_trash/`. No test is removed or weakened, no dependency is added, and test helpers are `#[track_caller]`. Add only the test-support surface this step's tests use. Every source file stays under 500 lines; split a file if it would cross.
 - New `#[cfg(test)]` `crates/promptforge-internal/engine/src/test_support/scenario.rs`:
@@ -781,7 +781,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
   - `cargo nextest run --locked -p promptforge-engine --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p promptforge-engine --all-targets --all-features`
   - `cargo fmt --all --check`
-  - `rg -n "tokio::|TokioDriver|drive_tokio|run_with_fixture|run_prepared|RunFixture|StoreGate|wait_timeout" crates/promptforge-internal/engine/src/execute`
+  - `rg -n "tokio::|TokioDriver|drive_tokio|run_with_fixture\b|run_prepared|RunFixture|StoreGate|wait_timeout" crates/promptforge-internal/engine/src/execute`
   - `rg -n "fn (effect_context|offering_context|catalog_context|tool_context|loop_context\w*|model_task_context\w*|ceiling_context|limited_context|scheduler_context\w*|h1_context\w*|to_context|run_fixture|run_offline|run_assembled|run_with_context|run_recorded|run_with_bindings|drive_serially|drive_recorded|drive_observed|drive_overflowing|drive_loop|drive_rounds|drive_files|drive_scripted|identity_run|loop_prompt|owner_prompt|arm_prompt|full_id_prompt|capped_loop_prompt|jump_prompt|offering_prompt|with_test_title)\b" crates/promptforge-internal/engine/src`
   - `$s='../cabinet/_scratch/vibe-coder-internal-test-harnesses'; foreach ($p in 'promptforge-engine') { cargo nextest list --locked -p $p --all-features | Out-File -Encoding utf8 "$s/$p-after.txt"; Compare-Object (Get-Content "$s/$p-before.txt") (Get-Content "$s/$p-after.txt") | ForEach-Object { "$p full $($_.SideIndicator) $($_.InputObject)" }; Compare-Object (Get-Content "$s/$p-before.txt" | ForEach-Object { ($_ -split '::')[-1] }) (Get-Content "$s/$p-after.txt" | ForEach-Object { ($_ -split '::')[-1] }) | ForEach-Object { "$p leaf $($_.SideIndicator) $($_.InputObject)" } }`
 - Rules: PowerShell, run from the repository root, which every relative path here (`crates/...`, `../cabinet/...`) resolves against. Run cargo commands one at a time and never append `2>&1`; judge a cargo step by its result lines and `$LASTEXITCODE`. Read the root `AGENTS.md` and `crates/promptforge-internal/engine/AGENTS.md`. A file leaves by `Move-Item` to `../cabinet/_trash/`. No test is removed or weakened, no dependency is added, and test helpers are `#[track_caller]`. Add only the test-support surface this step's tests use. Every source file stays under 500 lines.

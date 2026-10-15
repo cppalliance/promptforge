@@ -2,78 +2,60 @@
 //! uncaught run errors, the store view's confinement, and write conflicts
 //! from library code.
 
+use promptforge_lua::VfsOp;
+
 use super::*;
 
-use crate::{RunErrorKind, RunResult};
+use crate::{EffectRecord, RunErrorKind};
 
 /// A store failure the author caught with `pcall` is an error table of
 /// kind `store`: its `reason`, `path`, and `anchor` fields and its
 /// integer `count` read from Lua, and `tostring` returns the
 /// model-facing message.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_caught_store_error_is_a_store_table_with_reason_fields_and_message() {
-    let md = flow_prompt!(
-        "\
-## Only\n\n\
-```lua\n\
-local ok, err = pcall(function() return store.read('missing.txt') end)\n\
-assert(ok == false, 'the missing read fails')\n\
-assert(err.kind == 'store', 'kind is store, got ' .. tostring(err.kind))\n\
-assert(err.reason == 'not_found', 'reason is not_found, got ' .. tostring(err.reason))\n\
-assert(err.path == 'missing.txt', 'the path field names the file')\n\
-assert(tostring(err) == 'file not found in store: missing.txt', 'tostring is the message')\n\
-store.write('a.txt', 'na na na')\n\
-local ok2, err2 = pcall(function() store.str_replace('a.txt', 'na', 'la') end)\n\
-assert(ok2 == false, 'the ambiguous anchor fails')\n\
-assert(err2.reason == 'anchor', 'reason is anchor, got ' .. tostring(err2.reason))\n\
-assert(err2.anchor == 'na', 'the anchor field names the anchor')\n\
-assert(type(err2.count) == 'number' and err2.count % 1 == 0, 'count is an integer')\n\
-assert(err2.count == 3, 'count is the match count')\n\
-assert(tostring(err2):find('include more surrounding text', 1, true) ~= nil, 'the message carries the hint')\n\
-return 'ok'\n\
-```\n"
+#[test]
+fn a_caught_store_error_is_a_store_table_with_reason_fields_and_message() {
+    let source = one_section(
+        "
+        local ok, err = pcall(function() return store.read('missing.txt') end)
+        assert(ok == false, 'the missing read fails')
+        assert(err.kind == 'store', 'kind is store, got ' .. tostring(err.kind))
+        assert(err.reason == 'not_found', 'reason is not_found, got ' .. tostring(err.reason))
+        assert(err.path == 'missing.txt', 'the path field names the file')
+        assert(tostring(err) == 'file not found in store: missing.txt', 'tostring is the message')
+        store.write('a.txt', 'na na na')
+        local ok2, err2 = pcall(function() store.str_replace('a.txt', 'na', 'la') end)
+        assert(ok2 == false, 'the ambiguous anchor fails')
+        assert(err2.reason == 'anchor', 'reason is anchor, got ' .. tostring(err2.reason))
+        assert(err2.anchor == 'na', 'the anchor field names the anchor')
+        assert(type(err2.count) == 'number' and err2.count % 1 == 0, 'count is an integer')
+        assert(err2.count == 3, 'count is the match count')
+        assert(tostring(err2):find('include more surrounding text', 1, true) ~= nil, 'the message carries the hint')
+        return 'ok'",
     );
-    let out = run_offline(md)
-        .await
-        .expect("the caught store errors carry the documented shape");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// A store argument type error stays kind `lua`, like every other Engine
 /// function's argument errors: only what the VFS reports is kind `store`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_store_argument_type_error_is_kind_lua() {
-    let md = flow_prompt!(
-        "\
-## Only\n\n\
-```lua\n\
-local ok, err = pcall(function() store.write(123, 'x') end)\n\
-assert(ok == false, 'the non-string path fails')\n\
-assert(err.kind == 'lua', 'an argument error is kind lua, got ' .. tostring(err.kind))\n\
-local ok2, err2 = pcall(function() store.glob('a') end)\n\
-return 'ok'\n\
-```\n"
+#[test]
+fn a_store_argument_type_error_is_kind_lua() {
+    let source = one_section(
+        "
+        local ok, err = pcall(function() store.write(123, 'x') end)
+        assert(ok == false, 'the non-string path fails')
+        assert(err.kind == 'lua', 'an argument error is kind lua, got ' .. tostring(err.kind))
+        local ok2, err2 = pcall(function() store.glob('a') end)
+        return 'ok'",
     );
-    let out = run_offline(md)
-        .await
-        .expect("the argument type error surfaces as a lua error");
-    assert_eq!(out, "ok");
+    assert_eq!(Scenario::new(source).run().text(), "ok");
 }
 
 /// An uncaught store failure ends the run as a `Vfs` run error whose
 /// message is the model-facing rendering.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_uncaught_store_failure_ends_the_run_as_a_store_error() {
-    let md = flow_prompt!(
-        "\
-## Only\n\n\
-```lua\n\
-return store.read('missing.txt')\n\
-```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("an uncaught store failure must fail the run");
+#[test]
+fn an_uncaught_store_failure_ends_the_run_as_a_store_error() {
+    let trace = Scenario::new(one_section("return store.read('missing.txt')")).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Vfs,
@@ -90,19 +72,13 @@ return store.read('missing.txt')\n\
 /// An uncaught store failure in the H1 pass ends the run as a `Vfs`
 /// run error: the H1 blocks run through the same coroutine machinery as
 /// any section.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_uncaught_store_failure_in_h1_ends_the_run_as_a_store_error() {
-    let md = flow_prompt!(
-        "\
-```lua\n\
-return store.read('missing.txt')\n\
-```\n\n\
-## Only\n\n\
-Done.\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("an uncaught store failure in H1 must fail the run");
+#[test]
+fn an_uncaught_store_failure_in_h1_ends_the_run_as_a_store_error() {
+    let source = PromptSource::new()
+        .h1("return store.read('missing.txt')")
+        .prose("Only", "Done.");
+    let trace = Scenario::new(source.build()).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Vfs,
@@ -113,25 +89,24 @@ Done.\n"
 /// A caught store error raised again, after another suspending call,
 /// keeps its classification: the run ends as a `Vfs` run error whose
 /// message is the original rendering.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_caught_store_error_raised_again_after_a_suspending_call_keeps_store() {
-    let md = flow_prompt!(
-        "\
-## First\n\n\
-```lua\n\
-local ok, err = pcall(function() return store.read('missing.txt') end)\n\
-assert(ok == false, 'the missing read fails')\n\
-call('### Sibling', '')\n\
-error(err)\n\
-```\n\n\
-### Sibling\n\n\
-```lua\n\
-return 'sibling'\n\
-```\n"
+#[test]
+fn a_caught_store_error_raised_again_after_a_suspending_call_keeps_store() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "First",
+                "
+                local ok, err = pcall(function() return store.read('missing.txt') end)
+                assert(ok == false, 'the missing read fails')
+                call('### Sibling', '')
+                error(err)",
+            ),
+            ("### Sibling", "return 'sibling'"),
+        ],
     );
-    let error = run_offline(md)
-        .await
-        .expect_err("the re-raised store error must fail the run");
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Vfs,
@@ -148,17 +123,14 @@ return 'sibling'\n\
 /// A store declared at `/` covers only its own mount: a directory
 /// mounted beneath it lies outside the store view, so a file that
 /// directory holds reads as absent from the store.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() {
-    let md = flow_prompt!(
-        "\
-## Only\n\n\
-```lua\n\
-local ok, err = pcall(function() return store.read('mount/secret.txt') end)\n\
-assert(ok == false, 'the mounted path is not in the store')\n\
-assert(err.reason == 'not_found', 'the mounted file is simply absent: ' .. tostring(err))\n\
-return 'ok'\n\
-```\n"
+#[test]
+fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() {
+    let source = one_section(
+        "
+        local ok, err = pcall(function() return store.read('mount/secret.txt') end)
+        assert(ok == false, 'the mounted path is not in the store')
+        assert(err.reason == 'not_found', 'the mounted file is simply absent: ' .. tostring(err))
+        return 'ok'",
     );
     let vfs = promptforge_vfs::VfsRef::builder()
         .store("/", promptforge_vfs::MemoryBackend::new())
@@ -170,38 +142,45 @@ return 'ok'\n\
         .expect("the handle acquires")
         .write("/mount/secret.txt", b"secret")
         .expect("the mount seeds");
-    let out = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
-        .await
-        .result
-        .expect("the store view is confined to its own mount");
-    assert_eq!(out, "ok");
+    let trace = Scenario::new(source).vfs(vfs).unprepared().run();
+    assert_eq!(
+        trace.text(),
+        "ok",
+        "the store view is confined to its own mount"
+    );
+}
+
+/// The `## Parent` that fans `### Worker` out over `alpha` and `beta`, each
+/// arm requiring `## seeder`, whose body is `seeder`.
+fn arms_requiring_a_seeder(seeder: &str) -> String {
+    prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {'alpha', 'beta'})
+                return r[1].text",
+            ),
+            (
+                "### Worker",
+                "
+                require '## seeder'
+                return item",
+            ),
+            ("seeder", seeder),
+        ],
+    )
 }
 
 /// A library's top-level write runs under each requiring arm's own
 /// identity: the second arm's load meets the first's standing write
 /// claim and the run ends with a determinism violation.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_library_write_across_two_arms_ends_the_run_with_determinism() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-require '## seeder'\n\
-return item\n\
-```\n\n\
-## seeder\n\n\
-```lua\n\
-store.write('seeded.txt', 'seed')\n\
-```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("the library's cross-arm write must end the run");
+#[test]
+fn a_library_write_across_two_arms_ends_the_run_with_determinism() {
+    let source = arms_requiring_a_seeder("store.write('seeded.txt', 'seed')");
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Determinism,
@@ -211,28 +190,13 @@ store.write('seeded.txt', 'seed')\n\
 
 /// A conflict a library caught with its own `pcall` while loading still
 /// ends the run with a determinism violation.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_library_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
-    let md = flow_prompt!(
-        "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-require '## seeder'\n\
-return item\n\
-```\n\n\
-## seeder\n\n\
-```lua\n\
-local ok = pcall(function() store.write('seeded.txt', 'seed') end)\n\
-```\n"
+#[test]
+fn a_library_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
+    let source = arms_requiring_a_seeder(
+        "local ok = pcall(function() store.write('seeded.txt', 'seed') end)",
     );
-    let error = run_offline(md)
-        .await
-        .expect_err("the pcall-caught load conflict must still end the run");
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Determinism,
@@ -242,43 +206,39 @@ local ok = pcall(function() store.write('seeded.txt', 'seed') end)\n\
 
 /// The library the captured-store cases require: `store.write` captured
 /// in a local at load time, reached later only through a helper.
-const CAPTURED_STORE_WRITE: &str = "\n\n\
-## notes\n\n\
-```lua\n\
-local write = store.write\n\
-function save_note(path, text)\n\
-  write(path, text)\n\
-end\n\
-```\n";
+const CAPTURED_STORE_WRITE: &str = "
+    local write = store.write
+    function save_note(path, text)
+      write(path, text)
+    end";
 
 /// A store function a library captured at load time yields like
 /// `store.*` when called after the load, so two arms racing on one path
 /// through it end the run with a determinism violation even though each
 /// arm caught its own failure.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_captured_store_function_conflict_caught_with_pcall_still_ends_the_run_with_determinism()
-{
-    let md = [
-        flow_prompt!(
-            "\
-## Parent\n\n\
-```lua\n\
-local r = tasks.fanout('### Worker', {'alpha', 'beta'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-require '## notes'\n\
-pcall(save_note, 'note.txt', item)\n\
-return item\n\
-```"
-        ),
-        CAPTURED_STORE_WRITE,
-    ]
-    .concat();
-    let error = run_offline(&md)
-        .await
-        .expect_err("the captured function's caught conflict must still end the run");
+#[test]
+fn a_captured_store_function_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
+    let source = prompt(
+        "",
+        &[
+            (
+                "Parent",
+                "
+                local r = tasks.fanout('### Worker', {'alpha', 'beta'})
+                return r[1].text",
+            ),
+            (
+                "### Worker",
+                "
+                require '## notes'
+                pcall(save_note, 'note.txt', item)
+                return item",
+            ),
+            ("notes", CAPTURED_STORE_WRITE),
+        ],
+    );
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert_eq!(
         error.kind(),
         RunErrorKind::Determinism,
@@ -290,41 +250,27 @@ return item\n\
 /// as an `Effect::Vfs` when called after load, like `store.*` does.
 #[test]
 fn a_captured_store_function_called_after_load_reaches_the_caller_as_a_store_effect() {
-    use super::super::super::context::{parse, test_context};
-    use super::super::super::serial_driver::perform_locally;
-    use crate::{Effect, EffectRecord, Run};
-    use promptforge_lua::VfsOp;
-
-    let md = [
-        flow_prompt!(
-            "\
-## Only\n\n\
-```lua\n\
-require '## notes'\n\
-save_note('note.txt', 'kept')\n\
-return 'saved'\n\
-```"
-        ),
-        CAPTURED_STORE_WRITE,
-    ]
-    .concat();
-    let run = Run::new(Arc::new(parse(&md)), "", test_context(EXECUTION));
-    let mut records = Vec::new();
-    let (result, _) = crate::test_support::drive(run, |_, effect: &Effect| {
-        records.push(effect.record());
-        perform_locally(effect, &mut |effect| {
-            panic!("the fixture issues no model round: {effect:?}")
-        })
-    });
-    assert!(
-        matches!(&result, RunResult::Ok(text) if text == "saved"),
-        "the run succeeds: {result:?}"
+    let source = prompt(
+        "",
+        &[
+            (
+                "Only",
+                "
+                require '## notes'
+                save_note('note.txt', 'kept')
+                return 'saved'",
+            ),
+            ("notes", CAPTURED_STORE_WRITE),
+        ],
     );
+    let trace = Scenario::new(source).run();
+    assert_eq!(trace.text(), "saved");
     assert!(
-        records.iter().any(|record| matches!(
-            record,
+        trace.effects().iter().any(|(effect, _)| matches!(
+            effect,
             EffectRecord::Vfs { op: VfsOp::Write { path, .. } } if path == "note.txt"
         )),
-        "the captured write is performed by the test driver: {records:?}"
+        "the captured write is performed by the test driver: {:?}",
+        trace.effects()
     );
 }
