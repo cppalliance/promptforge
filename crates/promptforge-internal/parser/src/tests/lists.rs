@@ -7,8 +7,8 @@ use crate::list::parse_bullet_items;
 fn mixed_prose_with_one_bullet_is_not_a_list() {
     // An incidental bullet line in ordinary prose must not force strict
     // list parsing; the section stays prose.
-    let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\nHere is context.\n- one incidental bullet\nMore prose follows.\n";
-    let prompt = parse(src).unwrap();
+    let body = "Here is context.\n- one incidental bullet\nMore prose follows.";
+    let prompt = parse_ok(&PromptSource::new().prose("S", body).build());
     let section = &prompt.sections[0];
     assert!(!section.is_list_only(), "mixed prose is not a list");
     assert!(section.items().is_empty());
@@ -17,8 +17,8 @@ fn mixed_prose_with_one_bullet_is_not_a_list() {
 
 #[test]
 fn pure_list_section_parses_items() {
-    let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n- beta\n3. gamma\n";
-    let prompt = parse(src).unwrap();
+    let body = "- alpha\n- beta\n3. gamma";
+    let prompt = parse_ok(&PromptSource::new().prose("S", body).build());
     let section = &prompt.sections[0];
     assert!(section.is_list_only());
     assert_eq!(section.items(), ["alpha", "beta", "gamma"]);
@@ -28,17 +28,15 @@ fn pure_list_section_parses_items() {
 fn all_marker_list_with_empty_item_is_rejected() {
     // Every nonblank line is a marker, so it is a list; the empty marker is
     // then a hard error rather than a detector miss.
-    let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n1.\n- beta\n";
-    let error = parse(src).expect_err("empty item must fail");
+    let body = "- alpha\n1.\n- beta";
+    let error = parse_err(&PromptSource::new().prose("S", body).build());
     assert_eq!(error.kind(), ParseErrorKind::List);
 }
 
 #[test]
 fn list_error_kind_does_not_depend_on_the_section_name() {
     for section in ["frontmatter", "fence"] {
-        let src =
-            format!("---\nname: p\ndescription: d\n---\n\n# T\n\n## {section}\n\n- alpha\n1.\n");
-        let error = parse(&src).expect_err("an empty list item must fail");
+        let error = parse_err(&PromptSource::new().prose(section, "- alpha\n1.").build());
         assert_eq!(error.kind(), ParseErrorKind::List);
     }
 }
@@ -89,8 +87,8 @@ fn bullet_parser_rejects_empty_item() {
 
 #[test]
 fn list_h3_parses_items_at_load_time() {
-    let src = prompt_src("## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n");
-    let p = parse(&src).unwrap();
+    let src = PromptSource::new().prose("Parent", "p");
+    let p = parse_ok(&src.prose("### Items", "- alpha\n- beta").build());
     let items_section = &p.sections[0].children[0];
     assert_eq!(items_section.name, "Items");
     assert_eq!(items_section.items, vec!["alpha", "beta"]);
@@ -98,10 +96,9 @@ fn list_h3_parses_items_at_load_time() {
 
 #[test]
 fn non_list_h3_has_empty_items() {
-    let src = prompt_src(
-        "## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n",
-    );
-    let p = parse(&src).unwrap();
+    let worker = "```lua\nreturn item\n```\n\nDo work on {{ item }}.";
+    let src = PromptSource::new().prose("Parent", "p");
+    let p = parse_ok(&src.prose("### Worker", worker).build());
     let worker = &p.sections[0].children[0];
     assert_eq!(worker.name, "Worker");
     assert!(worker.items.is_empty());

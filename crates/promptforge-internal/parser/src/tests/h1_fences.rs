@@ -4,8 +4,9 @@ use super::*;
 
 const LABEL_NEAR_MISSES: [&str; 4] = ["lua extra", "Lua", "LUA", "luau"];
 
+#[track_caller]
 fn assert_unrecognized_label(src: &str, label: &str) {
-    let error = parse(src).expect_err("a label near-miss must fail the parse");
+    let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
     assert_eq!(
         error.to_string(),
@@ -21,8 +22,8 @@ fn unrecognized_lua_label_in_the_h1_fails_the_parse() {
 
 #[test]
 fn unrecognized_lua_label_in_a_section_fails_the_parse() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua extra\nlocal a = 1\n```\n";
-    assert_unrecognized_label(src, "lua extra");
+    let body = "Prose.\n\n```lua extra\nlocal a = 1\n```";
+    assert_unrecognized_label(&PromptSource::new().prose("S", body).build(), "lua extra");
 }
 
 #[test]
@@ -33,14 +34,15 @@ fn unrecognized_lua_label_before_the_h1_fails_the_parse() {
 
 #[test]
 fn the_first_unrecognized_label_is_the_one_reported() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```Lua\nlocal a = 1\n```\n\n```lua extra\nlocal b = 2\n```\n\n## S\n\np\n";
-    assert_unrecognized_label(src, "Lua");
+    let h1 = "```Lua\nlocal a = 1\n```\n\n```lua extra\nlocal b = 2\n```";
+    let src = PromptSource::new().h1_prose(h1).prose("S", "p").build();
+    assert_unrecognized_label(&src, "Lua");
 }
 
 #[test]
 fn h1_plain_lua_and_prose_are_live_blocks() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal first = 1\n```\n\nPlan {{ args }}.\n\n```lua\nstore.write('done', reply)\n```\n\n## S\n\np\n";
-    let prompt = parse(src).expect("H1 blocks must parse");
+    let h1 = "```lua\nlocal first = 1\n```\n\nPlan {{ args }}.\n\n```lua\nstore.write('done', reply)\n```";
+    let prompt = parse_ok(&PromptSource::new().h1_prose(h1).prose("S", "p").build());
     assert_eq!(prompt.h1_blocks.len(), 3);
     assert!(matches!(
         &prompt.h1_blocks[0],
@@ -59,9 +61,8 @@ fn h1_plain_lua_and_prose_are_live_blocks() {
 
 #[test]
 fn lone_plain_h1_lua_is_a_live_block() {
-    let src =
-        "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal live = true\n```\n\n## S\n\np\n";
-    let prompt = parse(src).expect("plain H1 Lua must parse");
+    let lua = "local live = true";
+    let prompt = parse_ok(&PromptSource::new().h1(lua).prose("S", "p").build());
     assert!(matches!(
         prompt.h1_blocks.as_slice(),
         [Block::Lua(program)] if program.source() == "local live = true"
@@ -92,10 +93,9 @@ fn h1_label_near_misses_fail_whatever_the_opener_shape() {
     assert_unrecognized_label(unclosed, "lua extra");
 }
 
+#[track_caller]
 fn assert_opener_violation(src: &str) {
-    let Err(error) = parse(src) else {
-        panic!("a non-exact Lua opener must fail the parse: {src:?}");
-    };
+    let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
     assert_eq!(error.to_string(), OPENER_MESSAGE, "{src:?}");
 }
@@ -117,7 +117,7 @@ fn non_exact_lua_openers_fail_in_the_h1_and_the_preface() {
 #[test]
 fn label_near_misses_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua extra\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua extra\nreturn 2\n```\n````\n";
-    let prompt = parse(src).expect("nested label near-misses must remain prose");
+    let prompt = parse_ok(src);
 
     assert!(prompt.description_text.contains("```lua extra"));
     assert!(prompt.sections[0].prologue().is_none());
@@ -127,10 +127,9 @@ fn label_near_misses_inside_longer_fences_remain_prose() {
 #[test]
 fn unrecognized_lua_label_fails_before_any_lua_compiles() {
     let source = "private_payload =";
-    let src = format!(
-        "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua\nlocal ok = 1\n```\n\n## S\n\n```lua extra\n{source}\n```\n"
-    );
-    let (error, events) = Prompt::parse(&src, "parse-failure");
+    let body = format!("```lua extra\n{source}\n```");
+    let src = PromptSource::new().h1("local ok = 1").prose("S", &body);
+    let (error, events) = Prompt::parse(&src.title("Private title").build(), "parse-failure");
     let recorder = Recorder(events);
     let error = error.expect_err("the label near-miss must fail");
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
@@ -148,10 +147,9 @@ fn unrecognized_lua_label_fails_before_any_lua_compiles() {
 #[test]
 fn non_exact_lua_opener_fails_before_any_lua_compiles() {
     let source = "private_payload =";
-    let src = format!(
-        "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua\nlocal ok = 1\n```\n\n## S\n\n~~~lua\n{source}\n~~~\n"
-    );
-    let (error, events) = Prompt::parse(&src, "parse-failure");
+    let body = format!("~~~lua\n{source}\n~~~");
+    let src = PromptSource::new().h1("local ok = 1").prose("S", &body);
+    let (error, events) = Prompt::parse(&src.title("Private title").build(), "parse-failure");
     let recorder = Recorder(events);
     let error = error.expect_err("the non-exact opener must fail");
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
@@ -167,9 +165,8 @@ fn non_exact_lua_opener_fails_before_any_lua_compiles() {
 
 #[test]
 fn successful_parse_reports_only_fixed_boundaries() {
-    let source =
-        "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal secret = 42\n```\n\n## S\n\np\n";
-    let (prompt, events) = Prompt::parse(source, "parse-success");
+    let source = PromptSource::new().h1("local secret = 42").prose("S", "p");
+    let (prompt, events) = Prompt::parse(&source.title("T").build(), "parse-success");
     prompt.expect("prompt must parse");
     let recorder = Recorder(events);
     assert!(

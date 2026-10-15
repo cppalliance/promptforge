@@ -4,39 +4,25 @@
 use std::num::NonZeroU32;
 
 use super::{ArgType, ModelKeyword};
-use crate::{ParseError, ParseErrorKind, Prompt};
+use crate::ParseErrorKind;
+use crate::test_support::{assert_parse_error, parse_err, parse_ok, prompt};
 
 #[path = "tests-plugins.rs"]
 mod plugins;
 
-fn parse(yaml: &str) -> Result<Prompt, ParseError> {
-    let src = format!("---\n{yaml}---\n\n# T\n\n## S\n\np\n");
-    Prompt::parse(&src, "test").0
-}
-
 #[test]
 fn the_full_contract_declaration_parses_and_round_trips() {
-    let prompt = parse(concat!(
-        "name: x\n",
-        "description: d\n",
-        "plugins:\n",
-        "  - web\n",
-        "  - mcp\n",
-        "args:\n",
-        "  use_mcp:\n",
-        "    type: boolean\n",
-        "    default: true\n",
-        "    description: Search MCP-connected private sources\n",
-        "models:\n",
-        "  analyst:\n",
-        "    keywords: [frontier, thinking]\n",
-        "    min_context: 200000\n",
-        "    description: deep reasoning\n",
-        "  triage:\n",
-        "    keywords: [fast, small]\n",
-        "    description: quick triage of search results\n",
-    ))
-    .expect("the full contract matrix must parse");
+    let prompt = parse_ok(&prompt(
+        "
+        plugins: [web, mcp]
+        args: { use_mcp: { type: boolean, default: true, \
+                description: Search MCP-connected private sources } }
+        models: { analyst: { keywords: [frontier, thinking], min_context: 200000, \
+                  description: deep reasoning }, \
+                  triage: { keywords: [fast, small], description: quick triage of search results } }
+        ",
+        &[],
+    ));
 
     let fm = prompt.frontmatter();
 
@@ -71,7 +57,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
 
 #[test]
 fn a_prompt_without_contract_keys_behaves_exactly_as_today() {
-    let prompt = parse("name: x\ndescription: d\n").expect("a plain prompt must parse");
+    let prompt = parse_ok(&prompt("", &[]));
     let fm = prompt.frontmatter();
     assert!(fm.plugins().is_empty());
     assert!(fm.models().is_empty());
@@ -81,7 +67,7 @@ fn a_prompt_without_contract_keys_behaves_exactly_as_today() {
 fn an_omitted_args_key_yields_the_default_prose_declaration() {
     // There are no freeform prompts: an absent `args:` key is the default
     // declaration of one optional string field named `prose`.
-    let prompt = parse("name: x\ndescription: d\n").expect("a plain prompt must parse");
+    let prompt = parse_ok(&prompt("", &[]));
     let args = prompt.frontmatter().args();
     assert_eq!(args.len(), 1);
     let prose = args
@@ -97,11 +83,11 @@ fn an_omitted_args_key_yields_the_default_prose_declaration() {
 fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     // `deny_unknown_fields` must hold inside each new key's entries too: a
     // typo'd field is an authoring error, not silently ignored.
-    for yaml in [
-        "name: x\ndescription: d\nargs:\n  flag:\n    tipe: boolean\n",
-        "name: x\ndescription: d\nmodels:\n  analyst:\n    keyword: [fast]\n",
+    for front in [
+        "args: { flag: { tipe: boolean } }",
+        "models: { analyst: { keyword: [fast] } }",
     ] {
-        let error = parse(yaml).expect_err("an unknown key inside an entry must be rejected");
+        let error = parse_err(&prompt(front, &[]));
         assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
     }
 }
@@ -112,24 +98,16 @@ fn every_reserved_name_the_grammar_allows_parses_as_a_model_role_label() {
         if name.starts_with('_') {
             continue;
         }
-        let prompt = parse(&format!(
-            "name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n"
-        ))
-        .unwrap_or_else(|error| panic!("the role label `{name}` parses: {error}"));
+        let prompt = parse_ok(&prompt(&format!("models: {{ '{name}': {{}} }}"), &[]));
         assert!(prompt.frontmatter().models().get(name).is_some(), "{name}");
     }
 }
 
 #[test]
 fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "args:\n",
-        "  prose:\n    type: string\n",
-        "  store:\n    type: string\n",
-        "  end:\n    type: boolean\n",
-    ))
-    .expect("reserved names parse as arg names");
+    let front =
+        "args: { prose: { type: string }, store: { type: string }, end: { type: boolean } }";
+    let prompt = parse_ok(&prompt(front, &[]));
     let args = prompt.frontmatter().args();
     assert_eq!(args.len(), 3);
     assert!(args.get("store").is_some() && args.get("end").is_some());
@@ -137,20 +115,11 @@ fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
 
 #[test]
 fn args_declarations_round_trip() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "args:\n",
-        "  use_mcp:\n",
-        "    type: boolean\n",
-        "    default: true\n",
-        "    description: Search private sources\n",
-        "  limit:\n",
-        "    type: integer\n",
-        "    optional: true\n",
-        "  query:\n",
-        "    type: string\n",
-    ))
-    .expect("args declarations must parse");
+    let prompt = parse_ok(&prompt(
+        "args: { use_mcp: { type: boolean, default: true, description: Search private sources }, \
+         limit: { type: integer, optional: true }, query: { type: string } }",
+        &[],
+    ));
     let args = prompt.frontmatter().args();
     assert_eq!(args.len(), 3);
     let limit = args.get("limit").expect("declared");
@@ -163,15 +132,15 @@ fn args_declarations_round_trip() {
 #[test]
 fn an_arg_default_must_match_the_declared_type() {
     for (kind, default) in [("boolean", "'true'"), ("integer", "1.5"), ("string", "42")] {
-        let yaml = format!(
-            "name: x\ndescription: d\nargs:\n  flag:\n    type: {kind}\n    default: {default}\n"
-        );
-        let error = parse(&yaml).expect_err("a mismatched default must be rejected");
+        let front = format!("args: {{ flag: {{ type: {kind}, default: {default} }} }}");
+        let error = parse_err(&prompt(&front, &[]));
         assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{kind}: {error}");
     }
     // A matching default passes.
-    let yaml = "name: x\ndescription: d\nargs:\n  limit:\n    type: integer\n    default: 3\n";
-    let prompt = parse(yaml).expect("a matching default must parse");
+    let prompt = parse_ok(&prompt(
+        "args: { limit: { type: integer, default: 3 } }",
+        &[],
+    ));
     assert_eq!(
         prompt
             .frontmatter()
@@ -184,8 +153,7 @@ fn an_arg_default_must_match_the_declared_type() {
 
 #[test]
 fn an_arg_name_must_match_the_alias_grammar() {
-    let yaml = "name: x\ndescription: d\nargs:\n  '1bad':\n    type: string\n";
-    let error = parse(yaml).expect_err("a bad arg name must be rejected");
+    let error = parse_err(&prompt("args: { '1bad': { type: string } }", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
 
@@ -193,30 +161,24 @@ fn an_arg_name_must_match_the_alias_grammar() {
 fn an_absent_args_key_marks_the_default_declaration() {
     // No `args:` key: the implicit default declaration, whose interface
     // prose wraps into `argv.prose`.
-    let prompt = parse("name: x\ndescription: d\n").expect("no args key parses");
     assert!(
-        prompt.frontmatter().args().is_default(),
+        parse_ok(&prompt("", &[])).frontmatter().args().is_default(),
         "an absent args key yields the default declaration"
     );
 
     // An explicit `args:` key is a structured declaration, which never
     // wraps.
-    let prompt = parse("name: x\ndescription: d\nargs:\n  query:\n    type: string\n")
-        .expect("explicit args parse");
-    assert!(!prompt.frontmatter().args().is_default());
+    let explicit = parse_ok(&prompt("args: { query: { type: string } }", &[]));
+    assert!(!explicit.frontmatter().args().is_default());
 
     // Even an explicit declaration identical to the default shape is
     // structured: declared is not defaulted.
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "args:\n",
-        "  prose:\n",
-        "    type: string\n",
-        "    optional: true\n",
-        "    description: Freeform input for this prompt\n",
-    ))
-    .expect("a default-shaped explicit declaration parses");
-    let args = prompt.frontmatter().args();
+    let shaped = parse_ok(&prompt(
+        "args: { prose: { type: string, optional: true, \
+         description: Freeform input for this prompt } }",
+        &[],
+    ));
+    let args = shaped.frontmatter().args();
     assert!(!args.is_default());
     assert_ne!(
         *args,
@@ -227,23 +189,17 @@ fn an_absent_args_key_marks_the_default_declaration() {
 
 #[test]
 fn an_unknown_arg_type_is_rejected() {
-    let yaml = "name: x\ndescription: d\nargs:\n  flag:\n    type: text\n";
-    let error = parse(yaml).expect_err("an unknown arg type must be rejected");
+    let error = parse_err(&prompt("args: { flag: { type: text } }", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
 
 #[test]
 fn model_roles_round_trip_with_defaults() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "models:\n",
-        "  analyst:\n",
-        "    keywords: [no-thinking, creative, chat]\n",
-        "    min_context: 32000\n",
-        "    description: deep reasoning\n",
-        "  spare: {}\n",
-    ))
-    .expect("model roles must parse");
+    let prompt = parse_ok(&prompt(
+        "models: { analyst: { keywords: [no-thinking, creative, chat], min_context: 32000, \
+         description: deep reasoning }, spare: {} }",
+        &[],
+    ));
     let roles = prompt.frontmatter().models();
     assert_eq!(roles.len(), 2);
     let analyst = roles.get("analyst").expect("declared");
@@ -266,22 +222,22 @@ fn model_roles_round_trip_with_defaults() {
 fn an_unknown_model_keyword_is_a_parse_error() {
     // The keyword vocabulary is closed; `multimodal` is a non-goal and a
     // typo must fail at parse rather than being silently ignored.
-    let error = parse("name: x\ndescription: d\nmodels:\n  analyst:\n    keywords: [multimodal]\n")
-        .expect_err("an unknown keyword must be rejected");
+    let error = parse_err(&prompt(
+        "models: { analyst: { keywords: [multimodal] } }",
+        &[],
+    ));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
 
 #[test]
 fn model_role_labels_must_match_the_alias_grammar() {
-    let yaml = "name: x\ndescription: d\nmodels:\n  '1analyst':\n    keywords: [fast]\n";
-    let error = parse(yaml).expect_err("a bad role label must be rejected");
+    let error = parse_err(&prompt("models: { '1analyst': { keywords: [fast] } }", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
 
 #[test]
 fn a_zero_min_context_is_rejected() {
-    let error = parse("name: x\ndescription: d\nmodels:\n  analyst:\n    min_context: 0\n")
-        .expect_err("a zero context minimum must be rejected");
+    let error = parse_err(&prompt("models: { analyst: { min_context: 0 } }", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
 
@@ -299,9 +255,7 @@ fn contract_errors_report_their_frontmatter_line_and_column() {
         "---\n",
         "\n# T\n\n## S\n\np\n",
     );
-    let error = Prompt::parse(src, "test")
-        .0
-        .expect_err("a Plugin id with spaces must be rejected");
+    let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(
         error.line(),

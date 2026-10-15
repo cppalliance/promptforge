@@ -35,8 +35,8 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 13: local a = 1  <- epilog line 1 (source_line = 13)
     // 14: assert(false) <- epilog line 2 (absolute = 14)
     // 15: ```
-    let src = prompt_src("## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n");
-    let prompt = parse(&src).expect("prompt must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n";
+    let prompt = parse_ok(src);
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -72,8 +72,8 @@ fn prologue_source_line_maps_correctly() {
     // 12: ```
     // 13: (empty)
     // 14: Do the work.
-    let src = prompt_src("## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n");
-    let prompt = parse(&src).expect("prompt must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
+    let prompt = parse_ok(src);
     let prologue = prompt
         .entry()
         .expect("has sections")
@@ -105,9 +105,8 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 14: local y = 2
     // 15: assert(false)  <- chunk line 3, absolute = 13 + 3 - 1 = 15
     // 16: ```
-    let src =
-        prompt_src("## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n");
-    let prompt = parse(&src).expect("prompt must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n";
+    let prompt = parse_ok(src);
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -129,11 +128,10 @@ fn every_block_of_a_section_maps_only_its_own_errors() {
     // 23: local y = 2
     // 24: assert(false)  <- chunk line 2, absolute = 24
     // 29: ```lua         <- epilog
-    let src = prompt_src(
-        "## S\n\n```lua\nx = 1\n```\n\nOne.\n\n```lua\nassert(false)\n```\n\nTwo.\n\n\
-         ```lua\nlocal y = 2\nassert(false)\n```\n\nThree.\n\n```lua\nz = 3\n```\n",
-    );
-    let prompt = parse(&src).expect("prompt must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n\
+         ## S\n\n```lua\nx = 1\n```\n\nOne.\n\n```lua\nassert(false)\n```\n\nTwo.\n\n\
+         ```lua\nlocal y = 2\nassert(false)\n```\n\nThree.\n\n```lua\nz = 3\n```\n";
+    let prompt = parse_ok(src);
     let section = prompt.entry().expect("has sections");
     let programs: Vec<&LuaProgram> = section
         .blocks()
@@ -175,12 +173,11 @@ fn sections_sharing_a_title_get_locations_named_by_heading_line() {
     // 20: ```lua         <- source_line = 21
     // 22: assert(false)  <- chunk line 2, absolute = 22
     // 25: ## C           <- a title no other section uses
-    let src = prompt_src(
-        "## A\n\n### Helpers\n\n```lua\nassert(false)\n```\n\n\
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n\
+         ## A\n\n### Helpers\n\n```lua\nassert(false)\n```\n\n\
          ## B\n\n### Helpers\n\n```lua\nlocal pad = 1\nassert(false)\n```\n\n\
-         ## C\n\n```lua\nx = 1\n```\n",
-    );
-    let prompt = parse(&src).expect("cousins may share a title");
+         ## C\n\n```lua\nx = 1\n```\n";
+    let prompt = parse_ok(src);
     let only_program = |section: &Section| match section.blocks() {
         [Block::Lua(program)] => program.clone(),
         other => panic!("one Lua block expected, got {other:?}"),
@@ -214,9 +211,8 @@ fn every_h1_block_maps_only_its_own_errors() {
     //  9: assert(false)
     // 12: Plan.
     // 14: ```lua         <- second block (source_line = 15)
-    let src =
-        prompt_src("```lua\nassert(false)\n```\n\nPlan.\n\n```lua\nx = 1\n```\n\n## S\n\np\n");
-    let prompt = parse(&src).expect("H1 blocks must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nassert(false)\n```\n\nPlan.\n\n```lua\nx = 1\n```\n\n## S\n\np\n";
+    let prompt = parse_ok(src);
     let [Block::Lua(first), Block::Prose { .. }, Block::Lua(second)] = prompt.h1_blocks.as_slice()
     else {
         panic!("H1 Lua, prose, Lua expected, got {:?}", prompt.h1_blocks);
@@ -242,9 +238,8 @@ fn a_long_unique_section_title_maps_its_prologue_line() {
     //  8: ## Gather Background Research Notes
     // 10: ```lua         <- prologue opens
     // 11: assert(false)  <- source_line = 11, absolute = 11
-    let src =
-        prompt_src("## Gather Background Research Notes\n\n```lua\nassert(false)\n```\n\nGo.\n");
-    let prompt = parse(&src).expect("prompt must parse");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Gather Background Research Notes\n\n```lua\nassert(false)\n```\n\nGo.\n";
+    let prompt = parse_ok(src);
     let prologue = prompt
         .entry()
         .expect("has sections")
@@ -265,12 +260,13 @@ fn a_shared_title_whose_heading_line_reaches_100_maps_its_prologue_line() {
     // 109: ### Research Worker Notes  <- under `B`
     // 112: local pad = 1              <- under `B` source_line = 112
     // 113: assert(false)              <- chunk line 2, absolute = 113
-    let src = prompt_src(&format!(
-        "## A\n\n### Research Worker Notes\n\n```lua\nassert(false)\n```\n\n{}\n\
+    let src = format!(
+        "---\nname: x\ndescription: d\n---\n\n# T\n\n\
+         ## A\n\n### Research Worker Notes\n\n```lua\nassert(false)\n```\n\n{}\n\
          ## B\n\n### Research Worker Notes\n\n```lua\nlocal pad = 1\nassert(false)\n```\n",
         "Padding.\n".repeat(90),
-    ));
-    let prompt = parse(&src).expect("cousins may share a title");
+    );
+    let prompt = parse_ok(&src);
     let prologue = |section: &Section| section.prologue().expect("prologue must exist").clone();
     let under_a = prologue(&prompt.sections[0].children()[0]);
     let under_b = prologue(&prompt.sections[1].children()[0]);
@@ -305,10 +301,9 @@ fn unrecognized_lua_label_error_reports_the_fence_opening_line() {
     // 14: end
     // 15: ```
     // 17: ```Lua       <- a later offender, not reported
-    let src = prompt_src(
-        "## S\n\nProse.\n\n```lua extra\nfunction f()\nend\n```\n\n```Lua\nreturn 1\n```\n",
-    );
-    let error = parse(&src).expect_err("the label near-miss must fail");
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n\
+         ## S\n\nProse.\n\n```lua extra\nfunction f()\nend\n```\n\n```Lua\nreturn 1\n```\n";
+    let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
     assert_eq!(error.line(), Some(12), "{error}");
     assert_eq!(error.column(), Some(1), "{error}");

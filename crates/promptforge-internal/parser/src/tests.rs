@@ -3,6 +3,9 @@
 use promptforge_types::event::Event;
 
 use super::*;
+use crate::test_support::{
+    PromptSource, assert_parse_error, one_section, parse_err, parse_ok, prompt,
+};
 
 mod breaks;
 mod frontmatter;
@@ -11,10 +14,6 @@ mod headings;
 mod line_mapping;
 mod lists;
 mod section_fences;
-
-fn prompt_src(body: &str) -> String {
-    format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{body}")
-}
 
 /// `lua` fences whose opening line breaks the Opener rule, each closed by a
 /// line that matches its opener.
@@ -38,8 +37,7 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // A malformed-YAML frontmatter must classify as `Frontmatter` and
     // retain the underlying serde_yaml_ng failure as the public error's
     // `source()`, instead of flattening it into a string.
-    let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
-    let error = parse(src).expect_err("malformed YAML frontmatter must fail to parse");
+    let error = parse_err(&prompt(": : :", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert!(
         std::error::Error::source(&error).is_some(),
@@ -52,8 +50,7 @@ fn frontmatter_syntax_errors_report_a_position_without_a_name() {
     // A malformed-YAML frontmatter surfaces the retained
     // serde_yaml_ng position (1-based, file-absolute); the failure predates
     // the prompt's name, so none is reported.
-    let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
-    let error = parse(src).expect_err("malformed YAML frontmatter must fail to parse");
+    let error = parse_err("---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(error.line(), Some(4), "the malformed line: {error}");
     assert!(
@@ -72,7 +69,7 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
         "---\nname: dup\ndescription: d\n---\n", // lines 1-4
         "\n# T\n\n## S\n\np\n\n## S\n\nq\n",     // the second `## S` heads line 12
     );
-    let error = parse(src).expect_err("duplicate sibling sections must be rejected");
+    let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Structure);
     assert_eq!(error.name(), Some("dup"));
     assert_eq!(
@@ -93,12 +90,15 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
 
 #[test]
 fn orphan_and_empty_heading_errors_report_a_line() {
-    // `prompt_src` puts `# T` on line 6 and the body from line 8.
+    // The frontmatter takes lines 1-4, `# T` is line 6, and the body starts
+    // on line 8.
     for (body, line, kind) in [
         ("## A\n\na\n\n#### D\n\nd\n", 12, ParseErrorKind::Structure),
         ("## \n\na\n", 8, ParseErrorKind::Structure),
     ] {
-        let error = parse(&prompt_src(body)).expect_err("the body must fail to parse");
+        let error = parse_err(&format!(
+            "---\nname: x\ndescription: d\n---\n\n# T\n\n{body}"
+        ));
         assert_eq!(error.kind(), kind, "{error}");
         assert_eq!(error.line(), Some(line), "{error}");
         assert_eq!(error.column(), Some(1), "{error}");
@@ -111,21 +111,15 @@ fn parsed_prompt_value_types_are_equatable() {
     // Parsing the same source twice yields equal values, and a differing
     // source yields unequal values, across the finalized parser value types
     // (`Prompt`, `Frontmatter`, `Section`, `Block`).
-    let src = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## One\n\ndo a thing\n";
-    let a = parse(src).unwrap();
-    let b = parse(src).unwrap();
+    let source = |heading: &str| PromptSource::new().prose(heading, "do a thing").build();
+    let a = parse_ok(&source("One"));
+    let b = parse_ok(&source("One"));
     assert_eq!(a, b, "identical sources must parse equal");
     assert_eq!(a.frontmatter, b.frontmatter);
     assert_eq!(a.sections, b.sections);
 
-    let other = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## Two\n\ndo a thing\n";
-    let c = parse(other).unwrap();
+    let c = parse_ok(&source("Two"));
     assert_ne!(a, c, "differing section headings must parse unequal");
-}
-
-/// Parses under the suite's execution id, keeping the outcome alone.
-fn parse(src: &str) -> std::result::Result<Prompt, ParseError> {
-    Prompt::parse(src, "test").0
 }
 
 /// The parse-time events read back as `(execution, section, kind)`.
@@ -179,34 +173,21 @@ impl Recorder {
 
 #[test]
 fn parses_multi_section_with_all_features() {
-    let src = "---\n\
-name: demo\n\
-description: A demo\n\
----\n\
-\n\
-# Demo Title\n\
-\n\
-Human-readable intro text.\n\
-\n\
-## First\n\
-\n\
-```lua\n\
-local x = 1\n\
-```\n\
-\n\
-Prose for the first section.\n\
-\n\
-### Child\n\
-\n\
-Child prose.\n\
-\n\
-## Second\n\
-\n\
-Prose for the second section.\n";
+    let src = PromptSource::new()
+        .name("demo")
+        .title("Demo Title")
+        .h1_prose("Human-readable intro text.")
+        .prose(
+            "First",
+            "```lua\nlocal x = 1\n```\n\nProse for the first section.",
+        )
+        .prose("### Child", "Child prose.")
+        .prose("Second", "Prose for the second section.")
+        .build();
 
-    let p = parse(src).unwrap();
+    let p = parse_ok(&src);
     assert_eq!(p.frontmatter.name, "demo");
-    assert_eq!(p.frontmatter.description, "A demo");
+    assert_eq!(p.frontmatter.description, "d");
     assert_eq!(p.title, "Demo Title");
     assert_eq!(
         p.h1_blocks,
@@ -238,8 +219,7 @@ Prose for the second section.\n";
 
 #[test]
 fn parses_single_minimal_section() {
-    let src = "---\nname: hi\ndescription: d\n---\n\n# T\n\n## Greet\n\nSay hi\n";
-    let p = parse(src).unwrap();
+    let p = parse_ok(&PromptSource::new().prose("Greet", "Say hi").build());
     assert_eq!(p.sections.len(), 1);
     assert_eq!(p.sections[0].name, "Greet");
     assert_eq!(p.sections[0].prose(), "Say hi");
