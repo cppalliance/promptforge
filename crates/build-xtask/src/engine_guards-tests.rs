@@ -45,7 +45,7 @@ fn clean_engine_root() -> tempfile::TempDir {
 
 #[test]
 fn engine_crates_declare_no_forbidden_dependencies() {
-    let violations = engine_manifest_violations(&workspace_root());
+    let violations = engine_dependency_violations(&workspace_root());
     assert!(
         violations.is_empty(),
         "engine manifest violations:\n{}",
@@ -116,8 +116,7 @@ fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_gua
         root.path(),
         "promptforge-internal/engine",
         "promptforge-engine",
-        "[dependencies]\ntokio = { version = \"1\", optional = true }\n\
-         [features]\ntest-support = [\"dep:tokio\"]\n",
+        "[features]\ntest-support = []\n",
     );
     test_support::write_crate(
         root.path(),

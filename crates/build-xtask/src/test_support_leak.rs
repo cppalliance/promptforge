@@ -4,14 +4,13 @@
 //! `crates/promptforge-internal/` member; the Harness family is the
 //! `crates/harness` facade plus every `crates/harness-internal/` member.
 //!
-//! The Engine manifest guard (`engine_deps`) lets an Engine crate keep an
-//! optional forbidden dependency that only its `test-support` feature
-//! enables (`promptforge-engine`'s tokio test driver), and a Harness crate
-//! may keep test fixtures behind its own. Both are safe
-//! only while `test-support` is enabled from `[dev-dependencies]`
+//! An Engine crate may keep test drivers behind its `test-support` feature
+//! (`promptforge-engine`'s serial driver and scripted model, for its
+//! bench), and a Harness crate may keep test fixtures behind its own. Both
+//! are safe only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
 //! `promptforge-engine = { workspace = true, features = ["test-support"] }`
-//! would pull the test drivers back into a shipping binary. This guard closes
+//! would pull the test drivers into a shipping binary. This guard closes
 //! that path. It scans every crate under `crates/` (containers included),
 //! the `[dependencies]` and `[build-dependencies]` tables and their
 //! `[target.<cfg>]` forms, and the root manifest's
@@ -33,7 +32,7 @@
 //!
 //! The check reads declared dependencies, not the resolved graph.
 //! Manifests that cannot be read or parsed are skipped here; the
-//! product-boundary check and the Engine manifest guard already report
+//! product-boundary check and the Engine dependency guard already report
 //! them.
 
 use std::fs;
@@ -42,8 +41,9 @@ use std::path::{Path, PathBuf};
 /// The dependency tables the guard scans, directly and under `[target]`.
 const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 
-/// The feature no non-dev table may enable on a guarded crate.
-const GUARDED_FEATURE: &str = crate::engine_deps::EXEMPTING_FEATURE;
+/// The feature that gates test drivers and fixtures, which no non-dev
+/// table may enable on a guarded crate.
+const EXEMPTING_FEATURE: &str = "test-support";
 
 /// Scans the workspace for non-dev dependency tables, and `[features]`
 /// values, that enable a promptforge or Harness crate's `test-support`
@@ -127,11 +127,11 @@ fn scan_features(
             // confines to dev tables, so any other feature leaks.
             // Cross-family forwarding is reported because the exemption
             // applies within each family only.
-            if feature == GUARDED_FEATURE && self_family == Some(family) {
+            if feature == EXEMPTING_FEATURE && self_family == Some(family) {
                 continue;
             }
             violations.push(format!(
-                "{}: [features] {feature} enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {GUARDED_FEATURE} feature",
+                "{}: [features] {feature} enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {EXEMPTING_FEATURE} feature",
                 manifest_path.display()
             ));
         }
@@ -142,7 +142,7 @@ fn scan_features(
 /// guarded feature: `<dep>/test-support` or `<dep>?/test-support`.
 fn guarded_dependency_reference(value: &str) -> Option<&str> {
     let (dep, feature) = value.split_once('/')?;
-    (feature == GUARDED_FEATURE).then(|| dep.strip_suffix('?').unwrap_or(dep))
+    (feature == EXEMPTING_FEATURE).then(|| dep.strip_suffix('?').unwrap_or(dep))
 }
 
 /// The package a dependency key names: its `package` rename when the
@@ -182,11 +182,11 @@ fn scan_table(
                 features
                     .iter()
                     .filter_map(toml::Value::as_str)
-                    .any(|feature| feature == GUARDED_FEATURE)
+                    .any(|feature| feature == EXEMPTING_FEATURE)
             });
         if enables {
             violations.push(format!(
-                "{}: [{table}] enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {GUARDED_FEATURE} feature",
+                "{}: [{table}] enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {EXEMPTING_FEATURE} feature",
                 manifest.display()
             ));
         }

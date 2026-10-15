@@ -1,5 +1,5 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
-//! the Harness family, the sans-I/O Engine (manifest guard and
+//! the Harness family, the sans-I/O Engine (dependency guard and
 //! `test-support` leak guard, run from `engine_guards`), the
 //! `promptforge` and `harness` facades' source shape (run from
 //! `facade_shape`), the `doc(hidden)` ban over both facades and their

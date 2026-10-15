@@ -852,7 +852,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-17>
 
-### Step 17: Total Engine dependency guard
+### Step 17: Total Engine dependency guard [completed]
 
 - Component: determinism policing
 - Tests:

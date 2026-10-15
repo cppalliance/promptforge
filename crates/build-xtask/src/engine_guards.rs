@@ -1,6 +1,7 @@
-//! Engine guards, live: the manifest guard runs over the Engine crates,
-//! and the `test-support` leak guard runs over the whole workspace, as
-//! part of `cargo test -p build-xtask` and `cargo xtask tidy`.
+//! Engine guards, live: the dependency guard's manifest scan and
+//! resolved-graph check run over the Engine crates, and the `test-support`
+//! leak guard runs over the whole workspace, as part of
+//! `cargo test -p build-xtask` and `cargo xtask tidy`.
 //!
 //! The Engine is the `promptforge` facade, the `promptforge-plugin`
 //! contract, and every crate under the `crates/promptforge-internal/`
@@ -51,21 +52,27 @@ pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     }
 }
 
-/// Runs the manifest guard over every Engine crate.
+/// Runs the dependency guard over every Engine crate: its manifest scan,
+/// then its resolved-graph check.
 #[must_use]
-fn engine_manifest_violations(root: &Path) -> Vec<String> {
+fn engine_dependency_violations(root: &Path) -> Vec<String> {
     engine_crates(root)
         .iter()
-        .flat_map(|dir| crate::engine_deps::forbidden_engine_dependencies(&dir.join("Cargo.toml")))
+        .flat_map(|dir| {
+            let mut violations =
+                crate::engine_deps::forbidden_engine_dependencies(&dir.join("Cargo.toml"));
+            violations.extend(crate::engine_deps::forbidden_engine_graph(root, dir));
+            violations
+        })
         .map(|violation| violation.to_string())
         .collect()
 }
 
-/// Every Engine guard, in one list: the manifest guard and the
+/// Every Engine guard, in one list: the dependency guard and the
 /// workspace-wide `test-support` leak guard.
 #[must_use]
 pub(crate) fn engine_guard_violations(root: &Path) -> Vec<String> {
-    let mut violations = engine_manifest_violations(root);
+    let mut violations = engine_dependency_violations(root);
     violations.extend(crate::test_support_leak::test_support_leak_violations(root));
     violations
 }

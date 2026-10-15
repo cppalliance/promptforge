@@ -1,44 +1,56 @@
-//! Engine manifest guard: the sans-I/O Engine crates declare no async
-//! runtime and no HTTP client.
+//! Engine dependency guard: no Engine crate depends on an async runtime,
+//! an HTTP client, or an OS entropy source, directly or transitively.
 //!
-//! The Engine (the `promptforge` facade and the crates under
-//! `crates/promptforge-internal/`) is a deterministic state machine; every
-//! wait becomes an effect the Harness performs. Its manifests therefore may
-//! not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in
-//! `[dependencies]`, `[build-dependencies]`, or the target-specific forms
-//! of either. `[dev-dependencies]` are outside the guard: the Engine's own
-//! suites drive it from the tokio test driver against a mock gateway.
+//! The Engine (the `promptforge` and `promptforge-*` crates) is a
+//! deterministic state machine: every wait becomes an effect the Harness
+//! performs, and every pseudo-random value comes from a seed. Its crates,
+//! tests included, therefore never depend on `tokio`, `tokio-util`,
+//! `async-trait`, `reqwest`, `getrandom` (the OS entropy source), or
+//! `fastrand` (whose global generator seeds itself). There is no
+//! exemption.
 //!
-//! Exemption: an entry marked `optional = true` that only the
-//! `test-support` feature enables is exempt, so the tokio test driver can
-//! ship behind that feature for the Engine's own suite and the companion
-//! crates' suites. "Only" is transitive: a feature that enables
-//! `test-support` (such as `default`) would enable the dependency too, so
-//! its presence voids the exemption. The exemption is safe only while
-//! `test-support` is enabled from `[dev-dependencies]` alone; the
-//! `test_support_leak` guard fails the build when any non-dev table in the
-//! workspace enables it.
+//! Two checks enforce it:
 //!
-//! The check reads declared dependencies, not the resolved graph.
+//! - The manifest scan reads every dependency table an Engine manifest
+//!   declares, `[dependencies]`, `[build-dependencies]`, and
+//!   `[dev-dependencies]`, directly and under `[target.<cfg>]`, and
+//!   resolves `package = ...` renames.
+//! - The resolved-graph check runs `cargo tree` for each Engine crate with
+//!   all features over its normal, build, and dev edges, so a forbidden
+//!   crate is reported when it arrives through another crate or behind an
+//!   optional dependency. Each crate is resolved on its own, because
+//!   `cargo metadata` resolves features for the whole workspace at once,
+//!   and a feature another workspace crate turns on must not flag an
+//!   Engine crate.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-/// The crates an Engine manifest may not declare outside `[dev-dependencies]`.
-const FORBIDDEN: [&str; 4] = ["tokio", "tokio-util", "async-trait", "reqwest"];
+/// The crates no Engine crate may depend on, directly or transitively.
+const FORBIDDEN: [&str; 6] = [
+    "tokio",
+    "tokio-util",
+    "async-trait",
+    "reqwest",
+    "getrandom",
+    "fastrand",
+];
 
-/// The one feature that may gate an optional forbidden dependency.
-pub(crate) const EXEMPTING_FEATURE: &str = "test-support";
+/// The dependency tables the manifest scan reads, directly and under
+/// `[target]`.
+const CHECKED_KINDS: [&str; 3] = ["dependencies", "build-dependencies", "dev-dependencies"];
 
-/// The dependency tables the guard scans, directly and under `[target]`.
-const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
+/// The `cargo tree` edge kinds the resolved-graph check follows.
+const GRAPH_EDGES: &str = "normal,build,dev";
 
-/// One finding from scanning an Engine manifest.
+/// One finding from checking an Engine crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Violation {
-    /// A forbidden crate declared outside `[dev-dependencies]`.
+    /// A forbidden crate declared in an Engine manifest.
     Forbidden {
         /// The manifest scanned.
         manifest: PathBuf,
@@ -48,6 +60,13 @@ pub(crate) enum Violation {
         /// The forbidden package name, after resolving `package = ...` renames.
         package: String,
     },
+    /// A forbidden crate in an Engine crate's resolved graph.
+    Reached {
+        /// The Engine crate's package name.
+        engine_crate: String,
+        /// The forbidden package reached.
+        package: String,
+    },
     /// The manifest could not be read or parsed.
     Unreadable {
         /// The manifest scanned.
@@ -55,10 +74,23 @@ pub(crate) enum Violation {
         /// What went wrong.
         error: String,
     },
+    /// `cargo tree` could not resolve an Engine crate's graph, or the
+    /// crate's manifest names no package to resolve.
+    Unresolved {
+        /// The Engine crate's package name, or its manifest path when the
+        /// manifest names none.
+        engine_crate: String,
+        /// What went wrong.
+        error: String,
+    },
 }
 
 impl fmt::Display for Violation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let rule = format!(
+            "Engine crates never depend on {}, directly or transitively",
+            FORBIDDEN.join(", ")
+        );
         match self {
             Self::Forbidden {
                 manifest,
@@ -66,13 +98,26 @@ impl fmt::Display for Violation {
                 package,
             } => write!(
                 f,
-                "{}: [{table}] declares {package}; engine crates declare {} only under [dev-dependencies]",
-                manifest.display(),
-                FORBIDDEN.join(", ")
+                "{}: [{table}] declares {package}; {rule}",
+                manifest.display()
+            ),
+            Self::Reached {
+                engine_crate,
+                package,
+            } => write!(
+                f,
+                "{engine_crate}: the resolved graph (all features; {GRAPH_EDGES} edges) reaches {package}; {rule}"
             ),
             Self::Unreadable { manifest, error } => {
                 write!(f, "{}: {error}", manifest.display())
             }
+            Self::Unresolved {
+                engine_crate,
+                error,
+            } => write!(
+                f,
+                "{engine_crate}: the resolved graph is unchecked; required: a graph that resolves; actual: {error}"
+            ),
         }
     }
 }
@@ -81,25 +126,15 @@ impl fmt::Display for Violation {
 /// cannot be read or parsed yields one [`Violation::Unreadable`].
 #[must_use]
 pub(crate) fn forbidden_engine_dependencies(manifest: &Path) -> Vec<Violation> {
-    let text = match fs::read_to_string(manifest) {
-        Ok(text) => text,
-        Err(error) => {
-            return vec![Violation::Unreadable {
-                manifest: manifest.to_path_buf(),
-                error: format!("unreadable manifest: {error}"),
-            }];
-        }
-    };
-    let value: toml::Value = match toml::from_str(&text) {
+    let value = match read_manifest(manifest) {
         Ok(value) => value,
         Err(error) => {
             return vec![Violation::Unreadable {
                 manifest: manifest.to_path_buf(),
-                error: format!("unparseable manifest: {error}"),
+                error,
             }];
         }
     };
-    let features = feature_lists(&value);
     let mut violations = Vec::new();
     for (table, entries) in crate::manifest::dependency_tables(&value, &CHECKED_KINDS) {
         for (key, entry) in entries {
@@ -107,99 +142,95 @@ pub(crate) fn forbidden_engine_dependencies(manifest: &Path) -> Vec<Violation> {
                 .get("package")
                 .and_then(toml::Value::as_str)
                 .unwrap_or(key);
-            if !FORBIDDEN.contains(&package) {
-                continue;
+            if FORBIDDEN.contains(&package) {
+                violations.push(Violation::Forbidden {
+                    manifest: manifest.to_path_buf(),
+                    table: table.clone(),
+                    package: package.to_owned(),
+                });
             }
-            if is_optional(entry) && is_exempt(&features, key) {
-                continue;
-            }
-            violations.push(Violation::Forbidden {
-                manifest: manifest.to_path_buf(),
-                table: table.clone(),
-                package: package.to_owned(),
-            });
         }
     }
     violations
 }
 
-/// Whether a dependency entry is declared `optional = true`.
-fn is_optional(entry: &toml::Value) -> bool {
-    entry
-        .get("optional")
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false)
-}
-
-/// The `[features]` table as `(feature, items)` pairs, in manifest order.
-/// Items that are not strings are dropped; cargo would reject them anyway.
-fn feature_lists(manifest: &toml::Value) -> Vec<(&str, Vec<&str>)> {
-    manifest
-        .get("features")
-        .and_then(toml::Value::as_table)
+/// Resolves the graph of the Engine crate in `crate_dir` with `cargo tree`,
+/// run in the workspace at `root` by the cargo running this process, and
+/// reports each forbidden package it reaches once. A root without a
+/// `Cargo.toml` has no workspace to resolve, a crate whose manifest cannot
+/// be read or parsed is left to the manifest scan, which reports it, and a
+/// manifest that names no package yields one [`Violation::Unresolved`].
+#[must_use]
+pub(crate) fn forbidden_engine_graph(root: &Path, crate_dir: &Path) -> Vec<Violation> {
+    let workspace = root.join("Cargo.toml");
+    if !workspace.is_file() {
+        return Vec::new();
+    }
+    let manifest = crate_dir.join("Cargo.toml");
+    let Ok(value) = read_manifest(&manifest) else {
+        return Vec::new();
+    };
+    let Some(engine_crate) = package_name(&value) else {
+        return vec![Violation::Unresolved {
+            engine_crate: manifest.display().to_string(),
+            error: "the manifest names no package, so cargo tree has none to resolve".to_owned(),
+        }];
+    };
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
+    let output = Command::new(cargo)
+        .current_dir(root)
+        .args(["tree", "--quiet", "--manifest-path"])
+        .arg(&workspace)
+        .args(["--package", &engine_crate, "--all-features", "--edges"])
+        .args([GRAPH_EDGES, "--prefix", "none"])
+        .output();
+    let stdout = match output {
+        Ok(output) if output.status.success() => output.stdout,
+        Ok(output) => {
+            return vec![Violation::Unresolved {
+                engine_crate,
+                error: format!(
+                    "cargo tree failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            }];
+        }
+        Err(error) => {
+            return vec![Violation::Unresolved {
+                engine_crate,
+                error: format!("cargo did not start: {error}"),
+            }];
+        }
+    };
+    let stdout = String::from_utf8_lossy(&stdout);
+    let reached: BTreeSet<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|package| FORBIDDEN.contains(package))
+        .collect();
+    reached
         .into_iter()
-        .flat_map(|table| {
-            table.iter().map(|(name, list)| {
-                let items = list
-                    .as_array()
-                    .map(|items| items.iter().filter_map(toml::Value::as_str).collect())
-                    .unwrap_or_default();
-                (name.as_str(), items)
-            })
+        .map(|package| Violation::Reached {
+            engine_crate: engine_crate.clone(),
+            package: package.to_owned(),
         })
         .collect()
 }
 
-/// Whether the exemption holds for the optional dependency `key`:
-/// `test-support` is the one feature, directly or through other features,
-/// that enables it.
-fn is_exempt(features: &[(&str, Vec<&str>)], key: &str) -> bool {
-    let enablers = enabling_features(features, key);
-    enablers.len() == 1 && enablers.contains(EXEMPTING_FEATURE)
+/// The package name a parsed manifest declares, if it names one.
+fn package_name(manifest: &toml::Value) -> Option<String> {
+    manifest
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(str::to_owned)
 }
 
-/// Every feature that enables the optional dependency `key`, directly or
-/// through another feature, following cargo's rules:
-///
-/// - `dep:key` enables it, and once any feature uses that form no implicit
-///   feature named `key` exists.
-/// - `key/<feature>` enables it whether or not `dep:` is in use; the weak
-///   form `key?/<feature>` never does.
-/// - Without `dep:`, cargo creates the implicit feature `key`, and every
-///   feature listing `key` enables it.
-/// - A feature that lists an enabling feature is itself an enabler, so
-///   `default = ["test-support"]` counts.
-fn enabling_features(features: &[(&str, Vec<&str>)], key: &str) -> BTreeSet<String> {
-    let explicit_dep = format!("dep:{key}");
-    let strong_prefix = format!("{key}/");
-    let uses_dep_syntax = features
-        .iter()
-        .any(|(_, items)| items.contains(&explicit_dep.as_str()));
-    let mut enablers: BTreeSet<String> = features
-        .iter()
-        .filter(|(_, items)| {
-            items.iter().any(|item| {
-                *item == explicit_dep
-                    || item.starts_with(&strong_prefix)
-                    || (!uses_dep_syntax && *item == key)
-            })
-        })
-        .map(|(name, _)| (*name).to_owned())
-        .collect();
-    if !uses_dep_syntax {
-        enablers.insert(key.to_owned());
-    }
-    loop {
-        let before = enablers.len();
-        for (name, items) in features {
-            if items.iter().any(|item| enablers.contains(*item)) {
-                enablers.insert((*name).to_owned());
-            }
-        }
-        if enablers.len() == before {
-            return enablers;
-        }
-    }
+/// Reads and parses one manifest, or says why it could not.
+fn read_manifest(manifest: &Path) -> Result<toml::Value, String> {
+    let text =
+        fs::read_to_string(manifest).map_err(|error| format!("unreadable manifest: {error}"))?;
+    toml::from_str(&text).map_err(|error| format!("unparseable manifest: {error}"))
 }
 
 #[cfg(test)]
