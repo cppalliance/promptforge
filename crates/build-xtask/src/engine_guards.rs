@@ -19,8 +19,7 @@ const ENGINE_ROOT_CRATES: [&str; 2] = ["promptforge", "promptforge-plugin"];
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 
 /// Every Engine crate directory: the named root crates first, whether or
-/// not they exist, then every crate under the container in directory
-/// order.
+/// not they exist, then every crate under the container in path order.
 #[must_use]
 pub(crate) fn engine_crates(root: &Path) -> Vec<PathBuf> {
     let crates_dir = root.join("crates");
@@ -32,15 +31,17 @@ pub(crate) fn engine_crates(root: &Path) -> Vec<PathBuf> {
     crates
 }
 
-/// Every crate directory under `dir`: a directory holding a `Cargo.toml`
-/// is a crate and is not descended into; any other directory is a
-/// container and the walk descends.
+/// Every crate directory under `dir`, in path order: a directory holding a
+/// `Cargo.toml` is a crate and is not descended into; any other directory
+/// is a container and the walk descends. The order is sorted because
+/// `read_dir` order differs between filesystems, and findings must not.
 pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    for entry in entries.flatten() {
-        let sub = entry.path();
+    let mut subs: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    subs.sort();
+    for sub in subs {
         if !sub.is_dir() {
             continue;
         }
