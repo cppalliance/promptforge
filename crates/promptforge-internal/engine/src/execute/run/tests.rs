@@ -214,15 +214,20 @@ fn a_timer_effect_records_its_seconds() {
     assert_eq!(round_trip(&record), record);
 }
 
-/// A run over one section whose only Lua block is `body`, Plugin-free.
-fn run_of(body: &str, ctx: RunContext) -> Run {
+/// A prompt with one section whose only Lua block is `body`, Plugin-free.
+fn prompt_of(body: &str) -> Arc<Prompt> {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\n{body}\n```\n"
     );
     let prompt = Prompt::parse(&source, "run-test")
         .0
         .expect("the run test prompt parses");
-    Run::new(Arc::new(prompt), "", ctx)
+    Arc::new(prompt)
+}
+
+/// A run of [`prompt_of`]`(body)`.
+fn run_of(body: &str, ctx: RunContext) -> Run {
+    Run::new(prompt_of(body), "", ctx)
 }
 
 /// Whether `events` include the run's end boundary.
@@ -369,14 +374,34 @@ fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
 fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
     let parent = CancelHandle::new();
     let child = parent.child();
-    let mut run = run_of(
-        "local n = 0\nwhile true do n = n + 1 end",
-        run_context().cancel(child),
+    let mut state = None;
+    let mut run = Run::new_for_test(
+        prompt_of(
+            "local n = 0\nwhile true do\n  n = n + 1\n  if n == 1 then log('looping') end\nend",
+        ),
+        "",
+        &run_context().cancel(child),
+        |fresh| {
+            state = Some(fresh.clone());
+            fresh
+        },
     );
-    // The loop never yields, so only the hook can end it: the parent's
-    // cancel reaches the child the run holds, from another thread.
+    let state = state.expect("the run starts over the state it was handed");
+    // The loop never yields, so only the hook can end it. The step polls
+    // the flag once before the chain runs, so the canceller waits for the
+    // loop's first-pass log in the run's buffer before it cancels the
+    // parent: the cancel then reaches the child the run holds, from another
+    // thread, while the loop runs. Reading the buffer drains what it read,
+    // so the step reports only what follows.
     let canceller = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut read = Vec::new();
+        while !read
+            .iter()
+            .any(|event| matches!(event, Event::Lua { message, .. } if message == "looping"))
+        {
+            read.extend(state.take_events());
+            std::thread::yield_now();
+        }
         parent.cancel();
     });
     let step = run.step();

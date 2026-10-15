@@ -25,8 +25,8 @@ use promptforge_types::timestamp::Timestamp;
 use promptforge_types::tools::ToolCatalog;
 use promptforge_vfs::VfsRef;
 
+use super::FnTool;
 use super::scripted_chat::ScriptedChat;
-use super::{FnTool, TestTool};
 use crate::Error;
 use crate::execute::{Effect, EffectAnswer, Run, RunContext, RunError, RunLimits, RunResult};
 use crate::lua::{ToolBinding, ToolSet};
@@ -43,8 +43,7 @@ mod serial;
 use driving::Answers;
 pub(crate) use driving::{Driving, Record, TestStore, Trace};
 pub(crate) use serial::{
-    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, only_effect, perform_locally,
-    round_trip, text_of,
+    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, only_effect, round_trip, text_of,
 };
 
 /// The run name a test that does not choose one runs under.
@@ -148,9 +147,8 @@ pub(crate) struct Scenario {
 impl Scenario {
     /// A run of `source` named [`EXECUTION`], under [`TEST_SEED`] and
     /// [`TEST_STARTED_AT`], with empty args, a fresh memory store, no tools,
-    /// no model, nothing filled in, and no held effect, prepared as
-    /// `run_with_fixture` prepares: an unsatisfiable prompt is refused
-    /// before it starts.
+    /// no model, nothing filled in, and no held effect, prepared so that
+    /// an unsatisfiable prompt is refused before it starts.
     pub(crate) fn new(source: impl Into<String>) -> Scenario {
         Scenario {
             source: source.into(),
@@ -396,7 +394,7 @@ impl Scenario {
         let mut ctx =
             RunContext::new(self.name.clone(), self.seed, TEST_STARTED_AT).vfs(self.store.vfs());
         if !self.tools.is_empty() {
-            let descriptors: Vec<_> = self.tools.iter().map(TestTool::descriptor).collect();
+            let descriptors: Vec<_> = self.tools.iter().map(FnTool::descriptor).collect();
             let catalog = ToolCatalog::new(&descriptors).expect("the scenario's tool ids differ");
             ctx = ctx.tools(catalog);
         }

@@ -139,13 +139,6 @@ impl RunError {
         matches!(self.inner, Error::Interrupted)
     }
 
-    /// Dissolves the boundary error into the Engine's own, for the test
-    /// drivers that report in that vocabulary.
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn into_inner(self) -> Error {
-        self.inner
-    }
-
     /// The Engine's own error behind the boundary one, for a test that
     /// matches on its variant.
     #[cfg(test)]

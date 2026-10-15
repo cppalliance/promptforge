@@ -19,7 +19,7 @@ use crate::test_support::scenario::{Scenario, Trace};
 use crate::test_support::scripted_chat::{
     MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
 };
-use crate::test_support::{FnTool, TestTool, fresh_access};
+use crate::test_support::{FnTool, fresh_access};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};

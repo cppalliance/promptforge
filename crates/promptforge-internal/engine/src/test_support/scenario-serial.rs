@@ -1,16 +1,15 @@
 //! The serial helpers for suites that drive a bare [`Run`]: the canned
-//! chat answer, the one-effect step, the effect record's round trip, the
-//! local performer, and the batched driver.
+//! chat answer, the one-effect step, the effect record's round trip, and
+//! the batched driver.
 
 use std::collections::BTreeMap;
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{Provenance, TaskId};
 
+use super::super::perform_locally;
 use super::super::scripted_chat::{ScriptedReply, text};
 use crate::execute::{Effect, EffectAnswer, EffectId, EffectRecord, Run, RunResult, Step};
-use crate::lua::run_store_op;
-use crate::tools::ToolError;
 
 /// The answer a `Chat` effect gets from the scripted model's `reply`,
 /// built as [`ScriptedChat::complete_now`] builds it for a round within the
@@ -58,25 +57,6 @@ pub(crate) fn infer_prompt(effect: &Effect) -> String {
         .as_str()
         .expect("an infer round includes one user message")
         .to_owned()
-}
-
-/// Performs one effect locally, with no I/O: a store operation runs on the
-/// effect's own access handle, a timer fires at once, a bound tool is
-/// unbound, and a model round is answered by
-/// `chat`, a function of the effect alone so the answer never depends on
-/// arrival order.
-pub(crate) fn perform_locally(
-    effect: &Effect,
-    chat: &mut impl FnMut(&Effect) -> EffectAnswer,
-) -> EffectAnswer {
-    match effect {
-        Effect::Chat { .. } => chat(effect),
-        Effect::ToolCall { alias, .. } => EffectAnswer::ToolCall(Err(ToolError::message(format!(
-            "no tool is bound as {alias} in this test"
-        )))),
-        Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
-        Effect::Timer { .. } => EffectAnswer::Timer,
-    }
 }
 
 /// The text of a run that succeeded; panics on any other outcome.

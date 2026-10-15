@@ -19,31 +19,23 @@ mlua.workspace = true
 # Logs the tools the offering leaves out; the caller's subscriber decides
 # where a line goes, so the Engine still performs no I/O itself.
 tracing.workspace = true
-# The one runtime the Engine names, and only for the tokio test driver
-# behind `test-support`; the Engine proper performs no I/O.
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }
 
 [features]
-# The Engine's own test drivers, for `benches/models_loop.rs` alone, which
-# names this feature in `required-features`: the serial sans-IO driver
-# (`test_support::drive`) that performs a run's effects through a caller's
-# closure with no runtime and no HTTP, and the tokio driver
-# (`test_support::drive_tokio`) that performs them through a caller's async
-# performers - the only thing in this crate that needs tokio. No other
-# crate enables it.
-test-support = ["dep:tokio"]
+# The Engine's own test driver, for `benches/models_loop.rs` alone, which
+# names this feature in `required-features` because a bench cannot see
+# `#[cfg(test)]` code: the serial sans-IO driver (`test_support::drive`)
+# that steps a run on the calling thread, the local effect performer, and
+# the scripted model, with no runtime and no HTTP. No other crate enables
+# it.
+test-support = []
 
 [dev-dependencies]
-# The suites write their fixture tools as `async fn` under the macro; the
-# fixture tool trait itself is declared in its expanded form.
-async-trait.workspace = true
 criterion.workspace = true
 promptforge-lua = { workspace = true, features = ["test-support"] }
 promptforge-parser = { workspace = true, features = ["test-support"] }
-tokio = { workspace = true, features = ["test-util"] }
 
-# The bench drives runs through the tokio test driver, so it needs the
-# feature that provides it.
+# The bench drives runs on the serial test driver and answers their rounds
+# from the scripted model, so it needs the feature that provides both.
 [[bench]]
 name = "models_loop"
 harness = false

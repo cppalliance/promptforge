@@ -1,102 +1,83 @@
-//! The Engine's test drivers: each steps a [`Run`] and answers its effects
-//! in this crate's suites and, under the `test-support` feature, companion
-//! crates'.
+//! The Engine's test drivers: each steps a [`Run`] and answers its effects,
+//! in this crate's suites and, under the `test-support` feature, in its
+//! bench.
 //!
 //! [`drive`] is the serial sans-IO driver: it steps a run on the calling
 //! thread and answers every effect the moment it is issued, through a
 //! closure the caller supplies. Nothing there awaits, spawns, or sleeps; a
 //! timer effect is answered however the closure sees fit, so a test's
-//! timeouts are instant. In this crate's own tests, `scenario` builds a
-//! whole run from its setup as data and drives it on the serial driver,
-//! and `rig` drives a scenario's run with its effects tapped, its held
-//! effects released in the order a test chooses or its answers shuffled
-//! under a seed, and its scheduler in reach.
+//! timeouts are instant. [`perform_locally`] answers every effect in
+//! process, a model round through a closure of the caller's, and
+//! [`ScriptedChat`](scripted_chat::ScriptedChat) plays that model from a
+//! script of replies.
 //!
-//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
-//! `ToolCall` effects through the caller's [`Performers`]
-//! (a struct of boxed async closures, one per kind) on the current tokio
-//! runtime, runs store operations on the blocking pool, sleeps timers on
-//! the timer wheel, and hands every event to the caller's sink. It steps
-//! the bench's runs.
-//!
-//! [`RunFixture`] bundles a suite's resources for one run - an observer, a
-//! client, a fixture tool table - and [`run_with_fixture`] is
-//! the implicit-prepare path over the tokio driver: prepare, refuse or
-//! run. The tool fixtures implement
-//! the stand-in trait [`TestTool`].
-//! [`Observer`](recording::Observer) and
-//! [`Observation`](recording::Observation) are the suites' recording
-//! vocabulary, and [`forward`] is the adapter that replays returned events
-//! onto one, so the observation suites hold without rewriting their
-//! assertions. Everything else here - the raw-body capture, the null
-//! observer, the detail constants, the fixture tool table - is
-//! crate-internal test plumbing, outside the facade API.
-
-use std::sync::Arc;
+//! The `test-support` feature compiles those three alone, for
+//! `benches/models_loop.rs`, its only consumer: a bench is a separate
+//! target that cannot see `#[cfg(test)]` code. The rest is this crate's
+//! own test plumbing. `scenario` builds a whole run from its setup as data
+//! and drives it on the serial driver, and `rig` drives a scenario's run
+//! with its effects tapped, its held effects released in the order a test
+//! chooses or its answers shuffled under a seed, and its scheduler in
+//! reach. `recording` is the suites' observation vocabulary, and its
+//! `forward` replays returned events onto an observer, so the observation
+//! suites hold without rewriting their assertions. `FnTool` is the
+//! fixture tool, a closure answered at once.
 
 use promptforge_types::event::Event;
+use promptforge_types::tools::ToolError;
 
 use crate::Error;
-use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunContext, RunError, RunResult, Step};
-use crate::parser::Prompt;
+use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunError, RunResult, Step};
+use crate::lua::run_store_op;
 
-mod fixture;
+#[cfg(test)]
 pub mod recording;
 #[cfg(test)]
 pub(crate) mod rig;
 #[cfg(test)]
 pub(crate) mod scenario;
-#[cfg(test)]
 #[path = "test_support/scripted-chat.rs"]
-pub(crate) mod scripted_chat;
+pub mod scripted_chat;
 #[cfg(test)]
 pub(crate) mod seeded;
 #[cfg(test)]
 pub(crate) mod temp_root;
-pub(crate) mod tokio_driver;
+#[cfg(test)]
 mod tools;
 
-pub use fixture::{ChatClient, RunFixture};
+#[cfg(test)]
 pub use recording::forward;
-pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 #[cfg(test)]
 pub(crate) use tools::FnTool;
-pub use tools::{TestTool, TestToolTable};
 
 /// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
 #[cfg(test)]
 #[track_caller]
-pub(crate) fn fresh_access() -> Arc<promptforge_vfs::Access> {
-    Arc::new(
+pub(crate) fn fresh_access() -> std::sync::Arc<promptforge_vfs::Access> {
+    std::sync::Arc::new(
         promptforge_vfs::VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("test fixture"))
             .expect("the stock backend acquires"),
     )
 }
 
-/// The suites' scripted model answers a `Chat` round in process under the
-/// run's limits.
-#[cfg(test)]
-impl ChatClient for scripted_chat::ScriptedChat {
-    fn complete(
-        &self,
-        messages: Vec<crate::model::Message>,
-        tools: Vec<crate::model::ToolSchema>,
-        options: crate::model::CompletionOptions,
-        limits: crate::execute::RunLimits,
-    ) -> BoxFuture<Result<crate::model::Completion, crate::model::CompletionError>> {
-        let chat = self.clone();
-        Box::pin(async move {
-            chat.complete(
-                &messages,
-                &tools,
-                &options,
-                limits.timeout(),
-                limits.response_bytes(),
-            )
-            .await
-        })
+/// Performs one effect locally, with no I/O: a store operation runs on the
+/// effect's own access handle, a timer fires at once, a bound tool is
+/// unbound, and a model round is answered by
+/// `chat`, a function of the effect alone so the answer never depends on
+/// arrival order.
+pub fn perform_locally(
+    effect: &Effect,
+    chat: &mut impl FnMut(&Effect) -> EffectAnswer,
+) -> EffectAnswer {
+    match effect {
+        Effect::Chat { .. } => chat(effect),
+        Effect::ToolCall { alias, .. } => EffectAnswer::ToolCall(Err(ToolError::message(format!(
+            "no tool is bound as {alias} in this test"
+        )))),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
+        Effect::Timer { .. } => EffectAnswer::Timer,
     }
 }
 
@@ -196,47 +177,4 @@ pub(crate) fn drive_step(
             None
         }
     }
-}
-
-/// The implicit-prepare path over the tokio driver: prepares and runs
-/// `prompt` with the resources `fixture` bundles.
-///
-/// The context's catalog is what the run offers; a suite with fixture
-/// tools sets their descriptors there
-/// ([`RunContext::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on `fixture` ([`RunFixture::tools`]). Plugins live
-/// outside the Engine, and none is installed here.
-///
-/// An unsatisfiable prompt - a missing required Plugin or an unmet
-/// model requirement - is refused with [`RunResult::Failure`] holding
-/// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
-/// model-readable notice naming each gap once.
-pub async fn run_with_fixture(
-    prompt: &Prompt,
-    args: &str,
-    ctx: RunContext,
-    fixture: RunFixture,
-) -> RunResult {
-    let (ctx, requirements) = ctx.prepare(prompt);
-    if let Some(refusal) = requirements.refusal() {
-        return RunResult::Failure(refusal);
-    }
-    run_prepared(prompt, args, ctx, fixture).await
-}
-
-/// Runs an already-prepared `prompt` under `ctx` with the resources
-/// `fixture` bundles, on the tokio driver: the bundle's
-/// [`performers`](RunFixture::performers) perform the effects under the
-/// context's limits, and every event is replayed onto its observer and
-/// capture.
-pub async fn run_prepared(
-    prompt: &Prompt,
-    args: &str,
-    ctx: RunContext,
-    fixture: RunFixture,
-) -> RunResult {
-    let limits = ctx.limits;
-    let run = Run::new(Arc::new(prompt.clone()), args, ctx);
-    let cancel = run.cancel_handle();
-    drive_tokio(run, fixture.performers(limits), fixture.sink(), cancel).await
 }

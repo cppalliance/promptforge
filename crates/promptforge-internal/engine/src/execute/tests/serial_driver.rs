@@ -15,10 +15,10 @@ use super::model_tasks::model_task_scenario;
 use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::run::{Effect, Run, Step};
-use crate::test_support::drive;
 use crate::test_support::scenario::{
-    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, perform_locally,
+    Batching, chat_answer, drive_batched, echo_chat, infer_prompt,
 };
+use crate::test_support::{drive, perform_locally};
 
 /// A run over `md` with the `writer` model pre-bound, as the scheduler
 /// suites build one.

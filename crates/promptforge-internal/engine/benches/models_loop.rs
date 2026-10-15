@@ -20,54 +20,17 @@
 )]
 
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_engine::test_support::{BoxFuture, ChatClient, RunFixture, run_with_fixture};
-use promptforge_engine::{RunContext, RunLimits, RunResult};
-use promptforge_model_client::client::{Completion, Message, ToolSchema};
-use promptforge_model_client::model::{CompletionError, CompletionOptions};
+use promptforge_engine::test_support::scripted_chat::{ScriptedChat, ScriptedReply};
+use promptforge_engine::test_support::{drive, perform_locally};
+use promptforge_engine::{Effect, EffectAnswer, Run, RunContext, RunLimits, RunResult};
 use promptforge_parser::Prompt;
 use promptforge_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-
-// The suites' scripted model, shared by path: the Engine holds no client of
-// its own, and the bench performs its rounds the way the in-crate suites
-// do.
-#[path = "../src/test_support/scripted-chat.rs"]
-#[expect(
-    dead_code,
-    reason = "the bench scripts only terminal text and reads only the call count; the rest serves the in-crate suites"
-)]
-mod scripted_chat;
-
-use scripted_chat::{ScriptedChat, ScriptedReply};
+use promptforge_types::timestamp::Timestamp;
 
 const EXECUTION: &str = "bench";
-
-/// The bench's chat client: the scripted model answering a round under
-/// the run's limits.
-struct BenchClient(ScriptedChat);
-
-impl ChatClient for BenchClient {
-    fn complete(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolSchema>,
-        options: CompletionOptions,
-        limits: RunLimits,
-    ) -> BoxFuture<Result<Completion, CompletionError>> {
-        let chat = self.0.clone();
-        Box::pin(async move {
-            chat.complete(
-                &messages,
-                &tools,
-                &options,
-                limits.timeout(),
-                limits.response_bytes(),
-            )
-            .await
-        })
-    }
-}
 
 /// A scripted model whose every round gets the same terminal-text reply,
 /// so a `models.loop` bench measures exactly one round per iteration.
@@ -114,29 +77,46 @@ fn parse_loop_prompt() -> Prompt {
         .expect("the bench prompt parses")
 }
 
+/// Prepares and runs `prompt` on a `context`-token window, on the serial
+/// driver: every effect is performed in process, and every round is
+/// answered by `chat` under the run's timeout. A prompt the prepare
+/// refuses ends with the refusal.
+fn run_once(prompt: &Prompt, chat: &ScriptedChat, context: u32) -> RunResult {
+    let limits = RunLimits::new();
+    let ctx = RunContext::new(EXECUTION, 1, Timestamp::UNIX_EPOCH)
+        .model(bench_catalog(context).models()[0].clone())
+        .limits(limits);
+    let (ctx, requirements) = ctx.prepare(prompt);
+    if let Some(refusal) = requirements.refusal() {
+        return RunResult::Failure(refusal);
+    }
+    let run = Run::new(Arc::new(prompt.clone()), "", ctx);
+    let (result, _) = drive(run, |_, effect| {
+        perform_locally(effect, &mut |round| {
+            let Effect::Chat {
+                messages,
+                tools,
+                options,
+                ..
+            } = round
+            else {
+                unreachable!("perform_locally hands the model only chat effects");
+            };
+            let (_, answer) = chat.complete_now(messages, tools, options, limits.timeout());
+            EffectAnswer::Chat(answer.map(Box::new))
+        })
+    });
+    result
+}
+
 /// One `models.loop` turn end to end: parse is excluded, so the measurement
 /// covers VM setup, projection, the round, and the terminal-record append.
 fn models_loop(c: &mut Criterion) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("the bench runtime builds");
     let chat = bench_chat();
     let prompt = parse_loop_prompt();
     c.bench_function("models_loop", |b| {
         b.iter(|| {
-            let result = runtime.block_on(run_with_fixture(
-                &prompt,
-                "",
-                RunContext::new(
-                    EXECUTION,
-                    1,
-                    promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
-                )
-                .model(bench_catalog(131_072).models()[0].clone()),
-                RunFixture::new().client(BenchClient(chat.clone())),
-            ));
+            let result = run_once(&prompt, &chat, 131_072);
             assert!(
                 matches!(result, RunResult::Ok(_)),
                 "the loop bench run succeeds: {result:?}"
@@ -153,26 +133,11 @@ fn models_loop(c: &mut Criterion) {
 /// request precheck before any dispatch, so the default compactor raises
 /// typed context exhaustion without a single request.
 fn compactors_fail(c: &mut Criterion) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("the bench runtime builds");
     let chat = bench_chat();
     let prompt = parse_loop_prompt();
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
-            let result = runtime.block_on(run_with_fixture(
-                &prompt,
-                "",
-                RunContext::new(
-                    EXECUTION,
-                    1,
-                    promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
-                )
-                .model(bench_catalog(1).models()[0].clone()),
-                RunFixture::new().client(BenchClient(chat.clone())),
-            ));
+            let result = run_once(&prompt, &chat, 1);
             let RunResult::Failure(error) = result else {
                 panic!("a one-token window must exhaust at the precheck");
             };

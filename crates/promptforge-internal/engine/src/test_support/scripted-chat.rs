@@ -8,13 +8,9 @@
 //! the reader's `EmptyReply` failure, and a reply past the run's timeout is
 //! the client's `Timeout` failure. The reply constructors beside it -
 //! [`text`], [`text_finish`], [`calls`], [`fail`], and [`delayed`] - write
-//! the script.
-//!
-//! This file names only external crates so the bench target can include
-//! it by `#[path]` beside the in-crate suites; it is not part of the
-//! `test-support` feature.
+//! the script. The bench answers its rounds from the same model through
+//! the `test-support` feature.
 
-use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -31,17 +27,19 @@ use serde_json::Value;
 const REASONING_IGNORED: &str = "reasoning content was present but ignored";
 
 /// The model every scripted reply names as its server.
-pub(crate) const MOCK_MODEL: &str = "mock-model";
+pub const MOCK_MODEL: &str = "mock-model";
 
 /// A text reply naming [`MOCK_MODEL`], with no finish reason, reasoning,
 /// or metrics.
-pub(crate) fn text(content: &str) -> ScriptedReply {
+#[must_use]
+pub fn text(content: &str) -> ScriptedReply {
     mock_text(content, None)
 }
 
 /// A text reply naming [`MOCK_MODEL`] that the backend stopped with
 /// `finish_reason`.
-pub(crate) fn text_finish(content: &str, finish_reason: &str) -> ScriptedReply {
+#[must_use]
+pub fn text_finish(content: &str, finish_reason: &str) -> ScriptedReply {
     mock_text(content, Some(finish_reason))
 }
 
@@ -61,8 +59,9 @@ fn mock_text(content: &str, finish_reason: Option<&str>) -> ScriptedReply {
 ///
 /// # Panics
 /// When a call's arguments are not JSON.
+#[must_use]
 #[track_caller]
-pub(crate) fn calls(calls: &[(&str, &str, &str)]) -> ScriptedReply {
+pub fn calls(calls: &[(&str, &str, &str)]) -> ScriptedReply {
     let calls = calls
         .iter()
         .map(|&(id, name, arguments)| {
@@ -80,7 +79,8 @@ pub(crate) fn calls(calls: &[(&str, &str, &str)]) -> ScriptedReply {
 /// A failed round of `kind`, as the gateway client reports a non-success
 /// `status` with `body`: the kind's phrase with the status appended, and
 /// the body as the detail.
-pub(crate) fn fail(kind: CompletionErrorKind, status: u16, body: &str) -> ScriptedReply {
+#[must_use]
+pub fn fail(kind: CompletionErrorKind, status: u16, body: &str) -> ScriptedReply {
     ScriptedReply::Failure {
         kind,
         message: format!("{} (status {status})", kind.phrase()),
@@ -90,13 +90,14 @@ pub(crate) fn fail(kind: CompletionErrorKind, status: u16, body: &str) -> Script
 }
 
 /// `reply`, answered after `delay`, which the run's timeout bounds.
-pub(crate) fn delayed(delay: Duration, reply: ScriptedReply) -> ScriptedReply {
+#[must_use]
+pub fn delayed(delay: Duration, reply: ScriptedReply) -> ScriptedReply {
     ScriptedReply::Delayed(delay, Box::new(reply))
 }
 
 /// One scripted answer to a round.
 #[derive(Clone, Debug)]
-pub(crate) enum ScriptedReply {
+pub enum ScriptedReply {
     /// A text reply. Whitespace-only `content` is an empty reply.
     Text {
         /// The model the completion names as its server.
@@ -144,7 +145,12 @@ impl ScriptedReply {
 
     /// Answers a round with this reply, ignoring its delay: the answer
     /// [`ScriptedChat::complete_now`] gives a round within the timeout.
-    pub(crate) fn answer(&self) -> Result<Completion, CompletionError> {
+    ///
+    /// # Errors
+    /// Returns the scripted failure, the `EmptyReply` failure for an empty
+    /// text reply, and the `MalformedResponse` failure for a tool call the
+    /// wire decoder would refuse.
+    pub fn answer(&self) -> Result<Completion, CompletionError> {
         match self {
             ScriptedReply::Text {
                 model,
@@ -221,24 +227,30 @@ fn timed_out() -> CompletionError {
 
 /// What one round's `Chat` effect carried.
 #[derive(Clone, Debug)]
-pub(crate) struct ScriptedCall {
+pub struct ScriptedCall {
     /// The conversation the round sent.
-    pub(crate) messages: Vec<Message>,
+    pub messages: Vec<Message>,
     /// The tools the round advertised, in order.
-    pub(crate) tools: Vec<ToolSchema>,
+    pub tools: Vec<ToolSchema>,
     /// The options the round ran under.
-    pub(crate) options: CompletionOptions,
+    pub options: CompletionOptions,
 }
 
 impl ScriptedCall {
     /// The round's messages as JSON, in the shape each message serializes
     /// to.
-    pub(crate) fn messages_json(&self) -> Value {
-        serde_json::to_value(&self.messages).expect("a message serializes to JSON")
+    ///
+    /// # Panics
+    /// When a message does not serialize.
+    #[must_use]
+    pub fn messages_json(&self) -> Value {
+        serde_json::to_value(&self.messages)
+            .unwrap_or_else(|error| panic!("a message serializes to JSON: {error}"))
     }
 
     /// The wire names of the tools the round advertised, in order.
-    pub(crate) fn tool_names(&self) -> Vec<&str> {
+    #[must_use]
+    pub fn tool_names(&self) -> Vec<&str> {
         self.tools.iter().map(ToolSchema::name).collect()
     }
 }
@@ -248,7 +260,7 @@ impl ScriptedCall {
 /// and records what each carried. Clones share the script, the count, and
 /// the record.
 #[derive(Clone, Debug)]
-pub(crate) struct ScriptedChat {
+pub struct ScriptedChat {
     replies: Arc<Vec<ScriptedReply>>,
     requests: Arc<Mutex<Vec<ScriptedCall>>>,
     /// The number of rounds asked of the script so far.
@@ -260,7 +272,8 @@ impl ScriptedChat {
     ///
     /// # Panics
     /// Panics when `replies` is empty.
-    pub(crate) fn new(replies: Vec<ScriptedReply>) -> ScriptedChat {
+    #[must_use]
+    pub fn new(replies: Vec<ScriptedReply>) -> ScriptedChat {
         assert!(
             !replies.is_empty(),
             "a scripted chat needs at least one reply"
@@ -273,12 +286,14 @@ impl ScriptedChat {
     }
 
     /// The number of rounds asked of the script so far.
-    pub(crate) fn call_count(&self) -> usize {
+    #[must_use]
+    pub fn call_count(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
     }
 
     /// Every recorded round, in the order the rounds arrived.
-    pub(crate) fn requests(&self) -> Vec<ScriptedCall> {
+    #[must_use]
+    pub fn requests(&self) -> Vec<ScriptedCall> {
         self.requests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -286,7 +301,8 @@ impl ScriptedChat {
     }
 
     /// The most recently recorded round, if any.
-    pub(crate) fn last_request(&self) -> Option<ScriptedCall> {
+    #[must_use]
+    pub fn last_request(&self) -> Option<ScriptedCall> {
         self.requests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -303,7 +319,7 @@ impl ScriptedChat {
     /// delay past `timeout`, the `EmptyReply` failure for an empty text
     /// reply, the `MalformedResponse` failure for a tool call the wire
     /// decoder would refuse, or the completion.
-    pub(crate) fn complete_now(
+    pub fn complete_now(
         &self,
         messages: &[Message],
         tools: &[ToolSchema],
@@ -327,33 +343,5 @@ impl ScriptedChat {
             reply.answer()
         };
         (delay, answer)
-    }
-
-    /// Answers one round as `complete_now` does, then waits out the
-    /// reply's delay under `timeout` before returning the answer.
-    /// `max_bytes` bounds nothing, because no bytes are read.
-    ///
-    /// # Errors
-    /// Returns the scripted failure, the `Timeout` failure for a delay
-    /// past `timeout`, the `EmptyReply` failure for an empty text reply,
-    /// and the `MalformedResponse` failure for a tool call the wire
-    /// decoder would refuse.
-    pub(crate) async fn complete(
-        &self,
-        messages: &[Message],
-        tools: &[ToolSchema],
-        options: &CompletionOptions,
-        timeout: Duration,
-        _max_bytes: NonZeroU64,
-    ) -> Result<Completion, CompletionError> {
-        let (delay, answer) = self.complete_now(messages, tools, options, timeout);
-        if !delay.is_zero()
-            && tokio::time::timeout(timeout, tokio::time::sleep(delay))
-                .await
-                .is_err()
-        {
-            return Err(timed_out());
-        }
-        answer
     }
 }

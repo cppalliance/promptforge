@@ -11,20 +11,20 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use promptforge_types::event::Event;
-use promptforge_types::tools::ToolId;
+use promptforge_types::tools::{ToolError, ToolId};
 use promptforge_vfs::{Origin, VfsError, VfsRef};
 
 use super::super::FnTool;
 use super::super::recording::{
     DebugCapture, DebugEvent, NullObserver, Observation, Observer, forward_one,
 };
-use super::super::tokio_driver::{refuse_chat, refuse_tool_call};
 use super::super::{drive_step, forward};
 use super::{Chat, Matcher};
 use crate::execute::{
     AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, RunError, RunResult,
 };
 use crate::lua::run_store_op;
+use crate::model::{CompletionError, CompletionErrorKind};
 
 /// How a scenario answers its run's effects: a store operation on the
 /// effect's own access, a timer at once, a tool call through the
@@ -74,11 +74,16 @@ impl Answers {
                     EffectAnswer::Chat(answer.map(Box::new))
                 }
                 Some(Chat::Closure(answer)) => answer(effect),
-                None => refuse_chat(),
+                None => EffectAnswer::Chat(Err(CompletionError::new(
+                    CompletionErrorKind::Unavailable,
+                    "model access is turned off or not configured",
+                ))),
             },
             Effect::ToolCall { tool, args, .. } => match self.tools.get(tool) {
                 Some(tool) => EffectAnswer::ToolCall(tool.call_now(args.clone())),
-                None => refuse_tool_call(),
+                None => EffectAnswer::ToolCall(Err(ToolError::message(
+                    "the tool the call names has no implementation in the test driver's tool table",
+                ))),
             },
             Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
             Effect::Timer { .. } => EffectAnswer::Timer,

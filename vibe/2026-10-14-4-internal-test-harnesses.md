@@ -796,7 +796,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-15>
 
-### Step 15: Remove tokio and async-trait from the engine
+### Step 15: Remove tokio and async-trait from the engine [completed]
 
 - Component: tokio removal
 - Tests:
